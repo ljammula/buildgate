@@ -1,4 +1,4 @@
-import { specAcceptanceCriteria, validateTicketPlan } from "@/domain/specSkeleton";
+import { validateTicketPlan } from "@/domain/specSkeleton";
 
 /** One ticket of a plan, as far as coverage is concerned. */
 export interface CoverageTicket {
@@ -34,12 +34,15 @@ export interface PlanCoverage {
 
 /**
  * Which ticket claims which acceptance criterion (`ValidatePlanCoverage`):
- * criteria are counted from the spec's numbered list by position, a ticket
- * claims the numbers under its "### Acceptance criteria covered", and a
- * ticket that does not parse claims nothing.
+ * criteria are the Go parser's numbered list, a ticket claims the numbers
+ * under its "### Acceptance criteria covered", and a ticket that does not
+ * parse claims nothing.
  */
-export function planCoverage(spec: string, tickets: readonly CoverageTicket[]): PlanCoverage {
-  const texts = specAcceptanceCriteria(spec);
+export function planCoverage(
+  criteriaTexts: readonly string[],
+  tickets: readonly CoverageTicket[],
+): PlanCoverage {
+  const texts = criteriaTexts;
   const claims = tickets.map((ticket) => {
     const plan = validateTicketPlan(ticket.content);
     const readable = plan.covered.length > 0;

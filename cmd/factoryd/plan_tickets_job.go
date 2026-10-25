@@ -39,6 +39,7 @@ const planTicketsScratchDirName = ".factory-plan-draft"
 const (
 	planTicketsContainerOutDir       = specDraftContainerWorkDir + "/" + planTicketsScratchDirName + "/tickets"
 	planTicketsContainerEvidencePath = specDraftContainerWorkDir + "/" + planTicketsScratchDirName + "/evidence.json"
+	planTicketsContainerCriteriaPath = specDraftContainerWorkDir + "/" + planTicketsScratchDirName + "/criteria.md"
 )
 
 // planTicketsEvidenceSchemaVersion is the schema_version plan_tickets.py's
@@ -65,11 +66,12 @@ type planTicketsEvidencePayload struct {
 // own "may be empty, then --feedback-file is omitted" convention. thinking
 // mirrors draftSpecArgs' own parameter: the planning role's Pi
 // reasoning-effort level, or "" to omit --thinking entirely.
-func planTicketsArgs(script, workspace, specPath, requestPath, verifyCommand, outDir, evidencePath string, files draftInputFiles, timeoutMinutes int, thinking, harness string) []string {
+func planTicketsArgs(script, workspace, specPath, criteriaPath, requestPath, verifyCommand, outDir, evidencePath string, files draftInputFiles, timeoutMinutes int, thinking, harness string) []string {
 	args := []string{
 		script,
 		"--workspace", workspace,
 		"--spec", specPath,
+		"--criteria-file", criteriaPath,
 		"--request", requestPath,
 		"--verify-command", verifyCommand,
 		"--out-dir", outDir,
@@ -114,9 +116,14 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	_ = os.RemoveAll(scratchDir)
 	defer os.RemoveAll(scratchDir)
 
+	sandboxUser, _ := requestJobSandboxIdentity(cfg)
+	hostCriteriaPath, err := stagePlanTicketsCriteria(specPath, scratchDir, sandboxUser)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// Stage advancePlanning's durable plan-feedback.md -- see
 	// runSpecDraftJobIn's identical block.
-	sandboxUser, _ := requestJobSandboxIdentity(cfg)
 	var hostFeedbackPath string
 	if feedback, readErr := os.ReadFile(request.PlanFeedbackPath(dataDir, r.ID)); readErr == nil && len(feedback) > 0 {
 		if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
@@ -180,7 +187,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		}
 		outDir := planTicketsContainerOutDir
 		evidencePath := planTicketsContainerEvidencePath
-		args := planTicketsArgs(script, r.Workspace, specPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+planTicketsScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
+		args := planTicketsArgs(script, r.Workspace, specPath, planTicketsContainerCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+planTicketsScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
 		sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
 		defer cancel()
 		_, workerUID := requestJobSandboxIdentity(cfg)
@@ -201,7 +208,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	} else {
 		outDir := filepath.Join(scratchDir, "tickets")
 		evidencePath := filepath.Join(scratchDir, "evidence.json")
-		args := planTicketsArgs(script, r.Workspace, specPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
+		args := planTicketsArgs(script, r.Workspace, specPath, hostCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness)
 		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.PlanTicketsInterpreter, args[1:]...)
 	}
 	retainDraftPrompts(dataDir, r.ID, "plan", r.Workspace, []string{planTicketsScratchDirName + "/session"})
@@ -231,6 +238,29 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		return nil, evidence, fmt.Errorf("%s", requestJobExitReason("plan_tickets.py", 0, "but wrote no tickets", res.LogPath))
 	}
 	return tickets, evidence, nil
+}
+
+// stagePlanTicketsCriteria gives plan_tickets.py the factory's numbered
+// criteria in the same scratch directory as its other job inputs. The
+// sandboxed path is fixed below; the returned host path is used by the
+// unsandboxed test/escape-hatch runner.
+func stagePlanTicketsCriteria(specPath, scratchDir, sandboxUser string) (string, error) {
+	specContent, err := os.ReadFile(specPath)
+	if err != nil {
+		return "", fmt.Errorf("read approved spec for planning: %w", err)
+	}
+	criteria, err := request.SpecAcceptanceCriteria(string(specContent))
+	if err != nil {
+		return "", fmt.Errorf("read approved spec criteria for planning: %w", err)
+	}
+	if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
+		return "", fmt.Errorf("create plan-draft scratch dir: %w", err)
+	}
+	hostCriteriaPath := filepath.Join(scratchDir, "criteria.md")
+	if err := writeRequestJobFeedbackFile(hostCriteriaPath, []byte(strings.Join(criteria, "\n")+"\n"), sandboxUser); err != nil {
+		return "", fmt.Errorf("stage plan criteria: %w", err)
+	}
+	return hostCriteriaPath, nil
 }
 
 // requestJobFailureTailBytes bounds how much of a request job's own log

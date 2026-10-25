@@ -173,9 +173,9 @@ type Params struct {
 	// oracles whether or not DraftOracles is set.
 	Bug bool
 	// ImportedSpec is the content of `factoryd submit -spec-file`: a
-	// finished spec the operator hands over. It must pass
-	// request.ValidateSpecSkeleton, the check a drafted spec passes, or
-	// the submission is refused. Empty: the spec is drafted.
+	// finished spec the operator hands over. It must contain at least one
+	// criterion as request.ValidateHandedOverSpec reads it; it need not use the
+	// drafted-spec skeleton. Empty: the spec is drafted.
 	ImportedSpec string
 	// ImportedTickets is `factoryd submit -plan-dir`: the tickets of a
 	// finished plan for ImportedSpec, in order. Each must pass
@@ -552,7 +552,9 @@ func validateDesignGuide(workspace string, settings sessionconfig.Settings) erro
 
 // validateDraftingInputs checks, before anything is recorded, what the
 // drafting stages will read: the repository's design guide resolves, and a
-// handed-over spec passes the skeleton check a drafted one must pass.
+// handed-over spec has at least one factory-readable criterion. A handed-over
+// spec need not use the skeleton; a model-drafted spec is checked by the
+// request driver's drafted-spec path later.
 func validateDraftingInputs(workspace string, p Params) error {
 	if err := validateDesignGuide(workspace, p.Settings); err != nil {
 		return err
@@ -563,10 +565,7 @@ func validateDraftingInputs(workspace string, p Params) error {
 		}
 		return nil
 	}
-	if err := request.ValidateSpecSkeleton(p.ImportedSpec); err != nil {
-		return fmt.Errorf("-spec-file: %w", err)
-	}
-	if err := request.ValidateSpecCriteria(p.ImportedSpec, false); err != nil {
+	if err := request.ValidateHandedOverSpec(p.ImportedSpec); err != nil {
 		return fmt.Errorf("-spec-file: %w", err)
 	}
 	return validateImportedTickets(p.ImportedSpec, p.ImportedTickets)
@@ -757,6 +756,7 @@ func Submit(p Params) (Result, error) {
 		return Result{}, err
 	}
 	req := request.New(id, workspaceAbs, project, p.Source, time.Now())
+	req.BuildInput = request.BuildInputApprovedSpec
 	req.VerifyCommand = verifyCommand
 	// The request's own full-suite command: the -full-suite-command /
 	// body value when set, else the workspace's .factory.yml

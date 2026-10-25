@@ -36,6 +36,8 @@ export interface FileContentSectionProps {
   readonly session?: EditorBinding;
   /** The structure rules the editor checks this file against while typing. */
   readonly structure: StructureKind;
+  /** A handed-over spec is allowed to keep the operator's own structure. */
+  readonly handedOver?: boolean;
   /** For a ticket: the spec's numbered criteria, for the editor's covered-criteria boxes. */
   readonly specCriteria?: readonly string[];
   /** Extra content under the text (the parsed acceptance criteria). */
@@ -75,6 +77,7 @@ export function FileContentSection({
   onFetchCurrent,
   session,
   structure,
+  handedOver = false,
   specCriteria,
   children,
   foldedSummary,
@@ -213,6 +216,7 @@ export function FileContentSection({
           onFetchCurrent={onFetchCurrent}
           onClose={onStopEdit}
           structure={structure}
+          handedOver={handedOver}
           {...(specCriteria === undefined ? {} : { specCriteria })}
           {...(session === undefined ? {} : { session })}
         />

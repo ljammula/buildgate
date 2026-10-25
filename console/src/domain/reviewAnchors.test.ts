@@ -25,7 +25,12 @@ const SPEC =
   "\n\n## Risks\n\nr\n";
 
 test("a spec offers the file, each section it has, and each criterion", () => {
-  const targets = anchorTargets(request({ spec: SPEC }));
+  const targets = anchorTargets(
+    request({
+      spec: SPEC,
+      criteria: ["1. It adds.", `2. ${"A".repeat(100)}`],
+    }),
+  );
 
   expect(targets.map((t) => [t.path, t.section, t.item])).toEqual([
     ["spec.md", "", 0],

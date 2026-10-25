@@ -71,9 +71,8 @@ function fileTargets(
  */
 export function anchorTargets(request: RequestSummary): AnchorTarget[] {
   if (request.state === "spec_review" && request.spec !== "") {
-    const criteria = specAcceptanceCriteria(request.spec);
     return fileTargets("spec.md", request.spec, requiredSpecHeadings, (heading) =>
-      heading === "## Acceptance criteria" ? criteria : [],
+      heading === "## Acceptance criteria" ? request.criteria : [],
     );
   }
   if (request.state === "plan_review") {

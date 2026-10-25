@@ -10,8 +10,8 @@ criterion 1 (the only one phase1-mock-draft-spec.py's spec declares) so
 ValidatePlanCoverage is satisfied too. Also writes an evidence.json
 matching planTicketsEvidencePayload's own field names.
 
-Argv mirrors planTicketsArgs exactly: --workspace --spec --request
---verify-command --out-dir --evidence --timeout-minutes (see
+Argv mirrors planTicketsArgs exactly: --workspace --spec --criteria-file
+--request --verify-command --out-dir --evidence --timeout-minutes (see
 cmd/factoryd/plan_tickets_job.go).
 """
 import argparse
@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 p = argparse.ArgumentParser()
 p.add_argument("--workspace", required=True)
 p.add_argument("--spec", required=True)
+p.add_argument("--criteria-file", required=True)
 p.add_argument("--request", required=True)
 p.add_argument("--verify-command", required=True)
 p.add_argument("--out-dir", required=True)

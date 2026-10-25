@@ -1,6 +1,7 @@
 package request
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,28 @@ import (
 	"testing"
 	"time"
 )
+
+func TestLegacyRequestRecordLoadsAndMarshalsByteIdentically(t *testing.T) {
+	legacy := New("req-legacy", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+	want, err := json.MarshalIndent(legacy, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal legacy record: %v", err)
+	}
+	var loaded Request
+	if err := json.Unmarshal(want, &loaded); err != nil {
+		t.Fatalf("unmarshal legacy record: %v", err)
+	}
+	got, err := json.MarshalIndent(&loaded, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal loaded legacy record: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("legacy record changed on load/marshal:\n got %s\nwant %s", got, want)
+	}
+	if bytes.Contains(got, []byte(`"build_input"`)) {
+		t.Fatalf("legacy record gained build_input: %s", got)
+	}
+}
 
 func TestSaveThenLoadRoundTrips(t *testing.T) {
 	dataDir := t.TempDir()

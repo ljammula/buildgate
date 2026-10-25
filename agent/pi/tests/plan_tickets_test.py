@@ -128,6 +128,23 @@ class BuildPromptTests(unittest.TestCase):
 		self.assertIn("dependency order", prompt.lower())
 		self.assertFalse(agents_md_used)
 
+	def test_includes_factory_numbered_criteria_after_the_spec(self):
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			init_repo(workspace)
+			prompt, _ = plan_tickets.build_prompt(
+				VALID_SPEC,
+				"Add idempotency keys",
+				workspace,
+				"make verify",
+				plan_tickets.DRAFT_RELATIVE_DIR,
+				criteria_text="1. Factory first.\n2. Factory second.",
+			)
+		self.assertIn("## Acceptance criteria, as the factory numbers them", prompt)
+		self.assertIn("1. Factory first.", prompt)
+		self.assertLess(prompt.index("## Approved spec"), prompt.index("## Acceptance criteria, as the factory numbers them"))
+		self.assertLess(prompt.index("## Acceptance criteria, as the factory numbers them"), prompt.index("## Original request"))
+
 	def test_states_the_tests_rule_and_its_opt_out(self):
 		# Live evidence (example-app "reminders_streak MCP tool" and "habit
 		# insights", both 2026-09-28): the planner split a ticket that only
@@ -347,6 +364,7 @@ class RunPlanTests(unittest.TestCase):
 	def test_main_thinking_option_accepts_every_level_and_rejects_unknown(self):
 		base_argv = [
 			str(PLAN_TICKETS_SCRIPT), "--spec", "/tmp/spec.md", "--request", "/tmp/request.md",
+		"--criteria-file", "/tmp/criteria.md",
 			"--workspace", "/tmp/work", "--verify-command", "make verify",
 			"--out-dir", "/tmp/tickets", "--evidence", "/tmp/evidence.json",
 		]

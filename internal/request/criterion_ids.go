@@ -71,6 +71,24 @@ func ValidateSpecCriteria(content string, requireIDs bool) error {
 	return nil
 }
 
+// ValidateHandedOverSpec checks the one structural contract for a spec an
+// operator supplied with -spec-file. It must contain at least one criterion
+// as read by SpecAcceptanceCriteria; a named "## Acceptance criteria" section
+// keeps its existing numbering check, while a spec without that section gets
+// criteria derived from headings and list markup only. It intentionally does
+// not require the drafted-spec skeleton or criterion IDs.
+func ValidateHandedOverSpec(content string) error {
+	if _, err := SpecAcceptanceCriteria(content); err != nil {
+		return err
+	}
+	if _, _, ok := findAcceptanceCriteriaSection(strings.Split(content, "\n")); ok {
+		if err := ValidateSpecCriteria(content, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // criteriaCarryIDs reports whether every folded criterion starts with its
 // ID ("N. AC-N: ..."), which is the spec a no-test note may be made for.
 func criteriaCarryIDs(criteria []string) bool {

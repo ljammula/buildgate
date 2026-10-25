@@ -78,13 +78,14 @@ func TestResolveSubmitSpecFile(t *testing.T) {
 	if err != nil || spec != "" || len(trailing) != 1 {
 		t.Fatalf("got %q, %q (%v)", spec, trailing, err)
 	}
-	// An empty Problem section and no request text: refused with a way out.
+	// A missing/empty Problem section falls back to the full spec text.
 	empty := filepath.Join(dir, "empty.md")
 	if err := os.WriteFile(empty, []byte(strings.Replace(requestdrivertest.CanonicalValidSpec, "Refunds can be double-processed on retry.\n", "", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := resolveSubmitSpecFile(submitParams{specFile: empty}); err == nil || !strings.Contains(err.Error(), "pass a request text as well") {
-		t.Fatalf("err = %v", err)
+	fallbackSpec, trailing, err := resolveSubmitSpecFile(submitParams{specFile: empty})
+	if err != nil || fallbackSpec == "" || len(trailing) != 1 || trailing[0] != strings.TrimSpace(fallbackSpec) {
+		t.Fatalf("fallback request text = %q (%v), want the trimmed spec", trailing, err)
 	}
 	if _, _, err := resolveSubmitSpecFile(submitParams{specFile: filepath.Join(dir, "absent.md")}); err == nil || !strings.Contains(err.Error(), "read -spec-file") {
 		t.Fatalf("err = %v", err)

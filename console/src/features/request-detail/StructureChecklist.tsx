@@ -10,11 +10,13 @@ export interface StructureChecklistProps {
   readonly kind: StructureKind;
   /** The editor's current text, saved or not. */
   readonly text: string;
+  /** A handed-over spec may use the operator's own shape instead of the skeleton. */
+  readonly handedOver?: boolean;
   readonly className?: string;
 }
 
-function check(kind: StructureKind, text: string): StructureCheck {
-  return kind === "spec" ? specStructure(text) : ticketStructure(text);
+function check(kind: StructureKind, text: string, handedOver: boolean): StructureCheck {
+  return kind === "spec" ? specStructure(text, handedOver) : ticketStructure(text);
 }
 
 /**
@@ -24,8 +26,13 @@ function check(kind: StructureKind, text: string): StructureCheck {
  * and the server validates the saved text again, so its refusal still shows
  * under the editor.
  */
-export function StructureChecklist({ kind, text, className }: StructureChecklistProps) {
-  const { rows, passes } = check(kind, text);
+export function StructureChecklist({
+  kind,
+  text,
+  handedOver = false,
+  className,
+}: StructureChecklistProps) {
+  const { rows, passes } = check(kind, text, handedOver);
   const failing = rows.filter((row) => !row.ok).length;
   return (
     <section

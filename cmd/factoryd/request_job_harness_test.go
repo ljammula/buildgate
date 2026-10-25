@@ -79,7 +79,7 @@ func TestDraftingJobArgvsAlwaysNameTheHarness(t *testing.T) {
 	for _, name := range []string{"pi", "pifork"} {
 		argvs := map[string][]string{
 			"draft_spec":  draftSpecArgs("/h/draft_spec.py", "/w", "/r.md", "/o.md", "/e.json", draftInputFiles{}, 10, "", name),
-			"plan":        planTicketsArgs("/h/plan_tickets.py", "/w", "/s.md", "/r.md", "make verify", "/o", "/e.json", draftInputFiles{}, 10, "", name),
+			"plan":        planTicketsArgs("/h/plan_tickets.py", "/w", "/s.md", "/c.md", "/r.md", "make verify", "/o", "/e.json", draftInputFiles{}, 10, "", name),
 			"oracle":      oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c.md", "", "/o", "/e.json", 9, 3, "", "", name),
 			"oracle-pair": oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c.md", "/fb.md", "/o", "/e.json", 9, 3, draftEcosystem("go"), "max", name),
 		}

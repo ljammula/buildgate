@@ -69,8 +69,9 @@ another profile:
   has an oracle whose command ran no test: explain which, and relay `next:`
   (a send-back to spec, then a corrected oracle).
   Add `-spec-file <file>` only when the operator hands over a finished spec
-  and says it is the spec, not the request: it must use Buildgate's spec
-  headings or `submit` refuses it, naming the missing one. Add
+  and says it is the spec, not the request: it may use the operator's own
+  headings, but it must contain a named numbered criteria section or a
+  derivable top-level list item in a `##` section. Add
   `-plan-dir <dir>` with it only when the operator also hands over the
   tickets (`001.spec.md`, `002.spec.md`, ...)
   in this request

@@ -68,6 +68,17 @@ func TestValidateSpecCriteriaAcceptsALegacySpec(t *testing.T) {
 	}
 }
 
+func TestValidateHandedOverSpecAcceptsAnOperatorShapedSpecAndChecksNamedNumbering(t *testing.T) {
+	t.Parallel()
+	operatorSpec := "# Feature\n\n## Scope\n\n- It supports the requested mode.\n"
+	if err := ValidateHandedOverSpec(operatorSpec); err != nil {
+		t.Fatalf("operator-shaped handed-over spec: %v", err)
+	}
+	if err := ValidateHandedOverSpec(specWithCriteria("1. first\n3. gap")); err == nil || !strings.Contains(err.Error(), "numbered 1..2 in order") {
+		t.Fatalf("numbered handed-over spec: err = %v", err)
+	}
+}
+
 func TestSpecReviewNotesNameACriterionNotInEARSForm(t *testing.T) {
 	t.Parallel()
 	spec := specWithCriteria("1. AC-1: When a request arrives, the system shall answer it.\n" +

@@ -245,13 +245,11 @@ const specAcceptanceCriteriaHeading = "## Acceptance criteria"
 // prose.
 var specCriterionItemRE = regexp.MustCompile(`^(\d+)[.)]\s+\S`)
 
-// SpecAcceptanceCriteriaCount parses the approved spec's own "##
-// Acceptance criteria" numbered list and returns how many criteria it
-// declares -- the count ValidatePlanCoverage checks every ticket's own
-// claims against. specContent is assumed already structurally valid
-// (ValidateSpecSkeleton has already accepted it, per the plan's own
-// "approve" step); this is a small, separate parser over that one
-// section, not a second copy of ValidateSpecSkeleton's own heading scan.
+// SpecAcceptanceCriteriaCount parses the approved spec's acceptance criteria
+// and returns how many criteria it declares -- the count
+// ValidatePlanCoverage checks every ticket's own claims against. When the
+// operator did not use the skeleton, SpecAcceptanceCriteria derives the same
+// numbered list from second-level headings and top-level list markup.
 func SpecAcceptanceCriteriaCount(specContent string) (int, error) {
 	criteria, err := SpecAcceptanceCriteria(specContent)
 	if err != nil {
@@ -301,17 +299,26 @@ func foldAcceptanceCriteriaLines(sectionLines []string) []string {
 
 // SpecAcceptanceCriteria returns the approved spec's numbered acceptance
 // criteria verbatim ("1. It works."), in order -- the lines a ticket's
-// build hands to build_app.py's --spec-acceptance-criteria conformity
-// review. Same one-section parser SpecAcceptanceCriteriaCount counts with.
+// build hands to build_app.py's --spec-acceptance-criteria conformity review.
+// When the spec has no "## Acceptance criteria" section, it derives criteria
+// from headings and list markup only: top-level list items in every "## "
+// section except Problem, Non-goals, Risks and Open questions. It folds
+// continuations through the shared splitAcceptanceCriteriaBlocks primitive,
+// never reads the wording to decide whether an item is a requirement, and
+// renumbers the derived items across the document.
 func SpecAcceptanceCriteria(specContent string) ([]string, error) {
 	lines := strings.Split(specContent, "\n")
 	start, end, ok := findAcceptanceCriteriaSection(lines)
-	if !ok {
-		return nil, fmt.Errorf("spec is missing %q", specAcceptanceCriteriaHeading)
+	if ok {
+		criteria := foldAcceptanceCriteriaLines(lines[start:end])
+		if len(criteria) == 0 {
+			return nil, fmt.Errorf("spec's %q section has no numbered criteria", specAcceptanceCriteriaHeading)
+		}
+		return criteria, nil
 	}
-	criteria := foldAcceptanceCriteriaLines(lines[start:end])
+	criteria := deriveAcceptanceCriteria(lines)
 	if len(criteria) == 0 {
-		return nil, fmt.Errorf("spec's %q section has no numbered criteria", specAcceptanceCriteriaHeading)
+		return nil, fmt.Errorf("spec has no %q section and no list items to derive criteria from", specAcceptanceCriteriaHeading)
 	}
 	return criteria, nil
 }
@@ -360,6 +367,94 @@ func isCommitMessageCriterion(folded string) bool {
 // prefix.
 var leadingCriterionNumberRE = regexp.MustCompile(`^\d+[.)]\s*`)
 
+// derivedCriterionItemRE matches the top-level list items from which a
+// handed-over spec without its own criteria section gets its criteria. The
+// caller checks the raw line's indentation separately.
+var derivedCriterionItemRE = regexp.MustCompile(`^(?:[-*+]\s+\S|\d+[.)]\s+\S)`)
+
+var derivedCriterionMarkerRE = regexp.MustCompile(`^(?:[-*+]\s+|\d+[.)]\s+)(.*)$`)
+
+var nonRequirementSpecSections = map[string]struct{}{
+	"problem":        {},
+	"non-goals":      {},
+	"risks":          {},
+	"open questions": {},
+}
+
+// markdownHeadingLevel returns a heading's level for an unindented Markdown
+// ATX heading, or zero for every other line. Keeping this structural check
+// here lets both the named-section parser and the derived parser stop a
+// criterion at a heading without looking at the heading's prose.
+func markdownHeadingLevel(raw string) int {
+	if raw == "" || raw != strings.TrimLeft(raw, " \t") || raw[0] != '#' {
+		return 0
+	}
+	level := 0
+	for level < len(raw) && raw[level] == '#' {
+		level++
+	}
+	if level == 0 || level >= len(raw) || (raw[level] != ' ' && raw[level] != '\t') {
+		return 0
+	}
+	return level
+}
+
+// deriveAcceptanceCriteria reads only Markdown section and list structure.
+// It deliberately ignores prose before the first item in a section and
+// excludes the skeleton's non-requirement sections by heading name.
+func deriveAcceptanceCriteria(lines []string) []string {
+	var criteria []string
+	var sectionLines []string
+	active := false
+	flushSection := func() {
+		if !active {
+			sectionLines = nil
+			return
+		}
+		for _, block := range splitCriteriaBlocks(sectionLines, derivedCriterionItemRE, true) {
+			match := derivedCriterionMarkerRE.FindStringSubmatch(strings.TrimSpace(block.folded))
+			if len(match) != 2 || strings.TrimSpace(match[1]) == "" {
+				continue
+			}
+			criteria = append(criteria, fmt.Sprintf("%d. %s", len(criteria)+1, strings.TrimSpace(match[1])))
+		}
+		sectionLines = nil
+	}
+
+	inFence := false
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+		wasInFence := inFence
+		if isFence {
+			inFence = !inFence
+		}
+		if !wasInFence && !isFence {
+			switch markdownHeadingLevel(raw) {
+			case 1:
+				flushSection()
+				active = false
+				continue
+			case 2:
+				flushSection()
+				heading := strings.ToLower(strings.TrimSpace(raw[2:]))
+				_, excluded := nonRequirementSpecSections[heading]
+				// A differently cased acceptance heading is still a named
+				// section for derivation purposes. Leave it to the unchanged
+				// exact-heading parser to report it as missing instead of
+				// treating its numbered lines as unrelated derived criteria.
+				active = !excluded && !strings.EqualFold(heading, strings.TrimPrefix(specAcceptanceCriteriaHeading, "## "))
+				continue
+			}
+		}
+		if active {
+			sectionLines = append(sectionLines, raw)
+		}
+	}
+	flushSection()
+	return criteria
+}
+
 // acceptanceCriterionBlock is one top-level numbered criterion's raw
 // source lines (its own first line plus every continuation line that
 // belongs to it, verbatim, in original formatting) alongside its folded
@@ -394,6 +489,16 @@ type acceptanceCriterionBlock struct {
 // matched, silently truncating any criterion whose text ran past one
 // line.
 func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionBlock {
+	return splitCriteriaBlocks(sectionLines, specCriterionItemRE, false)
+}
+
+// splitCriteriaBlocks is the shared folding loop for both the skeleton's
+// numbered criteria and derived list criteria. itemRE decides what starts a
+// new top-level item; fence, indentation, blank-line and heading handling is
+// deliberately shared so the two readers cannot drift. stopAtHeading applies
+// to derived criteria; named acceptance-criteria sections retain their
+// existing behavior of folding deeper headings into the current item.
+func splitCriteriaBlocks(sectionLines []string, itemRE *regexp.Regexp, stopAtHeading bool) []acceptanceCriterionBlock {
 	var blocks []acceptanceCriterionBlock
 	var current []string
 	started := false
@@ -427,7 +532,12 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 			inFence = !inFence
 		}
 		indented := raw != strings.TrimLeft(raw, " \t")
-		if !indented && !wasInFence && !isFence && specCriterionItemRE.MatchString(trimmed) {
+		if stopAtHeading && !indented && !wasInFence && !isFence && markdownHeadingLevel(raw) > 0 {
+			flush()
+			started = false
+			continue
+		}
+		if !indented && !wasInFence && !isFence && itemRE.MatchString(trimmed) {
 			flush()
 			started = true
 		}

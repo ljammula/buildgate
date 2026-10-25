@@ -1,4 +1,5 @@
 import { readFixtureJson } from "@/test/fixtures";
+import { specAcceptanceCriteria } from "@/domain/specSkeleton";
 
 import { planCoverage } from "./planCoverage";
 
@@ -21,7 +22,7 @@ describe("golden vectors (test/fixtures/vectors/spec-skeleton.json, plans)", () 
 
   test.each(plans)("$name", (v) => {
     const got = planCoverage(
-      v.spec,
+      specAcceptanceCriteria(v.spec),
       v.tickets.map((content, i) => ({ index: i + 1, content })),
     );
     expect({ criteria_count: got.criteria.length, unclaimed: got.unclaimed }).toEqual({
@@ -43,7 +44,7 @@ function ticket(index: number, covered: string) {
 }
 
 test("each criterion lists the tickets that claim it, by ticket index", () => {
-  const got = planCoverage(SPEC, [ticket(1, "- 1\n- 2"), ticket(4, "- 2")]);
+  const got = planCoverage(specAcceptanceCriteria(SPEC), [ticket(1, "- 1\n- 2"), ticket(4, "- 2")]);
 
   expect(got.criteria).toEqual([
     { number: 1, text: "1. It adds.", tickets: [1] },
@@ -56,7 +57,10 @@ test("each criterion lists the tickets that claim it, by ticket index", () => {
 });
 
 test("a criterion is known by its position, not by the number written on it", () => {
-  const got = planCoverage("## Acceptance criteria\n5. First.\n9. Second.\n", [ticket(1, "- 2")]);
+  const got = planCoverage(
+    specAcceptanceCriteria("## Acceptance criteria\n5. First.\n9. Second.\n"),
+    [ticket(1, "- 2")],
+  );
 
   expect(got.criteria.map((c) => [c.number, c.text, c.tickets])).toEqual([
     [1, "5. First.", []],
@@ -65,7 +69,7 @@ test("a criterion is known by its position, not by the number written on it", ()
 });
 
 test("claims outside the spec's list, and tickets that do not parse, are reported", () => {
-  const got = planCoverage(SPEC, [
+  const got = planCoverage(specAcceptanceCriteria(SPEC), [
     ticket(1, "- 1\n- 2\n- 3\n- 7\n- 0\n- 7"),
     ticket(2, "- the third one"),
   ]);

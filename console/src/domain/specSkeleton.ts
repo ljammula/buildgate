@@ -311,7 +311,19 @@ function headingRows(
   });
 }
 
-export function specStructure(content: string): StructureCheck {
+export function specStructure(content: string, handedOver = false): StructureCheck {
+  if (handedOver) {
+    return {
+      rows: [
+        {
+          label: "Handed-over spec",
+          ok: true,
+          note: "operator format; the server validates its criteria",
+        },
+      ],
+      passes: true,
+    };
+  }
   const lines = content.split("\n");
   const criteria = specAcceptanceCriteria(content);
   const rows = headingRows(lines, requiredSpecHeadings, (heading, body) =>

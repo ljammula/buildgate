@@ -601,6 +601,10 @@ export interface RequestSummary {
   readonly haltKind: string;
   /** spec.md's content. Only GET /requests/{id} populates it. */
   readonly spec: string;
+  /** The operator handed over the current spec with `-spec-file`. */
+  readonly specImported: boolean;
+  /** The Go request parser's criteria, including derived handed-over criteria. */
+  readonly criteria: readonly string[];
   /** Absolute on the serve host; only GET /requests/{id} populates it, like `spec`. */
   readonly specFullPath: string;
   /**
@@ -771,6 +775,8 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     resume: optObject(o, "resume", at, decodeResumeInfo),
     haltKind: optString(o, "halt_kind", at),
     spec: optString(o, "spec", at),
+    specImported: optBoolean(o, "spec_imported", at),
+    criteria: stringList(o, "criteria", at),
     specFullPath: optString(o, "spec_full_path", at),
     specEvidence: optObject(o, "spec_evidence", at, decodeSpecEvidence),
     planEvidence: optObject(o, "plan_evidence", at, decodePlanEvidence),

@@ -122,8 +122,8 @@ func draftSpecArgs(script, workspace, requestPath, outPath, evidencePath string,
 // (runSandboxWithRetries) rather than a second sandbox launcher --
 // unlike a ticket build, there is no worktree isolation, no gates, and no
 // PR: this is a single one-shot pi invocation, evaluated by the request
-// driver's own call to request.ValidateSpecSkeleton, not by this
-// function.
+// driver's drafted-spec validation, not by this function. Handed-over specs
+// do not run this job.
 //
 // r.Workspace is mounted read-write (see specDraftScratchDirName's own
 // doc comment for why "read-only" here is a script-level convention, not

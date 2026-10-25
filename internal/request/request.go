@@ -350,6 +350,12 @@ type Transition struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// BuildInputApprovedSpec records the ticket-build input shape used by new
+// requests: the approved spec is included verbatim before the ticket. An
+// empty BuildInput is the legacy shape for requests already in flight when
+// that input changed.
+const BuildInputApprovedSpec = "approved_spec"
+
 // Request is one operator-submitted request's durable record.
 type Request struct {
 	ID        string `json:"id"`
@@ -549,6 +555,10 @@ type Request struct {
 	// like a drafted one. After a spec_review rejection the drafting job
 	// revises the current spec.md with the operator's feedback.
 	SpecImported bool `json:"spec_imported,omitempty"`
+	// BuildInput selects the ticket-build prompt shape. Empty is deliberate
+	// legacy compatibility: old request records load and re-marshal without a
+	// new field, and their in-flight builds keep the old input.
+	BuildInput string `json:"build_input,omitempty"`
 	// PlanImported is `factoryd submit -spec-file ... -plan-dir`: the
 	// operator also handed over the tickets (ImportedTicketsDir). The first
 	// planning pass takes them in place of the planning job, through the

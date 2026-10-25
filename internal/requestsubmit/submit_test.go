@@ -2,6 +2,7 @@ package requestsubmit
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -412,9 +413,50 @@ func TestSubmitRefusesAnUnresolvableDesignGuide(t *testing.T) {
 const handedOverSpec = "# Spec\n\n## Problem\n\nRefunds double-process.\n\n## Scope\n\nThe endpoint.\n\n## Non-goals\n\nNone.\n\n" +
 	"## Affected services and packages\n\npayments\n\n## Acceptance criteria\n\n1. A retried POST returns the original result.\n\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
 
-// A handed-over spec is stored beside the request and marks it; one that
-// fails the skeleton check a drafted spec must pass is refused and records
-// nothing.
+const operatorShapedSpec = "# go-toml: an encoder setting for multiline strings\n\n" +
+	"## Problem\n\nStrings need a selectable encoding mode.\n\n" +
+	"## Wanted behaviour\n\n- A new encoder setting chooses how string values are written:\n" +
+	"  - **default**: quote strings.\n  - **if newline**: use multiline strings.\n" +
+	"- The setting applies to every string the encoder writes as a value.\n\n" +
+	"## Interface\n\n- `type MultilineStringMode int`.\n" +
+	"- `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`.\n" +
+	"Document the setting in the Encoder docs and in the README.\n"
+
+func TestSubmitAcceptsAnOperatorShapedSpecWithAndWithoutPlan(t *testing.T) {
+	t.Parallel()
+	for _, withPlan := range []bool{false, true} {
+		t.Run(fmt.Sprintf("with plan=%t", withPlan), func(t *testing.T) {
+			workspace := t.TempDir()
+			if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make verify\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			params := Params{
+				WorkspaceArg: workspace, DataDir: t.TempDir(), RequestText: "multiline strings",
+				Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+				ImportedSpec: operatorShapedSpec,
+			}
+			if withPlan {
+				ticket := strings.Replace(handedOverTicket, "- 1\n\n## Out", "- 1\n- 2\n- 3\n- 4\n\n## Out", 1)
+				params.ImportedTickets = []ImportedTicket{{Filename: "001.spec.md", Content: ticket}}
+			}
+			testfixture.CommitAgentsFile(t, workspace)
+			result, err := Submit(params)
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			req, err := request.Load(params.DataDir, result.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !req.SpecImported || req.PlanImported != withPlan || req.BuildInput != request.BuildInputApprovedSpec {
+				t.Fatalf("request flags = SpecImported %v, PlanImported %v, BuildInput %q", req.SpecImported, req.PlanImported, req.BuildInput)
+			}
+		})
+	}
+}
+
+// A handed-over spec is stored beside the request and marks it; one with no
+// factory-readable criterion is refused and records nothing.
 func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make verify\"\n"), 0o644); err != nil {
@@ -427,11 +469,11 @@ func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 		Source:                   request.Source{Kind: request.SourceText},
 		PreflightProfile:         "brownfield",
 		PreflightProfileExplicit: true,
-		ImportedSpec:             strings.Replace(handedOverSpec, "## Risks", "## Risk", 1),
+		ImportedSpec:             strings.Replace(handedOverSpec, "1. A retried POST returns the original result.", "No numbered criterion.", 1),
 	}
 	testfixture.CommitAgentsFile(t, workspace)
-	if _, err := Submit(params); err == nil || !strings.Contains(err.Error(), `-spec-file: spec is missing required heading "## Risks"`) {
-		t.Fatalf("err = %v, want a refusal naming the missing heading", err)
+	if _, err := Submit(params); err == nil || !strings.Contains(err.Error(), `-spec-file: spec's "## Acceptance criteria" section has no numbered criteria`) {
+		t.Fatalf("err = %v, want a refusal naming the missing criteria", err)
 	}
 	if entries, _ := os.ReadDir(filepath.Join(params.DataDir, "requests")); len(entries) != 0 {
 		t.Fatalf("a refused submission left %d request(s) behind", len(entries))

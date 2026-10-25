@@ -155,6 +155,12 @@ describe("specStructure", () => {
       note: "no content",
     });
   });
+
+  test("a handed-over spec does not require the drafted skeleton", () => {
+    const check = specStructure("# Operator spec\n\n## Scope\n\n- It works.\n", true);
+    expect(check.passes).toBe(true);
+    expect(check.rows.map((row) => row.label)).toEqual(["Handed-over spec"]);
+  });
 });
 
 describe("ticketStructure", () => {

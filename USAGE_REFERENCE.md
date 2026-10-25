@@ -182,7 +182,10 @@ with `-prior-run <previous run id>`. A ticket's actual `-spec` is not
 spec verbatim plus a `## Acceptance criteria this ticket must satisfy`
 section carrying the full text of every approved-spec criterion the
 ticket's own `### Acceptance criteria covered` numbers name (every
-criterion, if it names none). `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
+criterion, if it names none). New requests receive `# Approved spec`, the
+approved spec's bytes verbatim, `# This ticket`, the ticket's bytes and then
+that criteria section; requests without the build-input marker retain the
+legacy ticket-first shape. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
@@ -468,7 +471,8 @@ that draft again. What the next draft is told:
 
 ```text
 factoryd submit -spec-file my-spec.md <repo>
-  └─ refused unless the file passes the spec skeleton check, naming the missing heading
+  └─ refused unless the factory reads at least one criterion from the named
+     numbered section or from top-level list items in its ## sections
 submitted -> spec_drafting   (no model call: your file becomes spec.md)
           -> spec_review     approve, or reject -reason "..."
                                └─ reject: the planning model revises YOUR document with the feedback,
@@ -484,12 +488,12 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 
 | Point | Detail |
 |---|---|
-| Format | The skeleton a drafted spec has: `# Spec`, `## Problem`, `## Scope`, `## Non-goals`, `## Affected services and packages`, `## Acceptance criteria` (a numbered list), `## Risks`, `## Open questions`, in that order, each heading on its own line |
-| Request text | Optional with `-spec-file`: the spec's `## Problem` text is used. A request text, `-request-file` or `-issue` may still be given |
+| Format | A handed-over spec may use the operator's own headings. If it has `## Acceptance criteria`, its top-level numbered list keeps the existing numbering checks. Without that section, the factory numbers every top-level `-`, `*`, `+`, `N.`, or `N)` item in each `##` section, excluding `Problem`, `Non-goals`, `Risks`, and `Open questions`; indented sub-lists and wrapped lines fold into their item, and fenced-code lists are ignored. A drafted spec still uses the skeleton: `# Spec`, `## Problem`, `## Scope`, `## Non-goals`, `## Affected services and packages`, `## Acceptance criteria`, `## Risks`, `## Open questions`, in that order, with drafted criteria IDs. |
+| Request text | Optional with `-spec-file`: the spec's `## Problem` text is used when present. With no Problem text, the full trimmed spec is used. A request text, `-request-file` or `-issue` may still be given |
 | Review | The same `spec_review` gate and approval hash as a drafted spec. Planning, oracles and builds read it exactly like a drafted one |
 | After a reject | The request's spec is from then on a drafted document: later rejects revise the latest version, and the drafting cost shows in `factoryd cost` |
 | Edited in the console | At `spec_review` and `plan_review` the console's Edit saves the file in place. Each save is recorded on the request: who, when, the changed lines, and the replaced text as a revision (the request page's Audit lists them). If you then reject that stage, the changed lines go to the planning model with your feedback, marked to be kept; an edit you approve reaches no model, since nothing redrafts the file |
-| Not in the skeleton | Hand the document over as the request (`-request-file`) and review the spec Buildgate drafts from it |
+| Not in the skeleton | Hand the document over with `-spec-file`; only the criterion rule above is required of its shape |
 | Ticket format | Header lines `Verify-Command:` (the request's verify command, exactly), `Allowed-Files:`, `Required-Changed-Files:` (with at least one test file, or a `Tests-Required: no -- <reason>` line), then `## Goal`, `## Plan` with `### Files to touch`, `### Steps`, `### Tests to add`, `### Acceptance criteria covered` (criterion numbers, one per list item), `## Out of scope` A file the ticket moves or renames is a change to both paths: list the old path and the new one in `Allowed-Files:` (the changed-file list names both, for `diff_scope`, required files and protected paths alike) |
 | Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (ticket format, verify command, allowed files, criteria coverage, the tests rule). A handed-over plan that fails one halts the request with the reason, or, when it fails the tests rule, is revised by the planning model with that reason as feedback. What the factory reads from a criterion's prose is a note at `plan_review`, never a refusal |
 | `-plan-dir` alone | Refused: tickets name the criteria of the spec they plan |

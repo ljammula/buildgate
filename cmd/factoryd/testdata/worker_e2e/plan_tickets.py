@@ -45,6 +45,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--spec", required=True)
+    parser.add_argument("--criteria-file", required=True)
     parser.add_argument("--verify-command", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--evidence", required=True)

@@ -2413,6 +2413,130 @@ func TestBuildRequestBuildArgsBuildSpecCarriesCriteriaText(t *testing.T) {
 	}
 }
 
+func TestLegacyRequestBuildSpecKeepsTheTicketFirstShapeExactly(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
+	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(habitInsightsSpec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticketContent := requestdrivertest.ValidBrownfieldTicket("make verify", 8, 9)
+	ticketPath := filepath.Join(ticketsDir, "002.spec.md")
+	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedFirstTicketRun(t, dataDir, r)
+
+	got, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, request.Ticket{Index: 2, SpecPath: ticketPath})
+	if err != nil {
+		t.Fatalf("TicketBuildSpecContent: %v", err)
+	}
+	want := ticketContent + "\n" + requestdriver.BuildSpecCriteriaHeading + "\n\n" +
+		"8. The response body includes an integer field named exactly longest_streak.\n" +
+		"9. The response body includes a weekly entries array whose objects each carry an integer field named exactly best_weekday_done_count, and a per-day field named exactly done_count.\n" +
+		"\n" + requestdriver.BuildSpecCriteriaFooter + "\n"
+	if got != want {
+		t.Fatalf("legacy build spec changed:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestNewRequestBuildSpecsContainTheApprovedSpecForOperatorAndDraftedPlans(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		spec         string
+		specImported bool
+	}{
+		{
+			name:         "operator plan",
+			specImported: true,
+			spec:         "# Operator shape\n\n## Scope\n\n- The first part works.\n- The second part works.\n",
+		},
+		{name: "drafted plan", spec: requestdrivertest.TwoCriteriaSpec},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			r := &request.Request{
+				ID: "req-1", Workspace: "/repos/app", Project: "app",
+				BuildInput: request.BuildInputApprovedSpec, SpecImported: tc.specImported, PlanImported: tc.specImported,
+			}
+			ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
+			if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := request.SaveText(dataDir, r.ID, "request"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(tc.spec), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ticketPaths := []string{
+				filepath.Join(ticketsDir, "001.spec.md"),
+				filepath.Join(ticketsDir, "002.spec.md"),
+			}
+			for i, path := range ticketPaths {
+				if err := os.WriteFile(path, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", i+1)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r.Tickets = []request.Ticket{{Index: 1, SpecPath: ticketPaths[0]}, {Index: 2, SpecPath: ticketPaths[1]}}
+			seedFirstTicketRun(t, dataDir, r)
+			if err := r.Save(dataDir); err != nil {
+				t.Fatal(err)
+			}
+			for _, ticket := range r.Tickets {
+				args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
+				if err != nil {
+					t.Fatalf("BuildRequestBuildArgs(ticket %d): %v", ticket.Index, err)
+				}
+				path := requestdrivertest.ArgValue(args, "-spec")
+				content, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.HasPrefix(string(content), "# Approved spec\n\n") || !strings.Contains(string(content), tc.spec) {
+					t.Fatalf("ticket %d build spec = %q, want the approved spec verbatim", ticket.Index, content)
+				}
+			}
+		})
+	}
+}
+
+func TestNewRequestBuildSpecClosesOpenFencesInTheSpecAndTicket(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", BuildInput: request.BuildInputApprovedSpec}
+	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
+	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte("# Spec\n\n## Acceptance criteria\n\n1. It works.\n\n## Notes\n\n```md\nopen"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticketPath := filepath.Join(ticketsDir, "001.spec.md")
+	if err := os.WriteFile(ticketPath, []byte("# Ticket\n\n```md\nopen"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedFirstTicketRun(t, dataDir, r)
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, request.Ticket{Index: 1, SpecPath: ticketPath})
+	if err != nil {
+		t.Fatalf("TicketBuildSpecContent: %v", err)
+	}
+	if !strings.Contains(got, "```md\nopen\n```\n\n---\n\n# This ticket") {
+		t.Fatalf("build spec did not close the approved spec fence: %q", got)
+	}
+	if !strings.Contains(got, "# Ticket\n\n```md\nopen\n```\n\nThe ticket's plan") {
+		t.Fatalf("build spec did not close the ticket fence: %q", got)
+	}
+}
+
 // TestTicketBuildSpecContentListsAllCriteriaWhenNoneDeclared covers the
 // fallback half of the same fix: a ticket that declares no covered
 // criteria at all (the legacy/hand-written format, no "## Plan" section)

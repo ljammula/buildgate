@@ -71,28 +71,6 @@ export function ticketsLeadContent(request: RequestSummary): boolean {
   return request.tickets.length > 0 && TICKETS_FIRST_STATES.has(request.state);
 }
 
-/**
- * The numbered items under a "## Acceptance criteria" heading of `spec`,
- * stopping at the next heading. Tolerant by design: no heading, or no
- * numbered items, is an empty list. A display aid, never a validator.
- */
-export function parseAcceptanceCriteria(spec: string): string[] {
-  const items: string[] = [];
-  let inSection = false;
-  for (const line of spec.split("\n")) {
-    const heading = line.trimEnd();
-    if (/^#{1,6}\s+/.test(heading)) {
-      if (inSection) break;
-      inSection = /^#{1,6}\s+acceptance criteria\s*$/i.test(heading);
-      continue;
-    }
-    if (!inSection) continue;
-    const match = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    if (match?.[1] !== undefined) items.push(match[1].trim());
-  }
-  return items;
-}
-
 // Once the operator has approved, the spec and each ticket's plan are receipts,
 // not a decision: they fold to one line. Written as the states that fold, never
 // as "every state but the review ones": a state added later keeps its
@@ -124,12 +102,14 @@ function plural(n: number, one: string): string {
  * The one line a folded spec leaves: its title and how many acceptance
  * criteria it carries. Never empty: "spec.md" when it has neither.
  */
-export function specSummary(spec: string): string {
+export function specSummary(spec: string, criteria: readonly string[] = []): string {
   const title = /^#\s+(.+)$/m.exec(spec)?.[1]?.trim() ?? "";
-  const criteria = parseAcceptanceCriteria(spec).length;
+  const criteriaCount = criteria.length;
   const parts = [
     title,
-    criteria > 0 ? `${criteria} acceptance ${criteria === 1 ? "criterion" : "criteria"}` : "",
+    criteriaCount > 0
+      ? `${criteriaCount} acceptance ${criteriaCount === 1 ? "criterion" : "criteria"}`
+      : "",
   ];
   const line = parts.filter((p) => p !== "").join(" · ");
   return line === "" ? "spec.md" : line;

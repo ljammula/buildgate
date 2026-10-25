@@ -37,7 +37,7 @@ func TestAdvanceSpecDraftingTakesAHandedOverSpecWithoutTheDraftingJob(t *testing
 // an invalid shape after submit halts the request and never reaches review.
 func TestAdvanceSpecDraftingHaltsOnAnInvalidOrMissingHandedOverSpec(t *testing.T) {
 	for name, spec := range map[string]string{
-		"invalid": strings.Replace(requestdrivertest.CanonicalValidSpec, "## Risks", "## Risk", 1),
+		"invalid": strings.Replace(requestdrivertest.CanonicalValidSpec, "1. A retried POST /refunds with the same idempotency key returns the original result.", "No numbered criterion.", 1),
 		"missing": "",
 	} {
 		t.Run(name, func(t *testing.T) {

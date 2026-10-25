@@ -1,6 +1,5 @@
 import { useUpdateRequestTicket } from "@/api/requestQueries";
 import type { RequestSummary, RequestTicket } from "@/domain/request";
-import { specAcceptanceCriteria } from "@/domain/specSkeleton";
 import { getOperatorName } from "@/platform/operatorIdentity";
 
 import { ticketRelPath } from "@/domain/contentHash";
@@ -51,7 +50,7 @@ export function TicketPlanSection({
       onFetchCurrent={onFetchCurrent}
       structure="ticket"
       {...(editable && commentPath !== null ? { commentPath, onComment: pending.add } : {})}
-      specCriteria={specAcceptanceCriteria(request.spec)}
+      specCriteria={request.criteria}
       {...(session === undefined ? {} : { session })}
       {...(foldsContent(request.state) ? { foldedSummary: planSummary(ticket.content) } : {})}
     />

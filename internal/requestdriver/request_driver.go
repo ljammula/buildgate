@@ -113,11 +113,11 @@ func stillInState(dataDir string, id string, expected request.State) (bool, erro
 // AdvanceRequest moves r exactly one step forward and saves it.
 //
 // submitted -> spec_drafting is a pure state move: nothing runs
-// yet. spec_drafting runs the real drafting job: on success, with
-// a structurally valid spec.md (request.ValidateSpecSkeleton), r moves to
-// spec_review with spec.md written and its evidence recorded; on a job
-// failure or an invalid skeleton, r moves to halted with a reason naming
-// what went wrong, and a notification is dispatched through
+// yet. spec_drafting runs the real drafting job unless the request carries
+// the operator's handed-over spec: on success, with a structurally valid
+// drafted spec.md or a valid handed-over spec, r moves to spec_review with
+// spec.md written and its evidence recorded; on a job failure or invalid
+// content, r moves to halted with a reason naming what went wrong, and a notification is dispatched through
 // notify.DispatchExternal the same durable-log-first way save's own
 // notify.PrepareHalt call does for a run.
 func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, specRunner SpecDraftRunner, planRunner PlanTicketsRunner, oracleRunner OracleDraftRunner, buildRunner TicketRunner) error {
@@ -222,26 +222,31 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	if spliceErr != nil {
 		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
 	}
-	if err := request.ValidateSpecSkeleton(specMD); err != nil {
-		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
+	var validationErr error
+	if importsSpec(r) {
+		validationErr = request.ValidateHandedOverSpec(specMD)
+	} else if err := request.ValidateSpecSkeleton(specMD); err != nil {
+		validationErr = err
+	} else {
+		validationErr = request.ValidateSpecCriteria(specMD, criteriaAreDrafted(r))
 	}
-	if err := request.ValidateSpecCriteria(specMD, criteriaAreDrafted(r)); err != nil {
+	if validationErr != nil {
 		// Keep what the refused draft spent: the next pass, or the halt, adds to it.
 		accumulateSpecEvidence(r, evidence)
 		if attempt < maxSpecDraftingAttempts && !importsSpec(r) {
 			r.Rejections = append(r.Rejections, request.Rejection{
 				By:        request.FactoryActor,
 				At:        now.UTC().Format(time.RFC3339Nano),
-				Reason:    DraftHaltNote(err.Error()),
+				Reason:    DraftHaltNote(validationErr.Error()),
 				FromState: request.StateSpecDrafting,
 				ForStage:  request.StateSpecReview,
 			})
-			log.Printf("request %s: drafted spec refused (%v) -- drafting again automatically", r.ID, err)
+			log.Printf("request %s: drafted spec refused (%v) -- drafting again automatically", r.ID, validationErr)
 			return true, nil
 		}
 		// The refusal is the halt's own note (DraftHalt), not also a rejection.
 		dropFactorySpecRejection(r)
-		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(err), fmt.Sprintf("drafted spec.md is invalid: %v", err), now)
+		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(validationErr), fmt.Sprintf("drafted spec.md is invalid: %v", validationErr), now)
 	}
 	// A refusal this pass answered is not feedback for any later redraft.
 	dropFactorySpecRejection(r)
@@ -2735,14 +2740,12 @@ const BuildSpecCriteriaHeading = "## Acceptance criteria this ticket must satisf
 // paraphrase-able prose.
 const BuildSpecCriteriaFooter = "These are the approved spec's exact criteria; names, fields, formats and error codes in them are requirements, not suggestions."
 
-// TicketBuildSpecContent returns ticket's own spec content, verbatim,
-// followed by a BuildSpecCriteriaHeading section carrying the full text
-// of every approved-spec acceptance criterion this ticket covers -- the
-// same text and numbering WriteTicketCriteriaFile resolves via
-// resolveApprovedCriteriaTexts -- and returns it as the string a caller
-// writes to disk as the ticket's actual -spec (writeTicketBuildSpecFile)
-// or embeds as a review addendum's own base (WriteReviewAddendum,
-// pr_review_driver.go's WriteRoundAddendum).
+// TicketBuildSpecContent returns the string a caller writes to disk as the
+// ticket's actual -spec (writeTicketBuildSpecFile) or embeds as a review
+// addendum's own base (WriteReviewAddendum, pr_review_driver.go's
+// WriteRoundAddendum). New requests put the approved spec verbatim before
+// the ticket and its covered criteria; an old request record with no
+// BuildInput keeps the legacy ticket-first shape.
 //
 // Found live, Flutter + Go app Track M-E1, 2026-09-28
 // (feature-habit-insights-endpoint-and-mcp, ticket 002): the ticket file
@@ -2779,6 +2782,10 @@ func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (s
 	if err != nil {
 		return "", err
 	}
+	useApprovedSpec := false
+	if r, loadErr := request.Load(dataDir, requestID); loadErr == nil {
+		useApprovedSpec = r.BuildInput == request.BuildInputApprovedSpec
+	}
 	numbers, covErr := request.TicketCoveredCriteria(string(ticketContent))
 	declaresCoverage := covErr == nil
 	if covErr != nil && strings.Contains(string(ticketContent), "## Plan") {
@@ -2805,6 +2812,14 @@ func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (s
 		}
 	}
 
+	if useApprovedSpec {
+		specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestID))
+		if readErr != nil {
+			return "", fmt.Errorf("read approved spec: %w", readErr)
+		}
+		return renderApprovedSpecTicketBuildInput(string(specContent), string(ticketContent), "", texts), nil
+	}
+
 	if len(texts) == 0 {
 		return string(ticketContent), nil
 	}
@@ -2824,6 +2839,47 @@ func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (s
 	}
 	fmt.Fprintf(&b, "\n%s\n", BuildSpecCriteriaFooter)
 	return b.String(), nil
+}
+
+// renderApprovedSpecTicketBuildInput is the new ticket-build input shape.
+// specReviewContent is the named insertion seam for the future P1.3
+// spec-review questions and answers; the current caller passes an empty
+// string, so no review material is present yet.
+func renderApprovedSpecTicketBuildInput(specContent, ticketContent, specReviewContent string, criteria []string) string {
+	var b strings.Builder
+	b.WriteString("# Approved spec\n\n")
+	b.WriteString("The operator approved this spec. It is the contract for this build: names, fields, formats, behaviours and error texts in it are requirements.\n\n")
+	b.WriteString(specContent)
+	if len(specContent) == 0 || specContent[len(specContent)-1] != '\n' {
+		b.WriteString("\n")
+	}
+	if closing := ticketspec.ClosingFenceIfOpen(specContent); closing != "" {
+		b.WriteString(closing + "\n")
+	}
+	b.WriteString("\n---\n\n")
+	if specReviewContent != "" {
+		b.WriteString(specReviewContent)
+		if specReviewContent[len(specReviewContent)-1] != '\n' {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n---\n\n")
+	}
+	b.WriteString("# This ticket\n\n")
+	b.WriteString(ticketContent)
+	if len(ticketContent) == 0 || ticketContent[len(ticketContent)-1] != '\n' {
+		b.WriteString("\n")
+	}
+	if closing := ticketspec.ClosingFenceIfOpen(string(ticketContent)); closing != "" {
+		b.WriteString(closing + "\n")
+	}
+	b.WriteString("\nThe ticket's plan and steps are guidance for how to split the work; the approved spec above is the contract. Build this ticket's part of it.\n\n")
+	fmt.Fprintf(&b, "%s\n\n", BuildSpecCriteriaHeading)
+	for _, criterion := range criteria {
+		b.WriteString(criterion)
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "\n%s\n", BuildSpecCriteriaFooter)
+	return b.String()
 }
 
 // writeTicketBuildSpecFile writes TicketBuildSpecContent's result to
