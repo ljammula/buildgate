@@ -216,15 +216,6 @@ RUN XDG_CACHE_HOME=/opt/copilot-cache copilot --version \
     && test -f /opt/copilot-pkg/index.js
 ENV COPILOT_CLI_DIST_DIR=/opt/copilot-pkg
 
-# Maven's global settings for a run with the registry proxy's Maven route:
-# one mirror of every repository at ${env.BUILDGATE_MAVEN_MIRROR}, named by
-# the MAVEN_ARGS the launch sets (internal/sandbox/registryproxy_lifecycle.go).
-# Root-owned and read-only, so a build cannot point it elsewhere. Not COPY
-# --chmod, which gives the directories it creates that mode too.
-COPY internal/sandbox/maven-settings.xml /etc/buildgate/maven/settings.xml
-RUN chmod 0755 /etc/buildgate /etc/buildgate/maven \
-    && chmod 0444 /etc/buildgate/maven/settings.xml
-
 # /scratch is copied into each new, empty scratch volume on its first mount,
 # so the worker can write it: the launch's wrapper fails when it cannot.
 RUN mkdir -p /scratch && chown 65532:65532 /scratch && chmod 0770 /scratch \
@@ -252,5 +243,4 @@ RUN set -eu; \
     && for key in /etc/ssh/ssh_host_*; do test ! -e "$key"; done \
     && pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \
     && printf 'all:\n\t@true\n' | make -f - \
-    && test -r /etc/buildgate/maven/settings.xml && test ! -w /etc/buildgate/maven/settings.xml \
     && BG_COMPOSE_FORWARDS= bg-forward -- true

@@ -1235,6 +1235,12 @@ const workerContainerWorkDir = "/workspace"
 // worker container.
 const WorkerScratchMount = "/scratch"
 
+// workerJavaTmpDir is the directory under WorkerScratchMount a launch with
+// the registry proxy's Maven route names as java.io.tmpdir: a test suite
+// loads the native libraries it unpacks there, which the noexec /tmp refuses.
+// The worker's wrapper creates it with Go's.
+const workerJavaTmpDir = "java-tmp"
+
 // RunScratchDir is the per-run host directory holding each launch's
 // scratch directory under the stand-in Run: <dataDir>/scratch/<runID>/<launch>.
 // The gateway path uses a Docker volume instead (ScratchVolumeName); an
@@ -1303,13 +1309,13 @@ func (s LaunchSpec) withStandInScratch() (LaunchSpec, func(), error) {
 }
 
 // ensureStandInScratch creates the host scratch directory of a Run launch
-// and its go-build and go-tmp subdirectories.
+// and its go-build, go-tmp and java-tmp subdirectories.
 func ensureStandInScratch(s LaunchSpec) (string, error) {
 	dir, err := EnsureScratchDir(s.DataDir, s.RunID, s.Name, s.User)
 	if err != nil {
 		return "", err
 	}
-	for _, sub := range []string{"go-build", "go-tmp"} {
+	for _, sub := range []string{"go-build", "go-tmp", workerJavaTmpDir} {
 		d := filepath.Join(dir, sub)
 		if err := os.MkdirAll(d, 0o770); err != nil {
 			return "", fmt.Errorf("create worker scratch subdirectory: %w", err)

@@ -138,8 +138,15 @@ RUN cd /tmp/buildgate-agent/agent/pi; \
 # A JDK and Maven, from an official maven:<line>-eclipse-temurin-<major>
 # image. Temurin's JDK carries its own libraries beside glibc, so it runs on
 # the base image's distribution whichever one the maven image is built on.
-# Maven's settings and local repository are the worker's environment's
-# concern, not this image's.
+# Maven's global settings (/usr/share/maven/conf/settings.xml, root-owned and
+# read-only) are replaced by one mirror of every repository at
+# ${env.BUILDGATE_MAVEN_MIRROR}: a run with the registry proxy's Maven route
+# sets that variable to the route (internal/sandbox/registryproxy_lifecycle.go),
+# and the image's own value is Maven Central, which a project image's host-side
+# build below reaches directly and a sandbox without the route cannot reach.
+# Replacing them also drops the distribution's block on plain-HTTP mirrors.
+# Written here, not copied: this image's build context holds no buildgate file.
+# Where the local repository goes is the worker's environment's concern.
 FROM python-${PYTHON_MODE} AS java-keep
 FROM python-${PYTHON_MODE} AS java-replace
 USER root
@@ -147,6 +154,7 @@ RUN rm -rf /opt/java/openjdk /usr/share/maven
 COPY --from=project-java /opt/java/openjdk /opt/java/openjdk
 COPY --from=project-java /usr/share/maven /usr/share/maven
 ENV JAVA_HOME=/opt/java/openjdk
+ENV BUILDGATE_MAVEN_MIRROR=https://repo.maven.apache.org/maven2
 # Maven's console library ships its Linux native code only inside its jar and
 # extracts it to /tmp on every run, which the sandbox mounts noexec; laid out
 # where `mvn` already looks (library.jansi.path), it loads from /usr instead.
@@ -163,6 +171,20 @@ RUN set -e; \
         fi; \
         cd /; rm -rf /tmp/jansi; \
     done; \
+    printf '%s\n' \
+        '<?xml version="1.0" encoding="UTF-8"?>' \
+        '<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">' \
+        '  <mirrors>' \
+        '    <mirror>' \
+        '      <id>buildgate-registry-proxy</id>' \
+        '      <url>${env.BUILDGATE_MAVEN_MIRROR}</url>' \
+        '      <mirrorOf>*</mirrorOf>' \
+        '    </mirror>' \
+        '  </mirrors>' \
+        '</settings>' \
+        > /usr/share/maven/conf/settings.xml; \
+    chown root:root /usr/share/maven/conf/settings.xml; \
+    chmod 0444 /usr/share/maven/conf/settings.xml; \
     java -version; javac -version; mvn -v
 
 # Ruby and the Bundler it ships, from the official ruby:<version>-<codename>
@@ -171,8 +193,8 @@ RUN set -e; \
 # /usr/local/bin, libyaml with its header (psych compiles against it), and any
 # shared library the interpreter or an extension needs that the base image
 # lacks. `bundle install` compiles native extensions with the base image's C
-# compiler and make; a base image without a compiler gets one here, while make
-# is the base image's own (the worker's is built for the sandbox). Where
+# compiler and make (the worker image has both): this stage installs nothing
+# from a package manager, so a base image without a C compiler fails it. Where
 # gems go is the worker's environment's concern (BUNDLE_PATH), not this
 # image's.
 FROM java-${JAVA_MODE} AS ruby-keep
@@ -202,7 +224,8 @@ RUN --mount=type=bind,from=project-ruby,source=/,target=/ruby-image \
     ldconfig; \
     if { ldd /usr/local/bin/ruby; find /usr/local/lib/ruby -name '*.so' -exec ldd {} + ; } | grep 'not found'; then exit 1; fi; \
     if ! command -v cc >/dev/null 2>&1; then \
-        apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*; \
+        echo "the base image has no C compiler (cc), which bundle install needs for a gem's native extension; build Ruby projects on the buildgate worker image or an image that has one" >&2; \
+        exit 1; \
     fi; \
     command -v make >/dev/null || echo "warning: the base image has no make; a gem with a native extension cannot be compiled in it" >&2; \
     ruby -v; gem -v; bundle -v; \

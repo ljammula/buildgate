@@ -161,6 +161,10 @@ func TestPlanProjectImageReplacesTheJDKOrRubyWhenEitherHalfIsMissing(t *testing.
 	if got, err := plan(pom, "java openjdk version \"11.0.20\"\nApache Maven 3.9.9\n", "bookworm"); err != nil || len(got.BuildArgs) != 2 || len(got.Notes) != 1 {
 		t.Errorf("an image with an older JDK planned %v, %v, %q", got.BuildArgs, err, got.Notes)
 	}
+	java15 := map[string]string{"pom.xml": "<project/>", ".java-version": "15\n"}
+	if got, err := plan(java15, "", "bookworm"); err != nil || !reflect.DeepEqual(got.BuildArgs, []string{"JAVA_MODE=replace", "JAVA_IMAGE=maven:3.9-eclipse-temurin-17"}) {
+		t.Errorf("a Java 15 pin planned %v, %v; want the Java 17 image", got.BuildArgs, err)
+	}
 	gemfile := map[string]string{"Gemfile": "", ".ruby-version": "3.3\n"}
 	if got, err := plan(gemfile, "ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [aarch64-linux]\nbundler 2.5.22\n", "bookworm"); err != nil || got.BuildArgs != nil {
 		t.Errorf("an image with Ruby 3.3 and Bundler planned %v, %v; want nothing", got.BuildArgs, err)
@@ -178,8 +182,8 @@ func TestPlanProjectImageReplacesTheJDKOrRubyWhenEitherHalfIsMissing(t *testing.
 // what the real tools print, and its output parses back to their versions.
 func TestImageToolchainsScriptRoundTrip(t *testing.T) {
 	stubs := map[string]string{
-		"java":   `echo 'openjdk version "1.8.0_432"' >&2; echo 'OpenJDK Runtime Environment (Temurin)(build 1.8.0_432-b06)' >&2`,
-		"mvn":    `echo 'Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)'; echo 'Maven home: /usr/share/maven'`,
+		"java":   `echo 'Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/scratch/java-tmp -Xss4m' >&2; echo 'openjdk version "1.8.0_432"' >&2; echo 'OpenJDK Runtime Environment (Temurin)(build 1.8.0_432-b06)' >&2`,
+		"mvn":    `echo 'Picked up JAVA_TOOL_OPTIONS: -Xss4m'; echo 'Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)'; echo 'Maven home: /usr/share/maven'`,
 		"ruby":   `echo 'ruby 4.0.9 (2026-10-23 revision 3e93b23afc) +PRISM [aarch64-linux]'`,
 		"bundle": `echo '4.0.20'`,
 		"node":   `echo 'v22.23.2'`,
@@ -190,11 +194,11 @@ func TestImageToolchainsScriptRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	head, err := exec.LookPath("head")
+	grep, err := exec.LookPath("grep")
 	if err != nil {
-		t.Skip("no head on this host")
+		t.Skip("no grep on this host")
 	}
-	if err := os.Symlink(head, filepath.Join(bin, "head")); err != nil {
+	if err := os.Symlink(grep, filepath.Join(bin, "grep")); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("/bin/sh", "-c", imageToolchainsScript)

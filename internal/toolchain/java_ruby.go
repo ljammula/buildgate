@@ -14,7 +14,10 @@ import (
 // maven.compiler.release (or the compiler plugin's <release>) when it is a
 // plain number; with none of them any JDK satisfies it. A JDK compiles every
 // older --release target, so an image's Java satisfies a pin when its major
-// is at least the pinned one.
+// is at least the pinned one, and the JDK installed for a pin is the oldest
+// LTS at or above it (JavaInstallMajor). A value that does not read as a Java
+// major (an alias such as "system", "0") pins nothing, and the next source is
+// read.
 func detectJava(dir string) ([]Requirement, error) {
 	if _, err := os.Stat(filepath.Join(dir, "pom.xml")); os.IsNotExist(err) {
 		return nil, nil
@@ -60,14 +63,35 @@ func javaPin(dir string) (*Requirement, error) {
 	if err != nil || release == "" {
 		return nil, err
 	}
-	major, _ := JavaMajor(release)
+	major, ok := JavaMajor(release)
+	if !ok {
+		return nil, nil
+	}
 	return javaRequirement("pom.xml", "release "+release, major), nil
 }
 
 func javaRequirement(source, spec string, major int) *Requirement {
-	pinned := Version{Parts: []int{major}}
-	return &Requirement{Tool: Java, Source: source, Spec: spec, Install: pinned,
+	install := Version{Parts: []int{JavaInstallMajor(major)}}
+	return &Requirement{Tool: Java, Source: source, Spec: spec, Install: install,
 		satisfied: func(installed Version) bool { return installed.part(0) >= major }}
+}
+
+// javaLTSMajors are the Java majors an official maven:<line>-eclipse-temurin
+// image is published for at or below the newest LTS, oldest first. Temurin
+// publishes no maven image for the non-LTS majors among them (9, 10, 12-16).
+var javaLTSMajors = []int{8, 11, 17, 21, 25}
+
+// JavaInstallMajor is the JDK major installed for a pin of major: the oldest
+// LTS major at or above it, or major itself above the newest LTS. Any JDK at
+// or above the pin satisfies it, so a pin with no published image of its own
+// gets the next one that has.
+func JavaInstallMajor(major int) int {
+	for _, lts := range javaLTSMajors {
+		if lts >= major {
+			return lts
+		}
+	}
+	return major
 }
 
 var javaVersionSegment = regexp.MustCompile(`^\d+(\.\d+)*$`)
@@ -76,16 +100,22 @@ var javaVersionSegment = regexp.MustCompile(`^\d+(\.\d+)*$`)
 // "temurin64-17.0.2", "1.8") and SDKMAN! (.sdkmanrc: "21.0.1-tem") write it,
 // or as `java -version` prints it ("1.8.0_432", "21.0.5"): the first
 // dash-separated segment that is a dotted number, with the old "1.x" naming
-// read as x. ok is false when no segment is one.
+// read as x. ok is false when no segment is one, or the one that is does not
+// read as a major of 1 or more (a number too large for an int, "0"): the
+// caller then treats the declaration as no pin, never as major 0.
 func JavaMajor(s string) (major int, ok bool) {
 	for _, segment := range strings.Split(strings.TrimSpace(s), "-") {
 		segment, _, _ = strings.Cut(segment, "_")
 		if !javaVersionSegment.MatchString(segment) {
 			continue
 		}
-		v, _ := ParseVersion(segment)
-		if v.part(0) == 1 && len(v.Parts) > 1 {
-			return v.Parts[1], true
+		v, parsed := ParseVersion(segment)
+		if !parsed {
+			return 0, false
+		}
+		v = JavaVersion(v)
+		if v.part(0) < 1 {
+			return 0, false
 		}
 		return v.part(0), true
 	}

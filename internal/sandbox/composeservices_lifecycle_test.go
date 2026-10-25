@@ -188,7 +188,7 @@ func TestComposeServicesLifecycleRejectsProtectedOperatorWorkerEnvironment(t *te
 		t.Fatalf("error = %v, want protected worker environment rejection", err)
 	}
 	// Package managers and proxies read these in lower case.
-	for _, key := range []string{"npm_config_registry", "https_proxy", "INFERENCE_RELAY_API_KEY", "PIFORK_AGENT_SEED", "MAVEN_ARGS", "MVNW_REPOURL", "BUILDGATE_MAVEN_MIRROR", "BUNDLE_MIRROR__ALL", "GEM_HOME"} {
+	for _, key := range []string{"npm_config_registry", "https_proxy", "INFERENCE_RELAY_API_KEY", "PIFORK_AGENT_SEED", "MAVEN_ARGS", "MVNW_REPOURL", "BUILDGATE_MAVEN_MIRROR", "JAVA_TOOL_OPTIONS", "BUNDLE_MIRROR__ALL", "GEM_HOME"} {
 		if !protectedComposeWorkerEnvironmentKey(key) {
 			t.Errorf("protectedComposeWorkerEnvironmentKey(%q) = false, want true", key)
 		}

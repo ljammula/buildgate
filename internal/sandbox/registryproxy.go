@@ -66,8 +66,8 @@ const (
 	goSumDBRoutePrefix = "/gomodproxy/sumdb/sum.golang.org/"
 	// mavenRoutePrefix fronts Maven Central's repository layout (POMs, jars,
 	// checksums, maven-metadata.xml). Maven reads no environment variable
-	// for a mirror: the worker image's global settings file names this
-	// route through BUILDGATE_MAVEN_MIRROR (see mavenSettingsPath).
+	// for a mirror: the global settings of the Maven a build derives
+	// (Dockerfile.project) name this route through BUILDGATE_MAVEN_MIRROR.
 	mavenRoutePrefix = "/maven/"
 	// rubygemsRoutePrefix fronts rubygems.org: Bundler's compact index
 	// (/versions, /info/<gem>) and the gem downloads (/gems/<name>.gem).
@@ -75,11 +75,6 @@ const (
 	// rewritten.
 	rubygemsRoutePrefix = "/rubygems/"
 )
-
-// mavenSettingsPath is the global Maven settings file baked into the worker
-// image from internal/sandbox/maven-settings.xml: one mirror of every
-// repository, whose URL is the BUILDGATE_MAVEN_MIRROR environment variable.
-const mavenSettingsPath = "/etc/buildgate/maven/settings.xml"
 
 // goSumDBURL is the checksum database's URL on the registry proxy whose Go
 // module route is at goProxyBase.

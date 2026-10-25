@@ -18,12 +18,14 @@ import (
 // imageToolchainsScript prints the versions of the toolchains a build may
 // use and the image's distribution codename, one per line; a tool the image
 // lacks prints nothing a version is read from. java is asked only when it is
-// there, since a shell's "java: not found" carries a line number.
+// there, since a shell's "java: not found" carries a line number, and only
+// the version lines of java and mvn are read: a JVM prints "Picked up
+// JAVA_TOOL_OPTIONS: ..." first when that variable is set.
 const imageToolchainsScript = `go version 2>/dev/null
 python3 --version 2>/dev/null
 echo "node $(node --version 2>/dev/null)"
-command -v java >/dev/null 2>&1 && echo "java $(java -version 2>&1 | head -n 1)"
-mvn -v 2>/dev/null | head -n 1
+command -v java >/dev/null 2>&1 && echo "java $(java -version 2>&1 | grep -m 1 ' version ')"
+mvn -v 2>/dev/null | grep -m 1 '^Apache Maven '
 ruby --version 2>/dev/null
 echo "bundler $(bundle --version 2>/dev/null)"
 . /etc/os-release 2>/dev/null; echo "codename=$VERSION_CODENAME"`

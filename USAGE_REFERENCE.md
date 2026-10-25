@@ -2294,8 +2294,8 @@ is configured.
 |---|---|---|---|
 | Go | `go.mod`: the `go` line, and the `toolchain` line when it is newer | Its Go is at least the `go` line | That version is installed from the official `golang` image |
 | Python | `.python-version`, else `requires-python` in `pyproject.toml` | Its Python matches the numbers `.python-version` states, or meets every `requires-python` clause | That version is installed from the official `python` image built on the configured image's distribution; `python3`, `python` and `pip` become it |
-| Java and Maven | A `pom.xml` declares both. The Java version: `.java-version`, else `.sdkmanrc`'s `java=` line, else the pom's `maven.compiler.release` (or the compiler plugin's `<release>`) when it is a plain number | Its `java` major is at least the pinned one (any JDK when nothing pins one), and it has `mvn` | The JDK of the pinned major, or 21 when none is pinned, and Maven 3.9 are installed from the official `maven:3.9-eclipse-temurin-<major>` image under `/opt/java/openjdk` and `/usr/share/maven`; `java`, `javac`, `mvn` and the other JDK tools are on `PATH` and `JAVA_HOME` is set |
-| Ruby and Bundler | A `Gemfile` declares both. The Ruby version: `.ruby-version` (a `ruby-` prefix is dropped), else the Gemfile's `ruby "x.y[.z]"` line | Its Ruby matches the numbers stated (any Ruby when nothing pins one), and it has `bundle` | That Ruby, or 4.0 when none is pinned, is installed with its Bundler from the official `ruby:<version>-<codename>` image built on the configured image's distribution, with libyaml and any shared library it needs; gems with native extensions compile with the image's C compiler |
+| Java and Maven | A `pom.xml` declares both. The Java version: `.java-version`, else `.sdkmanrc`'s `java=` line, else the pom's `maven.compiler.release` (or the compiler plugin's `<release>`) when it is a plain number; a value that is not a Java major (`system`, `0`) pins nothing and the next one is read | Its `java` major is at least the pinned one (any JDK when nothing pins one), and it has `mvn` | The oldest LTS JDK at or above the pin (8, 11, 17, 21 or 25; the pinned major itself above 25), or 21 when none is pinned, and Maven 3.9 are installed from the official `maven:3.9-eclipse-temurin-<major>` image under `/opt/java/openjdk` and `/usr/share/maven`; `java`, `javac`, `mvn` and the other JDK tools are on `PATH`, `JAVA_HOME` is set, and Maven's global settings mirror every repository through the registry proxy's Maven route |
+| Ruby and Bundler | A `Gemfile` declares both. The Ruby version: `.ruby-version` (a `ruby-` prefix is dropped), else the Gemfile's `ruby "x.y[.z]"` line | Its Ruby matches the numbers stated (any Ruby when nothing pins one), and it has `bundle` | That Ruby, or 4.0 when none is pinned, is installed with its Bundler from the official `ruby:<version>-<codename>` image built on the configured image's distribution, with libyaml and any shared library it needs; gems with native extensions compile with the image's C compiler, and an image without one cannot be derived |
 | Node | `.nvmrc`, else `.node-version` | Its Node matches the numbers stated | Nothing is installed: the coding agents run on the image's Node. The run and `submit` print a warning |
 
 ```text
@@ -2380,22 +2380,26 @@ repository's `sandbox.registries` keeps only the routes it lists.
 | `/npm/` | `registry_proxy_npm_upstream` | none | `npm_config_registry` |
 | `/pypi/`, `/pypi-files/` | `registry_proxy_pypi_upstream`, `registry_proxy_pypi_files_upstream` | the file host (index links are rewritten to `/pypi-files/`) | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` |
 | `/gomodproxy/`, its `sumdb/sum.golang.org/` | `registry_proxy_go_upstream`, `registry_proxy_gosumdb_upstream` | `storage.googleapis.com` | `GOPROXY`, `GOSUMDB`, `GONOPROXY=none`, `GOMODCACHE` and `GOCACHE` under `/scratch`, `GOFLAGS` plus `-modcacherw` |
-| `/maven/` | `registry_proxy_maven_upstream` | none | `MAVEN_ARGS=-gs /etc/buildgate/maven/settings.xml -Dmaven.repo.local=/scratch/maven-repository`, `BUILDGATE_MAVEN_MIRROR`, `MVNW_REPOURL` |
+| `/maven/` | `registry_proxy_maven_upstream` | none | `BUILDGATE_MAVEN_MIRROR`, `MAVEN_ARGS=-Dmaven.repo.local=/scratch/maven-repository`, `MVNW_REPOURL`, `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/scratch/java-tmp` |
 | `/rubygems/` | `registry_proxy_rubygems_upstream` | none | `BUNDLE_MIRROR__ALL`, `BUNDLE_PATH=/scratch/bundle`, `GEM_HOME=/scratch/gems` |
 
 Each variable replaces whatever the image or the caller set. A mirror
 upstream follows no redirect. A route the run has, other than npm and PyPI,
 moves its downloads to the launch's scratch volume, so a project image's baked
 Go module cache or gems under `/usr/local/bundle` are not used, and Maven
-fetches again what its baked repository recorded from another repository id:
-everything comes through the proxy.
+fetches again what its baked repository recorded from a repository id other
+than the derived Maven's mirror: everything comes through the proxy. Java's
+temporary directory moves to `/scratch/java-tmp`, because a test suite loads
+the native libraries it unpacks there (sqlite-jdbc, Netty, JNA) and `/tmp` is
+mounted noexec.
 
 | Tool | How it reaches the proxy |
 |---|---|
-| Maven | Reads no variable for a mirror. The worker image's global settings (`/etc/buildgate/maven/settings.xml`, root-owned, read-only) hold one mirror of every repository at `${env.BUILDGATE_MAVEN_MIRROR}`, and `MAVEN_ARGS` names them; Maven 3.9 or later reads `MAVEN_ARGS`. An image that runs an older `mvn` resolves nothing |
-| Maven wrapper (`./mvnw`) | Downloads Maven through the route (`MVNW_REPOURL`) into `/home/worker/.m2` |
+| Maven | Reads no variable for a mirror. The Maven a build derives (Project toolchains) has global settings (`/usr/share/maven/conf/settings.xml`, root-owned, read-only) with one mirror of every repository at `${env.BUILDGATE_MAVEN_MIRROR}`, which the launch sets to the route. A Maven your own image brings keeps its own settings, has no mirror, and cannot fetch: give it a mirror of `${env.BUILDGATE_MAVEN_MIRROR}` in its global settings, or let the build derive Maven. Maven 3.9 or later reads `MAVEN_ARGS`, which puts the local repository on `/scratch` |
+| Maven wrapper (`./mvnw`) | Downloads Maven through the route (`MVNW_REPOURL`) into `/home/worker/.m2`. That Maven keeps its distribution's own settings, has no mirror, and cannot fetch the project's dependencies: a verify command that fetches runs `mvn` |
 | Bundler | `mirror.all` sends every `source` of the Gemfile to the route |
-| `gem install` | Reads no mirror setting: `gem install --clear-sources --source "$BUNDLE_MIRROR__ALL" <gem>` |
+| `gem install` | Reads no mirror setting: `gem install --clear-sources --source "$BUNDLE_MIRROR__ALL" <gem>`. The gem's executables land in `/scratch/gems/bin`, which is not on `PATH` |
+| A repository's committed `.bundle/config` | Takes precedence over the launch's Bundler environment (`BUNDLE_PATH`, `BUNDLE_MIRROR__ALL`); a mirror or path it names is used instead |
 | A repository's own `.mvn/maven.config`, settings file or Gemfile source | May name another host; the worker's network policy admits none but the proxy, so that fetch fails |
 
 ### Private Go modules

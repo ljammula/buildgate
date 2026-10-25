@@ -1230,7 +1230,7 @@ func protectedComposeWorkerEnvironmentKey(key string) bool {
 		"GOMODCACHE", "GOCACHE", "GOTMPDIR", "GOPROXY", "GOSUMDB", "GOFLAGS", "GOENV",
 		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
 		"SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
-		"NODE_OPTIONS":
+		"NODE_OPTIONS", "JAVA_TOOL_OPTIONS":
 		return true
 	}
 	for _, prefix := range []string{

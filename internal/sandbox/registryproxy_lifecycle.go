@@ -295,14 +295,21 @@ func (l *RegistryProxyLifecycle) withRegistryEnvironment(workerSpec LaunchSpec, 
 // read-only, the memory-backed $HOME is too small for a real dependency
 // graph, and /tmp is noexec, where a native gem extension could not run.
 //
-// Maven reads no environment variable for a mirror, so MAVEN_ARGS (read by
-// Maven 3.9 and later) names the image's global settings file, whose single
-// mirror of every repository is BUILDGATE_MAVEN_MIRROR, and puts the local
-// repository on the scratch volume. Replacing the global settings also drops
-// the distribution's own, which carry Maven's block on plain-HTTP mirrors.
+// Maven reads no environment variable for a mirror. The Maven a build derives
+// (internal/sandbox/Dockerfile.project's java-replace stage) has global
+// settings whose single mirror of every repository is BUILDGATE_MAVEN_MIRROR,
+// so this sets that variable and, in MAVEN_ARGS (read by Maven 3.9 and
+// later), only the local repository on the scratch volume: no launch names a
+// file an image may lack. Those settings replace the distribution's own,
+// which carry Maven's block on plain-HTTP mirrors. A Maven an operator's image
+// brings keeps its own settings and has no mirror, so it cannot fetch.
 // MVNW_REPOURL sends the Maven wrapper's own download of Maven to the same
-// route. A repository's .mvn/maven.config or settings.xml can name another
+// route; the Maven it downloads keeps its own settings, with no mirror. A
+// repository's .mvn/maven.config or settings.xml can name another
 // mirror, but the sandbox's network policy reaches no host but the proxy.
+// JAVA_TOOL_OPTIONS moves java.io.tmpdir off the noexec /tmp, where a test
+// suite unpacks the native libraries it loads (sqlite-jdbc, Netty, JNA), to
+// the scratch volume's java-tmp, which the worker's wrapper creates.
 //
 // Bundler's mirror.all setting sends every gem source to the route; gems
 // are installed under BUNDLE_PATH, and GEM_HOME is where a `gem install`
@@ -315,8 +322,9 @@ func mavenAndRubyGemsEnvironment(prefix, base string) (keys, values []string) {
 		mirror := strings.TrimRight(base, "/")
 		entries = [][2]string{
 			{"BUILDGATE_MAVEN_MIRROR", mirror},
-			{"MAVEN_ARGS", "-gs " + mavenSettingsPath + " -Dmaven.repo.local=" + scratch + "/maven-repository"},
+			{"MAVEN_ARGS", "-Dmaven.repo.local=" + scratch + "/maven-repository"},
 			{"MVNW_REPOURL", mirror},
+			{"JAVA_TOOL_OPTIONS", "-Djava.io.tmpdir=" + scratch + "/" + workerJavaTmpDir},
 		}
 	case rubygemsRoutePrefix:
 		entries = [][2]string{

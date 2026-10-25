@@ -41,6 +41,14 @@ func TestDetectJavaAndRuby(t *testing.T) {
 			[]string{"21.0.5"}, []string{"17.0.9"}},
 		{".java-version in the 1.x naming", map[string]string{"pom.xml": "<project/>", ".java-version": "1.8\n"}, Java, ".java-version", "8",
 			[]string{"8", "11"}, nil},
+		{"a pin with no published image installs the next LTS", map[string]string{"pom.xml": "<project/>", ".java-version": "15\n"}, Java, ".java-version", "17",
+			[]string{"15", "17.0.1"}, []string{"14", "11.0.20"}},
+		{"a pin above the newest LTS installs itself", map[string]string{"pom.xml": "<project/>", ".java-version": "26\n"}, Java, ".java-version", "26",
+			[]string{"26"}, []string{"25"}},
+		{"a major 0 in .java-version is no pin", map[string]string{"pom.xml": pomWithRelease, ".java-version": "0\n"}, Java, "pom.xml", "11",
+			[]string{"11.0.1"}, []string{"8"}},
+		{"an unparseable maven.compiler.release is no pin", map[string]string{"pom.xml": "<project><properties><maven.compiler.release>99999999999999999999</maven.compiler.release></properties></project>"}, Java, "pom.xml", DefaultJava.String(),
+			[]string{"8"}, nil},
 		{".sdkmanrc when there is no .java-version", map[string]string{"pom.xml": pomWithRelease, ".sdkmanrc": "# sdk env\nmaven=3.9.9\njava=17.0.9-tem\n"}, Java, ".sdkmanrc", "17",
 			[]string{"17.0.1"}, []string{"11.0.20"}},
 		{"an alias in .java-version falls through to the pom", map[string]string{"pom.xml": pomWithRelease, ".java-version": "system\n"}, Java, "pom.xml", "11",
@@ -107,8 +115,15 @@ func TestJavaMajorAndVersion(t *testing.T) {
 			t.Errorf("JavaMajor(%q) = %d, %v; want %d", in, got, ok, want)
 		}
 	}
-	if _, ok := JavaMajor("system"); ok {
-		t.Error("JavaMajor read a version from an alias")
+	for _, in := range []string{"system", "0", "99999999999999999999"} {
+		if got, ok := JavaMajor(in); ok {
+			t.Errorf("JavaMajor(%q) = %d, want no major", in, got)
+		}
+	}
+	for pin, want := range map[int]int{1: 8, 8: 8, 9: 11, 12: 17, 16: 17, 17: 17, 18: 21, 22: 25, 25: 25, 26: 26} {
+		if got := JavaInstallMajor(pin); got != want {
+			t.Errorf("JavaInstallMajor(%d) = %d, want %d", pin, got, want)
+		}
 	}
 	if got := JavaVersion(version(t, "1.8.0")).String(); got != "8.0" {
 		t.Errorf("JavaVersion(1.8.0) = %s, want 8.0", got)
