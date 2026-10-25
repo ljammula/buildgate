@@ -164,6 +164,11 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	r.Tickets = nil
 	r.TicketIndex = 0
 	r.TicketCount = 0
+	if target == SendBackToPlan {
+		// The imported files are now the previous plan to revise. Do not let a
+		// later spec send-back make planning take them as a fresh hand-over.
+		r.PlanImported = false
+	}
 	if target == SendBackToSpec {
 		// Every downstream pin goes with the spec: tickets/* and the
 		// request-level oracle/* (a redrafted spec redrafts the oracle,

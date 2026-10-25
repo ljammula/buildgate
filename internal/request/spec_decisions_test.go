@@ -57,6 +57,13 @@ func TestOpenDecisionsListsOnlyTheOpenQuestionsItems(t *testing.T) {
 	}
 }
 
+func TestOpenDecisionsDoesNotTreatAnInlineHTMLMarkerAsAComment(t *testing.T) {
+	content := "# Spec\n\n## Scope\n\n- reject `<!--` in names\n\n## Open questions\n\n- [NEEDS DECISION] choose a name.\n"
+	if got := OpenDecisions(content); len(got) != 1 || got[0] != "- [NEEDS DECISION] choose a name." {
+		t.Fatalf("OpenDecisions = %q, want the decision after the inline marker", got)
+	}
+}
+
 // TestApproveRefusesASpecWithOpenDecisions: found live 2026-10-08, when a
 // drafted spec asked for a decision and `factoryd approve` moved it to
 // planning with the choice unanswered. The refusal names each item and the

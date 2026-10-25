@@ -105,6 +105,14 @@ func TestResolveSubmitSpecFileUsesStructuralFallbacks(t *testing.T) {
 	if err != nil || len(trailing) != 1 || trailing[0] != "First request line." {
 		t.Fatalf("front-matter fallback = %q (%v), want first non-blank content line", trailing, err)
 	}
+	leadingBlank := filepath.Join(dir, "leading-blank.md")
+	if err := os.WriteFile(leadingBlank, []byte("\n\nFirst request line.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: leadingBlank})
+	if err != nil || len(trailing) != 1 || trailing[0] != "First request line." {
+		t.Fatalf("leading-blank fallback = %q (%v), want first non-blank content line", trailing, err)
+	}
 	fencedHeading := filepath.Join(dir, "fenced-heading.md")
 	if err := os.WriteFile(fencedHeading, []byte("~~~markdown\n# Not the title\n~~~\n\n# Real title\n\n- criterion\n"), 0o644); err != nil {
 		t.Fatal(err)

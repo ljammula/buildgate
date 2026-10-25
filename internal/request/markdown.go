@@ -1,21 +1,36 @@
 package request
 
 import (
+	"regexp"
 	"strings"
 
 	"buildgate/internal/ticketspec"
 )
 
+var yamlFrontMatterKeyRE = regexp.MustCompile(`^[A-Za-z0-9_-]+:`)
+
 // FrontMatterBodyOffset returns the first line after a leading YAML
 // front-matter block, or zero when the document does not begin with a closed
-// block. A block starts on the first line with --- and ends on a later line
-// containing --- or ....
+// block. The opening marker may have a leading UTF-8 BOM. To avoid treating a
+// thematic break as metadata, the first non-blank line after the marker must
+// look like a YAML key before a later --- or ... closes the block.
 func FrontMatterBodyOffset(lines []string) int {
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+	if len(lines) == 0 || strings.TrimSpace(strings.TrimPrefix(lines[0], "\uFEFF")) != "---" {
 		return 0
 	}
+	keyFound := false
 	for i := 1; i < len(lines); i++ {
 		marker := strings.TrimSpace(lines[i])
+		if !keyFound {
+			if marker == "" {
+				continue
+			}
+			if !yamlFrontMatterKeyRE.MatchString(marker) {
+				return 0
+			}
+			keyFound = true
+			continue
+		}
 		if marker == "---" || marker == "..." {
 			return i + 1
 		}
@@ -90,21 +105,6 @@ func markdownLineMask(lines []string) []bool {
 		if i < bodyOffset {
 			continue
 		}
-		if inHTMLComment {
-			blocked[i] = true
-			if strings.Contains(raw, "-->") {
-				inHTMLComment = false
-			}
-			continue
-		}
-		if commentStart := strings.Index(raw, "<!--"); commentStart >= 0 {
-			blocked[i] = true
-			if !strings.Contains(raw[commentStart+4:], "-->") {
-				inHTMLComment = true
-			}
-			continue
-		}
-
 		trimmed := strings.TrimSpace(raw)
 		if fenceChar != 0 {
 			blocked[i] = true
@@ -113,6 +113,23 @@ func markdownLineMask(lines []string) []bool {
 			}
 			continue
 		}
+		if inHTMLComment {
+			blocked[i] = true
+			if strings.Contains(raw, "-->") {
+				inHTMLComment = false
+			}
+			continue
+		}
+		commentText := strings.TrimLeft(raw, " ")
+		indent := len(raw) - len(commentText)
+		if indent <= 3 && strings.HasPrefix(commentText, "<!--") {
+			blocked[i] = true
+			if !strings.Contains(raw, "-->") {
+				inHTMLComment = true
+			}
+			continue
+		}
+
 		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
 			blocked[i] = true
 			fenceChar, fenceLen = ch, n

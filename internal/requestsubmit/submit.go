@@ -565,9 +565,6 @@ func validateDraftingInputs(workspace string, p Params) error {
 		}
 		return nil
 	}
-	if len([]byte(p.ImportedSpec)) > request.MaxHandedOverSpecBytes {
-		return fmt.Errorf("-spec-file is %d bytes, over the %d-byte handed-over spec limit", len([]byte(p.ImportedSpec)), request.MaxHandedOverSpecBytes)
-	}
 	if err := request.ValidateHandedOverSpec(p.ImportedSpec); err != nil {
 		return fmt.Errorf("-spec-file: %w", err)
 	}

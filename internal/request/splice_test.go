@@ -80,3 +80,14 @@ func TestSpliceSectionsIgnoresHeadingsInCodeFencesAndRefusesAmbiguity(t *testing
 		t.Errorf("SectionText must find the real heading, not the fenced one: %q", text)
 	}
 }
+
+func TestSpliceSectionsUsesTheSharedMaskForHTMLComments(t *testing.T) {
+	heads := SpecSkeletonHeadings()
+	commented := strings.Replace(joinSections(scopedSpecSections), "The refund path.\n", "<!--\n## Risks\n-->\nThe refund path.\n", 1)
+	if text, ok := SectionText(commented, heads, "## Risks"); !ok || strings.Contains(text, "## Risks\n-->") {
+		t.Errorf("commented skeleton heading changed the real section lookup: %q", text)
+	}
+	if _, err := SpliceSections(commented, rewriteEverySection(scopedSpecSections), heads, []string{"## Risks"}); err != nil {
+		t.Fatalf("SpliceSections with a commented heading: %v", err)
+	}
+}

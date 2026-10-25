@@ -3,6 +3,7 @@ package request
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,10 @@ func TestSpecReviewNotesDescribeDerivedCriteriaWithoutIDNotes(t *testing.T) {
 	if got := SpecReviewNotes(spec); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("notes = %q, want %q", got, want)
 	}
+	oneSection := "# Feature\n\n## Wanted behaviour\n\n- keep this\n"
+	if got := SpecReviewNotes(oneSection); strings.Join(got, "\n") != "Criteria 1-1 were derived from the list items of 1 section." {
+		t.Errorf("one-section notes = %q, want the singular form", got)
+	}
 }
 
 func TestExactAcceptanceCriteriaBulletListIsDerivedButDraftedListsMustBeNumbered(t *testing.T) {
@@ -114,11 +119,16 @@ func TestExactAcceptanceCriteriaBulletListIsDerivedButDraftedListsMustBeNumbered
 	}
 }
 
-func TestExactAcceptanceCriteriaMixedTopLevelItemsNameTheirLines(t *testing.T) {
+func TestExactAcceptanceCriteriaUsesTheNumberedParserWhenStylesAreMixed(t *testing.T) {
 	t.Parallel()
-	err := ValidateHandedOverSpec(specWithCriteria("- first\n1. second"))
-	if err == nil || !strings.Contains(err.Error(), "lines 21, 22") || !strings.Contains(err.Error(), "write every item as numbered") {
-		t.Fatalf("mixed exact criteria: err = %v", err)
+	if got, err := SpecAcceptanceCriteria(specWithCriteria("- first\n1. second")); err != nil || !slices.Equal(got, []string{"1. second"}) {
+		t.Fatalf("bullet before numbered: criteria = %q, err = %v", got, err)
+	}
+	if got, err := SpecAcceptanceCriteria(specWithCriteria("1. first\n- continuation")); err != nil || !slices.Equal(got, []string{"1. first - continuation"}) {
+		t.Fatalf("bullet after numbered: criteria = %q, err = %v", got, err)
+	}
+	if err := ValidateHandedOverSpec(specWithCriteria("- first\n1. second")); err != nil {
+		t.Fatalf("mixed exact criteria should be accepted by the numbered parser: %v", err)
 	}
 }
 

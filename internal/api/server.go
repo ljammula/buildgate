@@ -4426,14 +4426,12 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 	if !verifyBaseSHA256(w, body.BaseSHA256, specPath, nil) {
 		return
 	}
-	if loaded.SpecImported && len([]byte(content)) > request.MaxHandedOverSpecBytes {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("handed-over spec is %d bytes, over the %d-byte limit", len([]byte(content)), request.MaxHandedOverSpecBytes))
-		return
-	}
 	var validationErr error
 	if loaded.SpecImported {
 		validationErr = request.ValidateHandedOverSpec(content)
 	} else if err := request.ValidateSpecSkeleton(content); err != nil {
+		validationErr = err
+	} else if err := request.ValidateHandedOverSpec(content); err != nil {
 		validationErr = err
 	} else if _, err := request.SpecAcceptanceCriteria(content); err != nil {
 		// ValidateSpecSkeleton only requires the criteria section to be

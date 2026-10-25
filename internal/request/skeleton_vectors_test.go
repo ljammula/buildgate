@@ -50,9 +50,10 @@ type planCoverageVector struct {
 }
 
 type specSkeletonVectors struct {
-	Specs   []specSkeletonVector   `json:"specs"`
-	Tickets []ticketSkeletonVector `json:"tickets"`
-	Plans   []planCoverageVector   `json:"plans"`
+	MaxHandedOverSpecBytes int                    `json:"max_handed_over_spec_bytes"`
+	Specs                  []specSkeletonVector   `json:"specs"`
+	Tickets                []ticketSkeletonVector `json:"tickets"`
+	Plans                  []planCoverageVector   `json:"plans"`
 }
 
 // headingNamedBy returns the heading err's message quotes after prefix, or
@@ -159,6 +160,7 @@ func TestSpecSkeletonGoldenVectors(t *testing.T) {
 		t.Fatalf("golden vectors are missing a section: %d specs, %d tickets, %d plans", len(want.Specs), len(want.Tickets), len(want.Plans))
 	}
 	var got specSkeletonVectors
+	got.MaxHandedOverSpecBytes = MaxHandedOverSpecBytes
 	for _, v := range want.Specs {
 		got.Specs = append(got.Specs, specSkeletonOutcome(v))
 	}
@@ -181,6 +183,9 @@ func TestSpecSkeletonGoldenVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 		return
+	}
+	if want.MaxHandedOverSpecBytes != MaxHandedOverSpecBytes {
+		t.Fatalf("golden max_handed_over_spec_bytes = %d, want %d", want.MaxHandedOverSpecBytes, MaxHandedOverSpecBytes)
 	}
 	for i, v := range got.Specs {
 		if !reflect.DeepEqual(v, want.Specs[i]) {

@@ -169,9 +169,16 @@ export function markdownHeadingLevel(raw: string): number {
 
 /** The first line after a closed leading YAML front-matter block, or zero. */
 export function frontMatterBodyOffset(lines: readonly string[]): number {
-  if (lines.length === 0 || trimSpace(lines[0] ?? "") !== "---") return 0;
+  if (lines.length === 0 || trimSpace((lines[0] ?? "").replace(/^\uFEFF/, "")) !== "---") return 0;
+  let keyFound = false;
   for (let i = 1; i < lines.length; i++) {
     const marker = trimSpace(lines[i] ?? "");
+    if (!keyFound) {
+      if (marker === "") continue;
+      if (!/^[A-Za-z0-9_-]+:/.test(marker)) return 0;
+      keyFound = true;
+      continue;
+    }
     if (marker === "---" || marker === "...") return i + 1;
   }
   return 0;
@@ -204,21 +211,22 @@ function markdownLineMask(lines: readonly string[]): boolean[] {
   let inHTMLComment = false;
   lines.forEach((raw, i) => {
     if (i < bodyOffset) return;
+    const trimmed = trimSpace(raw);
+    if (fence !== null) {
+      blocked[i] = true;
+      if (closesFence(trimmed, fence.ch, fence.length)) fence = null;
+      return;
+    }
     if (inHTMLComment) {
       blocked[i] = true;
       if (raw.includes("-->")) inHTMLComment = false;
       return;
     }
-    const commentStart = raw.indexOf("<!--");
-    if (commentStart >= 0) {
+    const commentText = raw.replace(/^ +/, "");
+    const indent = raw.length - commentText.length;
+    if (indent <= 3 && commentText.startsWith("<!--")) {
       blocked[i] = true;
-      if (!raw.slice(commentStart + 4).includes("-->")) inHTMLComment = true;
-      return;
-    }
-    const trimmed = trimSpace(raw);
-    if (fence !== null) {
-      blocked[i] = true;
-      if (closesFence(trimmed, fence.ch, fence.length)) fence = null;
+      if (!raw.includes("-->")) inHTMLComment = true;
       return;
     }
     const opened = fenceMarker(trimmed);
@@ -318,7 +326,14 @@ function splitCriteriaBlocks(
   };
   let blankAfterItem = false;
   sectionLines.forEach((raw, lineIndex) => {
-    if (mask[lineIndex] ?? false) return;
+    if (mask[lineIndex] ?? false) {
+      if (current !== null && trimSpace(raw) !== "") {
+        current.push(raw);
+        currentEnd = lineIndex;
+        blankAfterItem = false;
+      }
+      return;
+    }
     const trimmed = trimSpace(raw);
     if (trimmed === "") {
       if (stopAtHeading && current !== null) blankAfterItem = true;
@@ -425,14 +440,17 @@ function parseDerivedCriteria(lines: readonly string[]): ParsedCriteria {
   const locations: SpecCriterionLocation[] = [];
   const sections: string[] = [];
   const sectionsSeen = new Set<string>();
+  const firstHeading = headingLines[0] ?? lines.length;
+  const titleArea = lines.slice(0, firstHeading);
+  const titleAreaSection = deriveSourceSection(titleArea);
+  const titleAreaName = deriveSourceName(titleArea);
   for (let i = 0; i <= headingLines.length; i++) {
     const start = i === 0 ? 0 : (headingLines[i - 1] ?? 0) + 1;
     const end = i < headingLines.length ? (headingLines[i] ?? lines.length) : lines.length;
     const heading = i === 0 ? null : (lines[headingLines[i - 1] ?? 0] ?? "");
     const active = heading === null || !NON_REQUIREMENT_SECTIONS.has(normalizeSpecHeading(heading));
     if (!active || start >= end) continue;
-    const section =
-      heading === null ? deriveSourceSection(lines.slice(start, end)) : trimSpace(heading);
+    const section = heading === null ? titleAreaSection : trimSpace(heading);
     const source = deriveSectionCriteria(
       lines.slice(start, end),
       start,
@@ -441,8 +459,7 @@ function parseDerivedCriteria(lines: readonly string[]): ParsedCriteria {
       mask.slice(start, end),
     );
     if (source.criteria.length === 0) continue;
-    const name =
-      heading === null ? deriveSourceName(lines.slice(start, end)) : headingLabel(heading);
+    const name = heading === null ? titleAreaName : headingLabel(heading);
     if (!sectionsSeen.has(name)) {
       sectionsSeen.add(name);
       sections.push(name);
@@ -480,11 +497,6 @@ function exactCriteriaKinds(
   return { numbered, bulleted, lines: itemLines };
 }
 
-function mixedCriteriaError(kinds: ReturnType<typeof exactCriteriaKinds>): string | null {
-  if (!kinds.numbered || !kinds.bulleted) return null;
-  return `acceptance criteria mix numbered and bulleted top-level items at lines ${kinds.lines.join(", ")}; write every item as numbered (1. …)`;
-}
-
 function parseCriteria(content: string): ParsedCriteria {
   const lines = content.split("\n");
   const mask = markdownLineMask(lines);
@@ -493,10 +505,7 @@ function parseCriteria(content: string): ParsedCriteria {
     const sectionLines = lines.slice(exact.start, exact.end);
     const sectionMask = mask.slice(exact.start, exact.end);
     const kinds = exactCriteriaKinds(sectionLines, sectionMask, exact.start);
-    if (mixedCriteriaError(kinds) !== null) {
-      return { criteria: [], locations: [], sections: [], named: false, heading: "" };
-    }
-    if (kinds.bulleted) {
+    if (!kinds.numbered) {
       const derived = deriveSectionCriteria(
         sectionLines,
         exact.start,

@@ -37,10 +37,7 @@ func ValidateSpecCriteria(content string, requireIDs bool) error {
 	if !ok {
 		return fmt.Errorf("spec is missing %q", specAcceptanceCriteriaHeading)
 	}
-	if err := validateExactCriteriaItemKinds(lines[start:end], mask[start:end], start); err != nil {
-		return err
-	}
-	if hasTopLevelBullets(lines[start:end], mask[start:end]) {
+	if !hasTopLevelNumbered(lines[start:end], mask[start:end]) {
 		if requireIDs {
 			return fmt.Errorf("acceptance criteria must be numbered (1. …) in a drafted spec")
 		}
@@ -90,6 +87,9 @@ func ValidateSpecCriteria(content string, requireIDs bool) error {
 // criteria derived from headings and list markup only. It intentionally does
 // not require the drafted-spec skeleton or criterion IDs.
 func ValidateHandedOverSpec(content string) error {
+	if err := validateSpecSize(content); err != nil {
+		return err
+	}
 	if _, err := SpecAcceptanceCriteria(content); err != nil {
 		return err
 	}
@@ -97,6 +97,14 @@ func ValidateHandedOverSpec(content string) error {
 		if err := ValidateSpecCriteria(content, false); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateSpecSize(content string) error {
+	bytes := len([]byte(content))
+	if bytes > MaxHandedOverSpecBytes {
+		return fmt.Errorf("handed-over spec is %d bytes, over the %d-byte limit", bytes, MaxHandedOverSpecBytes)
 	}
 	return nil
 }

@@ -273,21 +273,13 @@ func TestWriteReviewAddendumBoundsSizeWithoutTruncatingAFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One included verdict costs at most roughly criterion+verdict+detail
-	// bytes plus a small fixed markdown/fence overhead; bounding well
-	// above that (2KiB slack per verdict) still proves the huge inputs
-	// (3x every cap, `verdictCount` far past maxConformityFlaggedVerdicts)
-	// were never rendered in full.
-	perVerdictBound := int64(requestdriver.MaxConformityCriterionBytes + requestdriver.MaxConformityVerdictBytes + requestdriver.MaxConformityDetailBytes + 2*1024)
-	maxExpected := int64(len(mustReadFile(t, specPath))) + int64(requestdriver.MaxConformityFlaggedVerdicts)*perVerdictBound + 1024
-	if info.Size() > maxExpected {
-		t.Errorf("addendum size = %d bytes, want <= %d (bounded regardless of oversized untrusted input)", info.Size(), maxExpected)
+	if info.Size() > requestdriver.MaxTicketBuildInputBytes {
+		t.Errorf("addendum size = %d bytes, want <= %d (the shared ticket-build cap)", info.Size(), requestdriver.MaxTicketBuildInputBytes)
 	}
 
 	content := mustReadFile(t, addendumPath)
-	wantOmitted := verdictCount - requestdriver.MaxConformityFlaggedVerdicts
-	if !strings.Contains(string(content), fmt.Sprintf("%d more flagged criteria omitted", wantOmitted)) {
-		t.Errorf("addendum missing the omitted-count note for %d omitted verdicts", wantOmitted)
+	if !strings.Contains(string(content), "more flagged criteria omitted") {
+		t.Errorf("addendum missing the byte/count omitted note:\n%s", content)
 	}
 }
 

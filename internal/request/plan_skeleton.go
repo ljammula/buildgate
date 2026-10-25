@@ -3,7 +3,6 @@ package request
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -321,9 +320,9 @@ func findNamedAcceptanceCriteriaSectionWithMask(lines []string, mask []bool) (st
 // criteria verbatim ("1. It works."), in order -- the lines a ticket's
 // build hands to build_app.py's --spec-acceptance-criteria conformity review.
 // The exact "## Acceptance criteria" heading uses the drafted numbered-list
-// parser when its top-level items are numbered, and derived list rules when
-// they are bullet-only; mixed top-level styles are refused. A case/colon/level
-// variant of that heading uses derived list rules;
+// parser when its top-level items include a number, and derived list rules
+// when they do not. A case/colon/level variant of that heading uses derived
+// list rules;
 // without any named criteria section, those rules read top-level list items
 // before the first heading and in each non-excluded "#"/"##" section. Excluded
 // headings are normalized Problem, Non-goals, Out of scope, Risks, Open
@@ -376,11 +375,7 @@ func parseSpecAcceptanceCriteria(lines []string) parsedSpecCriteria {
 	mask := markdownLineMask(lines)
 	if start, end, ok := findAcceptanceCriteriaSectionWithMask(lines, mask); ok {
 		parsed := parsedSpecCriteria{exact: true}
-		if err := validateExactCriteriaItemKinds(lines[start:end], mask[start:end], start); err != nil {
-			parsed.err = err
-			return parsed
-		}
-		if hasTopLevelBullets(lines[start:end], mask[start:end]) {
+		if !hasTopLevelNumbered(lines[start:end], mask[start:end]) {
 			parsed = deriveSectionCriteria(lines[start:end], start, specAcceptanceCriteriaHeading, true, mask[start:end])
 			parsed.named = false
 			parsed.exact = true
@@ -483,47 +478,17 @@ var derivedCriterionMarkerRE = regexp.MustCompile(`^(?:[-*+]\s+|\d+[.)]\s+)(.*)$
 var taskListMarkerRE = regexp.MustCompile(`^\[[ xX]\](?:\s+|$)`)
 
 var exactNumberedItemRE = regexp.MustCompile(`^\d+[.)][ \t]+`)
-var exactBulletedItemRE = regexp.MustCompile(`^[-*+][ \t]+`)
 
-func hasTopLevelBullets(lines []string, mask []bool) bool {
+func hasTopLevelNumbered(lines []string, mask []bool) bool {
 	for i, raw := range lines {
 		if lineBlocked(mask, i) || raw != strings.TrimLeft(raw, " \t") {
 			continue
 		}
-		if exactBulletedItemRE.MatchString(raw) {
+		if exactNumberedItemRE.MatchString(raw) {
 			return true
 		}
 	}
 	return false
-}
-
-func validateExactCriteriaItemKinds(lines []string, mask []bool, offset int) error {
-	hasNumbered := false
-	hasBulleted := false
-	var numberedLines, bulletedLines []int
-	for i, raw := range lines {
-		if lineBlocked(mask, i) || raw != strings.TrimLeft(raw, " \t") {
-			continue
-		}
-		switch {
-		case exactNumberedItemRE.MatchString(raw):
-			hasNumbered = true
-			numberedLines = append(numberedLines, offset+i+1)
-		case exactBulletedItemRE.MatchString(raw):
-			hasBulleted = true
-			bulletedLines = append(bulletedLines, offset+i+1)
-		}
-	}
-	if !hasNumbered || !hasBulleted {
-		return nil
-	}
-	linesNamed := append(append([]int{}, numberedLines...), bulletedLines...)
-	slices.Sort(linesNamed)
-	parts := make([]string, len(linesNamed))
-	for i, line := range linesNamed {
-		parts[i] = strconv.Itoa(line)
-	}
-	return fmt.Errorf("acceptance criteria mix numbered and bulleted top-level items at lines %s; write every item as numbered (1. …)", strings.Join(parts, ", "))
 }
 
 var nonRequirementSpecSections = map[string]struct{}{
@@ -558,14 +523,16 @@ func deriveAcceptanceCriteria(lines []string, mask []bool) parsedSpecCriteria {
 		name, section string
 		active        bool
 	}, 0, len(headingLines)+1)
+	firstHeading := len(lines)
+	if len(headingLines) > 0 {
+		firstHeading = headingLines[0]
+	}
+	titleAreaName := deriveSourceName(lines, 0, firstHeading, nil)
+	titleAreaSection := deriveSourceSection(lines, 0, firstHeading, nil)
 	for i := 0; i <= len(headingLines); i++ {
 		start, end := 0, len(lines)
-		firstHeading := len(lines)
-		if len(headingLines) > 0 {
-			firstHeading = headingLines[0]
-		}
-		name := deriveSourceName(lines, 0, firstHeading, nil)
-		section := deriveSourceSection(lines, 0, firstHeading, nil)
+		name := titleAreaName
+		section := titleAreaSection
 		active := true
 		if i > 0 {
 			start = headingLines[i-1] + 1
@@ -740,6 +707,11 @@ func splitCriteriaBlocks(sectionLines []string, itemRE *regexp.Regexp, stopAtHea
 	blankAfterItem := false
 	for lineIndex, raw := range sectionLines {
 		if lineBlocked(mask, lineIndex) {
+			if builder.started && strings.TrimSpace(raw) != "" {
+				builder.current = append(builder.current, raw)
+				builder.currentEnd = lineIndex
+				blankAfterItem = false
+			}
 			continue
 		}
 		trimmed := strings.TrimSpace(raw)

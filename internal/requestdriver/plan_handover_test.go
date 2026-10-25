@@ -136,8 +136,91 @@ func TestCriteriaChangeHaltRejectToPlanRunsPlanningJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StatePlanReview || loaded.PlanAsHandedOver() || *gotVerify != requestdrivertest.HandoverVerify {
-		t.Fatalf("State = %q, PlanAsHandedOver = %v, verify = %q; want drafted plan review after send-back", loaded.State, loaded.PlanAsHandedOver(), *gotVerify)
+	if loaded.State != request.StatePlanReview || loaded.PlanImported || loaded.PlanAsHandedOver() || *gotVerify != requestdrivertest.HandoverVerify {
+		t.Fatalf("State = %q, PlanImported = %v, PlanAsHandedOver = %v, verify = %q; want drafted plan review after send-back", loaded.State, loaded.PlanImported, loaded.PlanAsHandedOver(), *gotVerify)
+	}
+}
+
+func drivePlanHandoverPass(t *testing.T, dp requestdriver.Deps, dataDir string, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner) {
+	t.Helper()
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, specRunner, planRunner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevisedImportedPlanIsNotReimportedAfterASpecSendBack(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{
+		"001.spec.md": requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2),
+	})
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(requestdrivertest.TwoCriteriaSpec, "1. A retried POST /refunds with the same idempotency key returns the original result.", "1. Changed.", 1)
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(changed))
+	r.ApprovedSHA256["spec.md"] = hex.EncodeToString(sum[:])
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	drivePlanHandoverPass(t, dp, dataDir, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t))
+	halted, err := request.Load(dataDir, id)
+	if err != nil || halted.State != request.StateHalted {
+		t.Fatalf("initial state = %q, err = %v; want criteria-change halt", halted.State, err)
+	}
+	if _, err := request.SendBack(dataDir, id, "operator", "revise the imported tickets", request.SendBackToPlan, time.Now()); err != nil {
+		t.Fatalf("reject -to plan: %v", err)
+	}
+
+	validRunner, _ := requestdrivertest.StubPlanTicketsRunner(
+		[]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)}},
+		&request.PlanEvidence{}, nil,
+	)
+	drivePlanHandoverPass(t, dp, dataDir, requestdrivertest.FailingSpecDraftRunner(t), validRunner)
+	planReview, err := request.Load(dataDir, id)
+	if err != nil || planReview.State != request.StatePlanReview || planReview.PlanImported {
+		t.Fatalf("after revised plan: state = %q, PlanImported = %v, err = %v; want plan_review with import ended", planReview.State, planReview.PlanImported, err)
+	}
+	if _, err := request.Reject(dataDir, id, "operator", "the revised plan still needs work", time.Now()); err != nil {
+		t.Fatalf("reject plan review: %v", err)
+	}
+	invalidRunner, _ := requestdrivertest.StubPlanTicketsRunner(
+		[]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make wrong", 1, 2)}},
+		&request.PlanEvidence{}, nil,
+	)
+	drivePlanHandoverPass(t, dp, dataDir, requestdrivertest.FailingSpecDraftRunner(t), invalidRunner)
+	badPlan, err := request.Load(dataDir, id)
+	if err != nil || badPlan.State != request.StateHalted {
+		t.Fatalf("revised plan state = %q, err = %v; want halt", badPlan.State, err)
+	}
+	if _, err := request.SendBack(dataDir, id, "operator", "rewrite the spec", request.SendBackToSpec, time.Now()); err != nil {
+		t.Fatalf("reject -to spec: %v", err)
+	}
+
+	specRunner := func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return requestdrivertest.TwoCriteriaSpec, &request.SpecEvidence{}, nil
+	}
+	drivePlanHandoverPass(t, dp, dataDir, specRunner, requestdrivertest.FailingPlanTicketsRunner(t))
+	if got, err := request.Load(dataDir, id); err != nil || got.State != request.StateSpecReview {
+		t.Fatalf("after spec redraft: state = %q, err = %v; want spec_review", got.State, err)
+	}
+	if _, err := request.Approve(dataDir, id, "operator", time.Now(), nil); err != nil {
+		t.Fatalf("approve spec: %v", err)
+	}
+	finalRunner, gotVerify := requestdrivertest.StubPlanTicketsRunner(
+		[]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)}},
+		&request.PlanEvidence{}, nil,
+	)
+	drivePlanHandoverPass(t, dp, dataDir, requestdrivertest.FailingSpecDraftRunner(t), finalRunner)
+	final, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != request.StatePlanReview || final.PlanImported || *gotVerify != requestdrivertest.HandoverVerify {
+		t.Fatalf("final state = %q, PlanImported = %v, verify = %q; want drafted planning after spec approval without reimport", final.State, final.PlanImported, *gotVerify)
 	}
 }
 

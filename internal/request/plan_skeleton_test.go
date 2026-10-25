@@ -554,3 +554,24 @@ func TestSpecAcceptanceCriteriaLargeHeadingDocumentIsLinearEnough(t *testing.T) 
 		t.Fatalf("parsing 150 KB with 10000 headings took %s", elapsed)
 	}
 }
+
+func TestSpecAcceptanceCriteriaLargePreambleAndHeadingDocumentIsLinearEnough(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(strings.Repeat("- preamble item\n", 15_000))
+	for i := 0; i < 10_000; i++ {
+		b.WriteString("## Heading ")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	started := time.Now()
+	criteria, err := SpecAcceptanceCriteria(b.String())
+	if err != nil {
+		t.Fatalf("large preamble: %v", err)
+	}
+	if len(criteria) != 15_000 {
+		t.Fatalf("large preamble criteria = %d, want 15000", len(criteria))
+	}
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("parsing 15000-item preamble and 10000 headings took %s", elapsed)
+	}
+}

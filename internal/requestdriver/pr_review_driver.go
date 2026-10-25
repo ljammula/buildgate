@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -1497,6 +1496,10 @@ the earlier attempt's changes as needed.
 const (
 	maxReplyFindings    = 5
 	maxReplyDetailBytes = 600
+	// MaxAddendumReviewThreads bounds the number of whole reviewer comments
+	// carried into one build input; the shared renderer also applies the
+	// remaining-byte cap.
+	MaxAddendumReviewThreads = 20
 )
 
 // replyRoundNotPushed answers each thread a round was started for when the
@@ -1602,6 +1605,20 @@ func replyInline(s string) string {
 	return strings.ReplaceAll(flattenConformityField(s, MaxConformityCriterionBytes), "`", "'")
 }
 
+func reviewThreadsSection(threads []forge.Thread) boundedAddendumSection {
+	entries := make([]string, 0, len(threads))
+	for _, t := range threads {
+		path := flattenConformityField(t.Path, MaxConformityCriterionBytes)
+		author := flattenConformityField(t.Author, MaxConformityCriterionBytes)
+		body := capConformityDetail(t.Body, MaxConformityDetailBytes)
+		entries = append(entries, fmt.Sprintf("- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, ticketspec.FenceVerbatim(body)))
+	}
+	return boundedAddendumSection{
+		heading: "\n## Reviewer comments to address", entries: entries,
+		omittedLabel: "reviewer comments", maxEntries: MaxAddendumReviewThreads,
+	}
+}
+
 // WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md
 // (<ticket>-<round>-fix<n> for the round's n-th fix attempt):
 // the ticket's own build spec (TicketBuildSpecContent -- its spec plus
@@ -1634,20 +1651,16 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
 		b.WriteString(closing + "\n")
 	}
-	b.WriteString("\n## Reviewer comments to address\n\n")
-	for _, t := range threads {
-		// Fenced, never inline: a comment body is untrusted text and
-		// ticketspec skips fenced content, so a reviewer cannot smuggle a
-		// top-level key line (Required-Content: is additive across lines)
-		// into the round's own gates (adversarial review finding).
-		// The path and author sit outside the fence, so each is flattened
-		// to one bounded line first (flattenConformityField).
-		path := flattenConformityField(t.Path, MaxConformityCriterionBytes)
-		author := flattenConformityField(t.Author, MaxConformityCriterionBytes)
-		fmt.Fprintf(&b, "- **%s:%d** (%s):\n\n%s\n", path, t.Line, author, ticketspec.FenceVerbatim(t.Body))
+	sections := make([]boundedAddendumSection, 0, 3)
+	if len(threads) > 0 {
+		sections = append(sections, reviewThreadsSection(threads))
 	}
-	if section := reviewFindingsSection(flaggedVerdicts, findings); section != "" {
-		b.WriteString(priorRoundFindingsNote)
+	findingSections := reviewFindingsSections(flaggedVerdicts, findings)
+	if len(findingSections) > 0 {
+		findingSections[0].prefix = priorRoundFindingsNote
+		sections = append(sections, findingSections...)
+	}
+	if section := renderBoundedAddendumSections(sections, MaxTicketBuildInputBytes-len([]byte(b.String()))); section != "" {
 		b.WriteString(section)
 	}
 
@@ -1656,11 +1669,8 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 		name = fmt.Sprintf("%s-fix%d", name, fix)
 	}
 	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", name)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("create round dir %s: %w", dir, err)
-	}
 	path := filepath.Join(dir, "addendum.md")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := writeTicketBuildSpecFile(path, b.String()); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil

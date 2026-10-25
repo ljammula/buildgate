@@ -2062,6 +2062,57 @@ func TestWriteRoundAddendumFencesReviewerBodies(t *testing.T) {
 	}
 }
 
+func TestWriteRoundAddendumBoundsReviewerCommentsByCountAndBytes(t *testing.T) {
+	t.Run("count", func(t *testing.T) {
+		r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+		threads := make([]forge.Thread, requestdriver.MaxAddendumReviewThreads+5)
+		for i := range threads {
+			threads[i] = forge.Thread{ID: fmt.Sprintf("t%d", i), Path: "a.go", Line: i + 1, Author: "reviewer", Body: "short comment"}
+		}
+		path, err := requestdriver.WriteRoundAddendum(dataDir, r.ID, &r.Tickets[0], threads, nil, nil, 1, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), "_5 more reviewer comments omitted._") {
+			t.Fatalf("missing count omission note:\n%s", content)
+		}
+		if len(content) > requestdriver.MaxTicketBuildInputBytes {
+			t.Fatalf("round addendum = %d bytes, want <= %d", len(content), requestdriver.MaxTicketBuildInputBytes)
+		}
+	})
+
+	t.Run("bytes", func(t *testing.T) {
+		r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+		header := "Verify-Command: make verify\n\n## Goal\n\nDo the thing.\n"
+		content := header + strings.Repeat("x", requestdriver.MaxTicketBuildBaseInputBytes-len([]byte(header)))
+		if err := os.WriteFile(r.Tickets[0].SpecPath, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		threads := make([]forge.Thread, requestdriver.MaxAddendumReviewThreads+5)
+		for i := range threads {
+			threads[i] = forge.Thread{ID: fmt.Sprintf("t%d", i), Path: "a.go", Line: i + 1, Author: "reviewer", Body: strings.Repeat("x", requestdriver.MaxConformityDetailBytes)}
+		}
+		path, err := requestdriver.WriteRoundAddendum(dataDir, r.ID, &r.Tickets[0], threads, nil, nil, 1, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		written, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(written) > requestdriver.MaxTicketBuildInputBytes {
+			t.Fatalf("large round addendum = %d bytes, want <= %d", len(written), requestdriver.MaxTicketBuildInputBytes)
+		}
+		if !strings.Contains(string(written), "more reviewer comments omitted") {
+			t.Fatalf("missing byte omission note")
+		}
+	})
+}
+
 // TestRunCorrectiveRoundAfterAQuarantinedRoundCarriesTheGatesFindings: the
 // round after one the review gate quarantined builds on that round's
 // commits, so its ticket names what the gate flagged, beside the reviewer's

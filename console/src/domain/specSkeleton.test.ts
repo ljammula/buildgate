@@ -2,6 +2,7 @@ import { readFixtureJson } from "@/test/fixtures";
 
 import {
   missingTicketHeaderKeys,
+  MAX_HANDED_OVER_SPEC_BYTES,
   specAcceptanceCriteria,
   specStructure,
   ticketStructure,
@@ -31,6 +32,7 @@ interface TicketVector {
 // the expectations are the server's own answers.
 describe("golden vectors (test/fixtures/vectors/spec-skeleton.json)", () => {
   const vectors = readFixtureJson("vectors/spec-skeleton.json") as {
+    max_handed_over_spec_bytes: number;
     specs: SpecVector[];
     tickets: TicketVector[];
   };
@@ -38,6 +40,10 @@ describe("golden vectors (test/fixtures/vectors/spec-skeleton.json)", () => {
   test("the file carries both sections", () => {
     expect(vectors.specs.length).toBeGreaterThan(20);
     expect(vectors.tickets.length).toBeGreaterThan(20);
+  });
+
+  test("the Go-written spec size limit is the console's limit", () => {
+    expect(vectors.max_handed_over_spec_bytes).toBe(MAX_HANDED_OVER_SPEC_BYTES);
   });
 
   test.each(vectors.specs)("spec: $name", (v) => {
@@ -193,6 +199,14 @@ test("the mirrored parser handles 150 KB with 10000 headings within a generous b
   expect(new TextEncoder().encode(spec).byteLength).toBeGreaterThanOrEqual(150_000);
   const started = Date.now();
   expect(specAcceptanceCriteria(spec)).toEqual([]);
+  expect(Date.now() - started).toBeLessThan(5_000);
+});
+
+test("the mirrored parser handles a 15000-item preamble before 10000 headings", () => {
+  const preamble = "- preamble item\n".repeat(15_000);
+  const headings = Array.from({ length: 10_000 }, (_, i) => `## Heading ${i}`).join("\n");
+  const started = Date.now();
+  expect(specAcceptanceCriteria(preamble + headings)).toHaveLength(15_000);
   expect(Date.now() - started).toBeLessThan(5_000);
 });
 

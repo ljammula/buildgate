@@ -223,11 +223,13 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
 	}
 	var validationErr error
-	if r.SpecImported && len([]byte(specMD)) > request.MaxHandedOverSpecBytes {
-		validationErr = fmt.Errorf("handed-over spec is %d bytes, over the %d-byte limit", len([]byte(specMD)), request.MaxHandedOverSpecBytes)
-	} else if r.SpecImported {
+	if r.SpecImported {
 		validationErr = request.ValidateHandedOverSpec(specMD)
 	} else if err := request.ValidateSpecSkeleton(specMD); err != nil {
+		validationErr = err
+	} else if err := request.ValidateHandedOverSpec(specMD); err != nil {
+		// The common validator owns the spec byte cap as well as the
+		// factory-readable criteria check; drafted specs get the same cap.
 		validationErr = err
 	} else {
 		validationErr = request.ValidateSpecCriteria(specMD, criteriaAreDrafted(r))
@@ -1860,43 +1862,96 @@ func capConformityDetail(s string, maxBytes int) string {
 	return strings.ToValidUTF8(s[:maxBytes], "") + "\n[detail truncated to fit the size limit]"
 }
 
-// reviewFindingsSection renders the review gate's flagged spec-conformity
-// criteria and blocking code-review findings as the addendum sections a
-// corrective round's builder reads ("## Spec conformity review to address",
-// "## Code review findings to address"), each present only when it has
-// entries. WriteReviewAddendum's doc comment states the bounds every
-// untrusted value gets; both addendum writers (the first build's review
-// round and a PR-review round, WriteRoundAddendum) share this one renderer
-// so neither can drop them.
-func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding) string {
-	var section strings.Builder
-	if len(flaggedVerdicts) > 0 {
-		included := flaggedVerdicts
-		omitted := 0
-		if len(included) > MaxConformityFlaggedVerdicts {
-			omitted = len(included) - MaxConformityFlaggedVerdicts
-			included = included[:MaxConformityFlaggedVerdicts]
+type boundedAddendumSection struct {
+	prefix       string
+	heading      string
+	entries      []string
+	omittedLabel string
+	maxEntries   int
+}
+
+func boundedAddendumSectionMinimumBytes(section boundedAddendumSection) int {
+	header := section.prefix + section.heading + "\n\n"
+	if len(section.entries) <= section.maxEntries {
+		return len([]byte(header))
+	}
+	omitted := fmt.Sprintf("_%d more %s omitted._\n", len(section.entries)-section.maxEntries, section.omittedLabel)
+	return len([]byte(header + omitted))
+}
+
+// renderBoundedAddendumSections keeps complete entries, dropping only whole
+// trailing entries when the shared ticket-build input writer's remaining
+// byte budget is tight. Each section keeps its own count/byte omission note.
+func renderBoundedAddendumSections(sections []boundedAddendumSection, maxBytes int) string {
+	active := make([]boundedAddendumSection, 0, len(sections))
+	for _, section := range sections {
+		if len(section.entries) > 0 {
+			active = append(active, section)
 		}
-		section.WriteString("\n## Spec conformity review to address\n\n")
-		for _, v := range included {
+	}
+	var out strings.Builder
+	for i, section := range active {
+		remaining := maxBytes - out.Len()
+		reserve := 0
+		for _, later := range active[i+1:] {
+			reserve += boundedAddendumSectionMinimumBytes(later)
+		}
+		candidate := renderOneBoundedAddendumSection(section, remaining-reserve)
+		if candidate == "" {
+			continue
+		}
+		out.WriteString(candidate)
+	}
+	return out.String()
+}
+
+func renderOneBoundedAddendumSection(section boundedAddendumSection, maxBytes int) string {
+	if len(section.entries) == 0 || section.maxEntries < 0 {
+		return ""
+	}
+	maxIncluded := len(section.entries)
+	if maxIncluded > section.maxEntries {
+		maxIncluded = section.maxEntries
+	}
+	header := section.prefix + section.heading + "\n\n"
+	for included := maxIncluded; included >= 0; included-- {
+		omitted := len(section.entries) - included
+		note := ""
+		if omitted > 0 {
+			note = fmt.Sprintf("_%d more %s omitted._\n", omitted, section.omittedLabel)
+		}
+		candidate := header + strings.Join(section.entries[:included], "") + note
+		if len([]byte(candidate)) <= maxBytes {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// reviewFindingsSection renders the review gate's flagged spec-conformity
+// criteria and blocking code-review findings as bounded addendum sections.
+func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, maxBytes int) string {
+	return renderBoundedAddendumSections(reviewFindingsSections(flaggedVerdicts, findings), maxBytes)
+}
+
+func reviewFindingsSections(flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding) []boundedAddendumSection {
+	var sections []boundedAddendumSection
+	if len(flaggedVerdicts) > 0 {
+		entries := make([]string, 0, len(flaggedVerdicts))
+		for _, v := range flaggedVerdicts {
 			criterion := flattenConformityField(v.Criterion, MaxConformityCriterionBytes)
 			verdict := flattenConformityField(v.Verdict, MaxConformityVerdictBytes)
 			detail := capConformityDetail(v.Detail, MaxConformityDetailBytes)
-			fmt.Fprintf(&section, "- **%s** (%s):\n\n%s\n", criterion, verdict, ticketspec.FenceVerbatim(detail))
+			entries = append(entries, fmt.Sprintf("- **%s** (%s):\n\n%s\n", criterion, verdict, ticketspec.FenceVerbatim(detail)))
 		}
-		if omitted > 0 {
-			fmt.Fprintf(&section, "_%d more flagged criteria omitted._\n", omitted)
-		}
+		sections = append(sections, boundedAddendumSection{
+			heading: "\n## Spec conformity review to address", entries: entries,
+			omittedLabel: "flagged criteria", maxEntries: MaxConformityFlaggedVerdicts,
+		})
 	}
 	if len(findings) > 0 {
-		included := findings
-		omitted := 0
-		if len(included) > MaxConformityFlaggedVerdicts {
-			omitted = len(included) - MaxConformityFlaggedVerdicts
-			included = included[:MaxConformityFlaggedVerdicts]
-		}
-		section.WriteString("\n## Code review findings to address\n\n")
-		for _, f := range included {
+		entries := make([]string, 0, len(findings))
+		for _, f := range findings {
 			loc := f.File
 			if loc != "" && f.Line > 0 {
 				loc = fmt.Sprintf("%s:%d", f.File, f.Line)
@@ -1911,13 +1966,14 @@ func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.C
 				text += "\n\nFailure scenario: " + f.FailureScenario
 			}
 			detail := capConformityDetail(text, MaxConformityDetailBytes)
-			fmt.Fprintf(&section, "- **%s** (%s):\n\n%s\n", location, severity, ticketspec.FenceVerbatim(detail))
+			entries = append(entries, fmt.Sprintf("- **%s** (%s):\n\n%s\n", location, severity, ticketspec.FenceVerbatim(detail)))
 		}
-		if omitted > 0 {
-			fmt.Fprintf(&section, "_%d more findings omitted._\n", omitted)
-		}
+		sections = append(sections, boundedAddendumSection{
+			heading: "\n## Code review findings to address", entries: entries,
+			omittedLabel: "findings", maxEntries: MaxConformityFlaggedVerdicts,
+		})
 	}
-	return section.String()
+	return sections
 }
 
 // WriteReviewAddendum writes
@@ -1962,8 +2018,6 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 		return "", fmt.Errorf("build spec for ticket %s: %w", ticket.SpecPath, err)
 	}
 
-	section := reviewFindingsSection(flaggedVerdicts, findings)
-
 	var b strings.Builder
 	b.WriteString(buildSpec)
 	if len(buildSpec) == 0 || buildSpec[len(buildSpec)-1] != '\n' {
@@ -1976,14 +2030,13 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
 		b.WriteString(closing + "\n")
 	}
-	b.WriteString(section)
+	if section := reviewFindingsSection(flaggedVerdicts, findings, MaxTicketBuildInputBytes-len([]byte(b.String()))); section != "" {
+		b.WriteString(section)
+	}
 
 	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-conformity%d", ticket.Index, roundIndex))
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("create round dir %s: %w", dir, err)
-	}
 	path := filepath.Join(dir, "addendum.md")
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := writeTicketBuildSpecFile(path, b.String()); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
@@ -2585,7 +2638,7 @@ func BuildRequestBuildArgs(dataDir string, r *request.Request, ticket request.Ti
 // when escalated: the build takes the place of an escalated one that never
 // finished (replacesEscalatedBuild).
 func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, escalated bool) ([]string, error) {
-	buildSpecPath, err := writeTicketBuildSpecFile(dataDir, r, ticket)
+	buildSpecPath, err := writeTicketBuildInput(dataDir, r, ticket)
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
@@ -2769,9 +2822,13 @@ const BuildSpecCriteriaHeading = "## Acceptance criteria this ticket must satisf
 const BuildSpecCriteriaFooter = "These are the approved spec's exact criteria; names, fields, formats and error codes in them are requirements, not suggestions."
 
 // MaxTicketBuildInputBytes caps the complete -spec content written for a
-// ticket build. build_app.py accepts a 200,000-byte round prompt; keeping
-// 20,000 bytes free lets its round-state framing and corrective prompt fit.
+// ticket build. The smaller base cap leaves room for every addendum section
+// before the one writer applies this final limit.
 const MaxTicketBuildInputBytes = 180_000
+
+// MaxTicketBuildBaseInputBytes caps TicketBuildSpecContent before a review
+// addendum is appended.
+const MaxTicketBuildBaseInputBytes = 150_000
 
 // TicketBuildSpecContent returns the string a caller writes to disk as the
 // ticket's actual -spec (writeTicketBuildSpecFile) or embeds as a review
@@ -2847,11 +2904,11 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 		if readErr != nil {
 			return "", fmt.Errorf("read approved spec: %w", readErr)
 		}
-		return checkedTicketBuildInput(renderApprovedSpecTicketBuildInput(string(specContent), string(ticketContent), texts))
+		return checkedTicketBuildBaseInput(renderApprovedSpecTicketBuildInput(string(specContent), string(ticketContent), texts), requestRecord.ID)
 	}
 
 	if len(texts) == 0 {
-		return checkedTicketBuildInput(string(ticketContent))
+		return checkedTicketBuildBaseInput(string(ticketContent), requestRecord.ID)
 	}
 
 	var b strings.Builder
@@ -2868,13 +2925,13 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "\n%s\n", BuildSpecCriteriaFooter)
-	return checkedTicketBuildInput(b.String())
+	return checkedTicketBuildBaseInput(b.String(), requestRecord.ID)
 }
 
-func checkedTicketBuildInput(content string) (string, error) {
+func checkedTicketBuildBaseInput(content, requestID string) (string, error) {
 	bytes := len([]byte(content))
-	if bytes > MaxTicketBuildInputBytes {
-		return "", fmt.Errorf("ticket build input is %d bytes, over the %d-byte limit (build_app.py allows 200000 bytes; 20000 bytes are reserved for round state)", bytes, MaxTicketBuildInputBytes)
+	if bytes > MaxTicketBuildBaseInputBytes {
+		return "", fmt.Errorf("ticket build base input is %d bytes, over the %d-byte limit; shorten the spec (`factoryd reject -to spec -reason \"...\" %s`) or split the ticket (`factoryd reject -to plan -reason \"...\" %s`)", bytes, MaxTicketBuildBaseInputBytes, requestID, requestID)
 	}
 	return content, nil
 }
@@ -2907,7 +2964,7 @@ func renderApprovedSpecTicketBuildInput(specContent, ticketContent string, crite
 	return b.String()
 }
 
-// writeTicketBuildSpecFile writes TicketBuildSpecContent's result to
+// writeTicketBuildInput writes TicketBuildSpecContent's result to
 // <ticket>.build.md beside the ticket's own spec, and returns its path --
 // what BuildRequestBuildArgs hands to BuildTicketRunArgs as -spec (never
 // ticket.SpecPath itself, which plan_review approved and
@@ -2915,16 +2972,30 @@ func renderApprovedSpecTicketBuildInput(specContent, ticketContent string, crite
 // <ticket>.spec.md the same way <ticket>.criteria.md is, so a request's
 // tickets/ directory shows the derived file next to what it was derived
 // from.
-func writeTicketBuildSpecFile(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
+func writeTicketBuildInput(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
 	content, err := ticketBuildSpecContent(dataDir, r, ticket)
 	if err != nil {
 		return "", err
 	}
 	path := strings.TrimSuffix(ticket.SpecPath, ".spec.md") + ".build.md"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := writeTicketBuildSpecFile(path, content); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+// writeTicketBuildSpecFile is the only writer for a ticket build's -spec
+// input, including review addenda. It enforces the final cap in bytes before
+// creating or replacing the file.
+func writeTicketBuildSpecFile(path, content string) error {
+	bytes := len([]byte(content))
+	if bytes > MaxTicketBuildInputBytes {
+		return fmt.Errorf("ticket build input is %d bytes, over the %d-byte limit", bytes, MaxTicketBuildInputBytes)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 // TicketOracleMountPath is the fixed, factory-chosen workspace-relative

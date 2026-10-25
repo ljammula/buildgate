@@ -80,8 +80,8 @@ func TestTicketBuildSpecContentRefusesAnOversizedBuildInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, request.Ticket{Index: 1, SpecPath: ticketPath})
-	if err == nil || !strings.Contains(err.Error(), "ticket build input") || !strings.Contains(err.Error(), "over the 180000-byte limit") {
-		t.Fatalf("TicketBuildSpecContent error = %v, want the clear build-input cap", err)
+	if err == nil || !strings.Contains(err.Error(), "ticket build base input") || !strings.Contains(err.Error(), "over the 150000-byte limit") || !strings.Contains(err.Error(), "factoryd reject -to spec -reason") || !strings.Contains(err.Error(), "factoryd reject -to plan -reason") {
+		t.Fatalf("TicketBuildSpecContent error = %v, want the clear base-input cap and recovery choices", err)
 	}
 }
 

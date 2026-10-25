@@ -23,6 +23,7 @@ type sectionSpan struct {
 type parsedDoc struct {
 	lines       []string
 	starts      []int
+	mask        []bool
 	spans       []sectionSpan
 	occurrences map[string]int
 	// fenced is the skeleton heading text found on a line inside a code fence:
@@ -42,13 +43,14 @@ func fenceCloses(line string, ch byte, n int) bool {
 	return ticketspec.ClosesFence(strings.TrimSpace(line), ch, n)
 }
 
-// parseSkeleton locates every heading of headings in content the way
-// ValidateSpecSkeleton and ValidateTicketPlan do (a line whose trimmed text is
-// the heading, searched in order), except that a line inside a fenced code
-// block is not a heading. A heading content lacks is absent from the spans and
+// parseSkeleton locates every heading of headings in content the way the
+// request readers do (a line whose trimmed text is the heading, searched in
+// order), except that a line hidden by the shared Markdown mask is not a
+// heading. A heading inside a comment or fence is absent from the spans and
 // does not move the search, so its neighbours are still found.
 func parseSkeleton(content string, headings []string) parsedDoc {
-	d := parsedDoc{lines: strings.SplitAfter(content, "\n"), occurrences: map[string]int{}}
+	lines := strings.SplitAfter(content, "\n")
+	d := parsedDoc{lines: lines, mask: markdownLineMask(lines), occurrences: map[string]int{}}
 	d.starts = make([]int, len(d.lines))
 	inFence := make([]bool, len(d.lines))
 	offset := 0
@@ -77,14 +79,14 @@ func parseSkeleton(content string, headings []string) parsedDoc {
 		if inFence[i] && isSkeleton[strings.TrimSpace(line)] {
 			d.fenced = strings.TrimSpace(line)
 		}
-		if !inFence[i] && isSkeleton[strings.TrimSpace(line)] {
+		if !d.mask[i] && isSkeleton[strings.TrimSpace(line)] {
 			d.occurrences[strings.TrimSpace(line)]++
 		}
 	}
 	searchFrom := 0
 	for _, heading := range headings {
 		for j := searchFrom; j < len(d.lines); j++ {
-			if !inFence[j] && strings.TrimSpace(d.lines[j]) == heading {
+			if !d.mask[j] && strings.TrimSpace(d.lines[j]) == heading {
 				d.spans = append(d.spans, sectionSpan{heading: heading, start: d.starts[j], startLine: j})
 				searchFrom = j + 1
 				break
@@ -100,7 +102,7 @@ func parseSkeleton(content string, headings []string) parsedDoc {
 		}
 		level := MarkdownHeadingLevel(d.lines[s.startLine])
 		for j := s.startLine + 1; j < len(d.lines); j++ {
-			if l := MarkdownHeadingLevel(d.lines[j]); !inFence[j] && l > 0 && l <= level {
+			if l := MarkdownHeadingLevel(d.lines[j]); !d.mask[j] && l > 0 && l <= level {
 				s.end, s.endLine = d.starts[j], j
 				break
 			}
@@ -171,7 +173,7 @@ func draftedSection(d parsedDoc, content string, headings []string, heading stri
 		}
 		level := MarkdownHeadingLevel(d.lines[s.startLine])
 		for j := s.startLine + 1; j < n.startLine; j++ {
-			if l := MarkdownHeadingLevel(d.lines[j]); l > 0 && l <= level {
+			if l := MarkdownHeadingLevel(d.lines[j]); !d.mask[j] && l > 0 && l <= level {
 				return "", fmt.Errorf("the redraft has a heading %q inside %q that the skeleton does not have", strings.TrimSpace(d.lines[j]), heading)
 			}
 		}

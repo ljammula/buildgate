@@ -53,7 +53,7 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 			if err != nil {
 				return nil, "", err
 			}
-			buildSpecPath, err := writeTicketBuildSpecFile(dataDir, r, *ticket)
+			buildSpecPath, err := writeTicketBuildInput(dataDir, r, *ticket)
 			if err != nil {
 				return nil, "", fmt.Errorf("build spec: %w", err)
 			}

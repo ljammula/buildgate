@@ -1,4 +1,5 @@
 {
+  "max_handed_over_spec_bytes": 120000,
   "specs": [
     {
       "name": "well-formed",
@@ -300,7 +301,7 @@
       "missing_heading": "## Problem",
       "criteria_section_empty": false,
       "criteria": [
-        "1. still hidden"
+        "1. still hidden ~~~ - visible"
       ]
     },
     {
@@ -380,12 +381,14 @@
       ]
     },
     {
-      "name": "exact acceptance criteria mixed styles are refused",
+      "name": "exact acceptance criteria mixed styles use the numbered parser",
       "text": "## Acceptance criteria\n\n- first\n1. second\n",
       "valid": false,
       "missing_heading": "# Spec",
       "criteria_section_empty": false,
-      "criteria": []
+      "criteria": [
+        "1. second"
+      ]
     },
     {
       "name": "carriage return stays inside an item",
@@ -431,6 +434,109 @@
     {
       "name": "HTML comment list items are ignored",
       "text": "## Scope\n\n<!--\n- hidden\n-->\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "HTML comment marker inside an item stays visible",
+      "text": "## Scope\n\n- Escape `<!--` in titles\n- second\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. Escape `<!--` in titles",
+        "2. second"
+      ]
+    },
+    {
+      "name": "numbered exact criteria fold an unindented bullet",
+      "text": "## Acceptance criteria\n\n1. first\n- continuation\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first - continuation"
+      ]
+    },
+    {
+      "name": "HTML comment marker before open questions stays visible",
+      "text": "# Spec\n\n## Scope\n\n- reject `<!--` in names\n\n## Open questions\n\n1. [NEEDS DECISION] choose a name.\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. reject `<!--` in names"
+      ]
+    },
+    {
+      "name": "an HTML fence containing a comment stays fenced",
+      "text": "## Scope\n\n```html\n<!-- open\n- hidden\n```\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "masked fence lines fold into a numbered criterion",
+      "text": "## Acceptance criteria\n\n1. prints:\n   ```\n   2. two\n   ```\n2. two\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. prints: ``` 2. two ```",
+        "2. two"
+      ]
+    },
+    {
+      "name": "a thematic break on line one is not front matter",
+      "text": "---\n## Scope\n\n- keep\n\n---\n\n- after\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. keep",
+        "2. after"
+      ]
+    },
+    {
+      "name": "front matter requires a YAML key",
+      "text": "---\nnot metadata\n---\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "a BOM is allowed before front matter",
+      "text": "﻿---\ntitle: Example\n...\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "a heading inside an HTML comment is not a section",
+      "text": "<!--\n## Hidden\n- hidden\n-->\n\n- visible\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. visible"
+      ]
+    },
+    {
+      "name": "an indented HTML comment still hides its block",
+      "text": "## Scope\n\n   <!-- open\n- hidden\n-->\n- visible\n",
       "valid": false,
       "missing_heading": "# Spec",
       "criteria_section_empty": false,

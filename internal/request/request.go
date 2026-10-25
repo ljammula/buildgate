@@ -564,7 +564,9 @@ type Request struct {
 	// planning pass takes them in place of the planning job, through the
 	// same validation a drafted plan passes, to plan_review. After a
 	// plan_review rejection, or when the factory finds the plan infeasible,
-	// the planning job revises the current tickets with that feedback.
+	// the planning job revises the current tickets with that feedback. Once
+	// the imported tickets are sent back to planning, this flag is cleared so
+	// a later spec redraft cannot import those old files again.
 	PlanImported bool `json:"plan_imported,omitempty"`
 	// ImportedPlanCriteria is the approved spec's numbered criteria at the
 	// moment a handed-over plan was submitted. Planning refuses to import
@@ -1203,6 +1205,7 @@ func (r *Request) RejectPlan(by, reason string, now time.Time) error {
 	if err := advance(r, []State{StatePlanReview}, StatePlanning, by, reason, now); err != nil {
 		return err
 	}
+	r.PlanImported = false
 	return nil
 }
 

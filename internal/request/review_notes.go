@@ -113,7 +113,11 @@ func SpecReviewNotes(specContent string) []string {
 		derivedSections = 1
 	}
 	if derivedSections > 0 {
-		notes = append(notes, fmt.Sprintf("Criteria 1-%d were derived from the list items of %d sections.", len(criteria), derivedSections))
+		sectionWord := "sections"
+		if derivedSections == 1 {
+			sectionWord = "section"
+		}
+		notes = append(notes, fmt.Sprintf("Criteria 1-%d were derived from the list items of %d %s.", len(criteria), derivedSections, sectionWord))
 	}
 	for i, criterion := range criteria {
 		if isCommitMessageCriterion(criterion) {
