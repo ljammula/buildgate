@@ -338,7 +338,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`doc/designs/validation-plan.md`](doc/designs/validation-plan.md) | The reusable end-to-end validation checklist; [`scripts/validation/`](scripts/validation/README.md) is its executable half |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute: setup, the checks a change needs, what a pull request needs, what will not be merged |
 | [`AGENTS.md`](AGENTS.md) | Instructions for a coding agent (or a person) changing this repository: layout, checks, where a change goes, module boundaries |
-| [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-021) |
+| [`safety-contract.md`](safety-contract.md) | Trust boundaries, threats, invariants (SC-001–SC-022) |
 | [`CLAIMS.md`](CLAIMS.md) | Every normative claim mapped to status + enforcing test |
 | [`containment-matrix.md`](containment-matrix.md) | Sandbox/network/filesystem escape boundaries: enforced vs. open |
 

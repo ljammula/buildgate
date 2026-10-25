@@ -33,7 +33,7 @@ This repo enforces its own safety properties on itself. Two files are
 **normative**, not descriptive, and are checked mechanically:
 
 - [`safety-contract.md`](safety-contract.md) — trust boundaries, threat
-  model, invariants SC-001–SC-021, the full run state graph. A change
+  model, invariants SC-001–SC-022, the full run state graph. A change
   that weakens an invariant needs a new contract review, not a quiet
   code edit.
 - [`CLAIMS.md`](CLAIMS.md) — every normative claim mapped to the test
