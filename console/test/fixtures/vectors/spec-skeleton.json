@@ -36,7 +36,10 @@
       "valid": false,
       "missing_heading": "## Acceptance criteria",
       "criteria_section_empty": false,
-      "criteria": []
+      "criteria": [
+        "1. It adds.",
+        "2. It subtracts."
+      ]
     },
     {
       "name": "heading out of order",
