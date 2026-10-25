@@ -103,7 +103,7 @@ A longer live walkthrough is in [`DEMO.md`](DEMO.md).
 
 ## Status
 
-Latest release tag: **`v0.0.12`** (tags are `vX.Y.Z`), cut only after
+Latest release tag: **`v0.0.13`** (tags are `vX.Y.Z`), cut only after
 `make live-smoke` passes on that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
 
 | | Area |
