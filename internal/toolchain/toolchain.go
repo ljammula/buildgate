@@ -1,6 +1,7 @@
 // Package toolchain reads the language toolchain versions a repository
-// declares (go.mod, .python-version, pyproject.toml, .nvmrc, .node-version)
-// and decides whether a sandbox image's own toolchains satisfy them. A build
+// declares (go.mod, .python-version, pyproject.toml, .nvmrc, .node-version,
+// pom.xml with .java-version or .sdkmanrc, Gemfile with .ruby-version) and
+// decides whether a sandbox image's own toolchains satisfy them. A build
 // runs with no network and with the image's toolchains only, so a version the
 // image lacks fails the verify command long after the build started; the
 // decision here is made before, by doctor and by the project image build.
@@ -23,7 +24,23 @@ const (
 	Go     = "go"
 	Python = "python"
 	Node   = "node"
+	// Java and Maven are both declared by a root pom.xml, Ruby and Bundler
+	// by a root Gemfile: a build needs the build tool beside the language.
+	Java    = "java"
+	Maven   = "maven"
+	Ruby    = "ruby"
+	Bundler = "bundler"
 )
+
+// DefaultJava is the JDK installed for a pom.xml that pins no Java version.
+// 21 is the LTS release the most Maven plugins support (JaCoCo, Lombok and
+// Error Prone versions in use still fail on newer class files), and its
+// javac still compiles --release 8.
+var DefaultJava = Version{Parts: []int{21}}
+
+// DefaultRuby is the Ruby installed for a Gemfile that pins none: the current
+// stable minor.
+var DefaultRuby = Version{Parts: []int{4, 0}}
 
 // Version is a dotted numeric version; Parts is nil for "none".
 type Version struct{ Parts []int }
@@ -105,7 +122,8 @@ type Requirement struct {
 	Spec   string // the declaration as written, for messages
 	// Install is the version to install when the image's does not satisfy
 	// the requirement; zero when the declaration names none (a bare upper
-	// bound).
+	// bound). For Maven it is the JDK major the Maven image is chosen by,
+	// and for Bundler the Ruby that brings it.
 	Install Version
 	// satisfied reports whether an installed version meets the declaration.
 	satisfied func(installed Version) bool
@@ -116,16 +134,25 @@ type Requirement struct {
 // since guessing a version is worse than naming the file.
 func Detect(dir string) ([]Requirement, error) {
 	var reqs []Requirement
-	for _, detect := range []func(string) (*Requirement, error){detectGo, detectPython, detectNode} {
-		req, err := detect(dir)
+	for _, detect := range []func(string) ([]Requirement, error){one(detectGo), one(detectPython), one(detectNode), detectJava, detectRuby} {
+		found, err := detect(dir)
 		if err != nil {
 			return nil, err
 		}
-		if req != nil {
-			reqs = append(reqs, *req)
-		}
+		reqs = append(reqs, found...)
 	}
 	return reqs, nil
+}
+
+// one adapts a detector of at most one requirement.
+func one(detect func(string) (*Requirement, error)) func(string) ([]Requirement, error) {
+	return func(dir string) ([]Requirement, error) {
+		req, err := detect(dir)
+		if err != nil || req == nil {
+			return nil, err
+		}
+		return []Requirement{*req}, nil
+	}
 }
 
 // detectGo reads go.mod: the `go` line is the oldest toolchain that may build

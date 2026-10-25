@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -53,6 +54,42 @@ func TestParseImageToolchainsReadsEachToolAndTheCodename(t *testing.T) {
 	if installed, _ := parseImageToolchains("Python 3.13.15\nnode \ncodename=bookworm\n"); len(installed) != 1 {
 		t.Errorf("an image with only Python parsed as %v", installed)
 	}
+	// What derived images print, as captured from them.
+	for out, want := range map[string]map[string]string{
+		"java openjdk version \"21.0.12.1\" 2026-08-18 LTS\nApache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\n": {toolchain.Java: "21.0.12", toolchain.Maven: "3.9.16"},
+		"ruby 4.0.9 (2026-10-23 revision 3e93b23afc) +PRISM [aarch64-linux]\nbundler 4.0.20\n":                                {toolchain.Ruby: "4.0.9", toolchain.Bundler: "4.0.20"},
+		"ruby 3.3.13 (2026-10-23 revision af48f08f21) [aarch64-linux]\nbundler Bundler version 2.5.22\n":                      {toolchain.Ruby: "3.3.13", toolchain.Bundler: "2.5.22"},
+	} {
+		installed, _ := parseImageToolchains(out)
+		got := map[string]string{}
+		for tool, v := range installed {
+			got[tool] = v.String()
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("parsed %v from %q, want %v", got, out, want)
+		}
+	}
+}
+
+func TestDoctorProjectToolchainRowsForAPomTheImageHasNoJDKFor(t *testing.T) {
+	repo := toolchainRepo(t, map[string]string{"pom.xml": "<project/>"})
+	in := doctorInputs{targetRepo: repo, sandboxImage: "worker@sha256:aaaa", sandboxDocker: toolchainDocker(t, workerImageToolchains), imageSourceRoot: "/src/buildgate"}
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	checks := doctorCheckProjectToolchains(context.Background(), in)
+	if len(checks) != 2 {
+		t.Fatalf("checks = %+v, want a JDK row and a Maven row", checks)
+	}
+	for _, row := range checks {
+		if row.Err != nil || !strings.Contains(row.Detail, "the sandbox image has no") || !strings.Contains(row.Detail, "a build derives an image") {
+			t.Errorf("row = %+v, want a pass naming the derived image", row)
+		}
+	}
+	t.Setenv(hostcontrol.AutostartEnvVar, "0")
+	for _, row := range doctorCheckProjectToolchains(context.Background(), in) {
+		if row.Err == nil || !row.Advisory || !strings.Contains(row.Err.Error(), "keeps configured image") {
+			t.Errorf("row = %+v, want an autostart-off advisory", row)
+		}
+	}
 }
 
 func TestPlanProjectImageInstallsWhatTheBaseImageLacks(t *testing.T) {
@@ -78,6 +115,14 @@ func TestPlanProjectImageInstallsWhatTheBaseImageLacks(t *testing.T) {
 		{"a pinned patch keeps major.minor as the installed name", map[string]string{".python-version": "3.11.9\n"},
 			[]string{"PYTHON_MODE=replace", "PYTHON_IMAGE=python:3.11.9-slim-bookworm", "PYTHON_VERSION=3.11"}},
 		{"Node is never replaced", map[string]string{".nvmrc": "20\n"}, nil},
+		{"a JDK and Maven, from one image, once", map[string]string{"pom.xml": "<project/>"},
+			[]string{"JAVA_MODE=replace", "JAVA_IMAGE=maven:3.9-eclipse-temurin-21"}},
+		{"a pinned JDK", map[string]string{"pom.xml": "<project/>", ".java-version": "17\n"},
+			[]string{"JAVA_MODE=replace", "JAVA_IMAGE=maven:3.9-eclipse-temurin-17"}},
+		{"Ruby and Bundler, on the base image's distribution", map[string]string{"Gemfile": ""},
+			[]string{"RUBY_MODE=replace", "RUBY_IMAGE=ruby:4.0-bookworm"}},
+		{"a pinned Ruby", map[string]string{"Gemfile": "ruby '3.3.6'\n"},
+			[]string{"RUBY_MODE=replace", "RUBY_IMAGE=ruby:3.3.6-bookworm"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,6 +138,85 @@ func TestPlanProjectImageInstallsWhatTheBaseImageLacks(t *testing.T) {
 	}
 	if _, err := plan(map[string]string{"pyproject.toml": "[project]\nrequires-python = \"<3.12\"\n"}); err == nil || !strings.Contains(err.Error(), "names no version to install") {
 		t.Errorf("an upper bound alone planned %v, want a refusal", err)
+	}
+}
+
+func TestPlanProjectImageReplacesTheJDKOrRubyWhenEitherHalfIsMissing(t *testing.T) {
+	plan := func(files map[string]string, out, codename string) (projectImagePlan, error) {
+		reqs, err := toolchain.Detect(toolchainRepo(t, files))
+		if err != nil {
+			t.Fatal(err)
+		}
+		installed, _ := parseImageToolchains(out)
+		return planProjectImage(toolchain.Check(reqs, installed), codename)
+	}
+	pom := map[string]string{"pom.xml": "<project/>", ".java-version": "17\n"}
+	if got, err := plan(pom, "java openjdk version \"21.0.5\"\nApache Maven 3.9.9\n", "bookworm"); err != nil || got.BuildArgs != nil {
+		t.Errorf("an image with a newer JDK and Maven planned %v, %v; want nothing", got.BuildArgs, err)
+	}
+	if got, err := plan(pom, "java openjdk version \"21.0.5\"\n", "bookworm"); err != nil ||
+		!reflect.DeepEqual(got.BuildArgs, []string{"JAVA_MODE=replace", "JAVA_IMAGE=maven:3.9-eclipse-temurin-17"}) || !strings.Contains(strings.Join(got.Notes, "\n"), `pom.xml declares "mvn" and the sandbox image has no maven`) {
+		t.Errorf("an image with no mvn planned %v, %v, %q", got.BuildArgs, err, got.Notes)
+	}
+	if got, err := plan(pom, "java openjdk version \"11.0.20\"\nApache Maven 3.9.9\n", "bookworm"); err != nil || len(got.BuildArgs) != 2 || len(got.Notes) != 1 {
+		t.Errorf("an image with an older JDK planned %v, %v, %q", got.BuildArgs, err, got.Notes)
+	}
+	gemfile := map[string]string{"Gemfile": "", ".ruby-version": "3.3\n"}
+	if got, err := plan(gemfile, "ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [aarch64-linux]\nbundler 2.5.22\n", "bookworm"); err != nil || got.BuildArgs != nil {
+		t.Errorf("an image with Ruby 3.3 and Bundler planned %v, %v; want nothing", got.BuildArgs, err)
+	}
+	if got, err := plan(gemfile, "ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [aarch64-linux]\nbundler \n", "bookworm"); err != nil ||
+		!reflect.DeepEqual(got.BuildArgs, []string{"RUBY_MODE=replace", "RUBY_IMAGE=ruby:3.3-bookworm"}) {
+		t.Errorf("an image with no bundle planned %v, %v", got.BuildArgs, err)
+	}
+	if _, err := plan(gemfile, "", ""); err == nil || !strings.Contains(err.Error(), "distribution codename") {
+		t.Errorf("a Ruby with no codename planned %v, want a refusal", err)
+	}
+}
+
+// The probe script runs in a real shell over stand-in executables that print
+// what the real tools print, and its output parses back to their versions.
+func TestImageToolchainsScriptRoundTrip(t *testing.T) {
+	stubs := map[string]string{
+		"java":   `echo 'openjdk version "1.8.0_432"' >&2; echo 'OpenJDK Runtime Environment (Temurin)(build 1.8.0_432-b06)' >&2`,
+		"mvn":    `echo 'Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)'; echo 'Maven home: /usr/share/maven'`,
+		"ruby":   `echo 'ruby 4.0.9 (2026-10-23 revision 3e93b23afc) +PRISM [aarch64-linux]'`,
+		"bundle": `echo '4.0.20'`,
+		"node":   `echo 'v22.23.2'`,
+	}
+	bin := t.TempDir()
+	for name, body := range stubs {
+		if err := writeExecutable(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	head, err := exec.LookPath("head")
+	if err != nil {
+		t.Skip("no head on this host")
+	}
+	if err := os.Symlink(head, filepath.Join(bin, "head")); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", imageToolchainsScript)
+	cmd.Env = []string{"PATH=" + bin}
+	// The exit status is the sourcing of /etc/os-release, which a test host
+	// may not have; every tool line is printed before it.
+	out, _ := cmd.Output()
+	installed, _ := parseImageToolchains(string(out))
+	got := map[string]string{}
+	for tool, v := range installed {
+		got[tool] = v.String()
+	}
+	want := map[string]string{toolchain.Java: "8.0", toolchain.Maven: "3.9.16", toolchain.Ruby: "4.0.9", toolchain.Bundler: "4.0.20", toolchain.Node: "22.23.2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parsed %v from %q; want %v", got, out, want)
+	}
+	// With none of them, nothing is read: no shell error is taken for a version.
+	cmd = exec.Command("/bin/sh", "-c", imageToolchainsScript)
+	cmd.Env = []string{"PATH=" + t.TempDir()}
+	out, _ = cmd.Output()
+	if installed, _ := parseImageToolchains(string(out)); len(installed) != 0 {
+		t.Errorf("an image with no tools parsed as %v from %q", installed, out)
 	}
 }
 

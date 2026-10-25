@@ -63,8 +63,8 @@ func newDeps() *deps {
 type dockerBoundary interface {
 	colimaBinary() string
 	dockerBinary() string
-	// imageToolchains runs image once and reads the versions of its Go,
-	// Python and Node, and its distribution codename.
+	// imageToolchains runs image once and reads the versions of its
+	// toolchains (imageToolchainLines) and its distribution codename.
 	imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
 	initChecks(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImage(repoRoot string, target string, vars ...string) (string, error)

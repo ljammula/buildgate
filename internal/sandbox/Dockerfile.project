@@ -70,13 +70,16 @@
 # this reason, and this file inherits that setting unchanged.
 #
 # Toolchains. A build has no network and GOTOOLCHAIN=local, so the image's
-# own Go and Python are the only ones a verify command can use. When the
-# project declares a version the base image does not satisfy (go.mod's `go`
-# line, .python-version, pyproject.toml's requires-python), `make
-# project-sandbox-image` passes GO_MODE/PYTHON_MODE=replace with the official
-# image to copy that toolchain from (`factoryd project-image-args`,
-# internal/toolchain). With neither, the stages below are the base image
-# unchanged and the two toolchain images are never pulled.
+# own toolchains are the only ones a verify command can use. When the
+# project declares one the base image does not satisfy (go.mod's `go` line,
+# .python-version, pyproject.toml's requires-python, a pom.xml's JDK and
+# Maven, a Gemfile's Ruby and Bundler), `make project-sandbox-image` passes
+# GO_MODE/PYTHON_MODE/JAVA_MODE/RUBY_MODE=replace with the official image to
+# copy that toolchain from (`factoryd project-image-args`,
+# internal/toolchain). With none, the stages below are the base image
+# unchanged and the toolchain images are never pulled. Everything a stage
+# installs lives under /usr or /opt, which the sandbox's filesystem policy
+# opens read-only.
 #
 # Node is not replaced: the Pi, Codex and Copilot CLIs run on the image's
 # Node, and it is the executable the sandbox's network policy admits.
@@ -85,9 +88,15 @@ ARG GO_MODE=keep
 ARG GO_IMAGE=${BASE_IMAGE}
 ARG PYTHON_MODE=keep
 ARG PYTHON_IMAGE=${BASE_IMAGE}
+ARG JAVA_MODE=keep
+ARG JAVA_IMAGE=${BASE_IMAGE}
+ARG RUBY_MODE=keep
+ARG RUBY_IMAGE=${BASE_IMAGE}
 
 FROM ${GO_IMAGE} AS project-go
 FROM ${PYTHON_IMAGE} AS project-python
+FROM ${JAVA_IMAGE} AS project-java
+FROM ${RUBY_IMAGE} AS project-ruby
 
 FROM ${BASE_IMAGE} AS go-keep
 FROM ${BASE_IMAGE} AS go-replace
@@ -126,9 +135,82 @@ RUN cd /tmp/buildgate-agent/agent/pi; \
     grep -E '^Ran ' /tmp/buildgate-agent-tests.log; \
     rm -rf /tmp/buildgate-agent /tmp/buildgate-agent-tests.log
 
+# A JDK and Maven, from an official maven:<line>-eclipse-temurin-<major>
+# image. Temurin's JDK carries its own libraries beside glibc, so it runs on
+# the base image's distribution whichever one the maven image is built on.
+# Maven's settings and local repository are the worker's environment's
+# concern, not this image's.
+FROM python-${PYTHON_MODE} AS java-keep
+FROM python-${PYTHON_MODE} AS java-replace
+USER root
+RUN rm -rf /opt/java/openjdk /usr/share/maven
+COPY --from=project-java /opt/java/openjdk /opt/java/openjdk
+COPY --from=project-java /usr/share/maven /usr/share/maven
+ENV JAVA_HOME=/opt/java/openjdk
+# Maven's console library ships its Linux native code only inside its jar and
+# extracts it to /tmp on every run, which the sandbox mounts noexec; laid out
+# where `mvn` already looks (library.jansi.path), it loads from /usr instead.
+RUN set -e; \
+    for tool in /opt/java/openjdk/bin/*; do ln -sf "$tool" /usr/local/bin/; done; \
+    ln -sf /usr/share/maven/bin/mvn /usr/local/bin/mvn; \
+    for jar in /usr/share/maven/lib/jansi-*.jar; do \
+        [ -f "$jar" ] || continue; \
+        mkdir -p /tmp/jansi; cd /tmp/jansi; \
+        jar xf "$jar" org/fusesource/jansi/internal/native/Linux; \
+        if [ -d org/fusesource/jansi/internal/native/Linux ]; then \
+            mkdir -p /usr/share/maven/lib/jansi-native; \
+            cp -r org/fusesource/jansi/internal/native/Linux /usr/share/maven/lib/jansi-native/; \
+        fi; \
+        cd /; rm -rf /tmp/jansi; \
+    done; \
+    java -version; javac -version; mvn -v
+
+# Ruby and the Bundler it ships, from the official ruby:<version>-<codename>
+# image of the base image's distribution: its interpreter, libruby, standard
+# library, default gems and headers, each executable its gems install under
+# /usr/local/bin, libyaml with its header (psych compiles against it), and any
+# shared library the interpreter or an extension needs that the base image
+# lacks. `bundle install` compiles native extensions with the base image's C
+# compiler and make; a base image without a compiler gets one here, while make
+# is the base image's own (the worker's is built for the sandbox). Where
+# gems go is the worker's environment's concern (BUNDLE_PATH), not this
+# image's.
+FROM java-${JAVA_MODE} AS ruby-keep
+FROM java-${JAVA_MODE} AS ruby-replace
+USER root
+RUN --mount=type=bind,from=project-ruby,source=/,target=/ruby-image \
+    set -e; \
+    src=/ruby-image; \
+    rm -rf /usr/local/lib/ruby /usr/local/lib/libruby.so* /usr/local/include/ruby-*; \
+    cp -a "$src"/usr/local/lib/ruby /usr/local/lib/; \
+    cp -a "$src"/usr/local/lib/libruby.so* /usr/local/lib/; \
+    cp -a "$src"/usr/local/include/ruby-* /usr/local/include/; \
+    mkdir -p /usr/local/lib/pkgconfig; \
+    cp -a "$src"/usr/local/lib/pkgconfig/ruby*.pc /usr/local/lib/pkgconfig/; \
+    for tool in "$src"/usr/local/bin/*; do \
+        if [ "${tool##*/}" = ruby ] || [ "$(head -c 21 "$tool")" = '#!/usr/local/bin/ruby' ]; then cp -a "$tool" /usr/local/bin/; fi; \
+    done; \
+    cp -a "$src"/usr/include/yaml.h /usr/include/; \
+    for lib in "$src"/usr/lib/*/libyaml*; do cp -a "$lib" "${lib#"$src"}"; done; \
+    ldconfig; \
+    missing="$( { ldd /usr/local/bin/ruby; find /usr/local/lib/ruby -name '*.so' -exec ldd {} + ; } | awk '/not found/ { print $1 }' | sort -u)"; \
+    for lib in $missing; do \
+        found="$(find "$src"/lib "$src"/usr/lib -name "$lib" | head -n 1)"; \
+        if [ -z "$found" ]; then echo "$lib, which Ruby needs, is in neither the base image nor $src" >&2; exit 1; fi; \
+        cp -L "$found" "${found#"$src"}"; echo "copied $lib from the ruby image"; \
+    done; \
+    ldconfig; \
+    if { ldd /usr/local/bin/ruby; find /usr/local/lib/ruby -name '*.so' -exec ldd {} + ; } | grep 'not found'; then exit 1; fi; \
+    if ! command -v cc >/dev/null 2>&1; then \
+        apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    command -v make >/dev/null || echo "warning: the base image has no make; a gem with a native extension cannot be compiled in it" >&2; \
+    ruby -v; gem -v; bundle -v; \
+    ruby -rpsych -rjson -ropenssl -rzlib -e 'puts "ruby standard library loads"'
+
 # The base image with the project's toolchains and nothing of the project
 # itself: what factoryd builds on its own for a build (--target toolchains).
-FROM python-${PYTHON_MODE} AS toolchains
+FROM ruby-${RUBY_MODE} AS toolchains
 USER 65532:65532
 
 FROM toolchains
