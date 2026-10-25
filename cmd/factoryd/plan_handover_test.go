@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 )
 
@@ -44,9 +49,80 @@ func TestStagePreviousPlanPrefersTheReviewedTicketsThenTheHandedOverOnes(t *test
 		t.Fatalf("staged %q, want the reviewed ticket", got)
 	}
 
-	r.PlanImported = false
-	if path, err := stagePreviousPlan(dataDir, r, scratch, ""); err != nil || path != "" {
+	draftedData, draftedID := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	drafted, err := request.Load(draftedData, draftedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path, err := stagePreviousPlan(draftedData, drafted, scratch, ""); err != nil || path != "" {
 		t.Fatalf("a drafted plan staged %q (%v); want nothing", path, err)
+	}
+}
+
+func TestStagePreviousPlanAfterPlanReviewRejectUsesHandedOverTickets(t *testing.T) {
+	ticket := requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)
+	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": ticket})
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.Reject(dataDir, id, "operator", "revise the tickets", time.Now()); err != nil {
+		t.Fatalf("reject plan review: %v", err)
+	}
+	rejected, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rejected.PlanImported || !rejected.PlanImportEnded {
+		t.Fatalf("after reject: PlanImported = %v, PlanImportEnded = %v; want import history and ended path", rejected.PlanImported, rejected.PlanImportEnded)
+	}
+	path, err := stagePreviousPlan(dataDir, rejected, filepath.Join(t.TempDir(), "scratch"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "=== 001.spec.md ===\n"+ticket+"\n" {
+		t.Fatalf("staged %q (%v), want the handed-over plan", got, err)
+	}
+}
+
+func TestStagePreviousPlanAfterCriteriaChangeSendBackUsesHandedOverTickets(t *testing.T) {
+	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": "handed over after criteria change\n"})
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(requestdrivertest.TwoCriteriaSpec, "1. A retried POST /refunds with the same idempotency key returns the original result.", "1. Changed.", 1)
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(changed))
+	r.ApprovedSHA256["spec.md"] = hex.EncodeToString(sum[:])
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	halted, err := request.Load(dataDir, id)
+	if err != nil || halted.State != request.StateHalted {
+		t.Fatalf("criteria-change pass: state = %q, err = %v; want halted", halted.State, err)
+	}
+	if _, err := request.SendBack(dataDir, id, "operator", "replan for the changed criteria", request.SendBackToPlan, time.Now()); err != nil {
+		t.Fatalf("send back to plan: %v", err)
+	}
+	replanned, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := stagePreviousPlan(dataDir, replanned, filepath.Join(t.TempDir(), "scratch"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "=== 001.spec.md ===\nhanded over after criteria change\n\n" {
+		t.Fatalf("staged %q (%v), want the handed-over plan after send-back", got, err)
 	}
 }
 

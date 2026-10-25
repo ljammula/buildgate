@@ -153,8 +153,8 @@ func TestRejectMainCriteriaChangeHaltFeedsPlanningFeedback(t *testing.T) {
 		t.Fatalf("factoryd reject -to plan -reason: %v", err)
 	}
 	planning := requestdrivertest.LoadRequest(t, dataDir, id)
-	if planning.State != request.StatePlanning || planning.PlanAsHandedOver() {
-		t.Fatalf("after reject: State = %q, PlanAsHandedOver = %v; want planning with drafted-plan path", planning.State, planning.PlanAsHandedOver())
+	if planning.State != request.StatePlanning || !planning.PlanImported || !planning.PlanImportEnded || planning.PlanAsHandedOver() {
+		t.Fatalf("after reject: State = %q, PlanImported = %v, PlanImportEnded = %v, PlanAsHandedOver = %v; want planning with import history retained and drafted-plan path", planning.State, planning.PlanImported, planning.PlanImportEnded, planning.PlanAsHandedOver())
 	}
 	runner, gotVerify := requestdrivertest.StubPlanTicketsRunner([]requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1)},

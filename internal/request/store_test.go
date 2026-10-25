@@ -12,6 +12,7 @@ import (
 
 func TestLegacyRequestRecordLoadsAndMarshalsByteIdentically(t *testing.T) {
 	legacy := New("req-legacy", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+	legacy.PlanImported = true
 	want, err := json.MarshalIndent(legacy, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal legacy record: %v", err)
@@ -29,6 +30,9 @@ func TestLegacyRequestRecordLoadsAndMarshalsByteIdentically(t *testing.T) {
 	}
 	if bytes.Contains(got, []byte(`"build_input"`)) {
 		t.Fatalf("legacy record gained build_input: %s", got)
+	}
+	if bytes.Contains(got, []byte(`"plan_import_ended"`)) {
+		t.Fatalf("legacy record gained plan_import_ended: %s", got)
 	}
 }
 

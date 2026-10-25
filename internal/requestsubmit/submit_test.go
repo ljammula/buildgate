@@ -471,8 +471,8 @@ func TestSubmitRefusesAnOversizedHandedOverSpecBeforeRecordingIt(t *testing.T) {
 		PreflightProfile: "brownfield", PreflightProfileExplicit: true,
 		ImportedSpec: strings.Repeat("x", request.MaxHandedOverSpecBytes+1),
 	})
-	if err == nil || !strings.Contains(err.Error(), "handed-over spec") || !strings.Contains(err.Error(), "over the") {
-		t.Fatalf("Submit error = %v, want the centralized handed-over spec limit", err)
+	if err == nil || !strings.Contains(err.Error(), "spec is") || !strings.Contains(err.Error(), "over the") {
+		t.Fatalf("Submit error = %v, want the centralized spec limit", err)
 	}
 	if entries, _ := os.ReadDir(filepath.Join(dataDir, "requests")); len(entries) != 0 {
 		t.Fatalf("oversized submission left %d request(s) behind", len(entries))

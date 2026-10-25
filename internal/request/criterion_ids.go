@@ -104,7 +104,7 @@ func ValidateHandedOverSpec(content string) error {
 func validateSpecSize(content string) error {
 	bytes := len([]byte(content))
 	if bytes > MaxHandedOverSpecBytes {
-		return fmt.Errorf("handed-over spec is %d bytes, over the %d-byte limit", bytes, MaxHandedOverSpecBytes)
+		return fmt.Errorf("spec is %d bytes, over the %d-byte limit", bytes, MaxHandedOverSpecBytes)
 	}
 	return nil
 }

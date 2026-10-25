@@ -564,10 +564,14 @@ type Request struct {
 	// planning pass takes them in place of the planning job, through the
 	// same validation a drafted plan passes, to plan_review. After a
 	// plan_review rejection, or when the factory finds the plan infeasible,
-	// the planning job revises the current tickets with that feedback. Once
-	// the imported tickets are sent back to planning, this flag is cleared so
-	// a later spec redraft cannot import those old files again.
+	// the planning job revises the current tickets with that feedback. It is
+	// retained as history after that hand-over ends; PlanImportEnded controls
+	// whether a later planning pass may still take the imported tickets.
 	PlanImported bool `json:"plan_imported,omitempty"`
+	// PlanImportEnded records that plan-stage feedback ended the imported-plan
+	// path. It is separate from PlanImported so the request keeps the history
+	// of how its original plan entered the factory.
+	PlanImportEnded bool `json:"plan_import_ended,omitempty"`
 	// ImportedPlanCriteria is the approved spec's numbered criteria at the
 	// moment a handed-over plan was submitted. Planning refuses to import
 	// those tickets if the approved spec now derives a different list.
@@ -1089,11 +1093,11 @@ func (r *Request) SpecAsHandedOver() bool {
 	return r.SpecImported && SpecFeedback(r) == ""
 }
 
-// PlanAsHandedOver is SpecAsHandedOver for the tickets: PlanImported and
-// no plan-stage feedback yet (the operator's, or the factory's own
-// infeasibility note).
+// PlanAsHandedOver is SpecAsHandedOver for the tickets: PlanImported, no
+// plan-stage feedback yet (the operator's, or the factory's own infeasibility
+// note), and the imported-plan path has not already ended.
 func (r *Request) PlanAsHandedOver() bool {
-	return r.PlanImported && PlanFeedback(r) == ""
+	return r.PlanImported && !r.PlanImportEnded && PlanFeedback(r) == ""
 }
 
 // ApproveSpec moves a request from spec_review to planning, recording by
@@ -1205,7 +1209,9 @@ func (r *Request) RejectPlan(by, reason string, now time.Time) error {
 	if err := advance(r, []State{StatePlanReview}, StatePlanning, by, reason, now); err != nil {
 		return err
 	}
-	r.PlanImported = false
+	if r.PlanImported {
+		r.PlanImportEnded = true
+	}
 	return nil
 }
 

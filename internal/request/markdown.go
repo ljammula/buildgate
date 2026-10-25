@@ -138,6 +138,13 @@ func markdownLineMask(lines []string) []bool {
 	return blocked
 }
 
+// MarkdownLineMask returns the structural-line mask used by request parsers.
+// A true entry is front matter, part of a fenced block, or part of an HTML
+// comment and must not be interpreted as document structure.
+func MarkdownLineMask(lines []string) []bool {
+	return markdownLineMask(lines)
+}
+
 func lineBlocked(mask []bool, index int) bool {
 	return index >= 0 && index < len(mask) && mask[index]
 }

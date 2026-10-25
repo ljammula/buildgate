@@ -1376,8 +1376,8 @@ func TestUpdateRequestSpecHandlerRefusesAnOversizedHandedOverSpec(t *testing.T) 
 	body, _ := json.Marshal(updateRequestContentBody{Content: strings.Repeat("x", request.MaxHandedOverSpecBytes+1)})
 	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/spec", "test-token", string(body)))
 
-	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "handed-over spec") {
-		t.Fatalf("status = %d, body %s; want the handed-over size refusal", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "spec is") {
+		t.Fatalf("status = %d, body %s; want the spec size refusal", recorder.Code, recorder.Body.String())
 	}
 }
 

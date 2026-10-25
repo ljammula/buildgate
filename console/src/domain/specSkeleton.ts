@@ -699,18 +699,19 @@ function headingRows(
 }
 
 export function specStructure(content: string, handedOver = false): StructureCheck {
+  const bytes = new TextEncoder().encode(content).byteLength;
+  const sizeRow: StructureRow = {
+    label: handedOver ? "Handed-over spec size" : "Spec size",
+    ok: bytes <= MAX_HANDED_OVER_SPEC_BYTES,
+    note:
+      bytes <= MAX_HANDED_OVER_SPEC_BYTES
+        ? `${bytes} bytes`
+        : `${bytes} bytes, max ${MAX_HANDED_OVER_SPEC_BYTES}`,
+  };
+  const criteria = specAcceptanceCriteria(content);
   if (handedOver) {
-    const bytes = new TextEncoder().encode(content).byteLength;
-    const criteria = specAcceptanceCriteria(content);
     const rows: StructureRow[] = [
-      {
-        label: "Handed-over spec size",
-        ok: bytes <= MAX_HANDED_OVER_SPEC_BYTES,
-        note:
-          bytes <= MAX_HANDED_OVER_SPEC_BYTES
-            ? `${bytes} bytes`
-            : `${bytes} bytes, max ${MAX_HANDED_OVER_SPEC_BYTES}`,
-      },
+      sizeRow,
       {
         label: "Handed-over criteria",
         ok: criteria.length > 0,
@@ -723,10 +724,12 @@ export function specStructure(content: string, handedOver = false): StructureChe
     };
   }
   const lines = content.split("\n");
-  const criteria = specAcceptanceCriteria(content);
-  const rows = headingRows(lines, requiredSpecHeadings, (heading, body) =>
-    heading === ACCEPTANCE_CRITERIA && !anyNonBlank(body) ? "no content" : "",
-  );
+  const rows: StructureRow[] = [
+    sizeRow,
+    ...headingRows(lines, requiredSpecHeadings, (heading, body) =>
+      heading === ACCEPTANCE_CRITERIA && !anyNonBlank(body) ? "no content" : "",
+    ),
+  ];
   rows.push({
     label: "Numbered criteria",
     ok: criteria.length > 0,

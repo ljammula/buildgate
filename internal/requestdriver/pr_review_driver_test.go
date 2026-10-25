@@ -484,6 +484,61 @@ func TestRunCorrectiveRoundTwoThreadsProducesOneRunAndTwoReplies(t *testing.T) {
 	}
 }
 
+func TestPRReviewAnswersOnlyThreadsIncludedInTheBoundedAddendum(t *testing.T) {
+	dp := newFakeDeps(t)
+	threads := make([]forge.Thread, 25)
+	for i := range threads {
+		threads[i] = forge.Thread{
+			ID:        fmt.Sprintf("thread-%02d", i+1),
+			Path:      "a.go",
+			Line:      i + 1,
+			Author:    "reviewer",
+			Body:      fmt.Sprintf("please address comment %d", i+1),
+			CommentID: int64(i + 1),
+		}
+	}
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
+		return saveAcceptedRoundRun(t, dataDir, accepted)
+	}
+	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
+		requestdrivertest.LastPushedSHA[branch] = sha
+		return nil
+	}
+	var replied []int64
+	dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error {
+		replied = append(replied, commentID)
+		return nil
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+	for poll := 0; poll < 2; poll++ {
+		if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(time.Duration(poll)*time.Minute)); err != nil {
+			t.Fatalf("advancePRReview poll %d: %v", poll+1, err)
+		}
+	}
+	loaded, err := request.Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Tickets[0].SeenThreadIDs) != 25 {
+		t.Fatalf("seen threads = %d, want 25 after two polls", len(loaded.Tickets[0].SeenThreadIDs))
+	}
+	if len(loaded.Tickets[0].Rounds) != 2 || len(loaded.Tickets[0].Rounds[0].ThreadIDs) != 20 || len(loaded.Tickets[0].Rounds[1].ThreadIDs) != 5 {
+		t.Fatalf("round thread counts = %+v, want [20 5]", loaded.Tickets[0].Rounds)
+	}
+	if len(replied) != 25 {
+		t.Fatalf("replied comment ids = %d, want 25", len(replied))
+	}
+	for i, commentID := range replied {
+		if commentID != int64(i+1) {
+			t.Fatalf("reply %d has comment id %d, want %d", i+1, commentID, i+1)
+		}
+	}
+}
+
 // TestRunCorrectiveRoundSetsRunRequestID pins the PR-review corrective
 // round's own onReady callback (pr_review_driver.go's runCorrectiveRound)
 // against the conformity round's identical requirement

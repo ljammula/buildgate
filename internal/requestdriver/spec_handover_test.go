@@ -66,7 +66,7 @@ func TestAdvanceSpecDraftingHaltsOnAnOversizedImportedRedraft(t *testing.T) {
 	}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if r.State != request.StateHalted || !strings.Contains(r.Error, "handed-over spec") || !strings.Contains(r.Error, "120000-byte limit") {
+	if r.State != request.StateHalted || !strings.Contains(r.Error, "spec is") || !strings.Contains(r.Error, "120000-byte limit") {
 		t.Fatalf("State = %q, Error = %q; want oversized redraft halt", r.State, r.Error)
 	}
 }

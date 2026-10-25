@@ -24,7 +24,7 @@ const failing = () =>
 test("a complete spec ticks every row and says the server checks again", () => {
   render(<StructureChecklist kind="spec" text={SPEC} />);
 
-  expect(within(checklist()).getAllByRole("listitem")).toHaveLength(9);
+  expect(within(checklist()).getAllByRole("listitem")).toHaveLength(10);
   expect(failing()).toEqual([]);
   expect(within(checklist()).getAllByRole("listitem").at(-1)).toHaveTextContent(
     "OK: Numbered criteria (2 parsed)",

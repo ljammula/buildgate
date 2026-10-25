@@ -21,7 +21,6 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestsubmit"
 	"buildgate/internal/sessionconfig"
-	"buildgate/internal/ticketspec"
 )
 
 // roleChoiceFlag is a flag.Value that accumulates `-<name> role=value`
@@ -252,22 +251,13 @@ func resolveSubmitSpecFile(p submitParams) (spec string, trailingText []string, 
 }
 
 func firstSubmitSpecHeading(spec string) string {
-	var fenceChar byte
-	var fenceLen int
 	lines := strings.Split(spec, "\n")
-	lines = lines[request.FrontMatterBodyOffset(lines):]
-	for _, raw := range lines {
+	mask := request.MarkdownLineMask(lines)
+	for i, raw := range lines {
+		if mask[i] {
+			continue
+		}
 		line := strings.TrimSpace(raw)
-		if fenceChar != 0 {
-			if ticketspec.ClosesFence(line, fenceChar, fenceLen) {
-				fenceChar, fenceLen = 0, 0
-			}
-			continue
-		}
-		if ch, n := ticketspec.FenceMarker(line); ch != 0 {
-			fenceChar, fenceLen = ch, n
-			continue
-		}
 		level := request.MarkdownHeadingLevel(raw)
 		if level > 0 {
 			return strings.TrimSpace(line[level:])
@@ -278,8 +268,11 @@ func firstSubmitSpecHeading(spec string) string {
 
 func firstSubmitSpecLine(spec string) string {
 	lines := strings.Split(spec, "\n")
-	lines = lines[request.FrontMatterBodyOffset(lines):]
-	for _, raw := range lines {
+	mask := request.MarkdownLineMask(lines)
+	for i, raw := range lines {
+		if mask[i] {
+			continue
+		}
 		if line := strings.TrimSpace(raw); line != "" {
 			return line
 		}
@@ -314,20 +307,10 @@ func specSection(spec, heading string) string {
 	inside := false
 	wanted := request.NormalizeSpecHeading(heading)
 	wantedLevel := request.MarkdownHeadingLevel(heading)
-	var fenceChar byte
-	var fenceLen int
 	lines := strings.Split(spec, "\n")
-	lines = lines[request.FrontMatterBodyOffset(lines):]
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if fenceChar != 0 {
-			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
-				fenceChar, fenceLen = 0, 0
-			}
-			continue
-		}
-		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
-			fenceChar, fenceLen = ch, n
+	mask := request.MarkdownLineMask(lines)
+	for i, line := range lines {
+		if mask[i] {
 			continue
 		}
 		level := request.MarkdownHeadingLevel(line)

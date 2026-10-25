@@ -165,9 +165,10 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	r.TicketIndex = 0
 	r.TicketCount = 0
 	if target == SendBackToPlan {
-		// The imported files are now the previous plan to revise. Do not let a
-		// later spec send-back make planning take them as a fresh hand-over.
-		r.PlanImported = false
+		// The imported files are now the previous plan to revise. Keep the
+		// import in the request's history, but do not let a later spec
+		// send-back make planning take them as a fresh hand-over.
+		endPlanImport(r)
 	}
 	if target == SendBackToSpec {
 		// Every downstream pin goes with the spec: tickets/* and the
@@ -206,6 +207,12 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 		return nil, err
 	}
 	return r, nil
+}
+
+func endPlanImport(r *Request) {
+	if r.PlanImported {
+		r.PlanImportEnded = true
+	}
 }
 
 // supersedeRequestOracle moves the request-level oracle/ directory to

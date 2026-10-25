@@ -616,6 +616,9 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 			FromState: request.StatePlanning,
 			ForStage:  request.StatePlanReview,
 		})
+		if r.PlanImported {
+			r.PlanImportEnded = true
+		}
 		log.Printf("request %s: drafted plan refused (%v) -- re-planning automatically", r.ID, validateErr)
 	}
 	// A request with an approved request-level oracle/ gets each ticket's own
@@ -662,9 +665,10 @@ func planRedraftable(r *request.Request, err error) bool {
 
 // importsPlan reports whether this planning attempt takes the tickets the
 // operator handed over (`factoryd submit -plan-dir`) in place of the
-// planning job: only while there is no plan-stage feedback. A plan_review
-// rejection, or the factory's own "plan infeasible" note, is feedback to
-// apply, and the planning job then revises the tickets.
+// planning job: only while the imported-plan path is still open and there is
+// no plan-stage feedback. A plan_review rejection, or the factory's own
+// "plan infeasible" note, is feedback to apply, and the planning job then
+// revises the tickets.
 func importsPlan(r *request.Request) bool {
 	return r.PlanAsHandedOver()
 }
@@ -1872,10 +1876,7 @@ type boundedAddendumSection struct {
 
 func boundedAddendumSectionMinimumBytes(section boundedAddendumSection) int {
 	header := section.prefix + section.heading + "\n\n"
-	if len(section.entries) <= section.maxEntries {
-		return len([]byte(header))
-	}
-	omitted := fmt.Sprintf("_%d more %s omitted._\n", len(section.entries)-section.maxEntries, section.omittedLabel)
+	omitted := fmt.Sprintf("_%d more %s omitted._\n", len(section.entries), section.omittedLabel)
 	return len([]byte(header + omitted))
 }
 
@@ -1883,6 +1884,11 @@ func boundedAddendumSectionMinimumBytes(section boundedAddendumSection) int {
 // trailing entries when the shared ticket-build input writer's remaining
 // byte budget is tight. Each section keeps its own count/byte omission note.
 func renderBoundedAddendumSections(sections []boundedAddendumSection, maxBytes int) string {
+	rendered, _ := renderBoundedAddendumSectionsWithCounts(sections, maxBytes)
+	return rendered
+}
+
+func renderBoundedAddendumSectionsWithCounts(sections []boundedAddendumSection, maxBytes int) (string, []int) {
 	active := make([]boundedAddendumSection, 0, len(sections))
 	for _, section := range sections {
 		if len(section.entries) > 0 {
@@ -1890,24 +1896,26 @@ func renderBoundedAddendumSections(sections []boundedAddendumSection, maxBytes i
 		}
 	}
 	var out strings.Builder
+	includedCounts := make([]int, 0, len(active))
 	for i, section := range active {
 		remaining := maxBytes - out.Len()
 		reserve := 0
 		for _, later := range active[i+1:] {
 			reserve += boundedAddendumSectionMinimumBytes(later)
 		}
-		candidate := renderOneBoundedAddendumSection(section, remaining-reserve)
+		candidate, included := renderOneBoundedAddendumSection(section, remaining-reserve)
+		includedCounts = append(includedCounts, included)
 		if candidate == "" {
 			continue
 		}
 		out.WriteString(candidate)
 	}
-	return out.String()
+	return out.String(), includedCounts
 }
 
-func renderOneBoundedAddendumSection(section boundedAddendumSection, maxBytes int) string {
+func renderOneBoundedAddendumSection(section boundedAddendumSection, maxBytes int) (string, int) {
 	if len(section.entries) == 0 || section.maxEntries < 0 {
-		return ""
+		return "", 0
 	}
 	maxIncluded := len(section.entries)
 	if maxIncluded > section.maxEntries {
@@ -1922,10 +1930,10 @@ func renderOneBoundedAddendumSection(section boundedAddendumSection, maxBytes in
 		}
 		candidate := header + strings.Join(section.entries[:included], "") + note
 		if len([]byte(candidate)) <= maxBytes {
-			return candidate
+			return candidate, included
 		}
 	}
-	return ""
+	return "", 0
 }
 
 // reviewFindingsSection renders the review gate's flagged spec-conformity

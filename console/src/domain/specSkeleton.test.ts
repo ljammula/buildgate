@@ -123,6 +123,7 @@ describe("specStructure", () => {
     const check = specStructure(SPEC);
     expect(check.passes).toBe(true);
     expect(check.rows.map((r) => r.label)).toEqual([
+      "Spec size",
       "# Spec",
       "## Problem",
       "## Scope",
@@ -171,6 +172,11 @@ describe("specStructure", () => {
     ]);
     expect(check.rows.every((row) => row.ok)).toBe(true);
     expect(check.rows.at(-1)?.note).toBe("1 parsed");
+  });
+
+  test("a drafted spec reports an oversized document", () => {
+    const check = specStructure(SPEC + "x".repeat(120_000));
+    expect(check.rows.find((row) => row.label === "Spec size")?.ok).toBe(false);
   });
 
   test("a handed-over spec without criteria fails the mirrored checklist", () => {

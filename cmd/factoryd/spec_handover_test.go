@@ -121,4 +121,15 @@ func TestResolveSubmitSpecFileUsesStructuralFallbacks(t *testing.T) {
 	if err != nil || len(trailing) != 1 || trailing[0] != "Real title" {
 		t.Fatalf("fenced-heading fallback = %q (%v), want the first structural heading", trailing, err)
 	}
+	commentedHeading := filepath.Join(dir, "commented-heading.md")
+	if err := os.WriteFile(commentedHeading, []byte("<!--\n# Not the title\n-->\n\n# Real title\n\n- criterion\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, trailing, err = resolveSubmitSpecFile(submitParams{specFile: commentedHeading})
+	if err != nil || len(trailing) != 1 || trailing[0] != "Real title" {
+		t.Fatalf("commented-heading fallback = %q (%v), want the first structural heading", trailing, err)
+	}
+	if got := specSection("## Problem\n\nreal problem\n<!--\n## Fake\n-->\n```\n## Also fake\n```\n## Scope\n\nscope\n", "## Problem"); got != "real problem" {
+		t.Fatalf("specSection = %q, want comments and fences ignored", got)
+	}
 }
