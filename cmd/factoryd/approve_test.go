@@ -149,7 +149,7 @@ func TestRejectMainCriteriaChangeHaltFeedsPlanningFeedback(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := rejectMain(dp, []string{id, "-to", "plan", "-reason", "revise the imported tickets", "-data-dir", dataDir}); err != nil {
+	if err := rejectMain(dp, []string{"-to", "plan", "-reason", "revise the imported tickets", "-data-dir", dataDir, id}); err != nil {
 		t.Fatalf("factoryd reject -to plan -reason: %v", err)
 	}
 	planning := requestdrivertest.LoadRequest(t, dataDir, id)

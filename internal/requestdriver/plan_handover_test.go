@@ -85,7 +85,7 @@ func TestPlanningStopsBeforeTakingImportedTicketsWhenSpecCriteriaChanged(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "the spec's criteria changed after the plan was handed over") || !strings.Contains(loaded.Error, "factoryd reject req-1 -to plan -reason") {
+	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "the spec's criteria changed after the plan was handed over") || !strings.Contains(loaded.Error, "factoryd reject -to plan -reason") {
 		t.Fatalf("State = %q, Error = %q; want the criteria-change halt and choices", loaded.State, loaded.Error)
 	}
 	if loaded.TicketCount != 0 {

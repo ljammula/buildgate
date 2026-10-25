@@ -91,7 +91,7 @@ another profile:
   tickets (`001.spec.md`, `002.spec.md`, ...)
   in this request
 - If a handed-over plan stops because the spec's criteria changed, run
-  `factoryd reject <id> -to plan -reason "..."`; the reason becomes planning
+  `factoryd reject -to plan -reason "..." <id>`; the reason becomes planning
   feedback and revised tickets are drafted instead of taking the imported
   tickets again.
 - `factoryd retry [-from scratch|<round>] <id>` (a round number from

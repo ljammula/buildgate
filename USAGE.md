@@ -104,7 +104,7 @@ console spec edit, and after a redraft. The complete ticket build input is
 limited to 180,000 bytes, leaving 20,000 bytes below build_app.py's 200,000-
 byte round-prompt limit for round state and corrective framing. If a
 handed-over plan's criteria change, planning stops; send it back to planning
-with `factoryd reject <id> -to plan -reason "..."`. That command supplies plan
+with `factoryd reject -to plan -reason "..." <id>`. That command supplies plan
 feedback, so planning drafts revised tickets instead of taking the imported
 tickets again.
 

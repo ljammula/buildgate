@@ -475,7 +475,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 			return haltPlanningInputs(dataDir, r, fmt.Sprintf("approved spec.md: %v", criteriaErr), now)
 		}
 		if !slices.Equal(criteria, r.ImportedPlanCriteria) {
-			return haltPlanningInputs(dataDir, r, fmt.Sprintf("the spec's criteria changed after the plan was handed over; send this request back to planning with `factoryd reject %s -to plan -reason \"...\"`, then planning will draft revised tickets instead of taking the imported tickets again", r.ID), now)
+			return haltPlanningInputs(dataDir, r, fmt.Sprintf("the spec's criteria changed after the plan was handed over; send this request back to planning with `factoryd reject -to plan -reason \"...\" %s`, then planning will draft revised tickets instead of taking the imported tickets again", r.ID), now)
 		}
 	}
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
