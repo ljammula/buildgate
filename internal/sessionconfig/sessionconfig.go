@@ -489,14 +489,16 @@ type Settings struct {
 	ModelHostConcurrency      int
 	MaxParallelJobs           int
 	SandboxInstallCacheImages int
-	MeterMaxRequestBytes      int64
-	MeterRequestsPerMinute    int
-	MeterTokenBudget          int
-	MeterTokenBudgetWindow    time.Duration
-	MeterCostBudgetMicroUSD   int64
-	MeterCostBudgetWindow     time.Duration
-	MeterTokenCeiling         int
-	MeterCostCeilingMicroUSD  int64
+	// MeterMaxRequestBytes is 0 when the config does not set it: the route
+	// then derives the cap from its model's context window.
+	MeterMaxRequestBytes     int64
+	MeterRequestsPerMinute   int
+	MeterTokenBudget         int
+	MeterTokenBudgetWindow   time.Duration
+	MeterCostBudgetMicroUSD  int64
+	MeterCostBudgetWindow    time.Duration
+	MeterTokenCeiling        int
+	MeterCostCeilingMicroUSD int64
 
 	// RequestTokenBudget/RequestCostBudgetMicroUSD/MonthlyTokenBudget/
 	// MonthlyCostBudgetMicroUSD mirror the identically-named Config
@@ -627,7 +629,6 @@ func DefaultSettings() Settings {
 		SandboxCPUs:      "2",
 		SandboxTmpfsSize: "1g",
 
-		MeterMaxRequestBytes:      1 << 20,
 		MeterRequestsPerMinute:    60,
 		MeterTokenBudget:          1_000_000,
 		MeterTokenBudgetWindow:    time.Hour,
@@ -770,7 +771,15 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 		atLeastOne(&s.SandboxInstallCacheImages, "sandbox_install_cache_images", c.SandboxInstallCacheImages)); err != nil {
 		return s, err
 	}
-	integer64(&s.MeterMaxRequestBytes, c.MeterMaxRequestBytes)
+	if c.MeterMaxRequestBytes != nil {
+		if *c.MeterMaxRequestBytes < 1 {
+			return s, fmt.Errorf("meter_max_request_bytes: must be at least 1, got %d", *c.MeterMaxRequestBytes)
+		}
+		if *c.MeterMaxRequestBytes > GatewayMaxRequestBytes {
+			return s, fmt.Errorf("meter_max_request_bytes: %d exceeds the OpenShell gateway's %d byte (4 MiB) payload cap", *c.MeterMaxRequestBytes, GatewayMaxRequestBytes)
+		}
+		s.MeterMaxRequestBytes = *c.MeterMaxRequestBytes
+	}
 	integer(&s.MeterRequestsPerMinute, c.MeterRequestsPerMinute)
 	integer(&s.MeterTokenBudget, c.MeterTokenBudget)
 	if err := duration(&s.MeterTokenBudgetWindow, "meter_token_budget_window", c.MeterTokenBudgetWindow); err != nil {
@@ -914,6 +923,12 @@ const (
 // typical Go build uses about 1.3 GiB (peak 1.26 GiB measured 2026-10-04, a
 // small Python build 0.2 GiB).
 const DefaultMaxParallelJobs = 2
+
+// GatewayMaxRequestBytes is the largest meter max_request_bytes the OpenShell
+// gateway accepts: it refuses a middleware config above it and the sandbox
+// never starts. It bounds both an explicit meter_max_request_bytes and the
+// per-model default.
+const GatewayMaxRequestBytes = 4 << 20
 
 // atLeastOne sets *dst to *v when v is set, refusing a value below 1.
 func atLeastOne(dst *int, name string, v *int) error {
