@@ -123,7 +123,7 @@ echo "verify-live: pass 1/2 -- go test -race <all non-data packages> (DOCKER_SAN
 	# cmd/factoryd runs the full test package here. On a developer Mac with
 	# the race detector and live tests enabled, that can exceed Go's 10-minute
 	# default package timeout even though each test completes successfully.
-	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -timeout=15m -p 1 $(go list ./... | grep -v /data/)
+	DOCKER_SANDBOX_LIVE=1 GOFLAGS="-count=1" go test -race -timeout=15m -p 1 $(go list ./... | grep -v -e /data/ -e /node_modules/)
 ) >"$LOG" 2>&1 9>&- || status=1
 tail -100 "$LOG"
 if [ "$status" -ne 0 ]; then

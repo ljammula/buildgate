@@ -10,7 +10,9 @@ IMAGE_SOURCE ?= source
 # list ./...`/`gofmt -l .` walking into it makes verify depend on what
 # happens to be sitting in an operator's data/ dir instead of this repo's
 # own source tree, so every Go target below is scoped away from it.
-GO_PACKAGES = $(shell go list ./... | grep -v '/data/')
+# console/node_modules is the same: an npm dependency may ship a Go package,
+# and the console's `npm ci` rewrites that tree while `go list` reads it.
+GO_PACKAGES = $(shell go list ./... | grep -v -e '/data/' -e '/node_modules/')
 GO_COVERPKG = $(shell echo $(GO_PACKAGES) | tr ' ' ',')
 
 # Optional PEM bundle for a host TLS-interception proxy. It is passed to
