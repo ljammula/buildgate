@@ -66,7 +66,12 @@ export function RevisionCompare({ request }: { readonly request: RequestSummary 
           feedbackSupplied={own === null ? null : own.feedbackSupplied}
           changes={
             own !== null && detail.data !== undefined && detail.data.index === own.index
-              ? anchoredChanges(note, detail.data.files, (path) => currentContentFor(request, path))
+              ? anchoredChanges(
+                  note,
+                  detail.data.files,
+                  (path) => currentContentFor(request, path),
+                  request.specImported,
+                )
               : null
           }
         />

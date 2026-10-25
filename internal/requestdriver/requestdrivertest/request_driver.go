@@ -217,7 +217,13 @@ func HandedOverPlanFixture(t *testing.T, tickets map[string]string) (dataDir, id
 	if err != nil {
 		t.Fatal(err)
 	}
+	r.SpecImported = true
 	r.PlanImported = true
+	criteria, err := request.SpecAcceptanceCriteria(TwoCriteriaSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ImportedPlanCriteria = criteria
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}

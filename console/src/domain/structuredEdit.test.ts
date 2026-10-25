@@ -3,6 +3,7 @@ import {
   requiredTicketHeadings,
   requiredTicketHeaderKeys,
   specAcceptanceCriteria,
+  specDocumentHeadings,
   validateTicketPlan,
 } from "@/domain/specSkeleton";
 import { readFixtureJson } from "@/test/fixtures";
@@ -71,8 +72,27 @@ describe("criteriaItems", () => {
 
   // The server's reader and this one must cut the list at the same places.
   test.each(vectors.specs)("agrees with the server's criteria on: $name", ({ text }) => {
-    const items = criteriaItems(text) ?? [];
+    const items = criteriaItems(text);
+    if (items === null) {
+      expect(text).not.toContain("\n## Acceptance criteria\n");
+      return;
+    }
     expect(items).toHaveLength(specAcceptanceCriteria(text).length);
+  });
+
+  test("does not expose derived operator bullets as a numbered-list editor", () => {
+    const text = "# Operator spec\n\n## Wanted behaviour\n\n- Keep this bullet.\n";
+    expect(specAcceptanceCriteria(text)).toEqual(["1. Keep this bullet."]);
+    expect(criteriaItems(text)).toBeNull();
+    expect(setCriterionBody(text, 0, "rewritten")).toBe(text);
+    expect(
+      setSectionBody(
+        text,
+        specDocumentHeadings(text),
+        "## Wanted behaviour",
+        "\n- Rewritten bullet.",
+      ),
+    ).toBe("# Operator spec\n\n## Wanted behaviour\n\n- Rewritten bullet.\n");
   });
 });
 

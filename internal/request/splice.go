@@ -3,6 +3,8 @@ package request
 import (
 	"fmt"
 	"strings"
+
+	"buildgate/internal/ticketspec"
 )
 
 // sectionSpan is one skeleton section of a document: the bytes from its
@@ -45,28 +47,12 @@ func headingLevel(line string) int {
 
 // fenceOpen returns the fence character and length a line opens, or 0.
 func fenceOpen(line string) (byte, int) {
-	t := strings.TrimLeft(line, " \t")
-	if t == "" || (t[0] != '`' && t[0] != '~') {
-		return 0, 0
-	}
-	n := 0
-	for n < len(t) && t[n] == t[0] {
-		n++
-	}
-	if n < 3 {
-		return 0, 0
-	}
-	return t[0], n
+	return ticketspec.FenceMarker(strings.TrimSpace(line))
 }
 
 // fenceCloses reports whether line closes a fence of ch opened with n.
 func fenceCloses(line string, ch byte, n int) bool {
-	t := strings.TrimSpace(line)
-	k := 0
-	for k < len(t) && t[k] == ch {
-		k++
-	}
-	return k >= n && k == len(t)
+	return ticketspec.ClosesFence(strings.TrimSpace(line), ch, n)
 }
 
 // parseSkeleton locates every heading of headings in content the way

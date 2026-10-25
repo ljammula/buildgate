@@ -71,7 +71,18 @@ another profile:
   Add `-spec-file <file>` only when the operator hands over a finished spec
   and says it is the spec, not the request: it may use the operator's own
   headings, but it must contain a named numbered criteria section or a
-  derivable top-level list item in a `##` section. Add
+  derivable top-level list item in the title area or a `##` section. Derived
+  criteria exclude `Problem`, `Non-goals`, `Out of scope`, `Risks`, `Open
+  questions`, `Background`, `Context`, `Motivation`, `Alternatives considered`,
+  `References` and `Notes` (case-insensitive, one trailing colon ignored).
+  A non-exact `##`-through-`######` `Acceptance criteria` heading uses the
+  derived reader; exact `## Acceptance criteria` keeps numbered checks.
+  Fenced lists are ignored using a closing fence with the same backtick/tilde
+  character, at least the opening length and no trailing content; thematic
+  breaks end items, task checkboxes are removed, and prose after a blank line
+  is outside the item while a lazy continuation without that blank stays in
+  it. The handed-over document is limited to 200,000 bytes at submit and the
+  console spec PUT. Add
   `-plan-dir <dir>` with it only when the operator also hands over the
   tickets (`001.spec.md`, `002.spec.md`, ...)
   in this request

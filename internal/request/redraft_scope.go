@@ -23,7 +23,7 @@ func skeletonFor(path string) []string {
 }
 
 // RedraftScope is the part of a reviewed document set a redraft may change:
-// the files and, within each, the skeleton sections the reviewer commented
+// the files and, within each, the document sections the reviewer commented
 // on. Everything else is copied from the reviewed files by the driver
 // (SpliceSections), never taken from the model.
 type RedraftScope struct {
@@ -38,8 +38,8 @@ func (s *RedraftScope) Whole(path string) bool {
 	return ok && headings == nil
 }
 
-// Sections returns the headings of path to redraft, in skeleton order, and
-// whether path is in scope at all.
+// Sections returns the headings of path to redraft and whether path is in
+// scope at all.
 func (s *RedraftScope) Sections(path string) ([]string, bool) {
 	headings, ok := s.Files[path]
 	return headings, ok
@@ -103,14 +103,29 @@ func ReviewedFiles(dataDir string, r *Request, stage State) map[string]string {
 // whose feedback names no passage, makes a full redraft. A rejection scopes
 // the redraft only when it carries anchors, no free note beside them (a note
 // on the whole document asks for a whole-document redraft), and no anchor on
-// the whole of spec.md or on a heading the skeleton lacks.
+// the whole of spec.md or on a heading the document lacks. Imported specs use
+// their own structural headings; drafted documents use the fixed skeleton.
 func (r *Request) RedraftScope(stage State) *RedraftScope {
 	newest := r.scopingRejection(stage)
 	if newest == nil || len(newest.Anchors) == 0 || newest.Note != "" {
 		return nil
 	}
 	want := map[string]map[string]bool{}
+	order := map[string][]string{}
 	for _, a := range newest.Anchors {
+		if r.SpecImported && a.Path == specFileName {
+			if a.Section == "" || markdownHeadingLevel(strings.TrimSpace(a.Section)) == 0 {
+				return nil
+			}
+			if want[a.Path] == nil {
+				want[a.Path] = map[string]bool{}
+			}
+			if !want[a.Path][a.Section] {
+				want[a.Path][a.Section] = true
+				order[a.Path] = append(order[a.Path], a.Section)
+			}
+			continue
+		}
 		skeleton := skeletonFor(a.Path)
 		if skeleton == nil || (a.Path == specFileName && a.Section == "") {
 			return nil
@@ -134,6 +149,10 @@ func (r *Request) RedraftScope(stage State) *RedraftScope {
 	for path, set := range want {
 		if set[""] {
 			scope.Files[path] = nil
+			continue
+		}
+		if r.SpecImported && path == specFileName {
+			scope.Files[path] = append([]string(nil), order[path]...)
 			continue
 		}
 		headings := []string{}

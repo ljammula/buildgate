@@ -21,6 +21,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestsubmit"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/ticketspec"
 )
 
 // roleChoiceFlag is a flag.Value that accumulates `-<name> role=value`
@@ -222,10 +223,9 @@ func submitRequest(dp *deps, ctx context.Context, p submitParams) (submitResult,
 
 // resolveSubmitSpecFile reads -spec-file and returns its content with the
 // trailing request text to use. A handed-over spec may come with no request
-// text at all; its own Problem section then stands in. If the operator's
-// document has no Problem section (or leaves it empty), the full trimmed spec
-// is the request text, so the missing skeleton heading is not itself a
-// submission failure.
+// text at all; its own Problem section then stands in. If there is no Problem
+// section, the first heading's text is the request title, or the first
+// non-blank line after any front matter when the document has no heading.
 func resolveSubmitSpecFile(p submitParams) (spec string, trailingText []string, err error) {
 	if p.specFile == "" {
 		return "", p.trailingText, nil
@@ -242,10 +242,68 @@ func resolveSubmitSpecFile(p submitParams) (spec string, trailingText []string, 
 	if problem != "" {
 		return spec, []string{problem}, nil
 	}
-	if fallback := strings.TrimSpace(spec); fallback != "" {
+	if title := firstSubmitSpecHeading(spec); title != "" {
+		return spec, []string{title}, nil
+	}
+	if fallback := firstSubmitSpecLine(spec); fallback != "" {
 		return spec, []string{fallback}, nil
 	}
 	return spec, nil, nil
+}
+
+func firstSubmitSpecHeading(spec string) string {
+	var fenceChar byte
+	var fenceLen int
+	for _, raw := range submitSpecContentLines(spec) {
+		line := strings.TrimSpace(raw)
+		if fenceChar != 0 {
+			if ticketspec.ClosesFence(line, fenceChar, fenceLen) {
+				fenceChar, fenceLen = 0, 0
+			}
+			continue
+		}
+		if ch, n := ticketspec.FenceMarker(line); ch != 0 {
+			fenceChar, fenceLen = ch, n
+			continue
+		}
+		level := 0
+		for level < len(line) && line[level] == '#' {
+			level++
+		}
+		if level > 0 && level < len(line) && (line[level] == ' ' || line[level] == '\t') {
+			return strings.TrimSpace(line[level:])
+		}
+	}
+	return ""
+}
+
+func firstSubmitSpecLine(spec string) string {
+	for _, raw := range submitSpecContentLines(spec) {
+		if line := strings.TrimSpace(raw); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func submitSpecContentLines(spec string) []string {
+	lines := strings.Split(spec, "\n")
+	first := -1
+	for i, raw := range lines {
+		if strings.TrimSpace(raw) != "" {
+			first = i
+			break
+		}
+	}
+	if first == -1 || strings.TrimSpace(lines[first]) != "---" {
+		return lines
+	}
+	for i := first + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return lines[i+1:]
+		}
+	}
+	return nil
 }
 
 // readSubmitPlanDir reads -plan-dir's tickets, in name order. Their names
@@ -273,11 +331,24 @@ func readSubmitPlanDir(dir string) ([]requestsubmit.ImportedTicket, error) {
 func specSection(spec, heading string) string {
 	var body []string
 	inside := false
+	var fenceChar byte
+	var fenceLen int
 	for _, line := range strings.Split(spec, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if fenceChar != 0 {
+			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
+				fenceChar, fenceLen = 0, 0
+			}
+			continue
+		}
+		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
+			fenceChar, fenceLen = ch, n
+			continue
+		}
 		switch {
-		case strings.TrimSpace(line) == heading:
+		case trimmed == heading:
 			inside = true
-		case inside && strings.HasPrefix(line, "## "):
+		case inside && strings.HasPrefix(trimmed, "## "):
 			return strings.TrimSpace(strings.Join(body, "\n"))
 		case inside:
 			body = append(body, line)

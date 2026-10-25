@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"regexp"
@@ -399,12 +400,12 @@ func RewriteAllowedFilesLine(specPath string, add []string) (string, error) {
 	for i, line := range lines {
 		trimmedForFence := strings.TrimSpace(line)
 		if inFence {
-			if closesFence(trimmedForFence, fenceChar, fenceLen) {
+			if ClosesFence(trimmedForFence, fenceChar, fenceLen) {
 				inFence = false
 			}
 			continue
 		}
-		if ch, n := fenceMarker(trimmedForFence); ch != 0 {
+		if ch, n := FenceMarker(trimmedForFence); ch != 0 {
 			inFence, fenceChar, fenceLen = true, ch, n
 			continue
 		}
@@ -640,7 +641,7 @@ func hasModuleRootMarker(dir string) bool {
 // means outside any fenced code block and with no leading whitespace —
 // shared by every machine-readable ticket key so this fence/indentation
 // handling (proven correct through several review rounds; see
-// fenceMarker/closesFence) isn't duplicated and can't drift between keys.
+// FenceMarker/ClosesFence) isn't duplicated and can't drift between keys.
 //
 // A ticket spec.md is prose that can quote or illustrate a key it's
 // describing (e.g. an indented example, or a fenced ```block``` showing
@@ -682,7 +683,7 @@ func parseAllTopLevelKeyLines(specPath, prefix string) (values []string, err err
 // forEachTopLevelLine scans specPath and calls fn with each top-level
 // line — outside any fenced code block and with no leading whitespace,
 // the shared fence/indentation handling (proven correct through several
-// review rounds; see fenceMarker/closesFence) every machine-readable
+// review rounds; see FenceMarker/ClosesFence) every machine-readable
 // ticket key relies on so it can't drift between keys. fn returning true
 // stops the scan early.
 //
@@ -703,34 +704,53 @@ func forEachTopLevelLine(specPath string, fn func(line string) (stop bool)) erro
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
 	inFence := false
 	var fenceChar byte
 	var fenceLen int
-	for scanner.Scan() {
-		raw := scanner.Text()
+	err = forEachLine(f, func(raw string) (stop bool) {
 		trimmedForFence := strings.TrimSpace(raw)
 		if inFence {
-			if closesFence(trimmedForFence, fenceChar, fenceLen) {
+			if ClosesFence(trimmedForFence, fenceChar, fenceLen) {
 				inFence = false
 			}
-			continue
+			return false
 		}
-		if ch, n := fenceMarker(trimmedForFence); ch != 0 {
+		if ch, n := FenceMarker(trimmedForFence); ch != 0 {
 			inFence, fenceChar, fenceLen = true, ch, n
-			continue
+			return false
 		}
 		if raw != strings.TrimLeft(raw, " \t") {
-			continue // indented (example/illustration), not top-level metadata
+			return false // indented (example/illustration), not top-level metadata
 		}
-		if fn(raw) {
-			return nil
-		}
-	}
-	if err := scanner.Err(); err != nil {
+		return fn(raw)
+	})
+	if err != nil {
 		return fmt.Errorf("read ticket spec: %w", err)
 	}
 	return nil
+}
+
+// forEachLine calls fn with one line without its line ending, including a
+// final line that has no newline. Unlike bufio.Scanner, it has no per-line
+// token limit; ticket specs are bounded by their callers, not by 64 KiB.
+func forEachLine(r io.Reader, fn func(string) bool) error {
+	reader := bufio.NewReader(r)
+	for {
+		raw, err := reader.ReadString('\n')
+		if len(raw) > 0 {
+			raw = strings.TrimSuffix(raw, "\n")
+			raw = strings.TrimSuffix(raw, "\r")
+			if fn(raw) {
+				return nil
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 // FenceVerbatim returns content inside a tilde fence that nothing in content
@@ -759,7 +779,7 @@ func FenceVerbatim(content string) string {
 
 // ClosingFenceIfOpen returns the delimiter line that closes a Markdown fence
 // content leaves open at end of input, or "" when every fence is closed --
-// judged by the same fenceMarker/closesFence rules forEachTopLevelLine
+// judged by the same FenceMarker/ClosesFence rules forEachTopLevelLine
 // parses headers with. A caller appending text after content (a corrective
 // round's addendum) writes this first, so the appended text is never read
 // as the inside of content's fence, or, worse, as the close of it followed
@@ -771,12 +791,12 @@ func ClosingFenceIfOpen(content string) string {
 	for _, raw := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(raw)
 		if inFence {
-			if closesFence(trimmed, fenceChar, fenceLen) {
+			if ClosesFence(trimmed, fenceChar, fenceLen) {
 				inFence = false
 			}
 			continue
 		}
-		if ch, n := fenceMarker(trimmed); ch != 0 {
+		if ch, n := FenceMarker(trimmed); ch != 0 {
 			inFence, fenceChar, fenceLen = true, ch, n
 		}
 	}
@@ -786,13 +806,13 @@ func ClosingFenceIfOpen(content string) string {
 	return strings.Repeat(string(fenceChar), fenceLen)
 }
 
-// fenceMarker reports the fence character (` or ~) and length of a
+// FenceMarker reports the fence character (` or ~) and length of a
 // Markdown fence delimiter at the start of a trimmed line, or (0, 0) if
 // the line isn't a fence delimiter (fewer than 3 of the same character).
 // An opening fence may be followed by an info string (e.g. "```python"),
-// which this permits — only closesFence requires nothing but whitespace
+// which this permits — only ClosesFence requires nothing but whitespace
 // after the marker, matching CommonMark's actual asymmetric rule.
-func fenceMarker(trimmed string) (ch byte, length int) {
+func FenceMarker(trimmed string) (ch byte, length int) {
 	if trimmed == "" {
 		return 0, 0
 	}
@@ -809,14 +829,14 @@ func fenceMarker(trimmed string) (ch byte, length int) {
 	return ch, length
 }
 
-// closesFence reports whether trimmed is a valid closing delimiter for a
+// ClosesFence reports whether trimmed is a valid closing delimiter for a
 // fence opened with character ch and length minLen. Unlike an opening
 // fence, CommonMark requires a closing fence to contain nothing but the
 // fence character (at least minLen repetitions) and optional trailing
 // whitespace — a line like "~~~not-a-close" has the right marker but
 // trailing content, so it does not close the fence and must still be
 // treated as content inside it.
-func closesFence(trimmed string, ch byte, minLen int) bool {
+func ClosesFence(trimmed string, ch byte, minLen int) bool {
 	n := 0
 	for n < len(trimmed) && trimmed[n] == ch {
 		n++
@@ -920,23 +940,24 @@ func parseGoalSection(specPath string) (string, error) {
 	inFence := false
 	var fenceChar byte
 	var fenceLen int
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		trimmed := strings.TrimSpace(scanner.Text())
+	var result string
+	err = forEachLine(f, func(raw string) (stop bool) {
+		trimmed := strings.TrimSpace(raw)
 		// A "## Goal" inside a fenced block (an approved spec quoted into a
 		// build input by FenceVerbatim) is content, never the ticket's goal.
 		if inFence {
-			if closesFence(trimmed, fenceChar, fenceLen) {
+			if ClosesFence(trimmed, fenceChar, fenceLen) {
 				inFence = false
 			}
-			continue
+			return false
 		}
-		if ch, n := fenceMarker(trimmed); ch != 0 {
+		if ch, n := FenceMarker(trimmed); ch != 0 {
 			if inGoal && len(lines) > 0 {
-				return strings.Join(lines, " "), nil
+				result = strings.Join(lines, " ")
+				return true
 			}
 			inFence, fenceChar, fenceLen = true, ch, n
-			continue
+			return false
 		}
 		switch {
 		case !inGoal:
@@ -945,19 +966,25 @@ func parseGoalSection(specPath string) (string, error) {
 			}
 		case trimmed == "":
 			if len(lines) > 0 {
-				return strings.Join(lines, " "), nil
+				result = strings.Join(lines, " ")
+				return true
 			}
 			// Blank line(s) right after the heading itself: keep waiting
 			// for the paragraph to start.
 		case strings.HasPrefix(trimmed, "#"):
 			// A later heading with no paragraph text in between.
-			return strings.Join(lines, " "), nil
+			result = strings.Join(lines, " ")
+			return true
 		default:
 			lines = append(lines, trimmed)
 		}
-	}
-	if err := scanner.Err(); err != nil {
+		return false
+	})
+	if err != nil {
 		return "", err
+	}
+	if result != "" {
+		return result, nil
 	}
 	return strings.Join(lines, " "), nil
 }

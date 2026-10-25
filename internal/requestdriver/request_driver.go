@@ -223,7 +223,7 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
 	}
 	var validationErr error
-	if importsSpec(r) {
+	if r.SpecImported {
 		validationErr = request.ValidateHandedOverSpec(specMD)
 	} else if err := request.ValidateSpecSkeleton(specMD); err != nil {
 		validationErr = err
@@ -287,7 +287,7 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 // handed-over spec, and not for a scoped redraft that keeps the reviewed
 // criteria section (the splice copies it from the reviewed file).
 func criteriaAreDrafted(r *request.Request) bool {
-	if importsSpec(r) {
+	if r.SpecImported {
 		return false
 	}
 	scope := r.RedraftScope(request.StateSpecReview)
@@ -431,6 +431,65 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 // second refused plan always halts -- this is a bounded retry, not a loop.
 const maxPlanningAttempts = 2
 
+type planningInputs struct {
+	verifyCommand string
+	testPatterns  []string
+	criteriaCount int
+}
+
+var errPlanningInputsHalted = errors.New("planning inputs halted")
+
+func haltPlanningInputs(dataDir string, r *request.Request, reason string, now time.Time) (planningInputs, error) {
+	if err := HaltRequest(dataDir, r, reason, now); err != nil {
+		return planningInputs{}, err
+	}
+	return planningInputs{}, errPlanningInputsHalted
+}
+
+func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (planningInputs, error) {
+	cfgFile, _, err := projectconfig.Load(r.Workspace)
+	if err != nil {
+		return haltPlanningInputs(dataDir, r, fmt.Sprintf("read %s: %v", projectconfig.FileName, err), now)
+	}
+	verifyCommand := r.VerifyCommand
+	if verifyCommand == "" && cfgFile != nil {
+		verifyCommand = cfgFile.VerifyCommand
+	}
+	if verifyCommand == "" {
+		return haltPlanningInputs(dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
+	}
+	var testPatterns []string
+	if cfgFile != nil {
+		testPatterns = cfgFile.TestPatterns
+	}
+
+	specBytes, err := os.ReadFile(RequestSpecPath(dataDir, r.ID))
+	if err != nil {
+		return planningInputs{}, fmt.Errorf("read approved spec: %w", err)
+	}
+	if importsPlan(r) && r.ImportedPlanCriteria != nil {
+		criteria, criteriaErr := request.SpecAcceptanceCriteria(string(specBytes))
+		if criteriaErr != nil {
+			return haltPlanningInputs(dataDir, r, fmt.Sprintf("approved spec.md: %v", criteriaErr), now)
+		}
+		if !slices.Equal(criteria, r.ImportedPlanCriteria) {
+			return haltPlanningInputs(dataDir, r, "the spec's criteria changed after the plan was handed over; edit the tickets at plan review via the existing redraft/plan path, or resubmit the spec and plan", now)
+		}
+	}
+	if err := VerifyApprovedHashes(dataDir, r); err != nil {
+		return haltPlanningInputs(dataDir, r, err.Error(), now)
+	}
+	criteriaCount, err := request.SpecAcceptanceCriteriaCount(string(specBytes))
+	if err != nil {
+		return haltPlanningInputs(dataDir, r, fmt.Sprintf("approved spec.md: %v", err), now)
+	}
+	return planningInputs{
+		verifyCommand: verifyCommand,
+		testPatterns:  testPatterns,
+		criteriaCount: criteriaCount,
+	}, nil
+}
+
 // AdvancePlanning runs the plan-drafting job for r and either completes
 // planning (every ticket validated and written under
 // <request>/tickets/, evidence recorded, moved to plan_review) or halts r
@@ -467,49 +526,16 @@ const maxPlanningAttempts = 2
 // own message; a handed-over plan and an I/O error halt on the first
 // attempt -- see planRedraftable and maxPlanningAttempts.
 func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner PlanTicketsRunner, now time.Time) error {
-	if err := VerifyApprovedHashes(dataDir, r); err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
+	inputs, err := loadPlanningInputs(dataDir, r, now)
+	if errors.Is(err, errPlanningInputsHalted) {
+		return nil
 	}
-
-	// r.VerifyCommand -- what `factoryd submit` resolved at submission
-	// time, from either its own -verify-command flag or the workspace's
-	// .factory.yml (see submitMain's own doc comment) -- takes precedence
-	// over re-reading .factory.yml here: a submit-time -verify-command
-	// flag never lands in .factory.yml at all, and re-reading it fresh
-	// would silently lose that choice the moment planning runs. Only a
-	// request submitted before this field existed falls back to reading
-	// .factory.yml directly.
-	// cfgFile is read unconditionally (not just on the verifyCommand==""
-	// fallback path below) because writeAndValidateDraftedTickets also
-	// needs its TestPatterns -- see policy.TicketTestsAddedFeasible's own
-	// doc comment for why that check needs the project's actual patterns,
-	// not just DefaultTestPatterns, the same way run_ticket.go's
-	// testPatterns resolution (via requestsubmit.ApplyProjectConfigDefaults)
-	// does for a build run.
-	cfgFile, _, err := projectconfig.Load(r.Workspace)
 	if err != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("read %s: %v", projectconfig.FileName, err), now)
+		return err
 	}
-	verifyCommand := r.VerifyCommand
-	if verifyCommand == "" && cfgFile != nil {
-		verifyCommand = cfgFile.VerifyCommand
-	}
-	if verifyCommand == "" {
-		return HaltRequest(dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
-	}
-	var testPatterns []string
-	if cfgFile != nil {
-		testPatterns = cfgFile.TestPatterns
-	}
-
-	specBytes, err := os.ReadFile(RequestSpecPath(dataDir, r.ID))
-	if err != nil {
-		return fmt.Errorf("read approved spec: %w", err)
-	}
-	criteriaCount, err := request.SpecAcceptanceCriteriaCount(string(specBytes))
-	if err != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("approved spec.md: %v", err), now)
-	}
+	verifyCommand := inputs.verifyCommand
+	testPatterns := inputs.testPatterns
+	criteriaCount := inputs.criteriaCount
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 
 	runner = withPlanImport(runner)
@@ -2765,27 +2791,26 @@ const BuildSpecCriteriaFooter = "These are the approved spec's exact criteria; n
 // A ticket that declares no covered criteria at all -- the legacy/
 // hand-written ticket format, lacking a "## Plan" section entirely --
 // gets every criterion in the approved spec listed instead of none
-// (safer than handing the builder no contract text at all). If the
-// approved spec itself cannot be read or parsed in that case, this is
-// treated the same as "nothing to add" rather than a fatal error: a
-// hand-written ticket was never depending on that section to build
-// successfully before this function existed, and a request always has a
-// spec.md whose acceptance criteria already passed spec_review by the
-// time any ticket actually builds -- the read failing at all only
-// happens in tests exercising unrelated argv-shape behavior with no
-// spec.md fixture. A ticket that DOES declare covered criteria still
-// gets resolveApprovedCriteriaTexts' own fatal-error treatment for an
-// unreadable/unparseable/out-of-range spec, unchanged from
-// WriteTicketCriteriaFile's existing behavior.
+// (safer than handing the builder no contract text at all). The request
+// record and approved spec are still required for every shape: a missing
+// request record is an input error, never a reason to silently fall back to
+// the legacy ticket-first format. A ticket that DOES declare covered
+// criteria gets resolveApprovedCriteriaTexts' own fatal-error treatment for
+// an unreadable/unparseable/out-of-range spec.
 func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (string, error) {
+	requestRecord, err := request.Load(dataDir, requestID)
+	if err != nil {
+		return "", fmt.Errorf("load request: %w", err)
+	}
+	return ticketBuildSpecContent(dataDir, requestRecord, ticket)
+}
+
+func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, ticket request.Ticket) (string, error) {
 	ticketContent, err := os.ReadFile(ticket.SpecPath)
 	if err != nil {
 		return "", err
 	}
-	useApprovedSpec := false
-	if r, loadErr := request.Load(dataDir, requestID); loadErr == nil {
-		useApprovedSpec = r.BuildInput == request.BuildInputApprovedSpec
-	}
+	useApprovedSpec := requestRecord.BuildInput == request.BuildInputApprovedSpec
 	numbers, covErr := request.TicketCoveredCriteria(string(ticketContent))
 	declaresCoverage := covErr == nil
 	if covErr != nil && strings.Contains(string(ticketContent), "## Plan") {
@@ -2794,26 +2819,24 @@ func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (s
 
 	var texts []string
 	if declaresCoverage {
-		texts, err = resolveApprovedCriteriaTexts(dataDir, requestID, numbers)
+		texts, err = resolveApprovedCriteriaTexts(dataDir, requestRecord.ID, numbers)
 		if err != nil {
 			return "", err
 		}
-		if r, loadErr := request.Load(dataDir, requestID); loadErr == nil {
-			later := lastCoveringTickets(r.Tickets)
-			for i, n := range numbers {
-				if last, ok := later[n]; ok && last > ticket.Index {
-					texts[i] += fmt.Sprintf(" (Shared with ticket %d: deliver this ticket's part of it; the whole criterion is reviewed at ticket %d.)", last, last)
-				}
+		later := lastCoveringTickets(requestRecord.Tickets)
+		for i, n := range numbers {
+			if last, ok := later[n]; ok && last > ticket.Index {
+				texts[i] += fmt.Sprintf(" (Shared with ticket %d: deliver this ticket's part of it; the whole criterion is reviewed at ticket %d.)", last, last)
 			}
 		}
-	} else if specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestID)); readErr == nil {
+	} else if specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestRecord.ID)); readErr == nil {
 		if criteria, parseErr := request.SpecAcceptanceCriteria(string(specContent)); parseErr == nil {
 			texts = criteria
 		}
 	}
 
 	if useApprovedSpec {
-		specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestID))
+		specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestRecord.ID))
 		if readErr != nil {
 			return "", fmt.Errorf("read approved spec: %w", readErr)
 		}
@@ -2842,9 +2865,9 @@ func TicketBuildSpecContent(dataDir, requestID string, ticket request.Ticket) (s
 }
 
 // renderApprovedSpecTicketBuildInput is the new ticket-build input shape.
-// specReviewContent is the named insertion seam for the future P1.3
-// spec-review questions and answers; the current caller passes an empty
-// string, so no review material is present yet.
+// specReviewContent is the insertion seam for review questions and answers;
+// the current caller passes an empty string, so no review material is present
+// yet.
 func renderApprovedSpecTicketBuildInput(specContent, ticketContent, specReviewContent string, criteria []string) string {
 	var b strings.Builder
 	b.WriteString("# Approved spec\n\n")
@@ -2888,7 +2911,7 @@ func renderApprovedSpecTicketBuildInput(specContent, ticketContent, specReviewCo
 // tickets/ directory shows the derived file next to what it was derived
 // from.
 func writeTicketBuildSpecFile(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
-	content, err := TicketBuildSpecContent(dataDir, r.ID, ticket)
+	content, err := ticketBuildSpecContent(dataDir, r, ticket)
 	if err != nil {
 		return "", err
 	}

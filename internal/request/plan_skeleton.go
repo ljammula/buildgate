@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/ticketspec"
 )
 
 // requiredTicketHeadings is the fixed skeleton agent/pi/scripts/plan_tickets.py
@@ -259,28 +260,107 @@ func SpecAcceptanceCriteriaCount(specContent string) (int, error) {
 }
 
 // findAcceptanceCriteriaSection returns the line-range [start, end) of the
-// body under specContent's "## Acceptance criteria" heading (start is the
-// line after the heading itself; end is the next "## " heading, or
-// len(lines)). ok is false when the heading itself isn't present.
+// body under the exact "## Acceptance criteria" heading. A heading inside a
+// fenced block is content, not a section boundary.
 func findAcceptanceCriteriaSection(lines []string) (start, end int, ok bool) {
-	start = -1
 	for i, line := range lines {
-		if strings.TrimSpace(line) == specAcceptanceCriteriaHeading {
-			start = i + 1
-			break
+		if strings.TrimSpace(line) != specAcceptanceCriteriaHeading || !headingIsOutsideFence(lines, i) {
+			continue
+		}
+		return i + 1, sectionEnd(lines, i, 2), true
+	}
+	return 0, 0, false
+}
+
+// normalizeSpecHeading is the one heading comparison used by criteria
+// derivation, excluded-section handling and OpenDecisions: surrounding space
+// is ignored, one trailing colon is presentation, and case does not matter.
+func normalizeSpecHeading(raw string) string {
+	text := strings.TrimSpace(raw)
+	if level := markdownHeadingLevel(text); level > 0 {
+		text = strings.TrimSpace(text[level:])
+	}
+	text = strings.TrimSpace(strings.TrimSuffix(text, ":"))
+	return strings.ToLower(text)
+}
+
+func headingLabel(raw string) string {
+	text := strings.TrimSpace(raw)
+	if level := markdownHeadingLevel(text); level > 0 {
+		return strings.TrimSpace(text[level:])
+	}
+	return text
+}
+
+func headingIsOutsideFence(lines []string, wanted int) bool {
+	inFence := false
+	var fenceChar byte
+	var fenceLen int
+	for i, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if inFence {
+			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
+				inFence = false
+			}
+			continue
+		}
+		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
+			inFence, fenceChar, fenceLen = true, ch, n
+			continue
+		}
+		if i == wanted {
+			return true
 		}
 	}
-	if start == -1 {
-		return 0, 0, false
-	}
-	end = len(lines)
-	for i := start; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "## ") {
-			end = i
-			break
+	return false
+}
+
+func sectionEnd(lines []string, headingLine, level int) int {
+	inFence := false
+	var fenceChar byte
+	var fenceLen int
+	for i := headingLine + 1; i < len(lines); i++ {
+		raw := lines[i]
+		trimmed := strings.TrimSpace(raw)
+		if inFence {
+			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
+				inFence = false
+			}
+			continue
+		}
+		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
+			inFence, fenceChar, fenceLen = true, ch, n
+			continue
+		}
+		got := markdownHeadingLevel(raw)
+		if got == 0 && level == 2 {
+			trimmed := strings.TrimSpace(raw)
+			if strings.HasPrefix(trimmed, "## ") {
+				got = 2
+			}
+		}
+		if got > 0 && got <= level {
+			return i
 		}
 	}
-	return start, end, true
+	return len(lines)
+}
+
+// findNamedAcceptanceCriteriaSection finds the first criteria heading that
+// is not the exact drafted-spec heading. Its list is read by derived-item
+// rules, and its section ends at the next heading of the same or higher level.
+func findNamedAcceptanceCriteriaSection(lines []string) (start, end int, heading string, ok bool) {
+	for i, raw := range lines {
+		level := markdownHeadingLevel(raw)
+		if level < 2 || level > 6 || !headingIsOutsideFence(lines, i) || strings.TrimSpace(raw) == specAcceptanceCriteriaHeading {
+			continue
+		}
+		if normalizeSpecHeading(raw) != "acceptance criteria" {
+			continue
+		}
+		return i + 1, sectionEnd(lines, i, level), strings.TrimSpace(raw), true
+	}
+	return 0, 0, "", false
 }
 
 // foldAcceptanceCriteriaLines folds a "## Acceptance criteria" section's
@@ -300,27 +380,106 @@ func foldAcceptanceCriteriaLines(sectionLines []string) []string {
 // SpecAcceptanceCriteria returns the approved spec's numbered acceptance
 // criteria verbatim ("1. It works."), in order -- the lines a ticket's
 // build hands to build_app.py's --spec-acceptance-criteria conformity review.
-// When the spec has no "## Acceptance criteria" section, it derives criteria
-// from headings and list markup only: top-level list items in every "## "
-// section except Problem, Non-goals, Risks and Open questions. It folds
-// continuations through the shared splitAcceptanceCriteriaBlocks primitive,
-// never reads the wording to decide whether an item is a requirement, and
-// renumbers the derived items across the document.
+// The exact "## Acceptance criteria" heading keeps the drafted numbered-list
+// parser. A case/colon/level variant of that heading uses derived list rules;
+// without any named criteria section, those rules read top-level list items
+// before the first "##" and in each non-excluded "##" section. Excluded
+// headings are normalized Problem, Non-goals, Out of scope, Risks, Open
+// questions, Background, Context, Motivation, Alternatives considered,
+// References and Notes. Fenced lists are ignored, thematic breaks end an
+// item, task checkboxes are removed, and prose after a blank line ends an
+// item; a lazy unindented continuation without that blank still folds in.
+// The parser never reads item wording to decide whether it is a requirement
+// and renumbers derived items across the document.
 func SpecAcceptanceCriteria(specContent string) ([]string, error) {
-	lines := strings.Split(specContent, "\n")
-	start, end, ok := findAcceptanceCriteriaSection(lines)
-	if ok {
-		criteria := foldAcceptanceCriteriaLines(lines[start:end])
-		if len(criteria) == 0 {
-			return nil, fmt.Errorf("spec's %q section has no numbered criteria", specAcceptanceCriteriaHeading)
+	parsed := parseSpecAcceptanceCriteria(strings.Split(specContent, "\n"))
+	if len(parsed.criteria) == 0 {
+		if parsed.named {
+			return nil, fmt.Errorf("spec's %q section has no list items", parsed.heading)
 		}
-		return criteria, nil
-	}
-	criteria := deriveAcceptanceCriteria(lines)
-	if len(criteria) == 0 {
+		if _, _, ok := findAcceptanceCriteriaSection(strings.Split(specContent, "\n")); ok {
+			return nil, fmt.Errorf("spec's %q section has no list items", specAcceptanceCriteriaHeading)
+		}
 		return nil, fmt.Errorf("spec has no %q section and no list items to derive criteria from", specAcceptanceCriteriaHeading)
 	}
-	return criteria, nil
+	return parsed.criteria, nil
+}
+
+// CriterionLocation ties a factory-numbered criterion to the heading and
+// source lines that contain it. The console mirrors this shape structurally;
+// it is used here to validate and scope review anchors on operator-shaped
+// specs.
+type CriterionLocation struct {
+	Text      string
+	Section   string
+	Item      int
+	StartLine int
+	EndLine   int
+}
+
+type parsedSpecCriteria struct {
+	criteria  []string
+	locations []CriterionLocation
+	sections  []string
+	named     bool
+	heading   string
+}
+
+func parseSpecAcceptanceCriteria(lines []string) parsedSpecCriteria {
+	if start, end, ok := findAcceptanceCriteriaSection(lines); ok {
+		blocks := splitAcceptanceCriteriaBlocks(lines[start:end])
+		parsed := parsedSpecCriteria{}
+		for i, block := range blocks {
+			parsed.criteria = append(parsed.criteria, block.folded)
+			parsed.locations = append(parsed.locations, CriterionLocation{
+				Text: block.folded, Section: specAcceptanceCriteriaHeading, Item: i + 1,
+				StartLine: start + block.startLine, EndLine: start + block.endLine,
+			})
+		}
+		return parsed
+	}
+	if start, end, heading, ok := findNamedAcceptanceCriteriaSection(lines); ok {
+		return deriveSectionCriteria(lines[start:end], start, heading, true)
+	}
+	return deriveAcceptanceCriteria(lines)
+}
+
+// SpecCriterionLocations returns the structural locations of the current
+// spec's criteria. A malformed or empty spec has no locations.
+func SpecCriterionLocations(specContent string) []CriterionLocation {
+	parsed := parseSpecAcceptanceCriteria(strings.Split(specContent, "\n"))
+	if len(parsed.criteria) == 0 {
+		return nil
+	}
+	return parsed.locations
+}
+
+// SpecDocumentHeadings returns unindented ATX headings outside fenced blocks,
+// in document order. It is the structural heading set used to validate
+// anchors on an operator-shaped spec.
+func SpecDocumentHeadings(content string) []string {
+	lines := strings.Split(content, "\n")
+	var headings []string
+	inFence := false
+	var fenceChar byte
+	var fenceLen int
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if inFence {
+			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
+				inFence = false
+			}
+			continue
+		}
+		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
+			inFence, fenceChar, fenceLen = true, ch, n
+			continue
+		}
+		if markdownHeadingLevel(raw) > 0 {
+			headings = append(headings, strings.TrimSpace(raw))
+		}
+	}
+	return headings
 }
 
 // commitMessageCriterionREs are the phrasings that make an acceptance
@@ -373,12 +532,20 @@ var leadingCriterionNumberRE = regexp.MustCompile(`^\d+[.)]\s*`)
 var derivedCriterionItemRE = regexp.MustCompile(`^(?:[-*+]\s+\S|\d+[.)]\s+\S)`)
 
 var derivedCriterionMarkerRE = regexp.MustCompile(`^(?:[-*+]\s+|\d+[.)]\s+)(.*)$`)
+var taskListMarkerRE = regexp.MustCompile(`^\[[ xX]\]\s+`)
 
 var nonRequirementSpecSections = map[string]struct{}{
-	"problem":        {},
-	"non-goals":      {},
-	"risks":          {},
-	"open questions": {},
+	"problem":                 {},
+	"non-goals":               {},
+	"out of scope":            {},
+	"risks":                   {},
+	"open questions":          {},
+	"background":              {},
+	"context":                 {},
+	"motivation":              {},
+	"alternatives considered": {},
+	"references":              {},
+	"notes":                   {},
 }
 
 // markdownHeadingLevel returns a heading's level for an unindented Markdown
@@ -400,59 +567,121 @@ func markdownHeadingLevel(raw string) int {
 }
 
 // deriveAcceptanceCriteria reads only Markdown section and list structure.
-// It deliberately ignores prose before the first item in a section and
-// excludes the skeleton's non-requirement sections by heading name.
-func deriveAcceptanceCriteria(lines []string) []string {
-	var criteria []string
-	var sectionLines []string
-	active := true
-	flushSection := func() {
-		if !active {
-			sectionLines = nil
-			return
+// It deliberately ignores prose before the first item, excludes the named
+// non-requirement sections, and returns the source section names for review
+// advice without reading the items' wording.
+func deriveAcceptanceCriteria(lines []string) parsedSpecCriteria {
+	var headingLines []int
+	for i, raw := range lines {
+		if markdownHeadingLevel(raw) != 2 || !headingIsOutsideFence(lines, i) {
+			continue
 		}
-		for _, block := range splitCriteriaBlocks(sectionLines, derivedCriterionItemRE, true) {
-			match := derivedCriterionMarkerRE.FindStringSubmatch(strings.TrimSpace(block.folded))
-			if len(match) != 2 || strings.TrimSpace(match[1]) == "" {
-				continue
-			}
-			criteria = append(criteria, fmt.Sprintf("%d. %s", len(criteria)+1, strings.TrimSpace(match[1])))
-		}
-		sectionLines = nil
+		headingLines = append(headingLines, i)
 	}
+	parts := make([]struct {
+		start, end    int
+		name, section string
+		active        bool
+	}, 0, len(headingLines)+1)
+	for i := 0; i <= len(headingLines); i++ {
+		start, end := 0, len(lines)
+		name := deriveSourceName(lines)
+		section := deriveSourceSection(lines)
+		active := true
+		if i > 0 {
+			start = headingLines[i-1] + 1
+			name = headingLabel(lines[headingLines[i-1]])
+			section = strings.TrimSpace(lines[headingLines[i-1]])
+			_, excluded := nonRequirementSpecSections[normalizeSpecHeading(lines[headingLines[i-1]])]
+			active = !excluded
+		}
+		if i < len(headingLines) {
+			end = headingLines[i]
+		}
+		parts = append(parts, struct {
+			start, end    int
+			name, section string
+			active        bool
+		}{start: start, end: end, name: name, section: section, active: active})
+	}
+	parsed := parsedSpecCriteria{}
+	for _, part := range parts {
+		if !part.active || part.start >= part.end {
+			continue
+		}
+		partParsed := deriveSectionCriteria(lines[part.start:part.end], part.start, part.section, false)
+		if len(partParsed.criteria) == 0 {
+			continue
+		}
+		if !containsString(parsed.sections, part.name) {
+			parsed.sections = append(parsed.sections, part.name)
+		}
+		appendDerivedCriteria(&parsed, partParsed)
+	}
+	return parsed
+}
 
-	inFence := false
+func appendDerivedCriteria(dst *parsedSpecCriteria, src parsedSpecCriteria) {
+	for i, criterion := range src.criteria {
+		body := leadingCriterionNumberRE.ReplaceAllString(strings.TrimSpace(criterion), "")
+		text := fmt.Sprintf("%d. %s", len(dst.criteria)+1, strings.TrimSpace(body))
+		dst.criteria = append(dst.criteria, text)
+		location := src.locations[i]
+		location.Text = text
+		location.Item = len(dst.criteria)
+		dst.locations = append(dst.locations, location)
+	}
+}
+
+func deriveSourceName(lines []string) string {
 	for _, raw := range lines {
-		trimmed := strings.TrimSpace(raw)
-		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
-		wasInFence := inFence
-		if isFence {
-			inFence = !inFence
-		}
-		if !wasInFence && !isFence {
-			switch markdownHeadingLevel(raw) {
-			case 1:
-				// Items under the title, before any "## " section, are
-				// requirements as much as a section's are.
-				flushSection()
-				active = true
-				continue
-			case 2:
-				flushSection()
-				heading := strings.ToLower(strings.TrimSpace(raw[2:]))
-				// A differently cased "## Acceptance Criteria" is not the
-				// named section; its items are derived like any section's.
-				_, excluded := nonRequirementSpecSections[heading]
-				active = !excluded
-				continue
-			}
-		}
-		if active {
-			sectionLines = append(sectionLines, raw)
+		if markdownHeadingLevel(raw) == 1 {
+			return headingLabel(raw)
 		}
 	}
-	flushSection()
-	return criteria
+	return "document title"
+}
+
+func deriveSourceSection(lines []string) string {
+	for _, raw := range lines {
+		if markdownHeadingLevel(raw) == 1 {
+			return strings.TrimSpace(raw)
+		}
+	}
+	return ""
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func deriveSectionCriteria(lines []string, offset int, source string, named bool) parsedSpecCriteria {
+	parsed := parsedSpecCriteria{named: named, heading: source}
+	for _, block := range splitCriteriaBlocks(lines, derivedCriterionItemRE, true) {
+		match := derivedCriterionMarkerRE.FindStringSubmatch(strings.TrimSpace(block.folded))
+		if len(match) != 2 {
+			continue
+		}
+		text := strings.TrimSpace(match[1])
+		text = taskListMarkerRE.ReplaceAllString(text, "")
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		item := len(parsed.criteria) + 1
+		criterion := fmt.Sprintf("%d. %s", item, text)
+		parsed.criteria = append(parsed.criteria, criterion)
+		parsed.locations = append(parsed.locations, CriterionLocation{
+			Text: criterion, Section: source, Item: item,
+			StartLine: offset + block.startLine, EndLine: offset + block.endLine,
+		})
+	}
+	return parsed
 }
 
 // acceptanceCriterionBlock is one top-level numbered criterion's raw
@@ -460,8 +689,38 @@ func deriveAcceptanceCriteria(lines []string) []string {
 // belongs to it, verbatim, in original formatting) alongside its folded
 // single-line text (see foldAcceptanceCriteriaLines) for matching.
 type acceptanceCriterionBlock struct {
-	rawLines []string
-	folded   string
+	rawLines  []string
+	folded    string
+	startLine int
+	endLine   int
+}
+
+type criteriaBlockBuilder struct {
+	blocks       []acceptanceCriterionBlock
+	current      []string
+	started      bool
+	currentStart int
+	currentEnd   int
+}
+
+func (b *criteriaBlockBuilder) flush() {
+	if !b.started || len(b.current) == 0 {
+		b.current = nil
+		b.currentStart, b.currentEnd = -1, -1
+		return
+	}
+	trimmedLines := make([]string, len(b.current))
+	for i, raw := range b.current {
+		trimmedLines[i] = strings.TrimSpace(raw)
+	}
+	b.blocks = append(b.blocks, acceptanceCriterionBlock{
+		rawLines:  append([]string{}, b.current...),
+		folded:    strings.Join(trimmedLines, " "),
+		startLine: b.currentStart,
+		endLine:   b.currentEnd,
+	})
+	b.current = nil
+	b.currentStart, b.currentEnd = -1, -1
 }
 
 // splitAcceptanceCriteriaBlocks is the single, shared primitive for "where
@@ -499,52 +758,93 @@ func splitAcceptanceCriteriaBlocks(sectionLines []string) []acceptanceCriterionB
 // to derived criteria; named acceptance-criteria sections retain their
 // existing behavior of folding deeper headings into the current item.
 func splitCriteriaBlocks(sectionLines []string, itemRE *regexp.Regexp, stopAtHeading bool) []acceptanceCriterionBlock {
-	var blocks []acceptanceCriterionBlock
-	var current []string
-	started := false
-	flush := func() {
-		if !started || len(current) == 0 {
-			current = nil
-			return
-		}
-		trimmedLines := make([]string, len(current))
-		for i, raw := range current {
-			trimmedLines[i] = strings.TrimSpace(raw)
-		}
-		blocks = append(blocks, acceptanceCriterionBlock{
-			rawLines: append([]string{}, current...),
-			folded:   strings.Join(trimmedLines, " "),
-		})
-		current = nil
-	}
+	builder := criteriaBlockBuilder{currentStart: -1, currentEnd: -1}
 	inFence := false
-	for _, raw := range sectionLines {
+	var fenceChar byte
+	var fenceLen int
+	blankAfterItem := false
+	for lineIndex, raw := range sectionLines {
 		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" {
+		if inFence {
+			if builder.started {
+				builder.current = append(builder.current, raw)
+				builder.currentEnd = lineIndex
+			}
+			if ticketspec.ClosesFence(trimmed, fenceChar, fenceLen) {
+				inFence = false
+			}
 			continue
 		}
-		// A numbered line inside a fenced code block is code, not a
-		// criterion: the fence lines and what they hold continue the
-		// criterion they sit in.
-		isFence := strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
-		wasInFence := inFence
-		if isFence {
-			inFence = !inFence
+		if ch, n := ticketspec.FenceMarker(trimmed); ch != 0 {
+			if stopAtHeading && builder.started && blankAfterItem {
+				builder.flush()
+				builder.started = false
+			}
+			if builder.started {
+				builder.current = append(builder.current, raw)
+				builder.currentEnd = lineIndex
+			}
+			inFence, fenceChar, fenceLen = true, ch, n
+			blankAfterItem = false
+			continue
+		}
+		if trimmed == "" {
+			if stopAtHeading && builder.started {
+				blankAfterItem = true
+			}
+			continue
+		}
+		if stopAtHeading && isThematicBreak(trimmed) {
+			builder.flush()
+			builder.started = false
+			blankAfterItem = false
+			continue
 		}
 		indented := raw != strings.TrimLeft(raw, " \t")
-		if stopAtHeading && !indented && !wasInFence && !isFence && markdownHeadingLevel(raw) > 0 {
-			flush()
-			started = false
+		if stopAtHeading && !indented && markdownHeadingLevel(raw) > 0 {
+			builder.flush()
+			builder.started = false
+			blankAfterItem = false
 			continue
 		}
-		if !indented && !wasInFence && !isFence && itemRE.MatchString(trimmed) {
-			flush()
-			started = true
+		if !indented && itemRE.MatchString(trimmed) {
+			builder.flush()
+			builder.started = true
+			builder.currentStart = lineIndex
+			builder.currentEnd = lineIndex
+			blankAfterItem = false
+		} else if stopAtHeading && builder.started && blankAfterItem && !indented {
+			builder.flush()
+			builder.started = false
+			blankAfterItem = false
 		}
-		if started {
-			current = append(current, raw)
+		if builder.started {
+			builder.current = append(builder.current, raw)
+			builder.currentEnd = lineIndex
+			blankAfterItem = false
 		}
 	}
-	flush()
-	return blocks
+	builder.flush()
+	return builder.blocks
+}
+
+func isThematicBreak(line string) bool {
+	compact := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' {
+			return -1
+		}
+		return r
+	}, line)
+	if len(compact) < 3 {
+		return false
+	}
+	if compact[0] != '-' && compact[0] != '*' && compact[0] != '_' {
+		return false
+	}
+	for i := 1; i < len(compact); i++ {
+		if compact[i] != compact[0] {
+			return false
+		}
+	}
+	return true
 }

@@ -172,12 +172,24 @@ func TestReviewOnlyFlaggedGuards(t *testing.T) {
 // are carried through unchanged) and returns its path.
 func writeMinimalTicketSpec(t *testing.T, dir string) string {
 	t.Helper()
+	saveMinimalRequest(t, dir)
 	path := filepath.Join(dir, "001.spec.md")
 	content := "Verify-Command: make verify\nAllowed-Files: a.go, a_test.go\nRequired-Changed-Files: a.go\n\n## Goal\n\nDo the thing.\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func saveMinimalRequest(t *testing.T, dataDir string) {
+	t.Helper()
+	if err := request.SaveText(dataDir, "req-1", "request"); err != nil {
+		t.Fatal(err)
+	}
+	r := request.New("req-1", dataDir, "app", request.Source{Kind: request.SourceText}, time.Now())
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestWriteReviewAddendumFlattensHeaderInjectionInCriterionAndVerdict
@@ -285,6 +297,7 @@ func TestWriteReviewAddendumBoundsSizeWithoutTruncatingAFence(t *testing.T) {
 // writeReviewAddendum closes the open fence first.
 func TestWriteReviewAddendumClosesAFenceTheSpecLeftOpen(t *testing.T) {
 	dir := t.TempDir()
+	saveMinimalRequest(t, dir)
 	specPath := filepath.Join(dir, "001.spec.md")
 	content := "Verify-Command: make verify\nAllowed-Files: a.go, a_test.go\nRequired-Changed-Files: a.go\n\n## Goal\n\nExample:\n\n```\nunclosed example\n"
 	if err := os.WriteFile(specPath, []byte(content), 0o600); err != nil {

@@ -22,7 +22,7 @@ const specRelPath = "spec.md"
 // the draft lacks a commented section: a structural refusal.
 func spliceScopedSpec(dataDir string, r *request.Request, drafted string) (string, error) {
 	scope := r.RedraftScope(request.StateSpecReview)
-	if scope == nil || importsSpec(r) {
+	if scope == nil {
 		return drafted, nil
 	}
 	headings, ok := scope.Sections(specRelPath)
@@ -34,7 +34,11 @@ func spliceScopedSpec(dataDir string, r *request.Request, drafted string) (strin
 		// Nothing reviewed on disk to keep: a full redraft stands.
 		return drafted, nil
 	}
-	return request.SpliceSections(string(current), drafted, request.SpecSkeletonHeadings(), headings)
+	sectionHeadings := request.SpecSkeletonHeadings()
+	if r.SpecImported {
+		sectionHeadings = request.SpecDocumentHeadings(string(current))
+	}
+	return request.SpliceSections(string(current), drafted, sectionHeadings, headings)
 }
 
 // spliceScopedTickets is spliceScopedSpec for a plan: current is the reviewed

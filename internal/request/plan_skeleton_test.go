@@ -327,14 +327,14 @@ func TestSpecAcceptanceCriteriaDerivesTheGoTomlExample(t *testing.T) {
 		"- The setting applies to every string the encoder writes as a value: keys and nested values included.\n\n" +
 		"## Interface\n\nIn package github.com/pelletier/go-toml/v2:\n" +
 		"- `type MultilineStringMode int`, with the constants ...\n" +
-		"- `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`, chainable ...\n" +
+		"- `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`, chainable ...\n\n" +
 		"Document the setting in the Encoder docs and in the README.\n\n" +
 		"## Risks\n\n- This risk bullet is not a criterion.\n"
 	want := []string{
 		"1. A new encoder setting chooses how string values are written, with three modes: - **default**: quote strings. - **if newline**: use multiline strings.",
 		"2. The setting applies to every string the encoder writes as a value: keys and nested values included.",
 		"3. `type MultilineStringMode int`, with the constants ...",
-		"4. `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`, chainable ... Document the setting in the Encoder docs and in the README.",
+		"4. `func (enc *Encoder) SetMultilineStrings(mode MultilineStringMode) *Encoder`, chainable ...",
 	}
 	got, err := SpecAcceptanceCriteria(spec)
 	if err != nil {
@@ -393,7 +393,7 @@ func TestSpecAcceptanceCriteriaDerivesFromAMiscasedCriteriaHeadingAndTheTitle(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"1. Under the title.", "2. First.", "3. Second."}
+	want := []string{"1. First.", "2. Second."}
 	if !slices.Equal(got, want) {
 		t.Errorf("SpecAcceptanceCriteria = %q, want %q", got, want)
 	}

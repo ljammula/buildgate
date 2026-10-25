@@ -2431,6 +2431,12 @@ func TestLegacyRequestBuildSpecKeepsTheTicketFirstShapeExactly(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedFirstTicketRun(t, dataDir, r)
+	if err := request.SaveText(dataDir, r.ID, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, request.Ticket{Index: 2, SpecPath: ticketPath})
 	if err != nil {
@@ -2589,6 +2595,12 @@ func TestApprovedSpecInABuildSpecDeclaresNoTicketKeyOrGoal(t *testing.T) {
 func TestTicketBuildSpecContentListsAllCriteriaWhenNoneDeclared(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
+	if err := request.SaveText(dataDir, r.ID, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(request.Dir(dataDir, r.ID), "tickets"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -2610,6 +2622,17 @@ func TestTicketBuildSpecContentListsAllCriteriaWhenNoneDeclared(t *testing.T) {
 	}
 	if !strings.Contains(got, "A non-idempotent POST /refunds still processes normally.") {
 		t.Errorf("build spec = %q, want criterion 2's text", got)
+	}
+}
+
+func TestTicketBuildSpecContentReturnsRequestLoadError(t *testing.T) {
+	ticketPath := filepath.Join(t.TempDir(), "001.spec.md")
+	if err := os.WriteFile(ticketPath, []byte("Verify-Command: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := requestdriver.TicketBuildSpecContent(t.TempDir(), "missing", request.Ticket{Index: 1, SpecPath: ticketPath})
+	if err == nil || !strings.Contains(err.Error(), "load request") {
+		t.Fatalf("TicketBuildSpecContent error = %v, want request load error", err)
 	}
 }
 

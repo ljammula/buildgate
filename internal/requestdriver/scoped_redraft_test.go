@@ -38,6 +38,14 @@ func rewriteSpecEverywhere(spec string) string {
 // rejectedSpecFixture is a request in spec_drafting after a reviewer rejected
 // spec (the reviewed spec.md on disk) with the given comments.
 func rejectedSpecFixture(t *testing.T, spec string, anchors ...request.RejectionAnchor) (dataDir string, r *request.Request) {
+	return rejectedSpecFixtureWithImport(t, false, spec, anchors...)
+}
+
+func rejectedImportedSpecFixture(t *testing.T, spec string, anchors ...request.RejectionAnchor) (dataDir string, r *request.Request) {
+	return rejectedSpecFixtureWithImport(t, true, spec, anchors...)
+}
+
+func rejectedSpecFixtureWithImport(t *testing.T, imported bool, spec string, anchors ...request.RejectionAnchor) (dataDir string, r *request.Request) {
 	t.Helper()
 	dataDir = t.TempDir()
 	if err := request.SaveText(dataDir, "req-1", "text"); err != nil {
@@ -45,6 +53,7 @@ func rejectedSpecFixture(t *testing.T, spec string, anchors ...request.Rejection
 	}
 	r = request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
 	r.State = request.StateSpecReview
+	r.SpecImported = imported
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +121,23 @@ func TestScopedSpecRedraftKeepsAHandEditOutsideTheComment(t *testing.T) {
 	}
 	if !strings.Contains(got, "REWRITTEN. Refunds can be double-processed on retry.") {
 		t.Errorf("the commented section was not taken from the redraft: %q", got)
+	}
+}
+
+func TestImportedSpecRedraftKeepsItsShapeAndScopesAnyHeading(t *testing.T) {
+	original := "# Operator spec\n\n## Wanted behaviour\n\n- The first behaviour.\n\n## Interface\n\n- The old interface.\n"
+	dataDir, r := rejectedImportedSpecFixture(t, original, request.RejectionAnchor{Path: "spec.md", Section: "## Interface", Note: "update the interface"})
+	drafted := strings.Replace(original, "- The old interface.", "- The revised interface.", 1)
+	advanceSpec(t, dataDir, r, drafted)
+
+	got := string(mustReadFile(t, requestdriver.RequestSpecPath(dataDir, "req-1")))
+	want := strings.Replace(original, "- The old interface.", "- The revised interface.", 1)
+	if got != want {
+		t.Fatalf("imported spec = %q, want %q", got, want)
+	}
+	loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	if loaded.State != request.StateSpecReview || loaded.SpecImported != true {
+		t.Fatalf("State = %q, SpecImported = %v; want spec_review and imported", loaded.State, loaded.SpecImported)
 	}
 }
 

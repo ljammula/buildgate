@@ -565,6 +565,9 @@ func validateDraftingInputs(workspace string, p Params) error {
 		}
 		return nil
 	}
+	if len([]byte(p.ImportedSpec)) > request.MaxHandedOverSpecBytes {
+		return fmt.Errorf("-spec-file is %d bytes, over the %d-byte handed-over spec limit", len([]byte(p.ImportedSpec)), request.MaxHandedOverSpecBytes)
+	}
 	if err := request.ValidateHandedOverSpec(p.ImportedSpec); err != nil {
 		return fmt.Errorf("-spec-file: %w", err)
 	}
@@ -656,6 +659,33 @@ func claimRequestID(p Params, requestText string) (string, error) {
 		return "", fmt.Errorf("generate request id: %w", err)
 	}
 	return id, nil
+}
+
+func resolveSubmittedFullSuite(workspace, configured, verifyCommand string) (string, string, error) {
+	if configured == "" {
+		cfg, found, err := projectconfig.Load(workspace)
+		if err != nil {
+			return "", "", fmt.Errorf("load %s: %w", projectconfig.FileName, err)
+		}
+		if found {
+			configured = cfg.FullSuiteCommand
+		}
+	}
+	command, source := ResolveFullSuiteCommand(configured, verifyCommand)
+	return command, source, nil
+}
+
+func recordHandedOverPlanCriteria(req *request.Request, spec string) error {
+	req.SpecImported = spec != ""
+	if !req.PlanImported {
+		return nil
+	}
+	criteria, err := request.SpecAcceptanceCriteria(spec)
+	if err != nil {
+		return fmt.Errorf("record handed-over plan criteria: %w", err)
+	}
+	req.ImportedPlanCriteria = append([]string(nil), criteria...)
+	return nil
 }
 
 // Submit records a new internal/request.Request in StateSubmitted under
@@ -764,18 +794,16 @@ func Submit(p Params) (Result, error) {
 	// verify-command substitution (an onboarding-plan decision). Shared by
 	// `factoryd submit` and POST /requests, so both record the same
 	// FullSuiteSource.
-	fullSuiteConfigured := p.FullSuiteCommand
-	if fullSuiteConfigured == "" {
-		if cfg, found, err := projectconfig.Load(workspaceAbs); err != nil {
-			return Result{}, fmt.Errorf("load %s: %w", projectconfig.FileName, err)
-		} else if found {
-			fullSuiteConfigured = cfg.FullSuiteCommand
-		}
+	fullSuiteCommand, fullSuiteSource, err := resolveSubmittedFullSuite(workspaceAbs, p.FullSuiteCommand, verifyCommand)
+	if err != nil {
+		return Result{}, err
 	}
-	req.FullSuiteCommand, req.FullSuiteSource = ResolveFullSuiteCommand(fullSuiteConfigured, verifyCommand)
+	req.FullSuiteCommand, req.FullSuiteSource = fullSuiteCommand, fullSuiteSource
 	recordOracleOptions(req, p)
-	req.SpecImported = p.ImportedSpec != ""
 	req.PlanImported = len(p.ImportedTickets) > 0
+	if err := recordHandedOverPlanCriteria(req, p.ImportedSpec); err != nil {
+		return Result{}, err
+	}
 	req.PreflightProfile = preflightProfile
 	req.Harnesses = p.Harnesses
 	req.Models = p.Models

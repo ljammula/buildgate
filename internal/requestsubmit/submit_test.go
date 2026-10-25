@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -455,6 +456,29 @@ func TestSubmitAcceptsAnOperatorShapedSpecWithAndWithoutPlan(t *testing.T) {
 	}
 }
 
+func TestSubmitRefusesAnOversizedHandedOverSpecBeforeRecordingIt(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make verify\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	testfixture.CommitAgentsFile(t, workspace)
+	_, err := Submit(Params{
+		WorkspaceArg:     workspace,
+		DataDir:          dataDir,
+		RequestText:      "oversized spec",
+		Source:           request.Source{Kind: request.SourceText},
+		PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+		ImportedSpec: strings.Repeat("x", request.MaxHandedOverSpecBytes+1),
+	})
+	if err == nil || !strings.Contains(err.Error(), "handed-over spec limit") {
+		t.Fatalf("Submit error = %v, want the handed-over spec limit", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dataDir, "requests")); len(entries) != 0 {
+		t.Fatalf("oversized submission left %d request(s) behind", len(entries))
+	}
+}
+
 // A handed-over spec is stored beside the request and marks it; one with no
 // factory-readable criterion is refused and records nothing.
 func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
@@ -472,7 +496,7 @@ func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 		ImportedSpec:             strings.Replace(handedOverSpec, "1. A retried POST returns the original result.", "No numbered criterion.", 1),
 	}
 	testfixture.CommitAgentsFile(t, workspace)
-	if _, err := Submit(params); err == nil || !strings.Contains(err.Error(), `-spec-file: spec's "## Acceptance criteria" section has no numbered criteria`) {
+	if _, err := Submit(params); err == nil || !strings.Contains(err.Error(), `-spec-file: spec's "## Acceptance criteria" section has no list items`) {
 		t.Fatalf("err = %v, want a refusal naming the missing criteria", err)
 	}
 	if entries, _ := os.ReadDir(filepath.Join(params.DataDir, "requests")); len(entries) != 0 {
@@ -545,6 +569,10 @@ func TestSubmitStoresAHandedOverPlanAndRefusesAMalformedOne(t *testing.T) {
 	stored, err := os.ReadFile(filepath.Join(request.ImportedTicketsDir(p.DataDir, result.ID), "001.spec.md"))
 	if !req.SpecImported || !req.PlanImported || err != nil || string(stored) != handedOverTicket {
 		t.Fatalf("SpecImported %v, PlanImported %v, stored ticket matches %v (%v)", req.SpecImported, req.PlanImported, string(stored) == handedOverTicket, err)
+	}
+	criteria, err := request.SpecAcceptanceCriteria(handedOverSpec)
+	if err != nil || !slices.Equal(req.ImportedPlanCriteria, criteria) {
+		t.Fatalf("ImportedPlanCriteria = %v (%v), want %v", req.ImportedPlanCriteria, err, criteria)
 	}
 }
 

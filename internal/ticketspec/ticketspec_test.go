@@ -19,6 +19,26 @@ func TestParseVerifyCommandFound(t *testing.T) {
 	}
 }
 
+func TestReadersAcceptALineLongerThanScannerLimit(t *testing.T) {
+	long := strings.Repeat("x", 70_000)
+	path := writeSpec(t, "Verify-Command: "+long+"\n\n## Goal\n\n"+long+"\n")
+
+	got, err := ParseVerifyCommand(path)
+	if err != nil {
+		t.Fatalf("ParseVerifyCommand: %v", err)
+	}
+	if got != long {
+		t.Fatalf("ParseVerifyCommand returned %d bytes, want %d", len(got), len(long))
+	}
+	goal, err := parseGoalSection(path)
+	if err != nil {
+		t.Fatalf("parseGoalSection: %v", err)
+	}
+	if goal != long {
+		t.Fatalf("parseGoalSection returned %d bytes, want %d", len(goal), len(long))
+	}
+}
+
 func TestParseVerifyCommandAbsent(t *testing.T) {
 	path := writeSpec(t, "# Ticket: foo\n\nNo machine-readable key here.\n")
 

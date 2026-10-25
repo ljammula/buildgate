@@ -249,7 +249,7 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 	if err != nil {
 		return "", nil, err
 	}
-	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath}
+	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, specGuidance: hostGuidancePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath, keepStructure: r.SpecImported}
 
 	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
 	if timeoutMinutes <= 0 {

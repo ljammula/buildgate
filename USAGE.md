@@ -69,7 +69,7 @@ act in "you" rows.
 | State | Who acts | What happens / what you do |
 |---|---|---|
 | `submitted` -> `spec_drafting` | factory | A sandboxed job drafts `spec.md`; with `submit -spec-file`, your own operator-shaped spec is taken as `spec.md` with no model call. It needs at least one acceptance criterion: a numbered `## Acceptance criteria` section or derivable top-level list items in `##` sections ([reference](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir)) |
-| `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`). To change only some sections, comment on passages (console: select text in the raw view, then Request changes; CLI: `reject -comments-file <file> <id>`): the redraft changes just the commented sections and keeps every other byte, your own edits included. A spec with a `[NEEDS DECISION]` item under Open questions is not approvable: `approve` lists the items, and `reject -reason "<your answers>"` ("take the recommended option" is an answer) has the redraft write them into the spec |
+| `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`). To change only some sections, comment on passages (console: select text in the raw view, then Request changes; CLI: `reject -comments-file <file> <id>`): the redraft changes just the commented sections and keeps every other byte, your own edits included. A spec with a `[NEEDS DECISION]` item under Open questions is not approvable: `approve` lists the items, and `reject -reason "<your answers>"` ("take the recommended option" is an answer) has the redraft write them into the spec. A handed-over operator-shaped spec remains in its own headings, order and list structure after a reject. |
 | `oracle_drafting` | factory | Only with `-draft-oracles`: drafts executable acceptance tests from the spec |
 | `oracle_review` | **you** | Read every oracle file, then `approve` (to `planning`) or `reject -reason` (back to `oracle_drafting`) |
 | `planning` | factory | Drafts one or more tickets from the approved spec; with `submit -plan-dir`, your own tickets are taken with no model call and get the same checks |
@@ -85,6 +85,22 @@ Every new ticket build receives the approved spec verbatim before its ticket
 plan. The build input then lists the ticket's covered criteria using the
 factory's numbered criteria, so exact names, formats and behaviours in the
 operator's spec remain part of the build contract.
+
+For `-spec-file`, criteria are structural: top-level list items in the title
+area and in non-excluded `##` sections are numbered; the excluded headings are
+`Problem`, `Non-goals`, `Out of scope`, `Risks`, `Open questions`, `Background`,
+`Context`, `Motivation`, `Alternatives considered`, `References` and `Notes`
+(case-insensitive with one trailing colon ignored). A non-exact
+`##`-through-`######` `Acceptance criteria` heading uses the same derived
+reader; the exact `## Acceptance criteria` heading keeps the numbered reader.
+Fenced lists use a closing delimiter with the same backtick/tilde character, at
+least the opening length, and no trailing content; thematic breaks end items,
+task checkboxes are removed, and prose after a blank line is outside the
+preceding item while a lazy continuation without that blank stays in it.
+The limit is 200,000 bytes at submit and at the console spec edit. If a
+handed-over plan's criteria change, planning stops and asks the operator to
+edit the tickets at plan review through the existing redraft/plan path or
+resubmit the spec and plan.
 
 The reason names one of ten causes (`resume.cause` in the request's
 `request.json`). The four that say a model was not served, or a review

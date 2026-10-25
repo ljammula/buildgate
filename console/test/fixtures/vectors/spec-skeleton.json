@@ -247,6 +247,96 @@
         "1. It adds.",
         "2. It subtracts."
       ]
+    },
+    {
+      "name": "go-toml operator shape",
+      "text": "# go-toml: an encoder setting\n\n## Problem\n\n- not a requirement\n\n## Wanted behaviour\n\n- A setting chooses the encoding mode.\n- Every string uses the chosen mode.\n\n## Interface\n\n- `SetMode` configures the encoder.\n\nDocument the setting in the README.\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. A setting chooses the encoding mode.",
+        "2. Every string uses the chosen mode.",
+        "3. `SetMode` configures the encoder."
+      ]
+    },
+    {
+      "name": "title list items",
+      "text": "# Operator spec\n\n- The first title requirement.\n- The second title requirement.\n\n## Problem\n\n- excluded\n",
+      "valid": false,
+      "missing_heading": "# Spec",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. The first title requirement.",
+        "2. The second title requirement."
+      ]
+    },
+    {
+      "name": "all excluded sections",
+      "text": "# Spec\n\n## Problem\n- no\n## Non-goals\n- no\n## Out of scope\n- no\n## Risks\n- no\n## Open questions\n- no\n## Background\n- no\n## Context\n- no\n## Motivation\n- no\n## Alternatives considered\n- no\n## References\n- no\n## Notes\n- no\n## Wanted\n- keep this\n",
+      "valid": false,
+      "missing_heading": "## Scope",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. keep this"
+      ]
+    },
+    {
+      "name": "miscased colon level-three criteria heading",
+      "text": "# Spec\n\n### Acceptance Criteria:\n\n- first\n- AC-2: second\n\n#### Detail\n\n- not in the criteria section\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first",
+        "2. AC-2: second",
+        "3. not in the criteria section"
+      ]
+    },
+    {
+      "name": "nested fences use the exact delimiter",
+      "text": "# Spec\n\n## Wanted\n\n~~~text\n- hidden\n```\n- still hidden\n~~~not-a-close\n- still hidden\n~~~~\n- still hidden\n~~~\n- visible\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. still hidden ~~~ - visible"
+      ]
+    },
+    {
+      "name": "thematic breaks end an item",
+      "text": "# Spec\n\n## Wanted\n\n- first\n\n---\n\n- second\n\n* * *\n\n- third\n\n___\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first",
+        "2. second",
+        "3. third"
+      ]
+    },
+    {
+      "name": "task list items drop their checkbox",
+      "text": "# Spec\n\n## Wanted\n\n- [ ] unchecked\n- [x] checked\n- [X] uppercase\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. unchecked",
+        "2. checked",
+        "3. uppercase"
+      ]
+    },
+    {
+      "name": "paragraph after a blank ends the item",
+      "text": "# Spec\n\n## Interface\n\n- first item\n  lazy continuation\n\nThis paragraph is not a requirement.\n\n- second item\n",
+      "valid": false,
+      "missing_heading": "## Problem",
+      "criteria_section_empty": false,
+      "criteria": [
+        "1. first item lazy continuation",
+        "2. second item"
+      ]
     }
   ],
   "tickets": [

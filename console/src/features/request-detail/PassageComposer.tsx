@@ -15,6 +15,8 @@ export interface PassageComposerProps {
   readonly selected: string;
   /** Where the selection starts in `content`, when the page could tell; null otherwise. */
   readonly offset: number | null;
+  /** Whether the reviewed spec keeps the operator's own document structure. */
+  readonly handedOver?: boolean;
   readonly onAdd: (comment: RejectionAnchor) => void;
   /** The comment was added or dropped: forget the selection. */
   readonly onDone: () => void;
@@ -32,6 +34,7 @@ export function PassageComposer({
   content,
   selected,
   offset,
+  handedOver = false,
   onAdd,
   onDone,
 }: PassageComposerProps) {
@@ -56,7 +59,9 @@ export function PassageComposer({
       start = first;
     }
     const anchor =
-      start === -1 ? null : anchorForSelection(path, content, start, start + trimmed.length);
+      start === -1
+        ? null
+        : anchorForSelection(path, content, start, start + trimmed.length, handedOver);
     if (anchor === null) {
       setProblem("That selection is not plain text of this file. Select text from the raw view.");
       return;

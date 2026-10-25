@@ -130,3 +130,11 @@ func TestOpenDecisionsItemShapes(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenDecisionsNormalizesTheHeadingAndKeepsFenceRules(t *testing.T) {
+	content := "# Spec\n\n## Open Questions:\n\n- [NEEDS DECISION] choose a mode.\n\n~~~text\n- [NEEDS DECISION] hidden.\n~~~ trailing text\n- [NEEDS DECISION] still hidden.\n~~~\n\n## Next\n\n- [NEEDS DECISION] outside.\n"
+	want := []string{"- [NEEDS DECISION] choose a mode."}
+	if got := OpenDecisions(content); !reflect.DeepEqual(got, want) {
+		t.Errorf("OpenDecisions = %q, want %q", got, want)
+	}
+}

@@ -160,6 +160,9 @@
   "spec_imported": true,
   "build_input": "every-field build_input",
   "plan_imported": true,
+  "imported_plan_criteria": [
+    "every-field imported_plan_criteria"
+  ],
   "review_notes": [
     "every-field review_notes"
   ],

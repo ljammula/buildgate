@@ -94,6 +94,15 @@ func TestSpecReviewNotesNameACriterionNotInEARSForm(t *testing.T) {
 	}
 }
 
+func TestSpecReviewNotesDescribeDerivedCriteriaWithoutIDNotes(t *testing.T) {
+	t.Parallel()
+	spec := "# Feature\n\n- The title item.\n\n## Wanted behaviour\n\n- AC-7: The first behaviour.\n\n## Interface\n\n* The interface behaviour.\n\n## Notes\n\n- Not a criterion.\n"
+	want := []string{"Criteria 1-3 were derived from the list items under: Feature, Wanted behaviour, Interface."}
+	if got := SpecReviewNotes(spec); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("notes = %q, want %q", got, want)
+	}
+}
+
 func TestTicketCoveredCriteriaAcceptsACIDs(t *testing.T) {
 	t.Parallel()
 	ticket := notesTicket("001.spec.md", []string{"a.go"}, 1)

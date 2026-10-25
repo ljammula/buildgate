@@ -566,6 +566,10 @@ type Request struct {
 	// plan_review rejection, or when the factory finds the plan infeasible,
 	// the planning job revises the current tickets with that feedback.
 	PlanImported bool `json:"plan_imported,omitempty"`
+	// ImportedPlanCriteria is the approved spec's numbered criteria at the
+	// moment a handed-over plan was submitted. Planning refuses to import
+	// those tickets if the approved spec now derives a different list.
+	ImportedPlanCriteria []string `json:"imported_plan_criteria,omitempty"`
 	// ReviewNotes are the factory's notes for the human on what the current
 	// review gate shows (see RefreshReviewNotes): set in spec_review and
 	// plan_review, dropped by every transition. Advice only: nothing reads

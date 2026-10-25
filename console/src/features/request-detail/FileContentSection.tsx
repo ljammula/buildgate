@@ -202,6 +202,7 @@ export function FileContentSection({
           content={content}
           selected={selected.text}
           offset={selected.offset}
+          handedOver={handedOver}
           onAdd={onComment}
           onDone={() => {
             setSelected({ text: "", offset: null });

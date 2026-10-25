@@ -4372,7 +4372,7 @@ func verifyBaseSHA256(w http.ResponseWriter, baseSHA256 string, currentPath stri
 // or consumed by planning -- and only for content that passes the exact
 // structural check the request driver itself applies
 // (request.ValidateSpecSkeleton for a drafted spec, or
-// request.ValidateHandedOverSpec for the first pass of an imported spec)
+// request.ValidateHandedOverSpec for every pass of an imported spec)
 // before this write, so an operator can never
 // save a spec the pipeline would halt on later. Approval, and the
 // SHA-256 hash it records, happens after this call as its own separate
@@ -4426,8 +4426,12 @@ func (s *Server) updateRequestSpec(w http.ResponseWriter, r *http.Request) {
 	if !verifyBaseSHA256(w, body.BaseSHA256, specPath, nil) {
 		return
 	}
+	if loaded.SpecImported && len([]byte(content)) > request.MaxHandedOverSpecBytes {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("handed-over spec is %d bytes, over the %d-byte limit", len([]byte(content)), request.MaxHandedOverSpecBytes))
+		return
+	}
 	var validationErr error
-	if loaded.SpecAsHandedOver() {
+	if loaded.SpecImported {
 		validationErr = request.ValidateHandedOverSpec(content)
 	} else if err := request.ValidateSpecSkeleton(content); err != nil {
 		validationErr = err
