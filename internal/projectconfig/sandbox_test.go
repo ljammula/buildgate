@@ -52,7 +52,7 @@ func TestSandboxBlockParsesAndValidates(t *testing.T) {
 		"cache unclean":        {"sandbox:\n  version: 1\n  install: [a]\n  cache_paths: [\"a//b\"]\n", "clean workspace-relative path"},
 		"input dotdot":         {"sandbox:\n  version: 1\n  install: [a]\n  inputs: [\"../lock\"]\n", "stay inside the workspace"},
 		"input bad pattern":    {"sandbox:\n  version: 1\n  install: [a]\n  inputs: [\"[\"]\n", "not a valid pattern"},
-		"unknown registry":     {"sandbox:\n  version: 1\n  install: [a]\n  registries: [rubygems]\n", "must be one of npm, pypi, go"},
+		"unknown registry":     {"sandbox:\n  version: 1\n  install: [a]\n  registries: [cargo]\n", "must be one of npm, pypi, go, maven, rubygems"},
 		"duplicate registry":   {"sandbox:\n  version: 1\n  install: [a]\n  registries: [npm, npm]\n", "listed twice"},
 		"too many cache paths": {"sandbox:\n  version: 1\n  install: [a]\n  cache_paths: [" + manyPaths(17) + "]\n", "at most 16"},
 	} {

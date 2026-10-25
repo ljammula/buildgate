@@ -1230,12 +1230,12 @@ func protectedComposeWorkerEnvironmentKey(key string) bool {
 		"GOMODCACHE", "GOCACHE", "GOTMPDIR", "GOPROXY", "GOSUMDB", "GOFLAGS", "GOENV",
 		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
 		"SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
-		"NODE_OPTIONS":
+		"NODE_OPTIONS", "JAVA_TOOL_OPTIONS":
 		return true
 	}
 	for _, prefix := range []string{
 		"ANTHROPIC_", "OPENAI_", "FACTORY", "SANDBOX_", "GIT_", "SF_", "COPILOT_", "PI_", "PIFORK_", "CODEX_",
-		"INFERENCE_RELAY_", "NPM_CONFIG_", "PIP_", "XDG_", "LD_", "DYLD_",
+		"INFERENCE_RELAY_", "NPM_CONFIG_", "PIP_", "MAVEN_", "MVNW_", "BUILDGATE_", "BUNDLE_", "GEM_", "XDG_", "LD_", "DYLD_",
 	} {
 		if strings.HasPrefix(key, prefix) {
 			return true

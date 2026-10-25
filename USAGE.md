@@ -718,8 +718,9 @@ target project needing a dependency the worker image doesn't bake (no
 package-registry network in the sandbox): `make project-sandbox-image
 PROJECT_DIR=<path> BASE_IMAGE=<worker ref>` (bakes a project-specific
 image) or `-registry-proxy` (a per-run caching proxy, default-on with the
-default model-backed build). A Go or Python version the image lacks needs
-nothing: a build derives an image with what the repository declares
+default model-backed build). A Go, Python, Java/Maven or Ruby/Bundler
+toolchain the image lacks needs nothing: a build derives an image with what
+the repository declares
 ([USAGE_REFERENCE.md § Project toolchains](USAGE_REFERENCE.md#project-toolchains)).
 A `docker-compose.yml` service
 dependency (Postgres, Kafka): `-compose-services` (default-on) launches
@@ -1585,7 +1586,7 @@ What changes for a build:
 | `no request "<id>" under ...` for a request you submitted | The request was recorded in another data dir. Every command that resolves one prints `data dir: ... (source: ...)` first, and a `note:` when `data` in the current directory holds records it is not using. Usual causes: the request was submitted before the config had a `data_dir` (commands then used `data` in the directory they ran in), or with an explicit `-data-dir` | Set `data_dir:` in the session config to the folder that holds the request (the `note:` line prints it), then `factoryd restart` |
 | A quarantine reads `canonical_verify failed: ...; it passed inside the build (round N)` | The build ran the verify command in its own container and it passed; the same command then failed in a fresh container. Usually the build left something outside the repository that the command needs (it installed a package the command does not install, wrote a cache or a file under `$HOME`), or the verify command fails on the repository as it is (a missing test dependency or tool in the worker image). Run the command on a clean checkout, fix it (`-verify-command`, `.factory.yml`), then resubmit. A flaky test that names one to three failures is already run once more before the quarantine (USAGE_REFERENCE.md, "A failed verify that looks flaky"); one that still fails: `factoryd retry <id>` |
 | A build is quarantined at `canonical_verify` with `go.mod requires go >= X (running go Y; GOTOOLCHAIN=local)`, or the wrong Python runs | The repository declares a toolchain version the sandbox image lacks and no image was derived for it: `FACTORYD_AUTOSTART=0` is set, or the image does not report its versions | Unset `FACTORYD_AUTOSTART`, or build the project's image yourself; `factoryd doctor -target-repo <repo>` says which applies ([USAGE_REFERENCE.md § Project toolchains](USAGE_REFERENCE.md#project-toolchains)); then `factoryd retry <id>` |
-| A run stops at start with `sandbox image: build the image with this repository's toolchains: ...` | The image for the repository's declared Go or Python could not be built: the toolchain image did not pull, the local registry is not running, or buildgate's build scripts do not work on that Python | The message ends with the reason. A pull or registry failure: fix it (`make install` starts the registry) and `factoryd retry <id>`. A Python the scripts fail on cannot run a build |
+| A run stops at start with `sandbox image: build the image with this repository's toolchains: ...` | The image for the repository's declared Go, Python, Java/Maven or Ruby/Bundler could not be built: the toolchain image did not pull (for a pinned Ruby, no official `ruby:<version>-<codename>` image exists), the configured image has no C compiler for Ruby, the local registry is not running, or buildgate's build scripts do not work on that Python | The message ends with the reason. A pull or registry failure: fix it (`make install` starts the registry) and `factoryd retry <id>`. A Python the scripts fail on cannot run a build |
 | A build is refused: `compose_services_worker_env ... names the service ... as a host` | The worker joins no network and resolves no service name | Read `BG_SERVICE_<NAME>` (an address) in the target repo instead |
 
 What each command does, the flags used most, session-config keys,

@@ -77,6 +77,14 @@
         ],
         "prefix": "/gomodproxy/",
         "upstream": "https://proxy.golang.org"
+      },
+      {
+        "prefix": "/maven/",
+        "upstream": "https://repo.maven.apache.org/maven2"
+      },
+      {
+        "prefix": "/rubygems/",
+        "upstream": "https://rubygems.org"
       }
     ],
     "upstream_timeout": 60000000000

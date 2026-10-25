@@ -1,5 +1,6 @@
 // Package registryproxy implements a read-only, caching, allowlisted forward
-// proxy for package-registry HTTP traffic (npm, PyPI, the Go module proxy),
+// proxy for package-registry HTTP traffic (npm, PyPI, the Go module proxy,
+// Maven Central, RubyGems),
 // launched per-run next to a sandboxed worker -- see internal/sandbox/registryproxy.go for the Docker
 // launch/teardown/orphan-reconciliation side of that lifecycle.
 //
@@ -13,8 +14,9 @@
 // that same internal network, fronting a fixed, operator-declared allowlist
 // of package-registry upstreams (npm's registry.npmjs.org, PyPI's
 // pypi.org/simple and files.pythonhosted.org, the Go module proxy's
-// proxy.golang.org and sum.golang.org), so `npm install`/`pip install`/
-// `go build` inside the sandbox can resolve real packages without a
+// proxy.golang.org and sum.golang.org, Maven Central's repo.maven.apache.org,
+// rubygems.org), so `npm install`/`pip install`/`go build`/`mvn`/
+// `bundle install` inside the sandbox can resolve real packages without a
 // per-project image and without giving the worker any other route out.
 //
 // Routing is by a fixed path prefix this server owns (e.g. "/npm/"), never

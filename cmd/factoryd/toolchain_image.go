@@ -90,16 +90,17 @@ func stageAgentTestsMain(args []string) error {
 }
 
 // toolchainImageFor returns the image a build of repo runs in. It is base
-// when base has the Go and Python versions repo declares, and otherwise an
-// image derived from base that has them, built on first use and reused after:
+// when base has the Go, Python, Java with Maven, and Ruby with Bundler that
+// repo declares, and otherwise an image derived from base that has them,
+// built on first use and reused after:
 // a build has no network to fetch a toolchain, so without it the build runs to
 // its verify command and fails there. The derived image is base plus official
 // toolchain images chosen by the declared version; nothing of the repository
 // is copied into it or run to build it.
 //
 // base is returned unchanged when there is nothing to compare (no
-// declaration, an image that cannot be asked, a tool the image does not
-// report) and under FACTORYD_AUTOSTART=0, which stops factoryd doing anything
+// declaration, an image that cannot be asked, a Go or Python the image does
+// not report) and under FACTORYD_AUTOSTART=0, which stops factoryd doing anything
 // the operator did not ask for. A declaration that names nothing installable,
 // or an image that fails to build, refuses the run: it could not pass.
 func toolchainImageFor(dp *deps, ctx context.Context, w io.Writer, repo, base, dockerBinary string) (string, error) {
@@ -120,7 +121,7 @@ func toolchainImageFor(dp *deps, ctx context.Context, w io.Writer, repo, base, d
 	}
 	var known []toolchain.Requirement
 	for _, req := range reqs {
-		if _, reported := installed[req.Tool]; reported {
+		if _, reported := installed[req.Tool]; reported || derivedWhenAbsent(req.Tool) {
 			known = append(known, req)
 		}
 	}

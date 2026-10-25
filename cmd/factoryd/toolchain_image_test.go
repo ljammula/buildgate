@@ -109,6 +109,10 @@ func TestToolchainImageForDerivesAnImageOnlyWhenTheBaseLacksADeclaredVersion(t *
 			[]string{base, "GO_MODE=replace", "GO_IMAGE=golang:1.27"}, "installing Go 1.27"},
 		{"another Python", map[string]string{".python-version": "3.12\n"}, "localhost:5050/buildgate-toolchain@sha256:cccc",
 			[]string{base, "PYTHON_MODE=replace", "PYTHON_IMAGE=python:3.12-slim-bookworm", "PYTHON_VERSION=3.12"}, "installing Python 3.12"},
+		{"a JDK and Maven the base has none of", map[string]string{"pom.xml": "<project/>"}, "localhost:5050/buildgate-toolchain@sha256:cccc",
+			[]string{base, "JAVA_MODE=replace", "JAVA_IMAGE=maven:3.9-eclipse-temurin-21"}, "installing Java 21 and Maven 3.9"},
+		{"a Ruby and Bundler the base has none of", map[string]string{"Gemfile": "", ".ruby-version": "3.3\n"}, "localhost:5050/buildgate-toolchain@sha256:cccc",
+			[]string{base, "RUBY_MODE=replace", "RUBY_IMAGE=ruby:3.3-bookworm"}, "installing Ruby 3.3 and Bundler"},
 		{"Node is reported and kept", map[string]string{".nvmrc": "20\n"}, base, nil, "keeps its own Node"},
 		{"a file that does not parse is reported and the base kept", map[string]string{"pyproject.toml": "[project\n"}, base, nil, "were not checked"},
 	}

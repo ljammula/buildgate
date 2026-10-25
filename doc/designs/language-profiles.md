@@ -13,10 +13,10 @@ contract.
 | `Markers` | Root-level regular files that identify a project family. Doctor detects them in the working tree and reports all matches; it does not pick a winner. |
 | `RequiredBinaries` | Executable hints for a project family. Missing profile-only binaries are doctor warnings, not run prerequisites; only committed `.factory.yml` `required_binaries` are checked as run prerequisites against the final image. Doctor checks committed required binaries against the configured base image as an early diagnostic. |
 | `VersionSources` | Files worth inspecting for a declared runtime version. These are hints, not claims that BuildGate parses or installs every version. |
-| `ToolchainProvisioning` | `automatic` for Go/Python derivation, `configured-image` for Node, or `image-only` for runtimes that must already be in the operator-selected image. |
+| `ToolchainProvisioning` | `automatic` for Go, Python, Java/Maven and Ruby/Bundler derivation, `configured-image` for Node, or `image-only` for runtimes that must already be in the operator-selected image. |
 | `DependencyManifests` | Common dependency and lock files for the project family. |
 | `ProjectImageManifests` | Root-level files currently consumed by `make project-sandbox-image`. This list is narrower than `DependencyManifests`. |
-| `RegistryProxyEcosystems` | Ecosystems routed by the per-run package-registry proxy: Go modules, npm, and PyPI. These are not tied to a required lockfile. |
+| `RegistryProxyEcosystems` | Ecosystems routed by the per-run package-registry proxy: Go modules, npm, PyPI, Maven Central and RubyGems. These are not tied to a required lockfile. |
 | `InstallCommand`, `CachePaths`, `InstallRequires` | A reviewed candidate for a `.factory.yml` `sandbox:` block (Node: `npm ci` into `node_modules`; Python: a virtualenv install into `.venv`), and the root file that must exist for it to apply (a lockfile or `requirements.txt`). `onboard`, `init -write-factory-yml` and `quickstart` write it as a draft; the operator commits it and approves its hash (`factoryd sandbox approve`). A profile never installs anything itself. Empty `InstallCommand` means no candidate |
 | `VerifyCommand`, `FullSuiteCommand` | Reviewed command candidates. Empty means the profile does not make that recommendation because a manifest alone does not identify the project's test runner. The Go profile uses `go build ./... && go test -run '^$' ./...` for verify (test compilation plus the vet subset `go test` runs, not the full `go vet`) and `go test ./...` for the full suite. `full_suite_command` falls back to `verify_command` when omitted by the repository. |
 | `TestPatterns` | Candidate patterns for `.factory.yml` `test_patterns`. They are advisory; the run uses the committed config or the global defaults. Profiles omit a pattern when one safe recommendation does not cover common layouts. |
@@ -41,9 +41,10 @@ by `doctor`. Since `.factory.yml` is read from committed HEAD, working-tree
 markers are onboarding hints and do not claim that the corresponding project
 is what the next run will build.
 
-For an automatic Go or Python toolchain, doctor reports the derived-image plan
-when the project-image planner can satisfy the declaration, even when
-`FACTORYD_AUTOSTART=0`; it fails only when no project image can be derived.
+For an automatic Go, Python, Java/Maven or Ruby/Bundler toolchain, doctor
+reports the derived-image plan when the project-image planner can satisfy the
+declaration, even when `FACTORYD_AUTOSTART=0`; it fails only when no project
+image can be derived. Java/Gradle stays `image-only`: Gradle is not derived.
 
 The helper currently stages only manifests at `PROJECT_DIR`'s root. Its
 dependency support is Go (`go.mod`, `go.sum`), npm (`package.json`,

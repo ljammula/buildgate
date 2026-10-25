@@ -17,11 +17,30 @@ import (
 
 // imageToolchainsScript prints the versions of the toolchains a build may
 // use and the image's distribution codename, one per line; a tool the image
-// lacks prints nothing a version is read from.
+// lacks prints nothing a version is read from. java is asked only when it is
+// there, since a shell's "java: not found" carries a line number, and only
+// the version lines of java and mvn are read: a JVM prints "Picked up
+// JAVA_TOOL_OPTIONS: ..." first when that variable is set.
 const imageToolchainsScript = `go version 2>/dev/null
 python3 --version 2>/dev/null
 echo "node $(node --version 2>/dev/null)"
+command -v java >/dev/null 2>&1 && echo "java $(java -version 2>&1 | grep -m 1 ' version ')"
+mvn -v 2>/dev/null | grep -m 1 '^Apache Maven '
+ruby --version 2>/dev/null
+echo "bundler $(bundle --version 2>/dev/null)"
 . /etc/os-release 2>/dev/null; echo "codename=$VERSION_CODENAME"`
+
+// imageToolchainLines maps the start of each line imageToolchainsScript
+// prints to the tool whose version follows it.
+var imageToolchainLines = []struct{ prefix, tool string }{
+	{"go version ", toolchain.Go},
+	{"Python ", toolchain.Python},
+	{"node ", toolchain.Node},
+	{"java ", toolchain.Java},
+	{"Apache Maven ", toolchain.Maven},
+	{"ruby ", toolchain.Ruby},
+	{"bundler ", toolchain.Bundler},
+}
 
 // imageToolchains is the real dockerBoundary probe.
 func (impl realDocker) imageToolchains(ctx context.Context, dockerBinary, image string) (toolchain.Installed, string, error) {
@@ -34,7 +53,7 @@ func (impl realDocker) requiredBinaries(ctx context.Context, dockerBinary, image
 
 // warnProjectToolchains prints, as a request is submitted, each toolchain
 // version the repository declares that its builds will not have: a Node
-// mismatch always, and a Go or Python one only under FACTORYD_AUTOSTART=0,
+// mismatch always, and any other one only under FACTORYD_AUTOSTART=0,
 // since otherwise a build derives the image that has it (toolchainImageFor).
 // It never refuses the request, and says nothing when the image cannot be
 // asked.
@@ -62,8 +81,8 @@ func warnProjectToolchains(dp *deps, ctx context.Context, w io.Writer, repo stri
 	}
 }
 
-// imageToolchains runs image once, without a network, and reads its Go,
-// Python and Node versions and its distribution codename.
+// imageToolchains runs image once, without a network, and reads the
+// versions of the tools in imageToolchainLines and its distribution codename.
 func imageToolchains(ctx context.Context, dockerBinary, image string) (toolchain.Installed, string, error) {
 	out, err := exec.CommandContext(ctx, dockerBinary, "run", "--rm", "--network", "none",
 		"--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
@@ -81,20 +100,22 @@ func parseImageToolchains(out string) (toolchain.Installed, string) {
 	codename := ""
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		tool := ""
-		switch {
-		case strings.HasPrefix(line, "codename="):
-			codename = strings.TrimPrefix(line, "codename=")
+		if value, found := strings.CutPrefix(line, "codename="); found {
+			codename = value
 			continue
-		case strings.HasPrefix(line, "go version "):
-			tool = toolchain.Go
-		case strings.HasPrefix(line, "Python "):
-			tool = toolchain.Python
-		case strings.HasPrefix(line, "node "):
-			tool = toolchain.Node
 		}
-		if v, ok := toolchain.ParseVersion(line); ok && tool != "" {
-			installed[tool] = v
+		for _, known := range imageToolchainLines {
+			rest, found := strings.CutPrefix(line, known.prefix)
+			if !found {
+				continue
+			}
+			if v, ok := toolchain.ParseVersion(rest); ok {
+				if known.tool == toolchain.Java {
+					v = toolchain.JavaVersion(v)
+				}
+				installed[known.tool] = v
+			}
+			break
 		}
 	}
 	return installed, codename
@@ -121,10 +142,11 @@ type projectImagePlan struct {
 }
 
 // planProjectImage turns the findings into build arguments of
-// internal/sandbox/Dockerfile.project. Go and Python are installed from their
-// official images; the Python image is the one built on the base image's
-// distribution (codename), since the interpreter links against its libraries.
-// Node is not installed: the coding agents run on the image's Node.
+// internal/sandbox/Dockerfile.project. Go, Python, Java with Maven, and Ruby
+// with Bundler are installed from their official images; the Python and Ruby
+// images are the ones built on the base image's distribution (codename),
+// since the interpreter links against its libraries. Node is not installed:
+// the coding agents run on the image's Node.
 func planProjectImage(findings []toolchain.Finding, codename string) (projectImagePlan, error) {
 	var plan projectImagePlan
 	for _, f := range findings {
@@ -138,21 +160,96 @@ func planProjectImage(findings []toolchain.Finding, codename string) (projectIma
 		if f.Install.Parts == nil {
 			return plan, fmt.Errorf("%s, and the declaration names no version to install", toolchainMismatch(f))
 		}
-		switch f.Tool {
-		case toolchain.Go:
-			plan.BuildArgs = append(plan.BuildArgs, "GO_MODE=replace", "GO_IMAGE=golang:"+f.Install.String())
-			plan.Notes = append(plan.Notes, fmt.Sprintf("installing Go %s: %s", f.Install, toolchainMismatch(f)))
-		case toolchain.Python:
-			if len(f.Install.Parts) < 2 || codename == "" {
-				return plan, fmt.Errorf("%s, and a Python image needs a major.minor version and the base image's distribution codename (got %q, %q)", toolchainMismatch(f), f.Install, codename)
-			}
-			plan.BuildArgs = append(plan.BuildArgs, "PYTHON_MODE=replace",
-				fmt.Sprintf("PYTHON_IMAGE=python:%s-slim-%s", f.Install, codename),
-				"PYTHON_VERSION="+f.Install.MajorMinor().String())
-			plan.Notes = append(plan.Notes, fmt.Sprintf("installing Python %s: %s", f.Install, toolchainMismatch(f)))
+		install := toolchainInstall(f.Tool)
+		if install == nil {
+			continue
 		}
+		args, what, err := install(f, codename)
+		if err != nil {
+			return plan, fmt.Errorf("%s, and %w", toolchainMismatch(f), err)
+		}
+		if plan.has(args[0]) {
+			continue // Java and Maven, or Ruby and Bundler, come from one image
+		}
+		plan.BuildArgs = append(plan.BuildArgs, args...)
+		plan.Notes = append(plan.Notes, fmt.Sprintf("installing %s: %s", what, toolchainMismatch(f)))
 	}
 	return plan, nil
+}
+
+func (plan projectImagePlan) has(arg string) bool {
+	for _, have := range plan.BuildArgs {
+		if have == arg {
+			return true
+		}
+	}
+	return false
+}
+
+// toolchainInstall is, for a tool a derived image can install, what turns a
+// finding into the build arguments that install its version and a name for
+// what they install, the first argument being the stage's MODE switch; nil for
+// a tool no derived image installs.
+func toolchainInstall(tool string) func(f toolchain.Finding, codename string) ([]string, string, error) {
+	switch tool {
+	case toolchain.Go:
+		return installGo
+	case toolchain.Python:
+		return installPython
+	case toolchain.Java, toolchain.Maven:
+		return installJavaAndMaven
+	case toolchain.Ruby, toolchain.Bundler:
+		return installRubyAndBundler
+	}
+	return nil
+}
+
+func installGo(f toolchain.Finding, _ string) ([]string, string, error) {
+	return []string{"GO_MODE=replace", "GO_IMAGE=golang:" + f.Install.String()}, "Go " + f.Install.String(), nil
+}
+
+func installPython(f toolchain.Finding, codename string) ([]string, string, error) {
+	if len(f.Install.Parts) < 2 || codename == "" {
+		return nil, "", fmt.Errorf("a Python image needs a major.minor version and the base image's distribution codename (got %q, %q)", f.Install, codename)
+	}
+	return []string{"PYTHON_MODE=replace",
+		fmt.Sprintf("PYTHON_IMAGE=python:%s-slim-%s", f.Install, codename),
+		"PYTHON_VERSION=" + f.Install.MajorMinor().String()}, "Python " + f.Install.String(), nil
+}
+
+// mavenImageLine is the Maven release line of the official maven image a JDK
+// and Maven are copied from.
+const mavenImageLine = "3.9"
+
+// installJavaAndMaven installs the JDK of the finding's major and Maven from
+// one official maven image. The JDK is a Temurin build, which runs on any
+// glibc distribution, so the image is not chosen by codename.
+func installJavaAndMaven(f toolchain.Finding, _ string) ([]string, string, error) {
+	major := f.Install.Parts[0]
+	return []string{"JAVA_MODE=replace", fmt.Sprintf("JAVA_IMAGE=maven:%s-eclipse-temurin-%d", mavenImageLine, major)},
+		fmt.Sprintf("Java %d and Maven %s", major, mavenImageLine), nil
+}
+
+// installRubyAndBundler installs the finding's Ruby, with the Bundler it
+// ships, from the official ruby image built on the base image's distribution.
+func installRubyAndBundler(f toolchain.Finding, codename string) ([]string, string, error) {
+	if codename == "" {
+		return nil, "", errors.New("a Ruby image needs the base image's distribution codename")
+	}
+	return []string{"RUBY_MODE=replace", fmt.Sprintf("RUBY_IMAGE=ruby:%s-%s", f.Install, codename)},
+		"Ruby " + f.Install.String() + " and Bundler", nil
+}
+
+// derivedWhenAbsent reports whether a build installs tool into a derived
+// image when the base image has none of it. Go and Python are part of every
+// worker image, so an image that reports neither is not one a derivation is
+// built on; Java, Maven, Ruby and Bundler are in no worker image.
+func derivedWhenAbsent(tool string) bool {
+	switch tool {
+	case toolchain.Java, toolchain.Maven, toolchain.Ruby, toolchain.Bundler:
+		return true
+	}
+	return false
 }
 
 // projectImageArgsMain is the hidden `factoryd project-image-args` subcommand
@@ -194,11 +291,12 @@ func projectImageArgsMain(dp *deps, args []string, stdout, stderr io.Writer) err
 
 // doctorCheckProjectToolchains holds the toolchain versions repo declares
 // against the sandbox image a build of it would start from: one row per
-// declaration. A Go or Python mismatch is what a build derives an image for
-// (toolchainImageFor), and the row says so when autostart is enabled. With
-// FACTORYD_AUTOSTART=0 the configured image is kept, so a derivable mismatch
-// is an advisory warning. A tool the image does not report, or a declaration
-// the planner cannot install, fails. A Node mismatch warns.
+// declaration. A Go, Python, Java, Maven, Ruby or Bundler mismatch is what a
+// build derives an image for (toolchainImageFor), and the row says so when
+// autostart is enabled. With FACTORYD_AUTOSTART=0 the configured image is
+// kept, so a derivable mismatch is an advisory warning. A Go or Python the
+// image does not report, or a declaration the planner cannot install, fails.
+// A Node mismatch warns.
 func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctorCheck {
 	prefix := "toolchains for " + in.targetRepo
 	reqs, err := toolchain.Detect(in.targetRepo)
@@ -221,7 +319,7 @@ func doctorCheckProjectToolchains(ctx context.Context, in doctorInputs) []doctor
 		case f.Tool == toolchain.Node:
 			checks = append(checks, doctorCheck{Name: name, Advisory: true, Err: errors.New(imageHas(f)),
 				Fix: "the image's Node also runs the coding agents and is not replaced per project; build on it, or supply your own worker image"})
-		case f.Tool == toolchain.Go || f.Tool == toolchain.Python:
+		case toolchainInstall(f.Tool) != nil:
 			checks = append(checks, derivedToolchainCheck(name, f, codename, in))
 		default:
 			checks = append(checks, doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)})
@@ -244,13 +342,13 @@ func projectImageFix(in doctorInputs) string {
 	return fmt.Sprintf("build this project's image, which installs what it declares: `make -C %s project-sandbox-image PROJECT_DIR=%s BASE_IMAGE=%s`, then `factoryd configure-images -sandbox-image <the ref it prints>`", source, repo, in.sandboxImage)
 }
 
-// derivedToolchainCheck is doctor's row for a Go or Python the sandbox image
+// derivedToolchainCheck is doctor's row for a toolchain the sandbox image
 // lacks: it passes when the project-image planner can derive an image with
 // the declared version, as the build does, and fails when it cannot. The
 // build that derives is the worker's or the run's own process: one started
 // with FACTORYD_AUTOSTART=0 keeps the configured image, and the row says so.
 func derivedToolchainCheck(name string, f toolchain.Finding, codename string, in doctorInputs) doctorCheck {
-	if f.Installed.Parts == nil {
+	if f.Installed.Parts == nil && !derivedWhenAbsent(f.Tool) {
 		return doctorCheck{Name: name, Err: errors.New(imageHas(f)), Fix: projectImageFix(in)}
 	}
 	plan, err := planProjectImage([]toolchain.Finding{f}, codename)

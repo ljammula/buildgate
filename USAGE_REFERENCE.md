@@ -732,7 +732,9 @@ toolchains, select images, run lifecycle hooks, change an existing
 nested modules or monorepo layouts. `factoryd doctor -target-repo <repo>`
 reports ambiguity, candidate `.factory.yml` fields, and profile binary hints
 missing from the configured base image as warnings. Committed
-`required_binaries` missing from that base image are an early diagnostic;
+`required_binaries` missing from that base image are an early diagnostic
+(one that a toolchain the repository declares will provide passes, since a build
+derives that toolchain's image);
 each run checks them against its final image. Doctor detects markers in the
 working tree, while `.factory.yml` is read from committed HEAD, so working-tree
 markers are onboarding hints rather than a claim about what the next run sees. Other
@@ -780,7 +782,7 @@ at `submit` and at the start of a run until you do.
 | `install` | Required, at least one command. Same limits as `setup:` (at most 8 entries, 2000 bytes, one line each, none blank, none beginning with `-`) |
 | `cache_paths` | Workspace-relative paths the install writes, at most 16: clean, no `..`, not absolute, not beginning with `-`, not `.git` or `.factory` or beneath them, no patterns, no comma |
 | `inputs` | Extra workspace-relative files the install reads (a pattern is allowed), at most 16, under the same path rules. They add to the dependency manifests; they never remove one |
-| `registries` | A subset of `npm`, `pypi`, `go`. The run's registry proxy then serves only those (`npm`: `/npm/`; `pypi`: PyPI and its file host; `go`: the module proxy and the checksum database). It narrows what you configured and never widens it. Empty leaves the proxy's routes as configured |
+| `registries` | A subset of `npm`, `pypi`, `go`, `maven`, `rubygems`. The run's registry proxy then serves only those (`npm`: `/npm/`; `pypi`: PyPI and its file host; `go`: the module proxy and the checksum database; `maven`: Maven Central; `rubygems`: rubygems.org). It narrows what you configured and never widens it. Empty leaves the proxy's routes as configured |
 
 | | |
 |---|---|
@@ -1498,7 +1500,7 @@ roles:                  # harness is per role; repeat it on planning/review to r
   execution:
     model: luna
     harness: pifork
-registry_proxy: true   # optional: npm/PyPI/Go via the run-scoped proxy
+registry_proxy: true   # optional: npm/PyPI/Go/Maven/RubyGems via the run-scoped proxy
 ```
 
 ```sh
@@ -1978,6 +1980,8 @@ limits for API-started runs.
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |
 | `registry_proxy_go_upstream` | `https://proxy.golang.org` |
 | `registry_proxy_gosumdb_upstream` | `https://sum.golang.org` |
+| `registry_proxy_maven_upstream` | `https://repo.maven.apache.org/maven2` |
+| `registry_proxy_rubygems_upstream` | `https://rubygems.org` |
 | `registry_proxy_cache_bytes` | `1073741824` (1g) |
 | `registry_proxy_max_object_bytes` | `268435456` (256m) |
 | `registry_proxy_max_concurrent_upstream` | `16` |
@@ -2277,20 +2281,23 @@ values a run will use).
 | Writing a ticket by hand | `factoryd ticket-template [-o <path>]` for a skeleton; `factoryd check-ticket <path>` to validate the header lines. Point `-spec` at it. `-ticket-file` is a separate from-scratch format; leave it unset. Both run paths refuse a malformed or near-miss header (`Verify-command:`, `Allowed_Files:`). |
 | Module root is a subdirectory | Point `PROJECT_DIR` (for `make project-sandbox-image`) and `-verify-command` at it. `doctor -workspace <repo>` warns when it finds the manifest one level down. |
 | Need a worker image | `make sandbox-image` builds one locally, or `make install IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z` pulls a release image; pass its digest-pinned ref as `BASE_IMAGE` to `make project-sandbox-image`. |
-| The project needs another Go or Python version | `make project-sandbox-image` installs it: see Project toolchains below. |
+| The project needs another Go, Python, Java or Ruby version | A build derives an image with it, and `make project-sandbox-image` installs it: see Project toolchains below. |
 | Model host only on Tailscale | Use the Tailscale IP or full `*.ts.net` FQDN for the route's own `upstream`; the container may not share the host's resolver. `doctor` resolves the host from inside a sandbox container and fails with `container DNS cannot resolve ...`. |
 
 ### Project toolchains
 
 A build has no network and downloads no toolchain (`GOTOOLCHAIN=local`), so it
 has the versions in its sandbox image and no others. When a repository
-declares a Go or Python version the configured image lacks, the build derives
-an image that has it and runs in that. Nothing is configured.
+declares a Go, Python, Java/Maven or Ruby/Bundler toolchain the configured
+image lacks, the build derives an image that has it and runs in that. Nothing
+is configured.
 
 | Tool | Read from, at the top of the repository | The image satisfies it when | When it does not |
 |---|---|---|---|
 | Go | `go.mod`: the `go` line, and the `toolchain` line when it is newer | Its Go is at least the `go` line | That version is installed from the official `golang` image |
 | Python | `.python-version`, else `requires-python` in `pyproject.toml` | Its Python matches the numbers `.python-version` states, or meets every `requires-python` clause | That version is installed from the official `python` image built on the configured image's distribution; `python3`, `python` and `pip` become it |
+| Java and Maven | A `pom.xml` declares both. The Java version: `.java-version`, else `.sdkmanrc`'s `java=` line, else the pom's `maven.compiler.release` (or the compiler plugin's `<release>`) when it is a plain number; a value that is not a Java major (`system`, `0`) pins nothing and the next one is read | Its `java` major is at least the pinned one (any JDK when nothing pins one), and it has `mvn` | The oldest LTS JDK at or above the pin (8, 11, 17, 21 or 25; the pinned major itself above 25), or 21 when none is pinned, and Maven 3.9 are installed from the official `maven:3.9-eclipse-temurin-<major>` image under `/opt/java/openjdk` and `/usr/share/maven`; `java`, `javac`, `mvn` and the other JDK tools are on `PATH`, `JAVA_HOME` is set, and Maven's global settings mirror every repository through the registry proxy's Maven route |
+| Ruby and Bundler | A `Gemfile` declares both. The Ruby version: `.ruby-version` (a `ruby-` prefix is dropped), else the Gemfile's `ruby "x.y[.z]"` line | Its Ruby matches the numbers stated (any Ruby when nothing pins one), and it has `bundle` | That Ruby, or 4.0 when none is pinned, is installed with its Bundler from the official `ruby:<version>-<codename>` image built on the configured image's distribution, with libyaml and any shared library it needs; gems with native extensions compile with the image's C compiler, and an image without one cannot be derived |
 | Node | `.nvmrc`, else `.node-version` | Its Node matches the numbers stated | Nothing is installed: the coding agents run on the image's Node. The run and `submit` print a warning |
 
 ```text
@@ -2299,7 +2306,7 @@ a build starts (worker, or a single-ticket run)
         v
 read the repository's declarations --- none, or the configured image has them ---> configured image
         |
-        | a Go or Python it lacks
+        | a Go, Python, Java/Maven or Ruby/Bundler it lacks
         v
 already derived for this image and these versions? --- yes ---> that image
         |
@@ -2312,13 +2319,13 @@ the build runs in localhost:5050/buildgate-toolchain@sha256:<digest>
 | Fact | Detail |
 |---|---|
 | What you see | `sandbox image: installing Go 1.27: go.mod declares "go 1.27" and the sandbox image has go 1.26.8`, then the derived image's reference, in the run's log |
-| What goes into the derived image | The configured image and the official toolchain image. No file of the repository, and none of its code runs to build it. Its dependencies come through the registry proxy during the build, or from `make project-sandbox-image` below |
-| Python and buildgate's own scripts | The build scripts run on the worker's `python3`. Deriving an image with another Python runs those scripts' test suite on it first and refuses the run if they fail |
-| Checking ahead | `factoryd doctor -target-repo <repo>`: one row per declaration; with autostart enabled, a derivable Go or Python mismatch passes and describes the derived image, while with `FACTORYD_AUTOSTART=0` it warns that the configured image is kept; a tool the base image does not report or a declaration with no installable version fails |
-| Turning it off | A build started with `FACTORYD_AUTOSTART=0` uses the configured image as it is, and `submit` warns; `doctor -target-repo` gives the same advisory for a derivable Go or Python mismatch and says an autostart-enabled build derives the declared version |
+| What goes into the derived image | The configured image and the official toolchain image, under `/usr` and `/opt` (read-only in the sandbox). No file of the repository, and none of its code runs to build it. Its dependencies come through the registry proxy during the build, or from `make project-sandbox-image` below |
+| Python and buildgate's own scripts | The build scripts run on the worker's `python3`. Deriving an image with another Python runs those scripts' test suite on it first and refuses the run if they fail. Java and Ruby replace neither Python nor Node |
+| Checking ahead | `factoryd doctor -target-repo <repo>`: one row per declaration (a `pom.xml` has a JDK row and a Maven row, a `Gemfile` a Ruby row and a Bundler row); with autostart enabled, a derivable mismatch passes and describes the derived image, while with `FACTORYD_AUTOSTART=0` it warns that the configured image is kept; a Go or Python the base image does not report, or a declaration with no installable version, fails |
+| Turning it off | A build started with `FACTORYD_AUTOSTART=0` uses the configured image as it is, and `submit` warns; `doctor -target-repo` gives the same advisory for a derivable mismatch and says an autostart-enabled build derives the declared version |
 | A declaration with no version to install | An upper bound alone (`requires-python = "<3.12"`) refuses the run, naming it; add `.python-version` |
-| An alias | `lts/*`, `system` and other names with no number are not compared |
-| Not covered | Acceptance-test drafting (`-draft-oracles`) runs in the configured image |
+| An alias | `lts/*`, `system` and other names with no number are not compared. A `.ruby-version` naming another engine (`jruby-9.4`) or a Gemfile constraint (`ruby "~> 3.3"`) pins nothing, and a `maven.compiler.release` that is a property reference is not read |
+| Not covered | Acceptance-test drafting (`-draft-oracles`) runs in the configured image. Gradle is not derived: a Gradle repository needs a worker image with its JDK and Gradle |
 | Removing them | `factoryd uninstall` removes every `localhost:5050/buildgate-toolchain` image |
 
 `make project-sandbox-image PROJECT_DIR=<repo> BASE_IMAGE=<worker ref>` builds
@@ -2341,8 +2348,8 @@ repository's release policy denied its change to protected `.factory.yml`.
 |---|---|---|
 | Go | Go from the configured image, or derived from `go.mod` when needed | `go.mod`, `go.sum` |
 | Python | Python from the configured image, or derived from `.python-version` / `pyproject.toml` when needed | `requirements.txt` |
-| Java / Maven | Java and Maven in the configured worker image | `pom.xml` |
-| Ruby / Bundler | Ruby and Bundler in the configured worker image | `Gemfile`, `Gemfile.lock` |
+| Java / Maven | Java and Maven from the configured image, or derived from `pom.xml` / `.java-version` / `.sdkmanrc` when needed | `pom.xml` |
+| Ruby / Bundler | Ruby and Bundler from the configured image, or derived from `Gemfile` / `.ruby-version` when needed | `Gemfile`, `Gemfile.lock` |
 | React Native / TypeScript | Node, npm, npx and pnpm in the configured worker image | `package.json`, `package-lock.json` |
 | C# / .NET | .NET in an operator-configured worker image | Not baked by `project-sandbox-image`; install it in the image |
 
@@ -2358,11 +2365,44 @@ npm or Maven cache does the same, with `/scratch` owned by `65532:65532`,
 mode `770`.
 
 This is verified command coverage for the listed repositories, not automatic
-toolchain installation for every language or framework. Only Go and Python
-have automatic version derivation; Node is checked in the configured image
-and is not replaced. Other tools must be present in the selected image and
+toolchain installation for every language or framework. Go, Python, Java
+with Maven, and Ruby with Bundler have automatic derivation; Node is checked
+in the configured image and is not replaced, and Gradle is not derived. Other tools must be present in the selected image and
 can be checked with `.factory.yml` `required_binaries`. See [BuildGate
 status](STATUS.md) for the current limits.
+
+### Package registries
+
+With `registry_proxy` on, each run starts a read-only caching proxy (GET and
+HEAD only, no credential) and points the worker's package tools at it. A
+repository's `sandbox.registries` keeps only the routes it lists.
+
+| Route | Upstream (session-config key) | Redirect hosts it follows | The worker's environment |
+|---|---|---|---|
+| `/npm/` | `registry_proxy_npm_upstream` | none | `npm_config_registry` |
+| `/pypi/`, `/pypi-files/` | `registry_proxy_pypi_upstream`, `registry_proxy_pypi_files_upstream` | the file host (index links are rewritten to `/pypi-files/`) | `PIP_INDEX_URL`, `PIP_TRUSTED_HOST` |
+| `/gomodproxy/`, its `sumdb/sum.golang.org/` | `registry_proxy_go_upstream`, `registry_proxy_gosumdb_upstream` | `storage.googleapis.com` | `GOPROXY`, `GOSUMDB`, `GONOPROXY=none`, `GOMODCACHE` and `GOCACHE` under `/scratch`, `GOFLAGS` plus `-modcacherw` |
+| `/maven/` | `registry_proxy_maven_upstream` | none | `BUILDGATE_MAVEN_MIRROR`, `MAVEN_ARGS=-Dmaven.repo.local=/scratch/maven-repository`, `MVNW_REPOURL`, `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=/scratch/java-tmp -Djava.net.preferIPv4Stack=true` (the sandbox refuses the IPv6 socket a JVM opens by default) |
+| `/rubygems/` | `registry_proxy_rubygems_upstream` | none | `BUNDLE_MIRROR__ALL`, `BUNDLE_PATH=/scratch/bundle`, `GEM_HOME=/scratch/gems` |
+
+Each variable replaces whatever the image or the caller set. A mirror
+upstream follows no redirect. A route the run has, other than npm and PyPI,
+moves its downloads to the launch's scratch volume, so a project image's baked
+Go module cache or gems under `/usr/local/bundle` are not used, and Maven
+fetches again what its baked repository recorded from a repository id other
+than the derived Maven's mirror: everything comes through the proxy. Java's
+temporary directory moves to `/scratch/java-tmp`, because a test suite loads
+the native libraries it unpacks there (sqlite-jdbc, Netty, JNA) and `/tmp` is
+mounted noexec.
+
+| Tool | How it reaches the proxy |
+|---|---|
+| Maven | Reads no variable for a mirror. The Maven a build derives (Project toolchains) has global settings (`/usr/share/maven/conf/settings.xml`, root-owned, read-only) with one mirror of every repository at `${env.BUILDGATE_MAVEN_MIRROR}`, which the launch sets to the route. A Maven your own image brings keeps its own settings, has no mirror, and cannot fetch: give it a mirror of `${env.BUILDGATE_MAVEN_MIRROR}` in its global settings, or let the build derive Maven. Maven 3.9 or later reads `MAVEN_ARGS`, which puts the local repository on `/scratch` |
+| Maven wrapper (`./mvnw`) | Downloads Maven through the route (`MVNW_REPOURL`) into `/home/worker/.m2`. That Maven keeps its distribution's own settings, has no mirror, and cannot fetch the project's dependencies: a verify command that fetches runs `mvn` |
+| Bundler | `mirror.all` sends every `source` of the Gemfile to the route |
+| `gem install` | Reads no mirror setting: `gem install --clear-sources --source "$BUNDLE_MIRROR__ALL" <gem>`. The gem's executables land in `/scratch/gems/bin`, which is not on `PATH` |
+| A repository's committed `.bundle/config` | Takes precedence over the launch's Bundler environment (`BUNDLE_PATH`, `BUNDLE_MIRROR__ALL`); a mirror or path it names is used instead |
+| A repository's own `.mvn/maven.config`, settings file or Gemfile source | May name another host; the worker's network policy admits none but the proxy, so that fetch fails |
 
 ### Private Go modules
 

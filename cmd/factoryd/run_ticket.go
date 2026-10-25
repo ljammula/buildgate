@@ -374,6 +374,8 @@ type ticketRun struct {
 	registryProxyPyPIFilesUpstream        *string
 	registryProxyGoUpstream               *string
 	registryProxyGoSumDBUpstream          *string
+	registryProxyMavenUpstream            *string
+	registryProxyRubyGemsUpstream         *string
 	registryProxyCacheBytes               *int64
 	registryProxyMaxObjectBytes           *int64
 	registryProxyMaxConcurrent            *int
@@ -650,6 +652,8 @@ func (tr *ticketRun) parseFlags() error {
 	tr.registryProxyPyPIFilesUpstream = &tr.settings.RegistryProxyPyPIFilesUpstream
 	tr.registryProxyGoUpstream = &tr.settings.RegistryProxyGoUpstream
 	tr.registryProxyGoSumDBUpstream = &tr.settings.RegistryProxyGoSumDBUpstream
+	tr.registryProxyMavenUpstream = &tr.settings.RegistryProxyMavenUpstream
+	tr.registryProxyRubyGemsUpstream = &tr.settings.RegistryProxyRubyGemsUpstream
 	tr.registryProxyCacheBytes = &tr.settings.RegistryProxyCacheBytes
 	tr.registryProxyMaxObjectBytes = &tr.settings.RegistryProxyMaxObjectBytes
 	tr.registryProxyMaxConcurrent = &tr.settings.RegistryProxyMaxConcurrentUpstream
@@ -1474,9 +1478,17 @@ func (tr *ticketRun) buildRegistryProxyPolicy() (*sandbox.RegistryProxyPolicy, e
 // routes: a repository cannot reach an upstream the operator did not
 // configure.
 func (tr *ticketRun) registryProxyRoutes() ([]sandbox.RegistryProxyRoute, error) {
-	routes, err := sandbox.RegistryProxyRoutesWithUpstreams(*tr.registryProxyNPMUpstream, *tr.registryProxyPyPIUpstream, *tr.registryProxyPyPIFilesUpstream, *tr.registryProxyGoUpstream, *tr.registryProxyGoSumDBUpstream)
+	routes, err := sandbox.RegistryProxyRoutesWithUpstreams(sandbox.RegistryProxyUpstreams{
+		NPM:       *tr.registryProxyNPMUpstream,
+		PyPI:      *tr.registryProxyPyPIUpstream,
+		PyPIFiles: *tr.registryProxyPyPIFilesUpstream,
+		GoProxy:   *tr.registryProxyGoUpstream,
+		GoSumDB:   *tr.registryProxyGoSumDBUpstream,
+		Maven:     *tr.registryProxyMavenUpstream,
+		RubyGems:  *tr.registryProxyRubyGemsUpstream,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("-registry-proxy-pypi-files-upstream: %w", err)
+		return nil, fmt.Errorf("registry_proxy_pypi_files_upstream: %w", err)
 	}
 	if tr.sandbox == nil {
 		return routes, nil

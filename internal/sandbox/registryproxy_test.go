@@ -142,7 +142,7 @@ func TestLaunchRegistryProxyAndCleanupUseExactRestrictedLifecycle(t *testing.T) 
 	if facts.NetworkID != "network-id-123" || facts.ContainerID != "container-id-123" {
 		t.Errorf("facts IDs = network %q/container %q, want fake IDs", facts.NetworkID, facts.ContainerID)
 	}
-	wantHosts := map[string]bool{"registry.npmjs.org": true, "pypi.org": true, "files.pythonhosted.org": true, "sum.golang.org": true, "proxy.golang.org": true, "storage.googleapis.com": true}
+	wantHosts := map[string]bool{"registry.npmjs.org": true, "pypi.org": true, "files.pythonhosted.org": true, "sum.golang.org": true, "proxy.golang.org": true, "storage.googleapis.com": true, "repo.maven.apache.org": true, "rubygems.org": true}
 	for _, h := range facts.Hosts {
 		if !wantHosts[h] {
 			t.Errorf("unexpected audited host %q", h)
@@ -430,6 +430,9 @@ func TestRegistryProxyLifecyclePrepareWorkerSetsNetworkAndEnv(t *testing.T) {
 	if !strings.Contains(joined, "GONOPROXY=none") {
 		t.Errorf("environment missing GONOPROXY=none, got %v", worker.Environment)
 	}
+	if !strings.Contains(joined, "BUILDGATE_MAVEN_MIRROR=http://registry-proxy:8092/maven") || !strings.Contains(joined, "BUNDLE_MIRROR__ALL=http://registry-proxy:8092/rubygems/") {
+		t.Errorf("environment missing the Maven or RubyGems mirror, got %v", worker.Environment)
+	}
 	if !strings.Contains(joined, "PATH=/usr/bin") {
 		t.Errorf("unrelated environment entry dropped, got %v", worker.Environment)
 	}
@@ -519,11 +522,14 @@ func TestRemoveScratchDirDeletesReadOnlyModuleCache(t *testing.T) {
 
 // TestRegistryProxyRoutesWithUpstreamsKeepsDefaultsAndDropsForMirrors pins
 // the one route table: default upstreams reproduce DefaultRegistryProxyRoutes
-// exactly (redirect allowlists included -- cmd/factoryd's own hand-written
-// copy used to drop them), and a mirror keeps only the PyPI rewrite, whose
-// host follows the pypi-files upstream.
+// exactly (redirect allowlists included), and a mirror keeps only the PyPI
+// rewrite, whose host follows the pypi-files upstream.
 func TestRegistryProxyRoutesWithUpstreamsKeepsDefaultsAndDropsForMirrors(t *testing.T) {
-	got, err := RegistryProxyRoutesWithUpstreams("https://registry.npmjs.org", "https://pypi.org/simple", "https://files.pythonhosted.org", "https://proxy.golang.org", "https://sum.golang.org")
+	got, err := RegistryProxyRoutesWithUpstreams(RegistryProxyUpstreams{
+		NPM: "https://registry.npmjs.org", PyPI: "https://pypi.org/simple", PyPIFiles: "https://files.pythonhosted.org",
+		GoProxy: "https://proxy.golang.org", GoSumDB: "https://sum.golang.org",
+		Maven: "https://repo.maven.apache.org/maven2", RubyGems: "https://rubygems.org",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,12 +537,27 @@ func TestRegistryProxyRoutesWithUpstreamsKeepsDefaultsAndDropsForMirrors(t *test
 		t.Fatalf("default upstreams:\n got %+v\nwant %+v", got, want)
 	}
 
-	mirror, err := RegistryProxyRoutesWithUpstreams("https://npm.corp", "https://pypi.corp/simple", "https://files.corp", "https://gomod.corp", "https://sumdb.corp")
+	mirror, err := RegistryProxyRoutesWithUpstreams(RegistryProxyUpstreams{
+		NPM: "https://npm.corp", PyPI: "https://pypi.corp/simple", PyPIFiles: "https://files.corp",
+		GoProxy: "https://gomod.corp", GoSumDB: "https://sumdb.corp",
+		Maven: "https://nexus.corp/repository/maven-public", RubyGems: "https://gems.corp",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(mirror) != len(got) {
+		t.Fatalf("mirror routes = %+v, want one per default route", mirror)
+	}
 	for _, r := range mirror {
 		switch r.Prefix {
+		case mavenRoutePrefix:
+			if r.Upstream != "https://nexus.corp/repository/maven-public" || r.AllowedHosts != nil {
+				t.Errorf("maven route = %+v, want the mirror upstream and no redirect host", r)
+			}
+		case rubygemsRoutePrefix:
+			if r.Upstream != "https://gems.corp" || r.AllowedHosts != nil {
+				t.Errorf("rubygems route = %+v, want the mirror upstream and no redirect host", r)
+			}
 		case pypiRoutePrefix:
 			if !reflect.DeepEqual(r.AllowedHosts, []string{"files.corp->" + pypiFilesRoutePrefix}) {
 				t.Errorf("pypi AllowedHosts = %v, want the mirror's files host rewrite", r.AllowedHosts)

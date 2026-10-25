@@ -22,6 +22,7 @@ import (
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/toolchain"
 )
 
 // doctorRegisterTargetRepoFlag registers -target-repo directly on flags,
@@ -248,6 +249,7 @@ func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorC
 	for _, name := range missingNames {
 		missing[name] = true
 	}
+	derived := derivedToolchainBinaries(in.targetRepo)
 	checks := make([]doctorCheck, 0, len(requested))
 	for _, name := range requested {
 		check := doctorCheck{Name: fmt.Sprintf("required executable %s available as configured/default isolated worker %s in base image (%s)", name, user, in.sandboxImage)}
@@ -255,7 +257,9 @@ func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorC
 			check.Name = fmt.Sprintf("profile executable hint %s available as configured/default isolated worker %s in base image (%s)", name, user, in.sandboxImage)
 			check.Advisory = true
 		}
-		if missing[name] {
+		if missing[name] && derived[name] != "" {
+			check.Detail = fmt.Sprintf("not in the base image; the image a build derives for the declared %s toolchain provides it, and each run checks its final image", derived[name])
+		} else if missing[name] {
 			check.Err = fmt.Errorf("%q is not executable on PATH as the configured/default isolated worker identity %s", name, user)
 			if check.Advisory {
 				check.Fix = fmt.Sprintf("profile hint only: add %s to .factory.yml required_binaries if the repository's reviewed commands need it, then ensure it exists in the final worker image", name)
@@ -266,6 +270,37 @@ func doctorCheckRequiredBinaries(ctx context.Context, in doctorInputs) []doctorC
 		checks = append(checks, check)
 	}
 	return checks
+}
+
+// toolchainBinaries are the executables the image a build derives for a
+// toolchain puts on PATH.
+var toolchainBinaries = map[string][]string{
+	toolchain.Go:      {"go", "gofmt"},
+	toolchain.Python:  {"python3", "python", "pip3", "pip"},
+	toolchain.Java:    {"java", "javac", "jar"},
+	toolchain.Maven:   {"mvn"},
+	toolchain.Ruby:    {"ruby", "gem", "erb", "irb", "rake", "rdoc", "ri"},
+	toolchain.Bundler: {"bundle", "bundler"},
+}
+
+// derivedToolchainBinaries maps each executable a toolchain the repository
+// declares provides to that toolchain's name. A build derives an image with
+// the toolchain when the configured image lacks it (doctor's toolchain rows
+// fail when it cannot), so such an executable missing from the base image is
+// not a failure of the base image. Nothing is returned when the declarations
+// cannot be read: the toolchain rows report that.
+func derivedToolchainBinaries(repo string) map[string]string {
+	reqs, err := toolchain.Detect(repo)
+	if err != nil {
+		return nil
+	}
+	provided := map[string]string{}
+	for _, req := range reqs {
+		for _, name := range toolchainBinaries[req.Tool] {
+			provided[name] = req.Tool
+		}
+	}
+	return provided
 }
 
 func uniqueProfileBinaries(values []string) []string {

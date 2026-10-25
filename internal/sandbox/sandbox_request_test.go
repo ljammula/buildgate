@@ -142,7 +142,7 @@ func TestSandboxRequestScratchIsAVolumeNotABind(t *testing.T) {
 		}
 	}
 	script := req.Command[2]
-	const mkdir = `mkdir -p '/scratch/go-build' '/scratch/go-tmp' '/scratch/gomodcache' || { echo "buildgate: the worker cannot write /scratch (uid $(id -u), $(stat -c %u:%g:%a '/scratch' 2>/dev/null)): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)"; exit 95; }; `
+	const mkdir = `mkdir -p '/scratch/go-build' '/scratch/go-tmp' '/scratch/java-tmp' '/scratch/gomodcache' || { echo "buildgate: the worker cannot write /scratch (uid $(id -u), $(stat -c %u:%g:%a '/scratch' 2>/dev/null)): the worker image predates the scratch volume; rebuild the worker image with make install (Pi) or make pifork-image (pifork)"; exit 95; }; `
 	if !strings.Contains(script, `ulimit -n 4096; `+mkdir+`umask 0002; "$@"`) {
 		t.Errorf("script = %q, want the scratch mkdir after the setup, before the command (inside the output redirect)", script)
 	}
