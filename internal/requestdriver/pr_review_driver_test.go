@@ -255,6 +255,16 @@ func saveAcceptedRoundRun(t *testing.T, dataDir string, accepted *run.Run) error
 	return release.SaveDecision(dataDir, release.Decision{RunID: accepted.ID, Project: accepted.Project, Allowed: true, Evaluated: time.Now().UTC().Format(time.RFC3339)})
 }
 
+func approvedOnHeadState(head string, checks *bool) forge.ReviewState {
+	return forge.ReviewState{
+		State:          "OPEN",
+		ChecksPassing:  checks,
+		HeadSHA:        head,
+		ReviewDecision: forge.ReviewDecisionApproved,
+		LatestReviews:  []forge.Review{{CommitOID: head, State: "APPROVED"}},
+	}
+}
+
 // TestAdvancePRReviewStateTable exercises advancePRReview's own dispatch
 // over (draft, checks, threads, decision, merged) -> action, table-driven:
 // every distinct branch advancePRReadyOrApproved/handleClosedOrMergedTicket/
@@ -302,7 +312,7 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 		},
 		{
 			name:          "open not draft checks passing approved: PRState approved, continueAfterPRApproval called",
-			state:         forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, ReviewDecision: forge.ReviewDecisionApproved},
+			state:         approvedOnHeadState(requestdrivertest.TicketRunResultSHA(1), &trueVal),
 			wantPRState:   "approved",
 			wantStartNext: 1,
 			wantRequest:   request.StatePRReview,
@@ -317,7 +327,7 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			// must not advance the ticket while that thread blocks
 			// readiness, the same way it already blocks `gh pr ready`.
 			name: "open not draft checks passing approved BUT an untrusted thread still blocks readiness: not advanced",
-			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, ReviewDecision: forge.ReviewDecisionApproved,
+			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), ReviewDecision: forge.ReviewDecisionApproved, LatestReviews: []forge.Review{{CommitOID: requestdrivertest.TicketRunResultSHA(1), State: "APPROVED"}},
 				BlocksReadyThreads: []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "untrusted-human", Body: "still not fixed", CommentID: 999}}},
 			wantPRState: "",
 			wantRequest: request.StatePRReview,
@@ -1191,15 +1201,18 @@ func TestAdvancePRReviewMergedStopsPolling(t *testing.T) {
 	}
 }
 
-// TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests: ticket 1's
-// pull request closed without merging ends the request as closed at once,
-// with ticket 2's still-open pull request left for a person, no longer
-// reported ready to merge, and the operator told.
+// TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests: the last
+// ticket's pull request closed without merging ends the request as closed
+// at once, with ticket 1's still-open pull request left for a person, no
+// longer reported ready to merge, and the operator told. (An earlier
+// ticket's closed pull request parks instead:
+// TestClosedUnmergedEarlierTicketParksRequest.)
 func TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests(t *testing.T) {
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 2)
-	r.Tickets[1].PRState = "ready"
-	r.Tickets[1].MergeReadiness = &request.MergeReadiness{Ready: true}
+	r.Tickets[0].PRState = "ready"
+	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
+	r.Tickets[0].LastPolledAt = time.Now().UTC().Format(time.RFC3339Nano) // not due: only ticket 2 is read
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -1216,21 +1229,21 @@ func TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests(t *testing.T) 
 	if saved.State != request.StateClosed {
 		t.Fatalf("request state = %q, want closed", saved.State)
 	}
-	if saved.Tickets[0].PRState != "closed" {
-		t.Errorf("ticket 1 PRState = %q, want closed", saved.Tickets[0].PRState)
+	if saved.Tickets[1].PRState != "closed" {
+		t.Errorf("ticket 2 PRState = %q, want closed", saved.Tickets[1].PRState)
 	}
-	if saved.Tickets[1].MergeReadiness != nil {
-		t.Errorf("ticket 2 MergeReadiness = %+v, want nil once the request is closed", saved.Tickets[1].MergeReadiness)
+	if saved.Tickets[0].MergeReadiness != nil {
+		t.Errorf("ticket 1 MergeReadiness = %+v, want nil once the request is closed", saved.Tickets[0].MergeReadiness)
 	}
-	if next := saved.NextAction(); !strings.Contains(next, r.Tickets[1].PRURL) {
-		t.Errorf("NextAction = %q, want it to name ticket 2's open pull request", next)
+	if next := saved.NextAction(); !strings.Contains(next, r.Tickets[0].PRURL) {
+		t.Errorf("NextAction = %q, want it to name ticket 1's open pull request", next)
 	}
 	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, r.ID))
 	if err != nil {
 		t.Fatalf("read notifications.log: %v", err)
 	}
-	if !strings.Contains(string(log), "Pull request closed: request closed") || !strings.Contains(string(log), r.Tickets[1].PRURL) {
-		t.Errorf("notifications.log = %s, want the closed notice naming ticket 2's open pull request", log)
+	if !strings.Contains(string(log), "Pull request closed: request closed") || !strings.Contains(string(log), r.Tickets[0].PRURL) {
+		t.Errorf("notifications.log = %s, want the closed notice naming ticket 1's open pull request", log)
 	}
 }
 
@@ -1376,7 +1389,10 @@ func TestPRPollStillRecordsApprovalWhenTheRetargetCannotHappen(t *testing.T) {
 	r, dataDir, edits := stackedRetargetFixture(dp, t)
 	r.Tickets[0].PRBase = "" // pre-upgrade merge: nothing to retarget onto
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
-		return forge.ReviewState{State: "OPEN", IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TicketRunResultSHA(2), ReviewDecision: forge.ReviewDecisionApproved}, nil
+		state := approvedOnHeadState(requestdrivertest.TicketRunResultSHA(2), nil)
+		state.IsDraft = true
+		state.BaseRefName = "factoryd/run-1"
+		return state, nil
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {

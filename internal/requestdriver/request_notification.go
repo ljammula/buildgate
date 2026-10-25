@@ -90,16 +90,24 @@ func prepareRequestNotification(dataDir string, r *request.Request, notice reque
 func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requestNotice {
 	approve := fmt.Sprintf("factoryd approve %s (or `factoryd reject -reason ... %s`)", r.ID, r.ID)
 	var notice requestNotice
-	switch r.State {
-	case request.StateOracleReview:
+	switch {
+	case r.State == request.StateOracleReview:
 		notice = requestNotice{Ask: "Acceptance tests ready for your review", Detail: "Read them, then approve, edit or skip them.", Next: approve}
-	case request.StatePlanReview:
+	case r.State == request.StatePlanReview:
 		detail := "Read the tickets, then approve or request changes."
 		if n := len(r.Tickets); n > 0 {
 			detail = fmt.Sprintf("%d ticket(s). %s", n, detail)
 		}
 		notice = requestNotice{Ask: "Plan ready for your review", Detail: detail + PlanReviewOracleNote(dataDir, r), Next: approve}
-	case request.StateResumeReview:
+	case r.State == request.StateResumeReview && r.Resume.Parked():
+		// Parked: an earlier ticket needs a repair only a person can make;
+		// NextAction names it and the two ways on.
+		notice = requestNotice{
+			Ask:    "An earlier ticket needs you before the request can continue",
+			Detail: r.NextAction(),
+			Next:   fmt.Sprintf("factoryd resume %s once it is repaired (or `factoryd cancel %s`)", r.ID, r.ID),
+		}
+	case r.State == request.StateResumeReview:
 		// Nothing to edit or approve: a step was lost, and the ways on are
 		// the resume verbs (NextAction names the lost state).
 		notice = requestNotice{

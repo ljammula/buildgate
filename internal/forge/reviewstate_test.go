@@ -56,7 +56,7 @@ func TestParsePRView(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
-			isDraft, state, mergedAt, decision, checksPassing, _, _, err := parsePRView(readTestdata(t, c.file))
+			isDraft, state, mergedAt, decision, checksPassing, _, _, _, err := parsePRView(readTestdata(t, c.file))
 			if err != nil {
 				t.Fatalf("parsePRView: %v", err)
 			}
@@ -87,7 +87,7 @@ func TestParsePRView(t *testing.T) {
 // apart from an ordinary one -- actually comes back from parsePRView,
 // not just headRefOid.
 func TestParsePRViewParsesBaseRefName(t *testing.T) {
-	_, _, _, _, _, headSHA, baseRefName, err := parsePRView(readTestdata(t, "prview_stacked_base.json"))
+	_, _, _, _, _, headSHA, baseRefName, _, err := parsePRView(readTestdata(t, "prview_stacked_base.json"))
 	if err != nil {
 		t.Fatalf("parsePRView: %v", err)
 	}
@@ -96,6 +96,38 @@ func TestParsePRViewParsesBaseRefName(t *testing.T) {
 	}
 	if baseRefName != "factoryd/run-1" {
 		t.Errorf("baseRefName = %q, want %q", baseRefName, "factoryd/run-1")
+	}
+}
+
+// TestApprovalOnlyCountsOnCurrentHead: recorded gh JSON, approved on its
+// head, approved on an older commit, and with changes requested: only the
+// first is an approval of the pull request as it stands.
+func TestApprovalOnlyCountsOnCurrentHead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file string
+		want bool
+	}{
+		{name: "approved on head", file: "prview_approved.json", want: true},
+		{name: "approved on older commit", file: "prview_approved_older.json", want: false},
+		{name: "changes requested", file: "prview_changes_requested.json", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, state, _, decision, _, headSHA, baseRefName, latestReviews, err := parsePRView(readTestdata(t, tc.file))
+			if err != nil {
+				t.Fatalf("parsePRView: %v", err)
+			}
+			got := ReviewState{
+				State:          state,
+				ReviewDecision: decision,
+				HeadSHA:        headSHA,
+				BaseRefName:    baseRefName,
+				LatestReviews:  latestReviews,
+			}.ApprovedOnCurrentHead()
+			if got != tc.want {
+				t.Errorf("ApprovedOnCurrentHead = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -401,8 +433,8 @@ func TestReadReviewStateCombinesPRViewAndReviewThreads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadReviewState: %v", err)
 	}
-	if state.State != "OPEN" || state.ReviewDecision != ReviewDecisionApproved {
-		t.Errorf("state = %+v, want OPEN/approved", state)
+	if state.State != "OPEN" || state.ReviewDecision != ReviewDecisionApproved || !state.ApprovedOnCurrentHead() {
+		t.Errorf("state = %+v, want OPEN/approved on its head", state)
 	}
 	if len(state.BlocksReadyThreads) != 1 || state.BlocksReadyThreads[0].Author != "alice" {
 		t.Errorf("BlocksReadyThreads = %+v, want alice's thread", state.BlocksReadyThreads)

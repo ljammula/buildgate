@@ -182,9 +182,10 @@ const DefaultMaxRounds = 3
 // r.Resume, checked against the ticket's own build spec and round limit. An
 // empty result means a resume may go ahead. err means a check could not be
 // made. A lost build with no recorded kept run has nothing to continue, which
-// is a refusal too.
+// is a refusal too. A park lost no step and kept nothing: its step reruns and
+// checks again, so nothing refuses it.
 func (g ResumeGate) RequestResumeRefusals(ctx context.Context, dataDir, dockerBinary string, r *request.Request) ([]string, error) {
-	if r.Resume == nil {
+	if r.Resume == nil || r.Resume.Parked() {
 		return nil, nil
 	}
 	if r.Resume.FromState != request.StateBuilding {

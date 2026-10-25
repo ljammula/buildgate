@@ -2088,6 +2088,7 @@ func TestAdvanceBuildingQuarantineReportedViaRunnerErrorStillQuarantinesRequest(
 		// even though the quarantine above is already durable.
 		return fmt.Errorf("run quarantined: gate failed: tests_added")
 	}
+	earlierPROpenAt(dp, fmt.Sprintf("%040d", 2))
 
 	for i := 1; i <= 2; i++ {
 		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {

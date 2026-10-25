@@ -891,10 +891,12 @@ func TicketAt(r *request.Request, idx int) (*request.Ticket, error) {
 // `factoryd retry` can find later even if this halt is the request's
 // first and only step through building.
 //
-// For ticket index > 1, the previous ticket's own recorded RunID (set by
-// this same function's own onReady callback, below, the last time it
-// ran) is chained in as -prior-run -- see BuildRequestBuildArgs' own doc
-// comment for why that argv shape is safe to build ahead of time here.
+// For ticket index > 1, the previous ticket's current PR-head run (the last
+// confirmed-pushed accepted round, or its first build) is chained in as
+// -prior-run -- see BuildRequestBuildArgs' own doc comment for why that argv
+// shape is safe to build ahead of time here. An open predecessor PR whose
+// remote branch has moved away from that run is recorded as a building wait;
+// a closed or deleted unmerged predecessor is parked in resume_review.
 //
 // On the run reaching accepted: the ticket's PullRequestURL/PRState are
 // recorded, and startNextTicketOrFinish (below) decides whether to start
@@ -920,6 +922,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if moved || err != nil {
 		return err
 	}
+	if held, err := holdForEarlierTicket(dp, ctx, dataDir, r, idx, cfg, now); held || err != nil {
+		return err
+	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
 	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
 	if err != nil {
@@ -929,6 +934,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
+	stackBase := continuedStackBase(dataDir, ticket, recordOf, resumeRunID, onBranch)
 
 	if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 		return err
@@ -967,6 +973,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// build itself, only findOwningRequest's fast path for this run.
 		startedRun.RequestID = r.ID
 		startedRun.EarlierAttemptOf = recordOf
+		if stackBase != "" {
+			startedRun.StackBaseSHA = stackBase
+		}
 		startedRun.Escalated = escalated
 		if err := startedRun.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, startedRun.ID, err)
@@ -1043,6 +1052,10 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if reason == "" && runErr != nil {
 		reason = runErr.Error()
 	}
+	return handleBuildingRunOutcome(dp, ctx, dataDir, r, ticket, runRecord, cfg, reason, idx, now)
+}
+
+func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, reason string, idx int, now time.Time) error {
 	switch runRecord.State {
 	case run.StateAccepted:
 		// The "merge by hand" hint used to always guess "factoryd/<run-id>", wrong for
@@ -1130,8 +1143,9 @@ func settlePriorRun(dp Deps, ctx context.Context, dataDir string, r *request.Req
 	// A human chose to continue the lost build in its kept worktree
 	// (`factoryd resume`, verb round): check it still can be, then adopt that
 	// worktree. A decision answering an earlier resume_review (a stale
-	// Generation) is no decision at all (PendingResumeVerb).
-	if r.PendingResumeVerb() == request.ResumeRound {
+	// Generation) is no decision at all (PendingResumeVerb). A park kept no
+	// worktree: its resume is an ordinary start, which checks again.
+	if r.PendingResumeVerb() == request.ResumeRound && !r.Resume.Parked() {
 		reasons, err := cfg.Resume.RequestResumeRefusals(ctx, dataDir, cfg.Settings.SandboxDocker, r)
 		if err != nil {
 			// A check that cannot be made (unreadable record, Docker down)
@@ -1244,9 +1258,9 @@ func startFailedReason(idx, count int, runErr error, onBranch bool) string {
 // withEarlierTicketsWork adds the argument that puts the earlier tickets'
 // work under this ticket's build: -resume-worktree-of for a resume (the
 // adopted worktree already holds it, and the flag refuses -prior-run),
-// -prior-run of the previous ticket's run otherwise. A retry that continues
-// on the quarantined attempt's branch (onBranch) needs neither: that branch
-// already holds it, as a corrective round's does.
+// -prior-run of the previous ticket's current PR-head run otherwise. A retry
+// that continues on the quarantined attempt's branch (onBranch) needs
+// neither: that branch already holds it, as a corrective round's does.
 func withEarlierTicketsWork(r *request.Request, idx int, args []string, resumeRunID string, onBranch bool) ([]string, error) {
 	switch {
 	case onBranch:
@@ -1260,10 +1274,11 @@ func withEarlierTicketsWork(r *request.Request, idx int, args []string, resumeRu
 	if err != nil {
 		return nil, err
 	}
-	if prev.RunID == "" {
+	priorRunID := prev.PRHeadRunID()
+	if priorRunID == "" {
 		return nil, fmt.Errorf("ticket %d/%d: previous ticket has no recorded run id to chain -prior-run from", idx, r.TicketCount)
 	}
-	return append(args, "-prior-run", prev.RunID), nil
+	return append(args, "-prior-run", priorRunID), nil
 }
 
 // refuseResume returns a building request whose resume decision cannot be
@@ -1702,13 +1717,14 @@ type correctiveLaunch struct {
 // record nothing: the request left building while the round ran (err nil),
 // the worker was asked to stop mid-round (the round is unrecorded and its
 // budget unspent), or the outcome could not be read.
-func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf string, escalated bool) (launched correctiveLaunch, stop bool, err error) {
+func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf, stackBaseSHA string, escalated bool) (launched correctiveLaunch, stop bool, err error) {
 	var startedRunID string
 	runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
 		startedRunID = started.ID
 		ticket.RunID = started.ID
 		started.RequestID = r.ID
 		started.EarlierAttemptOf = recordOf
+		started.StackBaseSHA = stackBaseSHA
 		started.Escalated = escalated
 		if err := started.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
@@ -1794,7 +1810,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if argValueOf(args, "-earlier-attempt") != "" {
 			recordOf = current.ID
 		}
-		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, executionEscalation(cfg) != nil)
+		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, stackBaseOf(dataDir, current), executionEscalation(cfg) != nil)
 		if stop {
 			return true, err
 		}

@@ -1376,6 +1376,11 @@ type Run struct {
 	SpecDriftReason          string `json:"spec_drift_reason,omitempty"`
 	State                    State  `json:"state"`
 	BaseSHA                  string `json:"base_sha"`
+	// StackBaseSHA is the earlier ticket's tip this run's commits sit on.
+	// A first build records its -prior-run result; a corrective or PR-review
+	// round copies the run it continues. Empty on runs that are not stacked,
+	// and omitted so older records marshal byte-identically.
+	StackBaseSHA string `json:"stack_base_sha,omitempty"`
 	// DiffBaseSHA is set only when -diff-base overrode the range the
 	// diff-shape gates (diff_scope, required_files_changed,
 	// required_content, tests_added) and the PR-body evidence were

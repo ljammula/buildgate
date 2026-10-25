@@ -22,7 +22,21 @@ const (
 	WaitRepository WaitKind = "repository"
 	// WaitJobSlot: every job slot of the worker is taken.
 	WaitJobSlot WaitKind = "job_slot"
+	// WaitStackedTicket: a building ticket cannot start until the earlier
+	// ticket's open PR branch has the run the factory selected as its head.
+	WaitStackedTicket WaitKind = "stacked_ticket"
 )
+
+// StackedWait is why a stacked ticket's build has not started: the earlier
+// ticket's open pull-request branch is not at the commit of that ticket's
+// current PR-head run, or it could not be read. The worker checks again on
+// its next pass.
+type StackedWait struct {
+	// Since is when the wait began (RFC 3339, UTC).
+	Since string `json:"since"`
+	// On is the operator sentence: what the branch is at and what to do.
+	On string `json:"on"`
+}
 
 // Wait is why a request is waiting, as `factoryd status -json`, the API and
 // the console carry it. Everything in it is derived from facts the factory
@@ -64,16 +78,20 @@ type WaitFacts struct {
 }
 
 // WaitFor says why r is waiting, or nil when it is not. In order: no worker
-// for a job-state request; the wait its progress feed names (model host,
-// compose sidecars, repository queue, repository lock); the repository wait
-// the heartbeat reports; every job slot taken. A wait recorded before r
-// entered its current state belongs to an earlier attempt and is dropped.
+// for a job-state request; an explicit stacked-ticket wait; the wait its
+// progress feed names (model host, compose sidecars, repository queue,
+// repository lock); the repository wait the heartbeat reports; every job
+// slot taken. A wait recorded before r entered its current state belongs to
+// an earlier attempt and is dropped.
 func WaitFor(r *Request, f WaitFacts) *Wait {
 	if r == nil {
 		return nil
 	}
 	if r.State.RunsJob() && !f.WorkerLive && !f.WorkerUnknown {
 		return &Wait{Kind: WaitNoWorker, Since: f.WorkerLastSeen}
+	}
+	if r.State == StateBuilding && r.StackedWait != nil {
+		return &Wait{Kind: WaitStackedTicket, Since: r.StackedWait.Since, On: r.StackedWait.On}
 	}
 	if r.State.RunsJob() {
 		if kind, ok := WaitKindForStage(f.RunWaitStage); ok && !r.waitIsStale(f.RunWaitSince) {
@@ -137,6 +155,8 @@ func (w Wait) Sentence(now time.Time) string {
 			text += fmt.Sprintf(", #%d in line", w.Position)
 		}
 		return text
+	case WaitStackedTicket:
+		text = w.On
 	default:
 		text = "waiting"
 	}

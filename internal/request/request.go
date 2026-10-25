@@ -157,8 +157,9 @@ type Ticket struct {
 	// stacked on another ticket's unmerged PR: waiting on a human to merge
 	// that one), "ready" (draft cleared, gh pr ready called), "approved"
 	// (ReviewDecision == approved), "merged", or
-	// "closed" (closed without merging -- the request ends as closed,
-	// see handleClosedOrMergedTicket).
+	// "closed" (closed without merging -- the last ticket's ends the
+	// request as closed, an earlier ticket's parks it in resume_review, see
+	// handleClosedOrMergedTicket).
 	PRState string `json:"pr_state,omitempty"`
 	// MergeReadiness is the PR-review poll's last check of whether this
 	// ticket's open pull request is ready to merge. Nil until a poll has
@@ -394,6 +395,10 @@ type Request struct {
 	WaitingSince   string `json:"waiting_since,omitempty"`
 	LastNotifiedAt string `json:"last_notified_at,omitempty"`
 	NotifyCount    int    `json:"notify_count,omitempty"`
+	// StackedWait is set while the current ticket's build waits on the
+	// earlier ticket's pull-request branch (see StackedWait). Nil otherwise;
+	// every state transition clears it.
+	StackedWait *StackedWait `json:"stacked_wait,omitempty"`
 	// LastAsk is the headline of the last notification sent for this
 	// request, at LastNotifiedAt: what an open console tab shows when it
 	// raises that notification itself.
@@ -1081,6 +1086,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	from := r.State
 	ts := now.UTC().Format(time.RFC3339Nano)
 	r.State = to
+	r.StackedWait = nil
 	r.HaltKind = ""
 	// QuarantineCheck names which check quarantined r (set by the request
 	// driver alongside Quarantine itself, e.g. "spec_conformity") -- like
@@ -1571,6 +1577,11 @@ func (r *Request) NextAction() string {
 		return fmt.Sprintf("review the drafted oracle (or leave it absent/empty to skip): `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
 	case StatePlanReview:
 		return fmt.Sprintf("review the drafted tickets: `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
+	case StateBuilding:
+		if r.StackedWait != nil {
+			return r.StackedWait.On
+		}
+		return ""
 	case StateResumeReview:
 		return r.resumeNextAction()
 	case StateQuarantined:

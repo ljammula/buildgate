@@ -38,6 +38,11 @@ type ResumeInfo struct {
 	// record written before causes existed, which reads as a lost worker
 	// (unresolved.Cause.What).
 	Cause unresolved.Cause `json:"cause,omitempty"`
+	// Reason is set for a park instead of Cause (Parked): the sentence naming
+	// the earlier ticket an operator must repair (a pull request closed, or a
+	// branch gone, without merging). A park is not one of unresolved.Cause's
+	// closed set, which says why a step ended with no verdict on the work.
+	Reason string `json:"reason,omitempty"`
 	// RetryAt is when the model provider said to try again, for a step it
 	// refused with its own limit; "" when it gave no time. It is the meter's
 	// record (RFC 3339 UTC), or, when the provider sent the meter none, the
@@ -66,21 +71,37 @@ type ResumeDecision struct {
 	At         string `json:"at"`
 }
 
-// ResumePrompt is the one sentence that tells the operator a step ended with
-// no verdict on the work, why (cause), and what to do about it. Recorded as
-// the History reason and Error of the move into resume_review, and the base
-// of the reminder.
+// ResumePrompt is the one sentence that tells the operator why a step ended
+// with no verdict, or why a stacked request was deliberately parked, and what
+// to do about it. Recorded as the History reason and Error of the move into
+// resume_review, and the base of the reminder.
 //
 // A build step that left no worktree to continue in (step.RunID is "": a
 // build on an existing branch keeps none) is offered only a rebuild. A time
 // the provider gave is said, so the operator does not resume into the same
 // refusal.
 func ResumePrompt(id string, from State, step LostStep) string {
+	if step.Reason != "" {
+		return parkPrompt(id, step.Reason)
+	}
 	what := lostStepWhat(step.Cause, from, step.RetryAt)
 	if from == StateBuilding && step.RunID == "" {
 		return fmt.Sprintf("%s; nothing of it was kept: `factoryd resume -from scratch %s` rebuilds the ticket (or `factoryd cancel %s`)", what, id, id)
 	}
 	return fmt.Sprintf("%s; `factoryd resume %s` continues it (or `-from scratch` / `factoryd cancel %s`)", what, id, id)
+}
+
+// Parked reports whether the wait is a park: the factory stopped the request
+// on purpose because something outside it (an earlier ticket's pull request
+// or branch) needs an operator's repair. No step was lost and nothing was
+// kept, so a resume reruns the step, which checks again.
+func (i *ResumeInfo) Parked() bool {
+	return i != nil && i.Reason != ""
+}
+
+// parkPrompt is ResumePrompt and NextAction for a park.
+func parkPrompt(id, reason string) string {
+	return fmt.Sprintf("%s: once it is repaired, `factoryd resume %s` checks again and continues, or `factoryd cancel %s`", reason, id, id)
 }
 
 // lostStepWhat is the clause naming what happened to a lost step, with the
@@ -103,6 +124,8 @@ type LostStep struct {
 	RunID string
 	// Cause is why the step gave no verdict.
 	Cause unresolved.Cause
+	// Reason is ResumeInfo.Reason: set for a park, which lost no step.
+	Reason string
 	// RetryAt is ResumeInfo.RetryAt.
 	RetryAt string
 	// Detail, when set, is what the step's job reported, one sanitised line;
@@ -111,9 +134,10 @@ type LostStep struct {
 }
 
 // EnterResumeReview moves a request whose step ended with no verdict on the
-// work out of from into resume_review, which waits on a human: nothing reruns
-// on its own. from must be the state of that step and the request's current
-// state. It starts the next Generation and resets the reminder bookkeeping.
+// work, or whose stacked predecessor needs operator repair, out of from into
+// resume_review, which waits on a human: nothing reruns on its own. from must
+// be the state of that step and the request's current state. It starts the
+// next Generation and resets the reminder bookkeeping.
 func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) error {
 	if !stateIn(from, resumableStates) {
 		return fmt.Errorf("request %s: a lost %q step cannot enter %s (allowed from: %v) %w", r.ID, from, StateResumeReview, resumableStates, ErrIllegalTransition)
@@ -126,6 +150,7 @@ func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) er
 		FromState:  from,
 		LostRunID:  step.RunID,
 		Cause:      step.Cause,
+		Reason:     step.Reason,
 		RetryAt:    step.RetryAt,
 		Generation: r.nextResumeGeneration(),
 		At:         r.UpdatedAt,
@@ -214,6 +239,9 @@ func (r *Request) ConsumeResumeDecision() {
 func (r *Request) resumeNextAction() string {
 	if r.Resume == nil {
 		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd resume %s`, `factoryd resume -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
+	}
+	if r.Resume.Parked() {
+		return parkPrompt(r.ID, r.Resume.Reason)
 	}
 	from := r.Resume.FromState
 	what := lostStepWhat(r.Resume.Cause, from, r.Resume.RetryAt)

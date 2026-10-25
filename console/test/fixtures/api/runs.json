@@ -332,6 +332,7 @@
     "spec_drift_reason": "every-field spec_drift_reason",
     "state": "accepted",
     "base_sha": "every-field base_sha",
+    "stack_base_sha": "every-field stack_base_sha",
     "diff_base_sha": "every-field diff_base_sha",
     "instruction_base_sha": "every-field instruction_base_sha",
     "result_sha": "every-field result_sha",

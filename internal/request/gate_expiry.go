@@ -155,7 +155,7 @@ func (r *Request) ReopenReview(by, reason string, now time.Time) error {
 	r.Error = ""
 	r.ClearReminderState()
 	if target == StateResumeReview && r.Resume != nil {
-		r.Error = ResumePrompt(r.ID, r.Resume.FromState, LostStep{RunID: r.Resume.LostRunID, Cause: r.Resume.Cause, RetryAt: r.Resume.RetryAt})
+		r.Error = ResumePrompt(r.ID, r.Resume.FromState, LostStep{RunID: r.Resume.LostRunID, Cause: r.Resume.Cause, Reason: r.Resume.Reason, RetryAt: r.Resume.RetryAt})
 	}
 	return nil
 }

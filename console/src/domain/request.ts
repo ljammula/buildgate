@@ -577,11 +577,11 @@ export interface RequestBuild {
  * `waitChipLabel` word the kinds they know and fall back for the rest.
  */
 export interface RequestWait {
-  /** job_slot, repository, repository_queue, model_host, compose_slot or no_worker. */
+  /** job_slot, repository, repository_queue, model_host, compose_slot, stacked_ticket or no_worker. */
   readonly kind: string;
   /** RFC3339 time the wait began; empty when the server did not know. */
   readonly since: string;
-  /** What the request waits behind: a request id (job_slot) or the lock holder's text. */
+  /** What the request waits behind: a request id (job_slot), the lock holder's text, or the stacked ticket's sentence. */
   readonly on: string;
   /** The request's place in line (job_slot, from 1); null otherwise. */
   readonly position: number | null;

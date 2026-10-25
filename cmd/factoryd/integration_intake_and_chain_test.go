@@ -436,6 +436,11 @@ func TestIntegrationSliceChainAcceptsMatchingPriorRun(t *testing.T) {
 	if second.BaseSHA != first.ResultSHA {
 		t.Errorf("second.BaseSHA = %q, want it to equal first.ResultSHA %q", second.BaseSHA, first.ResultSHA)
 	}
+	// The earlier slice's tip is the stack base the second run's commits
+	// sit on; a run chained onto nothing records none.
+	if second.StackBaseSHA != first.ResultSHA || first.StackBaseSHA != "" {
+		t.Errorf("StackBaseSHA = %q (first %q), want first.ResultSHA %q (first none)", second.StackBaseSHA, first.StackBaseSHA, first.ResultSHA)
+	}
 }
 
 // TestIntegrationFullSuiteVerifyInvalidatesPriorRunOnRegression is gap 3's

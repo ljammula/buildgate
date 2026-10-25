@@ -166,6 +166,37 @@ func TestLoadRequestStepEndsWorkflowForMissingRequest(t *testing.T) {
 	}
 }
 
+// A stacked ticket that waits on the earlier ticket's branch is checked
+// again at the PR poll rate, not straight away: its step returns with the
+// request still building.
+func TestLoadRequestStepPacesAStackedTicketWait(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-stacked", request.StateBuilding)
+	acts := &requestActivities{dp: newTestDeps(t), dataDir: dataDir, cfg: requestdriver.WorkerConfig{PrPollInterval: 3 * time.Minute}}
+	step, err := acts.LoadRequestStep(context.Background(), "req-stacked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Advance != workflow.RequestAdvanceJobs || step.Wait != 0 {
+		t.Fatalf("step without a wait = %+v, want a jobs step with no timer", step)
+	}
+	r, err := request.Load(dataDir, "req-stacked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.StackedWait = &request.StackedWait{Since: time.Now().UTC().Format(time.RFC3339Nano), On: "ticket 2/2 waits"}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	step, err = acts.LoadRequestStep(context.Background(), "req-stacked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Advance != workflow.RequestAdvanceJobs || step.Wait != 3*time.Minute {
+		t.Fatalf("step = %+v, want a jobs step that then waits the poll interval", step)
+	}
+}
+
 // A lost PR poll leaves the request in pr_review to poll again.
 func TestHaltLostRequestStepLeavesPRReviewPolling(t *testing.T) {
 	dp := newTestDeps(t)

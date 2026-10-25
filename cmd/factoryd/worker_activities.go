@@ -74,6 +74,9 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 		requestdriver.PruneRoundRefs(a.dp, r)
 	}
 	step := requestStepFor(r.State, a.cfg)
+	if r.State == request.StateBuilding && r.StackedWait != nil {
+		step.Wait = stackedWaitRecheck(a.cfg)
+	}
 	if step.Remind {
 		step.Wait = reviewWait(r, a.cfg.HitlReminderInterval, a.cfg.Settings.ReviewGateExpiry, time.Now())
 	}
@@ -121,6 +124,17 @@ func requestStepFor(state request.State, cfg requestdriver.WorkerConfig) workflo
 	}
 	// halted and quarantined: no step, no timer; a decision wakes it.
 	return step
+}
+
+// stackedWaitRecheck is how long a building request whose ticket waits on
+// the earlier ticket's pull-request branch (request.StackedWait) waits before
+// its step checks again: the PR poll interval, as the branch moves on a
+// person's push or a review round, or the repository retry when that is 0.
+func stackedWaitRecheck(cfg requestdriver.WorkerConfig) time.Duration {
+	if cfg.PrPollInterval > 0 {
+		return cfg.PrPollInterval
+	}
+	return requestRepoBusyRetryAfter
 }
 
 // requestRepoBusyRetryAfter is how long a building request waits before

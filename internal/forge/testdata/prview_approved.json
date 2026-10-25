@@ -4,6 +4,27 @@
   "mergedAt": null,
   "reviewDecision": "APPROVED",
   "statusCheckRollup": [
-    {"conclusion": "SUCCESS"}
+    {
+      "conclusion": "SUCCESS"
+    }
+  ],
+  "headRefOid": "4f9d2c1b8e7a6d5c4b3a29180f7e6d5c4b3a2918",
+  "baseRefName": "main",
+  "latestReviews": [
+    {
+      "id": "PRR_kwDOexamplereviewer-a",
+      "author": {
+        "login": "reviewer-a"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "submittedAt": "2026-10-20T10:00:00Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "APPROVED",
+      "commit": {
+        "oid": "4f9d2c1b8e7a6d5c4b3a29180f7e6d5c4b3a2918"
+      }
+    }
   ]
 }

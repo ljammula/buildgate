@@ -2238,6 +2238,10 @@ func (tr *ticketRun) createRunRecord() error {
 			return fmt.Errorf("load prior run %q for slice-chain validation: %w", *tr.priorRun, err)
 		}
 		tr.priorRunSnapshot = prior
+		// Preserve the earlier ticket's tip on every stacked run. A first
+		// build's commits sit directly on the declared predecessor, so its
+		// result is the durable stack base for later rounds to copy.
+		tr.r.StackBaseSHA = prior.ResultSHA
 		// Validate the predecessor's immutable metadata and result before
 		// preparing the worktree. An isolated successor intentionally
 		// starts from this recorded SHA even when the shared checkout HEAD

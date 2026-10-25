@@ -1090,8 +1090,8 @@ at, with a fresh `EnteredAt` and reminder state and nothing redrafted; a
 ### Request lifecycle: a pull request closed without merging
 
 The factory never merges and never re-opens a pull request a person closed.
-When the PR-review poll reads a ticket's pull request as `CLOSED` with no
-merge, `internal/request.Close` ends the request:
+When the PR-review poll reads the last ticket's pull request as `CLOSED` with
+no merge, `internal/request.Close` ends the request:
 
 - `pr_review -> closed`
 
@@ -1101,6 +1101,16 @@ merge, `internal/request.Close` ends the request:
 failed read, polled again (`handleClosedOrMergedTicket`,
 `internal/requestdriver/pr_review_driver.go`). Another ticket's pull request
 still open is left as it is, for a person to merge or close.
+
+An earlier ticket's pull request, which a later ticket's commits sit on, read
+as `CLOSED` with no merge parks the request in `resume_review` instead, with
+a reason and no cause (`pr_review -> resume_review`, below). So does, before
+a later ticket's build starts, an earlier ticket's pull request read as
+closed, or open with its branch gone from origin (`building -> resume_review`);
+an earlier ticket's open branch at a commit other than its current PR-head
+run's `ResultSHA` leaves the request `building` with no build started, checked
+again on the next pass (`internal/requestdriver/stacked.go`). Nothing was lost
+and nothing kept, so a resume reruns the parked step, which checks again.
 
 ### Request lifecycle: a lost step waits for a human
 

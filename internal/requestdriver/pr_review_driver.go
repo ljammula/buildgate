@@ -146,7 +146,7 @@ func RealRemoteBranchHeadSHA(ctx context.Context, workspaceDir, branch string) (
 	}
 	fields := strings.Fields(string(out))
 	if len(fields) == 0 {
-		return "", fmt.Errorf("git ls-remote origin refs/heads/%s: branch not found on remote", branch)
+		return "", fmt.Errorf("%w: git ls-remote origin refs/heads/%s", ErrRemoteBranchNotFound, branch)
 	}
 	return fields[0], nil
 }
@@ -433,8 +433,7 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 		return nil
 	}
 
-	policy := forge.AuthorPolicy{Trusted: cfg.PrTrustedAuthors, Ignore: cfg.PrIgnoreAuthors}
-	state, readErr := dp.ReadReviewState(ctx, ticket.PRURL, policy)
+	state, readErr := dp.ReadReviewState(ctx, ticket.PRURL, prAuthorPolicy(cfg))
 	// stillInState (request_driver.go): the network read above can take
 	// long enough for an operator's cancel to land mid-poll; discard the
 	// result rather than let the r.Save calls below resurrect the request.
@@ -460,6 +459,7 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	if state.ShouldStopPolling() {
 		return handleClosedOrMergedTicket(dataDir, r, ticket, state, now)
 	}
+	noteReopenedPR(ticket, state)
 	if merged := mergedTicketOnBranch(r, ticket, state.BaseRefName); merged != nil {
 		if retargetOffMergedTicket(dp, ctx, dataDir, r, ticket, merged, state) {
 			return r.Save(dataDir)
@@ -535,16 +535,17 @@ func prPollDue(lastPolledAt string, interval time.Duration, now time.Time) (bool
 
 // handleClosedOrMergedTicket handles a ticket's PR leaving OPEN. MERGED
 // records the merge, and completes the request once every ticket has
-// merged. CLOSED (closed without merging) ends the request as closed: the
-// factory never merges, and never re-opens a PR a person closed. Any other
-// state is a read the poll does not trust (an empty or unknown state from
-// gh): it is logged and the next poll reads again, so a misread can never
-// end a request.
+// merged. CLOSED (closed without merging) ends the request as closed when it
+// is the last ticket's: the factory never merges, and never re-opens a PR a
+// person closed. An earlier ticket's, which a later ticket builds on, parks
+// the request in resume_review instead, for the operator to reopen it and
+// resume, or cancel. Any other state is a read the poll does not trust (an
+// empty or unknown state from gh): it is logged and the next poll reads
+// again, so a misread can never end a request.
 func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *request.Ticket, state forge.ReviewState, now time.Time) error {
 	switch {
 	case state.MergedAt != nil || state.State == forge.PRStateMerged:
-		ticket.PRState = "merged"
-		ticket.MergeReadiness = nil
+		recordTicketMerged(ticket)
 		allMerged := true
 		for _, t := range r.Tickets {
 			if t.PRState != "merged" {
@@ -560,6 +561,9 @@ func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *requ
 		return r.Save(dataDir)
 	case state.State == forge.PRStateClosed:
 		ticket.PRState = "closed"
+		if ticket.Index < r.TicketCount {
+			return parkRequest(dataDir, r, fmt.Sprintf("ticket %d/%d's pull request %s was closed without merging, and ticket %d builds on it: reopen it", ticket.Index, r.TicketCount, ticket.PRURL, ticket.Index+1), now)
+		}
 		reason := fmt.Sprintf("ticket %d/%d: pull request %s closed without merging", ticket.Index, r.TicketCount, ticket.PRURL)
 		if err := r.Close(reason, now); err != nil {
 			return err
@@ -819,7 +823,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 	// review, GitHub Codex App, PR #154 round 2).
 	ticket.MergeReadiness = checkMergeReadiness(dataDir, ticket, state, now)
 	notifyPullRequestWaiting(dataDir, r, ticket, now)
-	if state.ReviewDecision == forge.ReviewDecisionApproved && len(state.BlocksReadyThreads) == 0 {
+	if state.ApprovedOnCurrentHead() && len(state.BlocksReadyThreads) == 0 {
 		ticket.PRState = "approved"
 		if err := r.Save(dataDir); err != nil {
 			return err
@@ -969,42 +973,18 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// describes the pull request. The poll after the round checks again.
 	ticket.MergeReadiness = nil
 
-	// The ticket's original run's own BaseSHA -- the PR's real starting
-	// point -- becomes this round's -diff-base, so the diff-shape gates
-	// (diff_scope, required_files_changed, required_content, tests_added)
-	// judge the cumulative diff the PR as a whole will merge, not just
-	// this round's own small delta from the branch tip it starts on (see
-	// -diff-base's own flag help).
-	ticketRun, err := run.Load(dataDir, ticket.RunID)
+	// The round builds on the ticket's current PR-head run (the commit on
+	// the pull request's branch now), on the branch that run pushed, and
+	// its -diff-base is the ticket's original base carried on that run, so
+	// the diff-shape gates (diff_scope, required_files_changed,
+	// required_content, tests_added) judge the cumulative diff the PR as a
+	// whole will merge, not just this round's own small delta from the
+	// branch tip it starts on (see loadPRHead and -diff-base's flag help).
+	head, err := loadPRHead(dataDir, ticket)
 	if err != nil {
-		return fmt.Errorf("request %s: ticket %d: round %d: load ticket run %q for -diff-base: %w", r.ID, ticket.Index, roundIndex, ticket.RunID, err)
+		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
 	}
-	// The branch the ticket's run actually pushed, not "factoryd/"+RunID:
-	// a Temporal/-repository-routed run's isolated branch is named from
-	// isolatedWorkspaceRunID, never its RunID (a real bug found and
-	// fixed), so a corrective round rebuilt the wrong branch name. The
-	// RunID form stays the fallback for
-	// records that predate run.Run.Branch.
-	branch := ticketRun.Branch
-	if branch == "" {
-		branch = "factoryd/" + ticket.RunID
-	}
-	// ticketRun.DiffBaseSHA, when set, is itself an EARLIER round's own
-	// -diff-base override -- the ticket's true original base, threaded
-	// forward across rounds -- not ticketRun.BaseSHA, which for a run that
-	// was itself built with -on-branch (an accepted automatic
-	// spec_conformity corrective round, TryReviewCorrectiveRound in
-	// request_driver.go) is only that round's own checkout point (the
-	// quarantined branch's tip), never the ticket's real starting commit.
-	// Using BaseSHA unconditionally here silently narrowed a PR-review
-	// round's cumulative diff to "everything since the last conformity
-	// round" instead of "everything since the ticket started" (found via
-	// adversarial review) -- falls back to BaseSHA only when DiffBaseSHA
-	// was never set (ticketRun is the ticket's own unmodified first build).
-	diffBase := ticketRun.DiffBaseSHA
-	if diffBase == "" {
-		diffBase = ticketRun.BaseSHA
-	}
+	branch, diffBase, stackBaseSHA := head.Branch, head.DiffBase, stackBaseOf(dataDir, head.Run)
 
 	// Threads are marked seen only once an accepted round's commit has
 	// actually been pushed (pushAcceptedRoundAndReply), never before: a
@@ -1040,7 +1020,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		if fix > 0 {
 			attemptID = fmt.Sprintf("%s-fix%d", roundRunID, fix)
 		}
-		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase)
+		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase, stackBaseSHA)
 		if err != nil {
 			return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
 		}
@@ -1140,7 +1120,7 @@ type roundOutcome struct {
 // branch, with specPath (the round's addendum) as its ticket, and reports
 // how it ended. ticketID is the -ticket value; the run's own id comes from
 // onReady.
-func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase string) (roundAttempt, error) {
+func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase, stackBaseSHA string) (roundAttempt, error) {
 	// -open-pull-request is always forced off for a corrective round,
 	// regardless of cfg.openPullRequest: this run's branch already has an
 	// open PR (opened when the ticket was first built), so a second
@@ -1190,6 +1170,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// fast path (owning_request.go) and any rollup keyed off run.Run.
 		// RequestID silently missed every PR-review round's own run.
 		started.RequestID = r.ID
+		started.StackBaseSHA = stackBaseSHA
 		if err := started.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
 		}

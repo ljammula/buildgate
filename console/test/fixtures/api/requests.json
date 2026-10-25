@@ -241,6 +241,10 @@
     "waiting_since": "2026-09-10T09:00:00Z",
     "last_notified_at": "2026-09-10T09:00:00Z",
     "notify_count": 3,
+    "stacked_wait": {
+      "since": "every-field since",
+      "on": "every-field on"
+    },
     "last_ask": "every-field last_ask",
     "ticket_index": 1,
     "ticket_count": 1,
@@ -308,6 +312,7 @@
     "resume": {
       "from_state": "building",
       "lost_run_id": "every-field lost_run_id",
+      "reason": "every-field reason",
       "retry_at": "2026-09-10T09:00:00Z",
       "generation": 3,
       "at": "2026-09-10T09:00:00Z",
@@ -551,7 +556,7 @@
         }
       ]
     },
-    "next_action": "the lost building step cannot be resumed (every-field refused); `factoryd resume -from scratch req-every-field` rebuilds the ticket, or `factoryd cancel req-every-field`"
+    "next_action": "every-field reason: once it is repaired, `factoryd resume req-every-field` checks again and continues, or `factoryd cancel req-every-field`"
   },
   {
     "id": "req-halted",

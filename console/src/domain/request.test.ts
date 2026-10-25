@@ -386,7 +386,8 @@ test("request-every-field decodes with every optional field populated", () => {
   expect(r.ticketCount).toBe(1);
   expect(r.spec).not.toBe("");
   expect(r.specFullPath).toBe("/data/requests/req-every-field/spec.md");
-  expect(r.nextAction).toContain("factoryd resume -from scratch req-every-field");
+  // Every field set includes resume.reason, which makes the wait a park.
+  expect(r.nextAction).toContain("`factoryd resume req-every-field` checks again");
   expect(r.draftOracles).toBe(true);
   expect(r.quarantineCheck).toBe("every-field quarantine_check");
   expect(r.oracleSkipWarning).toBe("every-field oracle_skip_warning");

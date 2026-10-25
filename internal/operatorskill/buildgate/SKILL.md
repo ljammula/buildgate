@@ -242,8 +242,9 @@ request sits in a queue nobody drains.
 - One request: `factoryd watch -no-follow <id>`.
 - Everything: `factoryd status` (add `-json` to parse it). A starred state
   (`building*`) names why the request waits instead of running: no worker, a
-  job slot, the repository, the model host or a sidecar slot; `-json` has it as
-  `wait.kind`.
+  job slot, the repository, the model host, a sidecar slot, or the earlier
+  ticket's branch not at the commit the next ticket builds on
+  (`stacked_ticket`); `-json` has it as `wait.kind`.
 - Spend: `factoryd cost [-request <id>]`, by role and model.
   On a subscription route (ChatGPT, Copilot) the dollars are an API-price
   estimate, not a bill.
@@ -258,9 +259,9 @@ request sits in a queue nobody drains.
 | `oracle_review` | List the oracle files and any `ACTION NEEDED` line `watch` printed |
 | `plan_review` | Summarize the ticket list with each ticket's `Estimated-Changed-Lines:` against the request's `plan_budget_lines` (in `DIR/requests/<id>/request.json`; absent means no budget), and quote any note saying a ticket is over budget (advice, not a refusal); approving starts the build |
 | `pr_review` | Give the PR URL; they review and merge on GitHub |
-| `resume_review` | A step ended with no verdict on the work (the worker stopped, its sandbox could not be started, the model route did not serve it, a review gave no verdict, a package registry could not be reached, or the oracle-drafting job ended before a draft; `reason:` says which, and the time the model provider said to try again when it gave one); nothing reruns on its own. Quote `reason:` and `next:` from `watch`, then name the choices: `factoryd resume <id>` (continue the build from its last completed round, review a kept build again without building, or rerun a lost drafting or planning step), `factoryd resume -from scratch <id>` (rebuild the ticket), `factoryd cancel <id>`. The operator chooses; if `resume` is refused, only `-from scratch` or `cancel` remain |
+| `resume_review` | A step ended with no verdict on the work (the worker stopped, its sandbox could not be started, the model route did not serve it, a review gave no verdict, a package registry could not be reached, or the oracle-drafting job ended before a draft; `reason:` says which, and the time the model provider said to try again when it gave one); nothing reruns on its own. Quote `reason:` and `next:` from `watch`, then name the choices: `factoryd resume <id>` (continue the build from its last completed round, review a kept build again without building, or rerun a lost drafting or planning step), `factoryd resume -from scratch <id>` (rebuild the ticket), `factoryd cancel <id>`. The operator chooses; if `resume` is refused, only `-from scratch` or `cancel` remain A park reads `reason:` naming an earlier ticket's pull request closed, or its branch gone, without merging: nothing was lost; the operator reopens or restores it on GitHub, then `factoryd resume <id>` checks again, or `factoryd cancel <id>` |
 | `halted`, `quarantined` | Quote `reason:` and `next:` from `watch`, then explain them. A halt reading `<state> expired: no decision in <duration>` (`gate_expired`) means no one decided the review in time and nothing failed: offer `factoryd retry <id>`, which reopens that same review |
-| `done`, `closed`, `cancelled` | Final state and PR URL(s); `closed`: a PR was closed without merging, name any PR still open |
+| `done`, `closed`, `cancelled` | Final state and PR URL(s); `closed`: the last ticket's PR was closed without merging, name any PR still open |
 
 ## Explain a failure
 
