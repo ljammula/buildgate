@@ -732,7 +732,9 @@ toolchains, select images, run lifecycle hooks, change an existing
 nested modules or monorepo layouts. `factoryd doctor -target-repo <repo>`
 reports ambiguity, candidate `.factory.yml` fields, and profile binary hints
 missing from the configured base image as warnings. Committed
-`required_binaries` missing from that base image are an early diagnostic;
+`required_binaries` missing from that base image are an early diagnostic
+(one that a toolchain the repository declares will provide passes, since a build
+derives that toolchain's image);
 each run checks them against its final image. Doctor detects markers in the
 working tree, while `.factory.yml` is read from committed HEAD, so working-tree
 markers are onboarding hints rather than a claim about what the next run sees. Other

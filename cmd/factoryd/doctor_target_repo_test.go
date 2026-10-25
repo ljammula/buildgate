@@ -548,3 +548,29 @@ func TestDoctorCheckUnpushedCommits(t *testing.T) {
 		t.Fatalf("unpushed: %+v", c)
 	}
 }
+
+func TestDoctorPassesARequiredBinaryTheDerivedToolchainImageProvides(t *testing.T) {
+	repo := commitFiles(t, map[string]string{
+		".factory.yml": "required_binaries: [ruby, bundle, rustc]\n",
+		"Gemfile":      "source \"https://rubygems.org\"\n",
+	})
+	docker, _ := requiredBinaryDocker(t, "ruby\nbundle\nrustc")
+	in := doctorTargetRepoInputs(repo, docker)
+	in.sandboxImage = "operator-worker@sha256:abc"
+	in.settings.SandboxUser = "65532:65532"
+	checks := doctorCheckRequiredBinaries(context.Background(), in)
+	var out strings.Builder
+	if failed := runDoctorChecks(checks, &out); failed != 1 {
+		t.Fatalf("failed = %d, want only rustc, which no declared toolchain provides, to fail:\n%s", failed, out.String())
+	}
+	for _, want := range []string{
+		"ok    required executable ruby available as configured/default isolated worker 65532:65532 in base image (operator-worker@sha256:abc)",
+		"the image a build derives for the declared ruby toolchain provides it",
+		"the image a build derives for the declared bundler toolchain provides it",
+		"FAIL  required executable rustc",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
