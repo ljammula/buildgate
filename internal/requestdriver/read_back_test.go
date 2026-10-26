@@ -133,6 +133,33 @@ func TestADraftedSpecGetsNoReadBack(t *testing.T) {
 	}
 }
 
+// A handed-over spec from a request whose ticket builds keep the earlier
+// input shape (no BuildInput: submitted before the read-back existed) gets no
+// read-back on a redraft: its answers would never reach a build.
+func TestAHandedOverSpecOnTheEarlierBuildInputGetsNoReadBack(t *testing.T) {
+	dataDir := t.TempDir()
+	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	r.BuildInput = ""
+	r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: time.Now().UTC().Format(time.RFC3339), Reason: "state the retention period", FromState: request.StateSpecReview})
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
+	draft := func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return revised, &request.SpecEvidence{}, nil
+	}
+	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		t.Fatal("the read-back ran for a request on the earlier build input")
+		return nil, nil, nil
+	}
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(readBack), draft, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r.State != request.StateSpecReview || r.ReadBack != nil {
+		t.Fatalf("State = %q, ReadBack = %+v", r.State, r.ReadBack)
+	}
+}
+
 // A keep-structure redraft of a handed-over spec after a rejection is read
 // back again: the new read-back replaces the old one.
 func TestARedraftOfAHandedOverSpecIsReadBackAgain(t *testing.T) {

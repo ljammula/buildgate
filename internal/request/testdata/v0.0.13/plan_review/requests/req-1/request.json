@@ -1,0 +1,59 @@
+{
+  "id": "req-1",
+  "workspace": "@WORKSPACE@",
+  "project": "app",
+  "source": {
+    "kind": "text"
+  },
+  "state": "plan_review",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_review",
+      "at": "2026-10-26T02:33:08.348695Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_review",
+      "to": "planning",
+      "at": "2026-10-26T02:33:08.34893Z",
+      "by": "alice",
+      "reason": "approved"
+    },
+    {
+      "from": "planning",
+      "to": "plan_review",
+      "at": "2026-10-26T02:33:08.359578Z",
+      "by": "factory",
+      "reason": "plan drafted: 2 tickets"
+    }
+  ],
+  "submitted_at": "2026-10-26T02:33:08.348638Z",
+  "updated_at": "2026-10-26T02:33:08.359578Z",
+  "entered_at": "2026-10-26T02:33:08.359578Z",
+  "waiting_since": "2026-10-26T02:33:08.359578Z",
+  "last_notified_at": "2026-10-26T02:33:08.359578Z",
+  "notify_count": 1,
+  "last_ask": "Plan ready for your review",
+  "ticket_count": 2,
+  "tickets": [
+    {
+      "index": 1,
+      "spec_path": "@DATA@/requests/req-1/tickets/001.spec.md"
+    },
+    {
+      "index": 2,
+      "spec_path": "@DATA@/requests/req-1/tickets/002.spec.md"
+    }
+  ],
+  "approved_by": "alice",
+  "approved_at": "2026-10-26T02:33:08.34893Z",
+  "approved_sha256": {
+    "spec.md": "fc081dfb5e194d79d9fda58f7c9ae4f387f0cdef0029278582780d12e6a0df81"
+  },
+  "plan_evidence": {
+    "agent_exit_code": 0,
+    "duration_s": 0,
+    "agents_md_used": false
+  }
+}

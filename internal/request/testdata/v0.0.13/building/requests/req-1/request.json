@@ -1,0 +1,64 @@
+{
+  "id": "req-1",
+  "workspace": "@WORKSPACE@",
+  "project": "app",
+  "source": {
+    "kind": "text"
+  },
+  "state": "building",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_review",
+      "at": "2026-10-26T02:33:08.370973Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_review",
+      "to": "planning",
+      "at": "2026-10-26T02:33:08.371205Z",
+      "by": "alice",
+      "reason": "approved"
+    },
+    {
+      "from": "planning",
+      "to": "plan_review",
+      "at": "2026-10-26T02:33:08.380243Z",
+      "by": "factory",
+      "reason": "plan drafted: 2 tickets"
+    },
+    {
+      "from": "plan_review",
+      "to": "building",
+      "at": "2026-10-26T02:33:08.387095Z",
+      "by": "alice",
+      "reason": "approved"
+    }
+  ],
+  "submitted_at": "2026-10-26T02:33:08.370818Z",
+  "updated_at": "2026-10-26T02:33:08.387095Z",
+  "entered_at": "2026-10-26T02:33:08.387095Z",
+  "ticket_count": 2,
+  "tickets": [
+    {
+      "index": 1,
+      "spec_path": "@DATA@/requests/req-1/tickets/001.spec.md"
+    },
+    {
+      "index": 2,
+      "spec_path": "@DATA@/requests/req-1/tickets/002.spec.md"
+    }
+  ],
+  "approved_by": "alice",
+  "approved_at": "2026-10-26T02:33:08.387095Z",
+  "approved_sha256": {
+    "spec.md": "fc081dfb5e194d79d9fda58f7c9ae4f387f0cdef0029278582780d12e6a0df81",
+    "tickets/001.spec.md": "eef2bb690fab6962f6aae117a5f21d3098cbbacb0e691c9aaa5f555e14ab7c09",
+    "tickets/002.spec.md": "eef2bb690fab6962f6aae117a5f21d3098cbbacb0e691c9aaa5f555e14ab7c09"
+  },
+  "plan_evidence": {
+    "agent_exit_code": 0,
+    "duration_s": 0,
+    "agents_md_used": false
+  }
+}

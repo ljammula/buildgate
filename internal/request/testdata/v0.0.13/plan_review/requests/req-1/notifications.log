@@ -1,0 +1,1 @@
+{"run_id":"","ticket":"","request_id":"req-1","reason":"2 ticket(s). Read the tickets, then approve or request changes.","state":"plan_review","sent_at":"2026-10-26T02:33:08.359578Z","delivered":true,"next":"factoryd approve req-1 (or `factoryd reject -reason ... req-1`)","ask":"Plan ready for your review","subject":"app: some request text"}

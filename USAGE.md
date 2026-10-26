@@ -68,12 +68,12 @@ act in "you" rows.
 
 | State | Who acts | What happens / what you do |
 |---|---|---|
-| `submitted` -> `spec_drafting` | factory | A sandboxed job drafts `spec.md`; with `submit -spec-file`, your own operator-shaped spec is taken as `spec.md` unchanged, and one sandboxed job writes its read-back: what it will build and the questions it would otherwise guess at. It needs at least one acceptance criterion: a numbered `## Acceptance criteria` section or derivable top-level list items in `##` sections ([reference](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir)) |
+| `submitted` -> `spec_drafting` | factory | A sandboxed job drafts `spec.md`; with `submit -spec-file`, your own operator-shaped spec is taken as `spec.md` unchanged, and one sandboxed job writes its read-back: what it will build and the questions it would otherwise guess at. It needs at least one acceptance criterion: a numbered `## Acceptance criteria` section or derivable top-level list items in the title area or a `#`/`##` section ([reference](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir)) |
 | `spec_review` | **you** | `approve` (to `planning`, or `oracle_drafting` if submitted with `-draft-oracles`) or `reject -reason "..."` (back to `spec_drafting`). To change only some sections, comment on passages (console: select text in the raw view, then Request changes; CLI: `reject -comments-file <file> <id>`): the redraft changes just the commented sections and keeps every other byte, your own edits included. A spec with a `[NEEDS DECISION]` item under Open questions is not approvable: `approve` lists the items, and `reject -reason "<your answers>"` ("take the recommended option" is an answer) has the redraft write them into the spec. A handed-over operator-shaped spec remains in its own headings, order and list structure after a reject. For a handed-over spec, `factoryd watch -no-follow <id>` lists the read-back's questions with their ids, hashes and answers; answer any in the console or with `factoryd answer -q Q1 -hash <hash> -text "..." <id>`: the answers are frozen at approval and given to the planner, the oracle drafter and every ticket's build; approval never waits on them. |
 | `oracle_drafting` | factory | Only with `-draft-oracles`: drafts executable acceptance tests from the spec |
 | `oracle_review` | **you** | Read every oracle file, then `approve` (to `planning`) or `reject -reason` (back to `oracle_drafting`) |
 | `planning` | factory | Drafts the tickets of the approved spec: one ticket when the planner's estimate of the whole change fits `pr_budget_lines` (default 400 changed lines, insertions plus deletions), otherwise the fewest tickets that each fit; each ticket declares its `Estimated-Changed-Lines:`. With `submit -plan-dir`, your own tickets are taken with no model call and get the same checks |
-| `plan_review` | **you** | Each ticket shows its estimate against the budget the plan was drafted under (the console, beside the ticket's plan); a note says "Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget." for one over it. The estimate is the planner's guess and the note is advice: `approve` (to `building`) or `reject -reason` (back to `planning`). Comments on passages of a ticket (`reject -comments-file`) redraft only the commented sections and tickets |
+| `plan_review` | **you** | Each ticket shows its estimate against the budget the plan was drafted under (the console, beside the ticket's plan, and once built beside the changed lines of its accepted run); a note says "Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget." for one over it. The estimate is the planner's guess and the note is advice: `approve` (to `building`) or `reject -reason` (back to `planning`). Comments on passages of a ticket (`reject -comments-file`) redraft only the commented sections and tickets |
 | `building` | factory | One ticket at a time in the Docker sandbox, verified, gated, PR opened when release policy allows. A quarantine whose failed gates are only `spec_conformity` and/or `code_review` first gets up to `-review-corrective-rounds` (default `1`) automatic corrective builds on the same branch before quarantining. So does a quarantine by other checks a build can fix when told what failed (a failed verification, a command or repository gate, a diff outside Allowed-Files, a missing required file or content): that build is given the factory's record of the failed attempt, and the same budget covers both kinds. A failed `tests_added`, an unknown check or a halt gets none. A review that gave no verdict (it timed out or returned nothing; the combined review has 20 minutes) is no quarantine and gets no corrective build: nothing was judged, so the request waits in `resume_review` with the cause, and the build is kept |
 | `pr_review` | **you** (on GitHub) | Trusted reviewer comments trigger corrective rounds; PR auto-marked ready once checks pass and no thread blocks it; merging is yours. Next ticket starts once this one is accepted (or, under `-advance-on pr_approved`, once reviewer-approved) |
 | `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft. The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
@@ -81,10 +81,11 @@ act in "you" rows.
 | `closed` | - | A ticket's PR was closed without merging. Final: reopening the PR does not bring the request back; submit again. Another ticket's PR left open is named by `factoryd watch <id>` and on the console's request page, for you to merge or close |
 | `quarantined` / `halted` | **you** | Read the reason in `factoryd status`/console, fix the cause, `factoryd retry <id>` (a rebuilt ticket continues from the failed attempt's commit when a build may be told what failed; `-from scratch` rebuilds from the base, `-from <round>` on a new branch at a round `factoryd rounds <id>` lists: [reference](USAGE_REFERENCE.md#request-lifecycle); console: Retry request, with **Retry from scratch** ticked for `-from scratch`) -- or, before any ticket is accepted, send it back to redraft the plan or the spec: `factoryd reject -to plan\|spec -reason "..." <id>` (`plan`/`planning` and `spec`/`spec_drafting`) -- or, to drop the request instead, `factoryd cancel <id>`. A retry after the factory's own checks refused a drafted spec or plan gives the next draft their reason; a failed or timed-out draft job does not ([reference](USAGE_REFERENCE.md#a-retried-draft)) |
 
-Every new ticket build receives the approved spec verbatim before its ticket
-plan. The build input then lists the ticket's covered criteria using the
-factory's numbered criteria, so exact names, formats and behaviours in the
-operator's spec remain part of the build contract.
+Every ticket build receives the approved spec verbatim before its ticket
+plan, then the ticket's covered criteria in the factory's numbered form, so
+exact names, formats and behaviours in the operator's spec remain part of the
+build contract. A request submitted before an upgrade keeps the earlier
+ticket-first input (see "Upgrading with requests in flight" under Upgrade).
 
 For `-spec-file`, criteria are structural: top-level list items in the title
 area and in non-excluded `#`/`##` sections are numbered; the excluded headings are
@@ -100,9 +101,11 @@ least the opening length, and no trailing content; thematic breaks end items,
 task checkboxes are removed, and prose after a blank line is outside the
 preceding item while a lazy continuation without that blank stays in it.
 The handed-over or edited spec limit is 120,000 bytes at submit, at the
-console spec edit, and after a redraft. The complete ticket build input is
-limited to 180,000 bytes, leaving 20,000 bytes below build_app.py's 200,000-
-byte round-prompt limit for round state and corrective framing. If a
+console spec edit, and after a redraft; approval also counts the answered
+read-back questions toward it. A ticket's build input (the spec, the answers,
+the ticket and its criteria) is limited to 150,000 bytes, and 180,000 bytes
+with a corrective round's addendum, leaving 20,000 bytes below build_app.py's
+200,000-byte round-prompt limit for round state and corrective framing. If a
 handed-over plan's criteria change, planning stops; send it back to planning
 with `factoryd reject -to plan -reason "..." <id>`. That command supplies plan
 feedback, so planning drafts revised tickets instead of taking the imported
@@ -331,6 +334,21 @@ Temporal is left running) and reruns `install-skill` for
 symlinks. If the install fails it prints the log tail, what is stopped, and
 the exact command to restore the previous checkout and install. Already on
 the target: it says so and changes nothing.
+
+**Upgrading with requests in flight.** A request records its ticket-build input
+shape when it is submitted (`build_input` in `request.json`). A request
+submitted before an upgrade has none and finishes on the earlier shape: each
+ticket's build input is the ticket and its covered criteria, with no approved
+spec in front of it and no read-back answers. No record is rewritten or
+migrated, and one waiting at a review gate, in `pr_review` or between tickets
+waits across the upgrade. What a later release added is absent from such a
+request: a plan handed over before the upgrade has no recorded criteria to
+compare, so planning does not stop on a criteria change, and a plan already at
+`plan_review` carries no PR budget and no budget note. Planning that runs
+after the upgrade uses `pr_budget_lines` as the session config then holds it.
+Such a request gets no read-back, not even on a redraft, since its answers
+would never reach a build. To give a request the
+new shape, `factoryd cancel <id>` and submit it again.
 
 **What `quickstart` does**, and the manual command for each step:
 
