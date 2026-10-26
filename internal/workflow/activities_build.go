@@ -83,15 +83,11 @@ func autofixArgs(commands []string) []string {
 // by the submitting process -- see cmd/factoryd/run_temporal.go) -- empty
 // when roles.execution is unset, which omits --thinking entirely and
 // preserves today's argv byte-for-byte.
-func buildActivityArgs(buildAppScript, workspace, spec, conformityPolicy string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string, setup ...string) []string {
+func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string, setup ...string) []string {
 	args := []string{
 		buildAppScript,
 		"--workspace", workspace,
 		"--spec", spec,
-		// --conformity-policy gates the per-criterion spec-conformity
-		// review, and must be threaded here too so the Temporal paths
-		// don't silently diverge.
-		"--conformity-policy", conformityPolicy,
 		"--max-rounds", fmt.Sprint(maxRounds),
 		"--timeout-minutes", fmt.Sprint(timeoutMinutes),
 		"--review-base-sha", baseSHA,
@@ -317,7 +313,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 
 	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
 	// see buildActivityArgs' own doc comment on that parameter for why.
-	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.conformityPolicyFor(input), a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
+	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
 	// The build script is the only reader of the autofix list (see
 	// TestOnlyTheBuildReadsAutofix): it runs the commands inside each round.
 	args = append(args, autofixArgs(input.AutofixCommands)...)

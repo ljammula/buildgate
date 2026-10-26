@@ -19,8 +19,7 @@ import (
 )
 
 // codeReviewFixtureInput is fixtureInput() plus the relay policy and
-// -code-review-policy RunCodeReviewActivity needs -- mirrors
-// specConformityReviewFixtureInput (spec_conformity_review_test.go).
+// -code-review-policy RunReviewStepActivity needs.
 func codeReviewFixtureInput(t *testing.T, workspacePath string) ReviewStepInput {
 	t.Helper()
 	input := fixtureInput()

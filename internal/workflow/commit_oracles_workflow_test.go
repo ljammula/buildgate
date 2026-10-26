@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 
@@ -20,16 +21,16 @@ func passingPostOracleCommitVerify(context.Context, RunWorkflowInput) (PostOracl
 	}, nil
 }
 
-func oracleWorkflowEnv(t *testing.T, referenceExit, specExit int, commit func(context.Context, CommitOraclesInput) (CommittedOracles, error)) func() RunWorkflowResult {
+func oracleWorkflowEnv(t *testing.T, referenceExit, reviewExit int, commit func(context.Context, CommitOraclesInput) (CommittedOracles, error)) func() RunWorkflowResult {
 	t.Helper()
-	execute, _ := oracleWorkflowEnvWith(t, referenceExit, specExit, "", commit, passingPostOracleCommitVerify)
+	execute, _ := oracleWorkflowEnvWith(t, referenceExit, reviewExit, "", commit, passingPostOracleCommitVerify)
 	return execute
 }
 
 // oracleWorkflowEnvWith also registers RunPostOracleCommitVerifyActivity (post)
 // and, when fullSuiteCommand is set, a passing RunFullSuiteVerifyActivity. The
 // first returned func fails the test on a workflow error; the second returns it.
-func oracleWorkflowEnvWith(t *testing.T, referenceExit, specExit int, fullSuiteCommand string, commit func(context.Context, CommitOraclesInput) (CommittedOracles, error), post func(context.Context, RunWorkflowInput) (PostOracleCommitVerifyResult, error), mutate ...func(*RunWorkflowInput)) (func() RunWorkflowResult, func() (RunWorkflowResult, error)) {
+func oracleWorkflowEnvWith(t *testing.T, referenceExit, reviewExit int, fullSuiteCommand string, commit func(context.Context, CommitOraclesInput) (CommittedOracles, error), post func(context.Context, RunWorkflowInput) (PostOracleCommitVerifyResult, error), mutate ...func(*RunWorkflowInput)) (func() RunWorkflowResult, func() (RunWorkflowResult, error)) {
 	t.Helper()
 	input := fixtureInput()
 	input.FullSuiteCommand = fullSuiteCommand
@@ -39,8 +40,8 @@ func oracleWorkflowEnvWith(t *testing.T, referenceExit, specExit int, fullSuiteC
 	for _, m := range mutate {
 		m(&input)
 	}
-	if specExit >= 0 {
-		input.SpecAcceptanceCriteria = "criterion"
+	if reviewExit >= 0 {
+		input.CodeReviewPolicy = "required"
 	}
 	env := newWorkflowEnvironmentSansCommitOracles(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
@@ -68,9 +69,10 @@ func oracleWorkflowEnvWith(t *testing.T, referenceExit, specExit int, fullSuiteC
 		}
 		return ev, nil
 	}, activity.RegisterOptions{Name: CollectEvidenceActivityName})
-	if specExit >= 0 {
+	if reviewExit >= 0 {
 		env.RegisterActivityWithOptions(func(context.Context, ReviewStepInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"conformity"}, ExitCode: specExit}}, nil
+			// reviewExit 0 is a verdict (the launch exits CombinedExitBase), anything else none.
+			return VerifyActivityResult{Result: runner.Result{Command: []string{"review"}, ExitCode: reviewstep.CombinedExitBase + 2*reviewExit}}, nil
 		}, activity.RegisterOptions{Name: RunReviewStepActivityName})
 	}
 	env.RegisterActivityWithOptions(commit, activity.RegisterOptions{Name: CommitOraclesActivityName})
@@ -289,26 +291,6 @@ func TestRunWorkflowNoCommitOraclesRunsValidateOnlyAndNoPostVerify(t *testing.T)
 	}
 	if !passed {
 		t.Fatalf("reference_oracle gate must still run and pass: %+v", result.GateResults)
-	}
-}
-
-func TestRunWorkflowCommitsOraclesOnlyAfterSpecConformityPasses(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		specExit   int
-		wantCommit bool
-	}{{"conformity passed", 0, true}, {"conformity failed", 1, false}} {
-		t.Run(tc.name, func(t *testing.T) {
-			called := false
-			execute := oracleWorkflowEnv(t, 0, tc.specExit, func(context.Context, CommitOraclesInput) (CommittedOracles, error) {
-				called = true
-				return CommittedOracles{}, nil
-			})
-			execute()
-			if called != tc.wantCommit {
-				t.Fatalf("CommitOraclesActivity called = %v, want %v", called, tc.wantCommit)
-			}
-		})
 	}
 }
 

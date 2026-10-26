@@ -1,8 +1,7 @@
 """The read-back answers the operator approved with the spec reach every
 reader of the approved spec inside the build: factoryd writes them after the
 criteria in the criteria file (requestdriver.AnsweredReadBackBlock), and the
-spec-conformity reviewers (in-build, standalone and combined), the planner
-and the oracle drafter get them labelled as the operator's answers to questions about the spec."""
+planner and the oracle drafter get them labelled as the operator's answers to questions about the spec."""
 
 import importlib.util
 import subprocess
@@ -26,7 +25,6 @@ def _load(name: str):
 
 combined_review = _load("combined_review")
 build_app = combined_review.build_app
-conformity_review = combined_review.conformity_review
 plan_tickets = _load("plan_tickets")
 draft_acceptance_oracles = _load("draft_acceptance_oracles")
 
@@ -76,84 +74,11 @@ class CriteriaFileTests(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as directory:
 			path = _criteria_path(directory)
 			self.assertEqual(build_app.read_acceptance_criteria(path), ["1. Keys are honoured", "2. Expired keys are refused"])
-			self.assertEqual(build_app.read_spec_answers(path), ANSWERS)
 
 	def test_a_criteria_file_without_answers_reads_as_before(self):
 		with tempfile.TemporaryDirectory() as directory:
 			path = _criteria_path(directory, "1. Foo\n# a comment\n2. Bar\n")
 			self.assertEqual(build_app.read_acceptance_criteria(path), ["1. Foo", "2. Bar"])
-			self.assertEqual(build_app.read_spec_answers(path), "")
-			self.assertEqual(build_app.read_spec_answers(None), "")
-
-
-class ConformityPromptTests(unittest.TestCase):
-	def test_the_answers_follow_the_criteria_labelled_as_the_operators(self):
-		prompt = build_app.spec_conformity_prompt(["1. Keys are honoured"], "abc123", answers=ANSWERS)
-		criteria_at = prompt.index("1. Keys are honoured")
-		label_at = prompt.index("The operator answered these questions about the spec at spec review and approved the answers with it.")
-		self.assertLess(criteria_at, label_at)
-		self.assertLess(label_at, prompt.index("24 hours."))
-		self.assertIn("They are not criteria and get no verdict of their own", prompt)
-
-	def test_no_answers_leaves_the_prompt_unchanged(self):
-		self.assertEqual(
-			build_app.spec_conformity_prompt(["1. Foo"], "abc123", answers=""),
-			build_app.spec_conformity_prompt(["1. Foo"], "abc123"),
-		)
-		self.assertNotIn("answered these questions", build_app.spec_conformity_prompt(["1. Foo"], "abc123"))
-
-	def test_the_combined_review_gives_task_a_the_answers_after_its_criteria(self):
-		prompt = combined_review.combined_review_prompt(["1. Keys are honoured"], "ticket", "abc123", answers=ANSWERS)
-		task_a = prompt.index("=== Task A")
-		task_b = prompt.index("=== Task B")
-		self.assertLess(task_a, prompt.index("24 hours."))
-		self.assertLess(prompt.index("24 hours."), task_b)
-
-
-def _capture_turns(prompts: list[str]):
-	def turn(workspace, *, prompt, **kwargs):
-		prompts.append(prompt)
-		return conformity_review.build_app.ReviewTurn(text="", error="no answer")
-	return turn
-
-
-class ReviewRunTests(unittest.TestCase):
-	def test_the_standalone_conformity_review_reads_the_answers_from_the_criteria_file(self):
-		prompts: list[str] = []
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			_init_repo(root)
-			path = _criteria_path(spec_dir)
-			# The module conformity_review itself calls: another test file may
-			# have loaded its own copy of build_app under the same name.
-			with mock.patch.object(conformity_review.build_app, "run_review_turn", side_effect=_capture_turns(prompts)):
-				evidence = conformity_review.run_conformity_review(root, criteria_path=path, conformity_policy="required")
-		self.assertEqual([v["criterion"] for v in evidence["review_verdicts"]], ["1. Keys are honoured", "2. Expired keys are refused"])
-		self.assertTrue(prompts)
-		self.assertIn("24 hours.", prompts[0])
-
-	def test_the_combined_review_and_its_conformity_retry_read_the_answers(self):
-		prompts: list[str] = []
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			_init_repo(root)
-			path = _criteria_path(spec_dir)
-			spec_path = Path(spec_dir) / "ticket.md"
-			spec_path.write_text("Add keys.\n")
-			answers = iter([
-				build_app.ReviewTurn(text='{"findings": []}', error=""),
-				build_app.ReviewTurn(text="", error="no answer"),
-			])
-
-			def turn(workspace, *, prompt, **kwargs):
-				prompts.append(prompt)
-				return next(answers)
-
-			with mock.patch.object(build_app, "run_review_turn", side_effect=turn):
-				combined_review.run_combined_review(root, criteria_path=path, spec_path=spec_path)
-		self.assertEqual(len(prompts), 2)
-		for prompt in prompts:
-			self.assertIn("24 hours.", prompt)
 
 
 class PlannerPromptTests(unittest.TestCase):

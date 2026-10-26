@@ -11,7 +11,7 @@ import (
 // TestHarnessScriptSiblingImportsAreStaged: every agent/pi/scripts module a
 // harness script imports must be in HarnessSiblingModules, or the staged
 // sandbox copy dies at import. Found live (a Flutter + Go app repo M-E2 run, 2026-09-28):
-// combined_review.py imports code_review and conformity_review, neither was
+// combined_review.py imported code_review and conformity_review, neither was
 // staged, and the launch exited with ModuleNotFoundError.
 func TestHarnessScriptSiblingImportsAreStaged(t *testing.T) {
 	dir := filepath.Join("..", "..", "agent", "pi", "scripts")

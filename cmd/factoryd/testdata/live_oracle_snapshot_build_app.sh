@@ -15,7 +15,7 @@ workspace=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--workspace) workspace="$2"; shift 2 ;;
-	--spec|--review-policy|--conformity-policy|--max-rounds|--timeout-minutes|--review-base-sha|--verify-command|--reference-oracle-command) shift 2 ;;
+	--spec|--review-policy|--max-rounds|--timeout-minutes|--review-base-sha|--verify-command|--reference-oracle-command) shift 2 ;;
 	*) shift ;;
 	esac
 done

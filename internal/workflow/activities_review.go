@@ -20,15 +20,13 @@ import (
 
 // reviewStepPassed reports whether a review step's launch passed, for its
 // progress feed's end outcome. The combined step exits
-// reviewstep.CombinedExitBase + bits, so its pass is 40, not 0; reading it
-// as "exit != 0 fails" marked every passing combined review failed on the
-// console's Timeline (found in a 2026-09-29 walkthrough) while
-// the gates, which decode it with GateExitCodes, passed. Mirrors the
-// cmd/factoryd's decoding.
+// reviewstep.CombinedExitBase when it gave a verdict, so its pass is 40, not
+// 0; reading it as "exit != 0 fails" marked every passing combined review
+// failed on the console's Timeline (found in a 2026-09-29 walkthrough) while
+// the gate, which decodes it with ReviewExitCode, passed.
 func reviewStepPassed(stepName string, exitCode int) bool {
 	if stepName == reviewstep.Combined {
-		conformity, codeReview := reviewstep.GateExitCodes(exitCode)
-		return conformity == 0 && codeReview == 0
+		return reviewstep.ReviewExitCode(exitCode) == 0
 	}
 	return exitCode == 0
 }
@@ -319,45 +317,21 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 // shared (M4-K3).
 func reviewStepArgs(a *Activities, step reviewstep.Step, input ReviewStepInput, script string) []string {
 	if step.Name == reviewstep.Combined {
-		// input.SpecPath and input.SpecAcceptanceCriteria: both are
-		// ALREADY unconditionally staged by a.runSandboxWithRetries below
-		// (specPath and extraRunInput respectively -- see that function's
-		// own doc comment on extraRunInput), for every review-step
-		// Activity launch, not just the Combined one -- so this needs no
-		// staging change of its own, unlike cmd/factoryd
-		// (which threads extraRunInput per call site). Same
-		// effectiveDiffBase()/policy-fallback reasoning as the two
-		// standalone branches below.
-		return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, input.SpecAcceptanceCriteria, a.conformityPolicyFor(input.RunWorkflowInput), input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
-	}
-	if step.Name == reviewstep.CodeReview {
-		// input.SpecPath, the same host path build_app.py's own --spec
-		// already stages (buildActivityArgs) -- unlike conformity_review.py,
-		// code_review.py takes a real --spec of its own (context only, per
-		// its own doc comment), so this reuses the ticket spec's already-
-		// staged mount instead of a second, code-review-specific file.
+		// input.SpecPath is already unconditionally staged by
+		// a.runSandboxWithRetries (specPath) for every review-step launch.
+		// The approved spec is not passed yet: no run input carries it, so
+		// no spec line can be cited and every finding is advice.
 		// input.effectiveDiffBase(), not input.BaseSHA: see
-		// RunWorkflowInput.DiffBaseSHA's own doc comment — a corrective
+		// RunWorkflowInput.DiffBaseSHA's own doc comment -- a corrective
 		// round's own BaseSHA is just its checkout point, not the
 		// cumulative diff a -diff-base override names for this review to
 		// read.
-		return codereview.Args(script, input.WorkspacePath, input.SpecPath, input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
+		return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, "", input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
 	}
-	// input.SpecAcceptanceCriteria, not a.specAcceptanceCriteriaFor(...):
-	// RunWorkflow's own decision to invoke this step at all (see its
-	// specConformityVersion gate) can only see input.SpecAcceptanceCriteria
-	// -- a deterministic Temporal workflow cannot read this Worker's own
-	// static Activities.SpecAcceptanceCriteria fallback without risking
-	// replay divergence if a different Worker with a different static
-	// default later replays the same history. Resolving the Worker-static
-	// fallback here, after the workflow already decided not to run this
-	// step because the raw field was empty, would silently review against
-	// criteria the workflow never agreed to check. A ticket that wants
-	// review against a Worker-level default must still set
-	// -spec-acceptance-criteria per run.
-	// input.effectiveDiffBase(), not input.BaseSHA: same reasoning as the
-	// code-review branch above.
-	return conformity.Args(script, input.WorkspacePath, input.SpecAcceptanceCriteria, a.conformityPolicyFor(input.RunWorkflowInput), input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
+	// The standalone code-review script: input.SpecPath, the same host path
+	// build_app.py's own --spec already stages (buildActivityArgs), as its
+	// context-only --spec.
+	return codereview.Args(script, input.WorkspacePath, input.SpecPath, input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
 }
 
 // reviewStepNoRelayError names step's own trigger condition for the
@@ -365,13 +339,7 @@ func reviewStepArgs(a *Activities, step reviewstep.Step, input ReviewStepInput, 
 // halt's text, so it stays specific rather than a single shared string
 // (mirrors run_ticket.go's own runReviewPhase noRelayErr parameter).
 func reviewStepNoRelayError(step reviewstep.Step, input ReviewStepInput) string {
-	if step.Name == reviewstep.Combined {
-		return "ticket declares -spec-acceptance-criteria and -code-review-policy is set, but no relay is configured for this run -- the combined review needs model access and cannot be silently skipped"
-	}
-	if step.Name == reviewstep.CodeReview {
-		return fmt.Sprintf("-code-review-policy is %q but no relay is configured for this run -- code review needs model access and cannot be silently skipped", input.CodeReviewPolicy)
-	}
-	return "ticket declares -spec-acceptance-criteria but no relay is configured for this run -- the spec-conformity review needs model access and cannot be silently skipped"
+	return fmt.Sprintf("-code-review-policy is %q but no relay is configured for this run -- code review needs model access and cannot be silently skipped", input.CodeReviewPolicy)
 }
 
 // reviewProgressDetail is the progress feed's detail for a review that

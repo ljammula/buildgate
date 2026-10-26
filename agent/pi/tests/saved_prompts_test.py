@@ -111,7 +111,7 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 		subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
 
 	def _check(self, run, session_name, saved_name, retry_name=None):
-		import code_review, combined_review, conformity_review  # noqa: F401
+		import code_review, combined_review  # noqa: F401
 		with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as inputs:
 			root = Path(d)
 			self._init(root)
@@ -134,14 +134,10 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 		import code_review
 		self._check(lambda root, spec, criteria: code_review.run_code_review(root, spec_path=spec), ".pi-code-review-session", "review-code")
 
-	def test_conformity_review(self):
-		import conformity_review
-		self._check(lambda root, spec, criteria: conformity_review.run_conformity_review(root, criteria_path=criteria, conformity_policy="required"), ".pi-conformity-session", "review-conformity")
-
 	def test_combined_review(self):
 		import combined_review
 		self._check(
-			lambda root, spec, criteria: combined_review.run_combined_review(root, criteria_path=criteria, spec_path=spec, conformity_policy="required", review_policy="required"),
+			lambda root, spec, criteria: combined_review.run_combined_review(root, spec_path=spec, review_policy="required"),
 			".pi-combined-review-session", "review-combined", retry_name="review-combined-retry",
 		)
 

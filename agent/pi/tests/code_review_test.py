@@ -37,7 +37,7 @@ def review_output(findings: list[dict]) -> str:
 
 
 class RunCodeReviewTests(unittest.TestCase):
-	def test_required_policy_fails_on_high_finding_and_never_touches_git(self):
+	def test_required_policy_passes_a_high_finding_and_never_touches_git(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			init_repo_with_commit(root)
@@ -57,13 +57,13 @@ class RunCodeReviewTests(unittest.TestCase):
 
 			with mock.patch.object(build_app, "sh", side_effect=side_effect):
 				evidence = code_review.run_code_review(root, spec_path=spec_path, review_policy="required")
-			self.assertFalse(evidence["succeeded"])
-			self.assertIn("1 blocking high-severity", evidence["stopped_reason"])
+			self.assertTrue(evidence["succeeded"], "a finding never fails the review (SC-022)")
+			self.assertIn("1 finding(s), 1 high-severity", evidence["stopped_reason"])
 			self.assertEqual(evidence["findings"][0]["severity"], "high")
 			self.assertNotIn("add", git_calls)
 			self.assertNotIn("commit", git_calls)
 
-	def test_required_policy_exit_code_is_1_on_blocking_finding(self):
+	def test_required_policy_exit_code_is_0_on_a_high_finding(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory) / "repo"
 			workspace.mkdir()
@@ -75,7 +75,7 @@ class RunCodeReviewTests(unittest.TestCase):
 			with mock.patch.object(sys, "argv", [
 				str(SCRIPT), "--workspace", str(workspace), "--spec", str(spec_path),
 			]), mock.patch.object(build_app, "sh", return_value=completed):
-				self.assertEqual(code_review.main(), 1)
+				self.assertEqual(code_review.main(), 0)
 
 	def test_advisory_policy_with_high_finding_succeeds(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
@@ -106,7 +106,7 @@ class RunCodeReviewTests(unittest.TestCase):
 			self.assertTrue(evidence["succeeded"])
 			self.assertTrue(evidence["available"])
 			self.assertEqual(evidence["findings"], [])
-			self.assertIn("no high-severity findings", evidence["stopped_reason"])
+			self.assertIn("0 finding(s), 0 high-severity", evidence["stopped_reason"])
 
 	def test_unparseable_output_is_unavailable_and_fails_under_required(self):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:

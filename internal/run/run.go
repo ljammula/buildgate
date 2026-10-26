@@ -792,12 +792,58 @@ type ReviewVerdictRecheck struct {
 // criterion, a CodeReviewFinding has no criterion to match against: it is
 // whatever concrete correctness/security/data-loss/concurrency defect the
 // reviewer found, each with its own failure scenario.
+//
+// A finding blocks a run only through a reproduction the factory runs
+// (SC-022). SpecLine is the line of the approved spec it cites; Reproduction
+// is what the factory recorded about the reproduction it carried, never the
+// reproduction's content (which lives in a host copy checked against
+// SHA256); Disposition is "blocks" or "advice", "" for a record from before
+// reproductions. All three are omitted when unset, so an older record
+// re-encodes byte for byte.
 type CodeReviewFinding struct {
-	Severity        string `json:"severity"`
-	File            string `json:"file,omitempty"`
-	Line            int    `json:"line,omitempty"`
-	Summary         string `json:"summary"`
-	FailureScenario string `json:"failure_scenario,omitempty"`
+	Severity        string              `json:"severity"`
+	File            string              `json:"file,omitempty"`
+	Line            int                 `json:"line,omitempty"`
+	Summary         string              `json:"summary"`
+	FailureScenario string              `json:"failure_scenario,omitempty"`
+	SpecLine        *SpecCitation       `json:"spec_line,omitempty"`
+	Reproduction    *ReviewReproduction `json:"reproduction,omitempty"`
+	Disposition     string              `json:"disposition,omitempty"`
+}
+
+// SpecCitation is the line of the approved spec a finding cites: its number
+// and the text the reviewer gave for it. The factory compares the text with
+// the line (SC-022); this record is what the reviewer said.
+type SpecCitation struct {
+	Number int    `json:"number"`
+	Text   string `json:"text"`
+}
+
+// ReviewReproduction is what the run record keeps of a finding's
+// reproduction: where it would be written, the hash of the copy the factory
+// ran, and how the factory's runs went. Never its content.
+type ReviewReproduction struct {
+	Path    string            `json:"path"`
+	SHA256  string            `json:"sha256,omitempty"`
+	Runner  string            `json:"runner,omitempty"`
+	TestIDs []string          `json:"test_ids,omitempty"`
+	Refused string            `json:"refused,omitempty"` // the shape rule that made the finding advice
+	Runs    []ReproductionRun `json:"runs,omitempty"`    // head1, head2, base, recheck
+	Verdict string            `json:"verdict,omitempty"` // blocks | advice | not_run
+	Reason  string            `json:"reason,omitempty"`  // one line
+}
+
+// ReproductionRun is one launch of a reproduction: which pass, on which
+// commit, and what the runner's report recorded.
+type ReproductionRun struct {
+	Pass               string            `json:"pass"`
+	Commit             string            `json:"commit,omitempty"`
+	Outcome            string            `json:"outcome,omitempty"`
+	Tests              map[string]string `json:"tests,omitempty"`
+	ExitCode           int               `json:"exit_code,omitempty"`
+	LogPath            string            `json:"log_path,omitempty"`
+	ReportSHA256       string            `json:"report_sha256,omitempty"`
+	ReproductionSHA256 string            `json:"reproduction_sha256,omitempty"`
 }
 
 // CodeReviewResult is the run-record shape of CODE_REVIEW_EVIDENCE.json's

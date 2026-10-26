@@ -19,7 +19,7 @@ import (
 
 // combinedReviewFixtureInput is fixtureInput() plus the relay policy,
 // spec, and criteria path RunReviewStepActivity needs for the Combined
-// step -- mirrors specConformityReviewFixtureInput/codeReviewFixtureInput.
+// step -- mirrors codeReviewFixtureInput.
 func combinedReviewFixtureInput(t *testing.T, workspacePath string) ReviewStepInput {
 	t.Helper()
 	input := fixtureInput()
@@ -65,7 +65,7 @@ func TestRunReviewStepActivityAcceptsCombinedStepDespiteItNotBeingInSteps(t *tes
 		// CombinedExitBase+3: both bits set --
 		// this test only checks the Activity resolves and returns this
 		// raw exit code untouched; RunWorkflow (not this Activity) is
-		// what splits it via reviewstep.GateExitCodes.
+		// what decodes it via reviewstep.ReviewExitCode.
 		result := runner.Result{Command: []string{"python3", "combined_review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: reviewstep.CombinedExitBase + 3, LogPath: log}
 		if err := after(1, result, nil); err != nil {
 			return result, err
@@ -98,13 +98,12 @@ func TestRunReviewStepActivityAcceptsCombinedStepDespiteItNotBeingInSteps(t *tes
 
 // TestReviewStepArgsForCombinedStepIncludesBothHostPaths proves
 // reviewStepArgs builds combined_review.py's own argv (via
-// reviewstep.CombinedArgs) with BOTH input.SpecPath and
-// input.SpecAcceptanceCriteria verbatim -- a.runSandboxWithRetries
-// always stages both host paths (specPath and extraRunInput; see its
-// own doc comment on extraRunInput), so both must appear in args
+// reviewstep.CombinedArgs) with input.SpecPath verbatim -- a.runSandboxWithRetries
+// always stages that host path (specPath), so it must appear in args
 // exactly as given for that staging's exact-string substitution to
-// translate them to their in-container paths.
-func TestReviewStepArgsForCombinedStepIncludesBothHostPaths(t *testing.T) {
+// translate it to its in-container path. No criteria and no conformity
+// policy are passed: the conformity review is retired.
+func TestReviewStepArgsForCombinedStepIncludesTheSpecPathAndNoConformityFlags(t *testing.T) {
 	activities := &Activities{}
 	input := fixtureInput()
 	input.SpecPath = "/fixture/spec.md"
@@ -126,14 +125,18 @@ func TestReviewStepArgsForCombinedStepIncludesBothHostPaths(t *testing.T) {
 		t.Errorf("args %v carry no %s", args, flag)
 	}
 	assertArgValue("--spec", input.SpecPath)
-	assertArgValue("--spec-acceptance-criteria", input.SpecAcceptanceCriteria)
 	assertArgValue("--review-policy", input.CodeReviewPolicy)
+	for _, gone := range []string{"--spec-acceptance-criteria", "--conformity-policy"} {
+		for _, a := range args {
+			if a == gone {
+				t.Errorf("args %v carry the retired %s", args, gone)
+			}
+		}
+	}
 }
 
-// TestReviewStepNoRelayErrorNamesTheCombinedStep proves the Combined
-// step gets its own specific no-relay halt text (mirrors
-// run_ticket.go's own runReviewPhase noRelayErr parameter for the
-// Combined case), not one of the two standalone steps' text.
+// TestReviewStepNoRelayErrorNamesTheCombinedStep proves the review
+// step's no-relay halt text names the policy that needs the model.
 func TestReviewStepNoRelayErrorNamesTheCombinedStep(t *testing.T) {
 	input := fixtureInput()
 	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
@@ -144,7 +147,7 @@ func TestReviewStepNoRelayErrorNamesTheCombinedStep(t *testing.T) {
 	if got == "" {
 		t.Fatal("reviewStepNoRelayError returned empty string for the Combined step")
 	}
-	for _, substr := range []string{"-spec-acceptance-criteria", "-code-review-policy", "combined review"} {
+	for _, substr := range []string{"-code-review-policy", "model access"} {
 		if !strings.Contains(got, substr) {
 			t.Errorf("reviewStepNoRelayError = %q, want it to mention %q", got, substr)
 		}

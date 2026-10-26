@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Standalone AI code-review pass, run as its OWN sandboxed launch,
-separate from build_app.py's own round loop and from
-conformity_review.py's own per-criterion spec-conformity pass -- see
-conformity_review.py's own doc comment for why a one-turn review runs as
-a distinct script rather than a mode flag on build_app.py (the same
-reasoning applies here: build_app.py's own main() always overwrites
-BUILD_EVIDENCE.json/BUILD_REPORT.md, so a review-only pass needs its own
-evidence file). This script only ever reads git (a diff/diff --stat to
-build the reviewer's own prompt, see build_app.workspace_diff), never writes --
-.git is mounted read-only inside the sandbox unconditionally, same as
-conformity_review.py.
+"""The code review's finding parser and evidence writer, shared with
+combined_review.py (the review step the factory launches), plus a
+standalone CLI for a code-review-only launch. A one-turn review runs as a
+distinct script rather than a mode flag on build_app.py: build_app.py's own
+main() always overwrites BUILD_EVIDENCE.json/BUILD_REPORT.md, so a
+review-only pass needs its own evidence file. The CLI only ever reads git
+(a diff/diff --stat to build the reviewer's own prompt, see
+build_app.workspace_diff), never writes -- .git is mounted read-only inside
+the sandbox unconditionally.
 
 Before the live example-app walk (2026-09-28), the reviewer was told to run
 `git diff` itself and did: ~13 tool-use turns at ~77k input tokens each
@@ -19,9 +17,8 @@ and no findings at all. Fetching the diff here and inlining it in the
 prompt (capped at 120,000 characters -- see build_app._DIFF_TRUNCATE_LIMIT) turns
 that into a single read instead of an open-ended exploration.
 
-Unlike conformity_review.py, which checks the diff against declared
-acceptance criteria, this script asks an independent model turn for a
-free-form code review of the diff: concrete correctness, security,
+This script asks an independent model turn for a free-form code review of
+the diff: concrete correctness, security,
 data-loss, or concurrency defects, each with a failure scenario. It is
 not a style/lint/formatting pass -- build_app.py's own round loop already
 formats changed Go files, and a reviewer flagging style drift here would
@@ -51,12 +48,22 @@ CODE_REVIEW_EVIDENCE_SCHEMA_VERSION = 1
 
 _VALID_SEVERITIES = ("high", "medium", "low")
 
+# A review carries at most MAX_REPRODUCTIONS reproductions of at most
+# MAX_REPRODUCTION_BYTES each (SC-022); internal/codereview applies the same
+# caps (maxReproductions, maxReproductionBytes) to the evidence file it reads.
+MAX_REPRODUCTIONS = 3
+MAX_REPRODUCTION_BYTES = 32 << 10
+
 SCOPE_RULE = (
 	prompt_templates.load_text("code_review.scope_rule")
 )
 
 SEVERITY_RULE = (
 	prompt_templates.load_text("code_review.severity_rule")
+)
+
+REPRODUCTION_RULE = (
+	prompt_templates.load_text("code_review.reproduction_rule")
 )
 
 COMMAND_OUTCOME_RULE = (
@@ -67,23 +74,8 @@ JSON_CONTRACT = (
 	prompt_templates.load_text("code_review.json_contract")
 )
 
-# The four constants above are shared with combined_review.py's own
-# combined_review_prompt (see build_app.py's own CONFORMITY_*
-# constants' doc comment for why: review was 50% of a live example-app
-# request's spend, 2026-09-28, split across two separate fresh sandboxed
-# sessions over the same diff) -- named here, instead of only inline in
-# code_review_prompt's own f-string below, so the combined prompt reuses
-# this review's exact existing wording instead of forking a driftable
-# copy.
-
-# workspace_diff/_HARNESS_ARTIFACT_PATHSPECS/_DIFF_TRUNCATE_LIMIT used to be
-# private copies here; moved to build_app.py (build_app.workspace_diff /
-# build_app._HARNESS_ARTIFACT_PATHSPECS / build_app._DIFF_TRUNCATE_LIMIT) so
-# conformity_review.py's own spec-conformity review can inline the same
-# scoped diff instead of asking its reviewer to `git diff` for itself --
-# found live, example-app run 3, 2026-09-28: without it, that review burned the
-# relay's whole hourly token budget across 30 tool-exploring turns and ended
-# in three straight 429s with no verdicts at all.
+# The rule constants above are shared with combined_review.py's own prompt,
+# so it reuses this review's exact wording instead of a driftable copy.
 
 DIFF_SELF = prompt_templates.load("code_review.diff_self", ("base",))
 DIFF_INLINE = prompt_templates.load("code_review.diff_inline", ("diff",))
@@ -125,7 +117,7 @@ def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
 	JSON object with a "findings" list was found at all (an unreachable
 	or unparseable reviewer), never conflated with a real, empty findings
 	list (a clean review). The LAST such candidate wins wholesale, same
-	rule as parse_conformity_verdicts' own _iter_json_objects use --
+	rule as every _iter_json_objects use --
 	only the model's actual final answer is ever trusted, not an earlier
 	echoed example.
 
@@ -169,14 +161,71 @@ def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
 		severity = severity.lower() if isinstance(severity, str) else ""
 		if severity not in _VALID_SEVERITIES:
 			severity = "medium"
-		parsed.append({
+		finding = {
 			"severity": severity,
 			"file": file_,
 			"line": line,
 			"summary": summary,
 			"failure_scenario": failure_scenario,
-		})
+		}
+		spec_line = _parse_spec_line(entry.get("spec_line"))
+		if spec_line:
+			finding["spec_line"] = spec_line
+		reproduction = _parse_reproduction(entry.get("reproduction"))
+		if reproduction:
+			finding["reproduction"] = reproduction
+		parsed.append(finding)
 	return True, parsed
+
+
+def _parse_spec_line(value) -> dict | None:
+	"""The {"number", "text"} a finding cites, or None unless number is an
+	int of at least 1 (not a bool) and text a non-empty string. Whether the
+	text is the approved spec's line is the host's check (SC-022), not this
+	one."""
+	if not isinstance(value, dict):
+		return None
+	number, text = value.get("number"), value.get("text")
+	if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+		return None
+	if not isinstance(text, str) or not text.strip():
+		return None
+	return {"number": number, "text": text}
+
+
+def _parse_reproduction(value) -> dict | None:
+	"""The {"path", "content"} a finding carries, or None unless both are
+	non-empty strings. Its shape (a new test path, a size) is the host's
+	check (SC-022); the caps on count and size are cap_reproductions'."""
+	if not isinstance(value, dict):
+		return None
+	path, content = value.get("path"), value.get("content")
+	if not isinstance(path, str) or not path.strip() or not isinstance(content, str) or not content:
+		return None
+	return {"path": path.strip(), "content": content}
+
+
+def cap_reproductions(findings: list[dict]) -> list[str]:
+	"""Drops the reproduction of every finding past the first
+	MAX_REPRODUCTIONS, and of any over MAX_REPRODUCTION_BYTES, in place; the
+	finding stays, as advice. Returns one note per drop. A cap never fails a
+	review."""
+	notes: list[str] = []
+	kept = 0
+	for index, finding in enumerate(findings, start=1):
+		reproduction = finding.get("reproduction")
+		if not reproduction:
+			continue
+		size = len(reproduction["content"].encode("utf-8"))
+		if size > MAX_REPRODUCTION_BYTES:
+			notes.append(f"finding {index}: reproduction dropped, {size} bytes is over the {MAX_REPRODUCTION_BYTES} byte cap")
+		elif kept >= MAX_REPRODUCTIONS:
+			notes.append(f"finding {index}: reproduction dropped, a review carries at most {MAX_REPRODUCTIONS}")
+		else:
+			kept += 1
+			continue
+		del finding["reproduction"]
+	return notes
 
 
 def _unavailable_stopped_reason(error: str, *, advisory: bool, diff_fetch_failed: bool = False) -> str:
@@ -210,37 +259,30 @@ def _unavailable_stopped_reason(error: str, *, advisory: bool, diff_fetch_failed
 
 def code_review_evidence(
 	available: bool, findings: list[dict], error: str, *, review_policy: str, thinking: str | None,
-	diff_fetch_failed: bool = False,
+	diff_fetch_failed: bool = False, notes: list[str] | None = None,
 ) -> dict:
 	"""Builds the CODE_REVIEW_EVIDENCE.json shape from an already-parsed
 	(available, findings) pair and the underlying turn's own error string
-	-- shared by run_code_review below (a standalone, code-review-only
-	turn) and combined_review.py's own run_combined_review (one turn
-	whose single JSON answer covers both this review and
-	conformity_review.py's own spec-conformity review), so the two
-	callers can never diverge on how findings turn into a
-	succeeded/stopped_reason outcome."""
-	blocking = [f for f in findings if f["severity"] == "high"]
-
-	if review_policy == "advisory":
-		succeeded = True
-		if not available:
-			stopped_reason = _unavailable_stopped_reason(error, advisory=True, diff_fetch_failed=diff_fetch_failed)
-		elif blocking:
-			stopped_reason = f"code review found {len(blocking)} high-severity finding(s), recorded under advisory policy"
-		else:
-			stopped_reason = f"code review found no high-severity findings ({len(findings)} total)"
-	elif not available:
-		succeeded = False
-		stopped_reason = _unavailable_stopped_reason(error, advisory=False, diff_fetch_failed=diff_fetch_failed)
-	elif blocking:
-		succeeded = False
-		stopped_reason = f"code review found {len(blocking)} blocking high-severity finding(s)"
+	-- shared by run_code_review below (the standalone CLI) and
+	combined_review.py's own run_combined_review, so the two callers can
+	never diverge on how findings turn into a succeeded/stopped_reason
+	outcome. notes are the caps' notes (cap_reproductions), kept under
+	"notes" only when there are any."""
+	# A finding never fails the review (SC-022: it blocks only through a
+	# reproduction the factory runs); a review fails only by giving no verdict.
+	high = [f for f in findings if f["severity"] == "high"]
+	if not available:
+		succeeded = review_policy == "advisory"
+		stopped_reason = _unavailable_stopped_reason(
+			error, advisory=review_policy == "advisory", diff_fetch_failed=diff_fetch_failed,
+		)
 	else:
 		succeeded = True
-		stopped_reason = f"code review found no high-severity findings ({len(findings)} total)"
+		stopped_reason = f"code review gave a verdict: {len(findings)} finding(s), {len(high)} high-severity"
+		if review_policy == "advisory":
+			stopped_reason += ", recorded under advisory policy"
 
-	return {
+	evidence = {
 		"schema_version": CODE_REVIEW_EVIDENCE_SCHEMA_VERSION,
 		"generated": datetime.now(timezone.utc).isoformat(),
 		"review_policy": review_policy,
@@ -251,6 +293,9 @@ def code_review_evidence(
 		"error": error,
 		"findings": findings,
 	}
+	if notes:
+		evidence["notes"] = notes
+	return evidence
 
 
 def run_code_review(

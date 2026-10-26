@@ -28,18 +28,9 @@ would fail every round as "review unavailable"); the intake scripts
 (ticket_runner.py, goal_pilot.py) always pass it explicitly.
 
 `--review-policy` governs only the legacy whole-diff "reviewer" extension
-trace and is independent of `--conformity-policy`, which governs the
-separate per-criterion spec-conformity review `--spec-acceptance-criteria`
-enables: that review runs once canonical verification passes,
-regardless of what `--review-policy` decided about the whole-diff reviewer,
-and `--conformity-policy required` (the default whenever criteria are
-given) fails the build on any non-clean or unreachable per-criterion
-verdict. The two were coupled through `--review-policy` alone until a live
-run showed why that was wrong: a sandbox with no whole-diff reviewer
-available (`--review-policy required` sees it as an unavailable,
-policy-violating verdict) blocked every round outright, so the conformity
-review -- gated on a round ever succeeding -- never even got a chance to
-run.
+trace. The per-criterion spec-conformity review is retired: the review step
+(combined_review.py) is a separate launch and its findings block only
+through a reproduction the factory runs (SC-022).
 
 Exit code 0 only if canonical verification and the selected review policy
 pass by the round budget.
@@ -565,18 +556,6 @@ class BuildResult:
 	workspace: Path
 	spec_path: Path
 	review_policy: str = "required"
-	# conformity_policy is the per-criterion spec-conformity review's
-	# own policy, separate from review_policy (which governs only the
-	# legacy whole-diff "reviewer" extension trace, review_signal's own
-	# concern): required fails the build on any non-clean/unavailable
-	# criterion verdict, advisory records verdicts without revoking a
-	# success canonical verification and the whole-diff review already
-	# earned. See run_build's own conformity-review block for why these
-	# two policies must never be coupled (found live: review_policy
-	# "required" against a sandbox with no whole-diff reviewer available
-	# blocked every round before the conformity review ever got a chance
-	# to run at all).
-	conformity_policy: str = "required"
 	rounds: list[Round] = field(default_factory=list)
 	succeeded: bool = False
 	# What the notes turn did, for BUILD_EVIDENCE.json: never its reply.
@@ -590,11 +569,6 @@ class BuildResult:
 	# to mention one.
 	agents_md_used: bool = False
 	agents_md_git_blob: str | None = None
-	# review_verdicts is the per-criterion independent-reviewer
-	# outcome against --spec-acceptance-criteria, one entry per declared
-	# criterion (empty when no criteria file was given). See
-	# run_spec_conformity_review's own doc comment for how it's produced.
-	review_verdicts: list[dict] = field(default_factory=list)
 
 
 def workspace_differs_from_base(workspace: Path, base_sha: str) -> bool:
@@ -1633,7 +1607,7 @@ def corrective_prompt(
 
 
 # Caps the diff text inlined into a reviewer's prompt (code_review.py's own
-# code_review_prompt and spec_conformity_prompt below) -- large enough for a
+# code_review_prompt and combined_review_prompt) -- large enough for a
 # real ticket-sized change, small enough to leave headroom in the relay's
 # hourly token budget. A diff past this length is truncated by
 # format_diff_for_prompt; the stat above it still lists every changed file
@@ -1649,9 +1623,8 @@ _DIFF_TRUNCATE_LIMIT = 120_000
 # directories (".pi-code-review-session", ".pi-conformity-session", the
 # build loop's own round sessions -- all match "**/.pi-*-session/**"). Git
 # pathspec ":(exclude)" magic requires at least one positive pathspec
-# alongside the excludes, hence the leading ".". Shared by
-# code_review.py's own code_review_prompt and spec_conformity_prompt below
-# (both call workspace_diff), so a reviewer of either kind sees the same
+# alongside the excludes, hence the leading ".". Shared by every review
+# prompt (they all call workspace_diff), so a reviewer sees the same
 # scoped-down diff.
 _HARNESS_ARTIFACT_PATHSPECS = (
 	".",
@@ -1668,17 +1641,11 @@ def workspace_diff(workspace: Path, review_base_sha: str) -> tuple[str, str] | N
 	review_base_sha, both already scoped away from harness-written
 	artifacts via _HARNESS_ARTIFACT_PATHSPECS. Returns None if either `git
 	diff` invocation fails or times out -- .git is mounted read-only in
-	the sandbox both code_review.py and conformity_review.py run in, so a
+	the sandbox the review runs in, so a
 	read here normally works, but a base sha the workspace doesn't have (a
 	shallow clone) could still fail it; the caller falls back to the
 	instruction-only prompt in that case, same as when review_base_sha is
-	unknown altogether. Shared by code_review.py's own run_code_review and
-	run_spec_conformity_review below -- moved here (from a private copy in
-	code_review.py) so both reviews inline the same scoped diff instead of
-	only code review having it (found live, example-app run 3, 2026-09-28: the
-	conformity reviewer, still told to `git diff` for itself, burned the
-	relay's whole hourly token budget across 30 tool-exploring turns and
-	ended in three straight 429s with no verdicts at all)."""
+	unknown altogether."""
 	outputs = []
 	for extra in (["--stat"], []):
 		try:
@@ -1701,8 +1668,7 @@ def workspace_diff(workspace: Path, review_base_sha: str) -> tuple[str, str] | N
 
 def format_diff_for_prompt(stat: str, diff_text: str, review_base_sha: str | None, limit: int = _DIFF_TRUNCATE_LIMIT) -> str:
 	"""Renders workspace_diff's own (stat, diff_text) pair as the inlined
-	"--- diff --stat ---"/"--- diff ---" block both code_review_prompt and
-	spec_conformity_prompt use, truncating diff_text at limit characters
+	"--- diff --stat ---"/"--- diff ---" block every review prompt uses, truncating diff_text at limit characters
 	(the stat above it is never truncated, so the reviewer always sees
 	every changed file even when the diff body itself is cut off)."""
 	truncated = len(diff_text) > limit
@@ -1847,7 +1813,7 @@ def _split_criteria_file(path: Path) -> tuple[list[str], str]:
 def read_acceptance_criteria(path: Path) -> list[str]:
 	"""Returns one criterion per non-empty, non-comment line of path (the
 	approved spec's own numbered acceptance criteria, one per line, e.g.
-	"1. Foo does X"), up to the read-back answers block (read_spec_answers)
+	"1. Foo does X"), up to the read-back answers block
 	when the file carries one."""
 	criteria = []
 	for line in _split_criteria_file(path)[0]:
@@ -1857,87 +1823,6 @@ def read_acceptance_criteria(path: Path) -> list[str]:
 	return criteria
 
 
-def read_spec_answers(path: Path | None) -> str:
-	"""The read-back answers block factoryd wrote after the criteria in path:
-	the questions about the spec the operator answered at spec review, each
-	question and answer fenced, rendered by factoryd. "" when there is none."""
-	if path is None:
-		return ""
-	return _split_criteria_file(path)[1]
-
-
-CONFORMITY_COMMAND_OUTCOME_RULE = (
-	prompt_templates.load_text("spec_conformity.command_outcome_rule")
-)
-
-CONFORMITY_FORMATTING_RULE = (
-	prompt_templates.load_text("spec_conformity.formatting_rule")
-)
-
-CONFORMITY_JSON_CONTRACT = (
-	prompt_templates.load_text("spec_conformity.json_contract")
-)
-
-# The three constants above are shared with combined_review.py's own
-# combined_review_prompt, which folds this same spec-conformity task and
-# code_review.py's own free-form code-review task into one prompt/one
-# turn (see combined_review.py's own module doc comment for why: review
-# was 50% of a live example-app request's spend, 2026-09-28, split across two
-# separate fresh sandboxed sessions over the same diff). Keeping the rule
-# text here as named constants, instead of only inline inside this
-# function's own f-string, is what lets that combined prompt reuse the
-# exact wording every existing standalone reviewer already relies on
-# instead of forking a second, driftable copy.
-
-CONFORMITY_DIFF_SELF = prompt_templates.load("spec_conformity.diff_self", ("base",))
-CONFORMITY_DIFF_INLINE = prompt_templates.load("spec_conformity.diff_inline", ("diff",))
-CONFORMITY_PROMPT = prompt_templates.load(
-	"spec_conformity", ("diff_instructions", "criteria", "answers", "command_outcome_rule", "formatting_rule", "json_contract"),
-)
-CONFORMITY_ANSWERS = prompt_templates.load("spec_conformity.answers", ("answers",))
-
-
-def spec_answers_section(answers: str) -> str:
-	"""The reviewer's section for the read-back answers (read_spec_answers),
-	to follow the criteria: "" when there are none, else a blank line and the
-	answers, labelled as the operator's answers to questions about the spec.
-	Shared by every conformity prompt (this module's and combined_review.py's)."""
-	if not answers.strip():
-		return ""
-	return "\n\n" + CONFORMITY_ANSWERS.format(answers=answers.strip("\n")).removesuffix("\n")
-
-
-def spec_conformity_prompt(
-	criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None = None, instructions_block: str = "",
-	answers: str = "",
-) -> str:
-	"""Builds the reviewer's prompt. diff, when given, is (stat, diff_text)
-	from workspace_diff: the diff is inlined directly and the reviewer is
-	told the diff is complete and not to re-fetch it, instead of being
-	asked to `git diff`/`git show` itself -- found live (example-app run 3,
-	2026-09-28): asked to diff the workspace itself, the reviewer explored
-	with tools for 30 turns at ~33k input tokens each (1,011,032 total)
-	until the relay's own sliding-window limiter answered "429 token
-	budget exceeded" three times, and the review ended with no verdicts at
-	all. diff is None when review_base_sha is unknown, or when the git
-	read to build it failed (run_spec_conformity_review's own call site)
-	-- the prompt then falls back to asking the reviewer to diff for
-	itself, exactly as before this fix. answers is the read-back answers block
-	(read_spec_answers), given after the criteria."""
-	if diff is None:
-		diff_instructions = CONFORMITY_DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
-		diff_instructions = diff_instructions.removesuffix("\n") + instructions_block
-	else:
-		stat, diff_text = diff
-		diff_instructions = CONFORMITY_DIFF_INLINE.format(diff=format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
-	return CONFORMITY_PROMPT.format(
-		diff_instructions=diff_instructions.removesuffix("\n"), criteria="\n".join(criteria),
-		answers=spec_answers_section(answers),
-		command_outcome_rule=CONFORMITY_COMMAND_OUTCOME_RULE, formatting_rule=CONFORMITY_FORMATTING_RULE,
-		json_contract=CONFORMITY_JSON_CONTRACT,
-	).removesuffix("\n")
-
-
 _CRITERION_NUMBER_PREFIX = re.compile(r"^[ \t\r\n\f]*[0-9]+[.)][ \t\r\n\f]+")
 _CRITERION_EDGE_SPACE = " \t\r\n\f"
 
@@ -1945,8 +1830,7 @@ _CRITERION_EDGE_SPACE = " \t\r\n\f"
 def criterion_key(text: str) -> str:
 	"""Comparison key for an echoed criterion, shared by every check that
 	matches a model's echo of a criterion back to the declared one
-	(parse_conformity_verdicts here, validate_manifest in
-	draft_acceptance_oracles.py). The number prefix (ASCII digits then a
+	(validate_manifest in draft_acceptance_oracles.py). The number prefix (ASCII digits then a
 	mandatory "." or ")" and whitespace: a list marker only, so "1.2.3 is
 	supported" keeps its "1.2"), backticks, ASCII edge whitespace and
 	trailing ".;:," are the only things not part of its identity -- no
@@ -1973,7 +1857,7 @@ def _iter_json_objects(output: str):
 	function's own test for the incident. raw_decode finds every
 	well-formed object regardless of what surrounds it, and a later
 	verdict wins over an earlier one for the same criterion key via
-	parse_conformity_verdicts' own left-to-right dict-overwrite order."""
+	left-to-right dict-overwrite order."""
 	decoder = json.JSONDecoder()
 	i, n = 0, len(output)
 	while i < n:
@@ -1987,25 +1871,6 @@ def _iter_json_objects(output: str):
 			continue
 		yield obj
 		i = end
-
-
-MAX_MISSING_FILE_CHARS = 300
-MAX_MISSING_TEXT_CHARS = 1000
-
-
-def missing_evidence(entry: dict) -> dict | None:
-	"""The {"file", "text"} a flagged verdict names as text the criterion
-	requires and the file lacks (the conformity JSON contract's optional
-	"missing"), each cut to its cap; None when absent or not two non-empty
-	strings. The reviewer wrote both: conformity_review.found_in_result
-	checks them against the result commit before anything relies on them."""
-	missing = entry.get("missing")
-	if not isinstance(missing, dict):
-		return None
-	file, text = missing.get("file"), missing.get("text")
-	if not isinstance(file, str) or not isinstance(text, str) or not file.strip() or not text.strip():
-		return None
-	return {"file": file.strip()[:MAX_MISSING_FILE_CHARS], "text": text[:MAX_MISSING_TEXT_CHARS]}
 
 
 def fresh_session_subdir(session: Path, subdir: str) -> Path | None:
@@ -2045,126 +1910,6 @@ def _remove_entry(path: str, is_real_dir: bool) -> None:
 		pass
 
 
-def parse_conformity_verdicts(output: str, criteria: list[str]) -> list[dict]:
-	"""Extracts the reviewer's per-criterion verdict from its final
-	response text. Returns exactly one {"criterion", "verdict", "detail"}
-	entry per declared criterion, in criteria's own order -- a criterion
-	the reviewer's own JSON didn't decisively cover (a missing or
-	malformed response, or one shorter than the criteria list) defaults to
-	"unavailable" rather than being silently dropped or counted clean,
-	since an unaccounted-for criterion must never read as having passed.
-
-	Matched by criterion_key on both sides (number prefix, backticks and
-	trailing punctuation ignored), not by exact text -- found live
-	(2026-09-17 multi-repo validation): the prompt asks the reviewer to
-	echo each criterion "verbatim", but a real response routinely drops
-	the leading number (e.g. declared as "1. `GET /health` responds
-	with HTTP 200..." and echoed back as "`GET /health` responds with
-	HTTP 200..."). An exact-string match against the numbered original
-	then misses every one of those -- including ones the reviewer
-	explicitly marked "clean" -- and this function's own "unaccounted
-	criterion defaults to unavailable" rule then fails the build on a
-	review that actually passed. Stripped-prefix matching is still a
-	1:1 mapping (two criteria differing only in their number would
-	collide, but read_acceptance_criteria's caller always numbers them
-	uniquely) and preserves an exact match when the reviewer does echo
-	the number.
-
-	After key matching, a criterion still unmatched falls back to the
-	verdict at its own position in the reviewer's entries list, but only
-	when that fallback cannot itself misattribute a verdict: the reviewer
-	must have returned exactly as many entries as declared criteria, and
-	every criterion that DID match by key must have matched an entry
-	sitting at that same index -- i.e. the reviewer answered in order and
-	only dropped a leading clause or two, never reordered or skipped an
-	entry. An entry already spent on a key match elsewhere never fills a
-	second, positional slot. Found live (example-app walk, 2026-09-28): a
-	reviewer answered all 6 criteria "clean", in order, but echoed
-	criterion 3 without its leading clause ("For both invalid input
-	categories, `HandleCreateNote` ..." echoed back starting at
-	"`HandleCreateNote` ..." -- criterion_key's own number/backtick/
-	punctuation stripping doesn't cover a dropped leading clause), so
-	criterion 3 read as unavailable and failed a clean build."""
-	# The LAST candidate with a "criteria" list wins wholesale -- entries
-	# are not merged key-by-key across candidates. Found via review
-	# (2026-09-22): merging would let a criterion entry from an earlier,
-	# non-authoritative JSON blob (e.g. the model echoing the expected
-	# answer schema as a worked example before its real analysis) survive
-	# even when the real, later verdict block never mentions that
-	# criterion -- a partial real analysis could inherit a stale "clean"
-	# from the example for whatever it didn't cover, silently defeating
-	# this function's own "unaccounted criterion defaults to unavailable"
-	# invariant. Replacing wholesale means only the model's actual final
-	# answer is ever trusted, exactly as intended.
-	#
-	# Considered and rejected: preferring whichever candidate matches the
-	# most declared criteria, instead of simply the last one -- a second
-	# review round (2026-09-22) noted "last wins" is itself vulnerable to
-	# trailing JSON-shaped prose *after* a real answer overriding it. That
-	# scenario is unconfirmed; "most matches wins" would confirmedly
-	# regress the incident this fix was written for (an echoed example
-	# that fully covers every criterion would then always beat a real but
-	# partial analysis). Kept as "last wins" -- fixes the observed
-	# failure without reintroducing it -- with the trailing-prose case
-	# recorded as a follow-up, not chased further here.
-	by_criterion: dict[str, dict] = {}
-	winning_entries: list = []
-	for candidate in _iter_json_objects(output):
-		entries = candidate.get("criteria") if isinstance(candidate, dict) else None
-		if not isinstance(entries, list):
-			continue
-		fresh: dict[str, dict] = {}
-		for entry in entries:
-			if isinstance(entry, dict) and entry.get("criterion"):
-				fresh[criterion_key(str(entry["criterion"]))] = entry
-		by_criterion = fresh
-		winning_entries = entries
-
-	def verdict_of(entry) -> dict | None:
-		if isinstance(entry, dict) and entry.get("verdict") in ("clean", "flagged"):
-			resolved = {"verdict": entry["verdict"], "detail": str(entry.get("detail") or "")}
-			missing = missing_evidence(entry) if entry["verdict"] == "flagged" else None
-			if missing:
-				resolved["missing"] = missing
-			return resolved
-		return None
-
-	# matched_position[criterion index] = index in winning_entries of the
-	# entry that satisfied it by key -- used both to check the "answered
-	# in order" precondition and to mark that entry as already spent.
-	matched_position: dict[int, int] = {}
-	used_positions: set[int] = set()
-	verdicts: list[dict | None] = [None] * len(criteria)
-	for i, criterion in enumerate(criteria):
-		entry = by_criterion.get(criterion_key(criterion))
-		resolved = verdict_of(entry)
-		if resolved is None:
-			continue
-		verdicts[i] = resolved
-		for position, candidate_entry in enumerate(winning_entries):
-			if candidate_entry is entry:
-				matched_position[i] = position
-				used_positions.add(position)
-				break
-
-	positional_fallback_eligible = (
-		len(winning_entries) == len(criteria)
-		and all(position == index for index, position in matched_position.items())
-	)
-	if positional_fallback_eligible:
-		for i in range(len(criteria)):
-			if verdicts[i] is not None or i in used_positions:
-				continue
-			resolved = verdict_of(winning_entries[i])
-			if resolved is not None:
-				verdicts[i] = resolved
-
-	return [
-		{"criterion": criterion, **(verdicts[i] or {"verdict": "unavailable", "detail": "no-review-verdict"})}
-		for i, criterion in enumerate(criteria)
-	]
-
-
 @dataclass(frozen=True)
 class ReviewTurn:
 	"""run_review_turn's own return shape: text is the last completed
@@ -2197,7 +1942,7 @@ def run_review_turn(
 	prompt_name: str | None = None,
 ) -> ReviewTurn:
 	"""Runs one bounded, standalone, non-continued model turn (shared by
-	run_spec_conformity_review and code_review.py's own run_code_review)
+	code_review.py's run_code_review and combined_review.py)
 	and returns a ReviewTurn (see its own doc comment) rather than a bare
 	string, so a caller can say why the turn produced nothing instead of
 	just that it did. Sets AI_REVIEW_BASE_SHA in the subprocess
@@ -2223,73 +1968,6 @@ def run_review_turn(
 		return ReviewTurn(text="", error=str(exc))
 	parsed = adapter.parse(output)
 	return ReviewTurn(text=parsed.final_text, error=parsed.last_turn_error)
-
-
-def run_spec_conformity_review(
-	workspace: Path,
-	*,
-	criteria: list[str],
-	review_base_sha: str | None,
-	thinking: str | None,
-	timeout_minutes: int = 10,
-	adapter=DEFAULT_ADAPTER,
-	instructions_diff: Path | None = None,
-	answers: str = "",
-) -> tuple[list[dict], str]:
-	"""Runs one bounded, standalone pi turn asking it to check the
-	workspace's current diff against each declared acceptance criterion
-	and return a per-criterion verdict -- separate from, and run after,
-	the ordinary corrective-round loop's own whole-diff "reviewer"
-	extension trace (review_signal), since that mechanism only ever
-	produces one decisive outcome for the whole diff, never a verdict per
-	criterion. A subprocess failure or timeout here (no output to parse)
-	still returns one "unavailable" entry per criterion via
-	parse_conformity_verdicts, never an empty list -- an unreachable
-	reviewer must read as "criteria unaccounted for", not "no criteria
-	declared".
-
-	When review_base_sha is given, the workspace's diff against it is
-	fetched via workspace_diff and inlined into the prompt (see
-	spec_conformity_prompt's own doc comment) instead of asking the
-	reviewer to fetch it itself -- found live (example-app run 3, 2026-09-28):
-	without this, the reviewer burned the relay's whole hourly token
-	budget across 30 tool-exploring turns just discovering the diff, and
-	the review ended in three straight 429s with no verdicts at all. A
-	failed diff fetch (workspace_diff returns None) falls back to the
-	instruction-only prompt, same as when review_base_sha is unknown.
-
-	Returns (verdicts, error): error is the underlying ReviewTurn's own
-	error (see run_review_turn's ReviewTurn doc comment) -- "" when the
-	turn produced usable text, else the model-reported error or subprocess
-	failure that explains why every verdict came back "unavailable".
-	Callers that only need the verdicts (e.g. this module's own run_build)
-	can discard it; conformity_review.py's own run_conformity_review uses
-	it to name the cause in CONFORMITY_EVIDENCE.json instead of leaving an
-	operator with only "no-review-verdict" per criterion -- the actual
-	429 was invisible in that evidence before this fix."""
-	diff = workspace_diff(workspace, review_base_sha) if review_base_sha else None
-	return run_spec_conformity_turn(
-		workspace, criteria=criteria, review_base_sha=review_base_sha, diff=diff,
-		instructions_block=instructions_diff_block(instructions_diff), thinking=thinking,
-		timeout_minutes=timeout_minutes, adapter=adapter, answers=answers,
-	)
-
-
-def run_spec_conformity_turn(
-	workspace: Path, *, criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None,
-	instructions_block: str, thinking: str | None, timeout_minutes: int = 10, adapter=DEFAULT_ADAPTER,
-	answers: str = "",
-) -> tuple[list[dict], str]:
-	"""run_spec_conformity_review's turn over a diff and instruction block
-	already fetched, so a caller that asks a further turn can give it the
-	same inputs. Returns (verdicts, error) as that function does."""
-	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff, instructions_block=instructions_block, answers=answers)
-	turn = run_review_turn(
-		workspace, prompt=prompt, session_dir=workspace / ".pi-conformity-session",
-		review_base_sha=review_base_sha, thinking=thinking,
-		timeout_minutes=timeout_minutes, adapter=adapter, prompt_name="review-conformity",
-	)
-	return parse_conformity_verdicts(turn.text, criteria), turn.error
 
 
 def build_round_checklist(verify_command: str | None) -> str:
@@ -2919,7 +2597,6 @@ def _run_build(
 	timeout_minutes: int,
 	thinking: str | None = None,
 	review_policy: str = "required",
-	conformity_policy: str = "required",
 	review_base_sha: str | None = None,
 	verify_command_override: str | None = None,
 	fast_check_command: str | None = None,
@@ -2951,7 +2628,6 @@ def _run_build(
 	agents_md_git_blob = committed_agents_md_blob(workspace)
 	result = BuildResult(
 		workspace=workspace, spec_path=spec_path, review_policy=review_policy,
-		conformity_policy=conformity_policy,
 		agents_md_used=agents_md_git_blob is not None, agents_md_git_blob=agents_md_git_blob,
 	)
 	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
@@ -3055,8 +2731,7 @@ def _run_build(
 	# A launch lost after the build passed: nothing is left to build. The
 	# pass stands as it is unless the notes turn had started, in which case
 	# the tree is checked once more. No setup, no round, no notes turn; what
-	# follows the rounds of any build (a conformity review asked for in this
-	# process) still runs.
+	# follows the rounds of any build still runs.
 	resumed_after_pass = resume is not None and resume["passed"]
 	if resumed_after_pass:
 		first_round = max_rounds + 1
@@ -3358,57 +3033,6 @@ def _run_build(
 	else:
 		result.notes_turn = run_notes_turn(workspace, session_dir, adapter, env, thinking, notes)
 
-	# Per-criterion spec-conformity review: only meaningful once
-	# canonical verification itself already succeeded above -- checking
-	# conformity of a build that never even passed verification would
-	# just repeat "canonical verification failed" through a different,
-	# more expensive mechanism. Runs exactly once, against the workspace's
-	# final state, not per round: unlike the whole-diff "reviewer"
-	# extension (which re-runs every round to catch regressions early),
-	# per-criterion conformity is a final acceptance check.
-	#
-	# A criterion checking whether the diff is committed (e.g. a commit
-	# subject-line convention) can only ever be evaluated meaningfully
-	# against an ALREADY-committed workspace -- this function's own round
-	# loop relies on the agent's own `git add -A`/commit, which doesn't
-	# always happen, and this process has no way to commit on the
-	# agent's behalf itself when invoked from factoryd's sandboxed path:
-	# `internal/sandbox/docker.go` mounts `.git` read-only inside that
-	# sandbox unconditionally, by deliberate security design (a
-	# real 2026-09-04 incident: an untrusted agent that could write
-	# `.git/config` could plant a filter/hook the HOST's later `git
-	# commit` would then execute with real credentials) -- so a commit
-	# attempted from inside this process, in that environment, cannot
-	# ever succeed (found live, 2026-09-17: `git add -A failed: ...
-	# Read-only file system`). factoryd's own two-phase design handles
-	# this instead: the caller omits --spec-acceptance-criteria from
-	# this invocation entirely when it wants the conformity review to
-	# run only after its own host-side safety-net commit has landed (see
-	# agent/pi/scripts/conformity_review.py, run separately, after that
-	# commit, in the sandboxed path). This function's own criteria
-	# handling below is unchanged for a standalone/non-sandboxed caller
-	# with a genuinely writable .git, where running both in one pass is
-	# still correct.
-	if spec_acceptance_criteria is not None and result.succeeded:
-		criteria = read_acceptance_criteria(spec_acceptance_criteria)
-		result.review_verdicts, _conformity_review_error = run_spec_conformity_review(
-			workspace, criteria=criteria, review_base_sha=review_base_sha,
-			thinking=thinking, adapter=adapter, answers=read_spec_answers(spec_acceptance_criteria),
-		)
-		non_clean = [v["criterion"] for v in result.review_verdicts if v["verdict"] != "clean"]
-		if non_clean and conformity_policy == "required":
-			# Mirrors round_blockers' own required-policy handling of a
-			# non-clean whole-diff review, but against conformity_policy,
-			# not review_policy: the two are deliberately independent (see
-			# BuildResult.conformity_policy's own doc comment). Under
-			# "required", anything short of "clean" (including
-			# "unavailable"/"no-review-verdict") must fail rather than
-			# silently pass. "advisory" records the verdicts (above)
-			# without revoking the success already earned by canonical
-			# verification and whole-diff review.
-			result.succeeded = False
-			result.stopped_reason = f"spec conformity review did not clear all criteria: {non_clean}"
-
 	return result
 
 
@@ -3429,7 +3053,6 @@ def write_report(result: BuildResult) -> Path:
 		f"Generated: {datetime.now(timezone.utc).isoformat()}",
 		f"Spec: `{result.spec_path}`",
 		f"Review policy: `{result.review_policy}`",
-		f"Conformity policy: `{result.conformity_policy}`",
 		f"AGENTS.md guidance used: {result.agents_md_used}"
 		+ (f" (git blob {result.agents_md_git_blob})" if result.agents_md_used else ""),
 		f"Outcome: {'SUCCEEDED' if result.succeeded else 'DID NOT SUCCEED'} -- {result.stopped_reason}",
@@ -3552,11 +3175,6 @@ def write_evidence_json(result: BuildResult) -> Path:
 		"schema_version": SCHEMA_VERSION,
 		"generated": datetime.now(timezone.utc).isoformat(),
 		"review_policy": result.review_policy,
-		# Additive, same convention as agents_md_used/review_verdicts
-		# above: the per-criterion conformity review's own policy,
-		# independent of review_policy -- see BuildResult.conformity_policy's
-		# own doc comment.
-		"conformity_policy": result.conformity_policy,
 		"provider": os.environ.get("PI_HARNESS_PROVIDER"),
 		"model": os.environ.get("PI_HARNESS_MODEL"),
 		# Additive fields, tolerated by run.AgentEvidence's json.Unmarshal --
@@ -3565,13 +3183,6 @@ def write_evidence_json(result: BuildResult) -> Path:
 		# repository guidance the agent actually saw.
 		"agents_md_used": result.agents_md_used,
 		"agents_md_git_blob": result.agents_md_git_blob,
-		# review_verdicts is the per-criterion independent-reviewer
-		# outcome (empty when no --spec-acceptance-criteria was given) --
-		# additive, same convention as agents_md_used/agents_md_git_blob
-		# above: tolerated by run.AgentEvidence's json.Unmarshal without a
-		# schema_version bump, since an older factoryd simply doesn't read
-		# this field.
-		"review_verdicts": result.review_verdicts,
 		"succeeded": result.succeeded,
 		"stopped_reason": result.stopped_reason,
 		# Additive: whether the one notes turn ran, and its usage. Never the
@@ -3648,16 +3259,6 @@ def main() -> int:
 		help="Review policy: required blocks on unavailable/flagged review; degraded permits unavailable review; advisory records review but only canonical verification blocks success.",
 	)
 	parser.add_argument(
-		"--conformity-policy",
-		choices=("required", "advisory"),
-		default="required",
-		help="Policy for the separate per-criterion spec-conformity review --spec-acceptance-criteria "
-		"enables, independent of --review-policy: required fails the build on any "
-		"non-clean or unreachable per-criterion verdict; advisory records verdicts without "
-		"failing the build. Meaningless (never consulted) when --spec-acceptance-criteria is "
-		"not given, since no conformity review runs at all.",
-	)
-	parser.add_argument(
 		"--review-base-sha",
 		default=None,
 		help="Commit the independent reviewer should diff against for the whole invocation, "
@@ -3714,12 +3315,8 @@ def main() -> int:
 		type=Path,
 		default=None,
 		help="Path to a file holding the approved spec's numbered acceptance criteria for "
-		"this ticket, one per line. When given, an independent reviewer checks the final "
-		"workspace against each criterion and returns a per-criterion verdict, recorded in "
-		"BUILD_EVIDENCE.json's review_verdicts. Under --conformity-policy required (the "
-		"default whenever this flag is given), any verdict short of \"clean\" (including an "
-		"unreachable reviewer) fails the build. Omitted (the default) runs no conformity "
-		"review at all.",
+		"this ticket, one per line. When given, the notes turn does not run. No review "
+		"reads it: findings come from the separate review step (combined_review.py).",
 	)
 	parser.add_argument(
 		"--reference-oracle-command",
@@ -3768,11 +3365,6 @@ def main() -> int:
 		"is not 1, or last_completed_round is not in [0, --max-rounds).",
 	)
 	args = parser.parse_args()
-	if args.earlier_attempt is not None and args.spec_acceptance_criteria is not None:
-		# The in-build conformity review runs while this build's session, and
-		# the record in it, are in the workspace: a review must never run
-		# beside the record of an earlier attempt.
-		parser.error("--earlier-attempt cannot be combined with --spec-acceptance-criteria")
 	adapter = harness_adapters.get(args.harness)
 	adapter.prepare()
 
@@ -3781,7 +3373,7 @@ def main() -> int:
 			args.workspace.resolve(), args.spec.resolve(),
 			max_rounds=args.max_rounds,
 			timeout_minutes=args.timeout_minutes,
-			thinking=args.thinking, review_policy=args.review_policy, conformity_policy=args.conformity_policy,
+			thinking=args.thinking, review_policy=args.review_policy,
 			review_base_sha=args.review_base_sha,
 			verify_command_override=args.verify_command,
 			fast_check_command=args.fast_check_command,

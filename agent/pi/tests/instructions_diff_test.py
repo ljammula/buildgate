@@ -22,14 +22,10 @@ def code_prompt(block: str, diff) -> str:
 
 
 def combined_prompt(block: str, diff) -> str:
-	return combined_review.combined_review_prompt(["1. Foo"], "spec text", "abc123", diff=diff, instructions_block=block)
+	return combined_review.combined_review_prompt("spec text", "abc123", diff=diff, instructions_block=block, approved_spec="L")
 
 
-def conformity_prompt(block: str, diff) -> str:
-	return build_app.spec_conformity_prompt(["1. Foo"], "abc123", diff=diff, instructions_block=block)
-
-
-PROMPTS = [code_prompt, combined_prompt, conformity_prompt]
+PROMPTS = [code_prompt, combined_prompt]
 
 
 @pytest.fixture

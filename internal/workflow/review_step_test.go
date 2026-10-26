@@ -21,28 +21,18 @@ import (
 	"buildgate/internal/testfixture"
 )
 
-// TestReviewStepsOrderIsSpecConformityThenCodeReview pins reviewstep.Steps'
-// own order (M4-K3): both cmd/factoryd's and RunWorkflow read
-// this same table and rely on the spec-conformity review running before
-// the code review -- see reviewstep's own package doc comment.
-func TestReviewStepsOrderIsSpecConformityThenCodeReview(t *testing.T) {
-	if len(reviewstep.Steps) != 2 {
-		t.Fatalf("len(reviewstep.Steps) = %d, want 2", len(reviewstep.Steps))
-	}
-	if reviewstep.Steps[0].Name != reviewstep.SpecConformity {
-		t.Errorf("Steps[0].Name = %q, want %q", reviewstep.Steps[0].Name, reviewstep.SpecConformity)
-	}
-	if reviewstep.Steps[1].Name != reviewstep.CodeReview {
-		t.Errorf("Steps[1].Name = %q, want %q", reviewstep.Steps[1].Name, reviewstep.CodeReview)
+// TestReviewStepsTableIsOnlyTheStandaloneCodeReview pins reviewstep.Steps:
+// the retired spec-conformity review is in no table.
+func TestReviewStepsTableIsOnlyTheStandaloneCodeReview(t *testing.T) {
+	if len(reviewstep.Steps) != 1 || reviewstep.Steps[0].Name != reviewstep.CodeReview {
+		t.Fatalf("reviewstep.Steps = %+v, want only %q", reviewstep.Steps, reviewstep.CodeReview)
 	}
 }
 
-// TestRunReviewStepActivityChecksInIndependentlyPerStep proves the
-// unification of RunSpecConformityReviewActivity/RunCodeReviewActivity
-// onto one RunReviewStepActivity implementation (M4-K3) did not collapse
-// the two steps' own durable checkpoints into one: two separate
+// TestRunReviewStepActivityChecksInIndependentlyPerStep proves the two
+// launches RunReviewStepActivity serves (the standalone code review and the
+// review step) keep their own durable checkpoints: two separate
 // ExecuteActivity calls against the SAME run's checkpoint/log directories
-// -- one per reviewstep.Steps entry, exactly as RunWorkflow issues them --
 // must each get their own checkpoint file, keyed by their own distinct
 // ActivityID (Temporal assigns each ExecuteActivity call its own), not
 // share or overwrite one another's.
@@ -92,10 +82,10 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(wrapper)
 
-	for _, step := range reviewstep.Steps {
-		in := ReviewStepInput{RunWorkflowInput: baseInput, Step: step.Name}
+	for _, name := range []string{reviewstep.CodeReview, reviewstep.Combined} {
+		in := ReviewStepInput{RunWorkflowInput: baseInput, Step: name}
 		if _, err := env.ExecuteActivity(wrapper, in); err != nil {
-			t.Fatalf("execute %s review step: %v", step.Name, err)
+			t.Fatalf("execute %s review step: %v", name, err)
 		}
 	}
 
