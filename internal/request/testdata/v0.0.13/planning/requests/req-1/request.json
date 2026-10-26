@@ -1,0 +1,32 @@
+{
+  "id": "req-1",
+  "workspace": "@WORKSPACE@",
+  "project": "app",
+  "source": {
+    "kind": "text"
+  },
+  "state": "planning",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_review",
+      "at": "2026-10-26T02:33:08.33767Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_review",
+      "to": "planning",
+      "at": "2026-10-26T02:33:08.341625Z",
+      "by": "alice",
+      "reason": "approved"
+    }
+  ],
+  "submitted_at": "2026-10-26T02:33:08.337613Z",
+  "updated_at": "2026-10-26T02:33:08.341625Z",
+  "entered_at": "2026-10-26T02:33:08.341625Z",
+  "approved_by": "alice",
+  "approved_at": "2026-10-26T02:33:08.341625Z",
+  "approved_sha256": {
+    "spec.md": "fc081dfb5e194d79d9fda58f7c9ae4f387f0cdef0029278582780d12e6a0df81"
+  }
+}

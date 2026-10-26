@@ -1,0 +1,21 @@
+{
+  "id": "req-1",
+  "workspace": "@WORKSPACE@",
+  "project": "app",
+  "source": {
+    "kind": "text"
+  },
+  "state": "spec_review",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_review",
+      "at": "2026-10-26T02:33:08.33565Z",
+      "by": "factory"
+    }
+  ],
+  "submitted_at": "2026-10-26T02:33:08.335472Z",
+  "updated_at": "2026-10-26T02:33:08.335472Z",
+  "entered_at": "2026-10-26T02:33:08.335472Z",
+  "spec_imported": true
+}

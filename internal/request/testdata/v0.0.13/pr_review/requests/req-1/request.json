@@ -1,0 +1,30 @@
+{
+  "id": "req-1",
+  "workspace": "@WORKSPACE@",
+  "project": "widget",
+  "source": {
+    "kind": ""
+  },
+  "state": "pr_review",
+  "history": [
+    {
+      "from": "",
+      "to": "pr_review",
+      "at": "2026-10-26T02:33:08.388994Z",
+      "by": "factory"
+    }
+  ],
+  "submitted_at": "2026-10-26T02:33:08.388987Z",
+  "updated_at": "2026-10-26T02:33:08.388988Z",
+  "entered_at": "2026-10-26T02:33:08.388988Z",
+  "ticket_index": 1,
+  "ticket_count": 1,
+  "tickets": [
+    {
+      "index": 1,
+      "spec_path": "@DATA@/ticket-1.spec.md",
+      "run_id": "run-1",
+      "pr_url": "https://github.com/acme/widget/pull/101"
+    }
+  ]
+}
