@@ -773,6 +773,7 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 		case request.StateSpecReview:
 			fmt.Fprintf(out, "Review the drafted spec, then run: factoryd approve %s\n", r.ID)
 			printReviewNotes(out, dataDir, r)
+			printReadBack(out, r)
 			return nil
 		case request.StateOracleReview:
 			fmt.Fprintf(out, "Review or hand-write %s/%s (leave it absent or empty to skip), then run: factoryd approve %s\n", request.Dir(dataDir, r.ID), request.RequestOracleDirName, r.ID)
@@ -1002,5 +1003,29 @@ func printReviewNotes(out io.Writer, dataDir string, r *request.Request) {
 	r.RefreshReviewNotes(dataDir)
 	for _, note := range r.ReviewNotes {
 		fmt.Fprintf(out, "note: %s\n", sanitize.Line(note))
+	}
+}
+
+// printReadBack prints a handed-over spec's read-back at spec_review: the
+// model's summary and each question with its id and current answer, so
+// `factoryd answer -q <id>` can be run from what it shows. The text is the
+// model's and the operator's, flattened to one line each (sanitize.Line). A
+// read-back that could not be drafted is a review note (printReviewNotes),
+// not printed here.
+func printReadBack(out io.Writer, r *request.Request) {
+	rb := r.ReadBack
+	if rb == nil || rb.Unavailable != "" || rb.Summary == "" {
+		return
+	}
+	fmt.Fprintf(out, "read-back (model-written; approval does not wait on it): %s\n", sanitize.Line(rb.Summary))
+	for _, q := range rb.Questions {
+		answer := "(unanswered)"
+		if q.Answer != "" {
+			answer = sanitize.Line(q.Answer)
+		}
+		fmt.Fprintf(out, "  %s: %s\n    answer: %s\n", q.ID, sanitize.Line(q.Text), answer)
+	}
+	if len(rb.Questions) > 0 {
+		fmt.Fprintf(out, "answer a question: factoryd answer -q <id> -text \"<answer>\" %s (empty -text clears it; the answers reach every ticket's build)\n", r.ID)
 	}
 }

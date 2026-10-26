@@ -104,7 +104,9 @@ var ErrOracleNotShown = errors.New("approval has oracle files this client did no
 // ApproveShown is Approve for clients that approve what they displayed (the
 // HTTP API): identical, except a plan approval whose oracle files are not all
 // present in expectedSHA256 is refused with ErrOracleNotShown instead of
-// silently pinning files the operator never saw. The console cannot show or
+// silently pinning files the operator never saw, and a spec approval with
+// answered read-back questions must carry the digest of the answers shown
+// under ReadBackAnswersKey (ErrReadBackNotShown otherwise). The console cannot show or
 // hash oracle files, so those approvals must come from the CLI (which calls
 // Approve, unconditional by design) or a client that lists oracle hashes.
 // The check runs under the same lock and hashing as Approve, so no file can
@@ -186,7 +188,11 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 			return nil, fmt.Errorf("request %s: %w", id, err)
 		}
 	}
-	if err := checkApprovalAgainstExpected(id, hashes, expectedSHA256, requireOracleShown); err != nil {
+	expectedFiles, err := takeReadBackShown(id, r, expectedSHA256, requireOracleShown)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkApprovalAgainstExpected(id, hashes, expectedFiles, requireOracleShown); err != nil {
 		return nil, err
 	}
 
@@ -228,6 +234,9 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 	case StateSpecReview:
 		relPaths = []string{specFileName}
 		if err := refuseOpenDecisions(dataDir, id); err != nil {
+			return nil, nil, err
+		}
+		if err := refuseOversizedApproval(dataDir, id, r); err != nil {
 			return nil, nil, err
 		}
 	case StatePlanReview:
@@ -504,7 +513,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 		if err := r.RejectSpec(by, reason, now); err != nil {
 			return nil, err
 		}
-		readBackAnswers = takeReadBackAnswers(r)
+		readBackAnswers = r.ReplaceReadBack(nil)
 	case StatePlanReview:
 		// ticketSpecRelPaths is Approve's precondition check -- it hard-fails
 		// when tickets/*.spec.md is missing or empty, which is right for

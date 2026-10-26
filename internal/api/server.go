@@ -3988,7 +3988,7 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}
-	if errors.Is(err, request.ErrOracleNotShown) {
+	if errors.Is(err, request.ErrOracleNotShown) || errors.Is(err, request.ErrReadBackNotShown) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

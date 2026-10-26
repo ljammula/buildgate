@@ -32,6 +32,11 @@ func seedReadBackRequest(t *testing.T, dataDir string) {
 	}
 }
 
+var (
+	q1Hash = request.QuestionSHA256("How long is a key kept?")
+	q2Hash = request.QuestionSHA256("Is the key scoped per merchant?")
+)
+
 func firstAnswerBy(r *request.Request) string { return r.ReadBack.Questions[0].AnsweredBy }
 
 func putAnswer(t *testing.T, dataDir, qid, body string) *httptest.ResponseRecorder {
@@ -44,7 +49,7 @@ func putAnswer(t *testing.T, dataDir, qid, body string) *httptest.ResponseRecord
 func TestAnswerReadBackHandlerRecordsTheAnswer(t *testing.T) {
 	dataDir := t.TempDir()
 	seedReadBackRequest(t, dataDir)
-	recorder := putAnswer(t, dataDir, "Q2", `{"answer":"Yes, per merchant.","by":"alice"}`)
+	recorder := putAnswer(t, dataDir, "Q2", `{"answer":"Yes, per merchant.","by":"alice","question_sha256":"`+q2Hash+`"}`)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
 	}
@@ -64,7 +69,7 @@ func TestAnswerReadBackHandlerRecordsTheAnswer(t *testing.T) {
 	if loaded.ReadBack.Questions[1].Answer != "Yes, per merchant." {
 		t.Fatalf("saved read-back = %+v", loaded.ReadBack)
 	}
-	if recorder := putAnswer(t, dataDir, "Q2", `{"answer":""}`); recorder.Code != http.StatusOK {
+	if recorder := putAnswer(t, dataDir, "Q2", `{"answer":"","question_sha256":"`+q2Hash+`"}`); recorder.Code != http.StatusOK {
 		t.Fatalf("clear: status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 	if loaded, _ := request.Load(dataDir, "req-1"); loaded.ReadBack.Questions[1].Answer != "" {
@@ -79,8 +84,10 @@ func TestAnswerReadBackHandlerRefusals(t *testing.T) {
 		name, qid, body string
 		want            int
 	}{
-		{"unknown question", "Q7", `{"answer":"x"}`, http.StatusNotFound},
-		{"too long", "Q1", `{"answer":"` + strings.Repeat("a", request.MaxReadBackAnswerBytes+1) + `"}`, http.StatusUnprocessableEntity},
+		{"unknown question", "Q7", `{"answer":"x","question_sha256":"` + q1Hash + `"}`, http.StatusNotFound},
+		{"too long", "Q1", `{"answer":"` + strings.Repeat("a", request.MaxReadBackAnswerBytes+1) + `","question_sha256":"` + q1Hash + `"}`, http.StatusUnprocessableEntity},
+		{"no question hash", "Q1", `{"answer":"x"}`, http.StatusBadRequest},
+		{"another question's text", "Q1", `{"answer":"x","question_sha256":"` + q2Hash + `"}`, http.StatusConflict},
 		{"unknown field", "Q1", `{"answer":"x","verify_command":"rm -rf /"}`, http.StatusBadRequest},
 		{"two objects", "Q1", `{"answer":"x"}{"answer":"y"}`, http.StatusBadRequest},
 		{"claims the gate suffix", "Q1", `{"answer":"x","by":"mallory (gate token)"}`, http.StatusBadRequest},
@@ -111,7 +118,50 @@ func TestAnswerReadBackHandlerWrongStateConflict(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if recorder := putAnswer(t, dataDir, "Q1", `{"answer":"x"}`); recorder.Code != http.StatusConflict {
+	if recorder := putAnswer(t, dataDir, "Q1", `{"answer":"x","question_sha256":"`+q1Hash+`"}`); recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// A spec approval from a client that shows the read-back must carry the
+// digest of the answers it showed: other answers, or none when some are
+// answered, are refused with a 409 and the request stays at spec_review.
+func TestApproveRefusesReadBackAnswersTheClientDidNotShow(t *testing.T) {
+	dataDir := t.TempDir()
+	seedReadBackRequest(t, dataDir)
+	if recorder := putAnswer(t, dataDir, "Q1", `{"answer":"A day.","question_sha256":"`+q1Hash+`"}`); recorder.Code != http.StatusOK {
+		t.Fatalf("answer: %d %s", recorder.Code, recorder.Body.String())
+	}
+	specHash, err := request.HashFile(dataDir, "req-1", "spec.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve := func(expected map[string]string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(map[string]any{"by": "alice", "expected_sha256": expected})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests/req-1/approve", "test-token", string(body)))
+		return recorder
+	}
+	stale := request.ReadBackShownSHA256(nil)
+	for name, expected := range map[string]map[string]string{
+		"not shown":  {"spec.md": specHash},
+		"none shown": {"spec.md": specHash, request.ReadBackAnswersKey: stale},
+	} {
+		if recorder := approve(expected); recorder.Code != http.StatusConflict {
+			t.Errorf("%s: status = %d, want 409: %s", name, recorder.Code, recorder.Body.String())
+		}
+	}
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateSpecReview {
+		t.Fatalf("a refused approval moved the request to %q", loaded.State)
+	}
+	if recorder := approve(map[string]string{"spec.md": specHash, request.ReadBackAnswersKey: request.ReadBackShownSHA256(loaded.ReadBack)}); recorder.Code != http.StatusOK {
+		t.Fatalf("approve with the answers shown: %d %s", recorder.Code, recorder.Body.String())
 	}
 }

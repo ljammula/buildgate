@@ -26,6 +26,9 @@ func newAnswerFlags() (flags *flag.FlagSet, dataDir, configPath, question, text 
 // <request-id>`: records the operator's answer to one question of a
 // handed-over spec's read-back while the request is in spec_review. Shares
 // request.AnswerReadBack with PUT /requests/{id}/read-back/answers/{qid}.
+// The question the answer is for is the one `factoryd watch` lists now
+// (shownQuestionSHA256), so an answer to a question replaced in the meantime
+// is refused.
 func answerMain(args []string) error {
 	flags, dataDir, configPath, question, text := newAnswerFlags()
 	if err := flags.Parse(args); err != nil {
@@ -44,7 +47,7 @@ func answerMain(args []string) error {
 	if err != nil {
 		return fmt.Errorf("answer request %q: %w", id, err)
 	}
-	r, err := request.AnswerReadBack(*dataDir, id, *question, currentOSUser(), *text, time.Now(), opts...)
+	r, err := request.AnswerReadBack(*dataDir, id, *question, shownQuestionSHA256(*dataDir, id, *question), currentOSUser(), *text, time.Now(), opts...)
 	if err != nil {
 		notifyIfGateExpired(*dataDir, id, err)
 		return fmt.Errorf("answer request %q: %w", id, err)
@@ -57,4 +60,20 @@ func answerMain(args []string) error {
 		return fmt.Errorf("print answer result: %w", err)
 	}
 	return nil
+}
+
+// shownQuestionSHA256 is request.QuestionSHA256 of question qid's text in
+// request id's read-back as it is on disk now, or "" when there is no such
+// question (AnswerReadBack then names what is missing).
+func shownQuestionSHA256(dataDir, id, qid string) string {
+	r, err := request.Load(dataDir, id)
+	if err != nil || r.ReadBack == nil {
+		return ""
+	}
+	for _, q := range r.ReadBack.Questions {
+		if q.ID == qid {
+			return request.QuestionSHA256(q.Text)
+		}
+	}
+	return ""
 }

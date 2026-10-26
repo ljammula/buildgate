@@ -463,14 +463,16 @@ export function useUpdateRequestSpec(id: string) {
 
 export interface AnswerReadBackInput {
   readonly questionId: string;
+  /** SHA-256 of the question text shown (sha256Hex). */
+  readonly questionSha256: string;
   readonly answer: string;
   readonly by?: string | null;
 }
 
 export function useAnswerReadBack(id: string) {
   const { http } = useApi();
-  return useRequestWrite(({ questionId, answer, by }: AnswerReadBackInput) =>
-    answerReadBackQuestion(http, id, questionId, answer, { by: by ?? null }),
+  return useRequestWrite(({ questionId, questionSha256, answer, by }: AnswerReadBackInput) =>
+    answerReadBackQuestion(http, id, questionId, questionSha256, answer, { by: by ?? null }),
   );
 }
 

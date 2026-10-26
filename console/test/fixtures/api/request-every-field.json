@@ -83,7 +83,8 @@
           "cost_micro_usd": 3
         }
       ]
-    }
+    },
+    "job": "every-field job"
   },
   "plan_evidence": {
     "usage": {
@@ -180,8 +181,17 @@
         "answered_at": "2026-09-10T09:00:00Z"
       }
     ],
-    "unavailable": "every-field unavailable"
+    "unavailable": "every-field unavailable",
+    "spec_sha256": "every-field spec_sha256"
   },
+  "read_back_answer_log": [
+    {
+      "question_id": "every-field question_id",
+      "action": "every-field action",
+      "by": "every-field by",
+      "at": "2026-09-10T09:00:00Z"
+    }
+  ],
   "plan_imported": true,
   "plan_import_ended": true,
   "imported_plan_criteria": [

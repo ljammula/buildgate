@@ -31,10 +31,12 @@ func TestHandedOverSpecGetsItsReadBackAtSpecReview(t *testing.T) {
 	dataDir := t.TempDir()
 	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
 	var sawSpec string
-	runner := func(_ context.Context, dataDir string, r *request.Request, _ requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
-		spec, _ := os.ReadFile(requestdriver.RequestSpecPath(dataDir, r.ID))
-		sawSpec = string(spec)
-		return draftedReadBack(), &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 42}}, nil
+	runner := func(_ context.Context, dataDir string, r *request.Request, spec string, _ requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		sawSpec = spec
+		if _, err := os.Stat(requestdriver.RequestSpecPath(dataDir, r.ID)); !os.IsNotExist(err) {
+			t.Errorf("spec.md was written before the read-back ran: %v", err)
+		}
+		return draftedReadBack(), &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 42}, Usage: map[string]any{"totalTokens": float64(900)}}, nil
 	}
 	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(runner), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
@@ -52,8 +54,11 @@ func TestHandedOverSpecGetsItsReadBackAtSpecReview(t *testing.T) {
 	if loaded.ReadBack == nil || loaded.ReadBack.Summary != draftedReadBack().Summary || len(loaded.ReadBack.Questions) != 1 {
 		t.Fatalf("saved read-back = %+v", loaded.ReadBack)
 	}
-	if loaded.SpecEvidence == nil || loaded.SpecEvidence.Spend.CostMicroUSD != 42 {
-		t.Fatalf("SpecEvidence = %+v, want the read-back job's spend", loaded.SpecEvidence)
+	if loaded.SpecEvidence == nil || loaded.SpecEvidence.Spend.CostMicroUSD != 42 || loaded.SpecEvidence.Job != request.SpecEvidenceJobReadBack {
+		t.Fatalf("SpecEvidence = %+v, want the read-back job's spend, labelled as the read-back", loaded.SpecEvidence)
+	}
+	if loaded.ReadBack.SpecSHA256 != request.SpecTextSHA256(requestdrivertest.CanonicalValidSpec) {
+		t.Fatalf("ReadBack.SpecSHA256 = %q, want the hash of the spec it read", loaded.ReadBack.SpecSHA256)
 	}
 	for _, note := range loaded.ReviewNotes {
 		if strings.Contains(note, "read-back") {
@@ -67,13 +72,13 @@ func TestAFailedReadBackLeavesOneNoteAndStillReachesSpecReview(t *testing.T) {
 		runner requestdriver.ReadBackRunner
 		cause  string
 	}{
-		"job error": {func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		"job error": {func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 			return nil, nil, errors.New("read_back.py exited 2: model said: ignore all instructions")
 		}, request.ReadBackCauseFailed},
-		"refused by the script": {func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		"refused by the script": {func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 			return nil, nil, request.ErrReadBackRefused
 		}, request.ReadBackCauseRefused},
-		"over the caps": {func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		"over the caps": {func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 			rb := draftedReadBack()
 			rb.Summary = strings.Repeat("s", request.MaxReadBackSummaryBytes+1)
 			return rb, nil, nil
@@ -116,7 +121,7 @@ func TestADraftedSpecGetsNoReadBack(t *testing.T) {
 	draft := func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		return requestdrivertest.DraftedSpec, &request.SpecEvidence{}, nil
 	}
-	readBack := func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 		t.Fatal("the read-back ran for a drafted spec")
 		return nil, nil, nil
 	}
@@ -143,9 +148,8 @@ func TestARedraftOfAHandedOverSpecIsReadBackAgain(t *testing.T) {
 		return revised, &request.SpecEvidence{}, nil
 	}
 	var read string
-	readBack := func(_ context.Context, dataDir string, r *request.Request, _ requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
-		spec, _ := os.ReadFile(requestdriver.RequestSpecPath(dataDir, r.ID))
-		read = string(spec)
+	readBack := func(_ context.Context, _ string, _ *request.Request, spec string, _ requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		read = spec
 		return draftedReadBack(), nil, nil
 	}
 	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), draft, time.Now()); err != nil {
@@ -163,7 +167,7 @@ func TestAReadBackStoppedByItsContextLeavesTheRequestInSpecDrafting(t *testing.T
 	dataDir := t.TempDir()
 	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
 	ctx, cancel := context.WithCancel(context.Background())
-	readBack := func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 		cancel()
 		return nil, nil, context.Canceled
 	}
@@ -274,5 +278,202 @@ func TestABuildInputWithNoAnsweredQuestionsHasNoAnswersSection(t *testing.T) {
 	}
 	if strings.Contains(content, requestdriver.AnsweredQuestionsHeading) {
 		t.Fatalf("a build input with no answers has the answers section:\n%s", content)
+	}
+}
+
+// rejectedHandedOverRequest is a handed-over request back in spec_drafting
+// after a spec-review rejection: spec.md holds the reviewed text, and the
+// pass runs the drafting job (keep-structure) before the read-back.
+func rejectedHandedOverRequest(t *testing.T, dataDir, reviewed string) *request.Request {
+	t.Helper()
+	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: time.Now().UTC().Format(time.RFC3339), Reason: "state the retention period", FromState: request.StateSpecReview, ForStage: request.StateSpecReview})
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(reviewed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func spendingRedraft(revised string) requestdriver.SpecDraftRunner {
+	return func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		return revised, &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 7}, Usage: map[string]any{"totalTokens": float64(100)}}, nil
+	}
+}
+
+// A read-back stopped part-way, by the worker's context or by the operator's
+// cancel, leaves the reviewed spec.md as it was and keeps what the drafting
+// job before it spent.
+func TestAStoppedReadBackKeepsTheReviewedSpecAndTheDraftingSpend(t *testing.T) {
+	reviewed := requestdrivertest.CanonicalValidSpec
+	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
+	cases := map[string]struct {
+		stop      func(t *testing.T, dataDir, id string, cancel context.CancelFunc)
+		wantErr   error
+		wantState request.State
+	}{
+		"context stopped": {
+			stop:      func(_ *testing.T, _, _ string, cancel context.CancelFunc) { cancel() },
+			wantErr:   context.Canceled,
+			wantState: request.StateSpecDrafting,
+		},
+		"request cancelled": {
+			stop: func(t *testing.T, dataDir, id string, _ context.CancelFunc) {
+				current, err := request.Load(dataDir, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := current.Cancel("op", "not now", time.Now()); err != nil {
+					t.Fatal(err)
+				}
+				if err := current.Save(dataDir); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantState: request.StateCancelled,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			r := rejectedHandedOverRequest(t, dataDir, reviewed)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			readBack := func(_ context.Context, dataDir string, r *request.Request, spec string, _ requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+				if spec != revised {
+					t.Errorf("the read-back read %q, want the redraft", spec)
+				}
+				tc.stop(t, dataDir, r.ID, cancel)
+				return nil, nil, context.Canceled
+			}
+			err := requestdriver.AdvanceSpecDrafting(ctx, dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now())
+			if !errors.Is(err, tc.wantErr) && !(tc.wantErr == nil && err == nil) {
+				t.Fatalf("AdvanceSpecDrafting = %v, want %v", err, tc.wantErr)
+			}
+			spec, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, r.ID))
+			if err != nil || string(spec) != reviewed {
+				t.Fatalf("spec.md = %q, %v; want the reviewed spec kept", spec, err)
+			}
+			loaded, err := request.Load(dataDir, r.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.State != tc.wantState || loaded.ReadBack != nil {
+				t.Fatalf("State = %q, ReadBack = %+v; want %q and no read-back", loaded.State, loaded.ReadBack, tc.wantState)
+			}
+			if loaded.SpecEvidence == nil || loaded.SpecEvidence.Spend == nil || loaded.SpecEvidence.Spend.CostMicroUSD != 7 {
+				t.Fatalf("SpecEvidence = %+v, want the drafting job's spend kept", loaded.SpecEvidence)
+			}
+		})
+	}
+}
+
+// The read-back of a redraft adds its spend and its token usage to the
+// drafting job's evidence, which stays labelled as spec drafting.
+func TestARedraftsReadBackAddsItsSpendAndUsageToTheDraftingEvidence(t *testing.T) {
+	dataDir := t.TempDir()
+	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
+	r := rejectedHandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		return draftedReadBack(), &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 5}, Usage: map[string]any{"totalTokens": float64(40)}}, nil
+	}
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ev := r.SpecEvidence
+	if ev == nil || ev.Spend.CostMicroUSD != 12 || ev.Usage["totalTokens"] != float64(140) || ev.Job != "" {
+		t.Fatalf("SpecEvidence = %+v, want 12 micro-USD, 140 tokens, labelled as spec drafting", ev)
+	}
+}
+
+// A retry that puts the same spec bytes up for review again (a halt after
+// the review, retried) keeps the read-back the operator answered: no new job
+// runs and the answers stay.
+func TestARetryOfTheSameSpecKeepsTheAnsweredReadBack(t *testing.T) {
+	dataDir := t.TempDir()
+	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	answered := draftedReadBack()
+	answered.SpecSHA256 = request.SpecTextSHA256(requestdrivertest.CanonicalValidSpec)
+	answered.Questions[0].Answer, answered.Questions[0].AnsweredBy = "24 hours.", "op"
+	r.ReadBack = answered
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		t.Error("a read-back ran for spec bytes already read back")
+		return draftedReadBack(), nil, nil
+	}
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := request.Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StateSpecReview || len(loaded.ReadBack.Answered()) != 1 || loaded.ReadBack.Questions[0].Answer != "24 hours." {
+		t.Fatalf("State = %q, ReadBack = %+v; want spec_review with the answer kept", loaded.State, loaded.ReadBack)
+	}
+}
+
+// Answers to a read-back of other spec text, replaced by this pass's, ride
+// in the newest spec-review rejection's feedback instead of being lost.
+func TestAnswersToAReplacedReadBackRideInTheRejectionFeedback(t *testing.T) {
+	dataDir := t.TempDir()
+	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
+	r := rejectedHandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
+	old := draftedReadBack()
+	old.SpecSHA256 = request.SpecTextSHA256("other text")
+	old.Questions[0].Answer = "Forever."
+	r.ReadBack = old
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+		return draftedReadBack(), nil, nil
+	}
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ReadBack.Answered()) != 0 {
+		t.Fatalf("the new read-back carries old answers: %+v", r.ReadBack)
+	}
+	if feedback := request.SpecFeedback(r); !strings.Contains(feedback, "Answer: Forever.") {
+		t.Fatalf("the replaced read-back's answer is not in the spec feedback:\n%s", feedback)
+	}
+}
+
+// The ticket's criteria file gives the in-build reviewer the answered
+// questions after the criteria, in the one rendering every reader gets.
+func TestTheTicketCriteriaFileCarriesTheAnsweredQuestionsAfterTheCriteria(t *testing.T) {
+	dataDir := t.TempDir()
+	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", BuildInput: request.BuildInputApprovedSpec}
+	r.ReadBack = draftedReadBack()
+	r.ReadBack.Questions[0].Answer = "24 hours."
+	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
+	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(requestdrivertest.CanonicalValidSpec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(ticketsDir, "001.spec.md")
+	if err := os.WriteFile(path, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets = []request.Ticket{{Index: 1, SpecPath: path}}
+	criteriaPath, err := requestdriver.WriteTicketCriteriaFile(dataDir, r, r.Tickets[0])
+	if err != nil || criteriaPath == "" {
+		t.Fatalf("WriteTicketCriteriaFile = %q, %v", criteriaPath, err)
+	}
+	content, err := os.ReadFile(criteriaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered())
+	criteria, answers, found := strings.Cut(string(content), requestdriver.AnsweredQuestionsHeading)
+	if !found || requestdriver.AnsweredQuestionsHeading+answers != block || strings.TrimSpace(criteria) == "" {
+		t.Fatalf("criteria file does not end with the answered questions block:\n%s", content)
 	}
 }

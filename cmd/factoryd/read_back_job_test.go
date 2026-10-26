@@ -29,7 +29,7 @@ func readBackJobFixture(t *testing.T, fakeBody string) (string, *request.Request
 	r.Workspace = t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "args")
 	fake := filepath.Join(t.TempDir(), "fake-read-back")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\nwhile [ $# -gt 0 ]; do case \"$1\" in --out) out=$2;; --evidence) ev=$2;; esac; shift; done\nmkdir -p \"$(dirname \"$out\")\"\n" + fakeBody
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\nwhile [ $# -gt 0 ]; do case \"$1\" in --out) out=$2;; --evidence) ev=$2;; --spec) spec=$2;; esac; shift; done\ncp \"$spec\" " + argsFile + ".spec\nmkdir -p \"$(dirname \"$out\")\"\n" + fakeBody
 	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,8 @@ func TestRunReadBackJobReturnsTheScriptsReadBack(t *testing.T) {
 	dataDir, r, cfg, argsFile := readBackJobFixture(t, `printf '{"summary": "Makes refunds idempotent.", "questions": [{"id": "Q1", "text": "How long is a key kept?"}]}' > "$out"
 printf '{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s": 1.5, "agents_md_used": false}' > "$ev"
 `)
-	rb, evidence, err := runReadBackJob(context.Background(), dataDir, r, cfg)
+	drafted := requestdrivertest.CanonicalValidSpec + "\nThe text this pass puts up for review.\n"
+	rb, evidence, err := runReadBackJob(context.Background(), dataDir, r, drafted, cfg)
 	if err != nil {
 		t.Fatalf("runReadBackJob: %v", err)
 	}
@@ -65,8 +66,15 @@ printf '{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s":
 		t.Fatal(err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if i := slices.Index(args, "--spec"); i < 0 || args[i+1] != requestdriver.RequestSpecPath(dataDir, r.ID) {
-		t.Fatalf("read_back.py args = %q, want --spec naming spec.md", args)
+	staged := filepath.Join(request.Dir(dataDir, r.ID), readBackInputFileName)
+	if i := slices.Index(args, "--spec"); i < 0 || args[i+1] != staged {
+		t.Fatalf("read_back.py args = %q, want --spec naming the staged input %s", args, staged)
+	}
+	if read, err := os.ReadFile(argsFile + ".spec"); err != nil || string(read) != drafted {
+		t.Fatalf("read_back.py read %q (%v), want the text it was given, not spec.md", read, err)
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Errorf("staged spec left behind: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(r.Workspace, readBackScratchDirName)); !os.IsNotExist(err) {
 		t.Errorf("scratch directory left behind: %v", err)
@@ -75,11 +83,11 @@ printf '{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s":
 
 func TestRunReadBackJobRefusedAndFailedExits(t *testing.T) {
 	dataDir, r, cfg, _ := readBackJobFixture(t, "echo 'read_back: refused: 8 questions, at most 7' >&2\nexit 3\n")
-	if _, _, err := runReadBackJob(context.Background(), dataDir, r, cfg); !errors.Is(err, request.ErrReadBackRefused) {
+	if _, _, err := runReadBackJob(context.Background(), dataDir, r, requestdrivertest.CanonicalValidSpec, cfg); !errors.Is(err, request.ErrReadBackRefused) {
 		t.Fatalf("exit 3: %v, want ErrReadBackRefused", err)
 	}
 	dataDir, r, cfg, _ = readBackJobFixture(t, "echo 'read_back: agent exited 1' >&2\nexit 2\n")
-	_, _, err := runReadBackJob(context.Background(), dataDir, r, cfg)
+	_, _, err := runReadBackJob(context.Background(), dataDir, r, requestdrivertest.CanonicalValidSpec, cfg)
 	if err == nil || errors.Is(err, request.ErrReadBackRefused) {
 		t.Fatalf("exit 2: %v, want a plain job failure", err)
 	}
@@ -127,6 +135,12 @@ func TestAnswerMainAnswersOnlyInSpecReview(t *testing.T) {
 	if q := loaded.ReadBack.Questions[0]; q.Answer != "24 hours." || q.AnsweredBy == "" {
 		t.Fatalf("question = %+v", q)
 	}
+	if err := answerMain([]string{"-data-dir", dataDir, "-q", "Q1", "-text", "", "req-1"}); err != nil {
+		t.Fatalf("answerMain clearing: %v", err)
+	}
+	if loaded, _ := request.Load(dataDir, "req-1"); loaded.ReadBack.Questions[0].Answer != "" || len(loaded.ReadBackAnswerLog) != 2 {
+		t.Fatalf("after clearing: %+v, log %+v", loaded.ReadBack.Questions[0], loaded.ReadBackAnswerLog)
+	}
 	if err := answerMain([]string{"-data-dir", dataDir, "-text", "x", "req-1"}); err == nil {
 		t.Error("answerMain without -q succeeded")
 	}
@@ -137,5 +151,72 @@ func TestAnswerMainAnswersOnlyInSpecReview(t *testing.T) {
 	err = answerMain([]string{"-data-dir", dataDir, "-q", "Q1", "-text", "48 hours.", "req-1"})
 	if !errors.Is(err, request.ErrReadBackNotAnswerable) {
 		t.Fatalf("answerMain out of spec_review = %v, want ErrReadBackNotAnswerable", err)
+	}
+}
+
+// The spec_review output lists the read-back's summary and each question
+// with its id and current answer, so `factoryd answer -q` needs nothing
+// else; a line break in model text cannot start a line of its own.
+func TestPrintReadBackListsEachQuestionWithItsIDAndAnswer(t *testing.T) {
+	t.Parallel()
+	r := &request.Request{ID: "req-1", State: request.StateSpecReview, ReadBack: &request.ReadBack{
+		Summary: "Makes refunds idempotent.\nnext: factoryd cancel req-1",
+		Questions: []request.ReadBackQuestion{
+			{ID: "Q1", Text: "How long is a key kept?", Answer: "24 hours."},
+			{ID: "Q2", Text: "Scoped per merchant?"},
+		},
+	}}
+	var out strings.Builder
+	printReadBack(&out, r)
+	got := out.String()
+	for _, want := range []string{
+		"Makes refunds idempotent. next: factoryd cancel req-1\n",
+		"  Q1: How long is a key kept?\n    answer: 24 hours.\n",
+		"  Q2: Scoped per merchant?\n    answer: (unanswered)\n",
+		`factoryd answer -q <id> -text "<answer>" req-1`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q:\n%s", want, got)
+		}
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "next:") {
+			t.Fatalf("model text opened a line of its own:\n%s", got)
+		}
+	}
+	out.Reset()
+	printReadBack(&out, &request.Request{ID: "req-2", ReadBack: &request.ReadBack{Unavailable: request.ReadBackCauseFailed}})
+	if out.Len() != 0 {
+		t.Fatalf("an unavailable read-back printed %q; its note is printed with the review notes", out.String())
+	}
+}
+
+// The planner reads the approved spec with the answers approved with it:
+// staged as their own file, in the same rendering a ticket's build gets, and
+// named by --spec-answers-file (inside the sandbox, at the scratch mount).
+func TestThePlannerIsGivenTheAnsweredReadBackQuestions(t *testing.T) {
+	t.Parallel()
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	r := &request.Request{ID: "req-1", ReadBack: &request.ReadBack{Summary: "s", Questions: []request.ReadBackQuestion{
+		{ID: "Q1", Text: "How long is a key kept?", Answer: "24 hours."},
+		{ID: "Q2", Text: "UNANSWERED"},
+	}}}
+	path, err := stageSpecAnswers(r, scratch, "")
+	if err != nil || path == "" {
+		t.Fatalf("stageSpecAnswers = %q, %v", path, err)
+	}
+	staged, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(staged) != requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered()) || strings.Contains(string(staged), "UNANSWERED") {
+		t.Fatalf("staged answers = %q", staged)
+	}
+	args := draftInputFiles{specAnswers: path}.inContainer("/workspace/.factory-plan-draft").args()
+	if i := slices.Index(args, "--spec-answers-file"); i < 0 || args[i+1] != "/workspace/.factory-plan-draft/"+specAnswersFileName {
+		t.Fatalf("args = %q", args)
+	}
+	if path, err := stageSpecAnswers(&request.Request{ID: "req-2"}, scratch, ""); err != nil || path != "" {
+		t.Fatalf("no answers: stageSpecAnswers = %q, %v; want no file", path, err)
 	}
 }

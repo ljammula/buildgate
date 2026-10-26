@@ -28,6 +28,11 @@ export interface ApproveDialogProps extends FlowProps {
    * from the displayed `request` itself.
    */
   readonly expectedSha256?: Readonly<Record<string, string>> | null;
+  /**
+   * The read-back questions whose answer box holds text not yet saved: the
+   * dialog warns that the text is not part of this approval.
+   */
+  readonly unsavedAnswers?: readonly string[];
 }
 
 /**
@@ -45,6 +50,7 @@ export function ApproveDialog({
   request,
   costSummary = null,
   expectedSha256 = null,
+  unsavedAnswers = [],
   open,
   onOpenChange,
   onDone,
@@ -58,6 +64,7 @@ export function ApproveDialog({
           request={request}
           costSummary={costSummary}
           expectedSha256={expectedSha256}
+          unsavedAnswers={unsavedAnswers}
           by={by}
           onOpenChange={onOpenChange}
           onDone={onDone}
@@ -71,6 +78,7 @@ interface BodyProps {
   readonly request: RequestSummary;
   readonly costSummary: CostSummary | null;
   readonly expectedSha256: Readonly<Record<string, string>> | null;
+  readonly unsavedAnswers: readonly string[];
   readonly by: string;
   readonly onOpenChange: (open: boolean) => void;
   readonly onDone: FlowProps["onDone"];
@@ -80,6 +88,7 @@ function ApproveBody({
   request: latestRequest,
   costSummary,
   expectedSha256: latestExpectedSha256,
+  unsavedAnswers,
   by,
   onOpenChange,
   onDone,
@@ -142,6 +151,12 @@ function ApproveBody({
             </li>
           ) : null}
           {skipWarning !== null ? <li className="text-tone-danger mt-2">{skipWarning}</li> : null}
+          {request.state === "spec_review" && unsavedAnswers.length > 0 ? (
+            <li className="text-tone-danger mt-2">
+              {`Unsaved answer${unsavedAnswers.length === 1 ? "" : "s"} to ${unsavedAnswers.join(", ")}: ` +
+                "not part of this approval and not sent to the build. Save or clear it first, or approve without it."}
+            </li>
+          ) : null}
         </ul>
       }
       confirmLabel="Approve"

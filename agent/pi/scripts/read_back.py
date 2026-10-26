@@ -71,7 +71,12 @@ def build_prompt(spec_text: str, draft_path: Path) -> str:
 def _text_within(value, limit: int, what: str) -> str:
 	if not isinstance(value, str) or not value.strip():
 		raise Refused(f"{what} is missing or empty")
-	if len(value.encode("utf-8")) > limit:
+	try:
+		encoded = value.encode("utf-8")
+	except UnicodeEncodeError as exc:
+		# JSON can spell a lone surrogate ("\ud800"), which is no text.
+		raise Refused(f"{what} is not valid UTF-8 text") from exc
+	if len(encoded) > limit:
 		raise Refused(f"{what} is over {limit} bytes")
 	return value
 

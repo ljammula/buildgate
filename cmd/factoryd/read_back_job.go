@@ -50,22 +50,26 @@ func readBackArgs(workspace, specPath, outPath, evidencePath string, timeoutMinu
 	return append(args, "--harness", harness)
 }
 
+// readBackInputFileName is where runReadBackJobIn stages the spec text the
+// job reads, in the request's directory beside spec.md: the text is the one
+// this spec_drafting pass is about to put up for review, not yet spec.md.
+const readBackInputFileName = "read-back-input.md"
+
 // runReadBackJob is the read-back job (requestdriver.ReadBackRunner): it
-// runs read_back.py over r's spec.md in a throwaway worktree of the
-// repository, through the spec-drafting job's launch path
-// (runSpecStageJob), and returns the read-back it wrote, unvalidated (the
-// request driver validates it). A refused read-back's error wraps
-// request.ErrReadBackRefused.
-func runReadBackJob(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (rb *request.ReadBack, evidence *request.SpecEvidence, err error) {
+// runs read_back.py over spec in a throwaway worktree of the repository,
+// through the spec-drafting job's launch path (runSpecStageJob), and returns
+// the read-back it wrote, unvalidated (the request driver validates it). A
+// refused read-back's error wraps request.ErrReadBackRefused.
+func runReadBackJob(ctx context.Context, dataDir string, r *request.Request, spec string, cfg requestdriver.WorkerConfig) (rb *request.ReadBack, evidence *request.SpecEvidence, err error) {
 	err = withDraftingWorktree(dataDir, r, func(job *request.Request) error {
 		var jobErr error
-		rb, evidence, jobErr = runReadBackJobIn(ctx, dataDir, job, cfg)
+		rb, evidence, jobErr = runReadBackJobIn(ctx, dataDir, job, spec, cfg)
 		return jobErr
 	})
 	return rb, evidence, err
 }
 
-func runReadBackJobIn(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
+func runReadBackJobIn(ctx context.Context, dataDir string, r *request.Request, spec string, cfg requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 	explicit := ""
 	if cfg.DraftSpecScript != "" {
 		explicit = filepath.Join(filepath.Dir(cfg.DraftSpecScript), readBackScriptName)
@@ -74,7 +78,11 @@ func runReadBackJobIn(ctx context.Context, dataDir string, r *request.Request, c
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve %s: %w", readBackScriptName, err)
 	}
-	specPath := requestdriver.RequestSpecPath(dataDir, r.ID)
+	specPath := filepath.Join(request.Dir(dataDir, r.ID), readBackInputFileName)
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		return nil, nil, fmt.Errorf("stage the read-back's spec: %w", err)
+	}
+	defer os.Remove(specPath)
 	scratchDir := filepath.Join(r.Workspace, readBackScratchDirName)
 	_ = os.RemoveAll(scratchDir)
 	defer os.RemoveAll(scratchDir)

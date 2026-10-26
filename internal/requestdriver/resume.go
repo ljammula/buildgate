@@ -26,6 +26,9 @@ func EnterResumeReview(dataDir string, r *request.Request, step request.LostStep
 		return err
 	}
 	log.Printf("request %s: %s -> resume_review (%s)", r.ID, from, r.Error)
+	// Not saveAndRemind: several callers hold the request's lock (the
+	// worker's reclaim, the halt of a lost step), and its locked reload
+	// would wait on that lock forever. Their r was loaded under the lock.
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}

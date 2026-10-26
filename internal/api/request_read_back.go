@@ -17,11 +17,14 @@ import (
 const maxReadBackAnswerBodyBytes = 64 << 10
 
 // readBackAnswerBody is PUT /requests/{id}/read-back/answers/{qid}'s body:
-// the answer (empty clears it) and, like the spec edit's, the operator's own
-// claim of who gives it.
+// the answer (empty clears it), the SHA-256 of the question text the client
+// showed (request.QuestionSHA256; required: a question replaced since is
+// refused), and, like the spec edit's, the operator's own claim of who gives
+// it.
 type readBackAnswerBody struct {
-	Answer string `json:"answer"`
-	By     string `json:"by,omitempty"`
+	Answer         string `json:"answer"`
+	QuestionSHA256 string `json:"question_sha256"`
+	By             string `json:"by,omitempty"`
 }
 
 // answerRequestReadBack serves PUT /requests/{id}/read-back/answers/{qid}:
@@ -30,7 +33,8 @@ type readBackAnswerBody struct {
 // calls. Gated like the spec edit (authorizeRequestWrite, the loopback
 // relaxation included, writePrincipal) and refused past the review gate's
 // expiry; allowed only in spec_review, which AnswerReadBack checks under the
-// request lock.
+// request lock, and refused (409) when the question's text is no longer the
+// one the client showed.
 func (s *Server) answerRequestReadBack(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequestWrite(r) {
 		writeError(w, http.StatusForbidden, "requests endpoint is not authorized")
@@ -55,7 +59,7 @@ func (s *Server) answerRequestReadBack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	loaded, err := request.AnswerReadBack(s.dataDir, id, r.PathValue("qid"), by, body.Answer, time.Now(), opts...)
+	loaded, err := request.AnswerReadBack(s.dataDir, id, r.PathValue("qid"), body.QuestionSHA256, by, body.Answer, time.Now(), opts...)
 	s.noteGateExpired(id, err)
 	if err != nil {
 		writeError(w, readBackAnswerStatus(err), err.Error())
@@ -69,7 +73,7 @@ func readBackAnswerStatus(err error) int {
 	switch {
 	case errors.Is(err, os.ErrNotExist), errors.Is(err, request.ErrReadBackQuestionNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, request.ErrReadBackNotAnswerable), errors.Is(err, request.ErrGateExpired):
+	case errors.Is(err, request.ErrReadBackNotAnswerable), errors.Is(err, request.ErrGateExpired), errors.Is(err, request.ErrReadBackQuestionChanged):
 		return http.StatusConflict
 	case errors.Is(err, request.ErrReadBackAnswerTooLong):
 		return http.StatusUnprocessableEntity
@@ -94,6 +98,10 @@ func decodeReadBackAnswerBody(w http.ResponseWriter, r *http.Request) (readBackA
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "request body must contain one JSON object")
+		return readBackAnswerBody{}, false
+	}
+	if body.QuestionSHA256 == "" {
+		writeError(w, http.StatusBadRequest, "question_sha256 is required: the SHA-256 of the question text the answer was given to")
 		return readBackAnswerBody{}, false
 	}
 	if len(body.By) > request.MaxEditByLen {

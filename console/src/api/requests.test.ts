@@ -296,17 +296,19 @@ describe("writes", () => {
     expect(ticket.body).toBe('{"content":"plan","base_sha256":"base2"}');
   });
 
-  test("answerReadBackQuestion PUTs the answer for one question, and by only when set", async () => {
+  test("answerReadBackQuestion PUTs the answer and the shown question's hash, and by only when set", async () => {
     const answered = await sentBy((http) =>
-      answerReadBackQuestion(http, "req-1", "Q2", "By name.", { by: "alice" }),
+      answerReadBackQuestion(http, "req-1", "Q2", "qhash", "By name.", { by: "alice" }),
     );
     expect(answered.url).toBe("/requests/req-1/read-back/answers/Q2");
     expect(answered.method).toBe("PUT");
     expect(answered.headers).toEqual(WRITE);
-    expect(answered.body).toBe('{"answer":"By name.","by":"alice"}');
+    expect(answered.body).toBe('{"answer":"By name.","question_sha256":"qhash","by":"alice"}');
 
-    const cleared = await sentBy((http) => answerReadBackQuestion(http, "req-1", "Q2", ""));
-    expect(cleared.body).toBe('{"answer":""}');
+    const cleared = await sentBy((http) =>
+      answerReadBackQuestion(http, "req-1", "Q2", "qhash", ""),
+    );
+    expect(cleared.body).toBe('{"answer":"","question_sha256":"qhash"}');
   });
 
   test("retry, cancel and resume send the reason or source, and by only when set", async () => {

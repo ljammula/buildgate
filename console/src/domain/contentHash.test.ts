@@ -2,6 +2,8 @@ import { type JsonObject, asObject } from "@/domain/decode";
 import {
   expectedSha256For,
   oracleExpectedSha256,
+  readBackAnswersKey,
+  readBackAnswersSha256,
   sha256Hex,
   sha256HexBytes,
 } from "@/domain/contentHash";
@@ -54,9 +56,10 @@ test("oracleExpectedSha256 keys each shown file as oracle/NAME", () => {
 });
 
 describe("expectedSha256For", () => {
-  test("spec_review hashes spec.md under that literal key", () => {
+  test("spec_review hashes spec.md under that literal key, and the read-back answers shown under theirs", () => {
     expect(expectedSha256For(request("spec_review", "# Spec\n"))).toEqual({
       "spec.md": "603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b",
+      [readBackAnswersKey]: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     });
   });
 
@@ -112,6 +115,11 @@ describe("golden vectors (test/fixtures/vectors/content-hash.json)", () => {
     shown: Record<string, string>;
     want: Record<string, string>;
   }
+  interface ReadBackVector {
+    name: string;
+    questions: { id: string; text: string; answer: string }[];
+    sha256: string;
+  }
 
   const digests = vectors.digests as DigestVector[];
   const approvals = vectors.approvals as ApprovalVector[];
@@ -148,6 +156,19 @@ describe("golden vectors (test/fixtures/vectors/content-hash.json)", () => {
   for (const o of oracleApprovals) {
     test(`oracle approval: ${o.name}`, () => {
       expect(oracleExpectedSha256(o.shown)).toEqual(o.want);
+    });
+  }
+
+  const readBackAnswers = vectors.read_back_answers as ReadBackVector[];
+  test("the read-back answers section is present", () => {
+    expect(readBackAnswers.length).toBeGreaterThan(0);
+  });
+  for (const v of readBackAnswers) {
+    test(`read-back answers: ${v.name}`, () => {
+      const questions = v.questions.map((q) => ({ ...q, answeredBy: "", answeredAt: "" }));
+      expect(
+        readBackAnswersSha256({ summary: "s", unavailable: "", specSha256: "", questions }),
+      ).toBe(v.sha256);
     });
   }
 });

@@ -254,9 +254,6 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	}
 	// A refusal this pass answered is not feedback for any later redraft.
 	dropFactorySpecRejection(r)
-	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
-		return false, fmt.Errorf("write spec: %w", err)
-	}
 	// A rejected spec_review sends this request back through
 	// spec_drafting again (RejectSpec), so this evidence record can
 	// replace an r.SpecEvidence that already existed -- accumulate the
@@ -265,10 +262,18 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	// dropped just because its evidence record was overwritten (see
 	// request.JobSpend.Add's own doc comment).
 	accumulateSpecEvidence(r, evidence)
-	// A handed-over spec gets its read-back before the review; it never
-	// stops the request (recordReadBack).
-	if ok, err := recordReadBack(ctx, dataDir, r, cfg, now); !ok {
+	// A handed-over spec gets its read-back, of the text about to go up for
+	// review, before spec.md or the record is written: a read-back stopped
+	// part-way leaves the previously reviewed spec.md in place. What the
+	// drafting job spent is saved first, so that stop cannot lose it.
+	if ok, err := saveSpecDraftSpend(dataDir, r, evidence); !ok {
 		return false, err
+	}
+	if ok, err := recordReadBack(ctx, dataDir, r, specMD, cfg); !ok {
+		return false, err
+	}
+	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
+		return false, fmt.Errorf("write spec: %w", err)
 	}
 	now = time.Now()
 	if err := r.CompleteSpecDrafting(now); err != nil {
@@ -278,18 +283,91 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	// (request.SpecReviewNotes): it changes nothing in the document.
 	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: spec_drafting -> spec_review (spec drafted)", r.ID)
-	// State first, then the reminder, then save again: a crash between
-	// the two saves costs at most one duplicate reminder (the ticker
-	// re-sends on its next tick), never a re-run of the drafting job.
-	if err := r.Save(dataDir); err != nil {
-		return false, err
+	return false, saveAndRemind(dataDir, r, now)
+}
+
+// saveSpecDraftSpend saves r.SpecEvidence, as this pass accumulated it, to
+// the request as it is on disk, before a handed-over spec's read-back runs,
+// so a stop during the read-back cannot lose the drafting job's recorded
+// spend. A pass that ran no drafting job (evidence nil), or a request that
+// gets no read-back, saves nothing here. ok is false when the request left
+// spec_drafting while the drafting job ran.
+func saveSpecDraftSpend(dataDir string, r *request.Request, evidence *request.SpecEvidence) (ok bool, err error) {
+	if evidence == nil || !r.SpecImported {
+		return true, nil
 	}
-	// Entering spec_review: the operator is waiting on them starting
-	// now -- send the first reminder immediately rather than leaving
-	// them to discover it only on RemindIfDue's own next tick.
-	// See RemindRequest's own doc comment.
-	RemindRequest(dataDir, r, now)
-	return false, r.Save(dataDir)
+	saved := false
+	_, err = updateLocked(dataDir, r.ID, func(current *request.Request) bool {
+		if current.State != request.StateSpecDrafting {
+			return false
+		}
+		current.SpecEvidence = r.SpecEvidence
+		saved = true
+		return true
+	})
+	if err == nil && !saved {
+		log.Printf("request %s: spec drafting finished but the request left spec_drafting while it ran -- discarding the result", r.ID)
+	}
+	return saved, err
+}
+
+// updateLocked applies mutate to request id as it is on disk now, under the
+// request's lock, and saves it when mutate returns true. It returns the
+// record as loaded and mutated. The request driver writes through it
+// whatever it writes while an operator may write the same request (an answer
+// at a review gate, a cancel): a save of the driver's own in-memory copy
+// would put back what that copy read before the operator's write.
+func updateLocked(dataDir, id string, mutate func(*request.Request) bool) (*request.Request, error) {
+	unlock, err := request.Lock(dataDir, id)
+	if err != nil {
+		return nil, fmt.Errorf("lock request %s: %w", id, err)
+	}
+	defer unlock()
+	current, err := request.Load(dataDir, id)
+	if err != nil {
+		return nil, fmt.Errorf("reload request %s: %w", id, err)
+	}
+	if !mutate(current) {
+		return current, nil
+	}
+	if err := current.Save(dataDir); err != nil {
+		return nil, err
+	}
+	return current, nil
+}
+
+// saveAndRemind saves r, which has just entered a review state, then sends
+// that review's first reminder at once (remindOnDisk). The caller must not
+// hold the request's lock (a driver pass after its job). A crash between the
+// two writes costs at most one duplicate reminder (the ticker re-sends on its
+// next tick), never a re-run of the job that led here.
+func saveAndRemind(dataDir string, r *request.Request, now time.Time) error {
+	if err := r.Save(dataDir); err != nil {
+		return err
+	}
+	return remindOnDisk(dataDir, r, now)
+}
+
+// remindOnDisk sends the first reminder of the review r has entered
+// (RemindRequest) and records it on the request as it is on disk
+// (updateLocked), not on r: the operator may already have acted on the
+// review, an answer or an approval, since r was saved. A request that has
+// left that review state gets no reminder. r is left equal to the saved
+// record.
+func remindOnDisk(dataDir string, r *request.Request, now time.Time) error {
+	state := r.State
+	current, err := updateLocked(dataDir, r.ID, func(current *request.Request) bool {
+		if current.State != state {
+			return false
+		}
+		RemindRequest(dataDir, current, now)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	*r = *current
+	return nil
 }
 
 // criteriaAreDrafted reports whether the criteria section of the spec this
@@ -329,8 +407,13 @@ func dropFactorySpecRejection(r *request.Request) {
 // accumulateSpecEvidence records evidence as r.SpecEvidence, adding the spend
 // of the record it replaces: a redraft's, or an earlier attempt's within this
 // pass, is real relay cost that must not vanish with the overwritten record.
+// A pass with no evidence (no drafting job ran, or it wrote none) keeps the
+// record there is.
 func accumulateSpecEvidence(r *request.Request, evidence *request.SpecEvidence) {
-	if evidence != nil && r.SpecEvidence != nil {
+	if evidence == nil {
+		return
+	}
+	if r.SpecEvidence != nil {
 		evidence.Spend = r.SpecEvidence.Spend.Add(evidence.Spend)
 	}
 	r.SpecEvidence = evidence
@@ -425,12 +508,7 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 		return err
 	}
 	log.Printf("request %s: oracle_drafting -> oracle_review (%s)", r.ID, draft.Status)
-	// Same state-save / reminder / save shape as AdvanceSpecDrafting.
-	if err := r.Save(dataDir); err != nil {
-		return err
-	}
-	RemindRequest(dataDir, r, now)
-	return r.Save(dataDir)
+	return saveAndRemind(dataDir, r, now)
 }
 
 // maxPlanningAttempts bounds AdvancePlanning's own automatic re-plan
@@ -648,13 +726,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	// re-plan: that reading of the spec's prose can be wrong.
 	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: planning -> plan_review (plan drafted: %d ticket(s))", r.ID, r.TicketCount)
-	if err := r.Save(dataDir); err != nil {
-		return err
-	}
-	// Entering plan_review: same immediate first reminder spec_review
-	// gets -- the operator is waiting on them from this moment.
-	RemindRequest(dataDir, r, now)
-	return r.Save(dataDir)
+	return saveAndRemind(dataDir, r, now)
 }
 
 // planRedraftable reports whether a plan refused with err gets the one
@@ -1192,11 +1264,7 @@ func refuseResume(dataDir string, r *request.Request, reasons []string, now time
 		return err
 	}
 	log.Printf("request %s: building -> resume_review (%s)", r.ID, r.Error)
-	if err := r.Save(dataDir); err != nil {
-		return err
-	}
-	RemindRequest(dataDir, r, now)
-	return r.Save(dataDir)
+	return saveAndRemind(dataDir, r, now)
 }
 
 // acceptTicketRun records runRecord -- an accepted run, the ticket's first
@@ -2718,7 +2786,8 @@ func replacesEscalatedBuild(dataDir string, r *request.Request, ticket *request.
 // acceptance criteria this ticket claims (its "### Acceptance criteria
 // covered" numbers, resolved against spec.md's own numbered list) to
 // <ticket>.criteria.md beside the ticket, one criterion per line in
-// build_app.py's read_acceptance_criteria shape, and returns its path --
+// build_app.py's read_acceptance_criteria shape, then the read-back answers
+// approved with the spec (AnsweredReadBackBlock), and returns its path --
 // what the ticket's build passes as -spec-acceptance-criteria so the
 // required per-criterion conformity review judges exactly the criteria
 // this ticket owns, not the whole spec. A ticket without the plan
@@ -2763,6 +2832,12 @@ func WriteTicketCriteriaFile(dataDir string, r *request.Request, ticket request.
 	for _, t := range texts {
 		b.WriteString(t)
 		b.WriteString("\n")
+	}
+	// The read-back answers approved with the spec follow the criteria, for
+	// the reviewer to read them with; build_app.py's read_acceptance_criteria
+	// stops at their heading, and read_spec_answers reads them.
+	if block := AnsweredReadBackBlock(r.ReadBack.Answered()); block != "" {
+		b.WriteString("\n" + block)
 	}
 	path := strings.TrimSuffix(ticket.SpecPath, ".spec.md") + ".criteria.md"
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
@@ -2950,7 +3025,7 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 func checkedTicketBuildBaseInput(content, requestID string) (string, error) {
 	bytes := len([]byte(content))
 	if bytes > MaxTicketBuildBaseInputBytes {
-		return "", fmt.Errorf("ticket build base input is %d bytes, over the %d-byte limit; shorten the spec (`factoryd reject -to spec -reason \"...\" %s`) or split the ticket (`factoryd reject -to plan -reason \"...\" %s`)", bytes, MaxTicketBuildBaseInputBytes, requestID, requestID)
+		return "", fmt.Errorf("ticket build base input is %d bytes, over the %d-byte limit; shorten the spec or the read-back answers approved with it (`factoryd reject -to spec -reason \"...\" %s`) or split the ticket (`factoryd reject -to plan -reason \"...\" %s`)", bytes, MaxTicketBuildBaseInputBytes, requestID, requestID)
 	}
 	return content, nil
 }
@@ -2965,7 +3040,9 @@ func renderApprovedSpecTicketBuildInput(specContent string, answered []request.R
 	b.WriteString("# Approved spec\n\n")
 	b.WriteString("The operator approved this spec. It is the contract for this build: names, fields, formats, behaviours and error texts in it are requirements. It is quoted verbatim between the tilde fences below.\n\n")
 	b.WriteString(ticketspec.FenceVerbatim(specContent))
-	writeAnsweredReadBack(&b, answered)
+	if block := AnsweredReadBackBlock(answered); block != "" {
+		b.WriteString("\n" + block)
+	}
 	b.WriteString("\n---\n\n")
 	b.WriteString("# This ticket\n\n")
 	b.WriteString(ticketContent)
@@ -2986,27 +3063,6 @@ func renderApprovedSpecTicketBuildInput(specContent string, answered []request.R
 	}
 	fmt.Fprintf(&b, "\n%s\n", BuildSpecCriteriaFooter)
 	return b.String()
-}
-
-// AnsweredQuestionsHeading heads the read-back questions the operator
-// answered at spec review in a ticket's build input.
-const AnsweredQuestionsHeading = "# Questions answered at spec review"
-
-// writeAnsweredReadBack writes the answered read-back questions section of
-// a build input, or nothing when no question was answered. A question's ID
-// is checked to be Q<n> (request.ValidateReadBack), so it is written as is.
-func writeAnsweredReadBack(b *strings.Builder, answered []request.ReadBackQuestion) {
-	if len(answered) == 0 {
-		return
-	}
-	fmt.Fprintf(b, "\n%s\n\n", AnsweredQuestionsHeading)
-	b.WriteString("The operator answered these questions about the spec when approving it. Each answer settles the choice its question names and is part of the contract. Each question and answer is quoted verbatim between tilde fences.\n")
-	for _, q := range answered {
-		fmt.Fprintf(b, "\nQuestion %s:\n\n", q.ID)
-		b.WriteString(ticketspec.FenceVerbatim(q.Text))
-		b.WriteString("\nAnswer:\n\n")
-		b.WriteString(ticketspec.FenceVerbatim(q.Answer))
-	}
 }
 
 // writeTicketBuildInput writes TicketBuildSpecContent's result to

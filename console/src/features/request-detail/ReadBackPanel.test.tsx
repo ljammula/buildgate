@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { readBackAnswersKey, sha256Hex } from "@/domain/contentHash";
 import { apiErrorResponse, json } from "@/test/render";
 
 import { openRequest, seedOperator } from "./testHarness";
@@ -8,24 +9,33 @@ import { requestWire } from "./testRequests";
 
 beforeEach(seedOperator);
 
-const readBack = (answer = "") => ({
+const readBack = (answer = "", q2Answer = "") => ({
   summary: "Makes POST /refunds idempotent by key.",
   questions: [
     {
       id: "Q1",
       text: "How long is a key kept?",
-      ...(answer === "" ? {} : { answer, answered_by: "operator" }),
+      ...(answer === ""
+        ? {}
+        : { answer, answered_by: "operator", answered_at: "2026-10-25T10:00:00Z" }),
     },
-    { id: "Q2", text: "<b>Scoped per merchant?</b>" },
+    {
+      id: "Q2",
+      text: "<b>Scoped per merchant?</b>",
+      ...(q2Answer === ""
+        ? {}
+        : { answer: q2Answer, answered_by: "bob", answered_at: "2026-10-25T10:01:00Z" }),
+    },
   ],
 });
 
-const specReview = (answer = "") =>
+const specReview = (answer = "", q2Answer = "") =>
   requestWire({
     state: "spec_review",
     title: "Refunds",
+    spec: "# Spec\n\nRefunds.\n",
     spec_imported: true,
-    read_back: readBack(answer),
+    read_back: readBack(answer, q2Answer),
   });
 
 test("a handed-over spec under review shows its read-back as text, with the answers going to the build", async () => {
@@ -53,6 +63,7 @@ test("saving an answer PUTs it for that question alone", async () => {
   });
   expect(server.sent("PUT /requests/req-1/read-back/answers/Q1")[0]?.body).toEqual({
     answer: "24 hours.",
+    question_sha256: sha256Hex("How long is a key kept?"),
     by: "operator",
   });
   expect(server.sent("PUT /requests/req-1/read-back/answers/Q2")).toHaveLength(0);
@@ -97,4 +108,73 @@ test("without write access the answer boxes are disabled", async () => {
   const question = within(await screen.findByTestId("read-back-question-Q1"));
   expect(question.getByRole("textbox", { name: "Answer to Q1" })).toBeDisabled();
   expect(question.getByRole("button", { name: "Save answer" })).toBeDisabled();
+});
+
+test("an answer box starts over when its stored answer changes underneath it", async () => {
+  openRequest(specReview(), {
+    extra: [
+      // Saving Q1 returns a record where someone else has since answered Q2.
+      {
+        on: "PUT /requests/req-1/read-back/answers/Q1",
+        reply: json(specReview("24 hours.", "Per merchant.")),
+      },
+    ],
+  });
+  const q1 = within(await screen.findByTestId("read-back-question-Q1"));
+  const q2Box = () =>
+    within(screen.getByTestId("read-back-question-Q2")).getByRole("textbox", {
+      name: "Answer to Q2",
+    });
+  await userEvent.type(q2Box(), "my unsaved text");
+  await userEvent.type(q1.getByRole("textbox", { name: "Answer to Q1" }), "24 hours.");
+  await userEvent.click(q1.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => {
+    expect(q2Box()).toHaveValue("Per merchant.");
+  });
+  expect(
+    within(screen.getByTestId("read-back-question-Q2")).getByText("Answered by bob."),
+  ).toBeInTheDocument();
+});
+
+test("Approve warns about an answer box with unsaved text and binds the answers shown", async () => {
+  const { server } = openRequest(specReview("24 hours."), {
+    extra: [{ on: "POST /requests/req-1/approve", reply: json(specReview("24 hours.")) }],
+  });
+  const q2 = within(await screen.findByTestId("read-back-question-Q2"));
+  await userEvent.type(q2.getByRole("textbox", { name: "Answer to Q2" }), "not saved");
+  await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+  const dialog = within(await screen.findByRole("dialog"));
+  expect(dialog.getByText(/Unsaved answer to Q2: not part of this approval/)).toBeInTheDocument();
+  await userEvent.click(dialog.getByRole("button", { name: "Approve" }));
+  await waitFor(() => {
+    expect(server.sent("POST /requests/req-1/approve")).toHaveLength(1);
+  });
+  const textBytes = new TextEncoder().encode("How long is a key kept?").length;
+  const shown = sha256Hex(`Q1\n${textBytes}\nHow long is a key kept?\n9\n24 hours.\n`);
+  expect(server.sent("POST /requests/req-1/approve")[0]?.body).toEqual({
+    by: "operator",
+    expected_sha256: { "spec.md": sha256Hex("# Spec\n\nRefunds.\n"), [readBackAnswersKey]: shown },
+  });
+});
+
+test("Approve says nothing about answers when every box is saved", async () => {
+  openRequest(specReview("24 hours."));
+  await screen.findByTestId("read-back");
+  await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+  const dialog = within(await screen.findByRole("dialog"));
+  expect(dialog.queryByText(/Unsaved answer/)).toBeNull();
+});
+
+test("the audit lists who answered which read-back question when, without the text", async () => {
+  openRequest({
+    ...specReview("24 hours."),
+    read_back_answer_log: [
+      { question_id: "Q1", action: "answered", by: "alice", at: "2026-10-25T10:00:00Z" },
+      { question_id: "Q1", action: "cleared", by: "bob", at: "2026-10-25T10:05:00Z" },
+    ],
+  });
+  const log = within(await screen.findByTestId("audit-read-back-answers"));
+  expect(log.getByText(/Read-back Q1 answered by alice at/)).toBeInTheDocument();
+  expect(log.getByText(/Read-back Q1 cleared by bob at/)).toBeInTheDocument();
+  expect(log.queryByText(/24 hours/)).toBeNull();
 });

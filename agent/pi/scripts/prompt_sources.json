@@ -214,12 +214,13 @@
         "spec_conformity.prompt.md",
         "spec_conformity.diff_self.prompt.md",
         "spec_conformity.diff_inline.prompt.md",
+        "spec_conformity.answers.prompt.md",
         "spec_conformity.command_outcome_rule.prompt.md",
         "spec_conformity.formatting_rule.prompt.md",
         "spec_conformity.json_contract.prompt.md",
         "review.instructions_diff.prompt.md"
       ],
-      "description": "Assembles spec-conformity review instructions with criteria, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
+      "description": "Assembles spec-conformity review instructions with criteria and the read-back answers approved with the spec, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
     },
     {
       "id": "prompt-source:combined-review",
@@ -235,6 +236,7 @@
         "code_review.scope_rule.prompt.md",
         "code_review.severity_rule.prompt.md",
         "code_review.command_outcome_rule.prompt.md",
+        "spec_conformity.answers.prompt.md",
         "spec_conformity.command_outcome_rule.prompt.md",
         "spec_conformity.formatting_rule.prompt.md",
         "review.instructions_diff.prompt.md"

@@ -123,7 +123,7 @@ DIFF_INLINE = prompt_templates.load("combined_review.diff_inline", ("diff",))
 PROMPT = prompt_templates.load(
 	"combined_review",
 	(
-		"diff_block", "spec_text", "criteria", "conformity_command_outcome_rule", "conformity_formatting_rule",
+		"diff_block", "spec_text", "criteria", "answers", "conformity_command_outcome_rule", "conformity_formatting_rule",
 		"scope_rule", "severity_rule", "command_outcome_rule",
 	),
 )
@@ -131,7 +131,7 @@ PROMPT = prompt_templates.load(
 
 def combined_review_prompt(
 	criteria: list[str], spec_text: str, review_base_sha: str | None, diff: tuple[str, str] | None = None,
-	instructions_block: str = "",
+	instructions_block: str = "", answers: str = "",
 ) -> str:
 	"""Builds the one prompt covering both tasks. diff, when given, is
 	(stat, diff_text) from build_app.workspace_diff, inlined via
@@ -143,7 +143,9 @@ def combined_review_prompt(
 	so it is a stable prefix shared byte-for-byte across every combined-
 	review launch for the same commit -- diff first, spec is unique per
 	ticket but far smaller, and the tasks/rules text below is a fixed
-	suffix identical across every launch of this script."""
+	suffix identical across every launch of this script. answers is the
+	read-back answers block (build_app.read_spec_answers), given after task
+	A's criteria."""
 	if diff is None:
 		diff_block = DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
 		diff_block = diff_block.removesuffix("\n") + instructions_block
@@ -152,6 +154,7 @@ def combined_review_prompt(
 		diff_block = DIFF_INLINE.format(diff=build_app.format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
 	return PROMPT.format(
 		diff_block=diff_block.removesuffix("\n"), spec_text=spec_text, criteria="\n".join(criteria),
+		answers=build_app.spec_answers_section(answers),
 		conformity_command_outcome_rule=build_app.CONFORMITY_COMMAND_OUTCOME_RULE,
 		conformity_formatting_rule=build_app.CONFORMITY_FORMATTING_RULE,
 		scope_rule=code_review.SCOPE_RULE, severity_rule=code_review.SEVERITY_RULE,
@@ -263,12 +266,13 @@ def run_combined_review(
 	"retry", and a "recheck" record on each criterion asked about."""
 	started = clock()
 	criteria = build_app.read_acceptance_criteria(criteria_path)
+	answers = build_app.read_spec_answers(criteria_path)
 	spec_text = spec_path.read_text()
 	diff = build_app.workspace_diff(workspace, review_base_sha) if review_base_sha else None
 	diff_fetch_failed = review_base_sha is not None and diff is None
 	instructions_block = build_app.instructions_diff_block(instructions_diff)
 	prompt = combined_review_prompt(
-		criteria, spec_text, review_base_sha, diff=diff, instructions_block=instructions_block,
+		criteria, spec_text, review_base_sha, diff=diff, instructions_block=instructions_block, answers=answers,
 	)
 	turn = build_app.run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / SESSION_DIR,
@@ -289,6 +293,7 @@ def run_combined_review(
 	inputs = TurnInputs(
 		workspace=workspace, criteria=criteria, spec_text=spec_text, review_base_sha=review_base_sha,
 		diff=diff, instructions_block=instructions_block, thinking=thinking, adapter=adapter, prompt=prompt,
+		answers=answers,
 	)
 	answer = _ask_missing_part(inputs, answer, started, policies)
 
@@ -303,7 +308,7 @@ def run_combined_review(
 			timeout_minutes=retry_timeout_minutes(RETRY_CONFORMITY, started),
 			prompt_session=workspace / SESSION_DIR,
 			fresh_session=lambda: fresh_retry_session_dir(workspace, conformity_review.RECHECK_SESSION_SUBDIR),
-			conformity_policy=conformity_policy,
+			conformity_policy=conformity_policy, answers=answers,
 		)
 	conformity, review = _answer_evidences(answer, policies)
 	if recheck:
@@ -336,6 +341,7 @@ class TurnInputs:
 	thinking: str | None
 	adapter: object
 	prompt: str
+	answers: str = ""
 
 
 def _answer_evidences(answer: Answer, policies: dict) -> tuple[dict, dict]:
@@ -377,7 +383,7 @@ def _ask_missing_part(inputs: TurnInputs, answer: Answer, started: float, polici
 	)
 	if part == RETRY_CONFORMITY:
 		retry_prompt = build_app.spec_conformity_prompt(
-			criteria, review_base_sha, diff=diff, instructions_block=instructions_block,
+			criteria, review_base_sha, diff=diff, instructions_block=instructions_block, answers=inputs.answers,
 		)
 	elif part == RETRY_CODE_REVIEW:
 		retry_prompt = code_review.code_review_prompt(

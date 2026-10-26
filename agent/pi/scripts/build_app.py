@@ -1827,16 +1827,43 @@ def instructions_diff_block(path: Path | None) -> str:
 	return "\n\n" + INSTRUCTIONS_DIFF.format(touched=touched, diff=neutralise_instructions_diff(text.rstrip("\n"))).removesuffix("\n")
 
 
+# The heading factoryd's criteria file puts before the read-back answers the
+# operator approved with the spec (requestdriver.AnsweredQuestionsHeading,
+# which renders the block after it): the criteria end at its first line.
+SPEC_ANSWERS_HEADING = "# Questions answered at spec review"
+
+
+def _split_criteria_file(path: Path) -> tuple[list[str], str]:
+	"""(criteria lines, answers block) of a criteria file: the lines before
+	the first line equal to SPEC_ANSWERS_HEADING, and that line on, verbatim
+	("" when the file has none)."""
+	lines = path.read_text().splitlines(keepends=True)
+	for index, line in enumerate(lines):
+		if line.rstrip("\r\n") == SPEC_ANSWERS_HEADING:
+			return lines[:index], "".join(lines[index:]).rstrip("\n")
+	return lines, ""
+
+
 def read_acceptance_criteria(path: Path) -> list[str]:
 	"""Returns one criterion per non-empty, non-comment line of path (the
 	approved spec's own numbered acceptance criteria, one per line, e.g.
-	"1. Foo does X")."""
+	"1. Foo does X"), up to the read-back answers block (read_spec_answers)
+	when the file carries one."""
 	criteria = []
-	for line in path.read_text().splitlines():
+	for line in _split_criteria_file(path)[0]:
 		line = line.strip()
 		if line and not line.startswith("#"):
 			criteria.append(line)
 	return criteria
+
+
+def read_spec_answers(path: Path | None) -> str:
+	"""The read-back answers block factoryd wrote after the criteria in path:
+	the questions about the spec the operator answered at spec review, each
+	question and answer fenced, rendered by factoryd. "" when there is none."""
+	if path is None:
+		return ""
+	return _split_criteria_file(path)[1]
 
 
 CONFORMITY_COMMAND_OUTCOME_RULE = (
@@ -1865,12 +1892,24 @@ CONFORMITY_JSON_CONTRACT = (
 CONFORMITY_DIFF_SELF = prompt_templates.load("spec_conformity.diff_self", ("base",))
 CONFORMITY_DIFF_INLINE = prompt_templates.load("spec_conformity.diff_inline", ("diff",))
 CONFORMITY_PROMPT = prompt_templates.load(
-	"spec_conformity", ("diff_instructions", "criteria", "command_outcome_rule", "formatting_rule", "json_contract"),
+	"spec_conformity", ("diff_instructions", "criteria", "answers", "command_outcome_rule", "formatting_rule", "json_contract"),
 )
+CONFORMITY_ANSWERS = prompt_templates.load("spec_conformity.answers", ("answers",))
+
+
+def spec_answers_section(answers: str) -> str:
+	"""The reviewer's section for the read-back answers (read_spec_answers),
+	to follow the criteria: "" when there are none, else a blank line and the
+	answers, labelled as the operator's answers to questions about the spec.
+	Shared by every conformity prompt (this module's and combined_review.py's)."""
+	if not answers.strip():
+		return ""
+	return "\n\n" + CONFORMITY_ANSWERS.format(answers=answers.strip("\n")).removesuffix("\n")
 
 
 def spec_conformity_prompt(
 	criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None = None, instructions_block: str = "",
+	answers: str = "",
 ) -> str:
 	"""Builds the reviewer's prompt. diff, when given, is (stat, diff_text)
 	from workspace_diff: the diff is inlined directly and the reviewer is
@@ -1883,7 +1922,8 @@ def spec_conformity_prompt(
 	all. diff is None when review_base_sha is unknown, or when the git
 	read to build it failed (run_spec_conformity_review's own call site)
 	-- the prompt then falls back to asking the reviewer to diff for
-	itself, exactly as before this fix."""
+	itself, exactly as before this fix. answers is the read-back answers block
+	(read_spec_answers), given after the criteria."""
 	if diff is None:
 		diff_instructions = CONFORMITY_DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
 		diff_instructions = diff_instructions.removesuffix("\n") + instructions_block
@@ -1892,6 +1932,7 @@ def spec_conformity_prompt(
 		diff_instructions = CONFORMITY_DIFF_INLINE.format(diff=format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
 	return CONFORMITY_PROMPT.format(
 		diff_instructions=diff_instructions.removesuffix("\n"), criteria="\n".join(criteria),
+		answers=spec_answers_section(answers),
 		command_outcome_rule=CONFORMITY_COMMAND_OUTCOME_RULE, formatting_rule=CONFORMITY_FORMATTING_RULE,
 		json_contract=CONFORMITY_JSON_CONTRACT,
 	).removesuffix("\n")
@@ -2193,6 +2234,7 @@ def run_spec_conformity_review(
 	timeout_minutes: int = 10,
 	adapter=DEFAULT_ADAPTER,
 	instructions_diff: Path | None = None,
+	answers: str = "",
 ) -> tuple[list[dict], str]:
 	"""Runs one bounded, standalone pi turn asking it to check the
 	workspace's current diff against each declared acceptance criterion
@@ -2229,18 +2271,19 @@ def run_spec_conformity_review(
 	return run_spec_conformity_turn(
 		workspace, criteria=criteria, review_base_sha=review_base_sha, diff=diff,
 		instructions_block=instructions_diff_block(instructions_diff), thinking=thinking,
-		timeout_minutes=timeout_minutes, adapter=adapter,
+		timeout_minutes=timeout_minutes, adapter=adapter, answers=answers,
 	)
 
 
 def run_spec_conformity_turn(
 	workspace: Path, *, criteria: list[str], review_base_sha: str | None, diff: tuple[str, str] | None,
 	instructions_block: str, thinking: str | None, timeout_minutes: int = 10, adapter=DEFAULT_ADAPTER,
+	answers: str = "",
 ) -> tuple[list[dict], str]:
 	"""run_spec_conformity_review's turn over a diff and instruction block
 	already fetched, so a caller that asks a further turn can give it the
 	same inputs. Returns (verdicts, error) as that function does."""
-	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff, instructions_block=instructions_block)
+	prompt = spec_conformity_prompt(criteria, review_base_sha, diff=diff, instructions_block=instructions_block, answers=answers)
 	turn = run_review_turn(
 		workspace, prompt=prompt, session_dir=workspace / ".pi-conformity-session",
 		review_base_sha=review_base_sha, thinking=thinking,
@@ -3350,7 +3393,7 @@ def _run_build(
 		criteria = read_acceptance_criteria(spec_acceptance_criteria)
 		result.review_verdicts, _conformity_review_error = run_spec_conformity_review(
 			workspace, criteria=criteria, review_base_sha=review_base_sha,
-			thinking=thinking, adapter=adapter,
+			thinking=thinking, adapter=adapter, answers=read_spec_answers(spec_acceptance_criteria),
 		)
 		non_clean = [v["criterion"] for v in result.review_verdicts if v["verdict"] != "clean"]
 		if non_clean and conformity_policy == "required":

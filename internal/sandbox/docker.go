@@ -2176,6 +2176,7 @@ var HarnessSiblingModules = map[string]bool{
 	"plan_tickets.scoped_sections.prompt.md":             true,
 	"read_back.prompt.md":                                true,
 	"review.instructions_diff.prompt.md":                 true,
+	"spec_conformity.answers.prompt.md":                  true,
 	"spec_conformity.command_outcome_rule.prompt.md":     true,
 	"spec_conformity.diff_inline.prompt.md":              true,
 	"spec_conformity.diff_self.prompt.md":                true,

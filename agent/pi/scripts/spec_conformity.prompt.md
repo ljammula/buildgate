@@ -2,7 +2,7 @@ Independent spec-conformity review.
 
 {diff_instructions}
 
-{criteria}
+{criteria}{answers}
 
 {command_outcome_rule}
 

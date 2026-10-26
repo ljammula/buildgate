@@ -53,7 +53,7 @@ export function StageSection({ request, dialogs, detailLoaded, anyEditorOpen }: 
             detailLoaded={detailLoaded}
             anyEditorOpen={anyEditorOpen}
           />
-          <ReadBackPanel request={request} />
+          <ReadBackPanel request={request} onDraftChanged={dialogs.onAnswerDraftChanged} />
         </>
       );
     case "oracle_review":

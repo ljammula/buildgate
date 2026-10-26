@@ -77,7 +77,7 @@ def test_read_back_with_no_questions_is_accepted(tmp_path: Path, monkeypatch) ->
 	assert json.loads(out.read_text(encoding="utf-8"))["questions"] == []
 
 
-@pytest.mark.parametrize("fixture", ["malformed.json", "over_cap.json"])
+@pytest.mark.parametrize("fixture", ["malformed.json", "over_cap.json", "lone_surrogate.json"])
 def test_malformed_or_over_cap_read_back_is_refused(tmp_path: Path, monkeypatch, capsys, fixture: str) -> None:
 	code, out, evidence, _ = _run(tmp_path, monkeypatch, (FIXTURES / fixture).read_bytes())
 	assert code == read_back.REFUSED_EXIT_CODE

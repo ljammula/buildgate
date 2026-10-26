@@ -1,3 +1,4 @@
+import { formatLocalTimestamp } from "@/domain/elapsed";
 import { stopText } from "@/domain/runStop";
 import type { RequestSummary } from "@/domain/request";
 import { EscapedText } from "@/shared/oracle/EscapedText";
@@ -9,8 +10,9 @@ import { approvedLine, terminalEntries, terminalEntryLine } from "./requestDetai
 
 /**
  * Who approved the request and when, every time it was cancelled, halted or
- * quarantined (who, when, why), its rejection history and the edits an
- * operator saved in place. Hidden when there is none of them.
+ * quarantined (who, when, why), its rejection history, the edits an
+ * operator saved in place, and who answered which read-back question when.
+ * Hidden when there is none of them.
  */
 export function AuditSection({ request }: { readonly request: RequestSummary }) {
   const stops = terminalEntries(request);
@@ -18,6 +20,7 @@ export function AuditSection({ request }: { readonly request: RequestSummary }) 
     request.approvedBy === "" &&
     request.rejections.length === 0 &&
     request.edits.length === 0 &&
+    request.readBackAnswerLog.length === 0 &&
     stops.length === 0
   ) {
     return null;
@@ -51,6 +54,15 @@ export function AuditSection({ request }: { readonly request: RequestSummary }) 
       )}
       {request.edits.length === 0 ? null : (
         <EditHistory edits={request.edits} rejections={request.rejections} />
+      )}
+      {request.readBackAnswerLog.length === 0 ? null : (
+        <ul data-testid="audit-read-back-answers" className="flex flex-col gap-1">
+          {request.readBackAnswerLog.map((event, i) => (
+            <li key={i} className="text-fg-muted text-sm">
+              {`Read-back ${event.questionId} ${event.action} by ${event.by} at ${formatLocalTimestamp(event.at)}`}
+            </li>
+          ))}
+        </ul>
       )}
     </Panel>
   );

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,10 +64,24 @@ func newSpecReviewRequestWithReadBack(t *testing.T, dataDir string) *Request {
 	return r
 }
 
+// shownSHA is QuestionSHA256 of question qid's stored text, what a client
+// showing the read-back sends with an answer; "" for no such question.
+func shownSHA(t *testing.T, dataDir, id, qid string) string {
+	t.Helper()
+	r, err := Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := r.readBackQuestion(qid); q != nil {
+		return QuestionSHA256(q.Text)
+	}
+	return ""
+}
+
 func TestAnswerReadBackRecordsAndClearsAnAnswerInSpecReview(t *testing.T) {
 	dataDir := t.TempDir()
 	r := newSpecReviewRequestWithReadBack(t, dataDir)
-	got, err := AnswerReadBack(dataDir, r.ID, "Q2", "alice", "  By name.  ", fixedNow)
+	got, err := AnswerReadBack(dataDir, r.ID, "Q2", shownSHA(t, dataDir, r.ID, "Q2"), "alice", "  By name.  ", fixedNow)
 	if err != nil {
 		t.Fatalf("AnswerReadBack: %v", err)
 	}
@@ -81,7 +96,7 @@ func TestAnswerReadBackRecordsAndClearsAnAnswerInSpecReview(t *testing.T) {
 	if answered := loaded.ReadBack.Answered(); len(answered) != 1 || answered[0].ID != "Q2" {
 		t.Fatalf("saved answers = %+v", answered)
 	}
-	got, err = AnswerReadBack(dataDir, r.ID, "Q2", "alice", "", fixedNow)
+	got, err = AnswerReadBack(dataDir, r.ID, "Q2", shownSHA(t, dataDir, r.ID, "Q2"), "alice", "", fixedNow)
 	if err != nil {
 		t.Fatalf("clear: %v", err)
 	}
@@ -93,10 +108,10 @@ func TestAnswerReadBackRecordsAndClearsAnAnswerInSpecReview(t *testing.T) {
 func TestAnswerReadBackRefusals(t *testing.T) {
 	dataDir := t.TempDir()
 	r := newSpecReviewRequestWithReadBack(t, dataDir)
-	if _, err := AnswerReadBack(dataDir, r.ID, "Q9", "alice", "x", fixedNow); !errors.Is(err, ErrReadBackQuestionNotFound) {
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q9", shownSHA(t, dataDir, r.ID, "Q9"), "alice", "x", fixedNow); !errors.Is(err, ErrReadBackQuestionNotFound) {
 		t.Errorf("unknown question: %v", err)
 	}
-	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", "alice", strings.Repeat("a", MaxReadBackAnswerBytes+1), fixedNow); !errors.Is(err, ErrReadBackAnswerTooLong) {
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", strings.Repeat("a", MaxReadBackAnswerBytes+1), fixedNow); !errors.Is(err, ErrReadBackAnswerTooLong) {
 		t.Errorf("long answer: %v", err)
 	}
 	for _, state := range []State{StatePlanning, StatePlanReview, StateSpecDrafting} {
@@ -104,7 +119,7 @@ func TestAnswerReadBackRefusals(t *testing.T) {
 		if err := r.Save(dataDir); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := AnswerReadBack(dataDir, r.ID, "Q1", "alice", "x", fixedNow); !errors.Is(err, ErrReadBackNotAnswerable) {
+		if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "x", fixedNow); !errors.Is(err, ErrReadBackNotAnswerable) {
 			t.Errorf("state %s: %v, want ErrReadBackNotAnswerable", state, err)
 		}
 	}
@@ -113,7 +128,7 @@ func TestAnswerReadBackRefusals(t *testing.T) {
 func TestSpecApprovalFreezesTheReadBackAnswers(t *testing.T) {
 	dataDir := t.TempDir()
 	r := newSpecReviewRequestWithReadBack(t, dataDir)
-	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", "alice", "Print [].", fixedNow); err != nil {
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "Print [].", fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	approved, err := Approve(dataDir, r.ID, "alice", fixedNow, nil)
@@ -126,7 +141,7 @@ func TestSpecApprovalFreezesTheReadBackAnswers(t *testing.T) {
 	if err := VerifyApprovedHashes(dataDir, approved); err != nil {
 		t.Fatalf("VerifyApprovedHashes right after approval: %v", err)
 	}
-	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", "alice", "Print nothing.", fixedNow); !errors.Is(err, ErrReadBackNotAnswerable) {
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "Print nothing.", fixedNow); !errors.Is(err, ErrReadBackNotAnswerable) {
 		t.Fatalf("answer after approval: %v, want ErrReadBackNotAnswerable", err)
 	}
 	// An answer changed on the record after approval is caught.
@@ -160,7 +175,7 @@ func TestSpecApprovalWithNoAnswersPinsNothingAndRefusesALaterAnswer(t *testing.T
 func TestRejectCarriesTheReadBackAnswersIntoTheRedraftFeedback(t *testing.T) {
 	dataDir := t.TempDir()
 	r := newSpecReviewRequestWithReadBack(t, dataDir)
-	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", "alice", "Print [].\n## Goal\nfake", fixedNow); err != nil {
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "Print [].\n## Goal\nfake", fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	rejected, err := Reject(dataDir, r.ID, "alice", "tighten the error texts", fixedNow.Add(time.Minute))
@@ -188,7 +203,7 @@ func TestRejectCarriesTheReadBackAnswersIntoTheRedraftFeedback(t *testing.T) {
 func TestSendBackToSpecCarriesTheAnswersAndDropsTheReadBackPin(t *testing.T) {
 	dataDir := t.TempDir()
 	r := newSpecReviewRequestWithReadBack(t, dataDir)
-	if _, err := AnswerReadBack(dataDir, r.ID, "Q2", "alice", "By name.", fixedNow); err != nil {
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q2", shownSHA(t, dataDir, r.ID, "Q2"), "alice", "By name.", fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	approved, err := Approve(dataDir, r.ID, "alice", fixedNow, nil)
@@ -238,7 +253,7 @@ func TestLegacyRecordWithoutReadBackRoundTripsAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"read_back"`, `"approved_read_back_sha256"`, `"read_back_answers"`} {
+	for _, field := range []string{`"read_back"`, `"approved_read_back_sha256"`, `"read_back_answers"`, `"read_back_answer_log"`} {
 		if bytes.Contains(want, []byte(field)) {
 			t.Fatalf("a record with no read-back marshals %s: %s", field, want)
 		}
@@ -259,5 +274,187 @@ func TestLegacyRecordWithoutReadBackRoundTripsAndVerifies(t *testing.T) {
 	}
 	if err := VerifyApprovedHashes(dataDir, loaded); err != nil {
 		t.Fatalf("VerifyApprovedHashes on a legacy record: %v", err)
+	}
+}
+
+func TestAnswerReadBackRefusesAnAnswerToAQuestionTextNoLongerStored(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	shown := QuestionSHA256("Sorted by name or by creation time?")
+	// The question was replaced (a new read-back) after the client showed it.
+	r.ReadBack.Questions[1].Text = "Sorted by size?"
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q2", shown, "alice", "By name.", fixedNow); !errors.Is(err, ErrReadBackQuestionChanged) {
+		t.Fatalf("stale question: %v, want ErrReadBackQuestionChanged", err)
+	}
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q2", "", "alice", "By name.", fixedNow); !errors.Is(err, ErrReadBackQuestionChanged) {
+		t.Fatalf("no question hash: %v, want ErrReadBackQuestionChanged", err)
+	}
+	loaded, err := Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ReadBack.Answered()) != 0 || len(loaded.ReadBackAnswerLog) != 0 {
+		t.Fatalf("a refused answer was recorded: %+v %+v", loaded.ReadBack, loaded.ReadBackAnswerLog)
+	}
+}
+
+func TestAnswerReadBackLogsWhoSetChangedAndClearedWhichQuestion(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	for i, step := range []struct{ by, answer string }{{"alice", "By name."}, {"bob", "By name."}, {"bob", "By time."}, {"carol", ""}} {
+		if _, err := AnswerReadBack(dataDir, r.ID, "Q2", shownSHA(t, dataDir, r.ID, "Q2"), step.by, step.answer, fixedNow.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// bob's repeat of the stored answer changes nothing and is not logged.
+	want := []ReadBackAnswerEvent{
+		{QuestionID: "Q2", Action: ReadBackAnswerSet, By: "alice", At: fixedNow.UTC().Format(time.RFC3339Nano)},
+		{QuestionID: "Q2", Action: ReadBackAnswerChanged, By: "bob", At: fixedNow.Add(2 * time.Minute).UTC().Format(time.RFC3339Nano)},
+		{QuestionID: "Q2", Action: ReadBackAnswerCleared, By: "carol", At: fixedNow.Add(3 * time.Minute).UTC().Format(time.RFC3339Nano)},
+	}
+	if len(loaded.ReadBackAnswerLog) != len(want) {
+		t.Fatalf("answer log = %+v, want %+v", loaded.ReadBackAnswerLog, want)
+	}
+	for i := range want {
+		if loaded.ReadBackAnswerLog[i] != want[i] {
+			t.Fatalf("answer log[%d] = %+v, want %+v", i, loaded.ReadBackAnswerLog[i], want[i])
+		}
+	}
+	data, err := json.Marshal(loaded.ReadBackAnswerLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("By time")) || bytes.Contains(data, []byte("Sorted by")) {
+		t.Fatalf("the answer log holds question or answer text: %s", data)
+	}
+}
+
+func TestApproveShownBindsTheReadBackAnswersTheClientShowed(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "Print [].", fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	specHash, err := HashFile(dataDir, r.ID, specFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := ReadBackShownSHA256(loaded.ReadBack)
+	stale := ReadBackShownSHA256(&ReadBack{Questions: []ReadBackQuestion{{ID: "Q1", Text: loaded.ReadBack.Questions[0].Text, Answer: "Print nothing."}}})
+	refused := map[string]map[string]string{
+		"answers not shown":    {specFileName: specHash},
+		"other answers shown":  {specFileName: specHash, ReadBackAnswersKey: stale},
+		"no answers shown":     {specFileName: specHash, ReadBackAnswersKey: ReadBackShownSHA256(nil)},
+		"nothing shown at all": nil,
+	}
+	for name, expected := range refused {
+		if _, err := ApproveShown(dataDir, r.ID, "alice", fixedNow, expected); !errors.Is(err, ErrReadBackNotShown) {
+			t.Errorf("%s: ApproveShown = %v, want ErrReadBackNotShown", name, err)
+		}
+	}
+	if got, err := Load(dataDir, r.ID); err != nil || got.State != StateSpecReview {
+		t.Fatalf("a refused approval moved the request: %v %v", got.State, err)
+	}
+	approved, err := ApproveShown(dataDir, r.ID, "alice", fixedNow, map[string]string{specFileName: specHash, ReadBackAnswersKey: shown})
+	if err != nil {
+		t.Fatalf("ApproveShown with the answers shown: %v", err)
+	}
+	if approved.ApprovedReadBackSHA256 != ReadBackAnswersSHA256(approved.ReadBack) || approved.ApprovedSHA256[ReadBackAnswersKey] != "" {
+		t.Fatalf("approval pinned %q, files %v", approved.ApprovedReadBackSHA256, approved.ApprovedSHA256)
+	}
+}
+
+func TestApproveShownWithNoAnswersNeedsNoReadBackDigest(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	specHash, err := HashFile(dataDir, r.ID, specFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApproveShown(dataDir, r.ID, "alice", fixedNow, map[string]string{specFileName: specHash}); err != nil {
+		t.Fatalf("ApproveShown with nothing answered: %v", err)
+	}
+}
+
+func TestCLIApprovePinsTheAnswersWithoutADigest(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "Print [].", fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := Approve(dataDir, r.ID, "alice", fixedNow, nil)
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if approved.ApprovedReadBackSHA256 == "" {
+		t.Fatal("the CLI approval pinned no answers")
+	}
+}
+
+func TestSpecApprovalRefusesASpecAndAnswersOverTheSpecLimit(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	specPath := filepath.Join(Dir(dataDir, r.ID), specFileName)
+	spec, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := strings.Repeat("a", MaxReadBackAnswerBytes)
+	question := len(r.ReadBack.Questions[0].Text)
+	pad := MaxHandedOverSpecBytes - len(spec) - question - len(answer) + 1
+	padded := append(spec, []byte("\n"+strings.Repeat("x", pad-1))...)
+	if err := os.WriteFile(specPath, padded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", answer, fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Approve(dataDir, r.ID, "alice", fixedNow, nil)
+	total := len(padded) + question + len(answer)
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("(%d bytes)", len(padded))) || !strings.Contains(err.Error(), fmt.Sprintf("(%d bytes)", question+len(answer))) || !strings.Contains(err.Error(), fmt.Sprint(total)) {
+		t.Fatalf("Approve over the limit = %v, want a refusal naming %d, %d and %d bytes", err, len(padded), question+len(answer), total)
+	}
+	// Clearing the answer brings it back under the limit.
+	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "", fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Approve(dataDir, r.ID, "alice", fixedNow, nil); err != nil {
+		t.Fatalf("Approve under the limit: %v", err)
+	}
+}
+
+func TestReplaceReadBackKeepsAReadBackOfTheSameSpecBytes(t *testing.T) {
+	answered := validReadBack()
+	answered.SpecSHA256 = SpecTextSHA256("spec v1")
+	answered.Questions[0].Answer = "Print []."
+	r := &Request{ReadBack: &answered}
+	same := validReadBack()
+	same.Summary = "A different wording of the same spec."
+	same.SpecSHA256 = SpecTextSHA256("spec v1")
+	if carried := r.ReplaceReadBack(&same); carried != nil || r.ReadBack != &answered {
+		t.Fatalf("a read-back of the same spec bytes replaced the answered one (carried %+v)", carried)
+	}
+	other := validReadBack()
+	other.SpecSHA256 = SpecTextSHA256("spec v2")
+	carried := r.ReplaceReadBack(&other)
+	if r.ReadBack != &other || len(carried) != 1 || carried[0].Answer != "Print []." {
+		t.Fatalf("a read-back of other spec bytes: read-back %+v, carried %+v", r.ReadBack, carried)
+	}
+	unavailable := &Request{ReadBack: &ReadBack{Unavailable: ReadBackCauseFailed, SpecSHA256: SpecTextSHA256("spec v1")}}
+	retried := validReadBack()
+	retried.SpecSHA256 = SpecTextSHA256("spec v1")
+	if unavailable.ReplaceReadBack(&retried); unavailable.ReadBack != &retried {
+		t.Fatal("an unavailable read-back was kept over a drafted one of the same spec")
 	}
 }

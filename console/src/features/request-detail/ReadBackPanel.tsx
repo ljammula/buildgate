@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useApi } from "@/api/ApiProvider";
 import { useAnswerReadBack } from "@/api/requestQueries";
+import { sha256Hex } from "@/domain/contentHash";
 import type { ReadBackQuestion, RequestSummary } from "@/domain/request";
 import { getOperatorName } from "@/platform/operatorIdentity";
 import { Button } from "@/ui/Button";
@@ -28,8 +29,19 @@ function byteLength(text: string): number {
  * what it will build and the questions it would otherwise guess at, each
  * with an answer box saved on its own. Model-written text, rendered as text;
  * it decides nothing, and approval never waits on an answer.
+ *
+ * Each box tells `onDraftChanged` whether it holds text not yet saved, so
+ * Approve can warn that the text is not sent. A box starts over from the
+ * stored answer whenever that answer (or the question) changes underneath
+ * it, whoever changed it.
  */
-export function ReadBackPanel({ request }: { readonly request: RequestSummary }) {
+export function ReadBackPanel({
+  request,
+  onDraftChanged,
+}: {
+  readonly request: RequestSummary;
+  readonly onDraftChanged: (questionId: string, unsaved: boolean) => void;
+}) {
   const { canWrite } = useApi();
   if (!hasReadBack(request) || request.readBack === null) return null;
   const { summary, questions } = request.readBack;
@@ -50,7 +62,12 @@ export function ReadBackPanel({ request }: { readonly request: RequestSummary })
           <ol className="flex flex-col gap-4">
             {questions.map((question) => (
               <li key={question.id}>
-                <QuestionAnswer requestId={request.id} question={question} canWrite={canWrite} />
+                <QuestionAnswer
+                  requestId={request.id}
+                  question={question}
+                  canWrite={canWrite}
+                  onDraftChanged={onDraftChanged}
+                />
               </li>
             ))}
           </ol>
@@ -64,15 +81,34 @@ function QuestionAnswer({
   requestId,
   question,
   canWrite,
+  onDraftChanged,
 }: {
   readonly requestId: string;
   readonly question: ReadBackQuestion;
   readonly canWrite: boolean;
+  readonly onDraftChanged: (questionId: string, unsaved: boolean) => void;
 }) {
   const answer = useAnswerReadBack(requestId);
   const [draft, setDraft] = useState(question.answer);
+  // The stored question and answer this box last started from: when either
+  // changes (a save, or someone else's answer), the box starts over from it.
+  const stored = `${question.text}\u0000${question.answer}\u0000${question.answeredAt}`;
+  const [startedFrom, setStartedFrom] = useState(stored);
+  if (startedFrom !== stored) {
+    setStartedFrom(stored);
+    setDraft(question.answer);
+  }
   const tooLong = byteLength(draft.trim()) > maxReadBackAnswerBytes;
   const unchanged = draft.trim() === question.answer;
+  useEffect(() => {
+    onDraftChanged(question.id, !unchanged);
+  }, [onDraftChanged, question.id, unchanged]);
+  useEffect(
+    () => () => {
+      onDraftChanged(question.id, false);
+    },
+    [onDraftChanged, question.id],
+  );
   return (
     <div className="flex flex-col gap-2" data-testid={`read-back-question-${question.id}`}>
       <Field
@@ -102,7 +138,12 @@ function QuestionAnswer({
           size="sm"
           disabled={!canWrite || answer.isPending || unchanged || tooLong}
           onClick={() => {
-            answer.mutate({ questionId: question.id, answer: draft, by: getOperatorName() });
+            answer.mutate({
+              questionId: question.id,
+              questionSha256: sha256Hex(question.text),
+              answer: draft,
+              by: getOperatorName(),
+            });
           }}
         >
           {draft.trim() === "" && question.answer !== "" ? "Clear answer" : "Save answer"}

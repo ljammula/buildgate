@@ -163,7 +163,7 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	if target == SendBackToSpec {
 		// The redraft drafts a new read-back; the answers given to the old
 		// one reach it through this rejection's feedback.
-		rejection.ReadBackAnswers = takeReadBackAnswers(r)
+		rejection.ReadBackAnswers = r.ReplaceReadBack(nil)
 	}
 	r.Rejections = append(r.Rejections, rejection)
 	r.DraftHalt = nil

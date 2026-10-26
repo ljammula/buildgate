@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
-import type { RequestSummary } from "@/domain/request";
+import type { ReadBack, RequestSummary } from "@/domain/request";
 
 // SHA-256 comes from a pure-JS implementation, not Web Crypto: crypto.subtle
 // exists only in secure contexts, and a console served over plain HTTP on a
@@ -40,10 +40,36 @@ export function oracleExpectedSha256(shown: Record<string, string>): Record<stri
 }
 
 /**
+ * The pseudo-path a spec approval sends the read-back answers' digest under,
+ * beside the file hashes (internal/request.ReadBackAnswersKey).
+ */
+export const readBackAnswersKey = "read-back/answers";
+
+/**
+ * The digest of the read-back answers the console shows
+ * (internal/request.ReadBackShownSHA256): per answered question, in order,
+ * its id, the UTF-8 byte length of its text, the text, the byte length of
+ * its answer and the answer, each followed by a newline. No read-back, or no
+ * answer, is the digest of no bytes.
+ */
+export function readBackAnswersSha256(readBack: ReadBack | null): string {
+  const encoder = new TextEncoder();
+  let text = "";
+  for (const question of readBack?.questions ?? []) {
+    if (question.answer === "") continue;
+    const textBytes = encoder.encode(question.text).length;
+    const answerBytes = encoder.encode(question.answer).length;
+    text += `${question.id}\n${textBytes}\n${question.text}\n${answerBytes}\n${question.answer}\n`;
+  }
+  return sha256Hex(text);
+}
+
+/**
  * The `expected_sha256` map to send with an approve call for `request`,
  * binding approval to the artifact shown -- keyed exactly the way
  * internal/request.Approve's own relPaths are: "spec.md" for a spec_review
- * approval, "tickets/NNN.spec.md" per ticket for a plan_review one. Empty
+ * approval (with the read-back answers shown, under readBackAnswersKey),
+ * "tickets/NNN.spec.md" per ticket for a plan_review one. Empty
  * for any other state (nothing to bind -- Approve itself refuses those
  * regardless).
  *
@@ -55,7 +81,10 @@ export function oracleExpectedSha256(shown: Record<string, string>): Record<stri
 export function expectedSha256For(request: RequestSummary): Record<string, string> {
   switch (request.state) {
     case "spec_review":
-      return { "spec.md": sha256Hex(request.spec) };
+      return {
+        "spec.md": sha256Hex(request.spec),
+        [readBackAnswersKey]: readBackAnswersSha256(request.readBack),
+      };
     case "plan_review": {
       const hashes: Record<string, string> = {};
       for (const ticket of request.tickets) {
