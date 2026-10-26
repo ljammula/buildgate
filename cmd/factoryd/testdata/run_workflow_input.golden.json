@@ -42,6 +42,19 @@
   "max_rounds": 7,
   "no_commit_oracles": true,
   "project_config_commit_sha": "<BASE_SHA>",
+  "recheck_reproductions": [
+    {
+      "finding": 0,
+      "host_path": "<DATA_DIR>/runs/golden-quarantined/review-repro/0/held_test.go",
+      "path": "held_test.go",
+      "runner": "go-test-json",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "spec_line": 3,
+      "test_ids": [
+        "TestHeld"
+      ]
+    }
+  ],
   "reference_oracle_dir": "<INPUTS>/oracle",
   "reference_oracle_in_loop_retry": true,
   "reference_oracle_mount_path": "verify",
@@ -149,6 +162,9 @@
     "worker_model_extra_json": "{\"reasoning\":true}",
     "worker_model_id": "reviewer-model-id"
   },
+  "review_reproduction": true,
+  "review_spec_path": "<DATA_DIR>/runs/<RUN_ID>/approved-spec.snapshot.md",
+  "review_spec_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
   "review_thinking": "high",
   "run_id": "<RUN_ID>",
   "sandbox_docker": "<TESTDATA>/fake_docker.sh",

@@ -71,6 +71,9 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	// A retired review step pending in a history recorded before
 	// reviewReproductionChange: this Worker gives it no verdict.
 	ReviewStepRetiredFailureType: unresolved.NoVerdict,
+	// A reviewer's reproduction the factory accepted and could not hold,
+	// check or mount (SC-022): the finding was never judged.
+	ReproductionUnheldFailureType: unresolved.ReproductionUnheld,
 }
 
 // modelRouteFailureTypes is the failure type of each cause
@@ -170,6 +173,7 @@ var nonRetryableActivityFailureTypes = []string{
 	ActivitySupersededType,
 	TemporalUnreachableFailureType,
 	ReviewStepRetiredFailureType,
+	ReproductionUnheldFailureType,
 }
 
 // retriedActivityOptions is options with the retrying policy: the second

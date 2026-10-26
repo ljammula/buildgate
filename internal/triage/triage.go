@@ -153,6 +153,8 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		return triageRequiredContentPresent(r, dataDir)
 	case "tests_added":
 		return triageTestsAdded(r)
+	case policy.ReviewReproductionCheck:
+		return triageReviewReproduction(r)
 	case "canonical_verify":
 		if g.SetupNotRun() {
 			return "canonical_verify: " + run.SetupNotRunMessage
@@ -460,6 +462,50 @@ func triageCodeReview(r *run.Run, check string) string {
 		return ""
 	}
 	return "code_review: the reviewer gave no verdict"
+}
+
+// maxReproductionNameLen caps a reproduction's path or test ID in a sentence.
+const maxReproductionNameLen = 160
+
+// triageReviewReproduction words a failed review_reproduction check
+// (SC-022): the path of the first reproduction a corrective build's recheck
+// found still failing, else of the first blocking finding's, with one test
+// ID and its failure kind. The path and the ID are the reviewer's, quoted;
+// the reviewer's summary and scenario are never in the sentence.
+func triageReviewReproduction(r *run.Run) string {
+	const where = "; the finding is in the run's review evidence"
+	for _, rc := range r.ReviewReproductionRechecks {
+		if rc.Verdict == "still_failing" {
+			id, kind := rc.FailedTest()
+			return fmt.Sprintf("review_reproduction: %q still fails on the result commit after the corrective build%s%s", reproductionName(rc.Path), testFailure(id, kind), where)
+		}
+	}
+	if r.CodeReview != nil {
+		for _, f := range r.CodeReview.Findings {
+			if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
+				id, kind := f.Reproduction.FailedTest()
+				return fmt.Sprintf("review_reproduction: the factory's run of the reviewer's reproduction %q fails on the result commit%s%s", reproductionName(f.Reproduction.Path), testFailure(id, kind), where)
+			}
+		}
+	}
+	return "review_reproduction: a reviewer's reproduction refused the run" + where
+}
+
+// reproductionName is a reviewer-chosen path or test ID made one bounded line.
+func reproductionName(s string) string {
+	s = sanitize.Line(s)
+	if runes := []rune(s); len(runes) > maxReproductionNameLen {
+		s = string(runes[:maxReproductionNameLen]) + "…"
+	}
+	return s
+}
+
+// testFailure is " (<id> <kind>)", or "" without an ID.
+func testFailure(id, kind string) string {
+	if id == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (%q %s)", reproductionName(id), kind)
 }
 
 // triageLogGate reports the first failure marker found in the failing
@@ -872,6 +918,8 @@ func triageHalt(r *run.Run) string {
 		return factoryDirSentence(r)
 	case string(unresolved.TemporalUnreachable):
 		return temporalUnreachableTriage
+	case string(unresolved.ReproductionUnheld):
+		return "halted after the review: a reviewer's reproduction could not be held or mounted, so its finding was not judged and nothing was refused"
 	case run.HaltReasonOracleNotRunOnBase:
 		return "halted before the build: the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected), so it says nothing about the bug; no model call was made"
 	case run.HaltReasonOraclePassesOnBase:

@@ -162,7 +162,7 @@ branch, then `factoryd resume <id>` checks again and continues; or
 `factoryd cancel <id>`. A park that interrupted your `factoryd resume` of a
 lost build keeps that build: the next `factoryd resume` continues it.
 
-For a lost step, the reason names one of eleven causes (`resume.cause` in the
+For a lost step, the reason names one of twelve causes (`resume.cause` in the
 request's `request.json`). The four that say a model was not served, or a review
 gave no verdict, are read from the spend meter's record of the step's model
 requests, never from what the worker printed:
@@ -180,6 +180,7 @@ requests, never from what the worker printed:
 | "the spend meter refused the model requests ..." | `meter_denied` | Raise the ceiling, window budget or request rate in the session config (or wait out a budget's window; `factoryd cost` shows the spend), then `factoryd restart` |
 | "the model route served none of the last requests ..." | `model_unavailable` | Check the route (`factoryd doctor`). A review whose model served nothing was already launched once more by the factory |
 | "the review of the ... step gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
+| "the factory could not hold or mount the reviewer's reproduction for the ... step" | `reproduction_unheld` | Read the run's halt reason: the held copy under the run's `review-repro/` changed, or its read-only mount was refused; nothing was refused on the work |
 
 `done`, `closed` and `cancelled` are terminal; `cancel` (`factoryd cancel <id>`) refuses the first two. Full mechanics
 (reminders, ticket sequencing, PR review loop): [USAGE_REFERENCE.md § Request lifecycle](USAGE_REFERENCE.md#request-lifecycle).

@@ -18,6 +18,13 @@ type QueueEntry struct {
 	Project string `json:"project,omitempty"`
 	// SpecPath is the absolute path to the ticket spec.md.
 	SpecPath string `json:"spec_path"`
+	// ReviewSpecPath is the request's approved spec.md (its hash checked
+	// against the approval), forwarded with -review-reproduction as
+	// -review-spec: the review cites it by line and a finding can refuse the
+	// run only through the factory's run of its reproduction (SC-022).
+	// Empty for a request with no approved spec hash, whose review is advice
+	// only.
+	ReviewSpecPath string `json:"review_spec_path,omitempty"`
 	// VerifyCommand is this ticket's canonical verification command,
 	// resolved at submit time from -verify-command or the workspace's
 	// .factory.yml.

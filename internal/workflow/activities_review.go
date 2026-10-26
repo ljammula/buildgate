@@ -280,7 +280,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(relaunchUnserved(relaunchUnstartedOnly(prep.launchContext(ctx))), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(relaunchUnserved(relaunchUnstartedOnly(withReviewSpec(prep.launchContext(ctx), input.RunWorkflowInput))), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, "", "", reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
 	})
 	// Immediately after the launch, before the clean check below: the stubs
 	// a mask over an absent path needed, and the snapshot's scratch.
@@ -291,14 +291,25 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 
 // reviewStepArgs builds the review launch's harness-script argv.
 // input.SpecPath is already unconditionally staged by
-// a.runSandboxWithRetries (specPath) for every review-step launch. The
-// approved spec is not passed yet: no run input carries it, so no spec line
-// can be cited and every finding is advice. input.effectiveDiffBase(), not
+// a.runSandboxWithRetries (specPath) for every review-step launch; the
+// approved spec (input.ReviewSpecPath, a run with -review-spec) is staged
+// beside it by withReviewSpec. Without one no spec line can be cited, so
+// every finding is advice. input.effectiveDiffBase(), not
 // input.BaseSHA: see RunWorkflowInput.DiffBaseSHA's own doc comment -- a
 // corrective round's own BaseSHA is just its checkout point, not the
 // cumulative diff a -diff-base override names for this review to read.
 func reviewStepArgs(input ReviewStepInput, script string) []string {
-	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, "", input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
+	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, input.ReviewSpecPath, input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
+}
+
+// withReviewSpec stages the approved spec (RunWorkflowInput.ReviewSpecPath)
+// beside the ticket's spec for the review launch, which reads it as
+// --approved-spec; ctx unchanged for a run without one.
+func withReviewSpec(ctx context.Context, input RunWorkflowInput) context.Context {
+	if input.ReviewSpecPath == "" {
+		return ctx
+	}
+	return withExtraRunInputs(ctx, input.ReviewSpecPath)
 }
 
 // reviewStepNoRelayError names the review's trigger condition for the
@@ -359,6 +370,14 @@ func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInp
 			if err == nil && !clean {
 				err = fmt.Errorf("%s left the workspace dirty -- refusing to auto-commit reviewer-authored output", step.Label)
 			}
+		}
+	}
+	if runErr == nil && err == nil {
+		// SC-022: the reproductions are held from the clean worktree the
+		// review judged, before the checkpoint records the review.
+		var holdErr error
+		if stepResult.Reproductions, holdErr = a.holdReproductions(ctx, input.RunWorkflowInput); holdErr != nil {
+			return a.failHold(ctx, step.Label, checkpoint, path, stepResult, holdErr)
 		}
 	}
 	errType := launchErrorType(stepErr(ctx, runErr))

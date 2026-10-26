@@ -820,6 +820,28 @@ type ReviewReproduction struct {
 	Reason  string            `json:"reason,omitempty"`  // one line
 }
 
+// FailedTest is the first of the reproduction's test IDs, in order, that
+// failed (an assertion, an error or the timeout) on its last recorded run on
+// the result commit (any pass but the base), and that run's kind for it;
+// "", "" when none did.
+func (rep ReviewReproduction) FailedTest() (id, kind string) {
+	i := len(rep.Runs) - 1
+	for i >= 0 && rep.Runs[i].Pass == "base" {
+		i--
+	}
+	if i < 0 {
+		return "", ""
+	}
+	last := rep.Runs[i]
+	for _, id := range rep.TestIDs {
+		switch k := last.Tests[id]; k {
+		case "fail", "error", "timeout":
+			return id, k
+		}
+	}
+	return "", ""
+}
+
 // ReproductionRun is one launch of a reproduction: which pass, on which
 // commit, and what the runner's report recorded.
 type ReproductionRun struct {
@@ -831,6 +853,62 @@ type ReproductionRun struct {
 	LogPath            string            `json:"log_path,omitempty"`
 	ReportSHA256       string            `json:"report_sha256,omitempty"`
 	ReproductionSHA256 string            `json:"reproduction_sha256,omitempty"`
+}
+
+// The dispositions of a finding (CodeReviewFinding.Disposition), and the
+// verdict of a reproduction the factory held and did not run.
+const (
+	DispositionBlocks         = "blocks"
+	DispositionAdvice         = "advice"
+	ReproductionVerdictNotRun = "not_run"
+	ReviewReproductionDirName = "review-repro"
+	ReproductionPassRecheck   = "recheck"
+)
+
+// ReviewReproductionDir is the directory, in the run directory runDir, that
+// holds the host copies of the run's review reproductions (SC-022): one
+// subdirectory per finding, named by the finding's index, holding the
+// reproduction at its repository path.
+func ReviewReproductionDir(runDir string) string {
+	return filepath.Join(runDir, ReviewReproductionDirName)
+}
+
+// HeldReproduction is the factory's record of one finding's reproduction as
+// the review step held it (SC-022): the finding's index among the review's
+// parsed findings, the repository path, and either the shape rule that
+// refused it (Refused, and nothing is held) or the host copy (HostPath, its
+// SHA-256 taken when it was written), the cited spec line, the test IDs and
+// runner the factory chose, and whether the content holds a backticked
+// literal of the cited line. Never the content.
+type HeldReproduction struct {
+	Finding      int      `json:"finding"`
+	Path         string   `json:"path"`
+	Refused      string   `json:"refused,omitempty"`
+	SHA256       string   `json:"sha256,omitempty"`
+	HostPath     string   `json:"host_path,omitempty"`
+	SpecLine     int      `json:"spec_line,omitempty"`
+	TestIDs      []string `json:"test_ids,omitempty"`
+	Runner       string   `json:"runner,omitempty"`
+	HoldsLiteral bool     `json:"holds_literal,omitempty"`
+}
+
+// FindingReproduction is what the factory decided about one finding's
+// reproduction, keyed by the finding's index as HeldReproduction is; the
+// command that writes the run record copies it onto that finding when the
+// finding there carries the same path.
+type FindingReproduction struct {
+	Finding      int                `json:"finding"`
+	Reproduction ReviewReproduction `json:"reproduction"`
+	Disposition  string             `json:"disposition"`
+}
+
+// RecheckManifest is a corrective build's -recheck-reproductions file: the
+// quarantined run whose review held the reproductions, and each held copy,
+// to run once on the corrective build's result. Every HostPath must be under
+// that run's ReviewReproductionDir.
+type RecheckManifest struct {
+	RunID         string             `json:"run_id"`
+	Reproductions []HeldReproduction `json:"reproductions"`
 }
 
 // CodeReviewResult is the run-record shape of CODE_REVIEW_EVIDENCE.json's
@@ -1689,6 +1767,12 @@ type Run struct {
 	// separate one-turn launch -- see internal/codereview's package doc
 	// comment). Nil for a run that never ran this gate.
 	CodeReview *CodeReviewResult `json:"code_review,omitempty"`
+	// ReviewReproductionRechecks are a corrective build's runs of the
+	// reproductions an earlier run's review held (-recheck-reproductions,
+	// SC-022): one per reproduction, its one run on this run's result
+	// commit, and Verdict "passes" or "still_failing". Nil for every other
+	// run.
+	ReviewReproductionRechecks []ReviewReproduction `json:"review_reproduction_rechecks,omitempty"`
 	// ReferenceOracleDir is the -reference-oracle-dir this run was
 	// configured with, recorded so any finalization site -- including a
 	// reclaimed run, which sees only this record -- can find the oracle's

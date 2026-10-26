@@ -229,3 +229,36 @@ func TestReplayRunAtDefaultVersionRefusesInsteadOfBuilding(t *testing.T) {
 		t.Errorf("Activities started at DefaultVersion: %v", f.started)
 	}
 }
+
+// TestReplayRunReviewSchedulesNoReproduction: a replay run (replayRunChange
+// version 1) reaches the review at reviewReproductionChange version 1 with no
+// ReviewReproduction input, so its review is advice only: a review that held
+// a reproduction launches nothing and records no review_reproduction check.
+func TestReplayRunReviewSchedulesNoReproduction(t *testing.T) {
+	f := newReplayFixture(t)
+	input := replayFixtureInput()
+	input.CodeReviewPolicy = "advisory"
+	f.env.OnGetVersion(replayRunChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.Version(1))
+	f.env.OnGetVersion(reviewReproductionChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.Version(1))
+	f.env.RegisterActivityWithOptions(func(context.Context, ReviewStepInput) (VerifyActivityResult, error) {
+		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "combined_review.py"}, ExitCode: reviewstep.CombinedExitBase}, Reproductions: []run.HeldReproduction{heldFixture()}}, nil
+	}, activity.RegisterOptions{Name: RunReviewStepActivityName})
+	f.env.RegisterActivityWithOptions(func(context.Context, ReproductionRunInput) (ReproductionRunResult, error) {
+		t.Error("a replay run launched a reproduction")
+		return ReproductionRunResult{}, nil
+	}, activity.RegisterOptions{Name: RunReviewReproductionActivityName})
+
+	result, err := f.run(t, input)
+	if err != nil || result.State != run.StateAccepted {
+		t.Fatalf("replay run: err=%v state=%q, want accepted", err, result.State)
+	}
+	if !slices.Contains(f.started, ApplyReplayActivityName) || !slices.Contains(f.started, RunReviewStepActivityName) {
+		t.Errorf("Activities started = %v, want the replay applied and the review run", f.started)
+	}
+	if slices.Contains(f.started, RunReviewReproductionActivityName) || result.ReviewReproductions != nil {
+		t.Errorf("Activities started = %v, findings %+v; want no reproduction", f.started, result.ReviewReproductions)
+	}
+	if _, ok := reproductionGate(result); ok {
+		t.Errorf("gates = %+v, want no review_reproduction check", result.GateResults)
+	}
+}

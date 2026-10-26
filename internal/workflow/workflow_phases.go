@@ -436,6 +436,7 @@ type reviewOutcome struct {
 	ranCodeReview    bool
 	legacy           bool
 	legacyConformity *VerifyActivityResult
+	reproductions    reproductionOutcome
 }
 
 // runReviewSteps runs the review step (planReviewSteps) once every earlier
@@ -457,6 +458,17 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	}
 	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
 	outcome.legacy = legacy
+	// SC-022: only at version 1, and only for a run given
+	// -review-reproduction. A corrective build's recheck runs first, after
+	// the gates and before its own review.
+	outcome.reproductions.ran = !legacy && input.ReviewReproduction
+	if outcome.reproductions.ran {
+		rechecks, err := recheckReproductions(ctx, ids, buildVerifyCtx, input, current, result, worktreePath, branch)
+		if err != nil {
+			return reviewOutcome{}, err
+		}
+		outcome.reproductions.rechecks, result.ReviewReproductionRechecks = rechecks, rechecks
+	}
 	for _, step := range steps {
 		stepResult, err := runOneReviewStep(ctx, ids, buildVerifyCtx, input, current, result, step, worktreePath, branch)
 		if err != nil {
@@ -471,6 +483,13 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		// command, duration and log hash are the launch's own.
 		stepResult.Result.ExitCode = reviewstep.ReviewExitCode(stepResult.Result.ExitCode)
 		outcome.codeReview, outcome.ranCodeReview = stepResult, true
+		if outcome.reproductions.ran {
+			findings, err := reproduceReviewFindings(ctx, ids, buildVerifyCtx, input, current, result, stepResult.Reproductions, worktreePath, branch)
+			if err != nil {
+				return reviewOutcome{}, err
+			}
+			outcome.reproductions.findings, result.ReviewReproductions = findings, findings
+		}
 	}
 	return outcome, nil
 }
@@ -564,6 +583,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		policyInput.FullSuiteLogSHA256 = gates.fullSuite.LogSHA256
 		policyInput.FullSuiteRerun = gates.fullSuite.Rerun
 	}
+	policyInput.ReviewReproduction = reviews.reproductions.policyInput()
 	if reviews.ranCodeReview {
 		policyInput.CodeReviewCommand = reviews.codeReview.Result.Command
 		policyInput.CodeReviewExitCode = reviews.codeReview.Result.ExitCode
@@ -590,7 +610,7 @@ func oracleCommitWanted(input RunWorkflowInput, result *RunWorkflowResult, gates
 	return gates.passedReferenceOracleSHA256 != "" && input.ReferenceOracleDir != "" &&
 		result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed &&
 		(!result.CodeReviewConfigured || (reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0)) &&
-		!legacyConformityBlocksOracleCommit(input, reviews)
+		!legacyConformityBlocksOracleCommit(input, reviews) && !reviews.reproductions.refuses()
 }
 
 // The host commit changed HEAD after every gate ran, so canonical

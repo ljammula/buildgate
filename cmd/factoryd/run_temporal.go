@@ -415,6 +415,10 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		Thinking:                         o.Thinking,
 		ReviewThinking:                   o.ReviewThinking,
 		ReviewRelayPolicy:                o.ReviewRelayPolicy,
+		ReviewReproduction:               o.ReviewReproduction,
+		ReviewSpecPath:                   o.ReviewSpecPath,
+		ReviewSpecSHA256:                 o.ReviewSpecSHA256,
+		RecheckReproductions:             o.RecheckReproductions,
 	}
 }
 

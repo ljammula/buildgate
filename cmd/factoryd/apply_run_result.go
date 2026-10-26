@@ -176,6 +176,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 			}
 		}
 		loadCodeReview(r, dataDir, id)
+		mergeReviewReproductions(r, result.ReviewReproductions, result.ReviewReproductionRechecks)
 	}
 
 	// Outside the attributeWorkspaceEvidence gate above: this reads only

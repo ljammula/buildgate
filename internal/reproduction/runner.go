@@ -71,6 +71,17 @@ func For(p string, root RootFacts) (Runner, bool) {
 	return found, found != nil
 }
 
+// ByID returns the registry's runner whose ID is id: the runner a held
+// reproduction recorded.
+func ByID(id string) (Runner, bool) {
+	for _, r := range runners {
+		if r.ID() == id {
+			return r, true
+		}
+	}
+	return nil, false
+}
+
 // RootFacts holds the root files of the judged commit that select a runner,
 // by name, with their content: the caller reads each of MarkerFiles that the
 // commit holds at its root.

@@ -396,6 +396,9 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	if skillsDir != "" {
 		mounts = append(mounts, sandbox.InputMount{Source: skillsDir, Target: "skills"})
 	}
+	// A reproduction's runner helpers (withInputMounts); nothing for any
+	// other launch.
+	mounts = append(mounts, inputMountsFrom(ctx)...)
 	last := runner.Result{ExitCode: -1}
 	var lastErr error
 	// commandRan: an attempt of this step released its command.

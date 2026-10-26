@@ -102,7 +102,8 @@ func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*
 
 // replayConflicts names the flags set in f that a replay run refuses: a
 // resume, a chain, an earlier attempt, a baseline check, a pull request it
-// would open, the shared repository queue, and a run serve starts.
+// would open, the shared repository queue, a run serve starts, and the
+// review-reproduction inputs (a replay run's review is advice only).
 func replayConflicts(f runFlags) []string {
 	var set []string
 	for _, c := range []struct {
@@ -117,6 +118,9 @@ func replayConflicts(f runFlags) []string {
 		{"-pr-base", *f.prBase != ""},
 		{"-repository", *f.repository != ""},
 		{"-run-id", *f.runID != ""},
+		{"-review-reproduction", *f.reviewReproduction},
+		{"-review-spec", *f.reviewSpec != ""},
+		{"-recheck-reproductions", *f.recheckReproductions != ""},
 	} {
 		if c.on {
 			set = append(set, c.name)
@@ -252,6 +256,9 @@ type runFlags struct {
 	resumeWorktreeOf             *string
 	replay                       *string
 	configPath                   *string
+	reviewReproduction           *bool
+	reviewSpec                   *string
+	recheckReproductions         *string
 }
 
 // newRunFlags builds `factoryd <run>`'s FlagSet in isolation from parsing,
@@ -317,6 +324,9 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.diffBase = flags.String("diff-base", "", "commit the diff checks and pull request evidence measure from, instead of the run's starting commit: a full 40-character id and an ancestor of it. Build and verify still use the branch tip")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts to continue its build. Refused with -repository, -on-branch or -prior-run, or when the worktree was not kept intact")
 	f.replay = flags.String("replay", "", "internal: file naming commits the host replayed onto a new base; the run judges them instead of building")
+	f.reviewReproduction = flags.Bool("review-reproduction", false, "internal: hold the review's reproductions and run them, so a finding can refuse the run (SC-022); a request's ticket build sets it")
+	f.reviewSpec = flags.String("review-spec", "", "internal: the request's approved spec.md, which the review cites by line and the reproduction check compares citations with")
+	f.recheckReproductions = flags.String("recheck-reproductions", "", "internal: manifest of a quarantined run's held reproductions that this corrective build's result must pass")
 	f.configPath = flags.String("config", "", "session config path, or a profile name; empty uses the active profile or the default paths")
 	finishFlags(flags)
 	flags.Usage = func() {
@@ -393,7 +403,13 @@ type ticketRun struct {
 	resumeWorktreeOf             *string
 	// replay is the record -replay names, read and checked by
 	// validateReplayFlags; nil for every run that builds.
-	replay                                *run.Replay
+	replay *run.Replay
+	// reviewSpecSnapshot/reviewSpecSHA256 are -review-spec's snapshot in the
+	// run's directory and its hash; rechecks is -recheck-reproductions,
+	// checked (snapshotReviewInputs).
+	reviewSpecSnapshot                    string
+	reviewSpecSHA256                      string
+	rechecks                              []run.HeldReproduction
 	args                                  []string
 	settings                              sessionconfig.Settings
 	executionHarnessName                  string
@@ -520,6 +536,9 @@ func runMainWithReady(dp *deps, lifecycleCtx context.Context, args []string, onR
 		return err
 	}
 	if err := tr.snapshotSpec(); err != nil {
+		return err
+	}
+	if err := tr.snapshotReviewInputs(); err != nil {
 		return err
 	}
 	if err := tr.checkScope(); err != nil {
@@ -2669,6 +2688,10 @@ func (tr *ticketRun) dispatch() error {
 			Thinking:                 tr.executionThinking,
 			ReviewThinking:           tr.reviewThinking,
 			ReviewRelayPolicy:        reviewRelayPolicy,
+			ReviewReproduction:       *tr.rf.reviewReproduction,
+			ReviewSpecPath:           tr.reviewSpecSnapshot,
+			ReviewSpecSHA256:         tr.reviewSpecSHA256,
+			RecheckReproductions:     tr.rechecks,
 		}
 		if opts.Repository != "" {
 			return runViaRepositoryOwner(tr.dp, tr.lifecycleCtx, temporalClient, tr.r, opts)

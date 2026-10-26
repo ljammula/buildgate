@@ -98,6 +98,7 @@ const stageOrder: readonly string[] = [
   "conformity_review",
   "code_review",
   "review",
+  "review_reproduction",
   "commit_oracles",
   "post_oracle_commit_verify",
   "evaluate",

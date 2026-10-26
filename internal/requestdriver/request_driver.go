@@ -2652,11 +2652,16 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
+	reviewSpec, err := approvedSpecPath(dataDir, r)
+	if err != nil {
+		return nil, err
+	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
 		Project:                r.Project,
 		SpecPath:               specPath,
+		ReviewSpecPath:         reviewSpec,
 		VerifyCommand:          verifyCommand,
 		FullSuiteCommand:       fullSuiteCommand,
 		FullSuiteSource:        fullSuiteSource,
@@ -2703,6 +2708,29 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil
+}
+
+// requestSpecFile is the request's spec, relative to its directory.
+const requestSpecFile = "spec.md"
+
+// approvedSpecPath is the request's spec.md when spec_review approved it by
+// hash: the spec a ticket build's review cites and its reproduction check
+// compares citations with (SC-022). "" for a request with no approved spec
+// hash. A spec whose content no longer matches the approval is an error, so
+// a review never cites an unapproved line.
+func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
+	approved, ok := r.ApprovedSHA256[requestSpecFile]
+	if !ok {
+		return "", nil
+	}
+	current, err := request.HashFile(dataDir, r.ID, requestSpecFile)
+	if err != nil {
+		return "", fmt.Errorf("request %s: hash %s: %w", r.ID, requestSpecFile, err)
+	}
+	if current != approved {
+		return "", fmt.Errorf("request %s: %s has changed since spec_review approved it -- re-approve before continuing", r.ID, requestSpecFile)
+	}
+	return filepath.Join(request.Dir(dataDir, r.ID), requestSpecFile), nil
 }
 
 // requestInstructionBase is the commit a ticket build's reviews read the

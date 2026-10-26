@@ -265,6 +265,11 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}
+	// A request's ticket build holds and runs its review's reproductions
+	// (SC-022); a bare run never gets these flags.
+	if entry.ReviewSpecPath != "" {
+		args = append(args, "-review-reproduction", "-review-spec", entry.ReviewSpecPath)
+	}
 	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
 	// own output (Phase 2) -- both set together or neither (see that
 	// function's own doc comment), so checking one is sufficient. The

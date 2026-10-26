@@ -1,10 +1,14 @@
 package workflow
 
 import (
+	"fmt"
+
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/reproduction"
 	"buildgate/internal/reviewstep"
+	"buildgate/internal/run"
 )
 
 // reviewReproductionChange is the GetVersion change ID under which
@@ -105,4 +109,164 @@ func legacyConformityBlocksOracleCommit(input RunWorkflowInput, reviews reviewOu
 		return false
 	}
 	return reviews.legacyConformity == nil || reviews.legacyConformity.Result.ExitCode != 0
+}
+
+// RunReviewReproductionActivityName runs one held reviewer's reproduction
+// once on one commit (RunReviewReproductionActivity, SC-022).
+const RunReviewReproductionActivityName = "RunReviewReproductionActivity"
+
+// ReproductionUnheldFailureType is the non-retryable ApplicationError type of
+// a reviewer's reproduction the factory accepted and then could not hold: its
+// host copy could not be written, its hash no longer matched before a
+// launch, or the launch refused its read-only mount. It is no verdict on the
+// work (unresolved.ReproductionUnheld): the run halts with its worktree kept.
+const ReproductionUnheldFailureType = "ReproductionUnheld"
+
+// The passes of a reproduction: two launches on the result commit, one on
+// the base commit only after both failed, and a corrective build's recheck.
+const (
+	reproductionPassHead1 = "head1"
+	reproductionPassHead2 = "head2"
+	reproductionPassBase  = "base"
+)
+
+// reproductionOutcome is what the reproduction phase and the recheck found.
+// ran is set when the run took the phase (version 1, ReviewReproduction).
+type reproductionOutcome struct {
+	ran      bool
+	findings []run.FindingReproduction
+	rechecks []run.ReviewReproduction
+}
+
+// policyInput is the review_reproduction check's input, nil when the run did
+// not take the phase.
+func (o reproductionOutcome) policyInput() *policy.ReviewReproductionInput {
+	if !o.ran {
+		return nil
+	}
+	in := &policy.ReviewReproductionInput{}
+	for _, f := range o.findings {
+		in.Decided++
+		if f.Disposition == run.DispositionBlocks {
+			in.Refusing++
+		}
+	}
+	for _, rc := range o.rechecks {
+		in.Decided++
+		if rc.Verdict != string(reproduction.VerdictPasses) {
+			in.Refusing++
+		}
+	}
+	return in
+}
+
+// refuses reports whether any reproduction refuses the run.
+func (o reproductionOutcome) refuses() bool {
+	in := o.policyInput()
+	return in != nil && in.Refusing > 0
+}
+
+// reproductionContext is ctx with the reproduction Activity's options: the
+// build/verify options (heartbeat, retries) with a start-to-close that
+// covers one capped launch, its setup and the scratch worktree.
+func reproductionContext(ctx, buildVerifyCtx temporalworkflow.Context) temporalworkflow.Context {
+	options := temporalworkflow.GetActivityOptions(buildVerifyCtx)
+	options.StartToCloseTimeout = reproductionActivityLimit
+	return temporalworkflow.WithActivityOptions(ctx, options)
+}
+
+// runReproduction launches one pass of a held reproduction
+// (RunReviewReproductionActivity), records its attempts, and returns its run.
+func runReproductionPass(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, held run.HeldReproduction, id, pass, commit, worktreePath, branch string) (ReproductionRunResult, error) {
+	var res ReproductionRunResult
+	in := ReproductionRunInput{RunWorkflowInput: input, Held: held, Pass: pass, Commit: commit}
+	if err := temporalworkflow.ExecuteActivity(ids.withRetries(rctx, id), RunReviewReproductionActivityName, in).Get(ctx, &res); err != nil {
+		return res, wrapActivityFailure("run review reproduction activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	result.Attempts = append(result.Attempts, res.Attempts...)
+	return res, nil
+}
+
+// runResultOf is a recorded run as reproduction.Decide reads it.
+func runResultOf(r run.ReproductionRun) *reproduction.RunResult {
+	out := &reproduction.RunResult{Outcome: reproduction.Outcome(r.Outcome), Tests: make(map[string]reproduction.Kind, len(r.Tests))}
+	for id, k := range r.Tests {
+		out.Tests[id] = reproduction.Kind(k)
+	}
+	return out
+}
+
+// reproduceReviewFindings runs every reproduction the review held: head1,
+// head2 only when head1 failed, and the base (gateBaseCommit) only when both
+// failed; then reproduction.Decide. A refused reproduction is advice with no
+// launch. Activity IDs are repro-<finding>-<pass>.
+func reproduceReviewFindings(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, held []run.HeldReproduction, worktreePath, branch string) ([]run.FindingReproduction, error) {
+	rctx := reproductionContext(ctx, buildVerifyCtx)
+	base, _ := gateBaseCommit(input)
+	var out []run.FindingReproduction
+	for _, h := range held {
+		rep := run.ReviewReproduction{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs, Refused: h.Refused}
+		if h.Refused != "" {
+			rep.Verdict = run.ReproductionVerdictNotRun
+			out = append(out, run.FindingReproduction{Finding: h.Finding, Reproduction: rep, Disposition: run.DispositionAdvice})
+			continue
+		}
+		current.Stage, current.StartedAt = reproductionAttemptKind, temporalworkflow.Now(ctx)
+		evidence := reproduction.Evidence{HoldsLiteral: h.HoldsLiteral}
+		launch := func(pass, commit string) (*reproduction.RunResult, error) {
+			res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-%d-%s", h.Finding, pass), pass, commit, worktreePath, branch)
+			if err != nil {
+				return nil, err
+			}
+			rep.Runs = append(rep.Runs, res.Run)
+			return runResultOf(res.Run), nil
+		}
+		var err error
+		if evidence.Head1, err = launch(reproductionPassHead1, result.ResultSHA); err != nil {
+			return nil, err
+		}
+		if evidence.Head1.Outcome == reproduction.OutcomeFailed {
+			if evidence.Head2, err = launch(reproductionPassHead2, result.ResultSHA); err != nil {
+				return nil, err
+			}
+		}
+		if evidence.Head2 != nil && evidence.Head2.Outcome == reproduction.OutcomeFailed && base != "" {
+			if evidence.Base, err = launch(reproductionPassBase, base); err != nil {
+				return nil, err
+			}
+		}
+		d := reproduction.Decide(evidence)
+		rep.Verdict, rep.Reason = string(d.Verdict), d.Reason
+		disposition := run.DispositionAdvice
+		if d.Verdict == reproduction.VerdictBlocks {
+			disposition = run.DispositionBlocks
+		}
+		out = append(out, run.FindingReproduction{Finding: h.Finding, Reproduction: rep, Disposition: disposition})
+	}
+	return out, nil
+}
+
+// recheckReproductions runs each of input.RecheckReproductions once on the
+// run's result commit (Activity ID repro-recheck-<k>) and judges it with
+// reproduction.Recheck: anything but a pass on every test ID, a result
+// commit that holds the path included, is still failing.
+func recheckReproductions(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) ([]run.ReviewReproduction, error) {
+	rctx := reproductionContext(ctx, buildVerifyCtx)
+	var out []run.ReviewReproduction
+	for k, h := range input.RecheckReproductions {
+		current.Stage, current.StartedAt = reproductionAttemptKind, temporalworkflow.Now(ctx)
+		res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-recheck-%d", k), run.ReproductionPassRecheck, result.ResultSHA, worktreePath, branch)
+		if err != nil {
+			return nil, err
+		}
+		rep := run.ReviewReproduction{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs, Runs: []run.ReproductionRun{res.Run}}
+		var ran *reproduction.RunResult
+		if !res.PathInCommit && res.Run.Outcome != "" {
+			ran = runResultOf(res.Run)
+		}
+		d := reproduction.Recheck(ran, h.TestIDs, res.PathInCommit)
+		rep.Verdict, rep.Reason = string(d.Verdict), d.Reason
+		out = append(out, rep)
+	}
+	return out, nil
 }

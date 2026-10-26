@@ -2,10 +2,13 @@ package requestdriver_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1021,5 +1024,40 @@ func TestRestackPushesOnlyAResultOnTheReplayedHead(t *testing.T) {
 		if f.r.State != request.StatePRReview || !f.did("push "+onTop) || f.r.Tickets[1].PRHeadRunID() != "req-1-002-restack1-x" {
 			t.Errorf("state %s (%s), events %v: want the result on the replayed head pushed", f.r.State, f.r.Error, f.events)
 		}
+	}
+}
+
+// A replay run's review is advice only (SC-022 scope): even for a request
+// whose approved spec would give its ticket builds -review-reproduction and
+// -review-spec, the replay run gets neither, and the run path refuses either
+// beside -replay.
+func TestReplayRunCarriesNoReviewReproduction(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	approved := filepath.Join(request.Dir(f.dataDir, f.r.ID), "spec.md")
+	body := []byte("# Spec\n\n- `Parse` returns a map.\n")
+	if err := os.WriteFile(approved, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	if f.r.ApprovedSHA256 == nil {
+		f.r.ApprovedSHA256 = map[string]string{}
+	}
+	f.r.ApprovedSHA256["spec.md"] = hex.EncodeToString(sum[:])
+	f.save()
+	build, err := requestdriver.BuildRequestBuildArgs(f.dataDir, f.r, f.r.Tickets[1], f.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(build, "-review-reproduction") {
+		t.Fatalf("a ticket build of this request = %v, want -review-reproduction (the fixture must approve the spec)", build)
+	}
+	f.pass()
+	if len(f.runArgs) != 1 {
+		t.Fatalf("replay runs = %d, want 1 (events %v)", len(f.runArgs), f.events)
+	}
+	args := f.runArgs[0]
+	checkReplayRunArgs(t, args)
+	if slices.Contains(args, "-review-reproduction") || slices.Contains(args, "-review-spec") || slices.Contains(args, "-recheck-reproductions") {
+		t.Errorf("replay run args = %v, want no review-reproduction input", args)
 	}
 }

@@ -31,7 +31,7 @@ func TestDecideBlocksOnlyOnTwoHeadFailures(t *testing.T) {
 		{"error then timeout", fails(KindError), fails(KindTimeout), VerdictBlocks},
 	}
 	for _, c := range cases {
-		d := Decide(Evidence{SpecText: citedLiteral, Content: []byte("x"), Head1: c.head1, Head2: c.head2, Base: base})
+		d := Decide(Evidence{HoldsLiteral: CitesLiteral(citedLiteral, []byte("x")), Head1: c.head1, Head2: c.head2, Base: base})
 		if d.Verdict != c.want || d.Reason == "" {
 			t.Errorf("%s: %+v, want %s", c.name, d, c.want)
 		}
@@ -64,7 +64,7 @@ func TestDecideSameBaseFailureIsAdviceUnlessLiteral(t *testing.T) {
 		{"same failure, literal differs by a byte", fails(KindFail), []byte("Parse(\"a=2\")"), "- `Parse(\"a=1\")` returns.", VerdictAdvice},
 	}
 	for _, c := range cases {
-		d := Decide(Evidence{SpecText: c.spec, Content: c.content, Head1: fails(KindFail), Head2: fails(KindFail), Base: c.base})
+		d := Decide(Evidence{HoldsLiteral: CitesLiteral(c.spec, c.content), Head1: fails(KindFail), Head2: fails(KindFail), Base: c.base})
 		if d.Verdict != c.want {
 			t.Errorf("%s: %+v, want %s", c.name, d, c.want)
 		}
@@ -74,11 +74,11 @@ func TestDecideSameBaseFailureIsAdviceUnlessLiteral(t *testing.T) {
 func TestDecideSameBaseNeedsEveryFailingIDTheSame(t *testing.T) {
 	two := res(OutcomeFailed, map[string]Kind{"TestA": KindFail, "TestB": KindFail})
 	base := res(OutcomeFailed, map[string]Kind{"TestA": KindFail, "TestB": KindPass})
-	d := Decide(Evidence{SpecText: "- plain line", Head1: two, Head2: two, Base: base})
+	d := Decide(Evidence{Head1: two, Head2: two, Base: base})
 	if d.Verdict != VerdictBlocks || len(d.TestIDs) != 2 {
 		t.Errorf("one ID that passes on the base: %+v, want blocks on both IDs", d)
 	}
-	d = Decide(Evidence{SpecText: "- plain line", Head1: two, Head2: two, Base: two})
+	d = Decide(Evidence{Head1: two, Head2: two, Base: two})
 	if d.Verdict != VerdictAdvice {
 		t.Errorf("both IDs fail the same on the base: %+v, want advice", d)
 	}

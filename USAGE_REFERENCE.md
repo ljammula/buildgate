@@ -1169,8 +1169,9 @@ attempt's `exit_code` is 40 for a verdict; any other value is no verdict),
 which sends the request to `resume_review` rather than quarantining it.
 Findings reach the PR body under a `## Code review` section, sanitized, `high`
 first and capped at 20. A finding blocks a run only through a reproduction
-the factory runs itself (SC-022 in `safety-contract.md`); that reproduction
-step is not built yet. An answer without a parseable verdict is asked for
+the factory runs itself (SC-022 in `safety-contract.md`), and only on a
+request's ticket build: a bare `factoryd -ticket` run's review is advice
+only, whatever it finds. An answer without a parseable verdict is asked for
 again once at most, in the same sandbox, told nothing of the first and
 unable to read its transcript; the two calls share the 20 minutes one call
 gets, and the second is skipped when under 5 minutes are left. The evidence
@@ -1179,6 +1180,32 @@ nothing was. A call that failed is not made again in the sandbox: the factory
 launches the review once more when the spend meter's record shows its model
 served nothing, and a review that still gave no verdict leaves the request in
 `resume_review`.
+
+A request's ticket build runs the reviewer's reproductions (the
+`review_reproduction` check, progress stage `review_reproduction`, attempt
+kind `review_reproduction`):
+
+| Step | What the factory does |
+|---|---|
+| Hold | After the review, each finding's reproduction is checked against the shape rules: it cites a line of the request's approved `spec.md` byte for byte, its path is new in the judged commit (case-folded), matches `test_patterns`, is not an instruction path, under `.factory/` or protected, and a runner applies (`go test -json`, pytest, vitest, Maven Surefire, minitest), with 1 to 20 tests. An accepted one is copied once, read-only, to the run's `review-repro/<finding>/<path>` and its SHA-256 recorded; a refused one is advice, its rule recorded on the finding |
+| Run | Each held copy runs in a scratch worktree of the result commit, never the run's own, launched as a gate (the run's image, setup commands, `.factory/`, registry proxy and compose services, no model route), mounted read-only after its hash is checked, under the runner's own command and per-test timeout of 60 s. It runs twice on the result, the second time only after a failure, then once on the commit the ticket started from only after two failures |
+| Decide | It blocks when some of its tests failed on both result launches and, on the base, it does not compile or does not fail the same way (same test, same kind); failing the same way blocks only when the cited line's backticked literal is in the reproduction. Everything else is advice: a pass, a compile or collection error, a missing report, one failure, an unknown base |
+| Gate | `review_reproduction` fails when any finding blocks. The finding records each run (pass, commit, outcome, each test's kind, report hash), the verdict and the reason, and its disposition (`blocks` or `advice`) |
+
+The `review_reproduction` triage sentence names the reproduction's path and
+one failing test with its kind, for example ``review_reproduction: the
+factory's run of the reviewer's reproduction "p/repro_test.go" fails on the
+result commit ("TestRepro" fail); the finding is in the run's review
+evidence``. The handoff a later build reads lists each blocking finding as
+one line under `## Reproduced review findings` (severity, summary, the cited
+spec line, the path, the test and its kind), never the reproduction's
+content or the reviewer's failure scenario. A corrective build handed an
+earlier run's held copies runs each once on its own result, after
+the gates and before its review: anything but a pass on every test, a result
+commit that holds the path included, is still failing and fails
+`review_reproduction`. A copy that cannot be held, no longer matches its hash
+before a launch, or whose mount is refused halts the run with the unresolved
+cause `reproduction_unheld`.
 
 | Restriction | Why |
 |---|---|

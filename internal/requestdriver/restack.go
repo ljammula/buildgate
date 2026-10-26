@@ -572,7 +572,10 @@ func runReplay(dp Deps, ctx context.Context, dataDir string, r *request.Request,
 	if err != nil {
 		return "", roundOutcome{}, err
 	}
-	entry.IssueRef, entry.PRBase = "", ""
+	// A replay run's review is advice only: it holds and runs no
+	// reproduction (no -review-reproduction or -review-spec), since a replay
+	// cannot take a corrective build.
+	entry.IssueRef, entry.PRBase, entry.ReviewSpecPath = "", "", ""
 	replayCfg := cfg
 	replayCfg.OpenPullRequest = false
 	args := append(BuildTicketRunArgs(dataDir, entry, replayCfg), "-on-branch", rs.Branch, "-diff-base", rs.OntoSHA, "-replay", file)

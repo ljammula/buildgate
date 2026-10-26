@@ -114,6 +114,11 @@ type Document struct {
 	// ReviewFindings are the code reviewer's, present when code_review
 	// failed.
 	ReviewFindings []run.CodeReviewFinding `json:"review_findings,omitempty"`
+	// ReproducedFindings are the review findings whose reproduction the
+	// factory ran and saw block the run (SC-022), present when
+	// review_reproduction failed: each one line, never the reproduction's
+	// content or the reviewer's failure scenario (SC-018).
+	ReproducedFindings []ReproducedFinding `json:"reproduced_findings,omitempty"`
 	// AgentNotes are the build agent's own notes for whoever attempts the
 	// ticket next: its view, not the factory's record. They never decide
 	// Next or a bin, and Markdown puts them last (SC-018).
@@ -200,11 +205,49 @@ func Build(r *run.Run, dataDir string) Document {
 			})
 		}
 	}
+	if failed[policy.ReviewReproductionCheck] {
+		doc.ReproducedFindings = reproducedFindings(r)
+	}
 	doc.Next = Next(r.State == run.StateHalted, doc.Checks)
 	if text, ok := evidence.ReadRetainedAgentNotes(runDir); ok {
 		doc.AgentNotes = parseNotes(text)
 	}
 	return doc
+}
+
+// ReproducedFinding is one blocking finding as a later build is told it:
+// the reviewer's severity and summary, the spec line it cited, the
+// reproduction's path, and one test ID with the failure kind the factory's
+// run recorded for it. Every string is cleaned.
+type ReproducedFinding struct {
+	Severity string `json:"severity"`
+	Summary  string `json:"summary"`
+	SpecLine int    `json:"spec_line,omitempty"`
+	Path     string `json:"path"`
+	TestID   string `json:"test_id,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+}
+
+// reproducedFindings lists the run's blocking findings, at most
+// maxReviewItems.
+func reproducedFindings(r *run.Run) []ReproducedFinding {
+	if r.CodeReview == nil {
+		return nil
+	}
+	var out []ReproducedFinding
+	for _, f := range r.CodeReview.Findings {
+		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil || len(out) == maxReviewItems {
+			continue
+		}
+		rf := ReproducedFinding{Severity: clean(f.Severity, maxWordLen), Summary: clean(f.Summary, maxSentenceLen), Path: clean(f.Reproduction.Path, maxNameLen)}
+		if f.SpecLine != nil {
+			rf.SpecLine = f.SpecLine.Number
+		}
+		id, kind := f.Reproduction.FailedTest()
+		rf.TestID, rf.Kind = clean(id, maxNameLen), clean(kind, maxWordLen)
+		out = append(out, rf)
+	}
+	return out
 }
 
 // oomSentence is what a later build is told of a step whose worker Docker
@@ -495,6 +538,13 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
+	if len(d.ReproducedFindings) > 0 {
+		b.WriteString("## Reproduced review findings\n\n")
+		for _, f := range d.ReproducedFindings {
+			b.WriteString(f.line())
+		}
+		b.WriteString("\n")
+	}
 	if len(d.Rounds) > 0 {
 		b.WriteString("## Build rounds\n\n")
 		for _, r := range d.Rounds {
@@ -536,6 +586,20 @@ func (d Document) Markdown() string {
 		out = strings.ToValidUTF8(out[:cut], "") + "\n\n(The rest of this record was cut to fit.)\n"
 	}
 	return out
+}
+
+// line is the finding's one list line: the reviewer's words quoted, the
+// factory's in the sentence.
+func (f ReproducedFinding) line() string {
+	cited := ""
+	if f.SpecLine > 0 {
+		cited = fmt.Sprintf(" (spec line %d)", f.SpecLine)
+	}
+	failure := ""
+	if f.TestID != "" {
+		failure = fmt.Sprintf(": %s %s", quote(f.TestID), f.Kind)
+	}
+	return fmt.Sprintf("- %s %s%s: the factory's run of `%s` failed on the result%s\n", quote(f.Severity), quote(f.Summary), cited, f.Path, failure)
 }
 
 const maxFilesInLine = 12

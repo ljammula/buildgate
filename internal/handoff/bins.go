@@ -50,6 +50,9 @@ var bins = map[string]Bin{
 	"required_files_changed":   BinCorrective,
 	"required_content_present": BinCorrective,
 	"code_review":              BinCorrective,
+	// A reviewer's finding whose reproduction the factory ran and saw
+	// fail (SC-022): one corrective build is told the finding in one line.
+	policy.ReviewReproductionCheck: BinCorrective,
 
 	policy.ReferenceOracleGateID: BinCorrectiveIfOracleInLoop,
 

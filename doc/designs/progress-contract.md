@@ -59,6 +59,9 @@ the Activities in `internal/workflow/activities_*.go`, via the
 (`detail` = gate name, e.g. `diff_scope`), `evidence`, `review`
 (the one review launch, when `code_review` is enabled; the feeds of older
 runs may instead hold `conformity_review` or `code_review`),
+`review_reproduction` (one `start`/`end` per launch of a reviewer's
+reproduction, SC-022; `detail` = `finding N <pass>`, the pass `head1`,
+`head2`, `base` or `recheck`; `pass` when every test passed),
 `commit_oracles`, `post_oracle_commit_verify`, `evaluate`, `finished`.
 
 A build attempt that resumes after a lost worker also writes one

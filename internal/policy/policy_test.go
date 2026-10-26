@@ -1520,3 +1520,23 @@ func TestTicketTestsAddedFeasibleWithATestDirectory(t *testing.T) {
 		t.Error("patterns lacking the directory should be infeasible")
 	}
 }
+
+// SC-022: the review_reproduction check fails iff a reproduction refuses the
+// run, and is not recorded for a run that took no reproduction phase.
+func TestEvaluateRunReviewReproductionFailsOnlyOnARefusingReproduction(t *testing.T) {
+	base := EvaluateRunInput{VerifyCommand: []string{"make", "verify"}, TestsRequiredOptOut: "not under test"}
+	if got := EvaluateRun(base); !got.Accepted || slices.ContainsFunc(got.GateResults, func(g run.GateResult) bool { return g.Check == ReviewReproductionCheck }) {
+		t.Errorf("no phase: %+v, want accepted with no review_reproduction check", got)
+	}
+	for _, tc := range []struct {
+		in   ReviewReproductionInput
+		want bool
+	}{{ReviewReproductionInput{}, true}, {ReviewReproductionInput{Decided: 3}, true}, {ReviewReproductionInput{Decided: 3, Refusing: 1}, false}} {
+		in := base
+		in.ReviewReproduction = &tc.in
+		got := EvaluateRun(in)
+		if got.Accepted != tc.want || slices.Contains(got.FailedChecks, ReviewReproductionCheck) == tc.want {
+			t.Errorf("%+v: accepted=%v failed=%v, want accepted=%v", tc.in, got.Accepted, got.FailedChecks, tc.want)
+		}
+	}
+}

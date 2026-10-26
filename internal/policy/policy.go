@@ -339,6 +339,33 @@ func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) 
 	}
 }
 
+// ReviewReproductionCheck is the check through which a reviewer's finding
+// refuses a run (SC-022).
+const ReviewReproductionCheck = "review_reproduction"
+
+// ReviewReproductionInput is the factory's runs of the reproductions a
+// review held (SC-022): how many it decided, and how many of those refuse
+// the run (a finding whose reproduction blocks, or, after a corrective build,
+// a held reproduction still failing on its result).
+type ReviewReproductionInput struct {
+	Decided  int
+	Refusing int
+}
+
+// ReviewReproduction evaluates the review_reproduction check: it fails iff
+// any reproduction refuses the run. A finding that is advice never fails it.
+func ReviewReproduction(in ReviewReproductionInput) run.GateResult {
+	exitCode := 0
+	if in.Refusing > 0 {
+		exitCode = 1
+	}
+	return run.GateResult{
+		Check:    "review_reproduction",
+		Passed:   in.Refusing == 0,
+		ExitCode: exitCode,
+	}
+}
+
 // NamedGateInput is one operator-configured named gate beyond the
 // built-in checks above -- lint/security_audit/unit_tests/
 // integration_tests, declared via .factory.yml's lint_command/
@@ -441,6 +468,11 @@ type EvaluateRunInput struct {
 	CodeReviewDurationMs int64
 	CodeReviewLogSHA256  string
 
+	// ReviewReproduction is nil exactly when the run took no reproduction
+	// phase (a run without -review-reproduction, or one that never reached
+	// the review), and EvaluateRun then skips the review_reproduction check.
+	ReviewReproduction *ReviewReproductionInput
+
 	// Oracles is the host-collected committed-oracle evidence (nil for
 	// every run without one). It only ever REMOVES factory-authored,
 	// hash-verified paths from the diff_scope and tests_added inventories
@@ -461,6 +493,16 @@ type EvaluateRunResult struct {
 	DiffScopeViolations    []string
 	MissingRequiredFiles   []string
 	MissingRequiredContent []string
+}
+
+// add records one gate's result, and its check as failed when it did not
+// pass, and reports whether it passed.
+func (r *EvaluateRunResult) add(gate run.GateResult) bool {
+	r.GateResults = append(r.GateResults, gate)
+	if !gate.Passed {
+		r.FailedChecks = append(r.FailedChecks, gate.Check)
+	}
+	return gate.Passed
 }
 
 // EvaluateRun runs every declared gate against input and combines their
@@ -544,12 +586,10 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	}
 
 	if input.CodeReviewCommand != nil {
-		codeReviewGate := CodeReview(input.CodeReviewCommand, input.CodeReviewExitCode, input.CodeReviewDurationMs, input.CodeReviewLogSHA256)
-		result.GateResults = append(result.GateResults, codeReviewGate)
-		if !codeReviewGate.Passed {
-			accepted = false
-			result.FailedChecks = append(result.FailedChecks, codeReviewGate.Check)
-		}
+		accepted = result.add(CodeReview(input.CodeReviewCommand, input.CodeReviewExitCode, input.CodeReviewDurationMs, input.CodeReviewLogSHA256)) && accepted
+	}
+	if input.ReviewReproduction != nil {
+		accepted = result.add(ReviewReproduction(*input.ReviewReproduction)) && accepted
 	}
 
 	result.Accepted = accepted

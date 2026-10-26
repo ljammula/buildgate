@@ -17,16 +17,17 @@ const (
 	VerdictStillFailing Verdict = "still_failing" // a recheck: anything but a pass
 )
 
-// Evidence is what Decide reads: the cited line, the reproduction's content
+// Evidence is what Decide reads: whether the reproduction's content holds a
+// backticked literal of the cited line (CitesLiteral, taken by the caller
+// when it held the content, so the content never travels with the verdict),
 // and the factory's launches of it. A nil launch did not run (the second head
 // launch runs only after a failed first, the base only after two; a run whose
 // base commit is unknown has no base launch).
 type Evidence struct {
-	SpecText string
-	Content  []byte
-	Head1    *RunResult
-	Head2    *RunResult
-	Base     *RunResult
+	HoldsLiteral bool
+	Head1        *RunResult
+	Head2        *RunResult
+	Base         *RunResult
 }
 
 // Decision is a verdict, a fixed one-line reason, and the IDs it rests on.
@@ -69,7 +70,7 @@ func Decide(e Evidence) Decision {
 	if !sameOnBase(failing, e) {
 		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails on the result commit and not the same way on the base", TestIDs: failing}
 	}
-	if citesLiteral(e.SpecText, e.Content) {
+	if e.HoldsLiteral {
 		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails the same way on the base and holds the cited line's literal", TestIDs: failing}
 	}
 	return Decision{Verdict: VerdictAdvice, Reason: "the reproduction fails the same way on the base", TestIDs: failing}
@@ -101,9 +102,9 @@ func sameOnBase(failing []string, e Evidence) bool {
 
 var backticked = regexp.MustCompile("`([^`]+)`")
 
-// citesLiteral reports whether a backticked literal of the cited line
+// CitesLiteral reports whether a backticked literal of the cited line
 // appears byte-for-byte in the content.
-func citesLiteral(line string, content []byte) bool {
+func CitesLiteral(line string, content []byte) bool {
 	for _, m := range backticked.FindAllStringSubmatch(line, -1) {
 		if bytes.Contains(content, []byte(m[1])) {
 			return true

@@ -431,6 +431,33 @@
       }
     ]
   },
+  "review_reproduction_rechecks": [
+    {
+      "path": "every-field path",
+      "sha256": "every-field sha256",
+      "runner": "every-field runner",
+      "test_ids": [
+        "every-field test_ids"
+      ],
+      "refused": "every-field refused",
+      "runs": [
+        {
+          "pass": "every-field pass",
+          "commit": "every-field commit",
+          "outcome": "every-field outcome",
+          "tests": {
+            "every-field key": "every-field tests"
+          },
+          "exit_code": 3,
+          "log_path": "every-field log_path",
+          "report_sha256": "every-field report_sha256",
+          "reproduction_sha256": "every-field reproduction_sha256"
+        }
+      ],
+      "verdict": "every-field verdict",
+      "reason": "every-field reason"
+    }
+  ],
   "reference_oracle_dir": "every-field reference_oracle_dir",
   "oracles_not_committed_by_request": true,
   "oracle_covered_criteria": [
