@@ -346,9 +346,8 @@ request: a plan handed over before the upgrade has no recorded criteria to
 compare, so planning does not stop on a criteria change, and a plan already at
 `plan_review` carries no PR budget and no budget note. Planning that runs
 after the upgrade uses `pr_budget_lines` as the session config then holds it.
-A handed-over spec sent back from `spec_review` gets a read-back with its
-redraft; the answers reach the planner, the oracle drafter and the
-spec-conformity reviewer, not the ticket's build input. To give a request the
+Such a request gets no read-back, not even on a redraft, since its answers
+would never reach a build. To give a request the
 new shape, `factoryd cancel <id>` and submit it again.
 
 **What `quickstart` does**, and the manual command for each step:
