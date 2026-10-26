@@ -2392,6 +2392,72 @@ func TestPRReviewRoundAfterAnAcceptedRecheckStillRechecks(t *testing.T) {
 	}
 }
 
+// TestPRReviewRoundAfterAnOverrideDropsTheOverriddenReproduction (SC-022):
+// the ticket's build, refused by a reproduction and accepted by an
+// operator's override, is followed by a PR round that does not run that
+// reproduction again (the override is the human's decision on it), and
+// still rechecks another reproduction the build carried and passed.
+func TestPRReviewRoundAfterAnOverrideDropsTheOverriddenReproduction(t *testing.T) {
+	dp := newFakeDeps(t)
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	approveRequestSpec(t, dataDir, r)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+
+	// The build's own blocking finding (the one overridden), and the
+	// reproduction an earlier run held, which the build rechecked and passed.
+	head, err := run.Load(dataDir, r.Tickets[0].PRHeadRunID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := requestdrivertest.ReproductionRefusedOn(t, dataDir, head.ID, "", "", "")
+	refused.CodeReview.Findings[0].Reproduction.Path = "internal/sum/overridden_repro_test.go"
+	passed := requestdrivertest.AfterRecheck(t, dataDir, "scratch", "run-origin", "", "", "", "passes")
+	requestdrivertest.ReproductionRefusedOn(t, dataDir, "run-origin", "", "", "")
+	head.State, head.CodeReview, head.GateResults = run.StateQuarantined, refused.CodeReview, refused.GateResults
+	head.ReviewReproductionRechecks = passed.ReviewReproductionRechecks
+	if err := head.ApplyOverride("alice", "the finding tests behaviour the spec does not ask for", run.StateAccepted, func() string { return time.Now().UTC().Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := head.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	var argvs [][]string
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		argvs = append(argvs, args)
+		return (&run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(argvs) != 1 {
+		t.Fatalf("builds = %d, want the round", len(argvs))
+	}
+	m := readRecheckManifest(t, argvs[0])
+	if want := requestdrivertest.HeldEntry(t, dataDir, "run-origin"); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
+		t.Errorf("the round's manifest = %+v, want only the carried reproduction %+v, not the overridden one", m.Reproductions, want)
+	}
+	if requestdrivertest.HasFlag(argvs[0], "-earlier-attempt") {
+		t.Errorf("the round is given a record of an accepted run: %v", argvs[0])
+	}
+
+	// With nothing else carried, the override ends the recheck: the round
+	// runs with none, and is not refused.
+	head.ReviewReproductionRechecks = nil
+	if err := head.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets[0].Rounds = nil
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(argvs) != 2 || requestdrivertest.HasFlag(argvs[1], "-recheck-reproductions") {
+		t.Errorf("builds = %d, last %v; want a round with no recheck", len(argvs), argvs[len(argvs)-1])
+	}
+}
+
 // TestPRReviewRoundBlocksOnlyOnAReproducedFinding (SC-022): a PR-review
 // round's own review refuses an attempt only through a reproduction the
 // factory ran. An attempt a reproduction refused gets a fix attempt, told

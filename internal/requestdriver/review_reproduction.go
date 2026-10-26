@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"buildgate/internal/evidence"
@@ -35,56 +36,98 @@ func needsRecheck(previous *run.Run) bool {
 // previous is given: every recheck previous was given or ran (the entry,
 // under the review-repro directory of the run that held it), and each of
 // previous's own blocking findings' held copies, without repeats (by hash
-// and path). Each entry's file is on disk with the hash recorded for it. An
-// error says why none can be made when needsRecheck(previous) and an entry
-// cannot be found again, or nothing is left to run.
+// and path), less those an operator's override of previous ended
+// (overriddenReproductions). Each entry's file is on disk with the hash
+// recorded for it. An error says why none can be made when
+// needsRecheck(previous) and an entry cannot be found again, or nothing is
+// left to run; a manifest the override emptied is returned empty, with no
+// error.
 func recheckManifestFor(dataDir string, previous *run.Run) (run.RecheckManifest, error) {
 	var m run.RecheckManifest
 	seen := map[string]bool{}
 	add := func(e run.RecheckEntry) {
-		if key := e.SHA256 + " " + e.Path; !seen[key] {
+		if key := recheckKey(e.Path, e.SHA256); !seen[key] {
 			seen[key] = true
 			m.Reproductions = append(m.Reproductions, e)
 		}
 	}
-	entries, err := carriedRechecks(dataDir, previous)
+	overridden := overriddenReproductions(previous)
+	entries, err := carriedRechecks(dataDir, previous, overridden)
 	if err != nil {
 		return run.RecheckManifest{}, err
 	}
-	own, err := blockingCopies(dataDir, previous)
+	own, err := blockingCopies(dataDir, previous, overridden)
 	if err != nil {
 		return run.RecheckManifest{}, err
 	}
 	for _, e := range append(entries, own...) {
 		add(e)
 	}
-	if len(m.Reproductions) == 0 {
+	if len(m.Reproductions) == 0 && len(overridden) == 0 {
 		return run.RecheckManifest{}, fmt.Errorf("run %s holds no reviewer reproduction to run again", previous.ID)
 	}
 	return m, nil
 }
 
+// recheckKey is what tells two reproductions apart in a manifest: the
+// repository path and the hash of the copy.
+func recheckKey(path, sha256 string) string { return sha256 + " " + path }
+
+// overriddenReproductions are the reproductions an operator's override ended
+// (by recheckKey): when r was accepted by an override (run.Run.Overrides),
+// every reproduction that refused it, its blocking findings and the rechecks
+// it ran that did not pass. The override is the human's decision on them, so
+// no later build in the chain runs them again; the rechecks r passed, and
+// those it was given and never ran, are carried on. Nil for any other run.
+func overriddenReproductions(r *run.Run) map[string]bool {
+	if r.State != run.StateAccepted || !slices.ContainsFunc(r.Overrides, func(o run.Override) bool { return o.NewState == run.StateAccepted }) {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, rc := range r.ReviewReproductionRechecks {
+		if rc.Verdict != reproductionPasses {
+			out[recheckKey(rc.Path, rc.SHA256)] = true
+		}
+	}
+	if r.CodeReview != nil {
+		for _, f := range r.CodeReview.Findings {
+			if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
+				out[recheckKey(f.Reproduction.Path, f.Reproduction.SHA256)] = true
+			}
+		}
+	}
+	return out
+}
+
 // carriedRechecks are the recheck entries r was given and those it ran,
-// each with its held copy on disk with its hash.
-func carriedRechecks(dataDir string, r *run.Run) ([]run.RecheckEntry, error) {
+// except those in overridden, each with its held copy on disk with its hash.
+func carriedRechecks(dataDir string, r *run.Run, overridden map[string]bool) ([]run.RecheckEntry, error) {
 	entries := append([]run.RecheckEntry(nil), r.ReviewReproductionRechecksGiven...)
 	for i, rc := range r.ReviewReproductionRechecks {
+		if overridden[recheckKey(rc.Path, rc.SHA256)] {
+			continue
+		}
 		if rc.Recheck == nil {
 			return nil, fmt.Errorf("run %s's recheck %d names no held copy", r.ID, i)
 		}
 		entries = append(entries, *rc.Recheck)
 	}
+	var out []run.RecheckEntry
 	for _, e := range entries {
+		if overridden[recheckKey(e.Path, e.SHA256)] {
+			continue
+		}
 		if !heldCopyOnDisk(dataDir, e) {
 			return nil, fmt.Errorf("run %s's recheck of %s has no held copy on disk with its hash", r.ID, e.Path)
 		}
+		out = append(out, e)
 	}
-	return entries, nil
+	return out, nil
 }
 
-// blockingCopies is the recheck entry of each of r's blocking findings: its
-// held copy under r's own review-repro directory.
-func blockingCopies(dataDir string, r *run.Run) ([]run.RecheckEntry, error) {
+// blockingCopies is the recheck entry of each of r's blocking findings not
+// in overridden: its held copy under r's own review-repro directory.
+func blockingCopies(dataDir string, r *run.Run, overridden map[string]bool) ([]run.RecheckEntry, error) {
 	if r.CodeReview == nil {
 		return nil, nil
 	}
@@ -94,7 +137,7 @@ func blockingCopies(dataDir string, r *run.Run) ([]run.RecheckEntry, error) {
 	}
 	var out []run.RecheckEntry
 	for i, f := range r.CodeReview.Findings {
-		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil {
+		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil || overridden[recheckKey(f.Reproduction.Path, f.Reproduction.SHA256)] {
 			continue
 		}
 		e, ok := heldBlockingCopy(r.ID, dir, i, f)
@@ -218,6 +261,10 @@ func withRecheck(dataDir, dir string, previous *run.Run, args []string) ([]strin
 	m, err := recheckManifestFor(dataDir, previous)
 	if err != nil {
 		return args, fmt.Errorf("%w: %w", errNoRecheck, err)
+	}
+	if len(m.Reproductions) == 0 {
+		// An operator's override ended every one (overriddenReproductions).
+		return args, nil
 	}
 	if !hasFlag(args, "-review-reproduction") {
 		return args, fmt.Errorf("%w: run %s needs its reviewer reproductions run again and the build runs none", errNoRecheck, previous.ID)

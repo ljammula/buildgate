@@ -520,7 +520,9 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   scenario or the reproduction) and rechecks its held copies, and those that
   attempt was given to recheck, also when its recheck still failed. A round
   after an accepted one rechecks what the pull request's head run rechecked,
-  so a later round cannot undo a fix a reproduction proved. With a copy gone
+  so a later round cannot undo a fix a reproduction proved. A reproduction
+  that refused a run `factoryd override` accepted is not rechecked again in
+  any later build: the override is the decision on it. With a copy gone
   or changed the round is not built: the request halts with the reason. The
   reply posted on the thread quotes the same lines.
 - No new threads, still a draft, checks passing, no unresolved thread
