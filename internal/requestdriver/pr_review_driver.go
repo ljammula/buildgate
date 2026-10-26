@@ -1212,19 +1212,13 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if loadID == "" {
 		loadID = ticketID
 	}
+	// What refused the attempt goes on the ticket's list, which the next
+	// attempt rechecks, written to the request on disk at once, so a worker
+	// that stops between attempts does not lose it.
+	noteRunRefusals(dataDir, r, ticket.Index, loadID)
 	ended, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
 	if loadErr != nil {
 		return roundAttempt{}, loadErr
-	}
-	// Before a fix attempt follows it: what refused it is on the ticket's
-	// list, which the next attempt rechecks. Saved now, so a worker that
-	// stops between attempts does not lose it; a save the store refuses (a
-	// request cancelled meanwhile) leaves the round to end as it would.
-	if rec, err := run.Load(dataDir, loadID); err == nil {
-		noteReproductionRefusals(dataDir, ticket, rec)
-		if err := r.Save(dataDir); err != nil {
-			log.Printf("request %s: ticket %d: save the ticket's reproductions: %v", r.ID, ticket.Index, err)
-		}
 	}
 	return roundAttempt{runID: loadID, roundOutcome: ended}, nil
 }

@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/missingdep","Action":"build-output","Output":"# example.com/repro/p\n"}
+{"ImportPath":"example.com/missingdep","Action":"build-output","Output":"p/repro_test.go:6:2: example.com/missingdep: read: connection reset by peer\n"}
+{"ImportPath":"example.com/missingdep","Action":"build-fail"}
+{"Time":"2026-10-26T17:47:21.435645413Z","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-26T17:47:21.435749313Z","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [setup failed]\n"}
+{"Time":"2026-10-26T17:47:21.435830195Z","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/missingdep"}

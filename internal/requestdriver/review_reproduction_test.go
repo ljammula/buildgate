@@ -126,7 +126,7 @@ func TestReviewReproductionCorrectiveRoundAccepted(t *testing.T) {
 // list: for the quarantined run's blocking finding, its held copy under that
 // run's review-repro directory, with the hash, runner, test IDs and cited
 // line the run recorded. A held copy that is gone or no longer matches its
-// hash gives no corrective build: the request halts (HaltReproductionUnheld)
+// hash gives no corrective build: the request halts (HaltRecheckUnheld)
 // with the operator's way out.
 func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 	dp := newFakeDeps(t)
@@ -176,7 +176,7 @@ func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 			if !handled || err != nil || *calls != 0 {
 				t.Errorf("handled=%v err=%v calls=%d, want the request halted and no corrective build", handled, err, *calls)
 			}
-			if r.State != request.StateHalted || r.HaltKind != request.HaltReproductionUnheld || !r.Tickets[0].Reproductions[0].Unheld || !strings.Contains(r.Error, "factoryd retry "+id) {
+			if r.State != request.StateHalted || r.HaltKind != request.HaltRecheckUnheld || !r.Tickets[0].Reproductions[0].Unheld || !strings.Contains(r.Error, "factoryd retry "+id) {
 				t.Errorf("state %s kind %q error %q list %+v; want halted with the unheld kind, the entry marked and the retry named", r.State, r.HaltKind, r.Error, r.Tickets[0].Reproductions)
 			}
 		})
@@ -523,7 +523,7 @@ func TestARetryWithTheHeldCopyGoneIsRefused(t *testing.T) {
 		t.Fatalf("builds = %d, want no build after the retry", len(builds))
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
-	if loaded.State != request.StateHalted || loaded.HaltKind != request.HaltReproductionUnheld || !strings.Contains(loaded.Error, "not built without a recheck") || !strings.Contains(loaded.Error, "factoryd retry "+id) {
+	if loaded.State != request.StateHalted || loaded.HaltKind != request.HaltRecheckUnheld || !strings.Contains(loaded.Error, "not built without a recheck") || !strings.Contains(loaded.Error, "factoryd retry "+id) {
 		t.Errorf("State %q, kind %q, Error %q; want halted with the recheck's reason and the operator's way out", loaded.State, loaded.HaltKind, loaded.Error)
 	}
 }

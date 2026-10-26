@@ -167,6 +167,9 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	}
 	r.Rejections = append(r.Rejections, rejection)
 	r.DraftHalt = nil
+	// The tickets go, and their recheck chains end with them: recorded as
+	// dropped, by the operator who sent the request back.
+	r.dropAllReproductions(by, fmt.Sprintf("the request was sent back to %s", stage), now)
 	r.Tickets = nil
 	r.TicketIndex = 0
 	r.TicketCount = 0

@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/missingdep","Action":"build-output","Output":"# example.com/repro/p\n"}
+{"ImportPath":"example.com/missingdep","Action":"build-output","Output":"p/repro_test.go:6:2: unrecognized import path \"example.com/missingdep\": reading https://example.com/missingdep?go-get=1: 404 Not Found\n"}
+{"ImportPath":"example.com/missingdep","Action":"build-fail"}
+{"Time":"2026-10-26T17:47:21.704356015Z","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-26T17:47:21.704513752Z","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [setup failed]\n"}
+{"Time":"2026-10-26T17:47:21.704603324Z","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/missingdep"}

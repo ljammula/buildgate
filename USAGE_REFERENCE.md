@@ -376,7 +376,7 @@ this corrective build too, with what the factory ran and nothing else:
 | Mounted | Nothing more: the build does not see the reproduction |
 | Rechecked | The ticket's list of reproductions (`reproductions` on the ticket in the request record): every reproduction that refused a run of the ticket, each once by path and hash, with the id of the run that holds it (path, SHA-256, runner, test IDs, the host copy under that run's `review-repro/`). Every build of the ticket gets it as a manifest in `rounds/<build>/recheck.json`, checked again by `factoryd` before the build starts (each run a run of the request). The build's workflow runs each copy once on its result, after the gates and before its own review; anything but a pass on every test refuses the build |
 | Still failing | The recheck runs once per automatic build: a round whose recheck still fails is not followed by another, whatever the budget, and the request is quarantined with check `review_reproduction`, its reason the run's triage sentence (``review_reproduction: "<path>" still fails on the result commit after the corrective build ("<test>" <kind>); …``). A new blocking finding in the round's own review is a new refusal: it gets the next round while the budget lasts |
-| No build | A held copy that is gone or no longer matches its hash: no build of the ticket, the request halted with the paths. `factoryd retry <id>` takes those reproductions off the list (recorded on the ticket, under `dropped_reproductions`, with who and why) and builds again |
+| No build | A held copy that is gone or no longer matches its hash: no build of the ticket, the request halted with halt kind `recheck_unheld` and the paths. `factoryd retry <id>` checks each copy again, takes those still missing off the list (recorded on the request, under `dropped_reproductions`, with the ticket, who and why) and builds again. Not the run's unresolved cause `reproduction_unheld`, which halts one run whose copy could not be held or mounted while it ran (see below) |
 
 Every build of the ticket rechecks the list the same way: a retry, a
 `retry -from <N>`, a resume and every PR-review round, also after a recheck
@@ -384,8 +384,21 @@ that still fails and after an accepted or restacked round. The list grows
 only by refusals, each bounded by `review_corrective_rounds` and
 `max_review_rounds`. A reproduction that refused a run `factoryd override`
 accepted is taken off it (recorded under `dropped_reproductions`): the
-override is the decision on it. A restack's replay run holds and runs no
-reproduction, and leaves the list for the round after it.
+override is the decision on it. A send-back to spec or to plan discards the
+tickets and with them their lists: an operator's action that ends the
+chain, each entry recorded under `dropped_reproductions` with who sent it
+back. A restack's replay run holds and runs no reproduction, and leaves the
+list for the round after it. The list is written to the request as soon as
+the run that a reproduction refused ends, whatever the request's state, and
+each build first notes again what refused every run recorded on the ticket;
+one window is left: a worker killed inside a PR-review round, between a fix
+attempt's end and that write, when the attempt's run is not yet on the
+ticket.
+
+| Token | What it is | Way out |
+|---|---|---|
+| `recheck_unheld` | A request's halt kind: a build of the ticket would run without a reproduction on its list whose held copy is gone or changed | `factoryd retry <id>` drops the ones still missing, recorded, and builds again |
+| `reproduction_unheld` | A run's unresolved cause: a copy could not be held, no longer matched its hash before a launch, or its mount was refused during that run | `factoryd resume <id>` or `-from scratch` (resume_review) |
 
 The build agent's own notes for the next attempt (the last section of
 `earlier-attempt.md`, labelled as the agent's unverified view):
@@ -1228,7 +1241,11 @@ included, is still failing and fails `review_reproduction`. Known limits: no
 runner for Gradle, jest, cargo, .NET or PHP (their reproductions are advice);
 a vitest reproduction can set its own per-test timeout; a ticket of a
 multi-ticket request may cite any line of the approved spec; a recheck that
-still fails starts no further automatic build. A copy that cannot be held, no longer matches its hash
+still fails starts no further automatic build; pytest reads any
+`ModuleNotFoundError` as a missing report (advice), a module the reproduction
+names that the commit adds included, while Go's `main module does not
+contain package` (a package of the module the commit does not have) reads as
+a compile error. A copy that cannot be held, no longer matches its hash
 before a launch, or whose mount is refused halts the run with the unresolved
 cause `reproduction_unheld`. A bare `factoryd -ticket` run, a restack's replay
 run and a run with code review off hold and run no reproduction and record no

@@ -122,7 +122,6 @@ func tagRoundByID(dp Deps, dataDir string, r *request.Request, ticket *request.T
 		log.Printf("request %s: ticket %d: round of run %s is not in the ledger: %v", r.ID, ticket.Index, runID, err)
 		return
 	}
-	noteReproductionRefusals(dataDir, ticket, runRecord)
 	tagTicketRound(dp, r, ticket, runRecord, kind, now)
 }
 

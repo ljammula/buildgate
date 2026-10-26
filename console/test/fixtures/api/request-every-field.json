@@ -29,6 +29,26 @@
   "last_ask": "every-field last_ask",
   "ticket_index": 1,
   "ticket_count": 1,
+  "dropped_reproductions": [
+    {
+      "ticket": 3,
+      "run_id": "every-field run_id",
+      "finding": 3,
+      "path": "every-field path",
+      "refused": "every-field refused",
+      "sha256": "every-field sha256",
+      "host_path": "every-field host_path",
+      "spec_line": 3,
+      "test_ids": [
+        "every-field test_ids"
+      ],
+      "runner": "every-field runner",
+      "holds_literal": true,
+      "by": "every-field by",
+      "at": "2026-09-10T09:00:00Z",
+      "why": "every-field why"
+    }
+  ],
   "error": "every-field error",
   "resume": {
     "from_state": "building",
@@ -367,25 +387,6 @@
             "every-field refused_runs"
           ],
           "unheld": true
-        }
-      ],
-      "dropped_reproductions": [
-        {
-          "run_id": "every-field run_id",
-          "finding": 3,
-          "path": "every-field path",
-          "refused": "every-field refused",
-          "sha256": "every-field sha256",
-          "host_path": "every-field host_path",
-          "spec_line": 3,
-          "test_ids": [
-            "every-field test_ids"
-          ],
-          "runner": "every-field runner",
-          "holds_literal": true,
-          "by": "every-field by",
-          "at": "2026-09-10T09:00:00Z",
-          "why": "every-field why"
         }
       ],
       "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",

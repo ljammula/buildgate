@@ -134,8 +134,12 @@ type goReport struct {
 }
 
 // goModuleError is the go command's text for a module it could not resolve
-// or fetch.
-var goModuleError = regexp.MustCompile(`cannot find module providing package|no required module provides package|module lookup disabled|missing go\.sum entry|checksum mismatch|unknown revision|invalid version|dial tcp|reading https?://`)
+// or fetch: a file-anchored line whose message begins "<module>@<version>:",
+// the go command's resolution messages, and the network and TLS errors of a
+// fetch.
+var goModuleError = regexp.MustCompile(`(?m)^\S+\.go:\d+:\d+: \S+@v\S*: ` +
+	`|cannot find module providing package|no required module provides package|module lookup disabled|missing go\.sum entry|checksum mismatch|unknown revision|invalid version|unrecognized import path|verifying module` +
+	`|dial tcp|reading https?://|Get "http|x509:|tls:|proxyconnect|connection reset|TLS handshake timeout`)
 
 // Classify: a build or setup failure is a compile only when the build's
 // output names the reproduction's own file and is no module resolution

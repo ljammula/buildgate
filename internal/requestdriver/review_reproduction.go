@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
@@ -26,39 +25,134 @@ const recheckFileName = "recheck.json"
 // that passed on every test ID on the result (reproduction.VerdictPasses).
 const reproductionPasses = "passes"
 
-// noteReproductionRefusals records on ticket every reproduction that refused
-// runRecord, a run of that ticket (SC-022): each blocking finding's held
-// copy, under runRecord's own review-repro directory, and each recheck it
-// ran that did not pass. It is where the request driver observes a refusal
-// (tagTicketRound, and each attempt of a PR-review round), and the only
-// place a reproduction is added to the ticket's list.
-func noteReproductionRefusals(dataDir string, ticket *request.Ticket, runRecord *run.Run) {
-	if !refusedByAReproduction(runRecord) {
+// noteReproductionRefusals records every reproduction that refused
+// runRecord, a run of ticket index (SC-022), on the ticket's list: on the
+// request on disk at once, whatever its state (recordReproductionRefusals),
+// and in r. It is called where the request driver observes a run's end
+// (noteRunRefusals: a ticket build, a corrective round, each attempt of a
+// PR-review round, and the build-time safety net of ticketRecheck), and is
+// the only way a reproduction is added to the list.
+func noteReproductionRefusals(dataDir string, r *request.Request, index int, runRecord *run.Run) {
+	entries := refusingReproductions(dataDir, runRecord)
+	if len(entries) == 0 {
 		return
 	}
+	if err := recordReproductionRefusals(dataDir, r, index, runRecord.ID, entries); err != nil {
+		log.Printf("request %s: ticket %d: record the reproductions that refused run %s: %v", r.ID, index, runRecord.ID, err)
+	}
+}
+
+// noteRunRefusals is noteReproductionRefusals for the run runID of ticket
+// index, loaded from its record; nothing when runID is "" or its record
+// cannot be read (renoteTicketRuns notes it again before the next build).
+// Every build of a ticket calls it as soon as its runner returns, before
+// anything else is decided about the request.
+func noteRunRefusals(dataDir string, r *request.Request, index int, runID string) {
+	if runID == "" {
+		return
+	}
+	if rec, err := run.Load(dataDir, runID); err == nil {
+		noteReproductionRefusals(dataDir, r, index, rec)
+	}
+}
+
+// refusingReproductions are the reproductions that refused runRecord: each
+// blocking finding's held copy, under runRecord's own review-repro
+// directory, and each recheck it ran that did not pass. None when no
+// reproduction refused it.
+func refusingReproductions(dataDir string, runRecord *run.Run) []run.RecheckEntry {
+	if !refusedByAReproduction(runRecord) {
+		return nil
+	}
+	var out []run.RecheckEntry
 	for _, rc := range runRecord.ReviewReproductionRechecks {
 		if rc.Verdict != reproductionPasses && rc.Recheck != nil {
-			ticket.NoteReproductionRefusal(*rc.Recheck, runRecord.ID)
+			out = append(out, *rc.Recheck)
 		}
 	}
 	if runRecord.CodeReview == nil {
-		return
+		return out
 	}
 	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, runRecord.ID)))
 	if err != nil {
-		log.Printf("ticket %d: run %s: the reproductions that refused it are not recorded: %v", ticket.Index, runRecord.ID, err)
-		return
+		return out
 	}
 	for i, f := range runRecord.CodeReview.Findings {
 		if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
-			ticket.NoteReproductionRefusal(heldBlockingCopy(runRecord.ID, dir, i, f), runRecord.ID)
+			out = append(out, heldBlockingCopy(runRecord.ID, dir, i, f))
+		}
+	}
+	return out
+}
+
+// recordReproductionRefusals adds entries, which refused run runID of ticket
+// index, to that ticket's list on the request on disk, under the request's
+// lock and from its current record, whatever its state (a request that left
+// building while the run ran keeps them too), except a cancelled one; a
+// reproduction already dropped from the ticket (Request.ReproductionDropped)
+// is never added again. r is brought up to the same list, so a later save of
+// r does not undo the write.
+func recordReproductionRefusals(dataDir string, r *request.Request, index int, runID string, entries []run.RecheckEntry) error {
+	unlock, err := request.Lock(dataDir, r.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	current, err := request.Load(dataDir, r.ID)
+	if err != nil {
+		return err
+	}
+	if current.State != request.StateCancelled && index >= 1 && index <= len(current.Tickets) {
+		if noteOn(current, index, runID, entries) {
+			if err := current.Save(dataDir); err != nil {
+				return err
+			}
+		}
+		mergeTicketList(r, index, current)
+	}
+	noteOn(r, index, runID, entries)
+	return nil
+}
+
+// noteOn notes entries, refusing run runID, on ticket index of req, except
+// those dropped from it; it reports whether the list changed.
+func noteOn(req *request.Request, index int, runID string, entries []run.RecheckEntry) bool {
+	if index < 1 || index > len(req.Tickets) {
+		return false
+	}
+	changed := false
+	for _, e := range entries {
+		if !req.ReproductionDropped(index, e) && req.Tickets[index-1].NoteReproductionRefusal(e, runID) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// mergeTicketList brings r's ticket index up to current's: the drops
+// current records (taken off r's list too), then every reproduction and
+// refused run current's list holds.
+func mergeTicketList(r *request.Request, index int, current *request.Request) {
+	if index < 1 || index > len(r.Tickets) {
+		return
+	}
+	for _, d := range current.DroppedReproductions {
+		if !r.ReproductionDropped(d.Ticket, d.RecheckEntry) {
+			r.DroppedReproductions = append(r.DroppedReproductions, d)
+		}
+	}
+	t := &r.Tickets[index-1]
+	t.Reproductions = slices.DeleteFunc(t.Reproductions, func(rp request.TicketReproduction) bool { return r.ReproductionDropped(index, rp.RecheckEntry) })
+	for _, rp := range current.Tickets[index-1].Reproductions {
+		for _, id := range rp.RefusedRuns {
+			noteOn(r, index, id, []run.RecheckEntry{rp.RecheckEntry})
 		}
 	}
 }
 
 // heldBlockingCopy is the recheck entry of finding i's reproduction, held by
 // run runID under dir (its review-repro directory). Whether the copy is
-// there with its hash is checked when a build is given it (heldCopyOnDisk).
+// there with its hash is checked when a build is given it (run.HeldCopyOnDisk).
 func heldBlockingCopy(runID, dir string, i int, f run.CodeReviewFinding) run.RecheckEntry {
 	rep := f.Reproduction
 	held := run.HeldReproduction{Finding: i, Path: rep.Path, SHA256: rep.SHA256, HostPath: filepath.Join(dir, strconv.Itoa(i), filepath.FromSlash(rep.Path)), TestIDs: rep.TestIDs, Runner: rep.Runner}
@@ -74,12 +168,15 @@ func heldBlockingCopy(runID, dir string, i int, f run.CodeReviewFinding) run.Rec
 // It is the one place every build of a ticket that runs reproductions gets
 // its recheck (ticketQueueEntry): the first build, a corrective round, a
 // retry, a retry -from <N>, a resume and every PR-review round attempt.
-// First it drops what an operator's override ended (dropOverridden). A
+// First it notes again what refused any run recorded on the ticket
+// (renoteTicketRuns), then drops what an operator's override ended
+// (dropOverridden). A
 // reproduction whose held copy is gone or no longer matches its hash is
 // marked Unheld and refuses the build (an unheldError, errNoRecheck): no
 // build continues without it.
 func ticketRecheck(dataDir string, r *request.Request, ticket *request.Ticket, buildID string) (string, error) {
-	dropOverridden(dataDir, ticket, time.Now())
+	renoteTicketRuns(dataDir, r, ticket)
+	dropOverridden(dataDir, r, ticket.Index, time.Now())
 	if len(ticket.Reproductions) == 0 {
 		return "", nil
 	}
@@ -87,7 +184,7 @@ func ticketRecheck(dataDir string, r *request.Request, ticket *request.Ticket, b
 	var unheld []string
 	for i := range ticket.Reproductions {
 		rp := &ticket.Reproductions[i]
-		if !heldCopyOnDisk(dataDir, rp.RecheckEntry) {
+		if !run.HeldCopyOnDisk(dataDir, rp.RecheckEntry) {
 			rp.Unheld = true
 			unheld = append(unheld, rp.Path)
 			continue
@@ -100,19 +197,40 @@ func ticketRecheck(dataDir string, r *request.Request, ticket *request.Ticket, b
 	return writeRecheckManifest(filepath.Join(request.Dir(dataDir, r.ID), "rounds", buildID), m)
 }
 
-// dropOverridden takes off ticket's list every reproduction that refused a
-// run an operator's override then accepted (run.Run.Overrides): the
-// override is the human's decision on it. It is the one place an override
-// is observed for the list; each drop is recorded with the override's
-// author.
-func dropOverridden(dataDir string, ticket *request.Ticket, now time.Time) {
-	for _, rp := range slices.Clone(ticket.Reproductions) {
+// renoteTicketRuns notes again (noteReproductionRefusals) what refused each
+// run recorded on ticket: its run and every round's run and earlier
+// attempts. It is the safety net under the notes made where a run's outcome
+// is observed: a run refused but never noted (a worker stopped between the
+// run's end and the note, a request moved out of its state while the run
+// ran) is on the list before the next build. A dropped reproduction is not
+// added again.
+func renoteTicketRuns(dataDir string, r *request.Request, ticket *request.Ticket) {
+	ids := []string{ticket.RunID}
+	for _, rnd := range ticket.Rounds {
+		ids = append(append(ids, rnd.PriorRunIDs...), rnd.RunID)
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			noteRunRefusals(dataDir, r, ticket.Index, id)
+		}
+	}
+}
+
+// dropOverridden takes off ticket index's list every reproduction that
+// refused a run an operator's override then accepted (run.Run.Overrides):
+// the override is the human's decision on it. It is the one place an
+// override is observed for the list; each drop is recorded with the
+// override's author.
+func dropOverridden(dataDir string, r *request.Request, index int, now time.Time) {
+	for _, rp := range slices.Clone(r.Tickets[index-1].Reproductions) {
 		by, runID := overriddenBy(dataDir, rp.RefusedRuns)
 		if by == "" {
 			continue
 		}
 		key := request.ReproductionKey(rp.RecheckEntry)
-		ticket.DropReproductions(func(x request.TicketReproduction) bool { return request.ReproductionKey(x.RecheckEntry) == key }, by,
+		r.DropReproductions(index, func(x request.TicketReproduction) bool { return request.ReproductionKey(x.RecheckEntry) == key }, by,
 			fmt.Sprintf("run %s, which it refused, was accepted by an operator's override", runID), now)
 	}
 }
@@ -132,25 +250,6 @@ func overriddenBy(dataDir string, runIDs []string) (by, runID string) {
 		}
 	}
 	return "", ""
-}
-
-// heldCopyOnDisk reports whether e's host path is a file under its run's
-// review-repro directory in dataDir with the hash e records. factoryd checks
-// every entry again, links included, before the build starts.
-func heldCopyOnDisk(dataDir string, e run.RecheckEntry) bool {
-	if !run.ValidID(e.RunID) || e.SHA256 == "" {
-		return false
-	}
-	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, e.RunID)))
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(dir, e.HostPath)
-	if err != nil || !filepath.IsLocal(rel) {
-		return false
-	}
-	sum, err := evidence.SHA256File(e.HostPath)
-	return err == nil && sum == e.SHA256
 }
 
 // aRecheckStillFails reports whether a recheck r ran is still failing. The
@@ -229,7 +328,7 @@ func (e *unheldError) Error() string {
 func (e *unheldError) Unwrap() error { return errNoRecheck }
 
 // haltWithoutRecheck halts r for err, a refusal to build without a recheck.
-// A held copy that is gone halts with HaltReproductionUnheld, whose reason
+// A held copy that is gone halts with HaltRecheckUnheld, whose reason
 // names the operator's way out: `factoryd retry` drops those reproductions,
 // recorded on the ticket, and builds again.
 func haltWithoutRecheck(dataDir string, r *request.Request, err error, now time.Time) error {
@@ -239,7 +338,7 @@ func haltWithoutRecheck(dataDir string, r *request.Request, err error, now time.
 	}
 	reason := fmt.Sprintf("%v; `factoryd retry %s` drops them (recorded on the ticket) and builds again, or `factoryd cancel %s`", err, r.ID, r.ID)
 	oldState := r.State
-	if err := r.HaltReproductionsUnheld(reason, now); err != nil {
+	if err := r.HaltRechecksUnheld(reason, now); err != nil {
 		return err
 	}
 	log.Printf("request %s: %s -> halted (%s)", r.ID, oldState, reason)

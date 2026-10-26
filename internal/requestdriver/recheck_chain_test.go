@@ -2,6 +2,7 @@ package requestdriver_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
+	"buildgate/internal/unresolved"
 )
 
 // originRun is the run whose review held the reproduction seedTicketList
@@ -244,7 +246,7 @@ func TestAnOverrideTakesTheReproductionOffTheTicketsList(t *testing.T) {
 	if want := requestdrivertest.HeldEntry(t, dataDir, originRun); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
 		t.Errorf("manifest = %+v, want only %+v", m.Reproductions, want)
 	}
-	dropped := r.Tickets[0].DroppedReproductions
+	dropped := r.DroppedReproductions
 	if len(dropped) != 1 || dropped[0].Path != overridden.Path || dropped[0].By != "bob" || !strings.Contains(dropped[0].Why, "o-run") {
 		t.Errorf("dropped = %+v, want the overridden one, by bob, naming o-run", dropped)
 	}
@@ -285,20 +287,224 @@ func TestAMissingHeldCopyHaltsAndARetryDropsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, r.ID)
-	if len(argvs) != 0 || loaded.State != request.StateHalted || loaded.HaltKind != request.HaltReproductionUnheld || !strings.Contains(loaded.Error, "factoryd retry "+r.ID) || !strings.Contains(loaded.NextAction(), "factoryd retry "+r.ID) {
+	if len(argvs) != 0 || loaded.State != request.StateHalted || loaded.HaltKind != request.HaltRecheckUnheld || !strings.Contains(loaded.Error, "factoryd retry "+r.ID) || !strings.Contains(loaded.NextAction(), "factoryd retry "+r.ID) {
 		t.Fatalf("builds %d, state %s kind %q error %q; want halted before any build, naming the retry", len(argvs), loaded.State, loaded.HaltKind, loaded.Error)
 	}
 	retried, err := request.Retry(dataDir, r.ID, "alice", "", time.Now(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(retried.Tickets[0].Reproductions) != 0 || len(retried.Tickets[0].DroppedReproductions) != 1 || retried.Tickets[0].DroppedReproductions[0].By != "alice" || !strings.Contains(retried.Tickets[0].DroppedReproductions[0].Why, "held copy") {
-		t.Fatalf("after the retry: list %+v, dropped %+v; want it dropped by alice", retried.Tickets[0].Reproductions, retried.Tickets[0].DroppedReproductions)
+	if len(retried.Tickets[0].Reproductions) != 0 || len(retried.DroppedReproductions) != 1 || retried.DroppedReproductions[0].By != "alice" || !strings.Contains(retried.DroppedReproductions[0].Why, "held copy") {
+		t.Fatalf("after the retry: list %+v, dropped %+v; want it dropped by alice", retried.Tickets[0].Reproductions, retried.DroppedReproductions)
 	}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, retried, cfg, time.Now().Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if len(argvs) != 1 || requestdrivertest.HasFlag(argvs[0], "-recheck-reproductions") {
 		t.Errorf("builds %v; want the round, with no recheck", argvs)
+	}
+}
+
+// manifestHas reports whether args' -recheck-reproductions manifest holds e.
+func manifestHas(t *testing.T, args []string, e run.RecheckEntry) bool {
+	t.Helper()
+	if !requestdrivertest.HasFlag(args, "-recheck-reproductions") {
+		return false
+	}
+	return slices.ContainsFunc(readRecheckManifest(t, args).Reproductions, func(x run.RecheckEntry) bool { return fmt.Sprint(x) == fmt.Sprint(e) })
+}
+
+// diskListHas reports whether ticket 1's list on disk holds e.
+func diskListHas(t *testing.T, dataDir, id string, e run.RecheckEntry) bool {
+	t.Helper()
+	return slices.ContainsFunc(requestdrivertest.LoadRequest(t, dataDir, id).Tickets[0].Reproductions, func(rp request.TicketReproduction) bool {
+		return request.ReproductionKey(rp.RecheckEntry) == request.ReproductionKey(e)
+	})
+}
+
+// SC-022: what refused a build is on the ticket's list on disk as soon as
+// the build ends, so a worker that stops before the request records the
+// outcome (here, inside the automatic corrective round that follows) loses
+// nothing: the build that resumes the ticket rechecks it.
+func TestARefusalSurvivesAWorkerStoppedInTheCorrectiveRound(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, "factoryd/"+id+"-001", sha40(1), "")
+	ctx, cancel := context.WithCancel(context.Background())
+	orig := requestdriver.ReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+	requestdriver.ReviewCorrectiveRunner = func(rctx context.Context, args []string, onReady func(*run.Run)) error {
+		onReady(&run.Run{ID: requestdrivertest.ArgValue(args, "-ticket")})
+		cancel()
+		return errors.New("context canceled")
+	}
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
+	if err := requestdrivertest.DriveRequests(dp, ctx, dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err == nil {
+		t.Fatal("driveRequests: want the stopped round's error")
+	}
+	e := requestdrivertest.HeldEntry(t, dataDir, id+"-001")
+	if !diskListHas(t, dataDir, id, e) {
+		t.Fatalf("the list on disk after the stop = %+v, want the first build's refusal", requestdrivertest.LoadRequest(t, dataDir, id).Tickets[0].Reproductions)
+	}
+	var builds [][]string
+	next := func(c context.Context, args []string, onReady func(*run.Run)) error {
+		builds = append(builds, args)
+		return requestdrivertest.AcceptingBuildRunner(t, dataDir)(c, args, onReady)
+	}
+	requestdriver.ReviewCorrectiveRunner = next
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), next); err != nil {
+		t.Fatalf("driveRequests after the restart: %v", err)
+	}
+	if len(builds) == 0 || !manifestHas(t, builds[0], e) {
+		t.Errorf("builds after the restart = %v, want the next one to recheck %+v", builds, e)
+	}
+}
+
+// SC-022: a build refused and never noted (the worker stopped between the
+// run's end and the note) is still rechecked by the next build: the build
+// notes again what refused every run recorded on the ticket first.
+func TestARefusalNeverNotedIsRecheckedByTheNextBuild(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	var builds [][]string
+	buildRunner := refusedBuildRunner(t, dataDir, id, &builds)
+	drive := func() {
+		t.Helper()
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+	}
+	drive()
+	// The note never happened.
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	r.Tickets[0].Reproductions = nil
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	drive()
+	if e := requestdrivertest.HeldEntry(t, dataDir, id+"-001"); len(builds) != 2 || !manifestHas(t, builds[1], e) {
+		t.Errorf("builds = %d; want the retry to recheck %+v", len(builds), e)
+	}
+}
+
+// SC-022: a request that left building while its build ran (here, moved to
+// resume_review) keeps what refused the build on the ticket's list.
+func TestARefusalIsNotedWhenTheRequestLeftBuilding(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		onReady(&run.Run{ID: ticket})
+		unlock, err := request.Lock(dataDir, id)
+		if err != nil {
+			return err
+		}
+		cur, err := request.Load(dataDir, id)
+		if err == nil {
+			err = cur.EnterResumeReview(request.StateBuilding, request.LostStep{RunID: ticket, Cause: unresolved.WorkerLost}, time.Now())
+		}
+		if err == nil {
+			err = cur.Save(dataDir)
+		}
+		unlock()
+		if err != nil {
+			return err
+		}
+		rr := requestdrivertest.ReproductionRefusedOn(t, dataDir, ticket, "factoryd/"+ticket, sha40(1), sha40(2))
+		return saveAsBuiltFrom(t, dataDir, id, args, rr)
+	}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
+	if loaded.State != request.StateResumeReview || !diskListHas(t, dataDir, id, requestdrivertest.HeldEntry(t, dataDir, id+"-001")) {
+		t.Errorf("state %s, list %+v; want resume_review with the refusal on the list", loaded.State, loaded.Tickets[0].Reproductions)
+	}
+}
+
+// SC-022: what a retry dropped (a held copy that stayed missing) is not
+// added back by the build-time safety net, though the run it refused is
+// still recorded on the ticket.
+func TestARetryDropIsNotAddedBack(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	var builds [][]string
+	refused := refusedBuildRunner(t, dataDir, id, &builds)
+	drive := func(runner requestdriver.TicketRunner) {
+		t.Helper()
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+	}
+	drive(refused)
+	e := requestdrivertest.HeldEntry(t, dataDir, id+"-001")
+	if err := os.Remove(e.HostPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	drive(refused)
+	if got := requestdrivertest.LoadRequest(t, dataDir, id); len(builds) != 1 || got.HaltKind != request.HaltRecheckUnheld {
+		t.Fatalf("builds %d, halt kind %q; want no build and the unheld halt", len(builds), got.HaltKind)
+	}
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	var after [][]string
+	drive(func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		after = append(after, args)
+		return requestdrivertest.AcceptingBuildRunner(t, dataDir)(ctx, args, onReady)
+	})
+	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
+	if len(after) != 1 || requestdrivertest.HasFlag(after[0], "-recheck-reproductions") || len(loaded.Tickets[0].Reproductions) != 0 || !loaded.ReproductionDropped(1, e) {
+		t.Errorf("builds %v, list %+v, dropped %+v; want a build with no recheck and the drop kept", after, loaded.Tickets[0].Reproductions, loaded.DroppedReproductions)
+	}
+}
+
+// SC-022: what an override dropped is not added back by the build-time
+// safety net, round after round, though the overridden run is still the
+// ticket's run.
+func TestAnOverrideDropIsNotAddedBack(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	approveRequestSpec(t, dataDir, r)
+	head, err := run.Load(dataDir, r.Tickets[0].RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := requestdrivertest.ReproductionRefusedOn(t, dataDir, head.ID, "", head.BaseSHA, head.ResultSHA)
+	refused.Project, refused.RequestID, refused.TicketIndex = head.Project, r.ID, 1
+	if err := refused.ApplyOverride("bob", "not what the spec asks", run.StateAccepted, func() string { return time.Now().UTC().Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := refused.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var argvs [][]string
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
+		argvs = append(argvs, a)
+		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}
+	for i, thread := range []forge.Thread{
+		{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5},
+		{ID: "thread-2", Path: "b.go", Line: 2, Author: "alice", Body: "and this", CommentID: 6},
+	} {
+		stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: []forge.Thread{thread}, ActionableThreads: []forge.Thread{thread}}, nil)
+		if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(time.Duration(i)*2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded := requestdrivertest.LoadRequest(t, dataDir, r.ID)
+	e := requestdrivertest.HeldEntry(t, dataDir, head.ID)
+	if len(argvs) != 2 || requestdrivertest.HasFlag(argvs[0], "-recheck-reproductions") || requestdrivertest.HasFlag(argvs[1], "-recheck-reproductions") || len(loaded.Tickets[0].Reproductions) != 0 || !loaded.ReproductionDropped(1, e) {
+		t.Errorf("builds %d, list %+v, dropped %+v; want two rounds with no recheck and the drop kept", len(argvs), loaded.Tickets[0].Reproductions, loaded.DroppedReproductions)
 	}
 }

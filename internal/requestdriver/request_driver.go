@@ -1010,6 +1010,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// one second after building began -- before the run had even started --
 	// for a build that took four minutes.
 	now = time.Now()
+	// What refused the build goes on the ticket's list (SC-022) at once,
+	// whatever becomes of the request next: every later build rechecks it.
+	noteRunRefusals(dataDir, r, ticket.Index, ticket.RunID)
 	// stillInState: see its own doc comment. Checked once, after runner
 	// above returns (the build itself is the long-running job here), before
 	// any of runErr/runRecord's outcome is persisted below -- a cancel that
@@ -1059,9 +1062,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return fmt.Errorf("load run %q for request %s ticket %d: %w", ticket.RunID, r.ID, idx, err)
 	}
-	// What refused the build goes on the ticket's list (SC-022), which
-	// every later build of the ticket rechecks.
-	noteReproductionRefusals(dataDir, ticket, runRecord)
 	tagTicketRound(dp, r, ticket, runRecord, request.RoundTagBuild, now)
 	// reason prefers the run's own durably recorded HaltError/HaltReasonCode/
 	// gate result (StatusReason), falling back to runErr's text only when
@@ -1539,6 +1539,9 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 			log.Printf("request %s: ticket %d: record corrective run %s: %v", r.ID, ticket.Index, started.ID, err)
 		}
 	})
+	// What refused the round goes on the ticket's list at once, whatever
+	// becomes of the request next.
+	noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
 	// stillInState: see AdvanceBuilding's own identical check and doc
 	// comment. A cancel that lands while this round built must not be
 	// resurrected by the caller's own r.Save calls.

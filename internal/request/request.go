@@ -213,10 +213,6 @@ type Ticket struct {
 	// ticket must pass again (SC-022, -recheck-reproductions): the ticket's
 	// recheck chain, whose only home this is. See TicketReproduction.
 	Reproductions []TicketReproduction `json:"reproductions,omitempty"`
-	// DroppedReproductions are the ones taken off Reproductions, with who
-	// dropped each and why: an operator's override of a run it refused, or a
-	// retry of a request halted because its held copy was gone.
-	DroppedReproductions []DroppedReproduction `json:"dropped_reproductions,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -444,6 +440,12 @@ type Request struct {
 	TicketIndex int      `json:"ticket_index,omitempty"`
 	TicketCount int      `json:"ticket_count,omitempty"`
 	Tickets     []Ticket `json:"tickets,omitempty"`
+	// DroppedReproductions are the reproductions taken off a ticket's list
+	// (Ticket.Reproductions), with the ticket, who dropped each and why: an
+	// operator's override of a run it refused, a retry of a request halted
+	// because its held copy was gone, or a send-back that discarded the
+	// tickets. Kept on the request, so the record outlives the tickets.
+	DroppedReproductions []DroppedReproduction `json:"dropped_reproductions,omitempty"`
 
 	// Error is the reason recorded by Quarantine or Halt. Empty
 	// otherwise.
@@ -1765,7 +1767,7 @@ func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
 	case HaltOracleMaterialize:
 		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
-	case HaltReproductionUnheld:
+	case HaltRecheckUnheld:
 		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is gone (recorded on the ticket) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltGateExpired:
 		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
