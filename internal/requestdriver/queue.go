@@ -19,12 +19,16 @@ type QueueEntry struct {
 	// SpecPath is the absolute path to the ticket spec.md.
 	SpecPath string `json:"spec_path"`
 	// ReviewSpecPath is the request's approved spec.md (its hash checked
-	// against the approval), forwarded with -review-reproduction as
-	// -review-spec: the review cites it by line and a finding can refuse the
-	// run only through the factory's run of its reproduction (SC-022).
-	// Empty for a request with no approved spec hash, whose review is advice
-	// only.
+	// against the approval), forwarded as -review-spec: the review cites it
+	// by line. Empty for a request with no approved spec hash.
 	ReviewSpecPath string `json:"review_spec_path,omitempty"`
+	// ReviewReproduction is forwarded as -review-reproduction: the build
+	// holds and runs its review's reproductions, so a finding can refuse the
+	// run only through the factory's run of one (SC-022). Set only with
+	// ReviewSpecPath, when the session config's review_reproductions is on
+	// or the ticket has reproductions to recheck (reproductionInputs);
+	// otherwise every finding is advice.
+	ReviewReproduction bool `json:"review_reproduction,omitempty"`
 	// RecheckReproductions is the build's -recheck-reproductions manifest,
 	// written from the ticket's list (ticketRecheck); "" when it has none.
 	RecheckReproductions string `json:"recheck_reproductions,omitempty"`

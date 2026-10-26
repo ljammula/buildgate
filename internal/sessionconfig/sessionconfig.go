@@ -230,6 +230,12 @@ type Config struct {
 	// hard limits.
 	PRBudgetLines *int `yaml:"pr_budget_lines,omitempty"`
 
+	// ReviewReproductions is whether a request's ticket build holds and runs
+	// its review's reproductions (SC-022). Default true. False keeps the
+	// review and its approved spec, so every finding is advice and no
+	// review_reproduction check is recorded.
+	ReviewReproductions *bool `yaml:"review_reproductions,omitempty"`
+
 	// AdvanceOn mirrors worker's own -advance-on flag: whether
 	// a request's ticket build advances to the next ticket as soon as a
 	// ticket's run is accepted ("accepted", the default) or only once its
@@ -515,6 +521,11 @@ type Settings struct {
 
 	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
 	PRBudgetLines int
+
+	// ReviewReproductionsOff is set when the config says
+	// review_reproductions: false. Its zero value keeps reproductions on, so
+	// a Settings built without DefaultSettings never turns SC-022's hold off.
+	ReviewReproductionsOff bool
 
 	RegistryProxy                      bool
 	RegistryProxyConfigured            bool
@@ -837,6 +848,10 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	}
 	boolean(&s.ComposeServicesRequireDigest, c.ComposeServicesRequireDigest)
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
+
+	if c.ReviewReproductions != nil {
+		s.ReviewReproductionsOff = !*c.ReviewReproductions
+	}
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)
 	integer(&s.ReleaseMaxFilesChanged, c.ReleaseMaxFilesChanged)
