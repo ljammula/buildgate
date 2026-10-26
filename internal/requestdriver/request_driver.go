@@ -972,6 +972,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// logged like the r.Save below: a failure here never blocks the
 		// build itself, only findOwningRequest's fast path for this run.
 		startedRun.RequestID = r.ID
+		startedRun.TicketIndex = ticket.Index
 		startedRun.EarlierAttemptOf = recordOf
 		if stackBase != "" {
 			startedRun.StackBaseSHA = stackBase
@@ -1144,8 +1145,9 @@ func settlePriorRun(dp Deps, ctx context.Context, dataDir string, r *request.Req
 	// (`factoryd resume`, verb round): check it still can be, then adopt that
 	// worktree. A decision answering an earlier resume_review (a stale
 	// Generation) is no decision at all (PendingResumeVerb). A park kept no
-	// worktree: its resume is an ordinary start, which checks again.
-	if r.PendingResumeVerb() == request.ResumeRound && !r.Resume.Parked() {
+	// worktree, unless it interrupted such a resume (KeepsLostBuild): its
+	// resume is an ordinary start, which checks again.
+	if r.PendingResumeVerb() == request.ResumeRound && r.Resume.KeepsLostBuild() {
 		reasons, err := cfg.Resume.RequestResumeRefusals(ctx, dataDir, cfg.Settings.SandboxDocker, r)
 		if err != nil {
 			// A check that cannot be made (unreadable record, Docker down)
@@ -1723,6 +1725,7 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 		startedRunID = started.ID
 		ticket.RunID = started.ID
 		started.RequestID = r.ID
+		started.TicketIndex = ticket.Index
 		started.EarlierAttemptOf = recordOf
 		started.StackBaseSHA = stackBaseSHA
 		started.Escalated = escalated
@@ -1810,7 +1813,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if argValueOf(args, "-earlier-attempt") != "" {
 			recordOf = current.ID
 		}
-		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, stackBaseOf(dataDir, current), executionEscalation(cfg) != nil)
+		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, run.StackBase(dataDir, current), executionEscalation(cfg) != nil)
 		if stop {
 			return true, err
 		}

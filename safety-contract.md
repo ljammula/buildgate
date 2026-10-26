@@ -1105,12 +1105,15 @@ still open is left as it is, for a person to merge or close.
 An earlier ticket's pull request, which a later ticket's commits sit on, read
 as `CLOSED` with no merge parks the request in `resume_review` instead, with
 a reason and no cause (`pr_review -> resume_review`, below). So does, before
-a later ticket's build starts, an earlier ticket's pull request read as
+a later ticket's build starts, any earlier ticket's pull request read as
 closed, or open with its branch gone from origin (`building -> resume_review`);
-an earlier ticket's open branch at a commit other than its current PR-head
-run's `ResultSHA` leaves the request `building` with no build started, checked
-again on the next pass (`internal/requestdriver/stacked.go`). Nothing was lost
-and nothing kept, so a resume reruns the parked step, which checks again.
+the ticket just before it with an open branch at a commit other than its
+current PR-head run's `ResultSHA` leaves the request `building` with no build
+started, checked again on the next pass and reminded at the reminder interval
+(`internal/requestdriver/stacked.go`). Nothing was lost and nothing kept, so a
+resume reruns the parked step, which checks again; a park that interrupted the
+resume of a lost build keeps that build's run, and the next resume continues
+it after the same precondition checks.
 
 ### Request lifecycle: a lost step waits for a human
 

@@ -24,6 +24,12 @@ const HaltReasonReplayRefused = "replay_refused"
 // review of the run judges HeadSHA against OntoSHA. A run is a replay run
 // exactly when Run.Replay is set.
 type Replay struct {
+	// RequestID and TicketIndex name the request ticket whose runs were
+	// replayed. The run's record takes both from here when it is created
+	// (run.Run.RequestID, TicketIndex), and every run replayed from must
+	// name the same.
+	RequestID   string `json:"request_id"`
+	TicketIndex int    `json:"ticket_index"`
 	// OfRunID is the ticket's current PR-head run, whose commits were
 	// replayed and whose build the run's build attempt is carried from.
 	OfRunID string `json:"of_run_id"`
@@ -82,10 +88,13 @@ func ReadReplayFile(path string) (*Replay, error) {
 	return &r, nil
 }
 
-// Validate checks the record's shape: run ids named, every commit a full
+// Validate checks the record's shape: the request ticket and run ids named, every commit a full
 // object id (ReplayedCommit.validate), at least one commit pair, the last replayed commit HeadSHA, the
 // last original SourceHeadSHA, and OfRunID among SourceRunIDs.
 func (r *Replay) Validate() error {
+	if r.RequestID == "" || r.TicketIndex < 1 {
+		return errors.New("request_id and ticket_index must name the request ticket replayed")
+	}
 	if r.OfRunID == "" || len(r.SourceRunIDs) == 0 || slices.Contains(r.SourceRunIDs, "") {
 		return errors.New("of_run_id and source_run_ids must name runs")
 	}

@@ -244,7 +244,8 @@ request sits in a queue nobody drains.
   (`building*`) names why the request waits instead of running: no worker, a
   job slot, the repository, the model host, a sidecar slot, or the earlier
   ticket's branch not at the commit the next ticket builds on
-  (`stacked_ticket`); `-json` has it as `wait.kind`.
+  (`stacked_ticket`, whose sentence names what the operator does: relay
+  it); `-json` has it as `wait.kind`.
 - Spend: `factoryd cost [-request <id>]`, by role and model.
   On a subscription route (ChatGPT, Copilot) the dollars are an API-price
   estimate, not a bill.

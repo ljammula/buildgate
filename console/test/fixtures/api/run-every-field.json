@@ -33,6 +33,8 @@
   "base_sha": "every-field base_sha",
   "stack_base_sha": "every-field stack_base_sha",
   "replay": {
+    "request_id": "every-field request_id",
+    "ticket_index": 3,
     "of_run_id": "every-field of_run_id",
     "source_run_ids": [
       "every-field source_run_ids"
@@ -362,6 +364,7 @@
   ],
   "prior_run_id": "every-field prior_run_id",
   "request_id": "req-done",
+  "ticket_index": 3,
   "earlier_attempt_of": "every-field earlier_attempt_of",
   "escalated": true,
   "tests_required_opt_out": "every-field tests_required_opt_out",

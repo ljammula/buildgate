@@ -99,6 +99,14 @@ func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requ
 			detail = fmt.Sprintf("%d ticket(s). %s", n, detail)
 		}
 		notice = requestNotice{Ask: "Plan ready for your review", Detail: detail + PlanReviewOracleNote(dataDir, r), Next: approve}
+	case r.State == request.StateBuilding && r.StackedWait != nil:
+		// A stacked ticket waits on the earlier ticket's pull request; the
+		// sentence names what is wrong and what to do (stackHold.wait).
+		notice = requestNotice{
+			Ask:    "A stacked ticket is waiting on the earlier ticket's pull request",
+			Detail: r.StackedWait.On,
+			Next:   fmt.Sprintf("fix what it names; the worker checks again on its own (or `factoryd cancel %s`)", r.ID),
+		}
 	case r.State == request.StateResumeReview && r.Resume.Parked():
 		// Parked: an earlier ticket needs a repair only a person can make;
 		// NextAction names it and the two ways on.

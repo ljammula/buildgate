@@ -229,20 +229,28 @@ leaving earlier tickets' runs/PRs untouched.
 
 Ticket N+1 chains (`-prior-run`) from ticket N's current PR-head run: its
 first build, or its last review round whose push was confirmed. Before the
-build starts the factory reads ticket N's pull request: merged builds; open
-builds only while the branch on origin is at that run's `ResultSHA`, and
-otherwise waits in `building` (`wait.kind` `stacked_ticket`, checked again
-every PR poll interval); closed, or open with its branch gone, parks the
-request (above). A build, retry or resume of ticket N+1 is checked the same
-way. Every run of a stacked ticket records `stack_base_sha`, the earlier
-ticket's tip its commits sit on: a first build its `-prior-run`'s result,
-a round or a continuing build the value of the run it continues.
-Corrective and PR-review rounds build on the ticket's current PR-head run
-and its branch; their `-diff-base` stays the ticket's original base, so the
-gates judge the whole pull request. An approval moves a ticket on (under
-`-advance-on pr_approved`) only when a reviewer's latest review approves
-the pull request's current head commit; an approval of an earlier commit
-does not.
+build starts the factory reads every earlier ticket's pull request: merged
+builds; open builds only while ticket N's branch on origin is at that run's
+`ResultSHA`, and otherwise waits in `building` (`wait.kind`
+`stacked_ticket`, checked again every PR poll interval, reminded every
+`-hitl-reminder-interval` like a review gate); any earlier one closed, or
+open with its branch gone, parks the request (above). The wait's sentence
+names the remedy: for a commit the factory did not make on ticket N's
+branch, move the branch back to the factory's commit, merge ticket N's pull
+request, or cancel; for a read that failed, fix `gh auth status` or git's
+access to origin. A park that interrupts `factoryd resume` of a lost build
+keeps that build: the resume after the repair continues it. A build, retry
+or resume of ticket N+1 is checked the same way. Every run of a stacked
+ticket records `stack_base_sha`, the earlier ticket's tip its commits sit
+on: a first build its `-prior-run`'s result, a replay run the commit it
+replayed onto, a round or a continuing build the value of the run it
+continues. Corrective and PR-review rounds build on the ticket's current
+PR-head run, on the ticket's pull-request branch; their `-diff-base` stays
+the ticket's original base, so the gates judge the whole pull request. An
+approval moves a ticket on (under `-advance-on pr_approved`) only when some
+reviewer's latest opinion (an approval, a change request or a dismissal; a
+comment is none) approves the pull request's current head commit and no
+reviewer's latest opinion approves an earlier commit.
 
 A ticket that quarantines with its failed gates a subset of
 `spec_conformity`/`code_review` (every other gate passed), where at least

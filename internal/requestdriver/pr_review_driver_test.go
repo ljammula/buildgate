@@ -261,7 +261,7 @@ func approvedOnHeadState(head string, checks *bool) forge.ReviewState {
 		ChecksPassing:  checks,
 		HeadSHA:        head,
 		ReviewDecision: forge.ReviewDecisionApproved,
-		LatestReviews:  []forge.Review{{CommitOID: head, State: "APPROVED"}},
+		Reviews:        []forge.Review{{Author: "reviewer", CommitOID: head, State: "APPROVED"}},
 	}
 }
 
@@ -327,7 +327,7 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			// must not advance the ticket while that thread blocks
 			// readiness, the same way it already blocks `gh pr ready`.
 			name: "open not draft checks passing approved BUT an untrusted thread still blocks readiness: not advanced",
-			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), ReviewDecision: forge.ReviewDecisionApproved, LatestReviews: []forge.Review{{CommitOID: requestdrivertest.TicketRunResultSHA(1), State: "APPROVED"}},
+			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), ReviewDecision: forge.ReviewDecisionApproved, Reviews: []forge.Review{{Author: "reviewer", CommitOID: requestdrivertest.TicketRunResultSHA(1), State: "APPROVED"}},
 				BlocksReadyThreads: []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "untrusted-human", Body: "still not fixed", CommentID: 999}}},
 			wantPRState: "",
 			wantRequest: request.StatePRReview,

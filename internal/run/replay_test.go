@@ -11,6 +11,8 @@ func sha(c byte) string { return strings.Repeat(string(c), 40) }
 
 func validReplay() Replay {
 	return Replay{
+		RequestID:     "req-1",
+		TicketIndex:   2,
 		OfRunID:       "req-1-002-review1",
 		SourceRunIDs:  []string{"req-1-002", "req-1-002-review1"},
 		UpstreamSHA:   sha('1'),
@@ -36,6 +38,8 @@ func TestReplayValidate(t *testing.T) {
 		"uppercase commit":       func(r *Replay) { r.Commits[0].Original = strings.ToUpper(sha('a')) },
 		"empty of_run_id":        func(r *Replay) { r.OfRunID = "" },
 		"empty source run id":    func(r *Replay) { r.SourceRunIDs = append(r.SourceRunIDs, "") },
+		"no request":             func(r *Replay) { r.RequestID = "" },
+		"no ticket":              func(r *Replay) { r.TicketIndex = 0 },
 	}
 	ok := validReplay()
 	if err := ok.Validate(); err != nil {
@@ -58,7 +62,7 @@ func TestReplayValidate(t *testing.T) {
 func TestReadReplayFileRefusesUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good.json")
-	body := `{"of_run_id":"r","source_run_ids":["r"],"upstream_sha":"` + sha('1') + `","source_head_sha":"` + sha('2') + `","onto_sha":"` + sha('a') + `","head_sha":"` + sha('b') + `","commits":[{"original":"` + sha('2') + `","replayed":"` + sha('b') + `","original_patch_id":"` + sha('d') + `","replayed_patch_id":"` + sha('d') + `"}]}`
+	body := `{"request_id":"req-1","ticket_index":2,"of_run_id":"r","source_run_ids":["r"],"upstream_sha":"` + sha('1') + `","source_head_sha":"` + sha('2') + `","onto_sha":"` + sha('a') + `","head_sha":"` + sha('b') + `","commits":[{"original":"` + sha('2') + `","replayed":"` + sha('b') + `","original_patch_id":"` + sha('d') + `","replayed_patch_id":"` + sha('d') + `"}]}`
 	if err := os.WriteFile(good, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

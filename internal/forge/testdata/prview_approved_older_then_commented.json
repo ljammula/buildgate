@@ -1,0 +1,45 @@
+{
+  "baseRefName": "main",
+  "headRefOid": "7d61f95304508abe038a49355fdd98d8dab74105",
+  "isDraft": false,
+  "mergedAt": null,
+  "reviewDecision": "APPROVED",
+  "reviews": [
+    {
+      "author": {
+        "login": "reviewer-a"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "commit": {
+        "oid": "ea2fd6b15178c33ea3acf8ac6c50ecdce472f1f9"
+      },
+      "id": "PRR_kwDOexample0001",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "APPROVED",
+      "submittedAt": "2026-10-08T12:35:29Z"
+    },
+    {
+      "author": {
+        "login": "reviewer-a"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "_I recreated the inline comments to fix their location._",
+      "commit": {
+        "oid": "7d61f95304508abe038a49355fdd98d8dab74105"
+      },
+      "id": "PRR_kwDOexample0002",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "COMMENTED",
+      "submittedAt": "2026-10-09T11:18:52Z"
+    }
+  ],
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "conclusion": "SUCCESS"
+    }
+  ]
+}

@@ -79,7 +79,7 @@ func replayOnto(t *testing.T, ws string, source *run.Run, onto, branch string) (
 	scratch := filepath.Join(t.TempDir(), "replay")
 	gitOut(t, ws, "worktree", "add", "-q", "-b", branch, scratch, onto)
 	originals := strings.Fields(gitOut(t, ws, "rev-list", "--reverse", source.BaseSHA+".."+source.ResultSHA))
-	record := run.Replay{OfRunID: source.ID, SourceRunIDs: []string{source.ID}, UpstreamSHA: source.BaseSHA, SourceHeadSHA: source.ResultSHA, OntoSHA: onto}
+	record := run.Replay{RequestID: source.RequestID, TicketIndex: source.TicketIndex, OfRunID: source.ID, SourceRunIDs: []string{source.ID}, UpstreamSHA: source.BaseSHA, SourceHeadSHA: source.ResultSHA, OntoSHA: onto}
 	for _, original := range originals {
 		gitOut(t, scratch, "-c", "user.name=t", "-c", "user.email=t@example.com", "cherry-pick", "--allow-empty", original)
 		replayed := gitOut(t, scratch, "rev-parse", "HEAD")
@@ -120,6 +120,12 @@ func acceptedSource(t *testing.T, ws, dataDir, verify string, env []string, extr
 	if source.State != run.StateAccepted || !source.Sandboxed() {
 		t.Fatalf("source run: state %q, sandboxed %v (%q), want an accepted sandboxed run", source.State, source.Sandboxed(), source.HaltError)
 	}
+	// What the request driver records on a stacked ticket's run: its request
+	// ticket, and the earlier ticket's tip it sits on (here its base).
+	source.RequestID, source.TicketIndex, source.StackBaseSHA = "req-1", 2, source.BaseSHA
+	if err := source.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	return source
 }
 
@@ -149,6 +155,9 @@ func TestIntegrationReplayRunJudgesTheReplayedCommitWithoutABuild(t *testing.T) 
 	}
 	if r.ResultSHA != head || r.DiffBaseSHA != onto || r.Replay == nil || r.Replay.HeadSHA != head {
 		t.Errorf("result %s, diff base %s, replay %+v; want result %s from %s", r.ResultSHA, r.DiffBaseSHA, r.Replay, head, onto)
+	}
+	if r.StackBaseSHA != onto || r.RequestID != "req-1" || r.TicketIndex != 2 {
+		t.Errorf("stack base %s, request %q ticket %d; want the replay's onto %s and its request ticket req-1/2", r.StackBaseSHA, r.RequestID, r.TicketIndex, onto)
 	}
 	if !slices.Equal(r.ChangedFiles, []string{"content.txt"}) {
 		t.Errorf("ChangedFiles = %v, want only the ticket's own content.txt", r.ChangedFiles)

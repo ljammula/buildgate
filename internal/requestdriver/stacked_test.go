@@ -2,7 +2,9 @@ package requestdriver_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
+	"buildgate/internal/unresolved"
 )
 
 func acceptingStackedBuildRunner(t *testing.T, dataDir string, built *[][]string) requestdriver.TicketRunner {
@@ -161,8 +164,13 @@ func TestAdvanceBuildingWaitsWhenEarlierTicketRemoteHeadDiffers(t *testing.T) {
 		t.Fatalf("state=%q index=%d, want building at ticket 2", loaded.State, loaded.TicketIndex)
 	}
 	w := request.WaitFor(loaded, request.WaitFacts{WorkerLive: true})
-	if w == nil || w.Kind != request.WaitStackedTicket || !strings.Contains(w.On, roundID) || !strings.Contains(loaded.NextAction(), "next pass") {
-		t.Fatalf("wait=%+v next action=%q, want a stacked_ticket wait naming %s and the next pass", w, loaded.NextAction(), roundID)
+	if w == nil || w.Kind != request.WaitStackedTicket || !strings.Contains(w.On, roundID) || !strings.Contains(loaded.NextAction(), "every PR poll") {
+		t.Fatalf("wait=%+v next action=%q, want a stacked_ticket wait naming %s and the next check", w, loaded.NextAction(), roundID)
+	}
+	for _, remedy := range []string{"move the branch back to", "--force-with-lease=refs/heads/factoryd/req-1-001:some-direct-push", "merge ticket 1's pull request", "factoryd cancel " + id} {
+		if !strings.Contains(loaded.NextAction(), remedy) {
+			t.Errorf("next action %q does not name the remedy %q", loaded.NextAction(), remedy)
+		}
 	}
 
 	earlierPROpenAt(dp, roundResult)
@@ -345,7 +353,7 @@ func TestApprovalOnOlderCommitDoesNotAdvancePRReview(t *testing.T) {
 		ChecksPassing:  &checks,
 		HeadSHA:        "new-head",
 		ReviewDecision: forge.ReviewDecisionApproved,
-		LatestReviews:  []forge.Review{{CommitOID: "old-head", State: "APPROVED"}},
+		Reviews:        []forge.Review{{Author: "reviewer", CommitOID: "old-head", State: "APPROVED"}},
 	}, nil)
 	called := 0
 	requestdriver.ContinueAfterPRApproval = func(string, *request.Request, time.Time) error {
@@ -404,13 +412,15 @@ func TestClosedUnmergedEarlierTicketParksRequest(t *testing.T) {
 
 // reviewRoundOn runs one PR-review round on ticket 2 of stackedRetargetFixture
 // whose rounds are rounds and whose current PR-head run is head (saved), and
-// returns the round's -on-branch and -diff-base; ran is false when no round
-// build started.
-func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRounds int) (branch, diffBase string, ran bool) {
+// returns the round's -on-branch and -diff-base and the branch its result was
+// pushed to; ran is false when no round build started. Ticket 2's pull
+// request is on factoryd/ticket-2-pr.
+func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRounds int) (branch, diffBase, pushed string, ran bool) {
 	t.Helper()
 	dp := newFakeDeps(t)
 	r, dataDir, _ := stackedRetargetFixture(dp, t)
 	ticket := &r.Tickets[1]
+	ticket.Branch = "factoryd/ticket-2-pr"
 	head.Project, head.State = "widget", run.StateAccepted
 	if err := head.Save(dataDir); err != nil {
 		t.Fatal(err)
@@ -425,7 +435,10 @@ func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRound
 	}
 	dp.remoteBranchHeadSHAFn = func(context.Context, string, string) (string, error) { return head.ResultSHA, nil }
 	dp.roundResultDescendsFromHeadFn = func(string, string, string) (bool, error) { return true, nil }
-	dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return nil }
+	dp.pushExistingBranchFn = func(_ context.Context, _, _, to string) error {
+		pushed = to
+		return nil
+	}
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
 	origRunner := requestdriver.PrReviewCorrectiveRunner
 	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
@@ -439,13 +452,14 @@ func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRound
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: maxRounds}, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
-	return branch, diffBase, ran
+	return branch, diffBase, pushed, ran
 }
 
-// replayHeadRun is an accepted replay run of ticket 2 onto onto.
+// replayHeadRun is an accepted replay run of ticket 2 onto onto, judged on
+// its local restack branch.
 func replayHeadRun(onto string) *run.Run {
 	head := strings.Repeat("c", 40)
-	return &run.Run{ID: "ticket-2-restack1", Branch: "factoryd/ticket-2-pr", BaseSHA: head, ResultSHA: head, DiffBaseSHA: onto, StackBaseSHA: onto, Replay: &run.Replay{OfRunID: "run-2", SourceRunIDs: []string{"run-2"}, OntoSHA: onto, HeadSHA: head}}
+	return &run.Run{ID: "ticket-2-restack1", Branch: "buildgate/req-1/t2-restack1", BaseSHA: head, ResultSHA: head, DiffBaseSHA: onto, StackBaseSHA: onto, Replay: &run.Replay{OfRunID: "run-2", SourceRunIDs: []string{"run-2"}, OntoSHA: onto, HeadSHA: head}}
 }
 
 // TestCurrentPRHeadRunIDFollowsAPushedRestackRound: a restack round becomes
@@ -462,13 +476,17 @@ func TestCurrentPRHeadRunIDFollowsAPushedRestackRound(t *testing.T) {
 }
 
 // TestPRReviewRoundAfterAReplayRunUsesItsOnto: a review round on a ticket
-// whose PR-head run is a replay run builds on that run's branch and measures
-// from the commit the replay is onto.
+// whose PR-head run is a replay run builds on the ticket's pull-request
+// branch, not the replay run's local restack branch, pushes its result
+// there, and measures from the commit the replay is onto.
 func TestPRReviewRoundAfterAReplayRunUsesItsOnto(t *testing.T) {
 	onto := strings.Repeat("a", 40)
-	branch, diffBase, ran := reviewRoundOn(t, replayHeadRun(onto), nil, 3)
+	branch, diffBase, pushed, ran := reviewRoundOn(t, replayHeadRun(onto), nil, 3)
 	if !ran || branch != "factoryd/ticket-2-pr" || diffBase != onto {
 		t.Fatalf("round ran=%v on %q from %q, want factoryd/ticket-2-pr from %s", ran, branch, diffBase, onto)
+	}
+	if pushed != "factoryd/ticket-2-pr" {
+		t.Fatalf("round pushed to %q, want the ticket's pull-request branch factoryd/ticket-2-pr", pushed)
 	}
 }
 
@@ -477,7 +495,192 @@ func TestPRReviewRoundAfterAReplayRunUsesItsOnto(t *testing.T) {
 // runs after two of them.
 func TestRestackRoundsUseNoRoundBudget(t *testing.T) {
 	earlier := []request.Round{{Index: 1, Kind: request.RestackRoundKind, RunID: "ticket-2-restack0", Outcome: request.RoundAccepted, Pushed: true}}
-	if _, _, ran := reviewRoundOn(t, replayHeadRun(strings.Repeat("a", 40)), earlier, 1); !ran {
+	if _, _, _, ran := reviewRoundOn(t, replayHeadRun(strings.Repeat("a", 40)), earlier, 1); !ran {
 		t.Fatal("no review round ran: restack rounds used the review-round budget")
+	}
+}
+
+// TestStackedWaitOnAnUnreadablePRNamesTheRemedy: a pull request gh cannot
+// read is a wait whose sentence says to check gh's login.
+func TestStackedWaitOnAnUnreadablePRNamesTheRemedy(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
+	var built [][]string
+	runner := acceptingStackedBuildRunner(t, dataDir, &built)
+	r := buildFirstTicket(t, dp, dataDir, id, runner)
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{}, errors.New("gh: not logged in")
+	}
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(built) != 1 || r.StackedWait == nil || !strings.Contains(r.NextAction(), "gh auth status") || !strings.Contains(r.NextAction(), "not logged in") {
+		t.Fatalf("built=%d next action=%q, want ticket 2 withheld and the gh remedy named", len(built), r.NextAction())
+	}
+}
+
+// TestStackedWaitRemindsAfterTheReminderInterval: a stacked wait is reminded
+// like a review gate: not when it begins, then once each reminder interval,
+// naming what to fix; a wait that ends drops its reminder state.
+func TestStackedWaitRemindsAfterTheReminderInterval(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
+	var built [][]string
+	runner := acceptingStackedBuildRunner(t, dataDir, &built)
+	r := buildFirstTicket(t, dp, dataDir, id, runner)
+	cfg := stackedCfg
+	cfg.HitlReminderInterval = 15 * time.Minute
+	earlierPROpenAt(dp, "some-direct-push")
+	start := time.Now()
+	for _, step := range []struct {
+		after time.Duration
+		want  int
+	}{{0, 0}, {10 * time.Minute, 0}, {15 * time.Minute, 1}, {20 * time.Minute, 1}, {31 * time.Minute, 2}} {
+		if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, cfg, runner, start.Add(step.after)); err != nil {
+			t.Fatal(err)
+		}
+		if r.NotifyCount != step.want {
+			t.Fatalf("after %s: %d reminder(s), want %d", step.after, r.NotifyCount, step.want)
+		}
+	}
+	if !strings.Contains(r.LastAsk, "stacked ticket") {
+		t.Errorf("last ask = %q, want the stacked-ticket reminder", r.LastAsk)
+	}
+	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, id))
+	if err != nil || !strings.Contains(string(log), "move the branch back") {
+		t.Errorf("notification log = %q, %v; want the reminder to name the remedy", log, err)
+	}
+	first, err := run.Load(dataDir, r.Tickets[0].RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlierPROpenAt(dp, first.ResultSHA)
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, cfg, runner, start.Add(40*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(built) != 2 || r.StackedWait != nil {
+		t.Fatalf("built=%d wait=%+v, want ticket 2 built and the wait over", len(built), r.StackedWait)
+	}
+}
+
+// threeTicketsBuildingTicket3 builds tickets 1 and 2 of a three-ticket
+// request, each pull request open at its own run's commit, and returns the
+// request building ticket 3 and each ticket's pull-request URL's state as
+// the fake reads it (open at its head unless a test changes it).
+func threeTicketsBuildingTicket3(t *testing.T, dp *fakeDeps) (r *request.Request, dataDir string, states map[string]forge.ReviewState, built *[][]string, runner requestdriver.TicketRunner) {
+	t.Helper()
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 3)
+	built = new([][]string)
+	runner = acceptingStackedBuildRunner(t, dataDir, built)
+	states = map[string]forge.ReviewState{}
+	dp.readReviewStateFn = func(_ context.Context, prURL string, _ forge.AuthorPolicy) (forge.ReviewState, error) {
+		if st, ok := states[prURL]; ok {
+			return st, nil
+		}
+		return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil
+	}
+	dp.remoteBranchHeadSHAFn = func(_ context.Context, _, branch string) (string, error) {
+		return "result-" + strings.TrimPrefix(branch, "factoryd/"), nil
+	}
+	r = buildFirstTicket(t, dp, dataDir, id, runner)
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+		t.Fatalf("build ticket 2: %v", err)
+	}
+	if r.TicketIndex != 3 || len(*built) != 2 {
+		t.Fatalf("after ticket 2: index=%d built=%d, want building ticket 3", r.TicketIndex, len(*built))
+	}
+	return r, dataDir, states, built, runner
+}
+
+// TestEveryEarlierTicketIsChecked: ticket 3 sits on tickets 1 and 2; ticket
+// 1's pull request closed without merging, or its branch gone, parks the
+// request though ticket 2's is fine.
+func TestEveryEarlierTicketIsChecked(t *testing.T) {
+	t.Run("ticket 1 closed", func(t *testing.T) {
+		dp := newFakeDeps(t)
+		r, dataDir, states, built, runner := threeTicketsBuildingTicket3(t, dp)
+		states[r.Tickets[0].PRURL] = forge.ReviewState{State: forge.PRStateClosed}
+		if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if len(*built) != 2 || r.State != request.StateResumeReview || !strings.Contains(r.Resume.Reason, "ticket 1/3's pull request") {
+			t.Fatalf("built=%d state=%q resume=%+v, want parked on ticket 1's closed pull request", len(*built), r.State, r.Resume)
+		}
+	})
+	t.Run("ticket 1's branch gone", func(t *testing.T) {
+		dp := newFakeDeps(t)
+		r, dataDir, _, built, runner := threeTicketsBuildingTicket3(t, dp)
+		gone := r.Tickets[0].Branch
+		dp.remoteBranchHeadSHAFn = func(_ context.Context, _, branch string) (string, error) {
+			if branch == gone {
+				return "", fmt.Errorf("%w: %s", requestdriver.ErrRemoteBranchNotFound, branch)
+			}
+			return "result-" + strings.TrimPrefix(branch, "factoryd/"), nil
+		}
+		if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if len(*built) != 2 || r.State != request.StateResumeReview || !strings.Contains(r.Resume.Reason, gone+" is gone from origin") {
+			t.Fatalf("built=%d state=%q resume=%+v, want parked on ticket 1's missing branch", len(*built), r.State, r.Resume)
+		}
+	})
+	t.Run("all fine", func(t *testing.T) {
+		dp := newFakeDeps(t)
+		r, dataDir, _, built, runner := threeTicketsBuildingTicket3(t, dp)
+		if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if len(*built) != 3 {
+			t.Fatalf("built=%d state=%q, want ticket 3 built", len(*built), r.State)
+		}
+	})
+}
+
+// TestStackedParkKeepsTheLostBuildToResume: the operator chose to continue
+// ticket 2's lost build in its kept worktree, but ticket 1's pull request was
+// closed meanwhile: the park keeps the lost run, says so, and the resume
+// after the pull request is reopened continues that build, not a new one.
+func TestStackedParkKeepsTheLostBuildToResume(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
+	var built [][]string
+	runner := acceptingStackedBuildRunner(t, dataDir, &built)
+	r := buildFirstTicket(t, dp, dataDir, id, runner)
+	const lost = "req-1-002"
+	if err := requestdriver.EnterResumeReview(dataDir, r, request.LostStep{RunID: lost, Cause: unresolved.WorkerLost}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := request.ResumeRequest(dataDir, id, request.ResumeRound, "alice", time.Now(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateClosed}, nil
+	}
+	cfg := stackedCfg
+	cfg.Resume = requestdriver.ResumeGate{Preconditions: &requestdrivertest.FakeResumePreconditions{T: t, OK: true}}
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, resumed, cfg, runner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(built) != 1 || resumed.State != request.StateResumeReview || !resumed.Resume.Parked() || resumed.Resume.LostRunID != lost || resumed.Resume.Cause != unresolved.WorkerLost {
+		t.Fatalf("built=%d state=%q resume=%+v, want parked keeping lost run %s", len(built), resumed.State, resumed.Resume, lost)
+	}
+	if !strings.Contains(resumed.NextAction(), "continues the kept build of run "+lost) {
+		t.Errorf("next action %q does not say the resume continues run %s", resumed.NextAction(), lost)
+	}
+	again, err := request.ResumeRequest(dataDir, id, request.ResumeRound, "alice", time.Now(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := run.Load(dataDir, again.Tickets[0].RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlierPROpenAt(dp, first.ResultSHA)
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, again, cfg, runner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(built) != 2 || requestdrivertest.ArgValue(built[1], "-resume-worktree-of") != lost {
+		t.Fatalf("built=%d args=%v, want ticket 2's lost build %s continued", len(built), built[len(built)-1], lost)
 	}
 }

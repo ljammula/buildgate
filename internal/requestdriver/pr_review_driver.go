@@ -984,7 +984,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	if err != nil {
 		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
 	}
-	branch, diffBase, stackBaseSHA := head.Branch, head.DiffBase, stackBaseOf(dataDir, head.Run)
+	branch, diffBase, stackBaseSHA := head.Branch, head.DiffBase, run.StackBase(dataDir, head.Run)
 
 	// Threads are marked seen only once an accepted round's commit has
 	// actually been pushed (pushAcceptedRoundAndReply), never before: a
@@ -1170,6 +1170,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// fast path (owning_request.go) and any rollup keyed off run.Run.
 		// RequestID silently missed every PR-review round's own run.
 		started.RequestID = r.ID
+		started.TicketIndex = ticket.Index
 		started.StackBaseSHA = stackBaseSHA
 		if err := started.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)

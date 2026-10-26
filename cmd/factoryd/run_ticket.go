@@ -2168,7 +2168,8 @@ func (tr *ticketRun) createRunRecord() error {
 	// resumeRequestID is the halted run's request: the resumed run belongs to
 	// it, so retry and cancel of that request can reap this run's worktree
 	// if it is kept in turn.
-	var resumeRequestID string
+	// A replay run (which never resumes) names its request from the replay.
+	resumeRequestID := replayRequestID(tr.replay)
 	if *tr.resumeWorktreeOf != "" {
 		var resumeErr error
 		tr.resumeFrom, resumeCarried, resumeErr = requestdriver.ResolveResumeFrom(tr.lifecycleCtx, tr.sandboxDataDir, *tr.sandboxDocker, *tr.resumeWorktreeOf, specSHA256, *tr.maxRounds)
@@ -2225,8 +2226,11 @@ func (tr *ticketRun) createRunRecord() error {
 		// RFC3339Nano — see the other CreatedAt assignment above's doc
 		// comment for why.
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
-		// Replay: the durable evidence of what a replay run judges.
-		Replay: tr.replay,
+		// Replay: the durable evidence of what a replay run judges; its
+		// commits sit on the commit they were replayed onto.
+		Replay:       tr.replay,
+		StackBaseSHA: replayStackBase(tr.replay),
+		TicketIndex:  replayTicketIndex(tr.replay),
 	}
 	if err := save(tr.r, *tr.dataDir); err != nil {
 		return err
@@ -2738,4 +2742,30 @@ func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 		return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
 	}
 	return nil
+}
+
+// replayRequestID and replayTicketIndex are the request ticket a replay
+// run's commits are of, which its record names from creation on; "" and 0
+// for a run that builds, whose request driver names them once it starts.
+func replayRequestID(replay *run.Replay) string {
+	if replay == nil {
+		return ""
+	}
+	return replay.RequestID
+}
+
+func replayTicketIndex(replay *run.Replay) int {
+	if replay == nil {
+		return 0
+	}
+	return replay.TicketIndex
+}
+
+// replayStackBase is the commit a replay run's commits were replayed onto, its
+// stack base; "" for a run that builds.
+func replayStackBase(replay *run.Replay) string {
+	if replay == nil {
+		return ""
+	}
+	return replay.OntoSHA
 }

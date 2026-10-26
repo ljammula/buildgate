@@ -1382,7 +1382,8 @@ type Run struct {
 	BaseSHA                  string `json:"base_sha"`
 	// StackBaseSHA is the earlier ticket's tip this run's commits sit on.
 	// A first build records its -prior-run result; a corrective or PR-review
-	// round copies the run it continues. Empty on runs that are not stacked,
+	// round copies the run it continues; a replay run records the commit its
+	// commits were replayed onto (Replay.OntoSHA). Read it through StackBase. Empty on runs that are not stacked,
 	// and omitted so older records marshal byte-identically.
 	StackBaseSHA string `json:"stack_base_sha,omitempty"`
 	// Replay is set on a replay run only: the record of the commits the host
@@ -1574,6 +1575,12 @@ type Run struct {
 	// scan -- falling back to that scan only for a run that predates this
 	// field (see findOwningRequest's own doc comment).
 	RequestID string `json:"request_id,omitempty"`
+	// TicketIndex is the 1-based index of the request's ticket this run was
+	// started for, set with RequestID at the same point and never changed. 0
+	// for a run started outside a request, or recorded before the field. A
+	// replay run checks that every run it replays from names its request and
+	// ticket.
+	TicketIndex int `json:"ticket_index,omitempty"`
 	// EarlierAttemptOf is the id of the quarantined run whose record
 	// (its handoff, rendered as text) this run's build was given as
 	// -earlier-attempt, "" when it was given none. Set by the request

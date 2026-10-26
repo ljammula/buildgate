@@ -82,7 +82,7 @@ type ResumeDecision struct {
 // refusal.
 func ResumePrompt(id string, from State, step LostStep) string {
 	if step.Reason != "" {
-		return parkPrompt(id, step.Reason)
+		return parkPrompt(id, step.Reason, step.RunID)
 	}
 	what := lostStepWhat(step.Cause, from, step.RetryAt)
 	if from == StateBuilding && step.RunID == "" {
@@ -93,14 +93,26 @@ func ResumePrompt(id string, from State, step LostStep) string {
 
 // Parked reports whether the wait is a park: the factory stopped the request
 // on purpose because something outside it (an earlier ticket's pull request
-// or branch) needs an operator's repair. No step was lost and nothing was
-// kept, so a resume reruns the step, which checks again.
+// or branch) needs an operator's repair. The park itself lost no step, so a
+// resume reruns the step, which checks again. A park that interrupted the
+// resume of a lost build keeps that build's LostRunID, so the resume after
+// the repair continues it (KeepsLostBuild).
 func (i *ResumeInfo) Parked() bool {
 	return i != nil && i.Reason != ""
 }
 
-// parkPrompt is ResumePrompt and NextAction for a park.
-func parkPrompt(id, reason string) string {
+// KeepsLostBuild reports whether a resume continues the kept build of
+// LostRunID: a lost build's wait, or a park that interrupted its resume.
+func (i *ResumeInfo) KeepsLostBuild() bool {
+	return i != nil && (!i.Parked() || i.LostRunID != "")
+}
+
+// parkPrompt is ResumePrompt and NextAction for a park; keptRunID, when set,
+// is the lost build the park interrupted the resume of.
+func parkPrompt(id, reason, keptRunID string) string {
+	if keptRunID != "" {
+		return fmt.Sprintf("%s: once it is repaired, `factoryd resume %s` checks again and continues the kept build of run %s (or `-from scratch` / `factoryd cancel %s`)", reason, id, keptRunID, id)
+	}
 	return fmt.Sprintf("%s: once it is repaired, `factoryd resume %s` checks again and continues, or `factoryd cancel %s`", reason, id, id)
 }
 
@@ -241,7 +253,7 @@ func (r *Request) resumeNextAction() string {
 		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd resume %s`, `factoryd resume -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
 	}
 	if r.Resume.Parked() {
-		return parkPrompt(r.ID, r.Resume.Reason)
+		return parkPrompt(r.ID, r.Resume.Reason, r.Resume.LostRunID)
 	}
 	from := r.Resume.FromState
 	what := lostStepWhat(r.Resume.Cause, from, r.Resume.RetryAt)

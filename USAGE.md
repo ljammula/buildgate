@@ -113,21 +113,29 @@ tickets again.
 
 A later ticket's commits sit on the earlier ticket's: ticket N+1 is built
 from ticket N's current PR-head run (its first build, or its last review round
-whose push was confirmed). Before ticket N+1 starts, the factory reads ticket
-N's pull request:
+whose push was confirmed). Before ticket N+1 starts, the factory reads every
+earlier ticket's pull request:
 
 | Ticket N's pull request | Ticket N+1 |
 |---|---|
 | Merged (its branch may be deleted) | Builds |
 | Open, branch on origin at the PR-head run's commit | Builds |
-| Open, branch at another commit, or unreadable | Waits in `building` (`wait.kind` `stacked_ticket`, the sentence names both commits); the worker checks again every PR poll interval |
-| Open, branch gone from origin | Parks the request in `resume_review` |
-| Closed without merging | Parks the request in `resume_review` |
+| Open, branch at another commit, or unreadable | Waits in `building` (`wait.kind` `stacked_ticket`); the worker checks again every PR poll interval and reminds you every `-hitl-reminder-interval` |
+| Open, branch gone from origin (any earlier ticket) | Parks the request in `resume_review` |
+| Closed without merging (any earlier ticket) | Parks the request in `resume_review` |
+
+The wait's sentence names both commits and what to do: a commit the factory
+did not make is on ticket N's branch, so move the branch back to the
+factory's commit (the sentence gives the `git push --force-with-lease`
+line), merge ticket N's pull request (ticket N+1 then builds on the merge),
+or `factoryd cancel <id>`; a read that failed names `gh auth status` or
+git's access to origin.
 
 A park is not a lost step: `resume.reason` says which ticket and what to
 repair, and `resume.cause` is empty. Reopen the pull request or restore the
 branch, then `factoryd resume <id>` checks again and continues; or
-`factoryd cancel <id>`.
+`factoryd cancel <id>`. A park that interrupted your `factoryd resume` of a
+lost build keeps that build: the next `factoryd resume` continues it.
 
 For a lost step, the reason names one of ten causes (`resume.cause` in the
 request's `request.json`). The four that say a model was not served, or a review

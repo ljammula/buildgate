@@ -18,6 +18,7 @@ func writeReplayFile(t *testing.T, dir, onto, head string) string {
 	t.Helper()
 	original := strings.Repeat("3", 40)
 	record := run.Replay{
+		RequestID: "req-1", TicketIndex: 2,
 		OfRunID: "req-1-002", SourceRunIDs: []string{"req-1-002"},
 		UpstreamSHA: strings.Repeat("1", 40), SourceHeadSHA: original, OntoSHA: onto, HeadSHA: head,
 		Commits: []run.ReplayedCommit{{Original: original, Replayed: head, OriginalPatchID: strings.Repeat("d", 40), ReplayedPatchID: strings.Repeat("d", 40)}},

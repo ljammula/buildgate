@@ -556,7 +556,7 @@
         }
       ]
     },
-    "next_action": "every-field reason: once it is repaired, `factoryd resume req-every-field` checks again and continues, or `factoryd cancel req-every-field`"
+    "next_action": "every-field reason: once it is repaired, `factoryd resume req-every-field` checks again and continues the kept build of run every-field lost_run_id (or `-from scratch` / `factoryd cancel req-every-field`)"
   },
   {
     "id": "req-halted",
