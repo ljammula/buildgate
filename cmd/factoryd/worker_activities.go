@@ -154,28 +154,35 @@ const stepInProgressErrorType = "StepInProgress"
 // drain lock (acquireWorkerLock in workerMain, which starts both the jobs and
 // the light task queue workers). The zero value is ready.
 type stepGuard struct {
-	mu      sync.Mutex
-	running map[string]bool
+	mu   sync.Mutex
+	held map[string]bool
 }
 
 // begin marks id as running a step and reports whether it was free.
 func (g *stepGuard) begin(id string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.running[id] {
+	if g.held[id] {
 		return false
 	}
-	if g.running == nil {
-		g.running = map[string]bool{}
+	if g.held == nil {
+		g.held = map[string]bool{}
 	}
-	g.running[id] = true
+	g.held[id] = true
 	return true
+}
+
+// running reports whether a step of id is running in this process.
+func (g *stepGuard) running(id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held[id]
 }
 
 func (g *stepGuard) end(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	delete(g.running, id)
+	delete(g.held, id)
 }
 
 // repositoryBusyErrorType is the application error type of a build step that
@@ -255,9 +262,10 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			}
 			// A build on a repository another build holds gives its slot
 			// back at once; the workflow retries after requestRepoBusyRetryAfter.
-			// A step whose heartbeat timed out on the server while its
-			// process lived on is still building this ticket: a second
-			// build of it would run beside the first.
+			// A step of this process for the request is refused above
+			// (stepGuard); this covers a build another process owns, which
+			// is still building this ticket: a second build of it would
+			// run beside the first.
 			if live, why := a.ticketRunStillLive(r, ownSteps); live {
 				// Its own run, not another build, holds it.
 				repositoryWaits.clear(id)
@@ -420,6 +428,14 @@ func (a *requestActivities) HaltLostRequestStep(_ context.Context, in workflow.H
 		return fmt.Errorf("load request %s: %w", in.RequestID, err)
 	}
 	if string(r.State) != in.State {
+		return nil
+	}
+	if a.steps.running(in.RequestID) {
+		// The server timed the step out, but the step is still running in
+		// this process (a drafting job has no run to show it): halting now
+		// would have it save its stale request over the operator's resume
+		// when it ends. A new step waits for it (stepGuard).
+		log.Printf("request %s: its step's heartbeat timed out, but the step is still running; not moving it to resume_review", r.ID)
 		return nil
 	}
 	if live, why := a.ticketRunStillLive(r, 0); live {

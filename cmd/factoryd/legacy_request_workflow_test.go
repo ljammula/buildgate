@@ -283,4 +283,52 @@ func TestAdvanceRequestRunsOneStepPerRequestAtATime(t *testing.T) {
 	if !acts.steps.begin("req-1") {
 		t.Fatal("the guard was not released when the step ended")
 	}
+	acts.steps.end("req-1")
+}
+
+// The guard is per request, and a step that panics still releases it.
+func TestStepGuardIsPerRequestAndSurvivesAPanic(t *testing.T) {
+	var g stepGuard
+	if !g.begin("a") || !g.begin("b") {
+		t.Fatal("a different request must run concurrently")
+	}
+	if g.begin("a") || !g.running("a") {
+		t.Fatal("the same request must not")
+	}
+	g.end("a")
+	g.end("b")
+	func() {
+		defer func() { _ = recover() }()
+		defer g.end("p")
+		g.begin("p")
+		panic("step failed")
+	}()
+	if g.running("p") || !g.begin("p") {
+		t.Fatal("a panic left the guard held")
+	}
+}
+
+// HaltLostRequestStep leaves a request alone while its step still runs in this
+// process (the step would save a stale request over the operator's resume),
+// and halts it once the step has ended.
+func TestHaltLostRequestStepWaitsForARunningStep(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-1", request.StatePlanning)
+	acts := &requestActivities{dp: dp, dataDir: dataDir}
+	in := workflow.HaltLostRequestStepInput{RequestID: "req-1", State: string(request.StatePlanning)}
+	acts.steps.begin("req-1")
+	if err := acts.HaltLostRequestStep(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := request.Load(dataDir, "req-1"); r.State != request.StatePlanning {
+		t.Fatalf("halted while its step ran: %s", r.State)
+	}
+	acts.steps.end("req-1")
+	if err := acts.HaltLostRequestStep(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := request.Load(dataDir, "req-1"); r.State != request.StateResumeReview {
+		t.Fatalf("state = %s, want resume_review once the step ended", r.State)
+	}
 }

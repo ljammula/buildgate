@@ -68,8 +68,10 @@ func wakeOrStartRequestWorkflow(ctx context.Context, c requestWorkflowStarter, q
 		if !errors.As(err, &notFound) {
 			return fmt.Errorf("wake workflow %s: %w", id, err)
 		}
-		// The legacy workflow finished between the lookup and the signal: the
-		// new id's workflow reads the request, finds it done, and returns.
+		// The legacy workflow ended between the lookup and the signal. If the
+		// request finished, the new id's workflow reads it, finds it done and
+		// returns; if the legacy one failed or was terminated, the new
+		// workflow drives the request or waits for its next decision.
 		id = workflow.RequestWorkflowID(queueID, requestID)
 	}
 	return startRequestWorkflow(ctx, c, id, requestID, jobsQueue, lightQueue)
