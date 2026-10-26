@@ -537,6 +537,10 @@ type GateResult struct {
 	// it is set, ExitCode, Passed and LogSHA256 are the rerun's. nil for
 	// every other check, and for a run that was not rerun.
 	Rerun *VerifyRerun `json:"rerun,omitempty"`
+	// ChangedByEarlierTickets is set on required_files_changed only: the
+	// required files this run left untouched that an earlier ticket of the
+	// same request changed, counted as changed (policy.RequiredFilesChanged).
+	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
 }
 
 // The outcomes of a GateBaseCheck.
@@ -1535,7 +1539,12 @@ type Run struct {
 	// recorded, else the run's effective diff base (DiffBaseSHA, else
 	// BaseSHA). Empty only in a record written before the field existed.
 	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
-	ResultSHA          string `json:"result_sha,omitempty"`
+	// ChangedByEarlierTickets is -changed-by-earlier-tickets: the files the
+	// earlier tickets of the same request changed, which required_files_changed
+	// may count for a required file this run left untouched. Empty for a
+	// request's first ticket and every run outside a request.
+	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
+	ResultSHA               string   `json:"result_sha,omitempty"`
 	// HaltConfirmed is true only once a StateHalted run's real outcome is
 	// positively known: either its own best-effort in-progress-child
 	// termination (or, for a still-queued request, cancellation) actually

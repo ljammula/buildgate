@@ -2188,6 +2188,10 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
+	changedEarlier, err := changedByEarlierTickets(dataDir, r, ticket, specPath)
+	if err != nil {
+		return nil, err
+	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
@@ -2229,6 +2233,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		PRBase: prBase,
 		// InstructionBase: see requestInstructionBase.
 		InstructionBase: instructionBase,
+		// ChangedByEarlierTickets: see changedByEarlierTickets.
+		ChangedByEarlierTickets: changedEarlier,
 		// RequestTicket: see QueueEntry.RequestTicket's own doc comment --
 		// every ticket built here is a ticketspec-format spec (the ticket's
 		// own file, or its conformity-corrective addendum), never a
@@ -2306,6 +2312,51 @@ func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
 		return "", fmt.Errorf("request %s: %s has changed since spec_review approved it -- re-approve before continuing", r.ID, requestSpecFile)
 	}
 	return filepath.Join(request.Dir(dataDir, r.ID), requestSpecFile), nil
+}
+
+// changedByEarlierTickets is the files among the ticket's
+// Required-Changed-Files (read from specPath, the spec the build is given)
+// that an earlier ticket of r changed, as of each earlier ticket's PR head
+// (its last accepted and pushed round's run, else its build's run,
+// Ticket.PRHeadRunID), as that run recorded them: the run's required_files_changed gate
+// may count such a file when this build leaves it untouched
+// (policy.RequiredFilesChanged). nil for ticket 1, for a ticket that declares
+// no required files, and when no earlier ticket changed one of them. An
+// earlier ticket with no run yet contributes nothing; a recorded run that
+// cannot be loaded is an error, so the build is not judged on a list that
+// silently lost a ticket.
+func changedByEarlierTickets(dataDir string, r *request.Request, ticket request.Ticket, specPath string) ([]string, error) {
+	if ticket.Index <= 1 {
+		return nil, nil
+	}
+	required, err := ticketspec.ParseRequiredChangedFiles(specPath)
+	if err != nil {
+		return nil, fmt.Errorf("request %s ticket %d: read required files: %w", r.ID, ticket.Index, err)
+	}
+	if len(required) == 0 {
+		return nil, nil
+	}
+	changed := map[string]bool{}
+	for i := 0; i < ticket.Index-1 && i < len(r.Tickets); i++ {
+		runID := r.Tickets[i].PRHeadRunID()
+		if runID == "" {
+			continue
+		}
+		earlier, err := run.Load(dataDir, runID)
+		if err != nil {
+			return nil, fmt.Errorf("request %s ticket %d: load ticket %d's run %s for the files it changed: %w", r.ID, ticket.Index, i+1, runID, err)
+		}
+		for _, f := range earlier.ChangedFiles {
+			changed[f] = true
+		}
+	}
+	var files []string
+	for _, f := range required {
+		if changed[f] {
+			files = append(files, f)
+		}
+	}
+	return files, nil
 }
 
 // requestInstructionBase is the commit a ticket build's reviews read the

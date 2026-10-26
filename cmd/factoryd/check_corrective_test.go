@@ -484,3 +484,25 @@ func assertRecordOf(t *testing.T, path, opens, attemptID string) {
 		t.Errorf("the record is not of the quarantined attempt %s:\n%s", attemptID, record)
 	}
 }
+
+// -changed-by-earlier-tickets takes workspace-relative paths only, an empty
+// value is no list, and a list without -request-ticket is refused.
+func TestParseChangedByEarlierTickets(t *testing.T) {
+	for _, requestTicket := range []bool{true, false} {
+		if got, err := parseChangedByEarlierTickets("", requestTicket); err != nil || got != nil {
+			t.Errorf("empty, -request-ticket %v: got %v, %v; want nil, nil", requestTicket, got, err)
+		}
+	}
+	if _, err := parseChangedByEarlierTickets("main.go", false); err == nil || !strings.Contains(err.Error(), "-request-ticket") {
+		t.Errorf("a list without -request-ticket: err = %v, want a refusal naming -request-ticket", err)
+	}
+	got, err := parseChangedByEarlierTickets("main.go, docs/a.md", true)
+	if err != nil || strings.Join(got, "|") != "main.go|docs/a.md" {
+		t.Errorf("got %v, %v; want [main.go docs/a.md]", got, err)
+	}
+	for _, bad := range []string{"/etc/passwd", "../outside.go", "a/../../b"} {
+		if _, err := parseChangedByEarlierTickets(bad, true); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}

@@ -1315,3 +1315,20 @@ func TestOpenEvidencePullRequestChecksFromTheRunsDiffBase(t *testing.T) {
 		t.Fatalf("url %q, checked %q: want the pull request, checked from the ticket's base", url, opener.unpushedBaseSHA)
 	}
 }
+
+// The pull request body names, under required_files_changed, the required
+// files an earlier ticket of the request changed in this ticket's place, so
+// the reviewer looks for that work in the earlier ticket's pull request.
+func TestEvidenceMarkdownNamesRequiredFilesChangedByEarlierTickets(t *testing.T) {
+	r := &run.Run{ID: "r", GateResults: []run.GateResult{
+		{Check: "required_files_changed", Passed: true, ChangedByEarlierTickets: []string{"main.go", "a`b.go"}},
+	}}
+	md := renderEvidenceMarkdown(r, nil)
+	if want := "- `required_files_changed`: pass (exit 0, 0ms)\n  - changed by an earlier ticket of this request, not by this one: `main.go`, `a'b.go`\n"; !strings.Contains(md, want) {
+		t.Errorf("evidence markdown does not contain %q:\n%s", want, md)
+	}
+	r.GateResults[0].ChangedByEarlierTickets = nil
+	if md := renderEvidenceMarkdown(r, nil); strings.Contains(md, "earlier ticket") {
+		t.Errorf("evidence markdown names an earlier ticket for a gate that counted none:\n%s", md)
+	}
+}

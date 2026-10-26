@@ -359,7 +359,7 @@ func triageRequiredFilesChanged(r *run.Run, dataDir string) string {
 	if err != nil || len(required) == 0 {
 		return ""
 	}
-	_, missing := policy.RequiredFilesChanged(r.ChangedFiles, required)
+	_, missing := policy.RequiredFilesChanged(r.ChangedFiles, required, r.ChangedByEarlierTickets)
 	if len(missing) == 0 {
 		return ""
 	}

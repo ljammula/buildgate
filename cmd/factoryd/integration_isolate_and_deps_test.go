@@ -1148,6 +1148,51 @@ func TestIntegrationRequiredFilesChangedGateQuarantinesUnchangedFile(t *testing.
 	}
 }
 
+// TestIntegrationRequiredFilesChangedCountsAnEarlierTicketsFile is a later
+// ticket of a request whose required content.txt an earlier ticket already
+// changed (-changed-by-earlier-tickets): the build changes only its other
+// required file, other.txt, and the run is accepted, with the gate and the
+// run record naming content.txt. The same build given no earlier ticket's
+// file, or a ticket requiring only content.txt, still quarantines.
+func TestIntegrationRequiredFilesChangedCountsAnEarlierTicketsFile(t *testing.T) {
+	requiredGateOf := func(r *run.Run) *run.GateResult {
+		for i := range r.GateResults {
+			if r.GateResults[i].Check == "required_files_changed" {
+				return &r.GateResults[i]
+			}
+		}
+		t.Fatalf("expected a required_files_changed gate result, got %v", r.GateResults)
+		return nil
+	}
+	// A request's ticket: -changed-by-earlier-tickets is refused without
+	// -request-ticket.
+	requestTicket := func(required string) string {
+		spec := strings.Replace(wellFormedRequestTicketspec, "Allowed-Files: content.txt\n", "Allowed-Files: content.txt, other.txt\n", 1)
+		return strings.Replace(spec, "Required-Changed-Files: content.txt\n", "Required-Changed-Files: "+required+"\n", 1)
+	}
+	both := requestTicket("content.txt, other.txt")
+	earlier := []string{"-request-ticket", "-changed-by-earlier-tickets", "content.txt"}
+
+	r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, earlier)
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q (%s), want accepted: content.txt was changed by an earlier ticket", r.State, r.HaltError)
+	}
+	if gate := requiredGateOf(r); !gate.Passed || !slices.Equal(gate.ChangedByEarlierTickets, []string{"content.txt"}) {
+		t.Errorf("required_files_changed = %+v, want passed naming content.txt", gate)
+	}
+	if !slices.Equal(r.ChangedByEarlierTickets, []string{"content.txt"}) {
+		t.Errorf("run ChangedByEarlierTickets = %v, want [content.txt]", r.ChangedByEarlierTickets)
+	}
+
+	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, []string{"-request-ticket"}); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
+		t.Errorf("without the earlier ticket's file: state = %q, want quarantined on required_files_changed", r.State)
+	}
+	onlyEarlier := requestTicket("content.txt")
+	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", onlyEarlier, "30s", nil, earlier); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
+		t.Errorf("a ticket that changed none of its required files: state = %q, want quarantined on required_files_changed", r.State)
+	}
+}
+
 // TestIntegrationRequiredFilesChangedGateRejectsPreExistingDirt proves the
 // current rule: required_files_changed is checked against the run's own
 // worktree, which is cut from the base commit, so uncommitted state in the

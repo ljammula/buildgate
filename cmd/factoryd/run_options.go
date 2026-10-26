@@ -91,9 +91,12 @@ type runOptions struct {
 
 	AllowedFiles         []string
 	RequiredChangedFiles []string
-	RequiredContent      []string
-	TestPatterns         []string
-	TestsRequiredOptOut  string
+	// ChangedByEarlierTickets is -changed-by-earlier-tickets, for the
+	// required_files_changed gate.
+	ChangedByEarlierTickets []string
+	RequiredContent         []string
+	TestPatterns            []string
+	TestsRequiredOptOut     string
 
 	Slice         temporalSliceOptions
 	ReleasePolicy release.MergePolicy

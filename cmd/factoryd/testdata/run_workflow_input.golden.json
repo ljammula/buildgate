@@ -10,6 +10,9 @@
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,
+  "changed_by_earlier_tickets": [
+    "content.txt"
+  ],
   "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
   "code_review_policy": "advisory",
   "compose_services_allowed_registries": [

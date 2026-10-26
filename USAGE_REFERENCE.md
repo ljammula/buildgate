@@ -246,8 +246,22 @@ on: a first build its `-prior-run`'s result, a replay run the commit it
 replayed onto, a round or a continuing build the value of the run it
 continues. Corrective and PR-review rounds build on the ticket's current
 PR-head run, on the ticket's pull-request branch; their `-diff-base` stays
-the ticket's original base, so the gates judge the whole pull request. An
-approval moves a ticket on (under `-advance-on pr_approved`) only when some
+the ticket's original base, so the gates judge the whole pull request.
+
+Every ticket build sees the whole approved spec, so an earlier ticket can do
+a later ticket's work in a file both may change. `required_files_changed`
+then judges the stack, not the ticket alone:
+
+| Ticket N+1's required file | `required_files_changed` |
+|---|---|
+| Changed by this build | Changed |
+| Untouched by this build, changed by an earlier ticket's PR-head run, and this build changed another of its required files | Changed: the gate's `changed_by_earlier_tickets` in `run.json` and a line under the gate in the pull request name it |
+| Untouched by this build and by every earlier ticket | Fails |
+| Any, when this build changed none of its required files | Fails for every untouched one, whatever earlier tickets changed |
+
+Ticket 1, and every run outside a request, is judged on its own diff only.
+
+An approval moves a ticket on (under `-advance-on pr_approved`) only when some
 reviewer's latest opinion (an approval, a change request or a dismissal; a
 comment is none) approves the pull request's current head commit and no
 reviewer's latest opinion approves an earlier commit.
