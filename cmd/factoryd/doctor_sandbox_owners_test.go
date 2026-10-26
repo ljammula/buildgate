@@ -218,15 +218,20 @@ func TestEndRequestWorkflowsEndsEachOrSaysHow(t *testing.T) {
 	stub := &stubWorkflowTerminator{}
 	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return stub, func() {}, nil }
 	var out bytes.Buffer
-	endRequestWorkflows(dp, context.Background(), "stub:7233", []string{"req-1"}, &out)
-	if len(stub.terminated) != 1 || stub.terminated[0] != workflow.RequestWorkflowID("req-1") || out.Len() != 0 {
+	dataDir := t.TempDir()
+	queueID, err := requestQueueID(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"req-1"}, &out)
+	if len(stub.terminated) != 1 || stub.terminated[0] != workflow.RequestWorkflowID(queueID, "req-1") || out.Len() != 0 {
 		t.Errorf("terminated = %v, output %q; want the request's workflow ended and nothing printed", stub.terminated, out.String())
 	}
 	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) {
 		return nil, nil, errors.New("temporal is down")
 	}
-	endRequestWorkflows(dp, context.Background(), "stub:7233", []string{"req-1"}, &out)
-	if !strings.Contains(out.String(), "temporal workflow terminate --workflow-id "+workflow.RequestWorkflowID("req-1")) {
+	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"req-1"}, &out)
+	if !strings.Contains(out.String(), "temporal workflow terminate --workflow-id "+workflow.RequestWorkflowID(queueID, "req-1")) {
 		t.Errorf("with no Temporal doctor must print the command that ends the workflow: %q", out.String())
 	}
 }

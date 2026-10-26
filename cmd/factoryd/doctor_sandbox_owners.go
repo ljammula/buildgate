@@ -247,7 +247,7 @@ func reclaimLostSandboxes(dp *deps, ctx context.Context, in doctorInputs, owners
 			continue
 		}
 		runs, requests := reclaimLostWork(dp, ctx, dataDir, in.sandboxDocker, in.temporalAddress)
-		endRequestWorkflows(dp, ctx, in.temporalAddress, requests, w)
+		endRequestWorkflows(dp, ctx, in.temporalAddress, dataDir, requests, w)
 		if in.sandboxDocker != "" {
 			removeFinishedRunContainers(ctx, in.sandboxDocker, dataDir)
 		}
@@ -284,8 +284,13 @@ func deleteSandbox(dp *deps, ctx context.Context, name string) error {
 // otherwise move the request back there after the operator resumes it. A
 // Temporal that cannot be reached is not fatal: the operator is told the
 // command that ends each one, because no later worker start does.
-func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress string, requestIDs []string, w io.Writer) {
+func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress, dataDir string, requestIDs []string, w io.Writer) {
 	if len(requestIDs) == 0 {
+		return
+	}
+	queueID, err := requestQueueID(dataDir)
+	if err != nil {
+		fmt.Fprintf(w, "sandboxes: could not read the queue id of %s (%v): end the workflows of its halted requests with `temporal workflow terminate`\n", sanitize.Line(dataDir), err)
 		return
 	}
 	address, err := hostcontrol.ResolveTemporalAddress(dp, ctx, temporalAddress, w)
@@ -294,12 +299,12 @@ func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress string, 
 		var closeFn func()
 		if terminator, closeFn, err = dp.temporal.dialTerminator(ctx, address); err == nil {
 			defer closeFn()
-			terminateRequestWorkflows(ctx, terminator, requestIDs)
+			terminateRequestWorkflows(ctx, terminator, queueID, requestIDs)
 			return
 		}
 	}
 	for _, id := range requestIDs {
-		fmt.Fprintf(w, "sandboxes: could not end the workflow of request %s (%v): before `factoryd resume`, end it with `temporal workflow terminate --workflow-id %s`\n", sanitize.Line(id), err, workflow.RequestWorkflowID(id))
+		fmt.Fprintf(w, "sandboxes: could not end the workflow of request %s (%v): before `factoryd resume`, end it with `temporal workflow terminate --workflow-id %s`\n", sanitize.Line(id), err, workflow.RequestWorkflowID(queueID, id))
 	}
 }
 

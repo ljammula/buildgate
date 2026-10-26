@@ -1488,7 +1488,7 @@ docker compose -f docker-compose.temporal.yml down -v   # stop, wipe data
 ### Requests under the worker
 
 `factoryd worker` drives every request of one data dir. Each request is one
-`RequestWorkflow` (workflow id `factoryd-request-<request id>`);
+`RequestWorkflow` (workflow id `factoryd-request-<queue id>-<request id>`);
 `request.json` stays the source of truth and the workflow keeps no request
 state of its own.
 

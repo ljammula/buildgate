@@ -19,6 +19,9 @@ import (
 	"go.temporal.io/sdk/client"
 	temporalworker "go.temporal.io/sdk/worker"
 
+	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
+
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -68,15 +71,23 @@ func workerMain(dp *deps, args []string) error {
 	// new work, so no workflow starts that ticket over on its own: a human decides.
 	_, haltedIDs := reclaimLostWork(dp, context.Background(), dataDir, cfg.Settings.SandboxDocker, cfg.TemporalAddress)
 
-	jobsQueue, lightQueue, err := requestTaskQueues(dataDir)
+	queueID, err := requestQueueID(dataDir)
 	if err != nil {
 		return err
 	}
+	jobsQueue, lightQueue := "factoryd-jobs-"+queueID, "factoryd-light-"+queueID
 	temporalClient, err := client.Dial(client.Options{HostPort: cfg.TemporalAddress})
 	if err != nil {
 		return fmt.Errorf("connect to Temporal at %s: %w", cfg.TemporalAddress, err)
 	}
 	defer temporalClient.Close()
+
+	// A request in flight at an upgrade is still running under the id it had
+	// before ids carried the queue id; end that workflow before the workers
+	// poll, so it never drives the request beside the one started below.
+	if err := retireLegacyRequestWorkflows(context.Background(), temporalClient, dataDir, lightQueue); err != nil {
+		return err
+	}
 
 	acts := &requestActivities{dp: dp,
 		dataDir:      dataDir,
@@ -108,8 +119,8 @@ func workerMain(dp *deps, args []string) error {
 	defer stop()
 	// A request in resume_review has an old workflow still waiting on its lost step; ended
 	// here, its lost-step move cannot fire later and undo a decision made in between.
-	terminateRequestWorkflows(ctx, temporalClient, haltedIDs)
-	if err := startRequestWorkflows(ctx, temporalClient, dataDir, jobsQueue, lightQueue); err != nil {
+	terminateRequestWorkflows(ctx, temporalClient, queueID, haltedIDs)
+	if err := startRequestWorkflows(ctx, temporalClient, dataDir, queueID, jobsQueue, lightQueue); err != nil {
 		return err
 	}
 	<-ctx.Done()
@@ -148,16 +159,28 @@ const requestQueueIDFileName = "worker-queue-id"
 // requestTaskQueues returns dataDir's jobs and light task queue names,
 // creating its queue id on first use.
 func requestTaskQueues(dataDir string) (jobs, light string, err error) {
+	id, err := requestQueueID(dataDir)
+	if err != nil {
+		return "", "", err
+	}
+	return "factoryd-jobs-" + id, "factoryd-light-" + id, nil
+}
+
+// requestQueueID returns dataDir's random queue id, creating it on first use.
+// It names the data dir in its task queues and in its request workflow ids
+// (workflow.RequestWorkflowID), the one thing that tells two data dirs on one
+// Temporal server apart.
+func requestQueueID(dataDir string) (string, error) {
 	path := filepath.Join(dataDir, requestQueueIDFileName)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		buf := make([]byte, 8)
 		if _, err := rand.Read(buf); err != nil {
-			return "", "", fmt.Errorf("generate worker queue id: %w", err)
+			return "", fmt.Errorf("generate worker queue id: %w", err)
 		}
 		raw = []byte(hex.EncodeToString(buf))
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
-			return "", "", fmt.Errorf("create data dir: %w", err)
+			return "", fmt.Errorf("create data dir: %w", err)
 		}
 		// O_EXCL: if another process created it first, use theirs.
 		f, createErr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -168,23 +191,23 @@ func requestTaskQueues(dataDir string) (jobs, light string, err error) {
 				writeErr = closeErr
 			}
 			if writeErr != nil {
-				return "", "", fmt.Errorf("write %s: %w", path, writeErr)
+				return "", fmt.Errorf("write %s: %w", path, writeErr)
 			}
 		case errors.Is(createErr, os.ErrExist):
 			if raw, err = os.ReadFile(path); err != nil {
-				return "", "", fmt.Errorf("read %s: %w", path, err)
+				return "", fmt.Errorf("read %s: %w", path, err)
 			}
 		default:
-			return "", "", fmt.Errorf("create %s: %w", path, createErr)
+			return "", fmt.Errorf("create %s: %w", path, createErr)
 		}
 	} else if err != nil {
-		return "", "", fmt.Errorf("read %s: %w", path, err)
+		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 	id := strings.TrimSpace(string(raw))
 	if id == "" {
-		return "", "", fmt.Errorf("%s is empty", path)
+		return "", fmt.Errorf("%s is empty", path)
 	}
-	return "factoryd-jobs-" + id, "factoryd-light-" + id, nil
+	return id, nil
 }
 
 // requestWorkflowStarter is the slice of client.Client startRequestWorkflow
@@ -195,8 +218,8 @@ type requestWorkflowStarter interface {
 
 // startRequestWorkflow starts requestID's RequestWorkflow, or wakes it when
 // it is already running, in one call.
-func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, requestID, jobsQueue, lightQueue string) error {
-	_, err := c.SignalWithStartWorkflow(ctx, workflow.RequestWorkflowID(requestID), workflow.RequestWakeSignalName, nil,
+func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, queueID, requestID, jobsQueue, lightQueue string) error {
+	_, err := c.SignalWithStartWorkflow(ctx, workflow.RequestWorkflowID(queueID, requestID), workflow.RequestWakeSignalName, nil,
 		client.StartWorkflowOptions{TaskQueue: lightQueue},
 		workflow.RequestWorkflowName,
 		workflow.RequestWorkflowInput{RequestID: requestID, JobsTaskQueue: jobsQueue, LightTaskQueue: lightQueue})
@@ -208,7 +231,7 @@ func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, request
 
 // startRequestWorkflows starts or wakes the workflow of every request in
 // dataDir that is not finished.
-func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDir, jobsQueue, lightQueue string) error {
+func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDir, queueID, jobsQueue, lightQueue string) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
@@ -217,9 +240,56 @@ func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDi
 		if r.State.Finished() {
 			continue
 		}
-		if err := startRequestWorkflow(ctx, c, r.ID, jobsQueue, lightQueue); err != nil {
+		if err := startRequestWorkflow(ctx, c, queueID, r.ID, jobsQueue, lightQueue); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// retireLegacyRequestWorkflows ends each unfinished request's workflow that
+// still has the id requests had before ids carried the queue id
+// (workflow.LegacyRequestWorkflowID), so the request is driven once, by the
+// workflow startRequestWorkflows starts. Only a workflow on lightQueue is
+// ended: the same legacy id on another data dir's queue is that data dir's
+// request, which this worker must not touch. request.json is the source of
+// truth and RequestWorkflow keeps no state of its own, so nothing is lost; a
+// step in flight belongs to the worker that was stopped for the upgrade and is
+// already halted by reclaimLostWork.
+func retireLegacyRequestWorkflows(ctx context.Context, c workflowTerminator, dataDir, lightQueue string) error {
+	requests, err := request.List(dataDir)
+	if err != nil {
+		return fmt.Errorf("list requests: %w", err)
+	}
+	for _, r := range requests {
+		if r.State.Finished() {
+			continue
+		}
+		if err := retireLegacyRequestWorkflow(ctx, c, workflow.LegacyRequestWorkflowID(r.ID), lightQueue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retireLegacyRequestWorkflow ends workflowID if it is running on lightQueue.
+func retireLegacyRequestWorkflow(ctx context.Context, c workflowTerminator, id, lightQueue string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var notFound *serviceerror.NotFound
+	desc, err := c.DescribeWorkflowExecution(ctx, id, "")
+	if errors.As(err, &notFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("look up workflow %s: %w", id, err)
+	}
+	info := desc.GetWorkflowExecutionInfo()
+	if info.GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING || info.GetTaskQueue() != lightQueue {
+		return nil
+	}
+	if err := c.TerminateWorkflow(ctx, id, "", "replaced by a workflow id that names its data dir"); err != nil && !errors.As(err, &notFound) {
+		return fmt.Errorf("end workflow %s: %w", id, err)
 	}
 	return nil
 }

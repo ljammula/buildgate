@@ -24,6 +24,7 @@ import (
 // workflow in running as Running.
 type stubWorkflowTerminator struct {
 	running    map[string]bool
+	queues     map[string]string // task queue per workflow id; empty when absent
 	terminated []string
 }
 
@@ -36,7 +37,7 @@ func (s *stubWorkflowTerminator) DescribeWorkflowExecution(_ context.Context, wo
 		status = enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING
 	}
 	return &workflowservice.DescribeWorkflowExecutionResponse{
-		WorkflowExecutionInfo: &workflowpb.WorkflowExecutionInfo{Status: status},
+		WorkflowExecutionInfo: &workflowpb.WorkflowExecutionInfo{Status: status, TaskQueue: s.queues[workflowID]},
 	}, nil
 }
 

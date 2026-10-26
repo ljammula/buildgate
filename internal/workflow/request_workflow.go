@@ -142,8 +142,19 @@ const (
 	requestStepStartToClose = 48 * time.Hour
 )
 
-// RequestWorkflowID is the workflow id of requestID's RequestWorkflow.
-func RequestWorkflowID(requestID string) string {
+// RequestWorkflowID is the workflow id of requestID's RequestWorkflow in the
+// data dir whose task-queue id is queueID. Workflow ids are global on a
+// Temporal server, so two data dirs sharing one server must not share an id
+// for requests that happen to share a request id.
+func RequestWorkflowID(queueID, requestID string) string {
+	return "factoryd-request-" + queueID + "-" + requestID
+}
+
+// LegacyRequestWorkflowID is the id a RequestWorkflow had before ids carried
+// the data dir's queue id. A workflow started under it is still running when
+// a worker is upgraded; the worker ends it (retireLegacyRequestWorkflows) and
+// starts the request under RequestWorkflowID.
+func LegacyRequestWorkflowID(requestID string) string {
 	return "factoryd-request-" + requestID
 }
 

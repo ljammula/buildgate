@@ -116,9 +116,9 @@ type requestWorkflowTerminator interface {
 // terminateRequestWorkflows ends the RequestWorkflow of each request id. A
 // workflow that is already closed or never existed is fine; other failures
 // are logged.
-func terminateRequestWorkflows(ctx context.Context, c requestWorkflowTerminator, ids []string) {
+func terminateRequestWorkflows(ctx context.Context, c requestWorkflowTerminator, queueID string, ids []string) {
 	for _, id := range ids {
-		err := c.TerminateWorkflow(ctx, workflow.RequestWorkflowID(id), "", "request halted at worker start: its step was lost")
+		err := c.TerminateWorkflow(ctx, workflow.RequestWorkflowID(queueID, id), "", "request halted at worker start: its step was lost")
 		var notFound *serviceerror.NotFound
 		if err != nil && !errors.As(err, &notFound) {
 			log.Printf("factoryd worker: end workflow of halted request %s: %v", id, err)

@@ -104,8 +104,8 @@ func (r *recordingTerminator) TerminateWorkflow(_ context.Context, workflowID, _
 
 func TestTerminateRequestWorkflowsEndsEachHaltedRequestsWorkflow(t *testing.T) {
 	term := &recordingTerminator{err: serviceerror.NewNotFound("gone")}
-	terminateRequestWorkflows(context.Background(), term, []string{"a", "b"})
-	want := []string{workflow.RequestWorkflowID("a"), workflow.RequestWorkflowID("b")}
+	terminateRequestWorkflows(context.Background(), term, "q1", []string{"a", "b"})
+	want := []string{workflow.RequestWorkflowID("q1", "a"), workflow.RequestWorkflowID("q1", "b")}
 	if !slices.Equal(term.ids, want) {
 		t.Fatalf("terminated %v, want %v", term.ids, want)
 	}

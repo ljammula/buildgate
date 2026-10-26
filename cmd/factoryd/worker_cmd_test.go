@@ -83,12 +83,12 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 	saveRequestInState(t, dataDir, "req-cancelled", request.StateCancelled)
 	saveRequestInState(t, dataDir, "req-closed", request.StateClosed)
 	starter := &recordingStarter{}
-	if err := startRequestWorkflows(context.Background(), starter, dataDir, "jobs-q", "light-q"); err != nil {
+	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q"); err != nil {
 		t.Fatal(err)
 	}
 	got := slices.Clone(starter.ids)
 	slices.Sort(got)
-	want := []string{workflow.RequestWorkflowID("req-halted"), workflow.RequestWorkflowID("req-review")}
+	want := []string{workflow.RequestWorkflowID("qid", "req-halted"), workflow.RequestWorkflowID("qid", "req-review")}
 	if !slices.Equal(got, want) {
 		t.Fatalf("started %v, want %v", got, want)
 	}
@@ -96,8 +96,55 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 		if starter.signals[i] != workflow.RequestWakeSignalName || starter.options[i].TaskQueue != "light-q" {
 			t.Errorf("start %d: signal %q, queue %q", i, starter.signals[i], starter.options[i].TaskQueue)
 		}
-		if in := starter.inputs[i]; in.JobsTaskQueue != "jobs-q" || in.LightTaskQueue != "light-q" || workflow.RequestWorkflowID(in.RequestID) != starter.ids[i] {
+		if in := starter.inputs[i]; in.JobsTaskQueue != "jobs-q" || in.LightTaskQueue != "light-q" || workflow.RequestWorkflowID("qid", in.RequestID) != starter.ids[i] {
 			t.Errorf("start %d: input %+v", i, in)
 		}
+	}
+}
+
+// Two data dirs on one Temporal server that hold a request with the same id
+// must not share a workflow id.
+func TestRequestWorkflowIDsDifferPerDataDir(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	qa, err := requestQueueID(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qb, err := requestQueueID(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflow.RequestWorkflowID(qa, "req-1") == workflow.RequestWorkflowID(qb, "req-1") {
+		t.Fatalf("data dirs %s and %s share a workflow id for one request id", a, b)
+	}
+	again, err := requestQueueID(a)
+	if err != nil || again != qa {
+		t.Fatalf("queue id of one data dir changed: %q then %q (%v)", qa, again, err)
+	}
+	if workflow.RequestWorkflowID(qa, "req-1") == workflow.LegacyRequestWorkflowID("req-1") {
+		t.Fatal("the new id equals the legacy id")
+	}
+}
+
+// A request in flight at an upgrade is still running under its legacy id on
+// this data dir's light queue; the worker ends it. The same legacy id on
+// another data dir's queue, a finished request and a closed workflow are left.
+func TestRetireLegacyRequestWorkflowsEndsOnlyThisDataDirsRunningOnes(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "mine", request.StateSpecReview)
+	saveRequestInState(t, dataDir, "theirs", request.StateSpecReview)
+	saveRequestInState(t, dataDir, "closed-wf", request.StateSpecReview)
+	saveRequestInState(t, dataDir, "fresh", request.StateSpecReview)
+	saveRequestInState(t, dataDir, "finished", request.StateDone)
+	id := workflow.LegacyRequestWorkflowID
+	stub := &stubWorkflowTerminator{
+		running: map[string]bool{id("mine"): true, id("theirs"): true, id("closed-wf"): false, id("finished"): true},
+		queues:  map[string]string{id("mine"): "light-q", id("theirs"): "light-other", id("closed-wf"): "light-q", id("finished"): "light-q"},
+	}
+	if err := retireLegacyRequestWorkflows(context.Background(), stub, dataDir, "light-q"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{id("mine")}; !slices.Equal(stub.terminated, want) {
+		t.Fatalf("terminated %v, want %v", stub.terminated, want)
 	}
 }
