@@ -47,6 +47,24 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd kill-switch -project <p>` | Durably engages or disengages a project's release kill switch; without `-state`, prints its state and history. Engaged = every release decision fails closed. CLI-only so it works without `serve`; file-locked; no merge, deploy or run side effect. |
 | `factoryd reconcile` | Reaps a stranded isolation marker, worktree or branch from a killed run. Refuses if a live run holds the repo lock; preserves anything still resumable. |
 
+### Upgrading with requests in flight
+
+`factoryd upgrade` rewrites no request record. A request records its
+ticket-build input shape at submit: `"build_input": "approved_spec"` in
+`request.json` for the shape that puts the approved spec verbatim before the
+ticket (see "Ticket sequencing (`building`)"), absent for the earlier
+ticket-first shape. A request submitted before the upgrade has no such field and
+keeps the earlier shape through every remaining ticket and corrective round.
+
+| Field a later release added | A request written before it |
+|---|---|
+| `build_input` | Absent: ticket-first build input, no `# Approved spec`, no read-back block |
+| `read_back`, `approved_read_back_sha256`, `read_back_answer_log` | Absent. Approval needs none and its hashes verify at build. A handed-over spec sent back from `spec_review` gets a read-back with its redraft; the answers reach the planner, the oracle drafter and the spec-conformity reviewer, not the ticket's build input |
+| `imported_plan_criteria`, `plan_import_ended` | Absent: a plan handed over before the upgrade is taken without the criteria comparison, so a changed spec does not stop planning |
+| `plan_budget_lines`, a ticket's `Estimated-Changed-Lines:` | Absent at `plan_review`: no budget and no note. Planning that runs after the upgrade reads `pr_budget_lines` from the session config then in force |
+
+To move a request to the new shape, `factoryd cancel <id>` and submit it again.
+
 ### The flags used most
 
 The 25 flags an operator passes most, or must pass. Every other flag is in
@@ -179,14 +197,15 @@ reopens the same review. `pr_review` has no expiry.
 
 **Ticket sequencing (`building`).** Tickets build one at a time, chained
 with `-prior-run <previous run id>`. A ticket's actual `-spec` is not
-`tickets/NNN.spec.md` itself but a derived `tickets/NNN.build.md`: that
-spec verbatim plus a `## Acceptance criteria this ticket must satisfy`
-section carrying the full text of every approved-spec criterion the
-ticket's own `### Acceptance criteria covered` numbers name (every
-criterion, if it names none). New requests receive `# Approved spec`, the
-approved spec's bytes verbatim, `# This ticket`, the ticket's bytes and then
-that criteria section; requests without the build-input marker retain the
-legacy ticket-first shape. `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
+`tickets/NNN.spec.md` itself but a derived `tickets/NNN.build.md`. It ends
+with a `## Acceptance criteria this ticket must satisfy` section carrying the
+full text of every approved-spec criterion the ticket's own `### Acceptance
+criteria covered` numbers name (every criterion, if it names none). A request
+with `"build_input": "approved_spec"` gets `# Approved spec`, the approved
+spec's bytes verbatim, the answered read-back questions, `# This ticket`, the
+ticket's bytes and then that criteria section. A request without the field
+gets the ticket's bytes verbatim and then the criteria section (see "Upgrading
+with requests in flight"). `plan_review`'s approval hash still pins `tickets/NNN.spec.md`
 itself, never the derived file. `-open-pull-request` only opens a PR
 when the run's `release.Decision` is `allowed: true`; an accepted run
 with a denied decision still accepts, but no PR opens (the notification
@@ -505,13 +524,14 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 | Spec changed after hand-over | A handed-over plan records the exact criteria list it was checked against. If the approved spec's criteria differ before those tickets are taken, planning stops. Run `factoryd reject -to plan -reason "..." <id>`; the reason becomes plan feedback and planning drafts revised tickets instead of taking the imported tickets again. Sending a request back to spec after a plan exists discards the plan's revisions and its feedback; the criteria check runs again |
 | Team design guide | Not applied to a handed-over spec or plan on its first pass; a revision after a reject reads it. To have your document checked against the guide, reject it with that as the reason (`reject -reason "check this against the team design guide"`) |
 
-The handed-over or edited spec limit is **120,000 bytes**. The complete ticket
-build input is limited to **180,000 bytes**; build_app.py's round prompt limit
-is **200,000 bytes**, so the build input leaves 20,000 bytes for round state
-and corrective framing. `submit -spec-file`, the console's spec `PUT`, and an
+The handed-over or edited spec limit is **120,000 bytes**. A ticket's build
+input is limited to **150,000 bytes** and to **180,000 bytes** with a
+corrective round's addendum; build_app.py's round prompt limit is **200,000
+bytes**, so the build input leaves 20,000 bytes for round state and corrective
+framing. `submit -spec-file`, the console's spec `PUT`, and an
 imported-spec redraft refuse a larger document before it is saved or reviewed.
 
-| Excluded `##` heading (case and one trailing colon ignored) | Derived criteria |
+| Excluded `#`/`##` heading (case and one trailing colon ignored) | Derived criteria |
 |---|---|
 | `Problem` | Never read |
 | `Non-goals` | Never read |
