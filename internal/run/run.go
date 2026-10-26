@@ -174,6 +174,10 @@ type Attempt struct {
 	// found it clean at that run's result commit, and launched nothing.
 	// Empty for a build that ran.
 	KeptFromRun string `json:"kept_from_run,omitempty"`
+	// ReplayOf, on a replay run's build attempt, is the run whose commits
+	// were replayed and whose last build attempt this one is carried from:
+	// nothing was built or launched. Empty for a build that ran.
+	ReplayOf string `json:"replay_of,omitempty"`
 	// ImageDigest is the sandbox worker image's pinned sha256 digest when
 	// this attempt ran inside Docker, and empty for a host-runner attempt —
 	// durable evidence of exactly which immutable worker image identity
@@ -1381,6 +1385,10 @@ type Run struct {
 	// round copies the run it continues. Empty on runs that are not stacked,
 	// and omitted so older records marshal byte-identically.
 	StackBaseSHA string `json:"stack_base_sha,omitempty"`
+	// Replay is set on a replay run only: the record of the commits the host
+	// replayed onto a new base, which the run judges instead of building
+	// (see Replay). Written once, when the run's record is created.
+	Replay *Replay `json:"replay,omitempty"`
 	// DiffBaseSHA is set only when -diff-base overrode the range the
 	// diff-shape gates (diff_scope, required_files_changed,
 	// required_content, tests_added) and the PR-body evidence were
@@ -1785,11 +1793,14 @@ func (r *Run) RecordRescue(by, reason, action string, newState State, now func()
 }
 
 // ApplyOverride changes a quarantined run's terminal state and appends the
-// attributable evidence for that change. Persisting the result is the caller's
+// attributable evidence for that change. A replay run is refused. Persisting the result is the caller's
 // responsibility.
 func (r *Run) ApplyOverride(by, reason string, newState State, now func() string) error {
 	if r.State != StateQuarantined {
 		return fmt.Errorf("override requires a quarantined run; current state is %q", r.State)
+	}
+	if r.Replay != nil {
+		return fmt.Errorf("run %s is a replay run: a replayed result is never accepted by hand", r.ID)
 	}
 	if by == "" {
 		return fmt.Errorf("override by is required")

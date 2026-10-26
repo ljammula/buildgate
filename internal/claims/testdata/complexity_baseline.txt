@@ -24,7 +24,7 @@
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
-30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
+26 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 32 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
 30 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 46 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia

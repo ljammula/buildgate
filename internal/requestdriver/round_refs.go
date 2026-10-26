@@ -63,7 +63,7 @@ func tagTicketRound(dp Deps, r *request.Request, ticket *request.Ticket, runReco
 		RunID:        runRecord.ID,
 		Kind:         kind,
 		SHA:          runRecord.ResultSHA,
-		BaseSHA:      runRecord.BaseSHA,
+		BaseSHA:      roundStart(runRecord),
 		DiffBaseSHA:  runRecord.DiffBaseSHA,
 		Outcome:      outcome,
 		FailedChecks: roundFailedChecks(runRecord),
@@ -79,6 +79,17 @@ func tagTicketRound(dp Deps, r *request.Request, ticket *request.Ticket, runReco
 	}
 	tag.Repo = repo
 	r.AppendRoundTag(ticket.Index, tag)
+}
+
+// roundStart is the commit a round's own work starts from, for its ledger
+// entry: the run's BaseSHA, or for a replay run, whose BaseSHA is the replayed
+// head it judges, the commit the replay is onto, so the replayed commits are
+// the round's own and it gets a ref of its own.
+func roundStart(runRecord *run.Run) string {
+	if runRecord.Replay != nil {
+		return runRecord.Replay.OntoSHA
+	}
+	return runRecord.BaseSHA
 }
 
 // maxRoundRefAttempts bounds the round numbers createRoundRef tries.
@@ -199,8 +210,9 @@ func withRoundBranch(dp Deps, dataDir string, r *request.Request, ticket *reques
 	return append(args, "-on-branch", branch, "-diff-base", diffBase), recordOf, true, nil
 }
 
-// PruneRoundRefs deletes request r's round refs, and the retry-from branches
-// of its tickets that were never pushed, from every repository its ledger names.
+// PruneRoundRefs deletes request r's round refs and its local branches, except
+// the retry-from branches of its pushed tickets, from every repository its
+// ledger names.
 // A request that has reached done, closed or cancelled needs neither: they
 // exist so an operator can retry from a round. A branch of a pushed ticket stays
 // (it is the pull request's). Failures are logged, never returned: the request
@@ -220,7 +232,11 @@ func PruneRoundRefs(dp Deps, r *request.Request) {
 				repos[tag.Repo] = nil
 			}
 			if ticket.Pushed() {
-				repos[tag.Repo] = append(repos[tag.Repo], fmt.Sprintf("buildgate/%s/t%d-", r.ID, ticket.Index))
+				// A pushed ticket's pull request may be on a retry-from
+				// branch; any other local branch of it (a replay branch,
+				// buildgate/<request>/t<n>-restack<k>) is never pushed by
+				// that name and goes.
+				repos[tag.Repo] = append(repos[tag.Repo], fmt.Sprintf("buildgate/%s/t%d-from-r", r.ID, ticket.Index))
 			}
 		}
 	}

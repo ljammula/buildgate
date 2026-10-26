@@ -236,6 +236,12 @@ const ConformityRoundKind = "conformity"
 // kind.
 const CorrectiveRoundKind = "corrective"
 
+// RestackRoundKind marks a Round as a replay run of the ticket's commits onto
+// a new base: it builds nothing and counts against neither round budget
+// (max_review_rounds reads Kind "" rounds, review_corrective_rounds the two
+// pre-PR kinds).
+const RestackRoundKind = "restack"
+
 // Round is one corrective build run against a ticket's own branch, in
 // response either to a batch of newly-surfaced unresolved PR review
 // threads (Kind "") or to a quarantined run's own spec_conformity
@@ -252,7 +258,8 @@ type Round struct {
 	Index int `json:"index"`
 	// Kind is "" (the zero value, so every round recorded before this
 	// field existed reads as a PR-review round, preserving their
-	// historical meaning), ConformityRoundKind or CorrectiveRoundKind. See
+	// historical meaning), ConformityRoundKind, CorrectiveRoundKind or
+	// RestackRoundKind. See
 	// this type's own doc comment.
 	Kind      string   `json:"kind,omitempty"`
 	ThreadIDs []string `json:"thread_ids"`
@@ -324,7 +331,8 @@ type Round struct {
 
 // Counted reports whether the round uses up one of its budget's rounds
 // (max_review_rounds for a PR-review round, review_corrective_rounds for the
-// two pre-PR kinds). A round whose run never started, or ended with no
+// two pre-PR kinds). A RestackRoundKind round is in neither budget: each
+// budget's reader also filters by Kind. A round whose run never started, or ended with no
 // verdict on the work, does not: neither says anything about the work, and
 // counting them let an outage spend the whole budget.
 func (rnd Round) Counted() bool {

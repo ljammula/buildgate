@@ -11,12 +11,14 @@ import (
 const RoundRefPrefix = "refs/buildgate/rounds/"
 
 // RoundTag kinds, the Kind of a RoundTag: the first build of a ticket, then an
-// automatic corrective or conformity round, then a PR-review round.
+// automatic corrective or conformity round, then a PR-review round, and a
+// replay run of the ticket's commits onto a new base.
 const (
 	RoundTagBuild      = "build"
 	RoundTagCorrective = CorrectiveRoundKind
 	RoundTagConformity = ConformityRoundKind
 	RoundTagPRReview   = "pr_review"
+	RoundTagRestack    = RestackRoundKind
 )
 
 // RoundTag is one entry of a ticket's round ledger: the commit a build round

@@ -56,16 +56,24 @@ func (a *Activities) keptFinishedBuild(ctx context.Context, input RunWorkflowInp
 }
 
 // keptBuildAttempt is the build attempt a run records for a build it kept
-// from earlier: that run's last build attempt, with everything that says
-// how the build was made (the sandbox image, the harness, the route, the
-// skills), since this run's release decision asks of its build attempt
-// whether it ran in the sandbox. What that attempt spent is left out: it is
-// the earlier run's spend, already carried to this one as a total, and
-// counting it here would count it twice. KeptFromRun says where it came
-// from; the times are when it was kept.
+// from earlier (carriedBuildAttempt), with KeptFromRun saying where it came
+// from.
 func keptBuildAttempt(earlier *run.Run, now time.Time) run.Attempt {
-	attempt := lastBuildAttempt(earlier)
+	attempt := carriedBuildAttempt(earlier, now)
 	attempt.KeptFromRun = earlier.ID
+	return attempt
+}
+
+// carriedBuildAttempt is the build attempt a run records for a build it did
+// not make but carries from earlier, a kept build or a replay: that run's last
+// build attempt, with everything that says how the build was made (the
+// sandbox image, the harness, the route, the skills), since this run's
+// release decision asks of its build attempt whether it ran in the sandbox.
+// What that attempt spent is left out: it is the earlier run's spend, and
+// counting it here would count it twice. The times are when it was carried;
+// the caller says where it came from.
+func carriedBuildAttempt(earlier *run.Run, now time.Time) run.Attempt {
+	attempt := lastBuildAttempt(earlier)
 	attempt.StartedAt, attempt.FinishedAt = now.Format(time.RFC3339), now.Format(time.RFC3339)
 	attempt.LogPath = ""
 	attempt.RelayConsumedInputTokens, attempt.RelayConsumedOutputTokens, attempt.RelayConsumedCostMicroUSD = 0, 0, 0

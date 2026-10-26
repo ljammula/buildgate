@@ -736,6 +736,9 @@ const baselineLogTailBytes = 8 << 20
 // checkpoint, intent and journal protocol is runVerifyCommand's.
 func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWorkflowInput) (BaselineVerifyResult, error) {
 	logDir := a.logDirFor(input)
+	if input.Replay != nil {
+		return a.replayBaselineVerify(input, logDir)
+	}
 	if from, resumed := a.baselineInheritedFrom(input); from != "" {
 		if result, inherited, err := a.inheritBaselineVerify(input, logDir, from, resumed); inherited || err != nil {
 			return result, err
@@ -922,6 +925,19 @@ func (a *Activities) ticketTextFor(input RunWorkflowInput) string {
 		}
 	}
 	return text.String()
+}
+
+// replayBaselineVerify is a replay run's baseline: it launches nothing. It
+// carries the baseline record of the run whose commits were replayed, as a
+// round carries its ticket's, or, with none to carry, records none. No
+// baseline is taken on the new base: a baseline only informs a build, which a
+// replay run does not make, and can only halt a run, never pass a gate.
+func (a *Activities) replayBaselineVerify(input RunWorkflowInput, logDir string) (BaselineVerifyResult, error) {
+	result, inherited, err := a.inheritBaselineVerify(input, logDir, input.Replay.OfRunID, false)
+	if inherited || err != nil {
+		return result, err
+	}
+	return BaselineVerifyResult{}, nil
 }
 
 // baselineInheritedFrom names the run whose baseline record input's run

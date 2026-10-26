@@ -84,6 +84,8 @@ func HaltReasonCodeFromError(err error) string {
 		return run.HaltReasonReviewInstructionsFailed
 	case FactoryDirFailureType:
 		return run.HaltReasonFactoryDirFailed
+	case ReplayFailureType:
+		return run.HaltReasonReplayRefused
 	}
 	return ""
 }

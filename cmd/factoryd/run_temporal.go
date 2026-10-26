@@ -73,8 +73,11 @@ type temporalSliceOptions struct {
 	// EarlierAttempt carries -earlier-attempt (an absolute path) onto
 	// RunWorkflowInput.EarlierAttemptPath.
 	EarlierAttempt string
-	TicketPath     string
-	TicketNumber   int
+	// Replay carries -replay's record onto RunWorkflowInput.Replay
+	// (replayInputOf); nil for every run that builds.
+	Replay       *workflow.ReplayInput
+	TicketPath   string
+	TicketNumber int
 	// RequestTicket carries -request-ticket onto RunWorkflowInput.
 	// RequestTicket/PreflightInput.RequestTicket, so PreflightActivity
 	// validates TicketPath (here, the -spec ticketspec-format file, per
@@ -350,6 +353,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		DiffBaseSHA:        o.Slice.DiffBase,
 		InstructionBaseSHA: o.Slice.InstructionBase,
 		EarlierAttemptPath: o.Slice.EarlierAttempt,
+		Replay:             o.Slice.Replay,
 		ResumeFrom:         o.Slice.ResumeFrom,
 		// Carried per-execution, not left to Activities' own Worker-static
 		// fields: see RunWorkflowInput.LogDir's doc comment — a no-op
@@ -1112,4 +1116,13 @@ func recordSpecDriftIfDetected(dataDir, thisRunID, thisProjectPath string, prior
 	if lockErr != nil {
 		log.Printf("run %s: warning: could not record spec/contract drift on prior run %q: %v", thisRunID, priorID, lockErr)
 	}
+}
+
+// replayInputOf is the part of a replay record the workflow reads, nil for no
+// record.
+func replayInputOf(r *run.Replay) *workflow.ReplayInput {
+	if r == nil {
+		return nil
+	}
+	return &workflow.ReplayInput{OfRunID: r.OfRunID, SourceRunIDs: append([]string(nil), r.SourceRunIDs...), OntoSHA: r.OntoSHA, HeadSHA: r.HeadSHA}
 }

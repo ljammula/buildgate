@@ -26,8 +26,12 @@ const (
 	CaptureBaseSHAActivityName = "CaptureBaseSHAActivity"
 	PreflightActivityName      = "PreflightActivity"
 	RunBuildActivityName       = "RunBuildActivity"
-	PostBuildActivityName      = "PostBuildActivity"
-	RunVerifyActivityName      = "RunVerifyActivity"
+	// ApplyReplayActivityName is a replay run's build step: a host check of
+	// the replayed commit that builds and launches nothing (see
+	// replayRunChange).
+	ApplyReplayActivityName = "ApplyReplayActivity"
+	PostBuildActivityName   = "PostBuildActivity"
+	RunVerifyActivityName   = "RunVerifyActivity"
 	// RunBaselineVerifyActivityName runs the verify command on the base
 	// commit, before the build's first round (see baselineVerifyChange).
 	RunBaselineVerifyActivityName = "RunBaselineVerifyActivity"
@@ -461,6 +465,45 @@ const requireIsolatedWorkspaceChange = "require-isolated-workspace"
 // NonIsolatedRunFailureType is the application error type of the refusal.
 const NonIsolatedRunFailureType = "NonIsolatedRun"
 
+// replayRunChange is the GetVersion change ID under which a replay run
+// (RunWorkflowInput.Replay set) schedules ApplyReplayActivity in place of
+// RunBuildActivity. Only a replay run asks for the version, right after the
+// isolation guard, so every other run records no marker. A replay run at
+// DefaultVersion (no real history can hold one) is refused, never built.
+const replayRunChange = "replay-run"
+
+// ReplayFailureType is the application error type of a refused replay run:
+// an input whose parts do not fit together (refuseIncoherentReplay) or a
+// replayed commit ApplyReplayActivity does not accept. Non-retryable; the
+// run halts with run.HaltReasonReplayRefused.
+const ReplayFailureType = "ReplayRefused"
+
+// refuseIncoherentReplay is RunWorkflow's check of a replay run, before any
+// Activity: it asks replayRunChange and refuses, with ReplayFailureType, a
+// replay at DefaultVersion and one that is not on an existing branch, whose
+// diff base is not the new base, or that also resumes, chains, carries an
+// earlier attempt or checks a baseline. An ordinary run passes untouched.
+func refuseIncoherentReplay(ctx temporalworkflow.Context, input RunWorkflowInput) error {
+	if input.Replay == nil {
+		return nil
+	}
+	refuse := func(why string) error {
+		return temporal.NewNonRetryableApplicationError("replay run refused: "+why, ReplayFailureType, nil)
+	}
+	if temporalworkflow.GetVersion(ctx, replayRunChange, temporalworkflow.DefaultVersion, 1) != 1 {
+		return refuse("this history predates replay runs")
+	}
+	switch {
+	case input.OnBranch == "":
+		return refuse("it must run on the branch the commits were replayed to")
+	case input.DiffBaseSHA != input.Replay.OntoSHA:
+		return refuse("its diff base must be the commit the replay is onto")
+	case input.ResumeFrom != nil || input.PriorRunID != "" || input.carriesEarlierAttempt() || input.BaselineCheck:
+		return refuse("it cannot resume, chain onto a prior run, carry an earlier attempt or check a baseline")
+	}
+	return nil
+}
+
 // baselineVerifyChange is the GetVersion change ID under which RunWorkflow
 // runs RunBaselineVerifyActivity between preflight and the build: the
 // ticket's verify command on the base commit, in a fresh sandbox, for every
@@ -621,6 +664,9 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 		return RunWorkflowResult{}, temporal.NewNonRetryableApplicationError(
 			"a build must run in an isolated workspace: RunWorkflowInput.IsolateWorkspace is false",
 			NonIsolatedRunFailureType, nil)
+	}
+	if err := refuseIncoherentReplay(ctx, input); err != nil {
+		return RunWorkflowResult{}, err
 	}
 	// current is updated just before each ExecuteActivity call below and
 	// read by the RunProgressQueryName handler this closes over — see

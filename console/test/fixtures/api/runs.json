@@ -333,6 +333,24 @@
     "state": "accepted",
     "base_sha": "every-field base_sha",
     "stack_base_sha": "every-field stack_base_sha",
+    "replay": {
+      "of_run_id": "every-field of_run_id",
+      "source_run_ids": [
+        "every-field source_run_ids"
+      ],
+      "upstream_sha": "every-field upstream_sha",
+      "source_head_sha": "every-field source_head_sha",
+      "onto_sha": "every-field onto_sha",
+      "head_sha": "every-field head_sha",
+      "commits": [
+        {
+          "original": "every-field original",
+          "replayed": "every-field replayed",
+          "original_patch_id": "every-field original_patch_id",
+          "replayed_patch_id": "every-field replayed_patch_id"
+        }
+      ]
+    },
     "diff_base_sha": "every-field diff_base_sha",
     "instruction_base_sha": "every-field instruction_base_sha",
     "result_sha": "every-field result_sha",
@@ -507,6 +525,7 @@
         "factory_dir_error": "every-field factory_dir_error",
         "resumed_from_checkpoint": "every-field resumed_from_checkpoint",
         "kept_from_run": "every-field kept_from_run",
+        "replay_of": "every-field replay_of",
         "image_digest": "every-field image_digest",
         "relay_image_digest": "every-field relay_image_digest",
         "relay_network": "every-field relay_network",

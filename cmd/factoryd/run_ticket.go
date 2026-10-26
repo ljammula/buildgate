@@ -76,6 +76,58 @@ func validateFollowUpRunInputs(diffBase, instructionBase, earlierAttempt string)
 	return validateEarlierAttemptFile(earlierAttempt)
 }
 
+// validateReplayFlags reads and checks the replay file -replay names, nil
+// when there is none. A replay run judges commits the host replayed onto a
+// new base instead of building: it runs on the branch they were replayed to
+// (-on-branch), measures from the commit they were replayed onto
+// (-diff-base, which must be the file's onto_sha), and takes none of the
+// inputs that start, chain or open a build (conflicts: the flags set that
+// it refuses).
+func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*run.Replay, error) {
+	if path == "" {
+		return nil, nil
+	}
+	if len(conflicts) > 0 {
+		return nil, fmt.Errorf("-replay cannot be combined with %s", strings.Join(conflicts, ", "))
+	}
+	if onBranch == "" || diffBase == "" {
+		return nil, errors.New("-replay needs -on-branch, the branch the commits were replayed to, and -diff-base, the commit they were replayed onto")
+	}
+	replay, err := run.ReadReplayFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if diffBase != replay.OntoSHA {
+		return nil, fmt.Errorf("-diff-base %s is not the commit the replay is onto (%s)", diffBase, replay.OntoSHA)
+	}
+	return replay, nil
+}
+
+// replayConflicts names the flags set in f that a replay run refuses: a
+// resume, a chain, an earlier attempt, a baseline check, a pull request it
+// would open, the shared repository queue, and a run serve starts.
+func replayConflicts(f runFlags) []string {
+	var set []string
+	for _, c := range []struct {
+		name string
+		on   bool
+	}{
+		{"-earlier-attempt", *f.earlierAttempt != ""},
+		{"-resume-worktree-of", *f.resumeWorktreeOf != ""},
+		{"-prior-run", *f.priorRun != ""},
+		{"-baseline-check", *f.baselineCheck},
+		{"-open-pull-request", *f.openPullRequest},
+		{"-pr-base", *f.prBase != ""},
+		{"-repository", *f.repository != ""},
+		{"-run-id", *f.runID != ""},
+	} {
+		if c.on {
+			set = append(set, c.name)
+		}
+	}
+	return set
+}
+
 // maxEarlierAttemptBytes bounds -earlier-attempt: the file goes into a
 // build's first prompt. A rendered handoff is at most 8 KiB.
 const maxEarlierAttemptBytes = 32 << 10
@@ -203,6 +255,7 @@ type runFlags struct {
 	instructionBase              *string
 	earlierAttempt               *string
 	resumeWorktreeOf             *string
+	replay                       *string
 	configPath                   *string
 }
 
@@ -270,6 +323,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.earlierAttempt = flags.String("earlier-attempt", "", "file describing an earlier failed attempt at this ticket, given to the build's first prompt only and never to a review; at most 32 KiB")
 	f.diffBase = flags.String("diff-base", "", "commit the diff checks and pull request evidence measure from, instead of the run's starting commit: a full 40-character id and an ancestor of it. Build and verify still use the branch tip")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts to continue its build. Refused with -repository, -on-branch or -prior-run, or when the worktree was not kept intact")
+	f.replay = flags.String("replay", "", "internal: file naming commits the host replayed onto a new base; the run judges them instead of building")
 	f.configPath = flags.String("config", "", "session config path, or a profile name; empty uses the active profile or the default paths")
 	finishFlags(flags)
 	flags.Usage = func() {
@@ -291,61 +345,64 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 // only is a local there.
 type ticketRun struct {
 	// dp is the external boundaries this call reaches.
-	dp                                    *deps
-	flags                                 *flag.FlagSet
-	rf                                    runFlags
-	ticket                                *string
-	workspace                             *string
-	spec                                  *string
-	buildAppInterpreter                   *string
-	buildAppScript                        *string
-	buildAppMaxAttempts                   *int
-	conformityPolicy                      *string
-	specAcceptanceCriteria                *string
-	codeReviewPolicy                      *string
-	maxRounds                             *int
-	timeoutMinutes                        *int
-	timeout                               *time.Duration
-	verifyCommand                         *string
-	fastCheckCommand                      *string
-	verifyMaxAttempts                     *int
-	fullSuiteCommand                      *string
-	fullSuiteCadence                      *int
-	fullSuiteSource                       *string
-	referenceOracleCommand                *string
-	referenceOracleDir                    *string
-	noCommitOracles                       *bool
-	bug                                   *bool
-	referenceOracleMountPath              *string
-	referenceOracleInLoopRetry            *bool
-	sandboxImage                          *string
-	executionModel                        *string
-	executionHarness                      *string
-	executionThinkingChoice               *string
-	registryProxy                         *bool
-	registryProxyImage                    *string
-	composeServices                       *bool
-	egressCABundle                        *string
-	dataDir                               *string
-	requireDeclaredScope                  *bool
-	temporalAddress                       *string
-	repository                            *string
-	runID                                 *string
-	priorRun                              *string
-	skipProjectCheck                      *bool
-	architectureRequiredSections          *string
-	preflightProfile                      *string
-	requestTicket                         *bool
-	ticketFile                            *string
-	openPullRequest                       *bool
-	prClosesIssue                         *string
-	prBase                                *string
-	allowSpecTicketScopeMismatch          *bool
-	onBranch                              *string
-	diffBase                              *string
-	instructionBase                       *string
-	earlierAttempt                        *string
-	resumeWorktreeOf                      *string
+	dp                           *deps
+	flags                        *flag.FlagSet
+	rf                           runFlags
+	ticket                       *string
+	workspace                    *string
+	spec                         *string
+	buildAppInterpreter          *string
+	buildAppScript               *string
+	buildAppMaxAttempts          *int
+	conformityPolicy             *string
+	specAcceptanceCriteria       *string
+	codeReviewPolicy             *string
+	maxRounds                    *int
+	timeoutMinutes               *int
+	timeout                      *time.Duration
+	verifyCommand                *string
+	fastCheckCommand             *string
+	verifyMaxAttempts            *int
+	fullSuiteCommand             *string
+	fullSuiteCadence             *int
+	fullSuiteSource              *string
+	referenceOracleCommand       *string
+	referenceOracleDir           *string
+	noCommitOracles              *bool
+	bug                          *bool
+	referenceOracleMountPath     *string
+	referenceOracleInLoopRetry   *bool
+	sandboxImage                 *string
+	executionModel               *string
+	executionHarness             *string
+	executionThinkingChoice      *string
+	registryProxy                *bool
+	registryProxyImage           *string
+	composeServices              *bool
+	egressCABundle               *string
+	dataDir                      *string
+	requireDeclaredScope         *bool
+	temporalAddress              *string
+	repository                   *string
+	runID                        *string
+	priorRun                     *string
+	skipProjectCheck             *bool
+	architectureRequiredSections *string
+	preflightProfile             *string
+	requestTicket                *bool
+	ticketFile                   *string
+	openPullRequest              *bool
+	prClosesIssue                *string
+	prBase                       *string
+	allowSpecTicketScopeMismatch *bool
+	onBranch                     *string
+	diffBase                     *string
+	instructionBase              *string
+	earlierAttempt               *string
+	resumeWorktreeOf             *string
+	// replay is the record -replay names, read and checked by
+	// validateReplayFlags; nil for every run that builds.
+	replay                                *run.Replay
 	args                                  []string
 	settings                              sessionconfig.Settings
 	executionHarnessName                  string
@@ -959,7 +1016,12 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 	if err := requestdriver.ValidateResumeWorktreeFlags(*tr.resumeWorktreeOf, *tr.onBranch, *tr.repository, *tr.priorRun); err != nil {
 		return err
 	}
-	return validateFollowUpRunInputs(*tr.diffBase, *tr.instructionBase, *tr.earlierAttempt)
+	if err := validateFollowUpRunInputs(*tr.diffBase, *tr.instructionBase, *tr.earlierAttempt); err != nil {
+		return err
+	}
+	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, replayConflicts(tr.rf))
+	tr.replay = replay
+	return err
 }
 
 // prepareSandbox places the data dir, reconciles orphaned containers and builds the model-route and registry-proxy policies, then checks the ticket's and project's names.
@@ -2163,6 +2225,8 @@ func (tr *ticketRun) createRunRecord() error {
 		// RFC3339Nano — see the other CreatedAt assignment above's doc
 		// comment for why.
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
+		// Replay: the durable evidence of what a replay run judges.
+		Replay: tr.replay,
 	}
 	if err := save(tr.r, *tr.dataDir); err != nil {
 		return err
@@ -2199,6 +2263,9 @@ func (tr *ticketRun) createRunRecord() error {
 		return fmt.Errorf("capture base SHA: %w", err)
 	}
 	tr.r.BaseSHA = tr.baseSHA
+	if err := tr.requireReplayedHead(); err != nil {
+		return err
+	}
 
 	// Closes gap 2 from the plan's 2026-08-28 Opus review ("nothing links
 	// slice N+1 to slice N"): -prior-run is optional, but once declared,
@@ -2305,35 +2372,8 @@ func (tr *ticketRun) createRunRecord() error {
 		// marked drifted here.
 		recordSpecDriftIfDetected(*tr.dataDir, tr.id, tr.r.ProjectPath, prior, tr.productSpecSHA256, tr.contractSHA256)
 	}
-	// r.FullSuiteSource set unconditionally, not only inside the
-	// configuredFullSuiteCommand != "" branch just below: it must also
-	// record fullSuiteSourceNone for an explicit opt-out, where
-	// configuredFullSuiteCommand is "" and this if is never entered.
-	tr.r.FullSuiteSource = *tr.fullSuiteSource
-	if tr.configuredFullSuiteCommand != "" {
-		tr.r.FullSuiteConfigured = true
-		tr.r.FullSuiteCadence = *tr.fullSuiteCadence
-		tr.r.FullSuiteSlice = 1
-		tr.r.FullSuiteScheduled = true
-		if *tr.fullSuiteCadence > 1 {
-			due, slice, cadenceErr := fullSuiteCadenceDue(*tr.dataDir, tr.r.ProjectPath, tr.priorRunSnapshot, *tr.fullSuiteCadence)
-			tr.r.FullSuiteSlice = slice
-			if cadenceErr != nil {
-				tr.r.State = run.StateHalted
-				tr.r.HaltConfirmed = true
-				if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
-					log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
-				}
-				return cadenceErr
-			}
-			tr.r.FullSuiteScheduled = due
-			if !due {
-				tr.effectiveFullSuiteCommand = ""
-			}
-		}
-		if err := save(tr.r, *tr.dataDir); err != nil {
-			return fmt.Errorf("persist full-suite cadence decision: %w", err)
-		}
+	if err := tr.scheduleFullSuite(); err != nil {
+		return err
 	}
 	if *tr.priorRun != "" {
 		// The isolated worktree is prepared from the predecessor's result
@@ -2367,6 +2407,62 @@ func (tr *ticketRun) createRunRecord() error {
 	}
 	fmt.Printf("run %s: state=%s base_sha=%s\n", tr.id, tr.r.State, tr.baseSHA)
 	return nil
+}
+
+// scheduleFullSuite records the run's full-suite configuration and whether
+// the full suite is due on this slice (-full-suite-cadence), and clears the
+// command when it is not.
+func (tr *ticketRun) scheduleFullSuite() error {
+	// r.FullSuiteSource set unconditionally, not only inside the
+	// configuredFullSuiteCommand != "" branch just below: it must also
+	// record fullSuiteSourceNone for an explicit opt-out, where
+	// configuredFullSuiteCommand is "" and this if is never entered.
+	tr.r.FullSuiteSource = *tr.fullSuiteSource
+	if tr.configuredFullSuiteCommand != "" {
+		tr.r.FullSuiteConfigured = true
+		tr.r.FullSuiteCadence = *tr.fullSuiteCadence
+		tr.r.FullSuiteSlice = 1
+		tr.r.FullSuiteScheduled = true
+		// A replay run always runs the full suite: its commits sit on a new
+		// base, which no earlier slice's full suite has seen.
+		if *tr.fullSuiteCadence > 1 && tr.replay == nil {
+			due, slice, cadenceErr := fullSuiteCadenceDue(*tr.dataDir, tr.r.ProjectPath, tr.priorRunSnapshot, *tr.fullSuiteCadence)
+			tr.r.FullSuiteSlice = slice
+			if cadenceErr != nil {
+				tr.r.State = run.StateHalted
+				tr.r.HaltConfirmed = true
+				if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+					log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
+				}
+				return cadenceErr
+			}
+			tr.r.FullSuiteScheduled = due
+			if !due {
+				tr.effectiveFullSuiteCommand = ""
+			}
+		}
+		if err := save(tr.r, *tr.dataDir); err != nil {
+			return fmt.Errorf("persist full-suite cadence decision: %w", err)
+		}
+	}
+	return nil
+}
+
+// requireReplayedHead halts a replay run whose branch is no longer at the
+// commit the host replayed: the branch moved after the replay, so what the
+// run would judge is not what the replay record says.
+func (tr *ticketRun) requireReplayedHead() error {
+	if tr.replay == nil || tr.baseSHA == tr.replay.HeadSHA {
+		return nil
+	}
+	tr.r.State = run.StateHalted
+	tr.r.HaltConfirmed = true
+	tr.r.HaltReasonCode = run.HaltReasonReplayRefused
+	err := fmt.Errorf("replay run refused: branch %s is at %s, not at the replayed head %s", *tr.onBranch, tr.baseSHA, tr.replay.HeadSHA)
+	if saveErr := save(tr.r, *tr.dataDir, err); saveErr != nil {
+		log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
+	}
+	return err
 }
 
 // recordAncestorInputs validates the two inputs that name a commit the run's
@@ -2476,6 +2572,7 @@ func (tr *ticketRun) dispatch() error {
 			DiffBase:                   tr.r.DiffBaseSHA,
 			InstructionBase:            tr.r.InstructionBaseSHA,
 			EarlierAttempt:             absolutePathOrEmpty(*tr.earlierAttempt),
+			Replay:                     replayInputOf(tr.replay),
 			TicketPath:                 temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
 			TicketNumber:               tr.piTicketNumber,
 			RequestTicket:              *tr.requestTicket,

@@ -155,6 +155,22 @@ func TestMergePolicyCheckRejectsRunWithNoAttemptsAtAll(t *testing.T) {
 	assertMergePolicyReason(t, r, cleanPolicy(), "did not execute inside the Docker sandbox")
 }
 
+// TestMergePolicyDeniesARunWithNoBuildAttempt pins the release decision of a
+// replay run to its carried build attempt: a replay record whose sandboxed
+// verify attempts ran but which has no build attempt (nothing carried from a
+// sandboxed source run) is denied, never treated as sandboxed.
+func TestMergePolicyDeniesARunWithNoBuildAttempt(t *testing.T) {
+	r := cleanRun()
+	r.Replay = &run.Replay{OfRunID: "req-1-002", SourceRunIDs: []string{"req-1-002"}}
+	r.Attempts = []run.Attempt{{Kind: "verify", ImageDigest: "sha256:" + strings.Repeat("a", 64)}}
+	assertMergePolicyReason(t, r, cleanPolicy(), "did not execute inside the Docker sandbox")
+
+	r.Attempts = append(r.Attempts, run.Attempt{Kind: "build", ImageDigest: "sha256:" + strings.Repeat("b", 64), ReplayOf: "req-1-002"})
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("replay run with its carried build attempt: denied (%v), want allowed", reasons)
+	}
+}
+
 func TestMergePolicyCheckAllowsUnsandboxedWithOptIn(t *testing.T) {
 	r := cleanRun()
 	r.Attempts = []run.Attempt{{Kind: "build"}}

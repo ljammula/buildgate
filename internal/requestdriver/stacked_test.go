@@ -401,3 +401,83 @@ func TestClosedUnmergedEarlierTicketParksRequest(t *testing.T) {
 		t.Fatalf("after resume: state %q, ticket 1 %q; want pr_review with a draft pull request", resumed.State, resumed.Tickets[0].PRState)
 	}
 }
+
+// reviewRoundOn runs one PR-review round on ticket 2 of stackedRetargetFixture
+// whose rounds are rounds and whose current PR-head run is head (saved), and
+// returns the round's -on-branch and -diff-base; ran is false when no round
+// build started.
+func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRounds int) (branch, diffBase string, ran bool) {
+	t.Helper()
+	dp := newFakeDeps(t)
+	r, dataDir, _ := stackedRetargetFixture(dp, t)
+	ticket := &r.Tickets[1]
+	head.Project, head.State = "widget", run.StateAccepted
+	if err := head.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	ticket.Rounds = append(rounds, request.Round{Index: len(rounds) + 1, Kind: request.RestackRoundKind, RunID: head.ID, Outcome: request.RoundAccepted, Pushed: true})
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 1}}
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: "OPEN", HeadSHA: head.ResultSHA, BlocksReadyThreads: threads, ActionableThreads: threads}, nil
+	}
+	dp.remoteBranchHeadSHAFn = func(context.Context, string, string) (string, error) { return head.ResultSHA, nil }
+	dp.roundResultDescendsFromHeadFn = func(string, string, string) (bool, error) { return true, nil }
+	dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return nil }
+	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
+	origRunner := requestdriver.PrReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		ran = true
+		branch, diffBase = requestdrivertest.ArgValue(args, "-on-branch"), requestdrivertest.ArgValue(args, "-diff-base")
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		onReady(&run.Run{ID: runID, State: run.StateReady, Branch: branch})
+		return saveAcceptedRoundRun(t, dataDir, &run.Run{ID: runID, Project: "widget", State: run.StateAccepted, WorkspacePath: t.TempDir(), Branch: branch, BaseSHA: head.ResultSHA, DiffBaseSHA: diffBase, ResultSHA: strings.Repeat("e", 40)})
+	}
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: maxRounds}, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	return branch, diffBase, ran
+}
+
+// replayHeadRun is an accepted replay run of ticket 2 onto onto.
+func replayHeadRun(onto string) *run.Run {
+	head := strings.Repeat("c", 40)
+	return &run.Run{ID: "ticket-2-restack1", Branch: "factoryd/ticket-2-pr", BaseSHA: head, ResultSHA: head, DiffBaseSHA: onto, StackBaseSHA: onto, Replay: &run.Replay{OfRunID: "run-2", SourceRunIDs: []string{"run-2"}, OntoSHA: onto, HeadSHA: head}}
+}
+
+// TestCurrentPRHeadRunIDFollowsAPushedRestackRound: a restack round becomes
+// the pull request's head run once its push is confirmed, like any round.
+func TestCurrentPRHeadRunIDFollowsAPushedRestackRound(t *testing.T) {
+	ticket := &request.Ticket{RunID: "run-2", Rounds: []request.Round{{Index: 1, Kind: request.RestackRoundKind, RunID: "run-2-restack1", Outcome: request.RoundAccepted}}}
+	if got := ticket.PRHeadRunID(); got != "run-2" {
+		t.Fatalf("head run before the push is confirmed = %q, want run-2", got)
+	}
+	ticket.Rounds[0].Pushed = true
+	if got := ticket.PRHeadRunID(); got != "run-2-restack1" {
+		t.Fatalf("head run after the push = %q, want the restack round's run", got)
+	}
+}
+
+// TestPRReviewRoundAfterAReplayRunUsesItsOnto: a review round on a ticket
+// whose PR-head run is a replay run builds on that run's branch and measures
+// from the commit the replay is onto.
+func TestPRReviewRoundAfterAReplayRunUsesItsOnto(t *testing.T) {
+	onto := strings.Repeat("a", 40)
+	branch, diffBase, ran := reviewRoundOn(t, replayHeadRun(onto), nil, 3)
+	if !ran || branch != "factoryd/ticket-2-pr" || diffBase != onto {
+		t.Fatalf("round ran=%v on %q from %q, want factoryd/ticket-2-pr from %s", ran, branch, diffBase, onto)
+	}
+}
+
+// TestRestackRoundsUseNoRoundBudget: restack rounds, however many, leave the
+// review-round budget whole: with max_review_rounds 1 a review round still
+// runs after two of them.
+func TestRestackRoundsUseNoRoundBudget(t *testing.T) {
+	earlier := []request.Round{{Index: 1, Kind: request.RestackRoundKind, RunID: "ticket-2-restack0", Outcome: request.RoundAccepted, Pushed: true}}
+	if _, _, ran := reviewRoundOn(t, replayHeadRun(strings.Repeat("a", 40)), earlier, 1); !ran {
+		t.Fatal("no review round ran: restack rounds used the review-round budget")
+	}
+}

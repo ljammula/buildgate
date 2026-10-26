@@ -166,9 +166,9 @@ type prHead struct {
 
 // loadPRHead loads ticket's PRHeadRunID. The branch is the run's own;
 // the ticket's, then "factoryd/<run id>", stand in for records that predate
-// run.Run.Branch. The diff base is the run's DiffBase: an earlier round's
-// -diff-base, carried forward, or the first build's own base, which is the
-// earlier ticket's tip the ticket was built on.
+// run.Run.Branch. The diff base is prHeadDiffBase: an earlier round's
+// -diff-base, carried forward, the first build's own base (the earlier
+// ticket's tip the ticket was built on), or a replay run's new base.
 func loadPRHead(dataDir string, ticket *request.Ticket) (prHead, error) {
 	id := ticket.PRHeadRunID()
 	if id == "" {
@@ -178,7 +178,7 @@ func loadPRHead(dataDir string, ticket *request.Ticket) (prHead, error) {
 	if err != nil {
 		return prHead{}, fmt.Errorf("load ticket %d's current PR-head run %s: %w", ticket.Index, id, err)
 	}
-	head := prHead{Run: rec, Branch: rec.Branch, DiffBase: rec.DiffBase()}
+	head := prHead{Run: rec, Branch: rec.Branch, DiffBase: prHeadDiffBase(rec)}
 	if head.Branch == "" {
 		head.Branch = ticket.Branch
 	}
@@ -186,6 +186,16 @@ func loadPRHead(dataDir string, ticket *request.Ticket) (prHead, error) {
 		head.Branch = "factoryd/" + id
 	}
 	return head, nil
+}
+
+// prHeadDiffBase is the diff base a round started on run record keeps: the
+// commit a replay run's commits were replayed onto, else the run's DiffBase
+// (an earlier round's -diff-base, or a first build's own base).
+func prHeadDiffBase(record *run.Run) string {
+	if record.Replay != nil {
+		return record.Replay.OntoSHA
+	}
+	return record.DiffBase()
 }
 
 // stackBaseOf is the earlier ticket's tip record's commits sit on: its

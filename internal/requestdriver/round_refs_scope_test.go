@@ -125,7 +125,7 @@ func TestPruneRoundRefsKeepsThePushedTicketsBranches(t *testing.T) {
 		{Index: 3},
 	}}
 	requestdriver.PruneRoundRefs(dp, r)
-	if len(calls) != 1 || calls[0].dir != "/repo/a" || calls[0].id != "req-1" || !reflect.DeepEqual(calls[0].keep, []string{"buildgate/req-1/t2-"}) {
-		t.Errorf("prune calls = %+v, want one for /repo/a keeping ticket 2's branches", calls)
+	if len(calls) != 1 || calls[0].dir != "/repo/a" || calls[0].id != "req-1" || !reflect.DeepEqual(calls[0].keep, []string{"buildgate/req-1/t2-from-r"}) {
+		t.Errorf("prune calls = %+v, want one for /repo/a keeping ticket 2's retry-from branches only", calls)
 	}
 }
