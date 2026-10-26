@@ -612,3 +612,42 @@ func TestASendBackDropDoesNotCoverTheNewTicketsRefusals(t *testing.T) {
 		t.Errorf("list = %+v, want the new ticket's refusal noted", list)
 	}
 }
+
+// SC-022: a refusal stays on the plan that judged it. A run that started
+// before the request was sent back and planned again ends refused: nothing
+// is noted on the new plan's ticket 1.
+func TestARefusalOfARunFromBeforeASendBackIsNotNoted(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		onReady(&run.Run{ID: runID})
+		started := time.Now().Add(-time.Minute)
+		// While the run builds: the request is quarantined, sent back to
+		// plan and planned again, its new ticket 1 building.
+		old := requestdrivertest.LoadRequest(t, dataDir, id)
+		old.State = request.StateQuarantined
+		if err := old.Save(dataDir); err != nil {
+			return err
+		}
+		if _, err := request.SendBack(dataDir, id, "alice", "a different plan", request.SendBackToPlan, time.Now()); err != nil {
+			return err
+		}
+		replanned := requestdrivertest.LoadRequest(t, dataDir, id)
+		replanned.State, replanned.TicketCount, replanned.TicketIndex = request.StateBuilding, 1, 1
+		replanned.Tickets = []request.Ticket{{Index: 1, SpecPath: old.Tickets[0].SpecPath}}
+		if err := replanned.Save(dataDir); err != nil {
+			return err
+		}
+		rr := requestdrivertest.ReproductionRefusedOn(t, dataDir, runID, "factoryd/"+runID, sha40(1), sha40(2))
+		rr.CreatedAt = started.Format(time.RFC3339Nano)
+		return saveAsBuiltFrom(t, dataDir, id, args, rr)
+	}
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{}, buildRunner, time.Now()); err != nil {
+		t.Fatalf("AdvanceBuilding: %v", err)
+	}
+	if list := requestdrivertest.LoadRequest(t, dataDir, id).Tickets[0].Reproductions; len(list) != 0 {
+		t.Errorf("new ticket 1's list = %+v, want nothing from a run of the old plan", list)
+	}
+}

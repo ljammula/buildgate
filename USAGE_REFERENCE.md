@@ -390,7 +390,8 @@ operator's action that ends the chain, each entry recorded under
 `dropped_reproductions` with who sent it back. A drop covers only the
 refusals it was made for (the ticket and the runs): the same reproduction
 refusing another run, a later one or one of a ticket planned again, is on
-the list again. A restack's replay run holds and runs no reproduction, and leaves the
+the list again. A run that started before the request's last send-back
+notes nothing: the tickets it judged are gone. A restack's replay run holds and runs no reproduction, and leaves the
 list for the round after it. The list is written to the request as soon as
 the run that a reproduction refused ends, whatever the request's state, and
 each build first notes again what refused every run recorded on the ticket;

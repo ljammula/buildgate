@@ -1,10 +1,11 @@
 package request
 
 import (
-	"buildgate/internal/run"
 	"fmt"
 	"os"
 	"time"
+
+	"buildgate/internal/run"
 )
 
 // PROpenOutcome is what a PROpener (below) reports for one attempt to
@@ -225,7 +226,8 @@ func retry(dataDir, id, by, reason string, choice retryChoice, now time.Time, op
 		return r, nil
 	}
 	// A build refused because a reproduction's held copy is gone: the
-	// retrying operator drops those reproductions, recorded on the ticket.
+	// retrying operator drops those whose copy is still missing, recorded on
+	// the request.
 	r.dropUnheldReproductions(by, func(e run.RecheckEntry) bool { return !run.HeldCopyOnDisk(dataDir, e) }, now)
 	if r.TicketCount == 0 || r.HaltedFrom() == StatePlanning {
 		// Halted before any ticket existed (a spec-drafting or planning

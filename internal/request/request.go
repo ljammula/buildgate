@@ -1768,7 +1768,7 @@ func (r *Request) haltedNextAction() string {
 	case HaltOracleMaterialize:
 		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
 	case HaltRecheckUnheld:
-		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is gone (recorded on the ticket) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
+		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is still missing (recorded on the request) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltGateExpired:
 		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltAcceptedNoPR:

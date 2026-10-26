@@ -47,6 +47,20 @@ type DroppedReproduction struct {
 // ReproductionKey tells two reproductions apart: path and hash.
 func ReproductionKey(e run.RecheckEntry) string { return e.SHA256 + " " + e.Path }
 
+// SentBackSince reports whether the request was sent back (SendBack, whose
+// Rejection names the stage it feeds) after t: the tickets of then were
+// discarded and planned again, so a run that started at t judged a plan the
+// request no longer has.
+func (r *Request) SentBackSince(t time.Time) bool {
+	for _, rj := range r.Rejections {
+		at, err := time.Parse(time.RFC3339Nano, rj.At)
+		if rj.ForStage != "" && err == nil && at.After(t) {
+			return true
+		}
+	}
+	return false
+}
+
 // RefusalDropped reports whether e's refusal of run runID, a run of ticket
 // index, was ended by a drop: one of that ticket, with e's path and hash,
 // made for that run.
@@ -132,7 +146,7 @@ func (r *Request) dropAllReproductions(by, why string, now time.Time) {
 // continue without a reproduction it must pass again: the held copy is gone
 // or no longer matches its hash (TicketReproduction.Unheld). The recovery,
 // `factoryd retry`, drops those reproductions whose copy is still missing
-// (recorded in DroppedReproductions) before it builds. It is a request's
+// (recorded on the request, in DroppedReproductions) before it builds. It is a request's
 // halt kind, not the unresolved cause reproduction_unheld, which halts a run
 // whose copy could not be held or mounted during the run itself.
 const HaltRecheckUnheld HaltKind = "recheck_unheld"
