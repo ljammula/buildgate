@@ -73,10 +73,7 @@ func workerMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
-	jobsQueue, lightQueue, err := requestTaskQueues(dataDir)
-	if err != nil {
-		return err
-	}
+	jobsQueue, lightQueue := taskQueuesFor(queueID)
 	temporalClient, err := client.Dial(client.Options{HostPort: cfg.TemporalAddress})
 	if err != nil {
 		return fmt.Errorf("connect to Temporal at %s: %w", cfg.TemporalAddress, err)
@@ -93,13 +90,6 @@ func workerMain(dp *deps, args []string) error {
 		buildRunner: func(a0 context.Context, a1 []string, a2 func(*run.Run)) error {
 			return runMainWithReady(dp, a0, a1, a2)
 		},
-	}
-	// A request in flight at an upgrade is still running under the id it had
-	// before ids carried the queue id; end that workflow before the workers
-	// poll, so it never drives the request beside the one started below.
-	skipped, err := retireLegacyRequestWorkflows(context.Background(), temporalClient, dataDir, lightQueue, acts.HaltLostRequestStepOf)
-	if err != nil {
-		return err
 	}
 	jobs := temporalworker.New(temporalClient, jobsQueue, jobsWorkerOptions(cfg.Settings.MaxParallelJobs))
 	jobs.RegisterActivityWithOptions(acts.AdvanceRequest, activity.RegisterOptions{Name: workflow.AdvanceRequestActivityName})
@@ -120,8 +110,8 @@ func workerMain(dp *deps, args []string) error {
 	defer stop()
 	// A request in resume_review has an old workflow still waiting on its lost step; ended
 	// here, its lost-step move cannot fire later and undo a decision made in between.
-	terminateRequestWorkflows(ctx, temporalClient, queueID, haltedIDs)
-	if err := startRequestWorkflows(ctx, temporalClient, dataDir, queueID, jobsQueue, lightQueue, skipped); err != nil {
+	terminateRequestWorkflows(ctx, temporalClient, queueID, lightQueue, haltedIDs)
+	if err := startRequestWorkflows(ctx, temporalClient, dataDir, queueID, jobsQueue, lightQueue); err != nil {
 		return err
 	}
 	<-ctx.Done()
@@ -164,12 +154,18 @@ func requestTaskQueues(dataDir string) (jobs, light string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	return "factoryd-jobs-" + id, "factoryd-light-" + id, nil
+	jobs, light = taskQueuesFor(id)
+	return jobs, light, nil
+}
+
+// taskQueuesFor names the jobs and light task queues of the data dir whose
+// queue id is id.
+func taskQueuesFor(id string) (jobs, light string) {
+	return "factoryd-jobs-" + id, "factoryd-light-" + id
 }
 
 // readRequestQueueID returns dataDir's queue id without creating it; found is
-// false when the data dir has none, which means no worker ever ran in it
-// under a workflow id that names its data dir.
+// false when the data dir has none.
 func readRequestQueueID(dataDir string) (id string, found bool, err error) {
 	path := filepath.Join(dataDir, requestQueueIDFileName)
 	raw, err := os.ReadFile(path)
@@ -231,10 +227,10 @@ type requestWorkflowStarter interface {
 	SignalWithStartWorkflow(ctx context.Context, workflowID, signalName string, signalArg interface{}, options client.StartWorkflowOptions, workflow interface{}, workflowArgs ...interface{}) (client.WorkflowRun, error)
 }
 
-// startRequestWorkflow starts requestID's RequestWorkflow, or wakes it when
-// it is already running, in one call.
-func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, queueID, requestID, jobsQueue, lightQueue string) error {
-	_, err := c.SignalWithStartWorkflow(ctx, workflow.RequestWorkflowID(queueID, requestID), workflow.RequestWakeSignalName, nil,
+// startRequestWorkflow starts requestID's RequestWorkflow under workflowID, or
+// wakes it when it is already running, in one call.
+func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, workflowID, requestID, jobsQueue, lightQueue string) error {
+	_, err := c.SignalWithStartWorkflow(ctx, workflowID, workflow.RequestWakeSignalName, nil,
 		client.StartWorkflowOptions{TaskQueue: lightQueue},
 		workflow.RequestWorkflowName,
 		workflow.RequestWorkflowInput{RequestID: requestID, JobsTaskQueue: jobsQueue, LightTaskQueue: lightQueue})
@@ -245,9 +241,10 @@ func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, queueID
 }
 
 // startRequestWorkflows starts or wakes the workflow of every request in
-// dataDir that is not finished, except those in skip (a request whose old
-// workflow could not be looked up, which a new one would drive twice).
-func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDir, queueID, jobsQueue, lightQueue string, skip map[string]bool) error {
+// dataDir that is not finished. A request whose legacy workflow is still its
+// driver (requestDriverWorkflowID) is woken there, not started a second time;
+// a lookup that fails fails the start.
+func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDir, queueID, jobsQueue, lightQueue string) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
@@ -256,11 +253,7 @@ func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDi
 		if r.State.Finished() {
 			continue
 		}
-		if skip[r.ID] {
-			log.Printf("factoryd worker: not starting request %s: its earlier workflow could not be ended or checked; restart the worker to try again", r.ID)
-			continue
-		}
-		if err := startRequestWorkflow(ctx, c, queueID, r.ID, jobsQueue, lightQueue); err != nil {
+		if err := wakeOrStartRequestWorkflow(ctx, c, queueID, r.ID, jobsQueue, lightQueue); err != nil {
 			return err
 		}
 	}

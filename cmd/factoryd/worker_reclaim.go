@@ -106,18 +106,15 @@ func runPredatesState(r *request.Request, lost *run.Run) bool {
 	return err == nil && created.Before(since)
 }
 
-// requestWorkflowTerminator is the slice of client.Client
-// terminateRequestWorkflows needs, so tests can stub it.
-type requestWorkflowTerminator interface {
-	TerminateWorkflow(ctx context.Context, workflowID, runID, reason string, details ...interface{}) error
-}
-
-// terminateRequestWorkflows ends the RequestWorkflow of each request id. A
-// workflow that is already closed or never existed is fine; other failures
-// are logged.
-func terminateRequestWorkflows(ctx context.Context, c requestWorkflowTerminator, queueID string, ids []string) {
+// terminateRequestWorkflows ends the driver workflow (requestDriverWorkflowID)
+// of each request id. A workflow that is already closed or never existed is
+// fine; other failures are logged.
+func terminateRequestWorkflows(ctx context.Context, c workflowTerminator, queueID, lightQueue string, ids []string) {
 	for _, id := range ids {
-		err := c.TerminateWorkflow(ctx, requestWorkflowIDIn(queueID, id), "", "request halted at worker start: its step was lost")
+		wfID, err := requestDriverWorkflowID(ctx, c, queueID, lightQueue, id)
+		if err == nil {
+			err = c.TerminateWorkflow(ctx, wfID, "", "request halted at worker start: its step was lost")
+		}
 		var notFound *serviceerror.NotFound
 		if err != nil && !errors.As(err, &notFound) {
 			log.Printf("factoryd worker: end workflow of halted request %s: %v", id, err)

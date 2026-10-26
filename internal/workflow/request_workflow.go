@@ -152,10 +152,8 @@ func RequestWorkflowID(queueID, requestID string) string {
 
 // LegacyRequestWorkflowID is the id a RequestWorkflow had before ids carried
 // the data dir's queue id. A workflow started under it is still running when
-// a worker is upgraded; the worker ends it (retireLegacyRequestWorkflows) and
-// starts the request under RequestWorkflowID. Delete this, its callers and
-// their tests once no data dir can hold a request whose workflow started
-// before ids carried the queue id.
+// a worker is upgraded, and keeps driving its request under that id
+// (cmd/factoryd/legacy_request_workflow.go).
 func LegacyRequestWorkflowID(requestID string) string {
 	return "factoryd-request-" + requestID
 }

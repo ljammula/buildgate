@@ -18,6 +18,7 @@ import (
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/workflow"
 	"buildgate/internal/workspace"
 )
 
@@ -287,9 +288,7 @@ func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress, dataDir
 	if len(requestIDs) == 0 {
 		return
 	}
-	// No queue id file: no worker ever ran in this data dir under an id that
-	// names it, so a request workflow of it has the legacy id.
-	queueID, _, err := readRequestQueueID(dataDir)
+	queueID, err := requestQueueID(dataDir)
 	if err != nil {
 		fmt.Fprintf(w, "sandboxes: could not read the queue id of %s (%v): end the workflows of its halted requests with `temporal workflow terminate`\n", sanitize.Line(dataDir), err)
 		return
@@ -300,12 +299,13 @@ func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress, dataDir
 		var closeFn func()
 		if terminator, closeFn, err = dp.temporal.dialTerminator(ctx, address); err == nil {
 			defer closeFn()
-			terminateRequestWorkflows(ctx, terminator, queueID, requestIDs)
+			_, lightQueue := taskQueuesFor(queueID)
+			terminateRequestWorkflows(ctx, terminator, queueID, lightQueue, requestIDs)
 			return
 		}
 	}
 	for _, id := range requestIDs {
-		fmt.Fprintf(w, "sandboxes: could not end the workflow of request %s (%v): before `factoryd resume`, end it with `temporal workflow terminate --workflow-id %s`\n", sanitize.Line(id), err, requestWorkflowIDIn(queueID, id))
+		fmt.Fprintf(w, "sandboxes: could not end the workflow of request %s (%v): before `factoryd resume`, end it with `temporal workflow terminate --workflow-id %s`\n", sanitize.Line(id), err, workflow.RequestWorkflowID(queueID, id))
 	}
 }
 

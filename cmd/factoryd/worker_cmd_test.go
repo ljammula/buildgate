@@ -86,12 +86,11 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 	dataDir := t.TempDir()
 	saveRequestInState(t, dataDir, "req-review", request.StateSpecReview)
 	saveRequestInState(t, dataDir, "req-halted", request.StateHalted)
-	saveRequestInState(t, dataDir, "req-skipped", request.StateSpecReview)
 	saveRequestInState(t, dataDir, "req-done", request.StateDone)
 	saveRequestInState(t, dataDir, "req-cancelled", request.StateCancelled)
 	saveRequestInState(t, dataDir, "req-closed", request.StateClosed)
 	starter := &recordingStarter{}
-	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q", map[string]bool{"req-skipped": true}); err != nil {
+	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q"); err != nil {
 		t.Fatal(err)
 	}
 	got := slices.Clone(starter.ids)

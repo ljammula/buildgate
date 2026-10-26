@@ -1,149 +1,144 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 
 	"buildgate/internal/request"
-	"buildgate/internal/unresolved"
 	"buildgate/internal/workflow"
 )
 
-func noHalt(string, string) error { return nil }
+// legacyOn is a stub whose legacy workflows of the named requests run on queue.
+func legacyOn(queue string, requests ...string) stubWorkflowTerminator {
+	s := stubWorkflowTerminator{running: map[string]bool{}, queues: map[string]string{}}
+	for _, r := range requests {
+		s.running[workflow.LegacyRequestWorkflowID(r)] = true
+		s.queues[workflow.LegacyRequestWorkflowID(r)] = queue
+	}
+	return s
+}
 
-// A request in flight at an upgrade is still running under its legacy id on
-// this data dir's light queue; the worker ends it. The same legacy id on
-// another data dir's queue, a finished request and a closed workflow are left.
-func TestRetireLegacyRequestWorkflowsEndsOnlyThisDataDirsRunningOnes(t *testing.T) {
-	dataDir := t.TempDir()
-	saveRequestInState(t, dataDir, "mine", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "theirs", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "closed-wf", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "fresh", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "finished", request.StateDone)
+func TestRequestDriverWorkflowIDIsLegacyOnlyWhileItRunsOnThisQueue(t *testing.T) {
 	id := workflow.LegacyRequestWorkflowID
-	stub := &stubWorkflowTerminator{
-		running: map[string]bool{id("mine"): true, id("theirs"): true, id("closed-wf"): false, id("finished"): true},
-		queues:  map[string]string{id("mine"): "light-q", id("theirs"): "light-other", id("closed-wf"): "light-q", id("finished"): "light-q"},
+	stub := legacyOn("light-q", "old")
+	stub.running[id("other-dir")], stub.queues[id("other-dir")] = true, "light-other"
+	stub.running[id("closed")], stub.queues[id("closed")] = false, "light-q"
+	for req, want := range map[string]string{
+		"old":       id("old"),
+		"other-dir": workflow.RequestWorkflowID("qid", "other-dir"),
+		"closed":    workflow.RequestWorkflowID("qid", "closed"),
+		"new":       workflow.RequestWorkflowID("qid", "new"),
+	} {
+		got, err := requestDriverWorkflowID(context.Background(), &stub, "qid", "light-q", req)
+		if err != nil || got != want {
+			t.Errorf("driver of %s = %q, %v; want %q", req, got, err, want)
+		}
 	}
-	skip, err := retireLegacyRequestWorkflows(context.Background(), stub, dataDir, "light-q", noHalt)
-	if err != nil || len(skip) != 0 {
-		t.Fatalf("skip = %v, err = %v; want none", skip, err)
-	}
-	if want := []string{id("mine")}; !slices.Equal(stub.terminated, want) {
-		t.Fatalf("terminated %v, want %v", stub.terminated, want)
+	stub.describeErr = map[string]error{id("sick"): errors.New("temporal is slow")}
+	if got, err := requestDriverWorkflowID(context.Background(), &stub, "qid", "light-q", "sick"); err == nil {
+		t.Errorf("a Describe failure must be an error, got %q", got)
 	}
 }
 
-// A drafting job has no run record, so only its workflow's lost-step halt
-// stands between a stopped worker and a rerun with no human decision: retire
-// puts the request in resume_review before it ends the workflow.
-func TestRetireLegacyRequestWorkflowsHaltsAStepInFlight(t *testing.T) {
-	dp := newTestDeps(t)
-	dataDir := t.TempDir()
-	saveRequestInState(t, dataDir, "drafting", request.StatePlanning)
-	saveRequestInState(t, dataDir, "waiting", request.StateSpecReview)
-	id := workflow.LegacyRequestWorkflowID
-	stub := &stubWorkflowTerminator{
-		running: map[string]bool{id("drafting"): true, id("waiting"): true},
-		queues:  map[string]string{id("drafting"): "light-q", id("waiting"): "light-q"},
-		started: map[string]bool{id("drafting"): true},
-	}
-	acts := &requestActivities{dp: dp, dataDir: dataDir}
-	skip, err := retireLegacyRequestWorkflows(context.Background(), stub, dataDir, "light-q", acts.HaltLostRequestStepOf)
-	if err != nil || len(skip) != 0 {
-		t.Fatalf("skip = %v, err = %v", skip, err)
-	}
-	slices.Sort(stub.terminated)
-	if want := []string{id("drafting"), id("waiting")}; !slices.Equal(stub.terminated, want) {
-		t.Fatalf("terminated %v, want %v", stub.terminated, want)
-	}
-	drafting, err := request.Load(dataDir, "drafting")
+// Two data dirs with one request id on one server get distinct driver ids.
+func TestRequestDriverWorkflowIDsDifferPerDataDir(t *testing.T) {
+	stub := &stubWorkflowTerminator{}
+	a, err := requestDriverWorkflowID(context.Background(), stub, "qa", "light-a", "req-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := request.ResumePrompt("drafting", request.StatePlanning, request.LostStep{Cause: unresolved.WorkerLost}); drafting.State != request.StateResumeReview || drafting.Error != want {
-		t.Fatalf("drafting request = %s %q, want resume_review %q", drafting.State, drafting.Error, want)
-	}
-	if waiting, _ := request.Load(dataDir, "waiting"); waiting.State != request.StateSpecReview {
-		t.Fatalf("a request with no step in flight moved to %s", waiting.State)
+	b, err := requestDriverWorkflowID(context.Background(), stub, "qb", "light-b", "req-1")
+	if err != nil || a == b {
+		t.Fatalf("ids %q and %q (%v)", a, b, err)
 	}
 }
 
-// A Describe that fails, or a halt that fails, never stops the worker: the
-// request's old workflow is left running and the request is not started.
-func TestRetireLegacyRequestWorkflowsSkipsWhatItCannotCheck(t *testing.T) {
-	dataDir := t.TempDir()
-	saveRequestInState(t, dataDir, "unknown", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "unhaltable", request.StatePlanning)
-	saveRequestInState(t, dataDir, "ok", request.StateSpecReview)
-	id := workflow.LegacyRequestWorkflowID
-	stub := &stubWorkflowTerminator{
-		running:     map[string]bool{id("unhaltable"): true, id("ok"): true},
-		queues:      map[string]string{id("unhaltable"): "light-q", id("ok"): "light-q"},
-		started:     map[string]bool{id("unhaltable"): true},
-		describeErr: map[string]error{id("unknown"): errors.New("temporal is slow")},
-	}
-	halt := func(string, string) error { return errors.New("disk full") }
-	skip, err := retireLegacyRequestWorkflows(context.Background(), stub, dataDir, "light-q", halt)
-	if err != nil {
-		t.Fatalf("a lookup failure must not stop the worker: %v", err)
-	}
-	if !skip["unknown"] || !skip["unhaltable"] || skip["ok"] || len(skip) != 2 {
-		t.Fatalf("skip = %v, want unknown and unhaltable", skip)
-	}
-	if want := []string{id("ok")}; !slices.Equal(stub.terminated, want) {
-		t.Fatalf("terminated %v, want only %v", stub.terminated, want)
-	}
-}
-
-// A wake signals a legacy workflow that still runs on this data dir's queue
-// (an old worker is up), and starts the new id otherwise.
-func TestWakeSignalsTheLegacyWorkflowWhileItRunsOnThisQueue(t *testing.T) {
-	id := workflow.LegacyRequestWorkflowID
-	s := &recordingStarter{stubWorkflowTerminator: stubWorkflowTerminator{
-		running: map[string]bool{id("old"): true, id("other-dir"): true, id("closed"): false},
-		queues:  map[string]string{id("old"): "light-q", id("other-dir"): "light-other", id("closed"): "light-q"},
-	}}
-	ctx := context.Background()
-	for _, req := range []string{"old", "other-dir", "closed", "new"} {
-		if err := wakeOrStartRequestWorkflow(ctx, s, "qid", req, "jobs-q", "light-q"); err != nil {
+// A wake signals a legacy workflow that still drives the request, and
+// signal-with-starts the new id otherwise.
+func TestWakeSignalsTheLegacyDriverAndStartsTheNewIDOtherwise(t *testing.T) {
+	s := &recordingStarter{stubWorkflowTerminator: legacyOn("light-q", "old")}
+	for _, req := range []string{"old", "new"} {
+		if err := wakeOrStartRequestWorkflow(context.Background(), s, "qid", req, "jobs-q", "light-q"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if want := []string{id("old")}; !slices.Equal(s.signaled, want) {
+	if want := []string{workflow.LegacyRequestWorkflowID("old")}; !slices.Equal(s.signaled, want) {
 		t.Errorf("signalled %v, want %v", s.signaled, want)
 	}
-	want := []string{workflow.RequestWorkflowID("qid", "other-dir"), workflow.RequestWorkflowID("qid", "closed"), workflow.RequestWorkflowID("qid", "new")}
-	if !slices.Equal(s.ids, want) {
+	if want := []string{workflow.RequestWorkflowID("qid", "new")}; !slices.Equal(s.ids, want) {
 		t.Errorf("signal-with-start ids %v, want %v", s.ids, want)
 	}
 }
 
-func TestWakeFailsWhenTheLegacyWorkflowCannotBeLookedUp(t *testing.T) {
-	id := workflow.LegacyRequestWorkflowID("r")
-	s := &recordingStarter{stubWorkflowTerminator: stubWorkflowTerminator{describeErr: map[string]error{id: errors.New("down")}}}
+func TestWakeFailsWhenTheDriverCannotBeLookedUp(t *testing.T) {
+	s := &recordingStarter{stubWorkflowTerminator: stubWorkflowTerminator{describeErr: map[string]error{workflow.LegacyRequestWorkflowID("r"): errors.New("down")}}}
 	if err := wakeOrStartRequestWorkflow(context.Background(), s, "qid", "r", "jobs-q", "light-q"); err == nil || len(s.ids) != 0 {
 		t.Fatalf("err = %v, started %v; want an error and no second driver", err, s.ids)
 	}
 }
 
-// A data dir with no queue id never had a worker under ids that name it, so
-// doctor ends the legacy id there, and does not create the queue id file.
-func TestEndRequestWorkflowsWithNoQueueIDEndsTheLegacyID(t *testing.T) {
-	dp := newTestDeps(t)
-	stub := &stubWorkflowTerminator{}
-	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return stub, func() {}, nil }
+// Worker start leaves a request whose legacy workflow drives it alone: no
+// second workflow, no halt, no termination, even for a request a lost step
+// already put in resume_review. The legacy workflow is only woken.
+func TestStartRequestWorkflowsLeavesALegacyDriverRunning(t *testing.T) {
 	dataDir := t.TempDir()
-	var out strings.Builder
-	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"req-1"}, &out)
-	if len(stub.terminated) != 1 || stub.terminated[0] != workflow.LegacyRequestWorkflowID("req-1") {
-		t.Errorf("terminated = %v, want the legacy id", stub.terminated)
+	saveRequestInState(t, dataDir, "legacy", request.StateSpecReview)
+	saveRequestInState(t, dataDir, "reclaimed", request.StateResumeReview)
+	saveRequestInState(t, dataDir, "fresh", request.StatePlanReview)
+	s := &recordingStarter{stubWorkflowTerminator: legacyOn("light-q", "legacy", "reclaimed")}
+	if err := startRequestWorkflows(context.Background(), s, dataDir, "qid", "jobs-q", "light-q"); err != nil {
+		t.Fatal(err)
 	}
-	if _, found, err := readRequestQueueID(dataDir); err != nil || found {
-		t.Errorf("doctor created a queue id (found=%v, err=%v)", found, err)
+	slices.Sort(s.signaled)
+	if want := []string{workflow.LegacyRequestWorkflowID("legacy"), workflow.LegacyRequestWorkflowID("reclaimed")}; !slices.Equal(s.signaled, want) {
+		t.Errorf("signalled %v, want %v", s.signaled, want)
+	}
+	if want := []string{workflow.RequestWorkflowID("qid", "fresh")}; !slices.Equal(s.ids, want) {
+		t.Errorf("started %v, want only %v", s.ids, want)
+	}
+	if len(s.terminated) != 0 {
+		t.Errorf("terminated %v, want none", s.terminated)
+	}
+	if r, _ := request.Load(dataDir, "reclaimed"); r.State != request.StateResumeReview || r.Resume != nil && r.Resume.Generation > 1 {
+		t.Errorf("reclaimed request changed: %s %+v", r.State, r.Resume)
+	}
+}
+
+func TestStartRequestWorkflowsFailsWhenADriverCannotBeLookedUp(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "sick", request.StateSpecReview)
+	s := &recordingStarter{stubWorkflowTerminator: stubWorkflowTerminator{describeErr: map[string]error{workflow.LegacyRequestWorkflowID("sick"): errors.New("down")}}}
+	if err := startRequestWorkflows(context.Background(), s, dataDir, "qid", "jobs-q", "light-q"); err == nil {
+		t.Fatal("start must fail loudly on a Describe error")
+	}
+}
+
+// Halted requests have their driver ended, whichever workflow that is.
+func TestTerminateRequestWorkflowsEndsTheDriver(t *testing.T) {
+	stub := legacyOn("light-q", "old")
+	terminateRequestWorkflows(context.Background(), &stub, "qid", "light-q", []string{"old", "new"})
+	want := []string{workflow.LegacyRequestWorkflowID("old"), workflow.RequestWorkflowID("qid", "new")}
+	if !slices.Equal(stub.terminated, want) {
+		t.Fatalf("terminated %v, want %v", stub.terminated, want)
+	}
+}
+
+func TestEndRequestWorkflowsEndsTheLegacyDriver(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	queueID, err := requestQueueID(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, light := taskQueuesFor(queueID)
+	stub := legacyOn(light, "old")
+	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return &stub, func() {}, nil }
+	var out bytes.Buffer
+	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"old"}, &out)
+	if want := []string{workflow.LegacyRequestWorkflowID("old")}; !slices.Equal(stub.terminated, want) || out.Len() != 0 {
+		t.Errorf("terminated %v (output %q), want %v", stub.terminated, out.String(), want)
 	}
 }
