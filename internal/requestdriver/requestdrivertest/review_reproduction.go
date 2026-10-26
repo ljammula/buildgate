@@ -120,7 +120,10 @@ func AfterRecheck(t *testing.T, dataDir, id, origin, branch, baseSHA, resultSHA,
 	// The sentence cmd/factoryd's save records (triage.Run) for it.
 	rr.Triage = fmt.Sprintf("review_reproduction: %q still fails on the result commit after the corrective build (%q fail); the finding is in the run's review evidence", ReproductionPath, ReproductionTestID)
 	if verdict == "passes" {
-		rr.Triage = fmt.Sprintf("%s failed", failedChecks[0])
+		rr.Triage = ""
+		if len(failedChecks) > 0 {
+			rr.Triage = failedChecks[0] + " failed"
+		}
 	}
 	if err := handoff.Sync(rr, dataDir); err != nil {
 		t.Fatalf("write the handoff: %v", err)

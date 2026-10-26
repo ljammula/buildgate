@@ -94,15 +94,21 @@ func (pytestJUnit) Command(inv Invocation) Command {
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(pytestTimeoutPlugin), Timeout: launchTimeout(inv.TestIDs)}
 }
 
-// Classify: exit 2 to 5 (interrupted, internal error, usage error, nothing
-// collected) or a collection error case is a compile; otherwise each case's
-// failure, error or skip, merged per ID over its parameter sets.
-func (pytestJUnit) Classify(_ string, report []byte, exit int, ids []string) (map[string]Kind, Outcome) {
+// Classify: a collection error case whose text names the reproduction's own
+// file (namesPath) is a compile; any other collection error, and exit 2 to 5
+// with no such case (interrupted, internal error, usage error such as a
+// conftest that does not import, nothing collected: pytest writes no report
+// for 3 and 4), is missing. Otherwise each case's failure, error or skip,
+// merged per ID over its parameter sets.
+func (pytestJUnit) Classify(p string, report []byte, exit int, ids []string) (map[string]Kind, Outcome) {
 	cases, ok := readJUnit(report)
-	if (exit >= 2 && exit <= 5) || (ok && pyCollectionError(cases)) {
-		return allKind(ids, KindCompile), OutcomeCompile
+	collection := pyCollectionErrors(cases)
+	for _, c := range collection {
+		if namesPath(c.Error.Message+"\n"+c.Error.Body, p) {
+			return allKind(ids, KindCompile), OutcomeCompile
+		}
 	}
-	if !ok {
+	if !ok || len(collection) > 0 || (exit >= 2 && exit <= 5) {
 		return allKind(ids, KindMissing), OutcomeMissing
 	}
 	kinds := map[string]Kind{}
@@ -112,15 +118,16 @@ func (pytestJUnit) Classify(_ string, report []byte, exit int, ids []string) (ma
 	return fromKinds(kinds, ids)
 }
 
-// pyCollectionError: pytest records a module that failed to collect as a
+// pyCollectionErrors: pytest records a module that failed to collect as a
 // case with no class name and an <error>.
-func pyCollectionError(cases []junitCase) bool {
+func pyCollectionErrors(cases []junitCase) []junitCase {
+	var out []junitCase
 	for _, c := range cases {
 		if c.ClassName == "" && c.Error != nil {
-			return true
+			out = append(out, c)
 		}
 	}
-	return false
+	return out
 }
 
 // pyCaseID maps a case to its ID: the parameter suffix of the name is

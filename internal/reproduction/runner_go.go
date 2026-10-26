@@ -122,19 +122,27 @@ type goEvent struct {
 
 // goReport is the report folded per top-level test.
 type goReport struct {
-	compile  bool
+	compile bool
+	// build is the text of the build's own output (build-output events, and
+	// output that belongs to no test), read for the reproduction's path.
+	build    string
 	timedOut bool
 	terminal map[string]string // test -> pass|fail|skip
 	panicked map[string]bool
 	any      bool
 }
 
-func (goTest) Classify(_ string, report []byte, _ int, ids []string) (map[string]Kind, Outcome) {
+// Classify: a build or setup failure is a compile only when the build's
+// output names the reproduction's own file (namesPath; Go 1.24 and later put
+// the compiler's output in the report as build-output events); a dependency
+// that does not build or cannot be fetched, or an older Go that names no
+// file, is missing.
+func (goTest) Classify(p string, report []byte, _ int, ids []string) (map[string]Kind, Outcome) {
 	r := readGoReport(report)
-	if r.compile {
+	if r.compile && namesPath(r.build, p) {
 		return allKind(ids, KindCompile), OutcomeCompile
 	}
-	if !r.any {
+	if r.compile || !r.any {
 		return allKind(ids, KindMissing), OutcomeMissing
 	}
 	kinds := map[string]Kind{}
@@ -179,6 +187,9 @@ func readGoReport(report []byte) goReport {
 
 func (r *goReport) add(ev goEvent) {
 	top, _, _ := strings.Cut(ev.Test, "/")
+	if ev.Test == "" && (ev.Action == "build-output" || ev.Action == "output") {
+		r.build += ev.Output
+	}
 	switch {
 	case ev.Action == "build-fail" || ev.FailedBuild != "":
 		r.compile = true

@@ -789,6 +789,22 @@
         }
       }
     ],
+    "review_reproduction_rechecks_given": [
+      {
+        "run_id": "every-field run_id",
+        "finding": 3,
+        "path": "every-field path",
+        "refused": "every-field refused",
+        "sha256": "every-field sha256",
+        "host_path": "every-field host_path",
+        "spec_line": 3,
+        "test_ids": [
+          "every-field test_ids"
+        ],
+        "runner": "every-field runner",
+        "holds_literal": true
+      }
+    ],
     "reference_oracle_dir": "every-field reference_oracle_dir",
     "oracles_not_committed_by_request": true,
     "oracle_covered_criteria": [

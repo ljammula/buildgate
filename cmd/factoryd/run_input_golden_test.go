@@ -15,6 +15,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	temporalclient "go.temporal.io/sdk/client"
 
+	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
 
@@ -239,6 +240,15 @@ func runInputGoldenRunWith(t *testing.T, runID string, prepare func(workspace, i
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t))...)
 	out, _ := cmd.CombinedOutput()
 	t.Logf("factoryd output:\n%s", out)
+	// The run record keeps the recheck it was given from its start, for the
+	// build that follows it even when its gates fail before the recheck. A
+	// replay run is given none.
+	if slices.Contains(flags, "-recheck-reproductions") {
+		rec, err := run.Load(dataDir, runID)
+		if err != nil || len(rec.ReviewReproductionRechecksGiven) != 1 || rec.ReviewReproductionRechecksGiven[0].RunID != "golden-quarantined" {
+			t.Errorf("run record's rechecks given = %+v (%v), want the manifest's one entry", rec, err)
+		}
+	}
 
 	resolve := func(path string) string {
 		resolved, err := filepath.EvalSymlinks(path)

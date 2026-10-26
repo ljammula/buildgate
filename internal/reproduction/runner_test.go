@@ -55,6 +55,15 @@ func TestRunnerClassifiesEveryOutcome(t *testing.T) {
 			{"timeout.json", "p/repro_test.go", 1, "TestHang", KindTimeout, OutcomeFailed},
 			{"skipped.json", "p/repro_test.go", 0, "TestSkip", KindSkipped, OutcomeInconclusive},
 			{"compile.json", "p/repro_test.go", 1, "TestPass", KindCompile, OutcomeCompile},
+			// The same build failure judged for another file: it names
+			// p/repro_test.go, not this one, so it is no compile verdict.
+			{"compile.json", "p/other_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
+			// A package the reproduction's imports does not build, or a
+			// module of the main code that cannot be fetched: missing. The
+			// reproduction's own import that cannot be resolved names it.
+			{"dependency-build-fail.json", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
+			{"setup-fail-dependency.json", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
+			{"setup-fail-own.json", "p/repro_test.go", 1, "TestPass", KindCompile, OutcomeCompile},
 			{"", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
 			{"pass.json", "p/repro_test.go", 0, "TestNotInReport", KindMissing, OutcomeInconclusive},
 		},
@@ -66,10 +75,19 @@ func TestRunnerClassifiesEveryOutcome(t *testing.T) {
 			{"skipped.xml", "tests/test_repro.py", 0, "test_skipped", KindSkipped, OutcomeInconclusive},
 			{"compile.xml", "tests/test_broken.py", 2, "test_x", KindCompile, OutcomeCompile},
 			{"compile.xml", "tests/test_broken.py", 1, "test_x", KindCompile, OutcomeCompile},
+			// A collection error that names another file is no compile verdict.
+			{"compile.xml", "tests/test_repro.py", 2, "test_pass", KindMissing, OutcomeMissing},
+			// A package __init__ that does not import fails the
+			// reproduction's own import, which names it.
+			{"collect-package-init.xml", "tests/test_repro.py", 2, "test_pass", KindCompile, OutcomeCompile},
+			// Internal and usage errors (a conftest that does not import)
+			// write no report (pytest 9.1.1): missing.
+			{"", "tests/test_repro.py", 3, "test_pass", KindMissing, OutcomeMissing},
+			{"", "tests/test_repro.py", 4, "test_pass", KindMissing, OutcomeMissing},
 			{"class.xml", "tests/test_repro.py", 1, "TestGroup::test_method_fails", KindFail, OutcomeFailed},
 			{"param.xml", "tests/test_repro.py", 1, "test_param", KindFail, OutcomeFailed},
 			{"", "tests/test_repro.py", 1, "test_pass", KindMissing, OutcomeMissing},
-			{"", "tests/test_repro.py", 5, "test_pass", KindCompile, OutcomeCompile},
+			{"", "tests/test_repro.py", 5, "test_pass", KindMissing, OutcomeMissing},
 		},
 		"vitest-json": {
 			{"pass.json", "src/pass.test.js", 0, "add > sums two numbers", KindPass, OutcomePassed},
@@ -378,5 +396,28 @@ func TestSurefireCompileStepNamesTheReproductionOrIsMissing(t *testing.T) {
 		if code != tc.want || !strings.Contains(string(out), tc.out) {
 			t.Errorf("%s: exit %d, output %q; want exit %d with the compile output in the log", name, code, out, tc.want)
 		}
+	}
+}
+
+// namesPath finds the reproduction's path as the toolchains print it
+// (relative, "./", absolute, quoted), and not as the tail of a longer name.
+func TestNamesPathMatchesOnlyTheWholePath(t *testing.T) {
+	for output, want := range map[string]bool{
+		"p/repro_test.go:9:15: too many arguments":                      true,
+		"./repro_test.go:3:1: undefined: X":                             false, // p is p/repro_test.go
+		"ImportError while importing test module '/w/p/repro_test.go'.": true,
+		"[ERROR] /workspace/p/repro_test.go:[3,8] cannot find symbol":   true,
+		"xp/repro_test.go:1:1: no":                                      false,
+		"p/repro_test.go2:1:1: no":                                      false,
+		"p/repro_test.gox":                                              false,
+		"q/q.go:3:25: cannot use":                                       false,
+		"":                                                              false,
+	} {
+		if got := namesPath(output, "p/repro_test.go"); got != want {
+			t.Errorf("namesPath(%q) = %v, want %v", output, got, want)
+		}
+	}
+	if !namesPath("./repro_test.go:3:1: undefined: X", "repro_test.go") {
+		t.Error("a root-level file printed as ./repro_test.go is named")
 	}
 }

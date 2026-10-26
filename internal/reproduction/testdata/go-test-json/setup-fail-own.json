@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/notthere","Action":"build-output","Output":"# example.com/repro/p\n"}
+{"ImportPath":"example.com/notthere","Action":"build-output","Output":"p/repro_test.go:6:2: cannot find module providing package example.com/notthere: module lookup disabled by GOPROXY=off\n"}
+{"ImportPath":"example.com/notthere","Action":"build-fail"}
+{"Time":"2026-10-26T13:40:15.400741889Z","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-26T13:40:15.400853813Z","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [setup failed]\n"}
+{"Time":"2026-10-26T13:40:15.40094211Z","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/notthere"}

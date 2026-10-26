@@ -1015,7 +1015,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// this round builds on (priorRoundRefusal), so its builder runs those
 	// reproductions again on its result and is given that attempt's record,
 	// beside the reviewer's comments.
-	refused := priorRoundRefusal(dataDir, r, ticket)
+	refused := priorRoundRefusal(dataDir, r, ticket, head.Run)
 	// One round is one build plus, when a reviewer's reproduction alone
 	// refused it (SC-022: a finding blocks only through its reproduction,
 	// never through its severity), up to review_corrective_rounds fix
@@ -1467,27 +1467,27 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	return r.Save(dataDir)
 }
 
-// priorRoundRefusal returns ticket's most recent PR-review round that
-// ran, when it was quarantined and a build on its commits must run reviewer
-// reproductions again (needsRecheck: one refused it, or it ran rechecks), nil
-// otherwise. A quarantined round is never pushed, but its commits stay on the
-// local PR branch (PrepareOnBranch checks the branch itself out), so the next
-// round builds on top of them, runs those reproductions again, and its
-// builder is told why they were refused (withRefusedAttempt). Found live
-// (2026-10-06, three rounds on one pull request): each round was given only
-// the reviewer's comment, built on the refused commits, and was quarantined
-// for the finding the round before it had already been quarantined for.
+// priorRoundRefusal returns the run whose commits this PR-review round
+// builds on, when a build on them must run reviewer reproductions again
+// (needsRecheck), nil otherwise. That run is ticket's most recent counted
+// round when it was quarantined: a quarantined round is never pushed, but
+// its commits stay on the local PR branch (PrepareOnBranch checks the branch
+// itself out), so the next round builds on top of them, runs those
+// reproductions again, and its builder is told why they were refused
+// (withRefusedAttempt). Found live (2026-10-06, three rounds on one pull
+// request): each round was given only the reviewer's comment, built on the
+// refused commits, and was quarantined for the finding the round before it
+// had already been quarantined for. After an accepted round, or before any
+// round, it is the PR-head run (head): the round builds on what was pushed,
+// and an accepted run that rechecked a reproduction passes it on, so a later
+// round cannot undo a fix a reproduction proved.
 //
-// Nothing is returned after an accepted round (it was not refused) or a
-// halted one (whether it committed is unknown), for a round that needs no
-// recheck, or when the round's run record cannot be read: the round then
-// runs on the reviewer's comments alone.
-func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticket) *run.Run {
-	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
-		rnd := ticket.Rounds[i]
-		if rnd.Kind != "" || !rnd.Counted() {
-			continue
-		}
+// Nothing is returned after a halted round (whether it committed is
+// unknown), or when the quarantined round's run record cannot be read: the
+// round then runs on the reviewer's comments alone.
+func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticket, head *run.Run) *run.Run {
+	prior := head
+	if rnd, ok := lastCountedRound(ticket); ok && rnd.Outcome != request.RoundAccepted {
 		if rnd.Outcome != request.RoundQuarantined {
 			return nil
 		}
@@ -1496,12 +1496,23 @@ func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticke
 			log.Printf("request %s: ticket %d: load quarantined round %d's run %s for its review findings: %v", r.ID, ticket.Index, rnd.Index, rnd.RunID, err)
 			return nil
 		}
-		if !needsRecheck(loaded) {
-			return nil
-		}
-		return loaded
+		prior = loaded
 	}
-	return nil
+	if prior == nil || !needsRecheck(prior) {
+		return nil
+	}
+	return prior
+}
+
+// lastCountedRound is ticket's most recent PR-review round that ran (no
+// Kind, counted).
+func lastCountedRound(ticket *request.Ticket) (request.Round, bool) {
+	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
+		if rnd := ticket.Rounds[i]; rnd.Kind == "" && rnd.Counted() {
+			return rnd, true
+		}
+	}
+	return request.Round{}, false
 }
 
 // maxReplyFindings bounds what a "not pushed" reply quotes from the

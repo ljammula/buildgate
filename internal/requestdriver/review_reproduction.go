@@ -23,19 +23,21 @@ const reproductionPasses = "passes"
 
 // needsRecheck reports whether a build that continues on previous's commits
 // must run reviewer reproductions again (SC-022): a reproduction refused
-// previous, or previous itself ran rechecks, passing or not (the build must
-// not undo a fix earlier in the ticket's chain).
+// previous, or previous was given or ran rechecks, passing or not, accepted
+// or not. Each build is given the rechecks of the run before it, so the
+// ticket's whole chain is carried forward: a later build cannot undo a fix
+// a reproduction proved earlier.
 func needsRecheck(previous *run.Run) bool {
-	return refusedByAReproduction(previous) || len(previous.ReviewReproductionRechecks) > 0
+	return refusedByAReproduction(previous) || len(previous.ReviewReproductionRechecks) > 0 || len(previous.ReviewReproductionRechecksGiven) > 0
 }
 
 // recheckManifestFor is the run.RecheckManifest a build that follows
-// previous is given: every recheck previous ran (the entry it ran, under the
-// review-repro directory of the run that held it), and each of previous's own
-// blocking findings' held copies, without repeats (by hash and path). Each
-// entry's file is on disk with the hash recorded for it. An error says why
-// none can be made when needsRecheck(previous) and an entry cannot be found
-// again, or nothing is left to run.
+// previous is given: every recheck previous was given or ran (the entry,
+// under the review-repro directory of the run that held it), and each of
+// previous's own blocking findings' held copies, without repeats (by hash
+// and path). Each entry's file is on disk with the hash recorded for it. An
+// error says why none can be made when needsRecheck(previous) and an entry
+// cannot be found again, or nothing is left to run.
 func recheckManifestFor(dataDir string, previous *run.Run) (run.RecheckManifest, error) {
 	var m run.RecheckManifest
 	seen := map[string]bool{}
@@ -45,23 +47,39 @@ func recheckManifestFor(dataDir string, previous *run.Run) (run.RecheckManifest,
 			m.Reproductions = append(m.Reproductions, e)
 		}
 	}
-	for i, rc := range previous.ReviewReproductionRechecks {
-		if rc.Recheck == nil || !heldCopyOnDisk(dataDir, *rc.Recheck) {
-			return run.RecheckManifest{}, fmt.Errorf("run %s's recheck %d names no held copy that is still on disk with its hash", previous.ID, i)
-		}
-		add(*rc.Recheck)
+	entries, err := carriedRechecks(dataDir, previous)
+	if err != nil {
+		return run.RecheckManifest{}, err
 	}
 	own, err := blockingCopies(dataDir, previous)
 	if err != nil {
 		return run.RecheckManifest{}, err
 	}
-	for _, e := range own {
+	for _, e := range append(entries, own...) {
 		add(e)
 	}
 	if len(m.Reproductions) == 0 {
 		return run.RecheckManifest{}, fmt.Errorf("run %s holds no reviewer reproduction to run again", previous.ID)
 	}
 	return m, nil
+}
+
+// carriedRechecks are the recheck entries r was given and those it ran,
+// each with its held copy on disk with its hash.
+func carriedRechecks(dataDir string, r *run.Run) ([]run.RecheckEntry, error) {
+	entries := append([]run.RecheckEntry(nil), r.ReviewReproductionRechecksGiven...)
+	for i, rc := range r.ReviewReproductionRechecks {
+		if rc.Recheck == nil {
+			return nil, fmt.Errorf("run %s's recheck %d names no held copy", r.ID, i)
+		}
+		entries = append(entries, *rc.Recheck)
+	}
+	for _, e := range entries {
+		if !heldCopyOnDisk(dataDir, e) {
+			return nil, fmt.Errorf("run %s's recheck of %s has no held copy on disk with its hash", r.ID, e.Path)
+		}
+	}
+	return entries, nil
 }
 
 // blockingCopies is the recheck entry of each of r's blocking findings: its

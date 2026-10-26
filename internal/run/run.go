@@ -1787,6 +1787,11 @@ type Run struct {
 	// commit, and Verdict "passes" or "still_failing". Nil for every other
 	// run.
 	ReviewReproductionRechecks []ReviewReproduction `json:"review_reproduction_rechecks,omitempty"`
+	// ReviewReproductionRechecksGiven are the -recheck-reproductions entries
+	// this run was given, recorded when it starts, whether or not its
+	// workflow reached the recheck (a run whose gates failed does not), so a
+	// later build on its commits is given them again (SC-022).
+	ReviewReproductionRechecksGiven []RecheckEntry `json:"review_reproduction_rechecks_given,omitempty"`
 	// ReferenceOracleDir is the -reference-oracle-dir this run was
 	// configured with, recorded so any finalization site -- including a
 	// reclaimed run, which sees only this record -- can find the oracle's

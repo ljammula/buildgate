@@ -2335,6 +2335,63 @@ func TestPRReviewRoundAfterAStillFailingFixAttemptRechecks(t *testing.T) {
 	}
 }
 
+// TestPRReviewRoundAfterAnAcceptedRecheckStillRechecks (SC-022): a round a
+// reproduction refused, whose fix attempt passed the recheck and was
+// accepted and pushed, is followed by a round on a new comment that still
+// rechecks that reproduction from the first attempt's held copy: a later
+// round cannot undo the proved fix.
+func TestPRReviewRoundAfterAnAcceptedRecheckStillRechecks(t *testing.T) {
+	dp := newFakeDeps(t)
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	approveRequestSpec(t, dataDir, r)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	var argvs [][]string
+	var first string
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		argvs = append(argvs, args)
+		id := requestdrivertest.ArgValue(args, "-ticket")
+		switch len(argvs) {
+		case 1:
+			first = id
+			return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
+		case 2:
+			a := requestdrivertest.AfterRecheck(t, dataDir, id, first, requestdrivertest.ArgValue(args, "-on-branch"), "", "cafef00dcafef00dcafef00dcafef00dcafef00d", "passes")
+			a.State, a.GateResults, a.HandoffSHA256, a.WorkspacePath = run.StateAccepted, []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "review_reproduction", Passed: true}}, "", t.TempDir()
+			return saveAcceptedRoundRun(t, dataDir, a)
+		}
+		return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
+	}
+	pushed := func() {
+		dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
+			requestdrivertest.LastPushedSHA[branch] = sha
+			return nil
+		}
+	}
+	pushed()
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 1}
+	now := time.Now()
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now); err != nil {
+		t.Fatal(err)
+	}
+	if rounds := r.Tickets[0].Rounds; len(argvs) != 2 || len(rounds) != 1 || rounds[0].Outcome != request.RoundAccepted || !rounds[0].Pushed {
+		t.Fatalf("builds %d, rounds %+v; want round 1 accepted and pushed after its fix attempt", len(argvs), rounds)
+	}
+	next := []forge.Thread{{ID: "thread-2", Path: "b.go", Line: 2, Author: "alice", Body: "and this", CommentID: 6}}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: next, ActionableThreads: next}, nil)
+	pushed()
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(argvs) < 3 || !strings.HasSuffix(requestdrivertest.ArgValue(argvs[2], "-ticket"), "-review2") {
+		t.Fatalf("builds = %d, want round 2 to run", len(argvs))
+	}
+	m := readRecheckManifest(t, argvs[2])
+	if want := requestdrivertest.HeldEntry(t, dataDir, first); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
+		t.Errorf("round 2's manifest = %+v, want round 1's first attempt's held copy %+v", m.Reproductions, want)
+	}
+}
+
 // TestPRReviewRoundBlocksOnlyOnAReproducedFinding (SC-022): a PR-review
 // round's own review refuses an attempt only through a reproduction the
 // factory ran. An attempt a reproduction refused gets a fix attempt, told

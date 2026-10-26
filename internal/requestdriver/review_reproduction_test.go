@@ -459,36 +459,48 @@ func TestARetryAfterAStillFailingRecheckRechecksTheFirstRunsCopy(t *testing.T) {
 	assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", builds[1])
 }
 
-// SC-022: a corrective build whose recheck passed but which another check
-// quarantined is followed by a round that still rechecks the reproduction:
-// a later round must not undo an earlier one's fix.
+// SC-022: a corrective build that was given a recheck and which another
+// check quarantined, whether its recheck ran and passed or its gates failed
+// before the recheck ran, is followed by a round that still rechecks the
+// reproduction: a later round must not undo an earlier one's fix.
 func TestARoundAfterAPassingRecheckStillRechecksIt(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
-	branch := "factoryd/" + id + "-001"
-	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), "")
-	var rounds [][]string
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		rounds = append(rounds, args)
-		roundRunID := requestdrivertest.ArgValue(args, "-ticket")
-		if onReady != nil {
-			onReady(&run.Run{ID: roundRunID})
-		}
-		if len(rounds) == 1 {
-			return requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "lint").Save(dataDir)
-		}
-		return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
+	for _, ran := range []bool{true, false} {
+		t.Run(fmt.Sprintf("recheck ran=%v", ran), func(t *testing.T) {
+			dp := newFakeDeps(t)
+			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+			branch := "factoryd/" + id + "-001"
+			buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), "")
+			var rounds [][]string
+			orig := requestdriver.ReviewCorrectiveRunner
+			t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+			requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+				rounds = append(rounds, args)
+				roundRunID := requestdrivertest.ArgValue(args, "-ticket")
+				if onReady != nil {
+					onReady(&run.Run{ID: roundRunID})
+				}
+				if len(rounds) == 1 {
+					rr := requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "lint")
+					if !ran {
+						// factoryd records what the build was given at its
+						// start; its gates failed, so no recheck ran.
+						rr.ReviewReproductionRechecksGiven = []run.RecheckEntry{*rr.ReviewReproductionRechecks[0].Recheck}
+						rr.ReviewReproductionRechecks = nil
+					}
+					return rr.Save(dataDir)
+				}
+				return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
+			}
+			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+				t.Fatalf("driveRequests: %v", err)
+			}
+			if len(rounds) != 2 {
+				t.Fatalf("corrective rounds = %d, want 2", len(rounds))
+			}
+			assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", rounds[1])
+		})
 	}
-	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
-		t.Fatalf("driveRequests: %v", err)
-	}
-	if len(rounds) != 2 {
-		t.Fatalf("corrective rounds = %d, want 2", len(rounds))
-	}
-	assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", rounds[1])
 }
 
 // SC-022: a build that would continue on the commits of a run a reviewer's

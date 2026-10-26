@@ -143,6 +143,42 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// namesPath reports whether a toolchain's build or collection output names
+// the repository path p, the reproduction's own file: p occurs at the start,
+// or after a "/" (an absolute or "./" form), whitespace or a quote, and is
+// not followed by another path character (so a longer path that ends in p,
+// in another directory, also names it: an absolute path cannot be told from
+// it). It is how a runner tells a
+// reproduction that does not compile (KindCompile) from any other failure of
+// the same step, which says nothing about the reproduction (a dependency
+// that does not build or cannot be fetched, a broken conftest, the
+// toolchain's own error) and reads as missing. A toolchain that does not
+// name the file reads a real compile error as missing too: advice, which is
+// the safe side, since false advice is better than a false block.
+func namesPath(output, p string) bool {
+	if p == "" {
+		return false
+	}
+	for i := 0; ; {
+		j := strings.Index(output[i:], p)
+		if j < 0 {
+			return false
+		}
+		at, end := i+j, i+j+len(p)
+		before := at == 0 || strings.ContainsRune("/ \t\n'\"", rune(output[at-1]))
+		after := end == len(output) || !isPathByte(output[end])
+		if before && after {
+			return true
+		}
+		i = at + 1
+	}
+}
+
+// isPathByte reports whether b can continue a path's last name.
+func isPathByte(b byte) bool {
+	return b == '_' || b == '-' || b == '.' || b == '/' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
 // baseMatches reports whether the path's base name matches one of the globs.
 func baseMatches(p string, globs ...string) bool {
 	base := path.Base(p)

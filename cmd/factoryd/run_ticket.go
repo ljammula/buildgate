@@ -2216,6 +2216,9 @@ func (tr *ticketRun) createRunRecord() error {
 		Repository:                    *tr.repository,
 		ReferenceOracleDir:            *tr.referenceOracleDir,
 		OraclesNotCommittedByRequest:  *tr.noCommitOracles,
+		// The reproductions this run must pass again, kept for the build
+		// that follows it even when its gates fail before the recheck.
+		ReviewReproductionRechecksGiven: tr.rechecks,
 		// Persisted here so applyRunWorkflowResult's own accepted branch
 		// -- the one completion point every execution path (runViaTemporal,
 		// runViaRepositoryOwner, and reconcileReclaimedRun)
