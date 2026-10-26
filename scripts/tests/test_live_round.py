@@ -85,6 +85,14 @@ class Stacked(unittest.TestCase):
 		self.assertEqual(live_round.stacked_pull_requests(prs, [{"pr_url": "u1"}, {}]), (None, None))
 		self.assertEqual(live_round.stacked_pull_requests(prs, []), (None, None))
 
+	def test_the_records_urls_decide_not_the_branch_names(self):
+		prs = [
+			{"url": "u1", "headRefName": "factoryd/req-1-001-x", "baseRefName": "main"},
+			{"url": "u2", "headRefName": "factoryd/req-1-002-x", "baseRefName": "factoryd/req-1-001-x"},
+		]
+		self.assertEqual(live_round.stacked_pull_requests(prs, [{"pr_url": "u1"}, {"pr_url": "gone"}]), (None, None))
+		self.assertEqual(live_round.stacked_pull_requests(prs, [{"pr_url": "u9"}, {"pr_url": "u8"}]), (None, None))
+
 	def test_restack_rounds_are_the_pushed_accepted_ones(self):
 		ticket = {"rounds": [
 			{"kind": "restack", "outcome": "accepted", "pushed": True, "run_id": "r1"},
