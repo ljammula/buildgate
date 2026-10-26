@@ -185,6 +185,14 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	// Nothing to continue from when the attempt committed nothing or its
 	// branch is not recorded: the rebuild starts from the base as before.
 	continues = continues && previous.Branch != "" && previous.ResultSHA != "" && previous.ResultSHA != diffBase
+	// Nor when the attempt sits on the earlier ticket's old head: the
+	// rebuild chains from that ticket's current PR-head run instead.
+	if continues {
+		if stale := staleStackBase(dataDir, r, ticket.Index, previous); stale != "" {
+			log.Printf("request %s: ticket %d: not continuing on %s: %s", r.ID, ticket.Index, previous.Branch, stale)
+			continues = false
+		}
+	}
 	if continues {
 		start = startsOnItsBranch
 	}

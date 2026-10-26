@@ -255,6 +255,16 @@ func saveAcceptedRoundRun(t *testing.T, dataDir string, accepted *run.Run) error
 	return release.SaveDecision(dataDir, release.Decision{RunID: accepted.ID, Project: accepted.Project, Allowed: true, Evaluated: time.Now().UTC().Format(time.RFC3339)})
 }
 
+func approvedOnHeadState(head string, checks *bool) forge.ReviewState {
+	return forge.ReviewState{
+		State:          "OPEN",
+		ChecksPassing:  checks,
+		HeadSHA:        head,
+		ReviewDecision: forge.ReviewDecisionApproved,
+		Reviews:        []forge.Review{{Author: "reviewer", CommitOID: head, State: "APPROVED"}},
+	}
+}
+
 // TestAdvancePRReviewStateTable exercises advancePRReview's own dispatch
 // over (draft, checks, threads, decision, merged) -> action, table-driven:
 // every distinct branch advancePRReadyOrApproved/handleClosedOrMergedTicket/
@@ -302,7 +312,7 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 		},
 		{
 			name:          "open not draft checks passing approved: PRState approved, continueAfterPRApproval called",
-			state:         forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, ReviewDecision: forge.ReviewDecisionApproved},
+			state:         approvedOnHeadState(requestdrivertest.TicketRunResultSHA(1), &trueVal),
 			wantPRState:   "approved",
 			wantStartNext: 1,
 			wantRequest:   request.StatePRReview,
@@ -317,16 +327,19 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			// must not advance the ticket while that thread blocks
 			// readiness, the same way it already blocks `gh pr ready`.
 			name: "open not draft checks passing approved BUT an untrusted thread still blocks readiness: not advanced",
-			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, ReviewDecision: forge.ReviewDecisionApproved,
+			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), ReviewDecision: forge.ReviewDecisionApproved, Reviews: []forge.Review{{Author: "reviewer", CommitOID: requestdrivertest.TicketRunResultSHA(1), State: "APPROVED"}},
 				BlocksReadyThreads: []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "untrusted-human", Body: "still not fixed", CommentID: 999}}},
 			wantPRState: "",
 			wantRequest: request.StatePRReview,
 		},
 		{
+			// The pull request is ready: it goes back to draft before the
+			// round's push (draftBeforeFactoryPush).
 			name: "open unresolved thread: corrective round runs",
 			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal,
 				BlocksReadyThreads: []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}},
 				ActionableThreads:  []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}},
+			wantPRState:   "draft",
 			wantRoundRuns: 1,
 			wantRequest:   request.StatePRReview,
 		},
@@ -919,6 +932,7 @@ func TestRunCorrectiveRoundRecordsRunnerErrorWhenHaltErrorIsEmpty(t *testing.T) 
 // it.
 func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 	dp := newFakeDeps(t)
+	draftPullRequest(dp)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	ticket := &r.Tickets[0]
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
@@ -987,6 +1001,7 @@ func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 // 1 and the ticket's only OTHER round is Kind == request.ConformityRoundKind.
 func TestRunCorrectiveRoundDoesNotCountConformityRoundsTowardMaxReviewRounds(t *testing.T) {
 	dp := newFakeDeps(t)
+	draftPullRequest(dp)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	ticket := &r.Tickets[0]
 	ticket.Rounds = append(ticket.Rounds, request.Round{
@@ -1191,15 +1206,18 @@ func TestAdvancePRReviewMergedStopsPolling(t *testing.T) {
 	}
 }
 
-// TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests: ticket 1's
-// pull request closed without merging ends the request as closed at once,
-// with ticket 2's still-open pull request left for a person, no longer
-// reported ready to merge, and the operator told.
+// TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests: the last
+// ticket's pull request closed without merging ends the request as closed
+// at once, with ticket 1's still-open pull request left for a person, no
+// longer reported ready to merge, and the operator told. (An earlier
+// ticket's closed pull request parks instead:
+// TestClosedUnmergedEarlierTicketParksRequest.)
 func TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests(t *testing.T) {
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 2)
-	r.Tickets[1].PRState = "ready"
-	r.Tickets[1].MergeReadiness = &request.MergeReadiness{Ready: true}
+	r.Tickets[0].PRState = "ready"
+	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
+	r.Tickets[0].LastPolledAt = time.Now().UTC().Format(time.RFC3339Nano) // not due: only ticket 2 is read
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -1216,21 +1234,21 @@ func TestAdvancePRReviewClosedEndsRequestAndNamesOpenPullRequests(t *testing.T) 
 	if saved.State != request.StateClosed {
 		t.Fatalf("request state = %q, want closed", saved.State)
 	}
-	if saved.Tickets[0].PRState != "closed" {
-		t.Errorf("ticket 1 PRState = %q, want closed", saved.Tickets[0].PRState)
+	if saved.Tickets[1].PRState != "closed" {
+		t.Errorf("ticket 2 PRState = %q, want closed", saved.Tickets[1].PRState)
 	}
-	if saved.Tickets[1].MergeReadiness != nil {
-		t.Errorf("ticket 2 MergeReadiness = %+v, want nil once the request is closed", saved.Tickets[1].MergeReadiness)
+	if saved.Tickets[0].MergeReadiness != nil {
+		t.Errorf("ticket 1 MergeReadiness = %+v, want nil once the request is closed", saved.Tickets[0].MergeReadiness)
 	}
-	if next := saved.NextAction(); !strings.Contains(next, r.Tickets[1].PRURL) {
-		t.Errorf("NextAction = %q, want it to name ticket 2's open pull request", next)
+	if next := saved.NextAction(); !strings.Contains(next, r.Tickets[0].PRURL) {
+		t.Errorf("NextAction = %q, want it to name ticket 1's open pull request", next)
 	}
 	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, r.ID))
 	if err != nil {
 		t.Fatalf("read notifications.log: %v", err)
 	}
-	if !strings.Contains(string(log), "Pull request closed: request closed") || !strings.Contains(string(log), r.Tickets[1].PRURL) {
-		t.Errorf("notifications.log = %s, want the closed notice naming ticket 2's open pull request", log)
+	if !strings.Contains(string(log), "Pull request closed: request closed") || !strings.Contains(string(log), r.Tickets[0].PRURL) {
+		t.Errorf("notifications.log = %s, want the closed notice naming ticket 1's open pull request", log)
 	}
 }
 
@@ -1247,11 +1265,35 @@ func stackedRetargetFixture(dp *fakeDeps, t *testing.T) (r *request.Request, dat
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
+	// Ticket 2 was built stacked on ticket 1's result, and ticket 1 merged
+	// with a merge commit: main's tip has that result under it, so ticket 2
+	// needs no restack.
+	stacked, err := run.Load(dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stacked.StackBaseSHA = requestdrivertest.TicketRunResultSHA(1)
+	if err := stacked.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	mainTip := strings.Repeat("7", 40)
 	ticket2URL := r.Tickets[1].PRURL
 	origRead, origEdit, origReady := dp.readReviewStateFn, dp.retargetPullRequestBaseFn, dp.markPullRequestReadyFn
+	origRemote, origFetch, origUnder := dp.remoteBranchHeadSHAFn, dp.fetchBranchCommitFn, dp.roundResultDescendsFromHeadFn
 	t.Cleanup(func() {
 		dp.readReviewStateFn, dp.retargetPullRequestBaseFn, dp.markPullRequestReadyFn = origRead, origEdit, origReady
+		dp.remoteBranchHeadSHAFn, dp.fetchBranchCommitFn, dp.roundResultDescendsFromHeadFn = origRemote, origFetch, origUnder
 	})
+	dp.remoteBranchHeadSHAFn = func(_ context.Context, _, branch string) (string, error) {
+		if branch != "main" {
+			t.Fatalf("read branch %q, want main", branch)
+		}
+		return mainTip, nil
+	}
+	dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return nil }
+	dp.roundResultDescendsFromHeadFn = func(_, ancestor, descendant string) (bool, error) {
+		return ancestor == requestdrivertest.TicketRunResultSHA(1) && descendant == mainTip, nil
+	}
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 		if prURL != ticket2URL {
 			t.Fatalf("read unexpected PR %q (ticket 1 is merged and must not be polled)", prURL)
@@ -1373,17 +1415,24 @@ func TestPRPollDoesNotRetargetWhenThePRHeadIsNotTheEvaluatedRun(t *testing.T) {
 // recorded (and it still isn't flipped ready, per the fixture).
 func TestPRPollStillRecordsApprovalWhenTheRetargetCannotHappen(t *testing.T) {
 	dp := newFakeDeps(t)
-	r, dataDir, edits := stackedRetargetFixture(dp, t)
-	r.Tickets[0].PRBase = "" // pre-upgrade merge: nothing to retarget onto
+	r, dataDir, _ := stackedRetargetFixture(dp, t)
+	var edits []string
+	dp.retargetPullRequestBaseFn = func(_ context.Context, prURL, base string) error {
+		edits = append(edits, prURL+" -> "+base)
+		return errors.New("gh: HTTP 502")
+	}
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
-		return forge.ReviewState{State: "OPEN", IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TicketRunResultSHA(2), ReviewDecision: forge.ReviewDecisionApproved}, nil
+		state := approvedOnHeadState(requestdrivertest.TicketRunResultSHA(2), nil)
+		state.IsDraft = true
+		state.BaseRefName = "factoryd/run-1"
+		return state, nil
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
-	if len(*edits) != 0 {
-		t.Errorf("gh pr edit calls = %v, want none", *edits)
+	if len(edits) != 1 || r.Tickets[1].Retarget != nil {
+		t.Errorf("gh pr edit calls = %v, retarget %+v: want one that failed, none recorded", edits, r.Tickets[1].Retarget)
 	}
 	if r.Tickets[1].PRState != "approved" {
 		t.Errorf("ticket 2 PRState = %q, want approved even though the retarget could not run", r.Tickets[1].PRState)
@@ -2069,6 +2118,17 @@ func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 2)
 	r.Tickets[0].Branch = "factoryd/run-1"
+	// Ticket 2 was built on ticket 1's result, which is still its branch's
+	// tip (StubPRReviewHooks' ancestry answers yes): no restack.
+	stacked, err := run.Load(dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stacked.StackBaseSHA = requestdrivertest.TicketRunResultSHA(1)
+	if err := stacked.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return nil }
 
 	trueVal := true
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), BaseRefName: "factoryd/run-1"}, nil)
@@ -2898,5 +2958,94 @@ func TestPollTicketPRCancelledDuringPollDoesNotResurrectRequest(t *testing.T) {
 	}
 	if loaded.State != request.StateCancelled {
 		t.Fatalf("State = %q, want %q (a cancel mid-poll must survive pollTicketPR's own save)", loaded.State, request.StateCancelled)
+	}
+}
+
+// draftPullRequest makes dp read every pull request as an open draft: the
+// state draftBeforeFactoryPush reads before a round's push.
+func draftPullRequest(dp *fakeDeps) {
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil
+	}
+}
+
+// TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush: a review
+// round's push to a ready pull request is preceded by turning it back to
+// draft, so no ready state crosses a head the factory changed; the next
+// pass polls it at once, so the ready flip runs again on the new head.
+func TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	trueVal := true
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	events := readyPullRequestForARound(t, dp, dataDir, false)
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	if len(*events) != 2 || (*events)[0] != "draft "+r.Tickets[0].PRURL || !strings.HasPrefix((*events)[1], "push ") {
+		t.Fatalf("events %v (state %s, %s): want the draft, then the push", *events, r.State, r.Error)
+	}
+	if t1 := r.Tickets[0]; t1.PRState != "draft" || t1.LastPolledAt != "" || !t1.Rounds[0].Pushed {
+		t.Errorf("ticket %+v: want it draft, pushed, and due for a poll", t1)
+	}
+}
+
+// readyPullRequestForARound makes dp's pull request ready until the factory
+// turns it to draft, runs an accepted review round, and records the draft
+// flips and pushes in order. markedReadyDuringPush marks it ready again as
+// the round's push lands, as a person could.
+func readyPullRequestForARound(t *testing.T, dp *fakeDeps, dataDir string, markedReadyDuringPush bool) *[]string {
+	t.Helper()
+	isDraft := false
+	inner := dp.readReviewStateFn
+	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
+		state, err := inner(ctx, prURL, policy)
+		state.IsDraft = isDraft
+		return state, err
+	}
+	var events []string
+	dp.undoMarkPullRequestReadyFn = func(_ context.Context, prURL string) error {
+		events = append(events, "draft "+prURL)
+		isDraft = true
+		return nil
+	}
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		return saveAcceptedRoundRun(t, dataDir, &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: strings.Repeat("d", 40), Branch: requestdrivertest.ArgValue(args, "-on-branch")})
+	}
+	dp.pushExistingBranchFn = func(_ context.Context, _, sha, branch string) error {
+		events = append(events, "push "+branch)
+		requestdrivertest.LastPushedSHA[branch] = sha
+		if markedReadyDuringPush {
+			isDraft = false
+		}
+		return nil
+	}
+	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
+	return &events
+}
+
+// TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft: a
+// person marks the pull request ready between the factory's flip to draft
+// and its push landing; once the push is confirmed it is turned back to
+// draft (redraftAfterFactoryPush), so no ready state carries across the new
+// head.
+func TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	trueVal := true
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	events := readyPullRequestForARound(t, dp, dataDir, true)
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	pr := r.Tickets[0].PRURL
+	if len(*events) != 3 || (*events)[0] != "draft "+pr || !strings.HasPrefix((*events)[1], "push ") || (*events)[2] != "draft "+pr {
+		t.Fatalf("events %v (state %s, %s): want the draft, the push, then the draft again", *events, r.State, r.Error)
+	}
+	if t1 := r.Tickets[0]; t1.PRState != "draft" || !t1.Rounds[0].Pushed || r.State != request.StatePRReview {
+		t.Errorf("ticket %+v, state %s: want it draft and pushed, still in pr_review", t1, r.State)
 	}
 }

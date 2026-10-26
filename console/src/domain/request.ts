@@ -92,12 +92,33 @@ export interface RequestTicket {
   readonly activeRoundRunId: string;
   /** The PR-review poll's last ready-to-merge check; null until one has run. */
   readonly mergeReadiness: MergeReadiness | null;
+  /**
+   * The restack under way on this ticket (Go's request.TicketRestack): its
+   * commits are replayed onto the new tip of the branch its pull request
+   * stacks on and judged again. null when none is.
+   */
+  readonly restack: TicketRestack | null;
+  /** The restacks that have ended on this ticket, oldest first. */
+  readonly restackRounds: readonly ReviewRound[];
   /** The round ledger: every build round that ended in a commit, oldest first. */
   readonly roundTags: readonly RoundTag[];
   /** The planner's declared `Estimated-Changed-Lines`; 0 when the ticket declares none. */
   readonly estimatedChangedLines: number;
   /** Changed lines (insertions plus deletions) of the ticket's built run; 0 until one is recorded. */
   readonly builtChangedLines: number;
+}
+
+/** A restack under way on a ticket (Go's request.TicketRestack). */
+export interface TicketRestack {
+  /** The restack's number on the ticket, from 1. */
+  readonly n: number;
+  /** The local branch the commits are replayed on. */
+  readonly branch: string;
+  /** The commit they are replayed onto. */
+  readonly ontoSha: string;
+  /** The replay run judging them; "" until it starts. */
+  readonly runId: string;
+  readonly since: string;
 }
 
 /**
@@ -180,15 +201,22 @@ function decodeReviewRound(o: JsonObject, at: string): ReviewRound {
 }
 
 export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
+  const rounds = objectList(o, "rounds", at, (round, roundAt) => ({
+    kind: optString(round, "kind", roundAt),
+    round: decodeReviewRound(round, roundAt),
+  }));
   return {
-    // A round with a kind is a spec-conformity round before any pull request
-    // exists; it is the build's business, not the review's.
-    reviewRounds: objectList(o, "rounds", at, (round, roundAt) => ({
-      kind: optString(round, "kind", roundAt),
-      round: decodeReviewRound(round, roundAt),
-    }))
-      .filter((entry) => entry.kind === "")
-      .map((entry) => entry.round),
+    // A round with another kind is a spec-conformity round before any pull
+    // request exists (the build's business, not the review's), or a restack.
+    reviewRounds: rounds.filter((entry) => entry.kind === "").map((entry) => entry.round),
+    restackRounds: rounds.filter((entry) => entry.kind === "restack").map((entry) => entry.round),
+    restack: optObject(o, "restack", at, (rs, rsAt) => ({
+      n: numberOr(rs, "n", rsAt, 0),
+      branch: optString(rs, "branch", rsAt),
+      ontoSha: optString(rs, "onto_sha", rsAt),
+      runId: optString(rs, "run_id", rsAt),
+      since: optString(rs, "since", rsAt),
+    })),
     activeRoundRunId: optString(o, "active_round_run_id", at),
     roundTags: objectList(o, "round_tags", at, decodeRoundTag),
     mergeReadiness: optObject(o, "merge_readiness", at, (m, mAt) => ({
@@ -577,11 +605,11 @@ export interface RequestBuild {
  * `waitChipLabel` word the kinds they know and fall back for the rest.
  */
 export interface RequestWait {
-  /** job_slot, repository, repository_queue, model_host, compose_slot or no_worker. */
+  /** job_slot, repository, repository_queue, model_host, compose_slot, stacked_ticket or no_worker. */
   readonly kind: string;
   /** RFC3339 time the wait began; empty when the server did not know. */
   readonly since: string;
-  /** What the request waits behind: a request id (job_slot) or the lock holder's text. */
+  /** What the request waits behind: a request id (job_slot), the lock holder's text, or the stacked ticket's sentence. */
   readonly on: string;
   /** The request's place in line (job_slot, from 1); null otherwise. */
   readonly position: number | null;

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestParsePRView(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
-			isDraft, state, mergedAt, decision, checksPassing, _, _, err := parsePRView(readTestdata(t, c.file))
+			isDraft, state, mergedAt, decision, checksPassing, _, _, _, err := parsePRView(readTestdata(t, c.file))
 			if err != nil {
 				t.Fatalf("parsePRView: %v", err)
 			}
@@ -87,7 +88,7 @@ func TestParsePRView(t *testing.T) {
 // apart from an ordinary one -- actually comes back from parsePRView,
 // not just headRefOid.
 func TestParsePRViewParsesBaseRefName(t *testing.T) {
-	_, _, _, _, _, headSHA, baseRefName, err := parsePRView(readTestdata(t, "prview_stacked_base.json"))
+	_, _, _, _, _, headSHA, baseRefName, _, err := parsePRView(readTestdata(t, "prview_stacked_base.json"))
 	if err != nil {
 		t.Fatalf("parsePRView: %v", err)
 	}
@@ -96,6 +97,69 @@ func TestParsePRViewParsesBaseRefName(t *testing.T) {
 	}
 	if baseRefName != "factoryd/run-1" {
 		t.Errorf("baseRefName = %q, want %q", baseRefName, "factoryd/run-1")
+	}
+}
+
+// TestApprovalOnlyCountsOnCurrentHead: gh JSON (the approve-then-comment
+// files recorded from gh 2.102's `pr view --json reviews`) approved on its
+// head, approved on an older commit, with changes requested, and with a
+// reviewer's COMMENTED review after their approval: only an approval of the
+// head counts, and a later comment neither adds nor withdraws one.
+func TestApprovalOnlyCountsOnCurrentHead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		file string
+		want bool
+	}{
+		{name: "approved on head", file: "prview_approved.json", want: true},
+		{name: "approved on older commit", file: "prview_approved_older.json", want: false},
+		{name: "changes requested", file: "prview_changes_requested.json", want: false},
+		{name: "approved on head, then commented", file: "prview_approved_then_commented.json", want: true},
+		{name: "approved on older commit, then commented on head", file: "prview_approved_older_then_commented.json", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, state, _, decision, _, headSHA, baseRefName, reviews, err := parsePRView(readTestdata(t, tc.file))
+			if err != nil {
+				t.Fatalf("parsePRView: %v", err)
+			}
+			got := ReviewState{
+				State:          state,
+				ReviewDecision: decision,
+				HeadSHA:        headSHA,
+				BaseRefName:    baseRefName,
+				Reviews:        reviews,
+			}.ApprovedOnCurrentHead()
+			if got != tc.want {
+				t.Errorf("ApprovedOnCurrentHead = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApprovalOnHeadWithAStaleApprovalStanding: one reviewer approved the
+// head, another's latest opinion is still an approval of an older commit:
+// not approved. Once that reviewer approves the head, or their approval is
+// dismissed, it is; their later COMMENTED review changes neither.
+func TestApprovalOnHeadWithAStaleApprovalStanding(t *testing.T) {
+	const head, old = "headheadheadheadheadheadheadheadheadhead", "oldoldoldoldoldoldoldoldoldoldoldoldoldo"
+	base := []Review{
+		{Author: "b", SubmittedAt: "2026-10-01T09:00:00Z", CommitOID: old, State: ReviewStateApproved},
+		{Author: "a", SubmittedAt: "2026-10-02T09:00:00Z", CommitOID: head, State: ReviewStateApproved},
+		{Author: "b", SubmittedAt: "2026-10-03T09:00:00Z", CommitOID: head, State: "COMMENTED"},
+	}
+	for _, tc := range []struct {
+		name  string
+		extra []Review
+		want  bool
+	}{
+		{name: "a stale approval stands", want: false},
+		{name: "the stale reviewer approves the head", extra: []Review{{Author: "b", SubmittedAt: "2026-10-04T09:00:00Z", CommitOID: head, State: ReviewStateApproved}}, want: true},
+		{name: "the stale approval is dismissed", extra: []Review{{Author: "b", SubmittedAt: "2026-10-04T09:00:00Z", CommitOID: old, State: ReviewStateDismissed}}, want: true},
+	} {
+		state := ReviewState{ReviewDecision: ReviewDecisionApproved, HeadSHA: head, Reviews: append(slices.Clone(base), tc.extra...)}
+		if got := state.ApprovedOnCurrentHead(); got != tc.want {
+			t.Errorf("%s: ApprovedOnCurrentHead = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -401,8 +465,8 @@ func TestReadReviewStateCombinesPRViewAndReviewThreads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadReviewState: %v", err)
 	}
-	if state.State != "OPEN" || state.ReviewDecision != ReviewDecisionApproved {
-		t.Errorf("state = %+v, want OPEN/approved", state)
+	if state.State != "OPEN" || state.ReviewDecision != ReviewDecisionApproved || !state.ApprovedOnCurrentHead() {
+		t.Errorf("state = %+v, want OPEN/approved on its head", state)
 	}
 	if len(state.BlocksReadyThreads) != 1 || state.BlocksReadyThreads[0].Author != "alice" {
 		t.Errorf("BlocksReadyThreads = %+v, want alice's thread", state.BlocksReadyThreads)

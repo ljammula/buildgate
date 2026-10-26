@@ -134,6 +134,7 @@ func TestRetryAfterADeniedTicketOpensItsPullRequestAndBuildsTheNextTicket(t *tes
 	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), openPR); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
+	earlierPROpenAt(dp, strings.Repeat("2", 40))
 	drive() // pr_review: ticket 2 was never built, so building resumes
 	drive() // ticket 2 builds
 	loaded, err := request.Load(dataDir, id)

@@ -188,10 +188,7 @@ func captureRunBase(ctx temporalworkflow.Context, ids *activityIDs, input *RunWo
 func buildAndVerify(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) (VerifyActivityResult, error) {
 	// RunBuildActivity's successful result is BuildActivityResult, carrying
 	// per-attempt evidence alongside the flat runner.Result.
-	var build BuildActivityResult
-	var buildErr error
-	current.Stage, current.StartedAt = "build", temporalworkflow.Now(ctx)
-	buildErr = temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "build"), RunBuildActivityName, input).Get(ctx, &build)
+	build, buildErr := runBuildStep(ctx, ids, buildVerifyCtx, input, current)
 	if buildErr != nil {
 		return VerifyActivityResult{}, wrapActivityFailure("run build activity", buildErr, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
@@ -242,6 +239,22 @@ func buildAndVerify(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	result.Verify = verify.Result
 	result.Attempts = append(result.Attempts, verify.Attempts...)
 	return verify, nil
+}
+
+// runBuildStep runs the build: RunBuildActivity, or, for a replay run
+// (input.Replay, admitted by refuseIncoherentReplay under replayRunChange),
+// ApplyReplayActivity, a host check that builds and launches nothing and
+// answers with the same BuildActivityResult.
+func runBuildStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress) (BuildActivityResult, error) {
+	var build BuildActivityResult
+	if input.Replay != nil {
+		current.Stage, current.StartedAt = replayStage, temporalworkflow.Now(ctx)
+		err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "apply-replay"), ApplyReplayActivityName, input).Get(ctx, &build)
+		return build, err
+	}
+	current.Stage, current.StartedAt = "build", temporalworkflow.Now(ctx)
+	err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "build"), RunBuildActivityName, input).Get(ctx, &build)
+	return build, err
 }
 
 // gateOutcome is what postVerifyGates found: the full-suite and named-gate

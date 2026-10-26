@@ -1,0 +1,30 @@
+{
+  "isDraft": false,
+  "state": "OPEN",
+  "mergedAt": null,
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [
+    {
+      "conclusion": "SUCCESS"
+    }
+  ],
+  "headRefOid": "4f9d2c1b8e7a6d5c4b3a29180f7e6d5c4b3a2918",
+  "baseRefName": "main",
+  "reviews": [
+    {
+      "id": "PRR_kwDOexamplereviewer-a",
+      "author": {
+        "login": "reviewer-a"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "submittedAt": "2026-10-19T10:00:00Z",
+      "includesCreatedEdit": false,
+      "reactionGroups": [],
+      "state": "APPROVED",
+      "commit": {
+        "oid": "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
+      }
+    }
+  ]
+}

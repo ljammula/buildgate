@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +53,9 @@ func runInputGoldenConfig(t *testing.T) string {
 // that reach RunWorkflowInput, each with a value that is not its default.
 // -compose-services stays at its default (true), which is the value the JSON
 // shows. Not set, so absent from the golden: -prior-run, -on-branch,
-// -diff-base and -resume-worktree-of (each needs an earlier run),
+// -diff-base, -resume-worktree-of and -replay (each needs an earlier run;
+// TestReplayRunWorkflowInputMatchesGolden covers -replay, which also refuses
+// -earlier-attempt),
 // -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
 // covers it), and the
 // spec's Required-Content and the config's skills and test patterns.
@@ -205,12 +208,22 @@ func compareRunInputGolden(t *testing.T, name string, input map[string]any, plac
 // The run's own outcome is not asserted: the input is what is under test.
 func runInputGoldenRun(t *testing.T, runID string, extraFlags ...string) (address string, placeholders [][2]string) {
 	t.Helper()
+	return runInputGoldenRunWith(t, runID, func(_, _ string, flags []string) ([]string, [][2]string) {
+		return append(flags, extraFlags...), nil
+	})
+}
+
+// runInputGoldenRunWith is runInputGoldenRun with the flag set given to
+// prepare, which may change the workspace and the flags and returns
+// placeholders of its own.
+func runInputGoldenRunWith(t *testing.T, runID string, prepare func(workspace, inputs string, flags []string) ([]string, [][2]string)) (address string, placeholders [][2]string) {
+	t.Helper()
 	address = sharedTemporalAddress(t)
 	workspace := newFixtureRepo(t)
 	commitFactoryYML(t, workspace, goldenFactoryYML)
 	dataDir, inputs := t.TempDir(), t.TempDir()
-	flags := runInputGoldenFlags(t, workspace, dataDir, inputs, runID, address)
-	cmd := factorydCommand(t, append(flags, extraFlags...)...)
+	flags, own := prepare(workspace, inputs, runInputGoldenFlags(t, workspace, dataDir, inputs, runID, address))
+	cmd := factorydCommand(t, flags...)
 	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "RUN_INPUT_GOLDEN_KEY=sk-test", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t))...)
 	out, _ := cmd.CombinedOutput()
@@ -228,7 +241,7 @@ func runInputGoldenRun(t *testing.T, runID string, extraFlags ...string) (addres
 		t.Fatalf("read the workspace's base commit: %v", err)
 	}
 	// Both spellings of each temp path: macOS temp dirs are symlinked.
-	return address, [][2]string{
+	return address, append(own, [][2]string{
 		{resolve(dataDir), "<DATA_DIR>"},
 		{dataDir, "<DATA_DIR>"},
 		{resolve(workspace), "<WORKSPACE>"},
@@ -239,7 +252,7 @@ func runInputGoldenRun(t *testing.T, runID string, extraFlags ...string) (addres
 		{testdataDir(t), "<TESTDATA>"},
 		{strings.TrimSpace(baseSHA), "<BASE_SHA>"},
 		{runID, "<RUN_ID>"},
-	}
+	}...)
 }
 
 // testdataDir is this package's testdata directory, absolute.
@@ -275,6 +288,65 @@ func TestRepositoryOwnerRunWorkflowInputFromFullFlagSetMatchesGolden(t *testing.
 	placeholders = append([][2]string{{ownerID, "<OWNER_ID>"}, {repository, "<REPOSITORY>"}}, placeholders...)
 	childID := workflow.RepositoryOwnerRunWorkflowID(ownerID, runID)
 	compareRunInputGolden(t, "run_workflow_input_repository_owner.golden.json", startedRunWorkflowInput(t, address, childID), placeholders)
+}
+
+// TestReplayRunWorkflowInputMatchesGolden is the same comparison for a replay
+// run: the full flag set without -earlier-attempt and -run-id (both refused
+// with -replay), plus -on-branch, -diff-base and -replay for a commit
+// replayed onto the workspace's head.
+func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
+	var dataDir string
+	address, placeholders := runInputGoldenRunWith(t, "unused", func(workspace, inputs string, flags []string) ([]string, [][2]string) {
+		onto, head := replayedBranch(t, workspace, "buildgate/req-golden/t2-restack1")
+		for _, refused := range []string{"-earlier-attempt", "-run-id"} {
+			if i := slices.Index(flags, refused); i >= 0 {
+				flags = slices.Delete(flags, i, i+2)
+			}
+		}
+		dataDir = flags[slices.Index(flags, "-data-dir")+1]
+		flags = append(flags, "-on-branch", "buildgate/req-golden/t2-restack1", "-diff-base", onto, "-replay", writeReplayFile(t, inputs, onto, head))
+		return flags, [][2]string{{head, "<REPLAY_HEAD>"}}
+	})
+	runs, err := os.ReadDir(filepath.Join(dataDir, "runs"))
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs of the replay golden run: %v, %v; want one", runs, err)
+	}
+	runID := runs[0].Name()
+	placeholders = append([][2]string{{runID, "<RUN_ID>"}}, placeholders...)
+	compareRunInputGolden(t, "run_workflow_input_replay.golden.json", startedRunWorkflowInput(t, address, runID), placeholders)
+}
+
+// replayedBranch creates branch in workspace with one commit on its HEAD, as
+// the host's replay leaves it, and returns the HEAD (onto) and the branch's
+// commit (head). The workspace stays on its branch.
+func replayedBranch(t *testing.T, workspace, branch string) (onto, head string) {
+	t.Helper()
+	out, err := runGit(t, workspace, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	onto = strings.TrimSpace(string(out))
+	scratch := filepath.Join(t.TempDir(), "replay")
+	if out, err := runGit(t, workspace, "worktree", "add", "-q", "-b", branch, scratch, onto); err != nil {
+		t.Fatalf("git worktree add: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(scratch, "content.txt"), []byte("replayed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "replayed commit"}} {
+		if out, err := runGit(t, scratch, args...); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	out, err = runGit(t, scratch, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head = strings.TrimSpace(string(out))
+	if out, err := runGit(t, workspace, "worktree", "remove", "--force", scratch); err != nil {
+		t.Fatalf("git worktree remove: %v: %s", err, out)
+	}
+	return onto, head
 }
 
 // goldenFactoryYML is the committed .factory.yml of the golden runs: setup and

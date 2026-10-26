@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,6 +50,25 @@ type Thread struct {
 	CommentID int64
 }
 
+// Review is one submitted review of a pull request (gh's reviews): who
+// submitted it and when, the commit it reviewed and its state (gh's own
+// spelling, e.g. ReviewStateApproved).
+type Review struct {
+	Author      string
+	SubmittedAt string
+	CommitOID   string
+	State       string
+}
+
+// The review states gh reports that are a reviewer's opinion of the pull
+// request. COMMENTED and PENDING are not: a comment after an approval leaves
+// the approval standing on GitHub.
+const (
+	ReviewStateApproved         = "APPROVED"
+	ReviewStateChangesRequested = "CHANGES_REQUESTED"
+	ReviewStateDismissed        = "DISMISSED"
+)
+
 // ReviewState is a snapshot of one pull request's review status, as of
 // one ReadReviewState call.
 type ReviewState struct {
@@ -71,6 +91,12 @@ type ReviewState struct {
 	// recorded decision describing a commit the PR has already moved past
 	// (found via review, GitHub Codex App, PR #154 round 5).
 	HeadSHA string
+	// Reviews is every submitted review, with the commit it reviewed: what
+	// ApprovedOnCurrentHead checks the aggregate approval against. They are
+	// read from gh's `reviews`, not `latestReviews`: gh fills no commit in
+	// `latestReviews`, and there a reviewer's later COMMENTED review hides
+	// the approval before it.
+	Reviews []Review
 	// BaseRefName is GitHub's own current base branch name for this PR --
 	// what `gh pr create --base`/`gh pr edit --base` last set it to, not
 	// necessarily the repo default branch. A caller checks this against
@@ -112,6 +138,60 @@ const (
 // both mean stop (MergedAt is set only in the MERGED case).
 func (r ReviewState) ShouldStopPolling() bool {
 	return r.State != PRStateOpen
+}
+
+// ApprovedOnCurrentHead reports whether the pull request is approved on its
+// current head: GitHub's aggregate decision is approved, some reviewer's
+// latest opinion (latestOpinions) is an approval of HeadSHA itself, and no
+// reviewer's latest opinion is an approval of another commit. An approval of
+// an earlier commit does not approve a head the branch has since moved to,
+// whether or not the repository dismisses stale reviews, and while one
+// stands the pull request does not count as approved. A COMMENTED review is
+// no opinion: it neither approves nor withdraws the approval before it.
+// Every reader that treats a pull request as approved asks this. Both commit
+// ids come from the same `gh pr view` read, in full, so they are compared
+// exactly.
+func (r ReviewState) ApprovedOnCurrentHead() bool {
+	if r.ReviewDecision != ReviewDecisionApproved || r.HeadSHA == "" {
+		return false
+	}
+	onHead := false
+	for _, review := range latestOpinions(r.Reviews) {
+		if review.State != ReviewStateApproved {
+			continue
+		}
+		if review.CommitOID != r.HeadSHA {
+			return false
+		}
+		onHead = true
+	}
+	return onHead
+}
+
+// latestOpinions is each author's last review that is an opinion (approved,
+// changes requested or dismissed), by submission time, as GitHub's
+// latestOpinionatedReviews has them.
+func latestOpinions(reviews []Review) []Review {
+	ordered := slices.Clone(reviews)
+	slices.SortStableFunc(ordered, func(a, b Review) int { return strings.Compare(a.SubmittedAt, b.SubmittedAt) })
+	latest := map[string]Review{}
+	var authors []string
+	for _, review := range ordered {
+		switch review.State {
+		case ReviewStateApproved, ReviewStateChangesRequested, ReviewStateDismissed:
+		default:
+			continue
+		}
+		if _, seen := latest[review.Author]; !seen {
+			authors = append(authors, review.Author)
+		}
+		latest[review.Author] = review
+	}
+	out := make([]Review, 0, len(authors))
+	for _, author := range authors {
+		out = append(out, latest[author])
+	}
+	return out
 }
 
 // DefaultIgnoreAuthors is the built-in default-ignore list for review-
@@ -263,7 +343,7 @@ func checksPassingFromRollup(rollup []ghStatusCheck) *bool {
 }
 
 // ghPRView is the JSON shape of `gh pr view <url> --json
-// isDraft,state,mergedAt,reviewDecision,statusCheckRollup,headRefOid,baseRefName`.
+// isDraft,state,mergedAt,reviewDecision,statusCheckRollup,headRefOid,baseRefName,reviews`.
 type ghPRView struct {
 	IsDraft           bool            `json:"isDraft"`
 	State             string          `json:"state"`
@@ -272,6 +352,18 @@ type ghPRView struct {
 	StatusCheckRollup []ghStatusCheck `json:"statusCheckRollup"`
 	HeadRefOid        string          `json:"headRefOid"`
 	BaseRefName       string          `json:"baseRefName"`
+	Reviews           []ghPRReview    `json:"reviews"`
+}
+
+type ghPRReview struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	SubmittedAt string `json:"submittedAt"`
+	Commit      struct {
+		OID string `json:"oid"`
+	} `json:"commit"`
+	State string `json:"state"`
 }
 
 // normalizeReviewDecision maps gh's own reviewDecision strings to this
@@ -291,15 +383,19 @@ func normalizeReviewDecision(raw string) ReviewDecision {
 }
 
 // parsePRView parses `gh pr view --json
-// isDraft,state,mergedAt,reviewDecision,statusCheckRollup,headRefOid,baseRefName`'s
+// isDraft,state,mergedAt,reviewDecision,statusCheckRollup,headRefOid,baseRefName,reviews`'s
 // own stdout. A pure function, taking gh's JSON bytes directly, so it is
 // testable against recorded fixtures without ever invoking gh.
-func parsePRView(data []byte) (isDraft bool, state string, mergedAt *time.Time, decision ReviewDecision, checksPassing *bool, headSHA, baseRefName string, err error) {
+func parsePRView(data []byte) (isDraft bool, state string, mergedAt *time.Time, decision ReviewDecision, checksPassing *bool, headSHA, baseRefName string, reviews []Review, err error) {
 	var v ghPRView
 	if err := json.Unmarshal(data, &v); err != nil {
-		return false, "", nil, "", nil, "", "", fmt.Errorf("parse gh pr view output: %w", err)
+		return false, "", nil, "", nil, "", "", nil, fmt.Errorf("parse gh pr view output: %w", err)
 	}
-	return v.IsDraft, v.State, v.MergedAt, normalizeReviewDecision(v.ReviewDecision), checksPassingFromRollup(v.StatusCheckRollup), v.HeadRefOid, v.BaseRefName, nil
+	reviews = make([]Review, 0, len(v.Reviews))
+	for _, review := range v.Reviews {
+		reviews = append(reviews, Review{Author: review.Author.Login, SubmittedAt: review.SubmittedAt, CommitOID: review.Commit.OID, State: review.State})
+	}
+	return v.IsDraft, v.State, v.MergedAt, normalizeReviewDecision(v.ReviewDecision), checksPassingFromRollup(v.StatusCheckRollup), v.HeadRefOid, v.BaseRefName, reviews, nil
 }
 
 // ghReviewThreadsResponse is the JSON shape of reviewThreadsQuery's own
@@ -509,7 +605,7 @@ func resolveSelfLogin(ctx context.Context, ghBinary string) (string, error) {
 // prViewJSONFields is the exact --json field list ReadReviewState asks
 // `gh pr view` for -- named once so what's requested and what parsePRView
 // actually reads can't drift apart silently.
-const prViewJSONFields = "isDraft,state,mergedAt,reviewDecision,statusCheckRollup,headRefOid,baseRefName"
+const prViewJSONFields = "isDraft,state,mergedAt,reviewDecision,statusCheckRollup,headRefOid,baseRefName,reviews"
 
 // ReadReviewState shells out to gh to build a snapshot of prURL's current
 // review state: `gh pr view` for the PR-level fields, `gh api graphql`
@@ -550,7 +646,7 @@ func (o GHPullRequestOpener) ReadReviewState(ctx context.Context, prURL string, 
 	if err != nil {
 		return ReviewState{}, fmt.Errorf("gh pr view %s: %w: %s", prURL, err, strings.TrimSpace(string(viewOut)))
 	}
-	isDraft, state, mergedAt, decision, checksPassing, headSHA, baseRefName, err := parsePRView(viewOut)
+	isDraft, state, mergedAt, decision, checksPassing, headSHA, baseRefName, reviews, err := parsePRView(viewOut)
 	if err != nil {
 		return ReviewState{}, err
 	}
@@ -606,6 +702,7 @@ func (o GHPullRequestOpener) ReadReviewState(ctx context.Context, prURL string, 
 		ReviewDecision:     decision,
 		ChecksPassing:      checksPassing,
 		HeadSHA:            headSHA,
+		Reviews:            reviews,
 		BaseRefName:        baseRefName,
 		BlocksReadyThreads: blocksReady,
 		ActionableThreads:  actionable,

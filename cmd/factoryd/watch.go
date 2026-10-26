@@ -864,11 +864,22 @@ func watchRequestTicketStep(out *os.File, dataDir string, r *request.Request, no
 		return true, fmt.Errorf("request %s: ticket index %d out of range (%d ticket(s))", r.ID, r.TicketIndex, len(r.Tickets))
 	}
 	ticket := r.Tickets[r.TicketIndex-1]
+	// A restack under way in pr_review is followed like a build: its replay
+	// run judges the ticket's commits on the new base. One held because it
+	// cannot be settled is named below instead.
+	if restacking := r.RestackInFlight(); r.State == request.StatePRReview && restacking != nil && restacking.RestackHold == nil {
+		return watchRestack(out, dataDir, r, restacking.Restack, noFollow, lastRunID, pollAgain, stopSpinner)
+	}
 	// pr_review waits on a human reviewer, possibly for days: say so and
 	// return, like spec_review/plan_review, rather than polling silently
 	// ("silence is a bug"). Attach to the ticket's run first if it hasn't
-	// been shown yet, so a corrective round in flight is still followed.
+	// been shown yet, so a corrective round in flight is still followed. A
+	// pull request held because whether it needs a restack cannot be told
+	// is named, with what to do.
 	if r.State == request.StatePRReview && (ticket.RunID == "" || ticket.RunID == *lastRunID) {
+		if held := r.RestackHeld(); held != nil {
+			fmt.Fprintf(out, "%s\n", held.RestackHold.On)
+		}
 		fmt.Fprintf(out, "waiting on PR review/merge for ticket %d/%d: %s\n", r.TicketIndex, r.TicketCount, ticket.PRURL)
 		return true, nil
 	}
@@ -891,6 +902,24 @@ func watchRequestTicketStep(out *os.File, dataDir string, r *request.Request, no
 	// until the request driver has advanced r to its next ticket, pr_review,
 	// or a terminal state, then reports whatever r is now.
 	return false, nil
+}
+
+// watchRestack is watchRequestTicketStep for a request in pr_review with a
+// restack under way: it says what is being restacked, then follows the
+// replay run once it has started.
+func watchRestack(out *os.File, dataDir string, r *request.Request, rs *request.TicketRestack, noFollow bool, lastRunID *string, pollAgain func() (bool, error), stopSpinner func()) (bool, error) {
+	if rs.RunID == "" || rs.RunID == *lastRunID {
+		if noFollow {
+			fmt.Fprintln(out, sanitize.Line(r.NextAction()))
+			return true, nil
+		}
+		return pollAgain()
+	}
+	*lastRunID = rs.RunID
+	stopSpinner()
+	fmt.Fprintln(out, sanitize.Line(r.NextAction()))
+	runErr := watchRun(out, dataDir, rs.RunID, noFollow)
+	return noFollow, runErr
 }
 
 // newTTYSpinner returns a spinner for w when w is an interactive terminal,

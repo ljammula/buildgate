@@ -24,7 +24,7 @@
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
-30 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
+26 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 32 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
 30 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 46 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
@@ -44,7 +44,6 @@
 26 internal/registryproxy/server.go NewServer
 29 internal/request/approve_test.go TestRejectFromEachState
 29 internal/request/oracle_materialize.go deriveTicketOracles
-27 internal/requestdriver/request_driver.go AdvanceBuilding
 29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch

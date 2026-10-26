@@ -32,6 +32,12 @@ describe("waitLine", () => {
     expect(waitLine(waitOf({ kind: "compose_slot", on: "queued behind run-b" }))).toBe(
       "Waiting for a sidecar slot · queued behind run-b",
     );
+    expect(
+      waitLine(waitOf({ kind: "stacked_ticket", on: "ticket 2/2 waits: ticket 1's branch moved" })),
+    ).toBe("Waiting on the earlier ticket's branch · ticket 2/2 waits: ticket 1's branch moved");
+    expect(waitChipLabel(waitOf({ kind: "stacked_ticket", on: "x" })!)).toBe(
+      "Waiting on earlier ticket",
+    );
     expect(waitLine(waitOf({ kind: "no_worker" }))).toBe("No worker is running");
   });
 

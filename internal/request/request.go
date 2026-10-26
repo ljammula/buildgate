@@ -157,8 +157,9 @@ type Ticket struct {
 	// stacked on another ticket's unmerged PR: waiting on a human to merge
 	// that one), "ready" (draft cleared, gh pr ready called), "approved"
 	// (ReviewDecision == approved), "merged", or
-	// "closed" (closed without merging -- the request ends as closed,
-	// see handleClosedOrMergedTicket).
+	// "closed" (closed without merging -- the last ticket's ends the
+	// request as closed, an earlier ticket's parks it in resume_review, see
+	// handleClosedOrMergedTicket).
 	PRState string `json:"pr_state,omitempty"`
 	// MergeReadiness is the PR-review poll's last check of whether this
 	// ticket's open pull request is ready to merge. Nil until a poll has
@@ -193,6 +194,21 @@ type Ticket struct {
 	// RoundTags is the ticket's round ledger: one entry per build round that
 	// ended in a commit, with the ref that keeps it and the gates' verdict.
 	RoundTags []RoundTag `json:"round_tags,omitempty"`
+	// Restack is set while a restack of the ticket is in flight: from just
+	// before its commits are replayed until the restack's round is recorded
+	// (internal/requestdriver's restack.go). A pass that finds it set learns
+	// a restack was interrupted, and reconciles it before anything else.
+	Restack *TicketRestack `json:"restack,omitempty"`
+	// RestackHold is set while whether the ticket needs a restack cannot be
+	// told (a fact could not be read, or its PR-head run records no stack
+	// base), or an interrupted restack (Restack) cannot be settled: its pull
+	// request is then neither retargeted nor marked ready. Cleared once a
+	// poll can tell.
+	RestackHold *TicketRestackHold `json:"restack_hold,omitempty"`
+	// Retarget is the last retarget of the ticket's pull request the factory
+	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
+	// changed on its own is never recorded here.
+	Retarget *TicketRetarget `json:"retarget,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -235,6 +251,12 @@ const ConformityRoundKind = "conformity"
 // kind.
 const CorrectiveRoundKind = "corrective"
 
+// RestackRoundKind marks a Round as a replay run of the ticket's commits onto
+// a new base: it builds nothing and counts against neither round budget
+// (max_review_rounds reads Kind "" rounds, review_corrective_rounds the two
+// pre-PR kinds).
+const RestackRoundKind = "restack"
+
 // Round is one corrective build run against a ticket's own branch, in
 // response either to a batch of newly-surfaced unresolved PR review
 // threads (Kind "") or to a quarantined run's own spec_conformity
@@ -251,7 +273,8 @@ type Round struct {
 	Index int `json:"index"`
 	// Kind is "" (the zero value, so every round recorded before this
 	// field existed reads as a PR-review round, preserving their
-	// historical meaning), ConformityRoundKind or CorrectiveRoundKind. See
+	// historical meaning), ConformityRoundKind, CorrectiveRoundKind or
+	// RestackRoundKind. See
 	// this type's own doc comment.
 	Kind      string   `json:"kind,omitempty"`
 	ThreadIDs []string `json:"thread_ids"`
@@ -323,7 +346,8 @@ type Round struct {
 
 // Counted reports whether the round uses up one of its budget's rounds
 // (max_review_rounds for a PR-review round, review_corrective_rounds for the
-// two pre-PR kinds). A round whose run never started, or ended with no
+// two pre-PR kinds). A RestackRoundKind round is in neither budget: each
+// budget's reader also filters by Kind. A round whose run never started, or ended with no
 // verdict on the work, does not: neither says anything about the work, and
 // counting them let an outage spend the whole budget.
 func (rnd Round) Counted() bool {
@@ -394,6 +418,10 @@ type Request struct {
 	WaitingSince   string `json:"waiting_since,omitempty"`
 	LastNotifiedAt string `json:"last_notified_at,omitempty"`
 	NotifyCount    int    `json:"notify_count,omitempty"`
+	// StackedWait is set while the current ticket's build waits on the
+	// earlier ticket's pull-request branch (see StackedWait). Nil otherwise;
+	// every state transition clears it.
+	StackedWait *StackedWait `json:"stacked_wait,omitempty"`
 	// LastAsk is the headline of the last notification sent for this
 	// request, at LastNotifiedAt: what an open console tab shows when it
 	// raises that notification itself.
@@ -1081,6 +1109,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	from := r.State
 	ts := now.UTC().Format(time.RFC3339Nano)
 	r.State = to
+	r.StackedWait = nil
 	r.HaltKind = ""
 	// QuarantineCheck names which check quarantined r (set by the request
 	// driver alongside Quarantine itself, e.g. "spec_conformity") -- like
@@ -1571,6 +1600,11 @@ func (r *Request) NextAction() string {
 		return fmt.Sprintf("review the drafted oracle (or leave it absent/empty to skip): `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
 	case StatePlanReview:
 		return fmt.Sprintf("review the drafted tickets: `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
+	case StateBuilding:
+		if r.StackedWait != nil {
+			return r.StackedWait.On
+		}
+		return ""
 	case StateResumeReview:
 		return r.resumeNextAction()
 	case StateQuarantined:
@@ -1614,6 +1648,14 @@ func (r *Request) prReviewNextAction() string {
 	var parts []string
 	for _, t := range r.Tickets {
 		if t.PRURL == "" {
+			continue
+		}
+		if t.RestackHold != nil {
+			parts = append(parts, t.RestackHold.On)
+			continue
+		}
+		if t.Restack != nil {
+			parts = append(parts, t.Restack.nextAction(t.Index, r.TicketCount, t.PRURL))
 			continue
 		}
 		if failed := t.lastFailedReviewRound(); failed != nil && t.PRState == "ready" {

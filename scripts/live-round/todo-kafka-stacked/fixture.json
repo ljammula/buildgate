@@ -1,0 +1,12 @@
+{
+  "repo": "todo-kafka-service",
+  "verify_command": "make test",
+  "preflight_profile": "brownfield",
+  "comments": [
+    {
+      "path": "main.go",
+      "anchor": "func handleVersion",
+      "body": "Make the first statement of `handleVersion`, directly under its `func` line and before the method check, set a `Cache-Control: no-store` header, and assert the header in the handler test."
+    }
+  ]
+}

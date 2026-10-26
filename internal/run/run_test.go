@@ -716,6 +716,49 @@ func TestValidateSliceChainRejectsMismatchedProjectPath(t *testing.T) {
 	}
 }
 
+func TestValidateSliceChainRejectsMissingProjectPath(t *testing.T) {
+	prior := &Run{ID: "slice-1-round-1", State: StateAccepted, ResultSHA: "abc123"}
+
+	if err := ValidateSliceChain(prior, "abc123", "/repo"); err == nil {
+		t.Fatal("ValidateSliceChain returned nil, want error when the prior run has no project path")
+	}
+}
+
+// TestLegacyRunRecordRoundTripsByteIdentically ensures the new optional
+// stack-base field does not rewrite a record written before it existed.
+func TestLegacyRunRecordRoundTripsByteIdentically(t *testing.T) {
+	legacy := &Run{
+		ID:            "legacy-run",
+		Ticket:        "ticket-1",
+		ProjectPath:   "/repo",
+		WorkspacePath: "/repo",
+		SpecPath:      "/repo/ticket.md",
+		State:         StateAccepted,
+		BaseSHA:       "base",
+		ResultSHA:     "result",
+		ChangedFiles:  []string{},
+	}
+	original, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy record: %v", err)
+	}
+	if strings.Contains(string(original), "stack_base_sha") {
+		t.Fatalf("legacy record unexpectedly contains stack_base_sha: %s", original)
+	}
+
+	var roundTripped Run
+	if err := json.Unmarshal(original, &roundTripped); err != nil {
+		t.Fatalf("unmarshal legacy record: %v", err)
+	}
+	got, err := json.Marshal(&roundTripped)
+	if err != nil {
+		t.Fatalf("marshal round-tripped legacy record: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("legacy record changed after round trip:\n got: %s\nwant: %s", got, original)
+	}
+}
+
 func TestFindChainSuccessorFindsAcceptedSuccessor(t *testing.T) {
 	dataDir := t.TempDir()
 	prior := &Run{ID: "slice-1", State: StateAccepted, ResultSHA: "abc123", ProjectPath: "/repo"}

@@ -76,9 +76,9 @@ act in "you" rows.
 | `plan_review` | **you** | Each ticket shows its estimate against the budget the plan was drafted under (the console, beside the ticket's plan, and once built beside the changed lines of its accepted run); a note says "Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget." for one over it. The estimate is the planner's guess and the note is advice: `approve` (to `building`) or `reject -reason` (back to `planning`). Comments on passages of a ticket (`reject -comments-file`) redraft only the commented sections and tickets |
 | `building` | factory | One ticket at a time in the Docker sandbox, verified, gated, PR opened when release policy allows. A quarantine whose failed gates are only `spec_conformity` and/or `code_review` first gets up to `-review-corrective-rounds` (default `1`) automatic corrective builds on the same branch before quarantining. So does a quarantine by other checks a build can fix when told what failed (a failed verification, a command or repository gate, a diff outside Allowed-Files, a missing required file or content): that build is given the factory's record of the failed attempt, and the same budget covers both kinds. A failed `tests_added`, an unknown check or a halt gets none. A review that gave no verdict (it timed out or returned nothing; the combined review has 20 minutes) is no quarantine and gets no corrective build: nothing was judged, so the request waits in `resume_review` with the cause, and the build is kept |
 | `pr_review` | **you** (on GitHub) | Trusted reviewer comments trigger corrective rounds; PR auto-marked ready once checks pass and no thread blocks it; merging is yours. Next ticket starts once this one is accepted (or, under `-advance-on pr_approved`, once reviewer-approved) |
-| `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft. The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
+| `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft. Or a park: an earlier ticket's pull request was closed, or its branch is gone, without merging (see below the table). The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
 | `done` | - | Every ticket's PR merged |
-| `closed` | - | A ticket's PR was closed without merging. Final: reopening the PR does not bring the request back; submit again. Another ticket's PR left open is named by `factoryd watch <id>` and on the console's request page, for you to merge or close |
+| `closed` | - | The last ticket's PR was closed without merging. Final: reopening the PR does not bring the request back; submit again. Another ticket's PR left open is named by `factoryd watch <id>` and on the console's request page, for you to merge or close. An earlier ticket's PR closed without merging parks the request in `resume_review` instead (below) |
 | `quarantined` / `halted` | **you** | Read the reason in `factoryd status`/console, fix the cause, `factoryd retry <id>` (a rebuilt ticket continues from the failed attempt's commit when a build may be told what failed; `-from scratch` rebuilds from the base, `-from <round>` on a new branch at a round `factoryd rounds <id>` lists: [reference](USAGE_REFERENCE.md#request-lifecycle); console: Retry request, with **Retry from scratch** ticked for `-from scratch`) -- or, before any ticket is accepted, send it back to redraft the plan or the spec: `factoryd reject -to plan\|spec -reason "..." <id>` (`plan`/`planning` and `spec`/`spec_drafting`) -- or, to drop the request instead, `factoryd cancel <id>`. A retry after the factory's own checks refused a drafted spec or plan gives the next draft their reason; a failed or timed-out draft job does not ([reference](USAGE_REFERENCE.md#a-retried-draft)) |
 
 Every ticket build receives the approved spec verbatim before its ticket
@@ -111,8 +111,59 @@ with `factoryd reject -to plan -reason "..." <id>`. That command supplies plan
 feedback, so planning drafts revised tickets instead of taking the imported
 tickets again.
 
-The reason names one of ten causes (`resume.cause` in the request's
-`request.json`). The four that say a model was not served, or a review
+A later ticket's commits sit on the earlier ticket's: ticket N+1 is built
+from ticket N's current PR-head run (its first build, or its last review round
+whose push was confirmed). Before ticket N+1 starts, the factory reads every
+earlier ticket's pull request:
+
+| Ticket N's pull request | Ticket N+1 |
+|---|---|
+| Merged (its branch may be deleted) | Builds |
+| Open, branch on origin at the PR-head run's commit | Builds |
+| Open, branch at another commit, or unreadable | Waits in `building` (`wait.kind` `stacked_ticket`); the worker checks again every PR poll interval and reminds you every `-hitl-reminder-interval` |
+| Open, branch gone from origin (any earlier ticket) | Parks the request in `resume_review` |
+| Closed without merging (any earlier ticket) | Parks the request in `resume_review` |
+
+The wait's sentence names both commits and what to do: a commit the factory
+did not make is on ticket N's branch, so move the branch back to the
+factory's commit (the sentence gives the `git push --force-with-lease`
+line), merge ticket N's pull request (ticket N+1 then builds on the merge),
+or `factoryd cancel <id>`; a read that failed names `gh auth status` or
+git's access to origin.
+
+After ticket N+1's pull request is open, the factory keeps it on ticket N.
+On each PR poll, when ticket N's branch has moved (a review round pushed to
+it), or ticket N merged by a squash or rebase, ticket N+1 is restacked: the
+host replays its commits onto ticket N's new tip (or the branch ticket N
+merged into) on a local branch `buildgate/<id>/t<n>-restack<k>`, a replay run
+judges them with every gate and review and no build, and the result replaces
+ticket N+1's pull-request branch through a push leased on the commit the
+factory last pushed. A ready pull request is turned back to draft first (as
+before a review round's push), and until the restack is pushed and confirmed
+the pull request is neither retargeted nor marked ready; the factory marks it
+ready again by its usual rule once it is. Tickets are restacked in order. The restack in
+progress is on the ticket in the console, in `factoryd watch` and in the
+request's next action. What can stop it:
+
+| What happened | The request | What you do |
+|---|---|---|
+| A commit the factory did not make is on ticket N+1's branch (or its leased push lost to one) | Parks in `resume_review` | Move the branch back to the commit the reason names, then `factoryd resume <id>`; or `factoryd cancel <id>` |
+| A merge commit, or a commit none of the ticket's runs made, is in ticket N+1's commits | Parks in `resume_review` | Take it out of the branch, then `factoryd resume <id>`; or cancel |
+| The commits conflict on the new tip, or a replayed commit is not the same change as its original (its patch id differs, or it changes nothing where the original changed something) | Parks in `resume_review`, before any replay run | `factoryd resume <id>` replays again, which succeeds once the branch under the ticket has moved so the commits replay cleanly; or cancel. A fix pushed by hand to the ticket's branch is refused as a commit the factory did not make |
+| The replay run is quarantined or halted | `halted`, nothing pushed | Read the run, fix the cause, `factoryd retry <id>` restacks again; or cancel |
+| The replay run did not start three times in a row | `halted`, nothing pushed; the reason names the last error | Fix it (often Temporal or the sandbox gateway), then `factoryd retry <id>` |
+| The host's git is older than 2.41 | Parks in `resume_review`, before anything is replayed | Upgrade git, then `factoryd resume <id>` |
+| Whether a restack is needed cannot be told (origin cannot be read, or the ticket's run records no stack base), or an interrupted restack cannot be settled (origin or its replay run cannot be read) | Stays in `pr_review`; the pull request is neither retargeted nor marked ready; the request's next action and `factoryd watch` name it, and you are reminded every `-hitl-reminder-interval` | Fix what it names; the worker checks again every PR poll |
+| Origin could not be read back after the push | `halted` | `factoryd retry <id>`: a poll that finds the branch at the replay run's commit records the push |
+
+A park is not a lost step: `resume.reason` says which ticket and what to
+repair, and `resume.cause` is empty. Reopen the pull request or restore the
+branch, then `factoryd resume <id>` checks again and continues; or
+`factoryd cancel <id>`. A park that interrupted your `factoryd resume` of a
+lost build keeps that build: the next `factoryd resume` continues it.
+
+For a lost step, the reason names one of eleven causes (`resume.cause` in the
+request's `request.json`). The four that say a model was not served, or a review
 gave no verdict, are read from the spend meter's record of the step's model
 requests, never from what the worker printed:
 
@@ -1606,6 +1657,7 @@ What changes for a build:
 | `factoryd doctor` warns the release policy denies every PR unconditionally | `release_max_files_changed`/`release_max_insertions` is `0` or `release_rollback_plan` is empty | Add all three to `config.yml` (`init-config`'s scaffold has usable defaults; `quickstart` writes them into a fresh config automatically) |
 | Status shows "accepted, awaiting pull request" | Every ticket's build was accepted but no PR exists (`-open-pull-request=false`, a release-policy denial, or the PR failed to open) | Merge the branch by hand, or `factoryd retry <id>` — re-opens just the PR if the release decision now allows it, otherwise rebuilds. When the reason names commits "not on origin", the repository had local commits under the run's base that no gate checked: push or drop them first. `factoryd doctor -target-repo` warns about them before a run |
 | Status shows a starred state and `waiting for a job slot (all <n> in use), #<k> in line` (one slot: `queued behind <id>`) | `wait.kind` `job_slot`: this request hasn't started yet; every job slot (`max_parallel_jobs`) is held, by builds, drafting jobs or `pr_review` passes | Nothing to do — it starts once a slot frees. Raise `max_parallel_jobs` if the wait is routine and the machine has room |
+| Status shows a starred state and `ticket <n>/<m> waits: ticket <k>'s branch ...` | `wait.kind` `stacked_ticket`: the earlier ticket's branch on origin is not at the commit of its current PR-head run (a commit the factory did not push), or its pull request or branch could not be read | Put the branch back at the named commit, or wait for the read to succeed; the worker checks again every PR poll interval. The request stays `building` and builds nothing meanwhile |
 | Status shows a starred state and `waiting for the repository (another build holds it), <duration>` | `wait.kind` `repository`: this request's build needs the repository alone (a corrective round on an existing branch, a non-isolated build) and another build holds it. A build that found it held gives its slot back and retries every 30 s; a build or `pr_review` pass that was already running waits inside its slot | Nothing to do — it starts once the other build ends; `factoryd status` shows which requests are building |
 | Status shows a starred state and `waiting in the repository queue: behind <n> run(s) on <repository>` | `wait.kind` `repository_queue`: runs submitted for one repository run in order, and this one is behind others | Nothing to do — it starts when the runs ahead end |
 | Status shows a starred state and `waiting for the model host: queued behind <run>` | `wait.kind` `model_host`: the model route is a single-instance local host (`model_host_concurrency`) and another job holds its slot | Nothing to do — it starts when that job ends. Raise `model_host_concurrency` only if the host serves more than one request at a time |

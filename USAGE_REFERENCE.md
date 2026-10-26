@@ -14,7 +14,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd -baseline-check -workspace <repo>` | Checks a repository before its first request: a real run through the sandbox (project image, dependency fetch, compose services) that runs the verify command, then the full-suite command when it differs, on the untouched repository, and stops. No model call, nothing built, nothing released. Either command must leave no new or changed path the repository does not ignore; otherwise it exits 1 with the same diff-scope advice a build gets. Each command prints its wall time; failure output includes failing-test or triage detail and keeps logs under `<data dir>/baseline-checks/`. Green leaves nothing. It never appears in `status`, `stats` or the console. `doctor -target-repo` runs it when every other row passed, and `quickstart` before a repository's first request |
 | `factoryd watch <run-or-request-id>` | Follows a run's progress feed; for a request, follows each ticket's run in turn and prints the `approve`/`retry` hint when it waits on you. Until the agent's first round the footer leads with the start-up step the run is on, `start-up 4/6: install (running 42s)`. Recap on exit. |
 | `factoryd worker` | The only request driver. Drives every request of the data dir through Temporal: one `RequestWorkflow` per request (workflow id `factoryd-request-<id>`), started or woken at worker start for every request not `done`, `closed` or `cancelled`. Model jobs, builds and `pr_review` passes (which can run a corrective build) run on task queue `factoryd-jobs-<id>`, at most `max_parallel_jobs` at once across requests; workflows and light steps (loading state, reminders, halts) on uncapped `factoryd-light-<id>`. `<id>` is the random id in `<data-dir>/worker-queue-id`. Holds the drain lock: a second worker for one data dir refuses to start. A step lost mid-run (worker killed or stopped, or Temporal stopping answering: a stall of up to about 90 s loses nothing, a longer one is cause `temporal_unreachable`, or `worker_lost` when the server timed the step out first) puts its request in `resume_review` once and waits for `factoryd resume`; a lost `pr_review` pass that only read the PR polls again. The next worker start halts the runs a lost step left (their workflows terminated, containers removed, a lost build's worktree kept) and puts the requests running them in `resume_review`; nothing is rerun on its own and Temporal never retries a lost Activity. While it is live, `submit`, the API's `POST /requests` and every decision (`approve`, `reject` (including send-back), `retry`, `resume`, `amend-scope`, `cancel`, on the CLI and the API) wake the request's workflow (signal-with-start, so a request submitted before the worker started is adopted); a wake that cannot reach Temporal prints one warning and the decision stays saved. Without a live worker nothing is woken: the next worker start reads `request.json` itself. A review wait also rechecks at `-hitl-reminder-interval`. `submit`, `quickstart` and `upgrade` start it. Requests on one repository build concurrently in their own worktrees; only a build that touches the shared checkout holds the repository alone. Known limit: a build that needs the repository alone (a non-isolated build, a repository-owner run, a corrective round on an existing branch), the daemon reclaim and `factoryd reconcile` can wait indefinitely while isolated builds keep overlapping, since the lock has no writer preference; stranded worktrees are cleaned up only when no build holds the repository, and `factoryd reconcile` reports busy then. Writes a liveness heartbeat with its Temporal address, `max_parallel_jobs` as job slots and every request it is running a job for, so `status`, `stop`, `use`, `upgrade` and the console see it; it also lists every request whose step holds a job slot, a `pr_review` pass included (`slot_requests`), and with every slot held, `status`, `watch`, `logs` and the console say a job-state request holding none is `waiting for a job slot (all <n> in use), #<k> in line`. A build that needs the repository alone, while others hold it, waits for that lock (retrying every 30 s, without holding a job slot) instead of halting the request; the heartbeat lists each such request with the time it first found the repository held (`repository_waits`), which `status` shows. Needs Temporal. `-temporal-address` defaults to Temporal at `localhost:7233`, started with Docker if it is down; an address is used as given. Pull requests are opened by default here (`-open-pull-request`). The model route (upstream, credential, model id) comes from the session config's `routes:`/`models:`/`roles:` block, not from flags: see "Routes and models". |
-| `factoryd status` | Requests (id, project, state, age since submitted, time in the current state, `ticket i/n`, latest PR URL or reason), then runs (ticket and launch suffix, project, state, time, cost, PR URL or reason). A request that waits shows its state starred and one sentence for why, one per `wait.kind`: `job_slot` (`waiting for a job slot (all <n> in use), #<k> in line`; one slot: `queued behind <id>`), `repository` (`waiting for the repository (another build holds it), <duration>`), `repository_queue`, `model_host`, `compose_slot` (each with the holder it queues behind and how long) and `no_worker` (a job-state request and no fresh worker heartbeat). `-json` carries `in_state` and the typed `wait` (`kind`, `since`, `on`, `position`, `slots`). |
+| `factoryd status` | Requests (id, project, state, age since submitted, time in the current state, `ticket i/n`, latest PR URL or reason), then runs (ticket and launch suffix, project, state, time, cost, PR URL or reason). A request that waits shows its state starred and one sentence for why, one per `wait.kind`: `job_slot` (`waiting for a job slot (all <n> in use), #<k> in line`; one slot: `queued behind <id>`), `repository` (`waiting for the repository (another build holds it), <duration>`), `repository_queue`, `model_host`, `compose_slot`, `stacked_ticket` (`ticket <n>/<m> waits: ...`: the earlier ticket's branch is not at the commit of its current PR-head run, or could not be read) and `no_worker` (a job-state request and no fresh worker heartbeat). `-json` carries `in_state` and the typed `wait` (`kind`, `since`, `on`, `position`, `slots`). |
 | `factoryd logs <request-id \| run-id \| queue-run \| serve>` | Prints the newest log for the id (the one being written now): a request's drafting logs plus its current ticket's run logs, a run's own logs, or the newest launchd/quickstart `.out`/`.err` pair for `queue-run` (the worker)/`serve`. Header line `==> <path> (<size>, modified <age> ago)`, then the last lines, with terminal escapes stripped. A building request whose current ticket has not started a run yet prints `ticket <i>/<n> has not started a run yet: <what it waits for>` instead of an earlier step's log. A launch that writes a log where an earlier launch left a non-empty one (a retried drafting job) first renames the earlier one to `<name>.<n>.log`, so a retry keeps the log its halt quoted. `-f` follows, switching to newer files, until the request or run is terminal. `-list` shows every log oldest first (a request lists all its tickets' runs), saved prompts included, marked `[prompt, as saved by the build]`; `-prompt <name>` prints the saved prompts of that name in full (`<launch>-<n>/<name>` picks one launch), terminal escapes stripped. |
 | `factoryd cost` | Cost per accepted ticket, grouped by role x model (`execution`/`planning`/`review`/`unknown`), across drafting jobs (spec/plan/oracle) and every ticket build, including failed and corrective rounds. The same figures as `GET /requests`' `cost_summary`. Also reports quarantined-ticket and rejected-spec/rejected-plan counts, the human-cost proxy alongside the dollar figures. |
 | `factoryd stats` | Whether the factory is getting better: one summary row per project (tickets, one-shot, accepted, median rounds to green, the check that quarantined most runs) and an overall row; with `-project`, that project's numbers, a table of buckets of days and the top-10 quarantined-by and halted-by lists. Reads run records only: no model call, no sandbox, nothing written. Percentages print as `3/8 (38%)`, `-` when there is nothing to divide by. `-since 30d\|YYYY-MM-DD` counts tickets whose first run began on or after it, `-bucket <days>` sets the bucket (default 7), and `-all` also counts `live-smoke-` tickets. |
@@ -159,12 +159,16 @@ each `daemon` child it runs.
 `submitted` -> `spec_drafting` -> `spec_review` (you) -> [`oracle_drafting`
 -> `oracle_review` (you), only with `-draft-oracles`] -> `planning` ->
 `plan_review` (you) -> `building` (one ticket at a time) -> `pr_review` ->
-`done`, or `closed` when a ticket's pull request is closed without merging.
-Off-ramps: `quarantined`, `halted`, `cancelled`. A step that ended
+`done`, or `closed` when the last ticket's pull request is closed without
+merging. Off-ramps: `quarantined`, `halted`, `cancelled`. A step that ended
 with no verdict on the work (its `worker` stopped, or one of the causes in
 USAGE.md's `resume_review` table)
 waits in `resume_review` (you): `factoryd resume`, `factoryd resume -from
-scratch` or `factoryd cancel`; it returns to the state of the lost step.
+scratch` or `factoryd cancel`; it returns to the state of the lost step. An
+earlier ticket's pull request closed, or its branch gone, without merging
+parks the request in the same wait (`resume.reason`, no cause): after you
+reopen or restore it, `factoryd resume` returns to the parked step, which
+checks again; or `factoryd cancel`.
 Merge stays human, outside this graph.
 
 **Staged oracles (opt-in, `submit -draft-oracles`).** `oracle_drafting`
@@ -222,6 +226,101 @@ everything, so a usable `-release-rollback-plan` and non-zero
 or halts moves the whole request to that state, naming the ticket
 (`i/n`); `factoryd retry <id>` resumes at that ticket with a fresh run,
 leaving earlier tickets' runs/PRs untouched.
+
+Ticket N+1 chains (`-prior-run`) from ticket N's current PR-head run: its
+first build, or its last review round whose push was confirmed. Before the
+build starts the factory reads every earlier ticket's pull request: merged
+builds; open builds only while ticket N's branch on origin is at that run's
+`ResultSHA`, and otherwise waits in `building` (`wait.kind`
+`stacked_ticket`, checked again every PR poll interval, reminded every
+`-hitl-reminder-interval` like a review gate); any earlier one closed, or
+open with its branch gone, parks the request (above). The wait's sentence
+names the remedy: for a commit the factory did not make on ticket N's
+branch, move the branch back to the factory's commit, merge ticket N's pull
+request, or cancel; for a read that failed, fix `gh auth status` or git's
+access to origin. A park that interrupts `factoryd resume` of a lost build
+keeps that build: the resume after the repair continues it. A build, retry
+or resume of ticket N+1 is checked the same way. Every run of a stacked
+ticket records `stack_base_sha`, the earlier ticket's tip its commits sit
+on: a first build its `-prior-run`'s result, a replay run the commit it
+replayed onto, a round or a continuing build the value of the run it
+continues. Corrective and PR-review rounds build on the ticket's current
+PR-head run, on the ticket's pull-request branch; their `-diff-base` stays
+the ticket's original base, so the gates judge the whole pull request. An
+approval moves a ticket on (under `-advance-on pr_approved`) only when some
+reviewer's latest opinion (an approval, a change request or a dismissal; a
+comment is none) approves the pull request's current head commit and no
+reviewer's latest opinion approves an earlier commit.
+
+A stacked ticket's open pull request is restacked when the branch it stacks
+on moves: on each PR poll, ticket N+1 needs a restack when ticket N's branch
+tip on origin is not under ticket N+1's PR head, or, after ticket N merged,
+when ticket N+1's `stack_base_sha` is not under the tip of the branch
+ticket N merged into (a squash or rebase merge; a merge commit needs none).
+Tickets are restacked in order, each after every earlier ticket's restack is
+pushed and confirmed. The factory checks that origin's branch is at the
+PR-head run's commit and that every commit since the stack base is the work
+of one of the ticket's own runs and no merge commit, replays those commits
+with `git cherry-pick` onto the new tip on the local branch
+`buildgate/<request>/t<n>-restack<k>` (pruned with the request's other
+local branches), and compares each replayed commit with its original by
+patch id (`git diff-tree -p -U0 --binary` piped to `git patch-id
+--verbatim`: no context lines, so a change beside one made under it keeps
+its id; every whitespace change counts). The replay's git calls read no
+`.gitattributes` from the commits (attributes come from the empty tree) and
+convert no line endings. A pair that is not the same change, or an original
+that changed something replayed as a commit that changes nothing, parks the
+request before any replay run. Otherwise it starts a replay run (round kind
+`restack`, no round budget used) that builds nothing, checks the same patch
+ids again, and runs every gate and review on the replayed head from the new
+base. The replay run's result is the replayed head, or a commit on top of it
+when verification left files behind (the evidence step commits them on the
+host, as for any run); a result that does not descend from the replayed head
+halts the request with nothing pushed. An accepted one is pushed: the pull
+request back to draft if it was ready, the release decision re-checked, a
+push leased on the commit read, the remote read back; only when origin reads
+the replay run's commit is it the PR-head run and the local branch moved to
+it, also when the push reported an error after landing. Whenever a poll
+finds the pull request's head at the commit of an accepted replay run whose
+push was not recorded, it records the push then, needed restack or not.
+Until then the pull request is neither retargeted nor marked ready. A human commit, a merge commit or a commit no run of the
+ticket made parks the request (`resume.reason`); so does a conflict, whose
+reason says what resolves it: `factoryd resume` replays again, which succeeds
+once the branch under the ticket has moved, or cancel; a fix pushed by hand
+to the ticket's branch is refused as a human commit. A replay run not
+accepted halts the request with nothing pushed (`factoryd retry` restacks
+again); a replay run that never starts is tried again on the next poll, and
+the third in a row halts the request (`factoryd retry` restacks again, with
+the count started over); a read-back that fails halts it, and the poll after
+`factoryd retry` records the push when origin is at the replay run's commit.
+The host's git must be 2.41 or later (the replay reads attributes with `git
+--attr-source`): an older one parks the request naming both versions, and
+`factoryd resume` restacks once git is upgraded; `factoryd doctor` warns
+about it. While whether a
+restack is needed cannot be told (origin cannot be read, or the pull request
+is on ticket N's branch and its run records no `stack_base_sha`), or while an
+interrupted restack cannot be settled (origin or its replay run cannot be
+read), the ticket's
+`restack_hold` names it, the request's next action and `factoryd watch`
+show it, it is reminded every `-hitl-reminder-interval`, and the pull request
+is neither retargeted nor marked ready. The ticket's `restack` field holds a
+restack in flight: a worker that stopped mid-restack leaves its replay run
+running, and the next pass waits for that run and settles it rather than
+start another; while that run's record or origin's branch cannot be read,
+the restack is kept and the ticket's poll ends there. `rounds` holds the finished ones. The ticket's `retarget`
+records the factory's own `gh pr edit --base`; a base GitHub changed on its
+own is not recorded. A resume of a kept build of ticket N+1 whose
+`stack_base_sha` is not ticket N's current PR head is refused (use
+`factoryd resume -from scratch`), and a retry of such an attempt builds
+from ticket N's current PR-head run instead of continuing on its branch.
+
+Before every push the factory makes to an open pull request's branch, a
+PR-review round's as well as a restack's, a pull request that is ready for
+review is turned back to draft, and once the push is confirmed the pull
+request is read again and turned back to draft if someone marked it ready
+meanwhile; the factory marks it ready again by its usual rule (checks pass,
+no thread open, the release decision allows the new head), so no ready state
+crosses a head the factory changed.
 
 A ticket that quarantines with its failed gates a subset of
 `spec_conformity`/`code_review` (every other gate passed), where at least

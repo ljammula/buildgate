@@ -241,6 +241,10 @@
     "waiting_since": "2026-09-10T09:00:00Z",
     "last_notified_at": "2026-09-10T09:00:00Z",
     "notify_count": 3,
+    "stacked_wait": {
+      "since": "every-field since",
+      "on": "every-field on"
+    },
     "last_ask": "every-field last_ask",
     "ticket_index": 1,
     "ticket_count": 1,
@@ -301,13 +305,31 @@
             ],
             "at": "2026-09-10T09:00:00Z"
           }
-        ]
+        ],
+        "restack": {
+          "n": 3,
+          "branch": "every-field branch",
+          "onto_sha": "every-field onto_sha",
+          "run_id": "every-field run_id",
+          "since": "every-field since"
+        },
+        "restack_hold": {
+          "since": "every-field since",
+          "on": "every-field on",
+          "reminded_at": "2026-09-10T09:00:00Z"
+        },
+        "retarget": {
+          "from": "every-field from",
+          "to": "every-field to",
+          "at": "2026-09-10T09:00:00Z"
+        }
       }
     ],
     "error": "every-field error",
     "resume": {
       "from_state": "building",
       "lost_run_id": "every-field lost_run_id",
+      "reason": "every-field reason",
       "retry_at": "2026-09-10T09:00:00Z",
       "generation": 3,
       "at": "2026-09-10T09:00:00Z",
@@ -551,7 +573,7 @@
         }
       ]
     },
-    "next_action": "the lost building step cannot be resumed (every-field refused); `factoryd resume -from scratch req-every-field` rebuilds the ticket, or `factoryd cancel req-every-field`"
+    "next_action": "every-field reason: once it is repaired, `factoryd resume req-every-field` checks again and continues the kept build of run every-field lost_run_id (or `-from scratch` / `factoryd cancel req-every-field`)"
   },
   {
     "id": "req-halted",

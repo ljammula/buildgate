@@ -182,9 +182,12 @@ const DefaultMaxRounds = 3
 // r.Resume, checked against the ticket's own build spec and round limit. An
 // empty result means a resume may go ahead. err means a check could not be
 // made. A lost build with no recorded kept run has nothing to continue, which
-// is a refusal too.
+// is a refusal too, as is a kept build of a stacked ticket that sits on the
+// earlier ticket's old head (staleStackBase). A park lost no step and kept nothing: its step reruns and
+// checks again, so nothing refuses it, unless it interrupted the resume of a
+// lost build, whose kept build is checked as before (KeepsLostBuild).
 func (g ResumeGate) RequestResumeRefusals(ctx context.Context, dataDir, dockerBinary string, r *request.Request) ([]string, error) {
-	if r.Resume == nil {
+	if !r.Resume.KeepsLostBuild() {
 		return nil, nil
 	}
 	if r.Resume.FromState != request.StateBuilding {
@@ -217,7 +220,13 @@ func (g ResumeGate) RequestResumeRefusals(ctx context.Context, dataDir, dockerBi
 	if err != nil {
 		return nil, err
 	}
-	return append(reasons, held...), nil
+	reasons = append(reasons, held...)
+	if lost, err := run.Load(dataDir, r.Resume.LostRunID); err == nil {
+		if stale := staleStackBase(dataDir, r, ticket.Index, lost); stale != "" {
+			reasons = append(reasons, stale+"; `factoryd resume -from scratch "+r.ID+"` builds the ticket again on that head")
+		}
+	}
+	return reasons, nil
 }
 
 // sandboxRuntimeRefusals says whether the sandbox runtime still holds a

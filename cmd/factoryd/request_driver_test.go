@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/forge"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
@@ -157,6 +158,7 @@ func TestRemindRequestNotificationHasApproveNextAndConsoleLink(t *testing.T) {
 // does.
 func TestAdvanceBuildingBuildsThreeTicketsInOrderWithPriorRunChaining(t *testing.T) {
 	dp := newTestDeps(t)
+	earlierPRsOpenAt(dp, fmt.Sprintf("%040d", 2))
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 3)
 
 	var gotArgs [][]string
@@ -255,6 +257,7 @@ func TestAdvanceBuildingBuildsThreeTicketsInOrderWithPriorRunChaining(t *testing
 // run intact and the request retryable from ticket 2" done-when item.
 func TestAdvanceBuildingQuarantineOfTicket2LeavesTicket1IntactAndRetryable(t *testing.T) {
 	dp := newTestDeps(t)
+	earlierPRsOpenAt(dp, fmt.Sprintf("%040d", 2))
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 3)
 	accept := requestdrivertest.AcceptingBuildRunner(t, dataDir)
 	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
@@ -326,6 +329,7 @@ func TestAdvanceBuildingQuarantineOfTicket2LeavesTicket1IntactAndRetryable(t *te
 // outcome instead of reporting the new start failure.
 func TestAdvanceBuildingRetryStartFailureDoesNotReplayStaleRunID(t *testing.T) {
 	dp := newTestDeps(t)
+	earlierPRsOpenAt(dp, fmt.Sprintf("%040d", 2))
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 3)
 	accept := requestdrivertest.AcceptingBuildRunner(t, dataDir)
 	quarantineTicket2 := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
@@ -532,3 +536,16 @@ func TestDriveRequestsPublishesTheActiveRequestDuringItsJob(t *testing.T) {
 }
 
 // no ## Scope heading
+
+// earlierPRsOpenAt makes every earlier ticket's pull request read open, with
+// its branch on origin at head: what a stacked ticket's build checks before
+// it starts.
+func earlierPRsOpenAt(dp *deps, head string) {
+	fake := fakeForgeOf(dp)
+	fake.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, HeadSHA: head}, nil
+	}
+	fake.remoteBranchHeadSHAFn = func(context.Context, string, string) (string, error) {
+		return head, nil
+	}
+}

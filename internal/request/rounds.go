@@ -11,12 +11,14 @@ import (
 const RoundRefPrefix = "refs/buildgate/rounds/"
 
 // RoundTag kinds, the Kind of a RoundTag: the first build of a ticket, then an
-// automatic corrective or conformity round, then a PR-review round.
+// automatic corrective or conformity round, then a PR-review round, and a
+// replay run of the ticket's commits onto a new base.
 const (
 	RoundTagBuild      = "build"
 	RoundTagCorrective = CorrectiveRoundKind
 	RoundTagConformity = ConformityRoundKind
 	RoundTagPRReview   = "pr_review"
+	RoundTagRestack    = RestackRoundKind
 )
 
 // RoundTag is one entry of a ticket's round ledger: the commit a build round
@@ -151,4 +153,70 @@ func (r *Request) RetryChoiceFor(ticketIndex int) (scratch bool, round int) {
 // started.
 func (r *Request) ClearRetryChoice() {
 	r.RetryFromScratch, r.RetryFromRound, r.RetryTicket = false, 0, 0
+}
+
+// TicketRestack is Ticket.Restack: a restack of the ticket in flight. Its
+// commits are replayed onto OntoSHA on the local branch Branch
+// (buildgate/<request>/t<n>-restack<N>), and RunID, once set, is the replay
+// run that judges them.
+type TicketRestack struct {
+	N       int    `json:"n"`
+	Branch  string `json:"branch"`
+	OntoSHA string `json:"onto_sha"`
+	RunID   string `json:"run_id,omitempty"`
+	Since   string `json:"since"`
+}
+
+// nextAction says what the restack of ticket index/count does now; nothing
+// is asked of the operator.
+func (rs *TicketRestack) nextAction(index, count int, prURL string) string {
+	onto := rs.OntoSHA
+	if len(onto) > 12 {
+		onto = onto[:12]
+	}
+	what := fmt.Sprintf("ticket %d/%d (%s) is being restacked: its commits are replayed onto %s on %s", index, count, prURL, onto, rs.Branch)
+	if rs.RunID != "" {
+		what += fmt.Sprintf(" and judged again by run %s", rs.RunID)
+	}
+	return what + "; the pull request is updated once every gate passes, and nothing is asked of you"
+}
+
+// TicketRestackHold is Ticket.RestackHold: since when whether the ticket
+// needs a restack could not be told, the operator sentence (what could not
+// be read, what holds, and what to do), and when the operator was last
+// reminded of it.
+type TicketRestackHold struct {
+	Since      string `json:"since"`
+	On         string `json:"on"`
+	RemindedAt string `json:"reminded_at,omitempty"`
+}
+
+// TicketRetarget is Ticket.Retarget: the factory moved the ticket's pull
+// request from base From to base To at At.
+type TicketRetarget struct {
+	From string `json:"from,omitempty"`
+	To   string `json:"to"`
+	At   string `json:"at"`
+}
+
+// RestackHeld is the first ticket of r whose restack need cannot be told
+// (Ticket.RestackHold), nil when none.
+func (r *Request) RestackHeld() *Ticket {
+	for i := range r.Tickets {
+		if r.Tickets[i].RestackHold != nil {
+			return &r.Tickets[i]
+		}
+	}
+	return nil
+}
+
+// RestackInFlight is the first ticket of r with a restack under way
+// (Ticket.Restack), nil when none has one.
+func (r *Request) RestackInFlight() *Ticket {
+	for i := range r.Tickets {
+		if r.Tickets[i].Restack != nil {
+			return &r.Tickets[i]
+		}
+	}
+	return nil
 }

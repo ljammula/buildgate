@@ -490,6 +490,11 @@ type RunWorkflowInput struct {
 	// never an input of a review, and never part of the spec a review is
 	// given.
 	EarlierAttemptPath string `json:"earlier_attempt_path,omitempty"`
+	// Replay, when set, makes this run judge commits the host replayed onto
+	// a new base instead of building any: ApplyReplayActivity replaces
+	// RunBuildActivity (see replayRunChange) and every later step runs
+	// unchanged against Replay.HeadSHA, with DiffBaseSHA Replay.OntoSHA.
+	Replay *ReplayInput `json:"replay,omitempty"`
 	// BaselineNotePath is set by RunWorkflow, never by a caller: the host
 	// file RunBaselineVerifyActivity wrote when the verify command failed on
 	// the base commit the way the ticket expects (BaselineVerifyResult.
@@ -559,6 +564,29 @@ type RunWorkflowInput struct {
 	// roles.review is unset: the conformity phase keeps RoutePolicy's
 	// own build fields unchanged, exactly as before roles: existed.
 	ReviewRelayPolicy *sandbox.RoutePolicy `json:"review_relay_policy,omitempty"`
+}
+
+// ReplayInput is RunWorkflowInput.Replay: what a replay run's
+// ApplyReplayActivity checks on the host before anything after the build
+// runs. It is the part of run.Replay (the record) the workflow reads.
+type ReplayInput struct {
+	// OfRunID is the ticket's current PR-head run whose commits were
+	// replayed; its last build attempt is carried as this run's.
+	OfRunID string `json:"of_run_id"`
+	// SourceRunIDs are every run whose commit is among those replayed.
+	SourceRunIDs []string `json:"source_run_ids"`
+	// OntoSHA is the new base the commits were replayed onto; it must equal
+	// RunWorkflowInput.DiffBaseSHA.
+	OntoSHA string `json:"onto_sha"`
+	// HeadSHA is the last replayed commit; the worktree's HEAD must be it.
+	HeadSHA string `json:"head_sha"`
+}
+
+// carriesEarlierAttempt reports whether the run was given an earlier attempt's
+// record, for the checks that refuse one (refuseIncoherentReplay) without
+// reading it: only the build Activity is ever handed the record.
+func (input RunWorkflowInput) carriesEarlierAttempt() bool {
+	return input.EarlierAttemptPath != ""
 }
 
 // effectiveDiffBase is what CollectEvidenceActivity's diff-derived
