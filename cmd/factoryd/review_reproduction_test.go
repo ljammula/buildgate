@@ -24,9 +24,13 @@ func writeRecheckManifest(t *testing.T, m run.RecheckManifest) string {
 	return path
 }
 
-// heldCopy writes a held copy under run id's review-repro directory.
+// heldCopy writes a held copy under run id's review-repro directory, and
+// the record of run id, a run of request req-1.
 func heldCopy(t *testing.T, dataDir, id string) string {
 	t.Helper()
+	if err := (&run.Run{ID: id, RequestID: "req-1"}).Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	dir, err := filepath.Abs(filepath.Join(run.ReviewReproductionDir(run.Dir(dataDir, id)), "0", "p"))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +61,7 @@ func TestRecheckManifestHostPathsMustBeUnderTheQuarantinedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	good := run.HeldReproduction{Path: "p/repro_test.go", SHA256: strings.Repeat("a", 64), HostPath: host, TestIDs: []string{"TestRepro"}, Runner: "go-test-json"}
-	got, err := loadRecheckManifest(dataDir, writeRecheckManifest(t, run.RecheckManifest{Reproductions: []run.RecheckEntry{{RunID: "run-q", HeldReproduction: good}}}))
+	got, err := loadRecheckManifest(dataDir, writeRecheckManifest(t, run.RecheckManifest{RequestID: "req-1", Reproductions: []run.RecheckEntry{{RunID: "run-q", HeldReproduction: good}}}))
 	if err != nil || len(got) != 1 || got[0].HostPath != host {
 		t.Fatalf("a valid manifest = %+v, %v; want it accepted", got, err)
 	}
@@ -82,8 +86,11 @@ func TestRecheckManifestHostPathsMustBeUnderTheQuarantinedRun(t *testing.T) {
 		"a refused finding":             func(m *run.RecheckManifest) { m.Reproductions[0].Refused = "no runner" },
 		"an invalid run id":             func(m *run.RecheckManifest) { m.Reproductions[0].RunID = "../run-q" },
 		"no reproduction":               func(m *run.RecheckManifest) { m.Reproductions = nil },
+		"another request's run":         func(m *run.RecheckManifest) { m.RequestID = "req-2" },
+		"no request":                    func(m *run.RecheckManifest) { m.RequestID = "" },
+		"a run with no record":          func(m *run.RecheckManifest) { m.Reproductions[0].RunID = "run-unrecorded" },
 	} {
-		m := run.RecheckManifest{Reproductions: []run.RecheckEntry{{RunID: "run-q", HeldReproduction: good}}}
+		m := run.RecheckManifest{RequestID: "req-1", Reproductions: []run.RecheckEntry{{RunID: "run-q", HeldReproduction: good}}}
 		mutate(&m)
 		if _, err := loadRecheckManifest(dataDir, writeRecheckManifest(t, m)); err == nil {
 			t.Errorf("%s: manifest accepted, want it refused", name)

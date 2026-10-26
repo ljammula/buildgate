@@ -943,6 +943,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
 	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
+	if errors.Is(err, errNoRecheck) {
+		return haltWithoutRecheck(dataDir, r, err, now)
+	}
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -1056,6 +1059,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return fmt.Errorf("load run %q for request %s ticket %d: %w", ticket.RunID, r.ID, idx, err)
 	}
+	// What refused the build goes on the ticket's list (SC-022), which
+	// every later build of the ticket rechecks.
+	noteReproductionRefusals(dataDir, ticket, runRecord)
 	tagTicketRound(dp, r, ticket, runRecord, request.RoundTagBuild, now)
 	// reason prefers the run's own durably recorded HaltError/HaltReasonCode/
 	// gate result (StatusReason), falling back to runErr's text only when
@@ -1597,6 +1603,9 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		diffBase := current.DiffBase()
 		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
 		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
+		if errors.Is(err, errNoRecheck) {
+			return true, haltWithoutRecheck(dataDir, r, err, now)
+		}
 		if err != nil {
 			return true, fmt.Errorf("request %s: ticket %d: %s %d: %w", r.ID, ticket.Index, plan.label, roundIndex, err)
 		}
@@ -1716,7 +1725,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 // PR-review round (runRoundAttempt) is not built here, and stays on the
 // role's model.
 func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string) ([]string, error) {
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -2136,7 +2145,7 @@ func RequestSpecPath(dataDir, id string) string {
 // harness instead of the request's actual one. One shared builder keeps
 // them in step: the PR-review round built its own too and ran with no
 // acceptance-criteria file, so no spec_conformity review at all.
-func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string) (*QueueEntry, error) {
+func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string, reproduce bool) (*QueueEntry, error) {
 	// prBase: ticket N (N>1) stacks its draft PR on ticket N-1's own
 	// branch while that PR is still open and unmerged -- see
 	// QueueEntry.PRBase's own doc comment for why.
@@ -2172,7 +2181,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	reviewSpec, err := approvedSpecPath(dataDir, r)
+	reviewSpec, recheck, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce)
 	if err != nil {
 		return nil, err
 	}
@@ -2182,6 +2191,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		Project:                r.Project,
 		SpecPath:               specPath,
 		ReviewSpecPath:         reviewSpec,
+		RecheckReproductions:   recheck,
 		VerifyCommand:          verifyCommand,
 		FullSuiteCommand:       fullSuiteCommand,
 		FullSuiteSource:        fullSuiteSource,
@@ -2228,6 +2238,34 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil
+}
+
+// reproductionInputs are a ticket build's -review-spec (approvedSpecPath)
+// and -recheck-reproductions manifest (ticketRecheck) when the build holds
+// and runs reviewer reproductions (reproduce), "" for both otherwise: a
+// restack's replay run, which cannot take a corrective build, holds and runs
+// none and leaves the ticket's list as it is. A ticket whose list is not
+// empty is never built without it: with no approved spec to run them under,
+// the build is refused (errNoRecheck).
+func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, reproduce bool) (reviewSpec, recheck string, err error) {
+	if !reproduce {
+		return "", "", nil
+	}
+	if reviewSpec, err = approvedSpecPath(dataDir, r); err != nil {
+		return "", "", err
+	}
+	if index < 1 || index > len(r.Tickets) {
+		return reviewSpec, "", nil
+	}
+	ticket := &r.Tickets[index-1]
+	if reviewSpec == "" {
+		if len(ticket.Reproductions) > 0 {
+			return "", "", fmt.Errorf("ticket %d: %w: the request has no approved spec to run them under", index, errNoRecheck)
+		}
+		return "", "", nil
+	}
+	recheck, err = ticketRecheck(dataDir, r, ticket, buildID)
+	return reviewSpec, recheck, err
 }
 
 // requestSpecFile is the request's spec, relative to its directory.
@@ -2318,7 +2356,7 @@ func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath, true)
 	if err != nil {
 		return nil, err
 	}

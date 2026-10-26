@@ -568,14 +568,15 @@ func runReplay(dp Deps, ctx context.Context, dataDir string, r *request.Request,
 		return "", roundOutcome{}, err
 	}
 	ticketID := fmt.Sprintf("%s-%03d-restack%d", r.ID, ticket.Index, rs.N)
-	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath)
+	// A replay run's review is advice only: it holds and runs no
+	// reproduction (no -review-reproduction, -review-spec or
+	// -recheck-reproductions), since a replay cannot take a corrective
+	// build. The ticket's list stays, for the round after it.
+	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath, false)
 	if err != nil {
 		return "", roundOutcome{}, err
 	}
-	// A replay run's review is advice only: it holds and runs no
-	// reproduction (no -review-reproduction or -review-spec), since a replay
-	// cannot take a corrective build.
-	entry.IssueRef, entry.PRBase, entry.ReviewSpecPath = "", "", ""
+	entry.IssueRef, entry.PRBase = "", ""
 	replayCfg := cfg
 	replayCfg.OpenPullRequest = false
 	args := append(BuildTicketRunArgs(dataDir, entry, replayCfg), "-on-branch", rs.Branch, "-diff-base", rs.OntoSHA, "-replay", file)

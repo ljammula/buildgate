@@ -241,6 +241,27 @@ func TestRestackReplaysTheTicketOntoTheEarlierTicketsNewTip(t *testing.T) {
 	}
 }
 
+// SC-022: a restack's replay run holds and runs no reproduction, even for a
+// ticket with reproductions on its list, and leaves that list as it is: the
+// round after the restack rechecks it (TestEveryBuildOfATicketRechecksItsList).
+func TestARestackRunsNoReproductionAndKeepsTheTicketsList(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	approveRequestSpec(t, f.dataDir, f.r)
+	seedTicketList(t, f.dataDir, f.r, 2)
+	f.pass()
+	if len(f.runArgs) != 1 {
+		t.Fatalf("replay runs = %d, want 1", len(f.runArgs))
+	}
+	for _, flag := range []string{"-review-reproduction", "-review-spec", "-recheck-reproductions"} {
+		if slices.Contains(f.runArgs[0], flag) {
+			t.Errorf("the replay run is given %s: %v", flag, f.runArgs[0])
+		}
+	}
+	if list := f.r.Tickets[1].Reproductions; len(list) != 1 {
+		t.Errorf("ticket 2's list after the restack = %+v, want it kept", list)
+	}
+}
+
 // checkReplayRunArgs checks the replay run of restackFixture's restack: on
 // the restack branch, from the new base, with no pull request, prior run or
 // earlier attempt, and a replay record of ticket 2's commits onto newTip.

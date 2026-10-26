@@ -4,163 +4,134 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
 
-// recheckFileName is a build's -recheck-reproductions manifest, written
-// beside the other files of the round that build is.
+// recheckFileName is a build's -recheck-reproductions manifest, written in
+// the build's own directory under the request's rounds/.
 const recheckFileName = "recheck.json"
 
 // reproductionPasses is the verdict a recheck records for a reproduction
 // that passed on every test ID on the result (reproduction.VerdictPasses).
 const reproductionPasses = "passes"
 
-// needsRecheck reports whether a build that continues on previous's commits
-// must run reviewer reproductions again (SC-022): a reproduction refused
-// previous, or previous was given or ran rechecks, passing or not, accepted
-// or not. Each build is given the rechecks of the run before it, so the
-// ticket's whole chain is carried forward: a later build cannot undo a fix
-// a reproduction proved earlier.
-func needsRecheck(previous *run.Run) bool {
-	return refusedByAReproduction(previous) || len(previous.ReviewReproductionRechecks) > 0 || len(previous.ReviewReproductionRechecksGiven) > 0
-}
-
-// recheckManifestFor is the run.RecheckManifest a build that follows
-// previous is given: every recheck previous was given or ran (the entry,
-// under the review-repro directory of the run that held it), and each of
-// previous's own blocking findings' held copies, without repeats (by hash
-// and path), less those an operator's override of previous ended
-// (overriddenReproductions). Each entry's file is on disk with the hash
-// recorded for it. An error says why none can be made when
-// needsRecheck(previous) and an entry cannot be found again, or nothing is
-// left to run; a manifest the override emptied is returned empty, with no
-// error.
-func recheckManifestFor(dataDir string, previous *run.Run) (run.RecheckManifest, error) {
-	var m run.RecheckManifest
-	seen := map[string]bool{}
-	add := func(e run.RecheckEntry) {
-		if key := recheckKey(e.Path, e.SHA256); !seen[key] {
-			seen[key] = true
-			m.Reproductions = append(m.Reproductions, e)
+// noteReproductionRefusals records on ticket every reproduction that refused
+// runRecord, a run of that ticket (SC-022): each blocking finding's held
+// copy, under runRecord's own review-repro directory, and each recheck it
+// ran that did not pass. It is where the request driver observes a refusal
+// (tagTicketRound, and each attempt of a PR-review round), and the only
+// place a reproduction is added to the ticket's list.
+func noteReproductionRefusals(dataDir string, ticket *request.Ticket, runRecord *run.Run) {
+	if !refusedByAReproduction(runRecord) {
+		return
+	}
+	for _, rc := range runRecord.ReviewReproductionRechecks {
+		if rc.Verdict != reproductionPasses && rc.Recheck != nil {
+			ticket.NoteReproductionRefusal(*rc.Recheck, runRecord.ID)
 		}
 	}
-	overridden := overriddenReproductions(previous)
-	entries, err := carriedRechecks(dataDir, previous, overridden)
+	if runRecord.CodeReview == nil {
+		return
+	}
+	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, runRecord.ID)))
 	if err != nil {
-		return run.RecheckManifest{}, err
+		log.Printf("ticket %d: run %s: the reproductions that refused it are not recorded: %v", ticket.Index, runRecord.ID, err)
+		return
 	}
-	own, err := blockingCopies(dataDir, previous, overridden)
-	if err != nil {
-		return run.RecheckManifest{}, err
-	}
-	for _, e := range append(entries, own...) {
-		add(e)
-	}
-	if len(m.Reproductions) == 0 && len(overridden) == 0 {
-		return run.RecheckManifest{}, fmt.Errorf("run %s holds no reviewer reproduction to run again", previous.ID)
-	}
-	return m, nil
-}
-
-// recheckKey is what tells two reproductions apart in a manifest: the
-// repository path and the hash of the copy.
-func recheckKey(path, sha256 string) string { return sha256 + " " + path }
-
-// overriddenReproductions are the reproductions an operator's override ended
-// (by recheckKey): when r was accepted by an override (run.Run.Overrides),
-// every reproduction that refused it, its blocking findings and the rechecks
-// it ran that did not pass. The override is the human's decision on them, so
-// no later build in the chain runs them again; the rechecks r passed, and
-// those it was given and never ran, are carried on. Nil for any other run.
-func overriddenReproductions(r *run.Run) map[string]bool {
-	if r.State != run.StateAccepted || !slices.ContainsFunc(r.Overrides, func(o run.Override) bool { return o.NewState == run.StateAccepted }) {
-		return nil
-	}
-	out := map[string]bool{}
-	for _, rc := range r.ReviewReproductionRechecks {
-		if rc.Verdict != reproductionPasses {
-			out[recheckKey(rc.Path, rc.SHA256)] = true
+	for i, f := range runRecord.CodeReview.Findings {
+		if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
+			ticket.NoteReproductionRefusal(heldBlockingCopy(runRecord.ID, dir, i, f), runRecord.ID)
 		}
 	}
-	if r.CodeReview != nil {
-		for _, f := range r.CodeReview.Findings {
-			if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
-				out[recheckKey(f.Reproduction.Path, f.Reproduction.SHA256)] = true
-			}
-		}
-	}
-	return out
-}
-
-// carriedRechecks are the recheck entries r was given and those it ran,
-// except those in overridden, each with its held copy on disk with its hash.
-func carriedRechecks(dataDir string, r *run.Run, overridden map[string]bool) ([]run.RecheckEntry, error) {
-	entries := append([]run.RecheckEntry(nil), r.ReviewReproductionRechecksGiven...)
-	for i, rc := range r.ReviewReproductionRechecks {
-		if overridden[recheckKey(rc.Path, rc.SHA256)] {
-			continue
-		}
-		if rc.Recheck == nil {
-			return nil, fmt.Errorf("run %s's recheck %d names no held copy", r.ID, i)
-		}
-		entries = append(entries, *rc.Recheck)
-	}
-	var out []run.RecheckEntry
-	for _, e := range entries {
-		if overridden[recheckKey(e.Path, e.SHA256)] {
-			continue
-		}
-		if !heldCopyOnDisk(dataDir, e) {
-			return nil, fmt.Errorf("run %s's recheck of %s has no held copy on disk with its hash", r.ID, e.Path)
-		}
-		out = append(out, e)
-	}
-	return out, nil
-}
-
-// blockingCopies is the recheck entry of each of r's blocking findings not
-// in overridden: its held copy under r's own review-repro directory.
-func blockingCopies(dataDir string, r *run.Run, overridden map[string]bool) ([]run.RecheckEntry, error) {
-	if r.CodeReview == nil {
-		return nil, nil
-	}
-	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, r.ID)))
-	if err != nil {
-		return nil, err
-	}
-	var out []run.RecheckEntry
-	for i, f := range r.CodeReview.Findings {
-		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil || overridden[recheckKey(f.Reproduction.Path, f.Reproduction.SHA256)] {
-			continue
-		}
-		e, ok := heldBlockingCopy(r.ID, dir, i, f)
-		if !ok || !heldCopyOnDisk(dataDir, e) {
-			return nil, fmt.Errorf("run %s's blocking finding %d has no held copy on disk with its hash", r.ID, i)
-		}
-		out = append(out, e)
-	}
-	return out, nil
 }
 
 // heldBlockingCopy is the recheck entry of finding i's reproduction, held by
-// run runID under dir (its review-repro directory).
-func heldBlockingCopy(runID, dir string, i int, f run.CodeReviewFinding) (run.RecheckEntry, bool) {
+// run runID under dir (its review-repro directory). Whether the copy is
+// there with its hash is checked when a build is given it (heldCopyOnDisk).
+func heldBlockingCopy(runID, dir string, i int, f run.CodeReviewFinding) run.RecheckEntry {
 	rep := f.Reproduction
-	if rep.SHA256 == "" || rep.Runner == "" || len(rep.TestIDs) == 0 || !filepath.IsLocal(filepath.FromSlash(rep.Path)) {
-		return run.RecheckEntry{}, false
-	}
 	held := run.HeldReproduction{Finding: i, Path: rep.Path, SHA256: rep.SHA256, HostPath: filepath.Join(dir, strconv.Itoa(i), filepath.FromSlash(rep.Path)), TestIDs: rep.TestIDs, Runner: rep.Runner}
 	if f.SpecLine != nil {
 		held.SpecLine = f.SpecLine.Number
 	}
-	return run.RecheckEntry{RunID: runID, HeldReproduction: held}, true
+	return run.RecheckEntry{RunID: runID, HeldReproduction: held}
+}
+
+// ticketRecheck is the -recheck-reproductions manifest of a build of ticket
+// (buildID), written under the request's rounds/<buildID>/, from the
+// ticket's list (request.Ticket.Reproductions), "" when the list is empty.
+// It is the one place every build of a ticket that runs reproductions gets
+// its recheck (ticketQueueEntry): the first build, a corrective round, a
+// retry, a retry -from <N>, a resume and every PR-review round attempt.
+// First it drops what an operator's override ended (dropOverridden). A
+// reproduction whose held copy is gone or no longer matches its hash is
+// marked Unheld and refuses the build (an unheldError, errNoRecheck): no
+// build continues without it.
+func ticketRecheck(dataDir string, r *request.Request, ticket *request.Ticket, buildID string) (string, error) {
+	dropOverridden(dataDir, ticket, time.Now())
+	if len(ticket.Reproductions) == 0 {
+		return "", nil
+	}
+	m := run.RecheckManifest{RequestID: r.ID}
+	var unheld []string
+	for i := range ticket.Reproductions {
+		rp := &ticket.Reproductions[i]
+		if !heldCopyOnDisk(dataDir, rp.RecheckEntry) {
+			rp.Unheld = true
+			unheld = append(unheld, rp.Path)
+			continue
+		}
+		m.Reproductions = append(m.Reproductions, rp.RecheckEntry)
+	}
+	if len(unheld) > 0 {
+		return "", &unheldError{ticket: ticket.Index, paths: unheld}
+	}
+	return writeRecheckManifest(filepath.Join(request.Dir(dataDir, r.ID), "rounds", buildID), m)
+}
+
+// dropOverridden takes off ticket's list every reproduction that refused a
+// run an operator's override then accepted (run.Run.Overrides): the
+// override is the human's decision on it. It is the one place an override
+// is observed for the list; each drop is recorded with the override's
+// author.
+func dropOverridden(dataDir string, ticket *request.Ticket, now time.Time) {
+	for _, rp := range slices.Clone(ticket.Reproductions) {
+		by, runID := overriddenBy(dataDir, rp.RefusedRuns)
+		if by == "" {
+			continue
+		}
+		key := request.ReproductionKey(rp.RecheckEntry)
+		ticket.DropReproductions(func(x request.TicketReproduction) bool { return request.ReproductionKey(x.RecheckEntry) == key }, by,
+			fmt.Sprintf("run %s, which it refused, was accepted by an operator's override", runID), now)
+	}
+}
+
+// overriddenBy is the author of the override that accepted one of runIDs,
+// and that run, or "" when none was.
+func overriddenBy(dataDir string, runIDs []string) (by, runID string) {
+	for _, id := range runIDs {
+		rec, err := run.Load(dataDir, id)
+		if err != nil || rec.State != run.StateAccepted {
+			continue
+		}
+		for _, o := range rec.Overrides {
+			if o.NewState == run.StateAccepted {
+				return o.By, id
+			}
+		}
+	}
+	return "", ""
 }
 
 // heldCopyOnDisk reports whether e's host path is a file under its run's
@@ -198,18 +169,11 @@ func aRecheckStillFails(r *run.Run) bool {
 
 // automaticCorrectionMayFollow reports whether an automatic corrective
 // build may follow quarantined on its commits: a build may be given its
-// record (handoffForABuild), no recheck it ran is still failing
-// (aRecheckStillFails), and the recheck that build must run can be made
-// (recheckManifestFor).
+// record (handoffForABuild), and no recheck it ran is still failing
+// (aRecheckStillFails).
 func automaticCorrectionMayFollow(dataDir string, quarantined *run.Run) bool {
-	if _, ok := handoffForABuild(dataDir, quarantined); !ok || aRecheckStillFails(quarantined) {
-		return false
-	}
-	if !needsRecheck(quarantined) {
-		return true
-	}
-	_, err := recheckManifestFor(dataDir, quarantined)
-	return err == nil
+	_, ok := handoffForABuild(dataDir, quarantined)
+	return ok && !aRecheckStillFails(quarantined)
 }
 
 // refusedByAReproduction reports whether a reviewer's reproduction refused
@@ -247,39 +211,40 @@ func writeRecheckManifest(dir string, m run.RecheckManifest) (string, error) {
 	return path, nil
 }
 
-// withRecheck appends -recheck-reproductions to args when a build that
-// continues on previous's commits must run reviewer reproductions again
-// (needsRecheck): the manifest (recheckManifestFor) is written in dir. The
-// error says why such a build may not start (SC-022): no manifest can be
-// made, or args lack -review-reproduction, so it would run none. It is the
-// one rule every build that follows a run goes through (a corrective round,
-// a retry, a resume, a PR-review round); none is built without the recheck.
-func withRecheck(dataDir, dir string, previous *run.Run, args []string) ([]string, error) {
-	if !needsRecheck(previous) {
-		return args, nil
-	}
-	m, err := recheckManifestFor(dataDir, previous)
-	if err != nil {
-		return args, fmt.Errorf("%w: %w", errNoRecheck, err)
-	}
-	if len(m.Reproductions) == 0 {
-		// An operator's override ended every one (overriddenReproductions).
-		return args, nil
-	}
-	if !hasFlag(args, "-review-reproduction") {
-		return args, fmt.Errorf("%w: run %s needs its reviewer reproductions run again and the build runs none", errNoRecheck, previous.ID)
-	}
-	path, err := writeRecheckManifest(dir, m)
-	if err != nil {
-		return args, err
-	}
-	return append(args, "-recheck-reproductions", path), nil
+// errNoRecheck is in the chain of every refusal to build a ticket without
+// the reproductions its list says it must pass again.
+var errNoRecheck = errors.New("not built without a recheck of the reviewer's reproductions")
+
+// unheldError is ticketRecheck's refusal when a held copy is gone or no
+// longer matches its hash.
+type unheldError struct {
+	ticket int
+	paths  []string
 }
 
-// errNoRecheck is in the chain of withRecheck's refusals: a build that
-// would continue on a run's commits without the reproductions that run must
-// pass again.
-var errNoRecheck = errors.New("not built without a recheck of the reviewer's reproductions")
+func (e *unheldError) Error() string {
+	return fmt.Sprintf("ticket %d: %v: the held copy of %s is gone or no longer matches its hash", e.ticket, errNoRecheck, strings.Join(e.paths, ", "))
+}
+
+func (e *unheldError) Unwrap() error { return errNoRecheck }
+
+// haltWithoutRecheck halts r for err, a refusal to build without a recheck.
+// A held copy that is gone halts with HaltReproductionUnheld, whose reason
+// names the operator's way out: `factoryd retry` drops those reproductions,
+// recorded on the ticket, and builds again.
+func haltWithoutRecheck(dataDir string, r *request.Request, err error, now time.Time) error {
+	var unheld *unheldError
+	if !errors.As(err, &unheld) {
+		return HaltRequest(dataDir, r, err.Error(), now)
+	}
+	reason := fmt.Sprintf("%v; `factoryd retry %s` drops them (recorded on the ticket) and builds again, or `factoryd cancel %s`", err, r.ID, r.ID)
+	oldState := r.State
+	if err := r.HaltReproductionsUnheld(reason, now); err != nil {
+		return err
+	}
+	log.Printf("request %s: %s -> halted (%s)", r.ID, oldState, reason)
+	return notifyTerminalRequest(dataDir, r, reason, now)
+}
 
 // hasFlag reports whether flag is one of argv's arguments.
 func hasFlag(argv []string, flag string) bool {

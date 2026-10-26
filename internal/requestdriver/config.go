@@ -270,6 +270,9 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	// (SC-022); a bare run never gets these flags.
 	if entry.ReviewSpecPath != "" {
 		args = append(args, "-review-reproduction", "-review-spec", entry.ReviewSpecPath)
+		if entry.RecheckReproductions != "" {
+			args = append(args, "-recheck-reproductions", entry.RecheckReproductions)
+		}
 	}
 	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
 	// own output (Phase 2) -- both set together or neither (see that

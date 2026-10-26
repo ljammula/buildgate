@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
 	"time"
 
 	"buildgate/internal/request"
@@ -123,6 +122,7 @@ func tagRoundByID(dp Deps, dataDir string, r *request.Request, ticket *request.T
 		log.Printf("request %s: ticket %d: round of run %s is not in the ledger: %v", r.ID, ticket.Index, runID, err)
 		return
 	}
+	noteReproductionRefusals(dataDir, ticket, runRecord)
 	tagTicketRound(dp, r, ticket, runRecord, kind, now)
 }
 
@@ -164,7 +164,7 @@ func startingPoint(dp Deps, dataDir string, r *request.Request, ticket *request.
 	if _, round := r.RetryChoiceFor(ticket.Index); round > 0 && resumeRunID == "" {
 		argv, recordOf, onBranch, err = withRoundBranch(dp, dataDir, r, ticket, args)
 	} else {
-		argv, recordOf, onBranch, err = withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
+		argv, recordOf, onBranch = withEarlierAttemptOf(dataDir, r, ticket, args, resumeRunID)
 	}
 	if err == nil {
 		argv, err = withEarlierTicketsWork(r, ticket.Index, argv, resumeRunID, onBranch)
@@ -191,14 +191,17 @@ func withRoundBranch(dp Deps, dataDir string, r *request.Request, ticket *reques
 	if tag.Repo == "" {
 		return args, "", false, fmt.Errorf("ticket %d/%d: retry from round %d: the round records no repository", ticket.Index, r.TicketCount, tag.N)
 	}
-	if previous != nil {
-		if args, recordOf, err = roundBranchRecord(dataDir, r, ticket, previous, args); err != nil {
-			return args, "", false, err
-		}
-	}
 	branch, err := createRoundBranch(dp, tag.Repo, r.ID, ticket.Index, tag)
 	if err != nil {
 		return args, "", false, fmt.Errorf("ticket %d/%d: retry from round %d: %w", ticket.Index, r.TicketCount, tag.N, err)
+	}
+	if previous != nil {
+		if doc, ok := recordableHandoff(dataDir, previous, args); ok {
+			if path, ok := writeEarlierRecord(dataDir, r, ticket, previous, doc, "retry", startsOnItsBranch); ok {
+				args = append(args, "-earlier-attempt", path)
+				recordOf = previous.ID
+			}
+		}
 	}
 	diffBase := tag.DiffBaseSHA
 	if diffBase == "" {
@@ -206,23 +209,6 @@ func withRoundBranch(dp Deps, dataDir string, r *request.Request, ticket *reques
 	}
 	log.Printf("request %s: ticket %d/%d: rebuilding on %s, at round %d's commit %s", r.ID, ticket.Index, r.TicketCount, branch, tag.N, tag.SHA)
 	return append(args, "-on-branch", branch, "-diff-base", diffBase), recordOf, true, nil
-}
-
-// roundBranchRecord gives a build that starts on round previous's commit
-// the record of previous, when it is a failure a build is told about, and
-// always the reviewer reproductions previous must pass again (withRecheck):
-// the build is on previous's commits, so it is never built without them.
-func roundBranchRecord(dataDir string, r *request.Request, ticket *request.Ticket, previous *run.Run, args []string) (argv []string, recordOf string, err error) {
-	dir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-retry", ticket.Index))
-	if doc, ok := recordableHandoff(dataDir, previous, args); ok {
-		if path, ok := writeEarlierRecord(dataDir, r, ticket, previous, doc, "retry", startsOnItsBranch); ok {
-			args, recordOf, dir = append(args, "-earlier-attempt", path), previous.ID, filepath.Dir(path)
-		}
-	}
-	if args, err = withRecheck(dataDir, dir, previous, args); err != nil {
-		return args, "", fmt.Errorf("ticket %d/%d: retry from run %s: %w", ticket.Index, r.TicketCount, previous.ID, err)
-	}
-	return args, recordOf, nil
 }
 
 // PruneRoundRefs deletes request r's round refs and its local branches, except

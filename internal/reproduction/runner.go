@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -172,6 +173,18 @@ func namesPath(output, p string) bool {
 		}
 		i = at + 1
 	}
+}
+
+// compileFailure reports whether a build or collection output says the
+// reproduction itself does not compile (KindCompile): the output names its
+// own file (namesPath) and is not a module resolution failure (moduleError
+// matches none of it). Resolving or fetching a module is never a compile
+// error, whatever the module and whichever file imports it: a dependency
+// the sandbox cannot fetch, or a module the reproduction names that the
+// commit does not have, says nothing the spec asked for, and a false block
+// is worse than a false piece of advice. Such a failure reads as missing.
+func compileFailure(output, p string, moduleError *regexp.Regexp) bool {
+	return namesPath(output, p) && !moduleError.MatchString(output)
 }
 
 // isPathByte reports whether b can continue a path's last name.

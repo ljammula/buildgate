@@ -209,6 +209,14 @@ type Ticket struct {
 	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
 	// changed on its own is never recorded here.
 	Retarget *TicketRetarget `json:"retarget,omitempty"`
+	// Reproductions are the reviewer reproductions every later build of the
+	// ticket must pass again (SC-022, -recheck-reproductions): the ticket's
+	// recheck chain, whose only home this is. See TicketReproduction.
+	Reproductions []TicketReproduction `json:"reproductions,omitempty"`
+	// DroppedReproductions are the ones taken off Reproductions, with who
+	// dropped each and why: an operator's override of a run it refused, or a
+	// retry of a request halted because its held copy was gone.
+	DroppedReproductions []DroppedReproduction `json:"dropped_reproductions,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -1757,6 +1765,8 @@ func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
 	case HaltOracleMaterialize:
 		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
+	case HaltReproductionUnheld:
+		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is gone (recorded on the ticket) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltGateExpired:
 		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltAcceptedNoPR:

@@ -25,6 +25,9 @@ type QueueEntry struct {
 	// Empty for a request with no approved spec hash, whose review is advice
 	// only.
 	ReviewSpecPath string `json:"review_spec_path,omitempty"`
+	// RecheckReproductions is the build's -recheck-reproductions manifest,
+	// written from the ticket's list (ticketRecheck); "" when it has none.
+	RecheckReproductions string `json:"recheck_reproductions,omitempty"`
 	// VerifyCommand is this ticket's canonical verification command,
 	// resolved at submit time from -verify-command or the workspace's
 	// .factory.yml.

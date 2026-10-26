@@ -223,6 +223,9 @@ func retry(dataDir, id, by, reason string, choice retryChoice, now time.Time, op
 		}
 		return r, nil
 	}
+	// A build refused because a reproduction's held copy is gone: the
+	// retrying operator drops those reproductions, recorded on the ticket.
+	r.dropUnheldReproductions(by, now)
 	if r.TicketCount == 0 || r.HaltedFrom() == StatePlanning {
 		// Halted before any ticket existed (a spec-drafting or planning
 		// failure), or halted in a re-plan after a plan_review rejection,

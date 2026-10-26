@@ -608,16 +608,17 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 	return classifyReproduction(l, input, result, res)
 }
 
-// ranPastLaunchCap reports a launch whose sandbox released the
-// reproduction's command (runErr carries sandbox.ErrCommandReleased, the
-// sandbox package's proof; a deadline that passed while the sandbox was
-// starting does not) and which ended because the launch's own cap passed:
-// the error carries context.DeadlineExceeded, the Activity's context is
-// still live, and the cap's deadline is the earlier of the two. Anything
-// else (a sandbox that never started, a lost gateway, the Activity's own
-// deadline) stays the launch's failure.
+// ranPastLaunchCap reports a launch whose sandbox started the reproduction's
+// command (runErr carries sandbox.ErrCommandStarted, the sandbox package's
+// proof that the command's output file appeared; a deadline that passed
+// while the sandbox was starting, or before the released command passed the
+// guard, does not) and which ended because the launch's own cap passed: the
+// error carries context.DeadlineExceeded, the Activity's context is still
+// live, and the cap's deadline is the earlier of the two. Anything else (a
+// sandbox that never started, a lost gateway, the Activity's own deadline)
+// stays the launch's failure.
 func ranPastLaunchCap(ctx, launchCtx context.Context, runErr error) bool {
-	if !errors.Is(runErr, sandbox.ErrCommandReleased) || !errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
+	if !errors.Is(runErr, sandbox.ErrCommandStarted) || !errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
 		return false
 	}
 	capAt, ok := launchCtx.Deadline()

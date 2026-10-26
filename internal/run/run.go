@@ -911,9 +911,11 @@ type FindingReproduction struct {
 	Disposition  string             `json:"disposition"`
 }
 
-// RecheckManifest is a build's -recheck-reproductions file: each held copy
-// to run once on the build's result.
+// RecheckManifest is a build's -recheck-reproductions file: the request
+// whose ticket the build is, and each held copy to run once on the build's
+// result. Every entry's run is a run of that request.
 type RecheckManifest struct {
+	RequestID     string         `json:"request_id"`
 	Reproductions []RecheckEntry `json:"reproductions"`
 }
 
@@ -1789,8 +1791,9 @@ type Run struct {
 	ReviewReproductionRechecks []ReviewReproduction `json:"review_reproduction_rechecks,omitempty"`
 	// ReviewReproductionRechecksGiven are the -recheck-reproductions entries
 	// this run was given, recorded when it starts, whether or not its
-	// workflow reached the recheck (a run whose gates failed does not), so a
-	// later build on its commits is given them again (SC-022).
+	// workflow reached the recheck (a run whose gates failed does not).
+	// Evidence only: what a later build rechecks is the ticket's list on the
+	// request (request.Ticket.Reproductions).
 	ReviewReproductionRechecksGiven []RecheckEntry `json:"review_reproduction_rechecks_given,omitempty"`
 	// ReferenceOracleDir is the -reference-oracle-dir this run was
 	// configured with, recorded so any finalization site -- including a

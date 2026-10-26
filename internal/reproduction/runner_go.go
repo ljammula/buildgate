@@ -9,6 +9,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -132,14 +133,20 @@ type goReport struct {
 	any      bool
 }
 
+// goModuleError is the go command's text for a module it could not resolve
+// or fetch.
+var goModuleError = regexp.MustCompile(`cannot find module providing package|no required module provides package|module lookup disabled|missing go\.sum entry|checksum mismatch|unknown revision|invalid version|dial tcp|reading https?://`)
+
 // Classify: a build or setup failure is a compile only when the build's
-// output names the reproduction's own file (namesPath; Go 1.24 and later put
-// the compiler's output in the report as build-output events); a dependency
-// that does not build or cannot be fetched, or an older Go that names no
-// file, is missing.
+// output names the reproduction's own file and is no module resolution
+// failure (compileFailure; Go 1.24 and later put the compiler's output in
+// the report as build-output events): an undefined name or a type error in
+// the reproduction. A module that cannot be resolved or fetched, whichever
+// file imports it, a dependency that does not build, and an older Go that
+// names no file are missing.
 func (goTest) Classify(p string, report []byte, _ int, ids []string) (map[string]Kind, Outcome) {
 	r := readGoReport(report)
-	if r.compile && namesPath(r.build, p) {
+	if r.compile && compileFailure(r.build, p, goModuleError) {
 		return allKind(ids, KindCompile), OutcomeCompile
 	}
 	if r.compile || !r.any {

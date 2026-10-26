@@ -1010,12 +1010,11 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// (forge.ThreadSeenKey), so a reviewer replying "still not fixed" on
 	// an already-addressed thread counts as new.
 
-	// The round before this one, when it was quarantined and a reviewer's
-	// reproduction refused it or it ran rechecks: its commits are the tip
-	// this round builds on (priorRoundRefusal), so its builder runs those
-	// reproductions again on its result and is given that attempt's record,
-	// beside the reviewer's comments.
-	refused := priorRoundRefusal(dataDir, r, ticket, head.Run)
+	// The round before this one, when it was quarantined: its commits are
+	// the tip this round builds on (priorRoundRefusal), so its builder is
+	// given that attempt's record, beside the reviewer's comments. The
+	// recheck is the ticket's list (ticketRecheck), whatever that round was.
+	refused := priorRoundRefusal(dataDir, r, ticket)
 	// One round is one build plus, when a reviewer's reproduction alone
 	// refused it (SC-022: a finding blocks only through its reproduction,
 	// never through its severity), up to review_corrective_rounds fix
@@ -1039,9 +1038,9 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		}
 		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase, stackBaseSHA, refused)
 		if errors.Is(err, errNoRecheck) {
-			// The round would build on commits a reviewer's reproduction
-			// must judge again, and cannot: no build (SC-022).
-			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: review round %d: %v", ticket.Index, r.TicketCount, roundIndex, err), now)
+			// The round would build without a reproduction the ticket must
+			// pass again: no build (SC-022).
+			return haltWithoutRecheck(dataDir, r, err, now)
 		}
 		if err != nil {
 			return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
@@ -1139,11 +1138,11 @@ type roundOutcome struct {
 // runRoundAttempt runs one build of a PR-review round on the pull request's
 // branch, with specPath (the round's addendum) as its ticket, and reports
 // how it ended. ticketID is the -ticket value; the run's own id comes from
-// onReady. refused, when not nil, is the build before this one, which a
-// reviewer's reproduction refused or which ran rechecks: this one is given its record as
-// -earlier-attempt, which says each blocking finding in one line (SC-018),
-// and runs its reproductions again (withRecheck), both from files beside
-// the addendum.
+// onReady. refused, when not nil, is the quarantined build before this one:
+// this one is given its record as -earlier-attempt, which says each
+// blocking finding in one line (SC-018), from a file beside the addendum.
+// Like every build of the ticket, it rechecks the ticket's list
+// (ticketRecheck), and what refused it goes on that list.
 func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase, stackBaseSHA string, refused *run.Run) (roundAttempt, error) {
 	// -open-pull-request is always forced off for a corrective round,
 	// regardless of cfg.openPullRequest: this run's branch already has an
@@ -1160,7 +1159,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// and its source, harness, model and preflight profile. SpecPath is the
 	// round's addendum: the
 	// ticket's own spec plus this round's appended sections.
-	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath)
+	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath, true)
 	if err != nil {
 		return roundAttempt{}, err
 	}
@@ -1217,6 +1216,11 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if loadErr != nil {
 		return roundAttempt{}, loadErr
 	}
+	// Before a fix attempt follows it: what refused it is on the ticket's
+	// list, which the next attempt rechecks.
+	if rec, err := run.Load(dataDir, loadID); err == nil {
+		noteReproductionRefusals(dataDir, ticket, rec)
+	}
 	return roundAttempt{runID: loadID, roundOutcome: ended}, nil
 }
 
@@ -1247,17 +1251,12 @@ func roundFixRefusal(ctx context.Context, dataDir string, r *request.Request, cf
 	return loaded
 }
 
-// withRefusedAttempt adds to a PR-review build's args, from files it writes
-// in dir, the reviewer reproductions refused must pass again
-// (-recheck-reproductions, withRecheck, whose refusal is returned: the build
-// is on refused's commits) and, when it is a failure a build is told about,
-// refused's record (-earlier-attempt, opening by saying the attempt's commit
-// is in the workspace).
+// withRefusedAttempt adds to a PR-review build's args, from a file it
+// writes in dir, refused's record (-earlier-attempt, opening by saying the
+// attempt's commit is in the workspace), when it is a failure a build is
+// told about. The build's recheck comes from the ticket's list, not from
+// refused (ticketRecheck).
 func withRefusedAttempt(dataDir, dir string, refused *run.Run, args []string) ([]string, error) {
-	args, err := withRecheck(dataDir, dir, refused, args)
-	if err != nil {
-		return args, err
-	}
 	doc, ok := handoffForABuild(dataDir, refused)
 	if !ok {
 		return args, nil
@@ -1467,41 +1466,27 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	return r.Save(dataDir)
 }
 
-// priorRoundRefusal returns the run whose commits this PR-review round
-// builds on, when a build on them must run reviewer reproductions again
-// (needsRecheck), nil otherwise. That run is ticket's most recent counted
-// round when it was quarantined: a quarantined round is never pushed, but
-// its commits stay on the local PR branch (PrepareOnBranch checks the branch
-// itself out), so the next round builds on top of them, runs those
-// reproductions again, and its builder is told why they were refused
-// (withRefusedAttempt). Found live (2026-10-06, three rounds on one pull
-// request): each round was given only the reviewer's comment, built on the
-// refused commits, and was quarantined for the finding the round before it
-// had already been quarantined for. After an accepted round, or before any
-// round, it is the PR-head run (head): the round builds on what was pushed,
-// and an accepted run that rechecked a reproduction passes it on, so a later
-// round cannot undo a fix a reproduction proved.
-//
-// Nothing is returned after a halted round (whether it committed is
-// unknown), or when the quarantined round's run record cannot be read: the
-// round then runs on the reviewer's comments alone.
-func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticket, head *run.Run) *run.Run {
-	prior := head
-	if rnd, ok := lastCountedRound(ticket); ok && rnd.Outcome != request.RoundAccepted {
-		if rnd.Outcome != request.RoundQuarantined {
-			return nil
-		}
-		loaded, err := run.Load(dataDir, rnd.RunID)
-		if err != nil {
-			log.Printf("request %s: ticket %d: load quarantined round %d's run %s for its review findings: %v", r.ID, ticket.Index, rnd.Index, rnd.RunID, err)
-			return nil
-		}
-		prior = loaded
-	}
-	if prior == nil || !needsRecheck(prior) {
+// priorRoundRefusal returns ticket's most recent counted PR-review round's
+// run when that round was quarantined, nil otherwise: a quarantined round is
+// never pushed, but its commits stay on the local PR branch (PrepareOnBranch
+// checks the branch itself out), so the next round builds on top of them and
+// its builder is told why they were refused (withRefusedAttempt). Found live
+// (2026-10-06, three rounds on one pull request): each round was given only
+// the reviewer's comment, built on the refused commits, and was quarantined
+// for the finding the round before it had already been quarantined for. It
+// decides the record only: every round's recheck is the ticket's list
+// (ticketRecheck), whatever the round before it was.
+func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticket) *run.Run {
+	rnd, ok := lastCountedRound(ticket)
+	if !ok || rnd.Outcome != request.RoundQuarantined {
 		return nil
 	}
-	return prior
+	loaded, err := run.Load(dataDir, rnd.RunID)
+	if err != nil {
+		log.Printf("request %s: ticket %d: load quarantined round %d's run %s for its record: %v", r.ID, ticket.Index, rnd.Index, rnd.RunID, err)
+		return nil
+	}
+	return loaded
 }
 
 // lastCountedRound is ticket's most recent PR-review round that ran (no

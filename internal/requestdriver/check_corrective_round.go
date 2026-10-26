@@ -2,7 +2,6 @@ package requestdriver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -34,11 +33,10 @@ import (
 // cleaned line (handoff.ReproducedFinding: severity, summary, cited spec
 // line, the reproduction's path, one failing test and its kind), never the
 // reproduction or the reviewer's failure scenario, and the build mounts no
-// copy of the reproduction. The build is also given -recheck-reproductions
-// (withRecheck): its workflow runs each held copy once on its result, and
-// anything but a pass refuses it again, whatever its own review says. Every
-// recheck the quarantined run ran is in it too, so a later round does not
-// undo an earlier one's fix.
+// copy of the reproduction. Like every build of the ticket, it is given
+// -recheck-reproductions from the ticket's list (ticketRecheck): its
+// workflow runs each held copy once on its result, and anything but a pass
+// refuses it again, whatever its own review says.
 //
 // Budget, launch, recording and outcomes are runCorrectiveRounds':
 // -review-corrective-rounds is one budget per ticket build, the launch
@@ -68,9 +66,6 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 			}
 			argv, err := BuildCorrectiveArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, diffBase)
 			if err != nil {
-				return nil, "", err
-			}
-			if argv, err = withRecheck(dataDir, roundDir, current, argv); err != nil {
 				return nil, "", err
 			}
 			return append(argv, "-earlier-attempt", recordPath), "failed " + failedCheckNames(doc), nil
@@ -132,21 +127,19 @@ func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, b
 // request, a ticket whose spec has changed since (sameSpec), a failure a
 // build is never told about, a handoff the run does not vouch for. An error
 // writing the record is logged and the build goes ahead without it; the
-// record is an aid, never a condition. The recheck it carries is one: a
-// build on the attempt's commits whose recheck cannot be made is refused
-// (recheckBeside).
-func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string, resumeRunID string) (argv []string, recordOf string, onBranch bool, err error) {
+// record is an aid, never a condition.
+func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ticket, args []string, resumeRunID string) (argv []string, recordOf string, onBranch bool) {
 	lastID := ticket.RunID
 	if resumeRunID != "" {
 		lastID = resumeRunID
 	}
 	if lastID == "" {
-		return args, "", false, nil
+		return args, "", false
 	}
 	previous, err := run.Load(dataDir, lastID)
 	// The record of another request's run is never this build's.
 	if err != nil || previous.RequestID != r.ID {
-		return args, "", false, nil
+		return args, "", false
 	}
 	dirName, start := "retry", startsFromBase
 	// continues: the rebuild may start on the quarantined attempt's own
@@ -160,14 +153,11 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	// run existed, whose own choice the move through resume_review dropped.
 	scratch, _ := r.RetryChoiceFor(ticket.Index)
 	continues := resumeRunID == "" && !scratch && r.PendingResumeVerb() == ""
-	// resumesOnItsBranch: the build resumes an interrupted one that started
-	// on the attempt's branch, so the attempt's commits are in its worktree.
-	var resumesOnItsBranch bool
 	if previous.State == run.StateHalted && previous.EarlierAttemptOf != "" {
 		continues = false
 		unfinished := previous
 		if previous, err = run.Load(dataDir, unfinished.EarlierAttemptOf); err != nil || previous.RequestID != r.ID {
-			return args, "", false, nil
+			return args, "", false
 		}
 		if resumeRunID != "" {
 			// Whether the attempt's commit is under the interrupted
@@ -175,13 +165,13 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 			// attempt that committed nothing has its base as its result.
 			dirName, start = "resume", resumesLostBuild+" "+interruptedStartedFromBase
 			if previous.Branch != "" && unfinished.Branch == previous.Branch {
-				start, resumesOnItsBranch = resumesLostBuild+" "+interruptedStartedOnItsBranch, true
+				start = resumesLostBuild + " " + interruptedStartedOnItsBranch
 			}
 		}
 	}
 	doc, ok := recordableHandoff(dataDir, previous, args)
 	if !ok {
-		return args, "", false, nil
+		return args, "", false
 	}
 	diffBase := previous.DiffBase()
 	// Nothing to continue from when the attempt committed nothing or its
@@ -200,34 +190,13 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	}
 	path, ok := writeEarlierRecord(dataDir, r, ticket, previous, doc, dirName, start)
 	if !ok {
-		return args, "", false, nil
+		return args, "", false
 	}
-	if args, err = recheckBeside(dataDir, r, ticket, previous, path, continues || resumesOnItsBranch, append(args, "-earlier-attempt", path)); err != nil {
-		return args, "", false, err
-	}
+	args = append(args, "-earlier-attempt", path)
 	if continues {
 		args = append(args, "-on-branch", previous.Branch, "-diff-base", diffBase)
 	}
-	return args, previous.ID, continues, nil
-}
-
-// recheckBeside gives a build that is told of previous (its record at
-// recordPath) the reviewer reproductions previous must pass again on the
-// build's own result (withRecheck, SC-022), from a manifest beside the
-// record. When none can be made, a build on previous's commits (onCommits)
-// is refused with withRecheck's reason; one that starts from the base goes
-// ahead without, which is logged: none of previous's commits are in it, and
-// its own review runs as for any build.
-func recheckBeside(dataDir string, r *request.Request, ticket *request.Ticket, previous *run.Run, recordPath string, onCommits bool, args []string) ([]string, error) {
-	withCheck, err := withRecheck(dataDir, filepath.Dir(recordPath), previous, args)
-	if err == nil {
-		return withCheck, nil
-	}
-	if onCommits || !errors.Is(err, errNoRecheck) {
-		return args, fmt.Errorf("ticket %d/%d: %w", ticket.Index, r.TicketCount, err)
-	}
-	log.Printf("request %s: ticket %d: the build starts from the base without a recheck of run %s's reviewer reproductions: %v", r.ID, ticket.Index, previous.ID, err)
-	return args, nil
+	return args, previous.ID, continues
 }
 
 // recordableHandoff is previous's handoff when a build about to run with args

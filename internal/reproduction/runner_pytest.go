@@ -94,17 +94,23 @@ func (pytestJUnit) Command(inv Invocation) Command {
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(pytestTimeoutPlugin), Timeout: launchTimeout(inv.TestIDs)}
 }
 
+// pyModuleError is Python's error for a module it cannot find.
+var pyModuleError = regexp.MustCompile(`ModuleNotFoundError`)
+
 // Classify: a collection error case whose text names the reproduction's own
-// file (namesPath) is a compile; any other collection error, and exit 2 to 5
-// with no such case (interrupted, internal error, usage error such as a
-// conftest that does not import, nothing collected: pytest writes no report
-// for 3 and 4), is missing. Otherwise each case's failure, error or skip,
-// merged per ID over its parameter sets.
+// file and is no ModuleNotFoundError (compileFailure) is a compile: a name
+// the reproduction imports that the module does not have ("cannot import
+// name"), an attribute it reads at import (AttributeError), a syntax error.
+// A module that cannot be found, whatever it is, any other collection
+// error, and exit 2 to 5 with no such case (interrupted, internal error,
+// usage error such as a conftest that does not import, nothing collected:
+// pytest writes no report for 3 and 4) are missing. Otherwise each case's
+// failure, error or skip, merged per ID over its parameter sets.
 func (pytestJUnit) Classify(p string, report []byte, exit int, ids []string) (map[string]Kind, Outcome) {
 	cases, ok := readJUnit(report)
 	collection := pyCollectionErrors(cases)
 	for _, c := range collection {
-		if namesPath(c.Error.Message+"\n"+c.Error.Body, p) {
+		if compileFailure(c.Error.Message+"\n"+c.Error.Body, p, pyModuleError) {
 			return allKind(ids, KindCompile), OutcomeCompile
 		}
 	}

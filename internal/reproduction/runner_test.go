@@ -55,15 +55,16 @@ func TestRunnerClassifiesEveryOutcome(t *testing.T) {
 			{"timeout.json", "p/repro_test.go", 1, "TestHang", KindTimeout, OutcomeFailed},
 			{"skipped.json", "p/repro_test.go", 0, "TestSkip", KindSkipped, OutcomeInconclusive},
 			{"compile.json", "p/repro_test.go", 1, "TestPass", KindCompile, OutcomeCompile},
+			{"undefined-symbol.json", "p/repro_test.go", 1, "TestPass", KindCompile, OutcomeCompile},
 			// The same build failure judged for another file: it names
 			// p/repro_test.go, not this one, so it is no compile verdict.
 			{"compile.json", "p/other_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
 			// A package the reproduction's imports does not build, or a
-			// module of the main code that cannot be fetched: missing. The
-			// reproduction's own import that cannot be resolved names it.
+			// module that cannot be resolved, the main code's or the
+			// reproduction's own: missing.
 			{"dependency-build-fail.json", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
 			{"setup-fail-dependency.json", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
-			{"setup-fail-own.json", "p/repro_test.go", 1, "TestPass", KindCompile, OutcomeCompile},
+			{"setup-fail-own.json", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
 			{"", "p/repro_test.go", 1, "TestPass", KindMissing, OutcomeMissing},
 			{"pass.json", "p/repro_test.go", 0, "TestNotInReport", KindMissing, OutcomeInconclusive},
 		},
@@ -73,13 +74,15 @@ func TestRunnerClassifiesEveryOutcome(t *testing.T) {
 			{"error.xml", "tests/test_repro.py", 1, "test_error", KindError, OutcomeFailed},
 			{"timeout.xml", "tests/test_repro.py", 1, "test_hang", KindTimeout, OutcomeFailed},
 			{"skipped.xml", "tests/test_repro.py", 0, "test_skipped", KindSkipped, OutcomeInconclusive},
-			{"compile.xml", "tests/test_broken.py", 2, "test_x", KindCompile, OutcomeCompile},
-			{"compile.xml", "tests/test_broken.py", 1, "test_x", KindCompile, OutcomeCompile},
+			// A name the module does not have, read at import: compile.
+			{"cannot-import-name.xml", "tests/test_repro.py", 2, "test_pass", KindCompile, OutcomeCompile},
+			{"attribute-error.xml", "tests/test_repro.py", 2, "test_pass", KindCompile, OutcomeCompile},
+			// A module that cannot be found, imported by the reproduction
+			// or by a package __init__ it imports: missing.
+			{"compile.xml", "tests/test_broken.py", 2, "test_x", KindMissing, OutcomeMissing},
+			{"collect-package-init.xml", "tests/test_repro.py", 2, "test_pass", KindMissing, OutcomeMissing},
 			// A collection error that names another file is no compile verdict.
-			{"compile.xml", "tests/test_repro.py", 2, "test_pass", KindMissing, OutcomeMissing},
-			// A package __init__ that does not import fails the
-			// reproduction's own import, which names it.
-			{"collect-package-init.xml", "tests/test_repro.py", 2, "test_pass", KindCompile, OutcomeCompile},
+			{"cannot-import-name.xml", "tests/test_other.py", 2, "test_pass", KindMissing, OutcomeMissing},
 			// Internal and usage errors (a conftest that does not import)
 			// write no report (pytest 9.1.1): missing.
 			{"", "tests/test_repro.py", 3, "test_pass", KindMissing, OutcomeMissing},

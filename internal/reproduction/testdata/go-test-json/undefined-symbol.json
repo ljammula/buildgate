@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-output","Output":"# example.com/repro/p [example.com/repro/p.test]\n"}
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-output","Output":"p/repro_test.go:6:5: undefined: Sub\n"}
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-fail"}
+{"Time":"2026-10-26T17:25:42.016847847Z","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-26T17:25:42.017106941Z","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [build failed]\n"}
+{"Time":"2026-10-26T17:25:42.017218262Z","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/repro/p [example.com/repro/p.test]"}

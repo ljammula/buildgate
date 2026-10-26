@@ -64,7 +64,8 @@ func (tr *ticketRun) snapshotReviewInputs() error {
 }
 
 // loadRecheckManifest reads a run.RecheckManifest and checks it: for each
-// reproduction a valid run id and a held copy (no refusal) whose host path
+// reproduction a valid run id of a run of the manifest's request, and a held
+// copy (no refusal) whose host path
 // is a regular file, reached through no link, under that run's review-repro
 // directory in dataDir, with a SHA-256, a runner the registry has and
 // between one and reproduction.MaxTestIDs test IDs. The copies' content is
@@ -84,18 +85,26 @@ func loadRecheckManifest(dataDir, path string) ([]run.RecheckEntry, error) {
 		return nil, errors.New("it names no reproduction")
 	}
 	for i, e := range m.Reproductions {
-		if err := checkRecheckRun(dataDir, e); err != nil {
+		if err := checkRecheckRun(dataDir, m.RequestID, e); err != nil {
 			return nil, fmt.Errorf("reproduction %d: %w", i, err)
 		}
 	}
 	return m.Reproductions, nil
 }
 
-// checkRecheckRun checks e's run id and its held copy (checkRecheckEntry)
-// against that run's review-repro directory.
-func checkRecheckRun(dataDir string, e run.RecheckEntry) error {
+// checkRecheckRun checks e's run: a valid id of a run of request requestID
+// (the request the build is a ticket of), and its held copy
+// (checkRecheckEntry) against that run's review-repro directory.
+func checkRecheckRun(dataDir, requestID string, e run.RecheckEntry) error {
 	if !run.ValidID(e.RunID) {
 		return fmt.Errorf("run id %q is not valid", e.RunID)
+	}
+	held, err := run.Load(dataDir, e.RunID)
+	if err != nil {
+		return fmt.Errorf("run %s: %w", e.RunID, err)
+	}
+	if requestID == "" || held.RequestID != requestID {
+		return fmt.Errorf("run %s is not a run of request %q", e.RunID, requestID)
 	}
 	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, e.RunID)))
 	if err != nil {

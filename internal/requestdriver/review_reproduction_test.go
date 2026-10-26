@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -121,12 +122,12 @@ func TestReviewReproductionCorrectiveRoundAccepted(t *testing.T) {
 	}
 }
 
-// The corrective build's -recheck-reproductions manifest names the
-// quarantined run and, for each blocking finding, its held copy under that
+// The corrective build's -recheck-reproductions manifest is the ticket's
+// list: for the quarantined run's blocking finding, its held copy under that
 // run's review-repro directory, with the hash, runner, test IDs and cited
 // line the run recorded. A held copy that is gone or no longer matches its
-// hash gives no corrective build at all: one that would not run the
-// reproduction again could pass a review that no longer repeats the finding.
+// hash gives no corrective build: the request halts (HaltReproductionUnheld)
+// with the operator's way out.
 func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
@@ -136,6 +137,8 @@ func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 	}
 	r := requestdrivertest.LoadRequest(t, dataDir, id)
 	r.TicketIndex = 1
+	// What the request driver records when it observes the refusal.
+	r.Tickets[0].NoteReproductionRefusal(requestdrivertest.HeldEntry(t, dataDir, quarantined.ID), quarantined.ID)
 	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: quarantined.Branch}
 	})
@@ -144,17 +147,11 @@ func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 		t.Fatalf("handled=%v err=%v calls=%d, want one corrective build", handled, err, *calls)
 	}
 	m := readRecheckManifest(t, *lastArgs)
-	if filepath.Dir(requestdrivertest.ArgValue(*lastArgs, "-recheck-reproductions")) != filepath.Join(request.Dir(dataDir, id), "rounds", "001-corrective1") {
-		t.Errorf("the manifest is not in the round's directory: %s", requestdrivertest.ArgValue(*lastArgs, "-recheck-reproductions"))
+	if filepath.Dir(requestdrivertest.ArgValue(*lastArgs, "-recheck-reproductions")) != filepath.Join(request.Dir(dataDir, id), "rounds", id+"-001-corrective1") {
+		t.Errorf("the manifest is not in the build's directory: %s", requestdrivertest.ArgValue(*lastArgs, "-recheck-reproductions"))
 	}
-	rep := quarantined.CodeReview.Findings[0].Reproduction
-	wantHost, err := filepath.Abs(filepath.Join(run.ReviewReproductionDir(run.Dir(dataDir, quarantined.ID)), "0", filepath.FromSlash(rep.Path)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := run.RecheckEntry{RunID: quarantined.ID, HeldReproduction: run.HeldReproduction{Finding: 0, Path: rep.Path, SHA256: rep.SHA256, HostPath: wantHost, SpecLine: requestdrivertest.ReproductionSpecLine, TestIDs: rep.TestIDs, Runner: rep.Runner}}
-	if len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
-		t.Errorf("manifest = %+v, want run %s and %+v", m, quarantined.ID, want)
+	if want := requestdrivertest.HeldEntry(t, dataDir, quarantined.ID); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
+		t.Errorf("manifest = %+v, want %+v", m, want)
 	}
 
 	for name, spoil := range map[string]func(host string){
@@ -171,12 +168,16 @@ func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 			}
 			r := requestdrivertest.LoadRequest(t, dataDir, id)
 			r.TicketIndex = 1
+			r.Tickets[0].NoteReproductionRefusal(requestdrivertest.HeldEntry(t, dataDir, quarantined.ID), quarantined.ID)
 			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted}
 			})
 			handled, err := requestdriver.TryCheckCorrectiveRound(dp, context.Background(), dataDir, r, &r.Tickets[0], quarantined, requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}, time.Now())
-			if handled || err != nil || *calls != 0 {
-				t.Errorf("handled=%v err=%v calls=%d, want no corrective build", handled, err, *calls)
+			if !handled || err != nil || *calls != 0 {
+				t.Errorf("handled=%v err=%v calls=%d, want the request halted and no corrective build", handled, err, *calls)
+			}
+			if r.State != request.StateHalted || r.HaltKind != request.HaltReproductionUnheld || !r.Tickets[0].Reproductions[0].Unheld || !strings.Contains(r.Error, "factoryd retry "+id) {
+				t.Errorf("state %s kind %q error %q list %+v; want halted with the unheld kind, the entry marked and the retry named", r.State, r.HaltKind, r.Error, r.Tickets[0].Reproductions)
 			}
 		})
 	}
@@ -254,8 +255,13 @@ func TestReviewReproductionNewFindingInARoundRunsTheNextRound(t *testing.T) {
 	if got := requestdrivertest.ArgValue(round2Args, "-diff-base"); got != originalBase {
 		t.Errorf("round 2's -diff-base = %q, want the original base %q", got, originalBase)
 	}
-	if m := readRecheckManifest(t, round2Args); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != id+"-001-corrective1" {
-		t.Errorf("round 2 rechecks %+v, want round 1's %s-001-corrective1", m.Reproductions, id)
+	// Round 1's own finding has the first build's path and hash: the
+	// ticket's list holds it once, from the run that first held it.
+	if m := readRecheckManifest(t, round2Args); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != id+"-001" || m.Reproductions[0].Path != requestdrivertest.ReproductionPath {
+		t.Errorf("round 2 rechecks %+v, want the ticket's one reproduction", m.Reproductions)
+	}
+	if list := requestdrivertest.LoadRequest(t, dataDir, id).Tickets[0].Reproductions; len(list) != 1 || !slices.Equal(list[0].RefusedRuns, []string{id + "-001", id + "-001-corrective1"}) {
+		t.Errorf("ticket list = %+v, want one reproduction that refused both runs", list)
 	}
 	if loaded := requestdrivertest.LoadRequest(t, dataDir, id); loaded.State != request.StatePRReview {
 		t.Fatalf("State = %q, want %q", loaded.State, request.StatePRReview)
@@ -459,48 +465,36 @@ func TestARetryAfterAStillFailingRecheckRechecksTheFirstRunsCopy(t *testing.T) {
 	assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", builds[1])
 }
 
-// SC-022: a corrective build that was given a recheck and which another
-// check quarantined, whether its recheck ran and passed or its gates failed
-// before the recheck ran, is followed by a round that still rechecks the
-// reproduction: a later round must not undo an earlier one's fix.
+// SC-022: a corrective build whose recheck passed but which another check
+// quarantined is followed by a round that still rechecks the reproduction:
+// it stays on the ticket's list, so a later round cannot undo the fix.
 func TestARoundAfterAPassingRecheckStillRechecksIt(t *testing.T) {
-	for _, ran := range []bool{true, false} {
-		t.Run(fmt.Sprintf("recheck ran=%v", ran), func(t *testing.T) {
-			dp := newFakeDeps(t)
-			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
-			branch := "factoryd/" + id + "-001"
-			buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), "")
-			var rounds [][]string
-			orig := requestdriver.ReviewCorrectiveRunner
-			t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-			requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				rounds = append(rounds, args)
-				roundRunID := requestdrivertest.ArgValue(args, "-ticket")
-				if onReady != nil {
-					onReady(&run.Run{ID: roundRunID})
-				}
-				if len(rounds) == 1 {
-					rr := requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "lint")
-					if !ran {
-						// factoryd records what the build was given at its
-						// start; its gates failed, so no recheck ran.
-						rr.ReviewReproductionRechecksGiven = []run.RecheckEntry{*rr.ReviewReproductionRechecks[0].Recheck}
-						rr.ReviewReproductionRechecks = nil
-					}
-					return rr.Save(dataDir)
-				}
-				return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
-			}
-			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
-				t.Fatalf("driveRequests: %v", err)
-			}
-			if len(rounds) != 2 {
-				t.Fatalf("corrective rounds = %d, want 2", len(rounds))
-			}
-			assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", rounds[1])
-		})
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	branch := "factoryd/" + id + "-001"
+	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), "")
+	var rounds [][]string
+	orig := requestdriver.ReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		rounds = append(rounds, args)
+		roundRunID := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: roundRunID})
+		}
+		if len(rounds) == 1 {
+			return requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "lint").Save(dataDir)
+		}
+		return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
 	}
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if len(rounds) != 2 {
+		t.Fatalf("corrective rounds = %d, want 2", len(rounds))
+	}
+	assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", rounds[1])
 }
 
 // SC-022: a build that would continue on the commits of a run a reviewer's
@@ -529,8 +523,8 @@ func TestARetryWithTheHeldCopyGoneIsRefused(t *testing.T) {
 		t.Fatalf("builds = %d, want no build after the retry", len(builds))
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
-	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "not built without a recheck") {
-		t.Errorf("State %q, Error %q; want halted with the recheck's reason", loaded.State, loaded.Error)
+	if loaded.State != request.StateHalted || loaded.HaltKind != request.HaltReproductionUnheld || !strings.Contains(loaded.Error, "not built without a recheck") || !strings.Contains(loaded.Error, "factoryd retry "+id) {
+		t.Errorf("State %q, kind %q, Error %q; want halted with the recheck's reason and the operator's way out", loaded.State, loaded.HaltKind, loaded.Error)
 	}
 }
 
