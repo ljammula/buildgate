@@ -70,10 +70,10 @@ class Stacked(unittest.TestCase):
 	def test_finds_ticket_two_stacked_on_ticket_one(self):
 		prs = [
 			{"url": "u0", "headRefName": "factoryd/other-001-x", "baseRefName": "main"},
-			{"url": "u2", "headRefName": "factoryd/req-1-002-20261025-1-abc", "baseRefName": "factoryd/req-1-001-20261025-1-def"},
-			{"url": "u1", "headRefName": "factoryd/req-1-001-20261025-1-def", "baseRefName": "main"},
+			{"url": "u2", "headRefName": "factoryd/a-long-request-bb8755bd3e1e", "baseRefName": "factoryd/a-long-request-798acadf69b6"},
+			{"url": "u1", "headRefName": "factoryd/a-long-request-798acadf69b6", "baseRefName": "main"},
 		]
-		first, second = live_round.stacked_pull_requests(prs, "req-1")
+		first, second = live_round.stacked_pull_requests(prs, [{"pr_url": "u1"}, {"pr_url": "u2"}])
 		self.assertEqual((first["url"], second["url"]), ("u1", "u2"))
 
 	def test_nothing_until_ticket_two_stacks_on_ticket_one(self):
@@ -81,7 +81,9 @@ class Stacked(unittest.TestCase):
 			{"url": "u1", "headRefName": "factoryd/req-1-001-x", "baseRefName": "main"},
 			{"url": "u2", "headRefName": "factoryd/req-1-002-x", "baseRefName": "main"},
 		]
-		self.assertEqual(live_round.stacked_pull_requests(prs, "req-1"), (None, None))
+		self.assertEqual(live_round.stacked_pull_requests(prs, [{"pr_url": "u1"}, {"pr_url": "u2"}]), (None, None))
+		self.assertEqual(live_round.stacked_pull_requests(prs, [{"pr_url": "u1"}, {}]), (None, None))
+		self.assertEqual(live_round.stacked_pull_requests(prs, []), (None, None))
 
 	def test_restack_rounds_are_the_pushed_accepted_ones(self):
 		ticket = {"rounds": [

@@ -209,13 +209,18 @@ def print_results(limit):
 	print(f"reviewer comments resolved within the cap: {t['resolved']}/{t['comments']} ({share}) over {t['runs']} run(s), {t['passed']} passed")
 
 
-def stacked_pull_requests(prs, request):
-	"""Ticket 1's and ticket 2's open pull requests of request among prs
-	(gh pr list --json url,number,headRefName,baseRefName): ticket n's head
-	branch names its run, <request>-00n-...; ticket 2's must stack on ticket
-	1's branch. (None, None) until both are open."""
-	first = next((p for p in prs if f"{request}-001-" in p["headRefName"]), None)
-	second = next((p for p in prs if f"{request}-002-" in p["headRefName"]), None)
+def stacked_pull_requests(prs, tickets):
+	"""Ticket 1's and ticket 2's open pull requests among prs (gh pr list
+	--json url,number,headRefName,baseRefName), found by the pull request
+	URLs the request record's tickets hold (a long request id gives its
+	branches hashed names, so a head branch need not name the request);
+	ticket 2's must stack on ticket 1's branch. (None, None) until both are
+	open."""
+	urls = [t.get("pr_url", "") for t in tickets[:2]]
+	if len(urls) < 2 or not all(urls):
+		return None, None
+	first = next((p for p in prs if p["url"] == urls[0]), None)
+	second = next((p for p in prs if p["url"] == urls[1]), None)
 	if first is None or second is None or second["baseRefName"] != first["headRefName"]:
 		return None, None
 	return first, second
@@ -389,7 +394,7 @@ class Round:
 			if state in STOPPED:
 				raise RuntimeError(f"request stopped before its pull requests: {state}: {self.state().get('error', '')}")
 			prs = json.loads(self.gh("pr", "list", "--state", "open", "--json", "url,number,headRefName,baseRefName"))
-			first, second = stacked_pull_requests(prs, self.request)
+			first, second = stacked_pull_requests(prs, self.request_record().get("tickets") or [])
 			if state == "pr_review" and first and second:
 				return (first, second), state
 			return None, state
