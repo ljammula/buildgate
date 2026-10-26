@@ -918,6 +918,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 				status = "FAIL"
 			}
 			fmt.Fprintf(&b, "- `%s`: %s (exit %d, %dms)\n", sanitizeMarkdownField(g.Check), status, g.ExitCode, g.DurationMs)
+			writeChangedByEarlierTickets(&b, g.ChangedByEarlierTickets)
 		}
 		b.WriteString("\n")
 	}
@@ -988,6 +989,20 @@ func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
 			}
 		}
 	}
+}
+
+// writeChangedByEarlierTickets names, under the required_files_changed gate,
+// the required files this ticket left untouched because an earlier ticket of
+// the request already changed them, so a reviewer looks for that work there.
+func writeChangedByEarlierTickets(b *strings.Builder, files []string) {
+	if len(files) == 0 {
+		return
+	}
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = "`" + sanitizeMarkdownField(f) + "`"
+	}
+	fmt.Fprintf(b, "  - changed by an earlier ticket of this request, not by this one: %s\n", strings.Join(quoted, ", "))
 }
 
 // writeNamedGatesSection lists every command gate and the repository's own

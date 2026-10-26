@@ -185,7 +185,7 @@ func TestDiffScopeViolationsGlobDoesNotCrossDirectories(t *testing.T) {
 }
 
 func TestRequiredFilesChangedAllPresent(t *testing.T) {
-	gate, missing := RequiredFilesChanged([]string{"a.go", "a_test.go", "b.go"}, []string{"a.go", "a_test.go"})
+	gate, missing := RequiredFilesChanged([]string{"a.go", "a_test.go", "b.go"}, []string{"a.go", "a_test.go"}, nil)
 	if len(missing) != 0 {
 		t.Errorf("got %v, want no missing files", missing)
 	}
@@ -195,7 +195,7 @@ func TestRequiredFilesChangedAllPresent(t *testing.T) {
 }
 
 func TestRequiredFilesChangedFindsMissingFile(t *testing.T) {
-	gate, missing := RequiredFilesChanged([]string{"a_test.go"}, []string{"a.go", "a_test.go"})
+	gate, missing := RequiredFilesChanged([]string{"a_test.go"}, []string{"a.go", "a_test.go"}, nil)
 	want := []string{"a.go"}
 	if !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v", missing, want)
@@ -206,13 +206,72 @@ func TestRequiredFilesChangedFindsMissingFile(t *testing.T) {
 }
 
 func TestRequiredFilesChangedEmptyChangedFailsWhenFilesRequired(t *testing.T) {
-	gate, missing := RequiredFilesChanged(nil, []string{"a.go"})
+	gate, missing := RequiredFilesChanged(nil, []string{"a.go"}, nil)
 	want := []string{"a.go"}
 	if !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v", missing, want)
 	}
 	if gate.Passed {
 		t.Errorf("RequiredFilesChanged() Passed = true, want false for an empty changed-file list with required files declared")
+	}
+}
+
+// A later ticket of a request whose required file an earlier ticket already
+// changed (the earlier build did this ticket's work, having seen the whole
+// spec) passes, as long as it changed another of its required files itself,
+// and the gate names the file it counted.
+func TestRequiredFilesChangedCountsAFileAnEarlierTicketChanged(t *testing.T) {
+	gate, missing := RequiredFilesChanged([]string{"README.md"}, []string{"README.md", "main.go"}, []string{"main.go"})
+	if len(missing) != 0 || !gate.Passed {
+		t.Fatalf("RequiredFilesChanged() = %+v, missing %v; want a pass", gate, missing)
+	}
+	if !slices.Equal(gate.ChangedByEarlierTickets, []string{"main.go"}) {
+		t.Errorf("ChangedByEarlierTickets = %v, want [main.go]", gate.ChangedByEarlierTickets)
+	}
+}
+
+// A required file no ticket of the stack changed still fails, whatever the
+// earlier tickets changed.
+func TestRequiredFilesChangedFailsAFileNoTicketChanged(t *testing.T) {
+	gate, missing := RequiredFilesChanged([]string{"README.md"}, []string{"README.md", "main.go"}, []string{"other.go"})
+	if gate.Passed || !slices.Equal(missing, []string{"main.go"}) {
+		t.Errorf("RequiredFilesChanged() = %+v, missing %v; want main.go missing", gate, missing)
+	}
+	if len(gate.ChangedByEarlierTickets) != 0 {
+		t.Errorf("ChangedByEarlierTickets = %v, want none", gate.ChangedByEarlierTickets)
+	}
+}
+
+// A ticket that changed none of its required files fails even when earlier
+// tickets changed every one of them: the earlier work counts only beside some
+// of this ticket's own.
+func TestRequiredFilesChangedNeedsOneRequiredFileOfTheTicketsOwn(t *testing.T) {
+	for _, changed := range [][]string{nil, {"unrelated.go"}} {
+		gate, missing := RequiredFilesChanged(changed, []string{"README.md", "main.go"}, []string{"README.md", "main.go"})
+		if gate.Passed || !slices.Equal(missing, []string{"README.md", "main.go"}) {
+			t.Errorf("changed %v: RequiredFilesChanged() = %+v, missing %v; want both missing", changed, gate, missing)
+		}
+	}
+}
+
+// EvaluateRun passes the earlier tickets' files to the gate: the observed
+// case of a stacked request accepts, and the same run without them does not.
+func TestEvaluateRunCountsRequiredFilesChangedByEarlierTickets(t *testing.T) {
+	input := EvaluateRunInput{
+		VerifyCommand:           []string{"make", "test"},
+		ChangedFiles:            []string{"README.md"},
+		AllowedFiles:            []string{"README.md", "main.go"},
+		RequiredChangedFiles:    []string{"README.md", "main.go"},
+		TestsRequiredOptOut:     "a documentation row",
+		ChangedByEarlierTickets: []string{"main.go"},
+	}
+	if got := EvaluateRun(input); !got.Accepted {
+		t.Fatalf("EvaluateRun() with the earlier ticket's main.go = %+v, want accepted", got)
+	}
+	input.ChangedByEarlierTickets = nil
+	got := EvaluateRun(input)
+	if got.Accepted || !slices.Equal(got.MissingRequiredFiles, []string{"main.go"}) {
+		t.Errorf("EvaluateRun() without it = %+v, want main.go missing", got)
 	}
 }
 

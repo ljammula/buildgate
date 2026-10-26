@@ -97,6 +97,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 	return []string{
 		"-ticket", "001-golden",
 		"-instruction-base", strings.TrimSpace(head),
+		"-changed-by-earlier-tickets", "content.txt",
 		"-run-id", runID,
 		"-workspace", workspace,
 		"-spec", write("spec.md", wellFormedRequestTicketspec),

@@ -570,6 +570,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		ChangedFiles:              evidenceResult.ChangedFiles,
 		AllowedFiles:              input.AllowedFiles,
 		RequiredChangedFiles:      input.RequiredChangedFiles,
+		ChangedByEarlierTickets:   input.ChangedByEarlierTickets,
 		RequiredContent:           input.RequiredContent,
 		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
 		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,

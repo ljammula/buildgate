@@ -54,6 +54,9 @@
   },
   "diff_base_sha": "every-field diff_base_sha",
   "instruction_base_sha": "every-field instruction_base_sha",
+  "changed_by_earlier_tickets": [
+    "every-field changed_by_earlier_tickets"
+  ],
   "result_sha": "every-field result_sha",
   "halt_confirmed": true,
   "kept_for_resume": true,
@@ -322,7 +325,10 @@
         "first_log_sha256": "every-field first_log_sha256",
         "exit_code": 3,
         "reason": "every-field reason"
-      }
+      },
+      "changed_by_earlier_tickets": [
+        "every-field changed_by_earlier_tickets"
+      ]
     }
   ],
   "notifications": [

@@ -63,6 +63,11 @@ type RunWorkflowInput struct {
 	AllowedFiles         []string `json:"allowed_files,omitempty"`
 	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
 	RequiredContent      []string `json:"required_content,omitempty"`
+	// ChangedByEarlierTickets is the files the earlier tickets of the same
+	// request changed (-changed-by-earlier-tickets), passed to the
+	// required_files_changed gate (policy.RequiredFilesChanged). nil for a
+	// request's first ticket and every run outside a request.
+	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
 	// LogDir/CheckpointDir override Activities.LogDir/CheckpointDir for
 	// this execution when set, falling back to the Worker-static values
 	// otherwise (preserves every existing caller/test that only sets

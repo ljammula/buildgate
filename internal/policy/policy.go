@@ -77,21 +77,53 @@ func DiffScope(changed, allowed []string) (run.GateResult, []string) {
 // already-collected changed-file inventory diff_scope uses, so a required
 // file that was never touched quarantines the run even though build and
 // verify both passed.
-func RequiredFilesChanged(changed, required []string) (run.GateResult, []string) {
-	changedSet := make(map[string]bool, len(changed))
-	for _, f := range changed {
-		changedSet[f] = true
-	}
+//
+// changedEarlier is the files the earlier tickets of the same request
+// changed (nil for a request's first ticket and for every run outside a
+// request). Every ticket build sees the whole approved spec, so an earlier
+// ticket can do a later ticket's work in a file both may change; the later
+// ticket then has nothing left to change there. A required file this run
+// left untouched counts as changed when an earlier ticket changed it, on
+// one condition: this run itself changed at least one of its required
+// files. The obligation is then on the stack, and a ticket that did none of
+// its own required work, or a file no ticket of the stack touched, still
+// fails. The files counted that way are recorded on the gate
+// (ChangedByEarlierTickets). The rule reads only file lists.
+func RequiredFilesChanged(changed, required, changedEarlier []string) (run.GateResult, []string) {
+	changedSet := stringSet(changed)
 	var missing []string
+	ownChange := false
 	for _, f := range required {
-		if !changedSet[f] {
+		if changedSet[f] {
+			ownChange = true
+		} else {
 			missing = append(missing, f)
 		}
 	}
-	return run.GateResult{
-		Check:  "required_files_changed",
-		Passed: len(missing) == 0,
-	}, missing
+	gate := run.GateResult{Check: "required_files_changed"}
+	if ownChange && len(missing) > 0 && len(changedEarlier) > 0 {
+		earlierSet := stringSet(changedEarlier)
+		var stillMissing []string
+		for _, f := range missing {
+			if earlierSet[f] {
+				gate.ChangedByEarlierTickets = append(gate.ChangedByEarlierTickets, f)
+			} else {
+				stillMissing = append(stillMissing, f)
+			}
+		}
+		missing = stillMissing
+	}
+	gate.Passed = len(missing) == 0
+	return gate, missing
+}
+
+// stringSet returns the members of list as a set.
+func stringSet(list []string) map[string]bool {
+	set := make(map[string]bool, len(list))
+	for _, s := range list {
+		set[s] = true
+	}
+	return set
 }
 
 // RequiredFilesPreDirty returns which of the ticket's required files
@@ -431,6 +463,10 @@ type EvaluateRunInput struct {
 	ChangedFiles         []string
 	AllowedFiles         []string
 	RequiredChangedFiles []string
+	// ChangedByEarlierTickets is the files the earlier tickets of the same
+	// request changed, nil outside a request's later tickets: see
+	// RequiredFilesChanged.
+	ChangedByEarlierTickets []string
 
 	RequiredContent           []string
 	RequiredContentBaseFiles  map[string]string
@@ -534,7 +570,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	}
 
 	if input.RequiredChangedFiles != nil {
-		requiredGate, missing := RequiredFilesChanged(input.ChangedFiles, input.RequiredChangedFiles)
+		requiredGate, missing := RequiredFilesChanged(input.ChangedFiles, input.RequiredChangedFiles, input.ChangedByEarlierTickets)
 		result.GateResults = append(result.GateResults, requiredGate)
 		result.MissingRequiredFiles = missing
 		if !requiredGate.Passed {
