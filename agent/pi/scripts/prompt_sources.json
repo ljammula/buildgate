@@ -89,9 +89,10 @@
         "draft_acceptance_oracles.go.prompt.md",
         "draft_acceptance_oracles.python.prompt.md",
         "draft_acceptance_oracles.feedback.prompt.md",
-        "draft_acceptance_oracles.prior_imports.prompt.md"
+        "draft_acceptance_oracles.prior_imports.prompt.md",
+        "draft_acceptance_oracles.answers.prompt.md"
       ],
-      "description": "Combines acceptance criteria, other-criterion context, repository file inventory, optional feedback and prior Python imports, and the selected ecosystem's oracle-writing instructions."
+      "description": "Combines acceptance criteria, other-criterion context, the read-back answers approved with the spec, repository file inventory, optional feedback and prior Python imports, and the selected ecosystem's oracle-writing instructions."
     },
     {
       "id": "prompt-source:draft-oracles.feedback",

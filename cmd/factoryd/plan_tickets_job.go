@@ -438,22 +438,22 @@ func stagePreviousPlan(dataDir string, r *request.Request, scratchDir, sandboxUs
 	return path, nil
 }
 
-// specAnswersFileName is the planner's copy of the read-back answers approved
-// with the spec, in its scratch directory.
+// specAnswersFileName is a drafting job's copy of the read-back answers
+// approved with the spec, in its scratch directory.
 const specAnswersFileName = "spec-answers.md"
 
 // stageSpecAnswers writes the read-back questions the operator answered and
 // approved with the spec (requestdriver.AnsweredReadBackBlock, the rendering
-// every reader of the approved spec gets) into scratchDir for
-// plan_tickets.py's --spec-answers-file, and returns its path; "" when no
-// question was answered.
+// every reader of the approved spec gets) into scratchDir for the
+// --spec-answers-file of plan_tickets.py and draft_acceptance_oracles.py,
+// and returns its path; "" when no question was answered.
 func stageSpecAnswers(r *request.Request, scratchDir, sandboxUser string) (string, error) {
 	block := requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered())
 	if block == "" {
 		return "", nil
 	}
 	if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
-		return "", fmt.Errorf("create plan-draft scratch dir: %w", err)
+		return "", fmt.Errorf("create the job's scratch dir: %w", err)
 	}
 	path := filepath.Join(scratchDir, specAnswersFileName)
 	if err := writeRequestJobFeedbackFile(path, []byte(block), sandboxUser); err != nil {

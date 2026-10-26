@@ -31,9 +31,10 @@ function byteLength(text: string): number {
  * it decides nothing, and approval never waits on an answer.
  *
  * Each box tells `onDraftChanged` whether it holds text not yet saved, so
- * Approve can warn that the text is not sent. A box starts over from the
- * stored answer whenever that answer (or the question) changes underneath
- * it, whoever changed it.
+ * Approve can warn that the text is not sent. When the stored answer (or the
+ * question) changes underneath a box, whoever changed it, a box with no
+ * unsaved text starts over from it; a box with unsaved text keeps the
+ * operator's text and says what is stored now.
  */
 export function ReadBackPanel({
   request,
@@ -90,16 +91,22 @@ function QuestionAnswer({
 }) {
   const answer = useAnswerReadBack(requestId);
   const [draft, setDraft] = useState(question.answer);
-  // The stored question and answer this box last started from: when either
-  // changes (a save, or someone else's answer), the box starts over from it.
+  // The stored question and answer this box last started from (base), and
+  // the stored record it last saw (seen). When the record changes (a save,
+  // or someone else's answer), a box whose text was saved starts over from
+  // it; unsaved text is kept against its base, and the change is shown.
   const stored = `${question.text}\u0000${question.answer}\u0000${question.answeredAt}`;
-  const [startedFrom, setStartedFrom] = useState(stored);
-  if (startedFrom !== stored) {
-    setStartedFrom(stored);
-    setDraft(question.answer);
+  const [startedFrom, setStartedFrom] = useState({ seen: stored, base: question });
+  if (startedFrom.seen !== stored) {
+    const unsaved = draft.trim() !== startedFrom.base.answer && draft.trim() !== question.answer;
+    setStartedFrom({ seen: stored, base: unsaved ? startedFrom.base : question });
+    if (!unsaved) setDraft(question.answer);
   }
   const tooLong = byteLength(draft.trim()) > maxReadBackAnswerBytes;
   const unchanged = draft.trim() === question.answer;
+  const base = startedFrom.base;
+  const changedUnderneath =
+    !unchanged && (base.text !== question.text || base.answer !== question.answer);
   useEffect(() => {
     onDraftChanged(question.id, !unchanged);
   }, [onDraftChanged, question.id, unchanged]);
@@ -133,6 +140,9 @@ function QuestionAnswer({
           }}
         />
       </Field>
+      {changedUnderneath ? (
+        <StoredAnswerChanged question={question} questionChanged={base.text !== question.text} />
+      ) : null}
       <div>
         <Button
           size="sm"
@@ -150,6 +160,45 @@ function QuestionAnswer({
         </Button>
       </div>
       {answer.error ? <ErrorCallout error={answer.error} headingLevel={4} /> : null}
+    </div>
+  );
+}
+
+/**
+ * What a box with unsaved text says when the stored answer or the question
+ * changed underneath it: the stored answer now, as text, and that the box's
+ * text is still not saved.
+ */
+function StoredAnswerChanged({
+  question,
+  questionChanged,
+}: {
+  readonly question: ReadBackQuestion;
+  readonly questionChanged: boolean;
+}) {
+  if (questionChanged) {
+    return (
+      <p className="text-tone-warning text-sm" role="status">
+        This question changed while you were typing: read it again. Your text is kept and not saved.
+      </p>
+    );
+  }
+  return (
+    <div className="text-tone-warning text-sm" role="status">
+      {question.answer === "" ? (
+        <p>The stored answer was cleared while you were typing. Your text is kept and not saved.</p>
+      ) : (
+        <>
+          <p>
+            The stored answer changed while you were typing
+            {question.answeredBy === "" ? "" : ` (by ${question.answeredBy})`}. It is now:
+          </p>
+          <p className="whitespace-pre-line" data-testid={`read-back-stored-${question.id}`}>
+            {question.answer}
+          </p>
+          <p>Your text is kept and not saved.</p>
+        </>
+      )}
     </div>
   );
 }

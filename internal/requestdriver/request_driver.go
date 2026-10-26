@@ -180,7 +180,14 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	// across stages. runSpecDraftJob(In) reads this file back at
 	// request.SpecFeedbackPath(dataDir, r.ID) itself -- see its own doc
 	// comment.
-	if err := writeDraftFeedback(request.SpecFeedbackPath(dataDir, r.ID), draftFeedbackText(r, request.StateSpecDrafting, request.SpecFeedback(r), "## Spec rejected ")); err != nil {
+	feedback := draftFeedbackText(r, request.StateSpecDrafting, request.SpecFeedback(r), "## Spec rejected ")
+	if !importsSpec(r) {
+		// Answers still on the read-back go to the redraft that replaces
+		// the spec they were given about, in their own section: no past
+		// rejection is rewritten to carry them.
+		feedback += request.ReadBackAnswersForRedraft(r.ReadBack)
+	}
+	if err := writeDraftFeedback(request.SpecFeedbackPath(dataDir, r.ID), feedback); err != nil {
 		return false, err
 	}
 	var (
@@ -345,8 +352,16 @@ func saveAndRemind(dataDir string, r *request.Request, now time.Time) error {
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
+	if betweenReviewSaves != nil {
+		betweenReviewSaves(dataDir, r.ID)
+	}
 	return remindOnDisk(dataDir, r, now)
 }
+
+// betweenReviewSaves, when a test sets it, runs in saveAndRemind after r is
+// saved in its review state and before the reminder is recorded: the moment
+// an operator's decision can land between the two writes.
+var betweenReviewSaves func(dataDir, id string)
 
 // remindOnDisk sends the first reminder of the review r has entered
 // (RemindRequest) and records it on the request as it is on disk

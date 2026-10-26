@@ -173,6 +173,17 @@ func QuestionSHA256(text string) string {
 	return sha256Hex([]byte(text))
 }
 
+// QuestionHashLen is how many leading hex digits of QuestionSHA256 a CLI
+// shows beside a question (QuestionShortHash) and asks for back.
+const QuestionHashLen = 12
+
+// QuestionShortHash is the first QuestionHashLen hex digits of
+// QuestionSHA256(text): what `factoryd watch` prints beside a question and
+// `factoryd answer -hash` names it by.
+func QuestionShortHash(text string) string {
+	return QuestionSHA256(text)[:QuestionHashLen]
+}
+
 // readBackAnswersDigest is the hex SHA-256 of answered questions in order:
 // per question its ID, the byte length of its text, the text, the byte
 // length of its answer and the answer, each followed by a newline. Lengths
@@ -206,7 +217,8 @@ func ReadBackShownSHA256(rb *ReadBack) string {
 
 // takeReadBackShown removes ReadBackAnswersKey from expected, returning the
 // files' map without it, and checks it against r at spec_review: a digest
-// sent must equal the stored answers' (ReadBackShownSHA256), and a client
+// sent must come with spec.md's hash (an answers digest alone binds nothing)
+// and equal the stored answers' (ReadBackShownSHA256), and a client
 // that approves what it displayed (requireShown) must send one whenever a
 // question is answered. Either refusal wraps ErrReadBackNotShown. In any
 // other state the key is dropped unchecked: only a spec approval pins
@@ -230,6 +242,9 @@ func takeReadBackShown(id string, r *Request, expected map[string]string, requir
 			return nil, fmt.Errorf("request %s: the read-back's answered questions would be approved but this client did not show them %w -- approve from the CLI (factoryd approve), or a client that shows the read-back", id, ErrReadBackNotShown)
 		}
 		return expected, nil
+	}
+	if expected[specFileName] == "" {
+		return nil, fmt.Errorf("request %s: the approval names the read-back's answers but not %s's hash %w -- answers are approved only with the spec they answer; send both", id, specFileName, ErrReadBackNotShown)
 	}
 	if shown != ReadBackShownSHA256(r.ReadBack) {
 		return nil, fmt.Errorf("request %s: the read-back's answers changed since this client showed them %w (fetch the request again and re-review before approving)", id, ErrReadBackNotShown)
@@ -270,8 +285,9 @@ func verifyApprovedReadBack(r *Request) error {
 // redrafted. A drafted read-back of the same spec bytes as next's
 // (ReadBack.Reads) is kept, with its questions and answers, and next is
 // dropped. Otherwise next replaces it, and the questions the operator had
-// answered are returned: the caller carries them into a rejection's
-// feedback (Rejection.ReadBackAnswers), so they are not lost.
+// answered are returned: a rejection carries them in its feedback
+// (Rejection.ReadBackAnswers); a drafting pass gave them to its redraft
+// before the job ran (ReadBackAnswersForRedraft).
 func (r *Request) ReplaceReadBack(next *ReadBack) (carried []ReadBackQuestion) {
 	if next != nil && r.ReadBack.Reads(next.SpecSHA256) {
 		return nil
@@ -379,6 +395,19 @@ func (r *Request) readBackQuestion(qid string) *ReadBackQuestion {
 // readBackAnswersFeedback renders answered read-back questions for a
 // redraft's feedback: each question and answer on one line (oneLine), so
 // neither can open a heading of its own.
+// ReadBackAnswersForRedraft is the factory-written section of a spec
+// redraft's feedback that gives the drafter the answers rb holds: the pass
+// is about to replace the spec they were given about, and with it the
+// read-back (ReplaceReadBack), so this redraft is the reader they reach.
+// Empty when rb holds no answer.
+func ReadBackAnswersForRedraft(rb *ReadBack) string {
+	answered := rb.Answered()
+	if len(answered) == 0 {
+		return ""
+	}
+	return "## Read-back answers given about an earlier draft (from the factory)\n\n" + readBackAnswersFeedback(answered)
+}
+
 func readBackAnswersFeedback(answered []ReadBackQuestion) string {
 	if len(answered) == 0 {
 		return ""

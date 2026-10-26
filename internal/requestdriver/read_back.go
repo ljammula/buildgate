@@ -38,6 +38,10 @@ func recordReadBack(ctx context.Context, dataDir string, r *request.Request, spe
 		return true, nil
 	}
 	rb, evidence, jobErr := draftReadBack(ctx, dataDir, r, spec, cfg, time.Now())
+	// What the job spent is the request's whatever becomes of the pass.
+	if err := saveReadBackSpend(dataDir, r, evidence); err != nil {
+		return false, err
+	}
 	if jobErr != nil && ctx.Err() != nil {
 		return false, ctx.Err()
 	}
@@ -47,28 +51,46 @@ func recordReadBack(ctx context.Context, dataDir string, r *request.Request, spe
 		}
 		return false, err
 	}
-	addSpecSpend(r, evidence)
 	rb.SpecSHA256 = specSHA
 	carryReadBackAnswers(r, r.ReplaceReadBack(rb))
 	return true, nil
 }
 
-// carryReadBackAnswers puts answers a replaced read-back held into the
-// feedback of the newest spec-review rejection, as a rejection does with the
-// answers it takes (request.Request.ReplaceReadBack): a later redraft of the
-// spec is told them. With no such rejection there is no feedback for them to
-// ride in, which is logged.
+// saveReadBackSpend adds the read-back job's spend and token usage
+// (addSpecSpend) to the request as it is on disk, under its lock, in any
+// state: a pass stopped after the job, or a request cancelled while it ran,
+// still spent it. r takes the saved evidence, so the pass's own later save
+// keeps it. A job that recorded no evidence saves nothing.
+func saveReadBackSpend(dataDir string, r *request.Request, evidence *request.SpecEvidence) error {
+	if evidence == nil {
+		return nil
+	}
+	saved, err := updateLocked(dataDir, r.ID, func(current *request.Request) bool {
+		job := *evidence
+		addSpecSpend(current, &job)
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("record the read-back's spend: %w", err)
+	}
+	r.SpecEvidence = saved.SpecEvidence
+	return nil
+}
+
+// carryReadBackAnswers accounts for answers a replaced read-back held. A
+// pass that redrafted the spec gave them to its drafter, in the feedback it
+// wrote before the job ran (request.ReadBackAnswersForRedraft); a pass over
+// the handed-over spec as it is had no drafter to give them to. Either way
+// the record of a past rejection is left as it was, and the count is logged.
 func carryReadBackAnswers(r *request.Request, carried []request.ReadBackQuestion) {
 	if len(carried) == 0 {
 		return
 	}
-	for i := len(r.Rejections) - 1; i >= 0; i-- {
-		if r.Rejections[i].ForStage == request.StateSpecReview {
-			r.Rejections[i].ReadBackAnswers = append(r.Rejections[i].ReadBackAnswers, carried...)
-			return
-		}
+	if importsSpec(r) {
+		log.Printf("request %s: %d read-back answer(s) were given about other spec text, and this pass took the handed-over spec with no redraft to give them to", r.ID, len(carried))
+		return
 	}
-	log.Printf("request %s: %d read-back answer(s) were given to a read-back of other spec text and no spec rejection holds feedback for them", r.ID, len(carried))
+	log.Printf("request %s: %d read-back answer(s) were given about an earlier draft; this pass's redraft was given them", r.ID, len(carried))
 }
 
 // draftReadBack runs cfg.ReadBack for r over spec and returns the read-back

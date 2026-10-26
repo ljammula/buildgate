@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -260,7 +261,7 @@ func TestOracleDraftJobInputsAreApprovedCriteriaOnly(t *testing.T) {
 			t.Errorf("request.md passed to the drafter as %s", p)
 		}
 	}
-	args := strings.Join(oracleDraftArgs(seen.Script, seen.Workspace, seen.CriteriaPath, seen.FeedbackPath, seen.OutDir, seen.EvidencePath, seen.TimeoutMinutes, seen.CriterionTimeoutMinutes, seen.Ecosystem, "", "pi"), "\n")
+	args := strings.Join(oracleDraftArgs(seen.Script, seen.Workspace, seen.CriteriaPath, seen.FeedbackPath, seen.SpecAnswersPath, seen.OutDir, seen.EvidencePath, seen.TimeoutMinutes, seen.CriterionTimeoutMinutes, seen.Ecosystem, "", "pi"), "\n")
 	if strings.Contains(args, textPath) || strings.Contains(args, "request.md") {
 		t.Errorf("drafter argv mentions request.md:\n%s", args)
 	}
@@ -826,17 +827,65 @@ func TestRunOracleDraftJobUnresolvableReviewRoleFailsBeforeLaunch(t *testing.T) 
 	}
 }
 
+// The oracle drafter is given the read-back answers approved with the spec,
+// in the one rendering every reader gets, staged in its scratch directory
+// and read from there inside the sandbox; with none answered it gets no flag.
+func TestOracleDraftJobIsGivenTheApprovedReadBackAnswers(t *testing.T) {
+	f := newDraftFixture(t)
+	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
+	r.ReadBack = &request.ReadBack{Summary: "s", Questions: []request.ReadBackQuestion{{ID: "Q1", Text: "How long are keys kept?", Answer: "24 hours."}, {ID: "Q2", Text: "Unanswered?"}}}
+	r.ApprovedReadBackSHA256 = request.ReadBackAnswersSHA256(r.ReadBack)
+	var seen oracleLaunch
+	var staged string
+	stubLaunch(t, goDrafted(), func(l oracleLaunch) {
+		seen = l
+		b, err := os.ReadFile(l.SpecAnswersPath)
+		if err != nil {
+			t.Errorf("read the staged answers: %v", err)
+		}
+		staged = string(b)
+	})
+	in := requestdriver.OracleDraftInput{DataDir: f.dataDir, Request: r, Cfg: f.cfg, OracleDir: f.oracleDir}
+	if _, err := runOracleDraftJob(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if want := requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered()); staged != want {
+		t.Fatalf("staged answers = %q, want %q", staged, want)
+	}
+	if dir := filepath.Base(filepath.Dir(seen.SpecAnswersPath)); dir != oracleDraftScratchDirName {
+		t.Errorf("answers staged in %q, want the job's scratch directory", dir)
+	}
+	if got, want := oracleContainerSpecAnswers(seen.SpecAnswersPath), specDraftContainerWorkDir+"/"+oracleDraftScratchDirName+"/"+specAnswersFileName; got != want {
+		t.Errorf("container path = %q, want %q", got, want)
+	}
+	args := oracleDraftArgs(seen.Script, seen.Workspace, seen.CriteriaPath, "", oracleContainerSpecAnswers(seen.SpecAnswersPath), "/o", "/e", 9, 3, "", "", "pi")
+	if i := slices.Index(args, "--spec-answers-file"); i < 0 || args[i+1] != oracleContainerSpecAnswers(seen.SpecAnswersPath) {
+		t.Errorf("args %v do not pass the staged answers", args)
+	}
+
+	r.ReadBack.Questions[0].Answer = ""
+	r.ApprovedReadBackSHA256 = request.ReadBackAnswersSHA256(r.ReadBack)
+	seen = oracleLaunch{}
+	stubLaunch(t, goDrafted(), func(l oracleLaunch) { seen = l })
+	if _, err := runOracleDraftJob(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if seen.SpecAnswersPath != "" || oracleContainerSpecAnswers(seen.SpecAnswersPath) != "" {
+		t.Errorf("SpecAnswersPath = %q with no answer given", seen.SpecAnswersPath)
+	}
+}
+
 func TestOracleDraftArgsShape(t *testing.T) {
-	got := oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c/criteria.md", "", "/o", "/e.json", 9, 3, "", "", "pi")
+	got := oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c/criteria.md", "", "", "/o", "/e.json", 9, 3, "", "", "pi")
 	want := []string{"/h/draft_acceptance_oracles.py", "--workspace", "/w", "--criteria", "/c/criteria.md", "--out-dir", "/o", "--evidence", "/e.json", "--timeout-minutes", "9", "--criterion-timeout-minutes", "3", "--harness", "pi"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("args = %v, want %v", got, want)
 	}
-	got = oracleDraftArgs("/s.py", "/w", "/c", "/fb.md", "/o", "/e", 9, 3, "", "", "pi")
+	got = oracleDraftArgs("/s.py", "/w", "/c", "/fb.md", "", "/o", "/e", 9, 3, "", "", "pi")
 	if n := len(got); got[n-4] != "--feedback" || got[n-3] != "/fb.md" {
 		t.Errorf("feedback flag missing from %v", got)
 	}
-	got = oracleDraftArgs("/s.py", "/w", "/c", "", "/o", "/e", 9, 3, draftEcosystemPython, "", "pi")
+	got = oracleDraftArgs("/s.py", "/w", "/c", "", "", "/o", "/e", 9, 3, draftEcosystemPython, "", "pi")
 	if n := len(got); got[n-4] != "--ecosystem" || got[n-3] != "python" {
 		t.Errorf("ecosystem flag missing from %v", got)
 	}
@@ -845,7 +894,7 @@ func TestOracleDraftArgsShape(t *testing.T) {
 // TestOracleDraftArgsIncludesThinkingWhenGiven covers the review role's own
 // --thinking argument, mirroring TestDraftSpecArgsIncludesThinkingWhenGiven.
 func TestOracleDraftArgsIncludesThinkingWhenGiven(t *testing.T) {
-	got := oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c/criteria.md", "", "/o", "/e.json", 9, 3, "", "xhigh", "pi")
+	got := oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c/criteria.md", "", "", "/o", "/e.json", 9, 3, "", "xhigh", "pi")
 	if n := len(got); got[n-4] != "--thinking" || got[n-3] != "xhigh" {
 		t.Errorf("thinking flag missing from %v", got)
 	}

@@ -110,30 +110,80 @@ test("without write access the answer boxes are disabled", async () => {
   expect(question.getByRole("button", { name: "Save answer" })).toBeDisabled();
 });
 
-test("an answer box starts over when its stored answer changes underneath it", async () => {
-  openRequest(specReview(), {
-    extra: [
-      // Saving Q1 returns a record where someone else has since answered Q2.
-      {
-        on: "PUT /requests/req-1/read-back/answers/Q1",
-        reply: json(specReview("24 hours.", "Per merchant.")),
-      },
-    ],
+// Saving Q1 returns a record where someone else has since answered Q2.
+const answeredUnderneath = () => ({
+  extra: [
+    {
+      on: "PUT /requests/req-1/read-back/answers/Q1",
+      reply: json(specReview("24 hours.", "Per merchant.")),
+    },
+  ],
+});
+
+const answerBox = (id: string) =>
+  within(screen.getByTestId(`read-back-question-${id}`)).getByRole("textbox", {
+    name: `Answer to ${id}`,
   });
+
+async function saveQ1() {
   const q1 = within(await screen.findByTestId("read-back-question-Q1"));
-  const q2Box = () =>
-    within(screen.getByTestId("read-back-question-Q2")).getByRole("textbox", {
-      name: "Answer to Q2",
-    });
-  await userEvent.type(q2Box(), "my unsaved text");
   await userEvent.type(q1.getByRole("textbox", { name: "Answer to Q1" }), "24 hours.");
   await userEvent.click(q1.getByRole("button", { name: "Save answer" }));
+}
+
+test("an answer box with no unsaved text starts over when its stored answer changes underneath it", async () => {
+  openRequest(specReview(), answeredUnderneath());
+  await saveQ1();
   await waitFor(() => {
-    expect(q2Box()).toHaveValue("Per merchant.");
+    expect(answerBox("Q2")).toHaveValue("Per merchant.");
   });
-  expect(
-    within(screen.getByTestId("read-back-question-Q2")).getByText("Answered by bob."),
-  ).toBeInTheDocument();
+  expect(answerBox("Q1")).toHaveValue("24 hours.");
+  const q2 = within(screen.getByTestId("read-back-question-Q2"));
+  expect(q2.getByText("Answered by bob.")).toBeInTheDocument();
+  expect(q2.queryByRole("status")).toBeNull();
+  expect(within(screen.getByTestId("read-back-question-Q1")).queryByRole("status")).toBeNull();
+});
+
+test("an answer box keeps unsaved text when its stored answer changes underneath it, and shows the new answer", async () => {
+  openRequest(specReview(), answeredUnderneath());
+  await screen.findByTestId("read-back-question-Q2");
+  await userEvent.type(answerBox("Q2"), "my unsaved text");
+  await saveQ1();
+  const q2 = within(screen.getByTestId("read-back-question-Q2"));
+  const notice = await q2.findByRole("status");
+  expect(answerBox("Q2")).toHaveValue("my unsaved text");
+  expect(notice).toHaveTextContent("The stored answer changed while you were typing (by bob)");
+  expect(q2.getByTestId("read-back-stored-Q2")).toHaveTextContent("Per merchant.");
+  expect(notice).toHaveTextContent("Your text is kept and not saved.");
+  await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+  const dialog = within(await screen.findByRole("dialog"));
+  expect(dialog.getByText(/Unsaved answer to Q2: not part of this approval/)).toBeInTheDocument();
+});
+
+test("an answer box keeps unsaved text when its question is replaced underneath it, and says so", async () => {
+  const first = readBack("24 hours.").questions[0];
+  const replaced = requestWire({
+    state: "spec_review",
+    title: "Refunds",
+    spec: "# Spec\n\nRefunds.\n",
+    spec_imported: true,
+    read_back: {
+      summary: "Makes POST /refunds idempotent by key.",
+      questions: [first, { id: "Q2", text: "Scoped per account?" }],
+    },
+  });
+  openRequest(specReview(), {
+    extra: [{ on: "PUT /requests/req-1/read-back/answers/Q1", reply: json(replaced) }],
+  });
+  await screen.findByTestId("read-back-question-Q2");
+  await userEvent.type(answerBox("Q2"), "my unsaved text");
+  await saveQ1();
+  const q2 = within(screen.getByTestId("read-back-question-Q2"));
+  expect(await q2.findByRole("status")).toHaveTextContent(
+    "This question changed while you were typing: read it again.",
+  );
+  expect(answerBox("Q2")).toHaveValue("my unsaved text");
+  expect(q2.getByText(/Scoped per account\?/)).toBeInTheDocument();
 });
 
 test("Approve warns about an answer box with unsaved text and binds the answers shown", async () => {

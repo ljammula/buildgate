@@ -105,6 +105,9 @@ type LostStep struct {
 	Cause unresolved.Cause
 	// RetryAt is ResumeInfo.RetryAt.
 	RetryAt string
+	// Detail, when set, is what the step's job reported, one sanitised line;
+	// it follows the prompt in the request's Error.
+	Detail string
 }
 
 // EnterResumeReview moves a request whose step ended with no verdict on the
@@ -128,6 +131,9 @@ func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) er
 		At:         r.UpdatedAt,
 	}
 	r.Error = prompt
+	if step.Detail != "" {
+		r.Error += "; the job reported: " + step.Detail
+	}
 	r.ClearReminderState()
 	return nil
 }

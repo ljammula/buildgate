@@ -1007,8 +1007,9 @@ func printReviewNotes(out io.Writer, dataDir string, r *request.Request) {
 }
 
 // printReadBack prints a handed-over spec's read-back at spec_review: the
-// model's summary and each question with its id and current answer, so
-// `factoryd answer -q <id>` can be run from what it shows. The text is the
+// model's summary and each question with its id, the short hash of its text
+// (request.QuestionShortHash) and its current answer, so `factoryd answer -q
+// <id> -hash <hash>` can be run from what it shows. The text is the
 // model's and the operator's, flattened to one line each (sanitize.Line). A
 // read-back that could not be drafted is a review note (printReviewNotes),
 // not printed here.
@@ -1023,9 +1024,9 @@ func printReadBack(out io.Writer, r *request.Request) {
 		if q.Answer != "" {
 			answer = sanitize.Line(q.Answer)
 		}
-		fmt.Fprintf(out, "  %s: %s\n    answer: %s\n", q.ID, sanitize.Line(q.Text), answer)
+		fmt.Fprintf(out, "  %s [%s]: %s\n    answer: %s\n", q.ID, request.QuestionShortHash(q.Text), sanitize.Line(q.Text), answer)
 	}
 	if len(rb.Questions) > 0 {
-		fmt.Fprintf(out, "answer a question: factoryd answer -q <id> -text \"<answer>\" %s (empty -text clears it; the answers reach every ticket's build)\n", r.ID)
+		fmt.Fprintf(out, "answer a question: factoryd answer -q <id> -hash <hash in brackets> -text \"<answer>\" %s (empty -text clears it; the answers reach every ticket's build)\n", r.ID)
 	}
 }

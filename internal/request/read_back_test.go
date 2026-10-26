@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -357,6 +358,7 @@ func TestApproveShownBindsTheReadBackAnswersTheClientShowed(t *testing.T) {
 		"other answers shown":  {specFileName: specHash, ReadBackAnswersKey: stale},
 		"no answers shown":     {specFileName: specHash, ReadBackAnswersKey: ReadBackShownSHA256(nil)},
 		"nothing shown at all": nil,
+		"answers without spec": {ReadBackAnswersKey: shown},
 	}
 	for name, expected := range refused {
 		if _, err := ApproveShown(dataDir, r.ID, "alice", fixedNow, expected); !errors.Is(err, ErrReadBackNotShown) {
@@ -372,6 +374,24 @@ func TestApproveShownBindsTheReadBackAnswersTheClientShowed(t *testing.T) {
 	}
 	if approved.ApprovedReadBackSHA256 != ReadBackAnswersSHA256(approved.ReadBack) || approved.ApprovedSHA256[ReadBackAnswersKey] != "" {
 		t.Fatalf("approval pinned %q, files %v", approved.ApprovedReadBackSHA256, approved.ApprovedSHA256)
+	}
+}
+
+// An answers digest binds answers to the spec they answer: sent without
+// spec.md's hash it pins nothing, so it is refused from any client.
+func TestAnAnswersDigestWithoutTheSpecHashIsRefused(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	for name, approveWith := range map[string]func(map[string]string) (*Request, error){
+		"ApproveShown": func(e map[string]string) (*Request, error) { return ApproveShown(dataDir, r.ID, "alice", fixedNow, e) },
+		"Approve":      func(e map[string]string) (*Request, error) { return Approve(dataDir, r.ID, "alice", fixedNow, e) },
+	} {
+		if _, err := approveWith(map[string]string{ReadBackAnswersKey: ReadBackShownSHA256(nil)}); !errors.Is(err, ErrReadBackNotShown) {
+			t.Errorf("%s with only the answers key = %v, want ErrReadBackNotShown", name, err)
+		}
+	}
+	if got, err := Load(dataDir, r.ID); err != nil || got.State != StateSpecReview {
+		t.Fatalf("a refused approval moved the request: %v %v", got.State, err)
 	}
 }
 
@@ -456,5 +476,34 @@ func TestReplaceReadBackKeepsAReadBackOfTheSameSpecBytes(t *testing.T) {
 	retried.SpecSHA256 = SpecTextSHA256("spec v1")
 	if unavailable.ReplaceReadBack(&retried); unavailable.ReadBack != &retried {
 		t.Fatal("an unavailable read-back was kept over a drafted one of the same spec")
+	}
+}
+
+// A spec edited after its read-back was drafted gets one note at spec
+// review, from the hashes alone; the read-back of the text under review, or
+// one with no recorded hash, gets none.
+func TestASpecEditedAfterItsReadBackIsNotedAtSpecReview(t *testing.T) {
+	dataDir := t.TempDir()
+	r := newSpecReviewRequestWithReadBack(t, dataDir)
+	spec, err := os.ReadFile(SpecPath(dataDir, r.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ReadBack.SpecSHA256 = SpecTextSHA256(string(spec))
+	r.RefreshReviewNotes(dataDir)
+	if slices.Contains(r.ReviewNotes, ReadBackStaleNote) {
+		t.Fatalf("a read-back of the spec under review was noted as stale: %v", r.ReviewNotes)
+	}
+	if err := os.WriteFile(SpecPath(dataDir, r.ID), append(spec, []byte("\nAn edit.\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.RefreshReviewNotes(dataDir)
+	if len(r.ReviewNotes) == 0 || r.ReviewNotes[0] != ReadBackStaleNote {
+		t.Fatalf("ReviewNotes = %v, want the stale read-back noted first", r.ReviewNotes)
+	}
+	r.ReadBack.SpecSHA256 = ""
+	r.RefreshReviewNotes(dataDir)
+	if slices.Contains(r.ReviewNotes, ReadBackStaleNote) {
+		t.Fatalf("a read-back with no recorded spec hash was noted as stale: %v", r.ReviewNotes)
 	}
 }

@@ -305,7 +305,7 @@ func spendingRedraft(revised string) requestdriver.SpecDraftRunner {
 
 // A read-back stopped part-way, by the worker's context or by the operator's
 // cancel, leaves the reviewed spec.md as it was and keeps what the drafting
-// job before it spent.
+// job before it and the read-back job itself spent.
 func TestAStoppedReadBackKeepsTheReviewedSpecAndTheDraftingSpend(t *testing.T) {
 	reviewed := requestdrivertest.CanonicalValidSpec
 	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
@@ -346,7 +346,7 @@ func TestAStoppedReadBackKeepsTheReviewedSpecAndTheDraftingSpend(t *testing.T) {
 					t.Errorf("the read-back read %q, want the redraft", spec)
 				}
 				tc.stop(t, dataDir, r.ID, cancel)
-				return nil, nil, context.Canceled
+				return nil, &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 5}, Usage: map[string]any{"totalTokens": float64(40)}}, context.Canceled
 			}
 			err := requestdriver.AdvanceSpecDrafting(ctx, dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now())
 			if !errors.Is(err, tc.wantErr) && !(tc.wantErr == nil && err == nil) {
@@ -363,8 +363,8 @@ func TestAStoppedReadBackKeepsTheReviewedSpecAndTheDraftingSpend(t *testing.T) {
 			if loaded.State != tc.wantState || loaded.ReadBack != nil {
 				t.Fatalf("State = %q, ReadBack = %+v; want %q and no read-back", loaded.State, loaded.ReadBack, tc.wantState)
 			}
-			if loaded.SpecEvidence == nil || loaded.SpecEvidence.Spend == nil || loaded.SpecEvidence.Spend.CostMicroUSD != 7 {
-				t.Fatalf("SpecEvidence = %+v, want the drafting job's spend kept", loaded.SpecEvidence)
+			if ev := loaded.SpecEvidence; ev == nil || ev.Spend == nil || ev.Spend.CostMicroUSD != 12 || ev.Usage["totalTokens"] != float64(140) {
+				t.Fatalf("SpecEvidence = %+v, want the drafting job's and the read-back's spend kept (12 micro-USD, 140 tokens)", loaded.SpecEvidence)
 			}
 		})
 	}
@@ -417,9 +417,11 @@ func TestARetryOfTheSameSpecKeepsTheAnsweredReadBack(t *testing.T) {
 	}
 }
 
-// Answers to a read-back of other spec text, replaced by this pass's, ride
-// in the newest spec-review rejection's feedback instead of being lost.
-func TestAnswersToAReplacedReadBackRideInTheRejectionFeedback(t *testing.T) {
+// Answers still on a read-back of other spec text reach this pass's
+// redraft, in a factory-written section of the feedback it reads, before the
+// pass's own read-back replaces it; the record of the past rejection is not
+// rewritten to carry them.
+func TestAnswersToAReplacedReadBackReachThisPassRedraft(t *testing.T) {
 	dataDir := t.TempDir()
 	revised := strings.Replace(requestdrivertest.DraftedSpec, "None known.", "Keys are kept for 24 hours.", 1)
 	r := rejectedHandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
@@ -430,17 +432,37 @@ func TestAnswersToAReplacedReadBackRideInTheRejectionFeedback(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
+	var feedbackRead string
+	redraft := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+		data, err := os.ReadFile(request.SpecFeedbackPath(dataDir, r.ID))
+		if err != nil {
+			t.Errorf("the redraft had no feedback file: %v", err)
+		}
+		feedbackRead = string(data)
+		return spendingRedraft(revised)(ctx, dataDir, r, cfg)
+	}
 	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 		return draftedReadBack(), nil, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), redraft, time.Now()); err != nil {
 		t.Fatal(err)
+	}
+	rejected, section, found := strings.Cut(feedbackRead, "## Read-back answers given about an earlier draft (from the factory)")
+	if !found || !strings.Contains(rejected, "state the retention period") || !strings.Contains(section, "Answer: Forever.") || strings.Contains(rejected, "Forever.") {
+		t.Fatalf("the redraft's feedback does not give the answer in its own section after the rejection:\n%s", feedbackRead)
 	}
 	if len(r.ReadBack.Answered()) != 0 {
 		t.Fatalf("the new read-back carries old answers: %+v", r.ReadBack)
 	}
-	if feedback := request.SpecFeedback(r); !strings.Contains(feedback, "Answer: Forever.") {
-		t.Fatalf("the replaced read-back's answer is not in the spec feedback:\n%s", feedback)
+	loaded, err := request.Load(dataDir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Rejections[len(loaded.Rejections)-1].ReadBackAnswers; len(got) != 0 {
+		t.Fatalf("the past rejection was rewritten to carry %+v", got)
+	}
+	if feedback := request.SpecFeedback(loaded); strings.Contains(feedback, "Forever.") {
+		t.Fatalf("a later redraft's rejection feedback carries the answer of a replaced read-back:\n%s", feedback)
 	}
 }
 
