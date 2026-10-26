@@ -51,16 +51,17 @@ func wakeRequestWorkflowWith(dp *deps, ctx context.Context, dialer requestWorkfl
 	if err != nil || !hb.Worker() || daemonheartbeat.Stale(hb, time.Now(), workerStaleAfter) || !hostcontrol.AliveFactoryd(dp, hb.PID) {
 		return nil
 	}
-	jobs, light, err := requestTaskQueues(dataDir)
+	queueID, err := requestQueueID(dataDir)
 	if err != nil {
 		return err
 	}
+	jobs, light := taskQueuesFor(queueID)
 	starter, closeFn, err := dialer.DialRequestWorkflowStarter(ctx, hb.TemporalAddress)
 	if err != nil {
 		return fmt.Errorf("reach Temporal at %s: %w", hb.TemporalAddress, err)
 	}
 	defer closeFn()
-	return startRequestWorkflow(ctx, starter, requestID, jobs, light)
+	return wakeOrStartRequestWorkflow(ctx, starter, queueID, requestID, jobs, light)
 }
 
 // requestWakeTimeout bounds one wake (dial plus signal-with-start), so an

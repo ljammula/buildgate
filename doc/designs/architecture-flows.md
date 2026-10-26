@@ -103,7 +103,7 @@ withdrawal) is a third off-ramp from any state, omitted above for space.
 
 `factoryd worker` drives every request of one data dir, each as one
 `RequestWorkflow` (`internal/workflow/request_workflow.go`, workflow id
-`factoryd-request-<request id>`). `request.json` stays the source of truth:
+`factoryd-request-<queue id>-<request id>`). `request.json` stays the source of truth:
 the workflow keeps no request state, and each step
 (`internal/requestdriver`) saves its own outcome.
 

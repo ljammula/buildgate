@@ -2,16 +2,11 @@ package main
 
 import (
 	"buildgate/internal/unresolved"
-	"context"
-	"slices"
 	"testing"
-
-	"go.temporal.io/api/serviceerror"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
-	"buildgate/internal/workflow"
 )
 
 // A run halted at worker start halts the request that was building it, so the
@@ -89,24 +84,5 @@ func TestHaltRequestsOfLostRunsLeavesAPRReviewRequestForARunFromBeforeIt(t *test
 	round := &run.Run{ID: "run-round", RequestID: "req-pr", CreatedAt: "2026-10-20T04:10:00Z"}
 	if halted := haltRequestsOfLostRuns(dataDir, []*run.Run{round}); len(halted) != 1 {
 		t.Fatalf("halted = %v, want [req-pr] for a round started in pr_review", halted)
-	}
-}
-
-type recordingTerminator struct {
-	ids []string
-	err error
-}
-
-func (r *recordingTerminator) TerminateWorkflow(_ context.Context, workflowID, _, _ string, _ ...interface{}) error {
-	r.ids = append(r.ids, workflowID)
-	return r.err
-}
-
-func TestTerminateRequestWorkflowsEndsEachHaltedRequestsWorkflow(t *testing.T) {
-	term := &recordingTerminator{err: serviceerror.NewNotFound("gone")}
-	terminateRequestWorkflows(context.Background(), term, []string{"a", "b"})
-	want := []string{workflow.RequestWorkflowID("a"), workflow.RequestWorkflowID("b")}
-	if !slices.Equal(term.ids, want) {
-		t.Fatalf("terminated %v, want %v", term.ids, want)
 	}
 }

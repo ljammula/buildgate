@@ -11,8 +11,8 @@ import (
 )
 
 // RequestWorkflow drives one request (internal/request) from submitted to a
-// terminal state, one step at a time. Its id is the request id
-// (RequestWorkflowID), so a request has at most one driver.
+// terminal state, one step at a time. Its id names the data dir and the
+// request (RequestWorkflowID), so a request has at most one driver.
 //
 // request.json stays the source of truth: every iteration starts with
 // LoadRequestStep, which reads it and says what to do next, and every step
@@ -142,8 +142,19 @@ const (
 	requestStepStartToClose = 48 * time.Hour
 )
 
-// RequestWorkflowID is the workflow id of requestID's RequestWorkflow.
-func RequestWorkflowID(requestID string) string {
+// RequestWorkflowID is the workflow id of requestID's RequestWorkflow in the
+// data dir whose task-queue id is queueID. Workflow ids are global on a
+// Temporal server, so two data dirs sharing one server must not share an id
+// for requests that happen to share a request id.
+func RequestWorkflowID(queueID, requestID string) string {
+	return "factoryd-request-" + queueID + "-" + requestID
+}
+
+// LegacyRequestWorkflowID is the id a RequestWorkflow had before ids carried
+// the data dir's queue id. A workflow started under it is still running when
+// a worker is upgraded, and keeps driving its request under that id
+// (cmd/factoryd/legacy_request_workflow.go).
+func LegacyRequestWorkflowID(requestID string) string {
 	return "factoryd-request-" + requestID
 }
 

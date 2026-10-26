@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,47 +23,53 @@ func saveRequestInState(t *testing.T, dataDir, id string, state request.State) {
 	}
 }
 
-func TestRequestTaskQueuesAreStablePerDataDir(t *testing.T) {
+func TestQueueNamesAreStablePerDataDir(t *testing.T) {
 	dataDir := t.TempDir()
-	jobs, light, err := requestTaskQueues(dataDir)
+	id, err := requestQueueID(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(jobs, "factoryd-jobs-") || !strings.HasPrefix(light, "factoryd-light-") ||
-		strings.TrimPrefix(jobs, "factoryd-jobs-") != strings.TrimPrefix(light, "factoryd-light-") {
+	jobs, light := taskQueuesFor(id)
+	if jobs != "factoryd-jobs-"+id || light != "factoryd-light-"+id {
 		t.Fatalf("queues = %q, %q", jobs, light)
 	}
-	jobs2, light2, err := requestTaskQueues(dataDir)
-	if err != nil {
-		t.Fatal(err)
+	if again, err := requestQueueID(dataDir); err != nil || again != id {
+		t.Fatalf("second call = %q, %v; want %q", again, err, id)
 	}
-	if jobs2 != jobs || light2 != light {
-		t.Fatalf("second call = %q, %q; want %q, %q", jobs2, light2, jobs, light)
+	if got, found, err := readRequestQueueID(dataDir); err != nil || !found || got != id {
+		t.Fatalf("read = %q, %v, %v", got, found, err)
 	}
-	other, _, err := requestTaskQueues(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+	if other, err := requestQueueID(t.TempDir()); err != nil || other == id {
+		t.Fatalf("two data dirs share queue id %q (%v)", id, err)
 	}
-	if other == jobs {
-		t.Fatalf("two data dirs share queue %q", jobs)
+	if _, found, err := readRequestQueueID(t.TempDir()); err != nil || found {
+		t.Fatalf("a data dir with no worker has a queue id (%v, %v)", found, err)
 	}
 }
 
-func TestRequestTaskQueuesRejectsEmptyID(t *testing.T) {
+func TestQueueIDRejectsAnEmptyFile(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dataDir, requestQueueIDFileName), []byte("\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := requestTaskQueues(dataDir); err == nil {
+	if _, err := requestQueueID(dataDir); err == nil {
 		t.Fatal("want an error for an empty queue id file")
 	}
 }
 
 type recordingStarter struct {
-	ids     []string
-	options []client.StartWorkflowOptions
-	inputs  []workflow.RequestWorkflowInput
-	signals []string
+	stubWorkflowTerminator // Describe: the legacy workflows that run
+	signaled               []string
+	signalErr              error
+	ids                    []string
+	options                []client.StartWorkflowOptions
+	inputs                 []workflow.RequestWorkflowInput
+	signals                []string
+}
+
+func (s *recordingStarter) SignalWorkflow(_ context.Context, workflowID, _, _ string, _ interface{}) error {
+	s.signaled = append(s.signaled, workflowID)
+	return s.signalErr
 }
 
 func (s *recordingStarter) SignalWithStartWorkflow(_ context.Context, workflowID, signalName string, _ interface{}, options client.StartWorkflowOptions, _ interface{}, workflowArgs ...interface{}) (client.WorkflowRun, error) {
@@ -83,12 +88,12 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 	saveRequestInState(t, dataDir, "req-cancelled", request.StateCancelled)
 	saveRequestInState(t, dataDir, "req-closed", request.StateClosed)
 	starter := &recordingStarter{}
-	if err := startRequestWorkflows(context.Background(), starter, dataDir, "jobs-q", "light-q"); err != nil {
+	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q"); err != nil {
 		t.Fatal(err)
 	}
 	got := slices.Clone(starter.ids)
 	slices.Sort(got)
-	want := []string{workflow.RequestWorkflowID("req-halted"), workflow.RequestWorkflowID("req-review")}
+	want := []string{workflow.RequestWorkflowID("qid", "req-halted"), workflow.RequestWorkflowID("qid", "req-review")}
 	if !slices.Equal(got, want) {
 		t.Fatalf("started %v, want %v", got, want)
 	}
@@ -96,8 +101,32 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 		if starter.signals[i] != workflow.RequestWakeSignalName || starter.options[i].TaskQueue != "light-q" {
 			t.Errorf("start %d: signal %q, queue %q", i, starter.signals[i], starter.options[i].TaskQueue)
 		}
-		if in := starter.inputs[i]; in.JobsTaskQueue != "jobs-q" || in.LightTaskQueue != "light-q" || workflow.RequestWorkflowID(in.RequestID) != starter.ids[i] {
+		if in := starter.inputs[i]; in.JobsTaskQueue != "jobs-q" || in.LightTaskQueue != "light-q" || workflow.RequestWorkflowID("qid", in.RequestID) != starter.ids[i] {
 			t.Errorf("start %d: input %+v", i, in)
 		}
+	}
+}
+
+// Two data dirs on one Temporal server that hold a request with the same id
+// must not share a workflow id.
+func TestRequestWorkflowIDsDifferPerDataDir(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	qa, err := requestQueueID(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qb, err := requestQueueID(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workflow.RequestWorkflowID(qa, "req-1") == workflow.RequestWorkflowID(qb, "req-1") {
+		t.Fatalf("data dirs %s and %s share a workflow id for one request id", a, b)
+	}
+	again, err := requestQueueID(a)
+	if err != nil || again != qa {
+		t.Fatalf("queue id of one data dir changed: %q then %q (%v)", qa, again, err)
+	}
+	if workflow.RequestWorkflowID(qa, "req-1") == workflow.LegacyRequestWorkflowID("req-1") {
+		t.Fatal("the new id equals the legacy id")
 	}
 }
