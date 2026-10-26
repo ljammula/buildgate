@@ -10,9 +10,8 @@ import (
 	"buildgate/internal/run"
 )
 
-// TestRunMainWithReadyAcceptsCodeReviewPolicyFlag mirrors
-// TestRunMainWithReadyAcceptsConformityPolicyFlag for -code-review-policy:
-// the flag must be a recognized member of runMainWithReady's own
+// TestRunMainWithReadyAcceptsCodeReviewPolicyFlag: -code-review-policy must
+// be a recognized member of runMainWithReady's own
 // flag.FlagSet, not just something buildTicketRunArgs/sessionconfig knows
 // how to spell.
 func TestRunMainWithReadyAcceptsCodeReviewPolicyFlag(t *testing.T) {
@@ -34,12 +33,7 @@ func TestRunMainWithReadyAcceptsCodeReviewPolicyFlag(t *testing.T) {
 
 // TestRunMainWithReadyRejectsInvalidCodeReviewPolicy covers
 // -code-review-policy's own up-front validation (codereview.ValidPolicy),
-// refused before any sandbox/relay work starts -- mirroring how
-// -conformity-policy's own validation is exercised at the worker layer
-// (TestWorkerConfigRejectsInvalidConformityPolicy); factoryd <run> itself
-// has no equivalent -conformity-policy validation to mirror (build_app.py
-// validates that one via its own argparse choices instead), so this is a
-// new up-front check this PR adds, not a mirror of an existing one.
+// refused before any sandbox/relay work starts.
 func TestRunMainWithReadyRejectsInvalidCodeReviewPolicy(t *testing.T) {
 	dp := newTestDeps(t)
 	dir := t.TempDir()
@@ -72,11 +66,10 @@ func TestRunMainWithReadyRejectsInvalidCodeReviewPolicy(t *testing.T) {
 // quarantine, advisory+high-finding acceptance with findings in the PR
 // body, required+unavailable quarantine, and a dirty-workspace halt --
 // all need the code-review phase's own sandboxed container to actually
-// run code_review.py (real or fixture) end to end. That needs a model
+// run combined_review.py (real or fixture) end to end. That needs a model
 // route: runReviewPhase halts immediately (relaySpec == nil) when
 // roles.review resolves to none, and testdata/fake_docker.sh plays a
-// worker, not a model. The spec-conformity phase has the same gap in this
-// test harness. See
+// worker, not a model. See
 // TestRunMainWithReadyRequiredCodeReviewPolicyHaltsWithNoRelayConfigured
 // below for the seam this PR uses instead: proving the flag actually
 // reaches a real check, without needing Docker or a relay to do it.
@@ -115,7 +108,7 @@ func TestIntegrationCodeReviewOffRunsNoPhaseAtAll(t *testing.T) {
 // -code-review-policy required with no review route at all: the code
 // review phase must halt instead of being silently skipped, the exact
 // silent-bypass class of bug the phase-2 halt this test exercises exists
-// to prevent (mirroring the spec-conformity phase's own identical halt).
+// to prevent.
 func TestRunMainWithReadyRequiredCodeReviewPolicyHaltsWithNoRelayConfigured(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().

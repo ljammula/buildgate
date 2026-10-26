@@ -43,7 +43,6 @@ func workerEndToEndArgs(t *testing.T, dataDir string) (args, env []string, confi
 		"-sandbox-image", fakeSandboxImage,
 		"-draft-spec-script", abs("draft_spec.py"),
 		"-plan-tickets-script", abs("plan_tickets.py"),
-		// conformity_review.py is found beside the build script.
 		"-build-app-script", abs("build_app.py"),
 	}
 	env = append(os.Environ(), "WORKER_E2E_TEST_KEY=sk-test", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
@@ -173,10 +172,6 @@ func TestWorkerEndToEndRequestReachesAcceptedRun(t *testing.T) {
 	}
 	if record.RequestID != id {
 		t.Errorf("run %s request id = %q, want %q", runID, record.RequestID, id)
-	}
-	// The spec's one criterion reached the review step (-spec-acceptance-criteria).
-	if len(record.SpecConformityVerdicts) != 1 || record.SpecConformityVerdicts[0].Verdict != "clean" {
-		t.Errorf("run %s spec conformity verdicts = %+v, want one clean verdict", runID, record.SpecConformityVerdicts)
 	}
 }
 

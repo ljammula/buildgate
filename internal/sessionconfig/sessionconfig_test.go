@@ -211,6 +211,19 @@ func TestLoadRefusesRetiredConformityCorrectiveRoundsKey(t *testing.T) {
 	}
 }
 
+// TestLoadRefusesRetiredConformityPolicyKey: the spec-conformity review is
+// retired, so its conformity_policy key fails loudly instead of being
+// silently ignored.
+func TestLoadRefusesRetiredConformityPolicyKey(t *testing.T) {
+	_, err := Load(writeConfig(t, "conformity_policy: required\n"))
+	if err == nil {
+		t.Fatal("Load: want an error for the retired conformity_policy key, got nil")
+	}
+	if !strings.Contains(err.Error(), "conformity_policy") {
+		t.Errorf("Load error = %q, want it to name the retired key", err.Error())
+	}
+}
+
 // TestApplySettingsParsesBudgetKeys covers the four M3-C2 budget keys
 // end to end: present in the config file, they land on Settings exactly.
 func TestApplySettingsParsesBudgetKeys(t *testing.T) {

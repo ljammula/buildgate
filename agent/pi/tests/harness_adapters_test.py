@@ -277,21 +277,6 @@ class PiforkThroughSharedOrchestrationTests(unittest.TestCase):
 		self.assertEqual((turn.text, turn.error), ("hello", ""))
 		self.assertEqual([c[0] for c in commands if "--print" in c], ["pifork"])
 
-	def test_run_spec_conformity_review_launches_pifork(self):
-		commands = []
-
-		def fake_sh(args, cwd=None, timeout=None, env=None):
-			commands.append(args)
-			payload = json.dumps({"criteria": [{"criterion": "1. Widget exists", "verdict": "clean"}]})
-			return subprocess.CompletedProcess(args, 0, message_end(content=payload), "")
-
-		with tempfile.TemporaryDirectory() as root, mock.patch.object(build_app, "sh", side_effect=fake_sh):
-			verdicts, error = build_app.run_spec_conformity_review(
-				Path(root), criteria=["1. Widget exists"], review_base_sha=None, thinking=None, adapter=PIFORK,
-			)
-		self.assertEqual((verdicts[0]["verdict"], error), ("clean", ""))
-		self.assertEqual([c[0] for c in commands if "--print" in c], ["pifork"])
-
 	def test_corrective_rounds_continue_through_the_pifork_adapter(self):
 		with tempfile.TemporaryDirectory() as root:
 			workspace, spec = self._workspace_and_spec(root)
@@ -380,7 +365,7 @@ class MainHarnessFlagTests(unittest.TestCase):
 class HarnessFlagTests(unittest.TestCase):
 	"""Every model-bound script exposes --harness with the adapters' names, default pi."""
 
-	SCRIPT_NAMES = ("build_app", "code_review", "combined_review", "conformity_review", "draft_spec", "plan_tickets", "draft_acceptance_oracles")
+	SCRIPT_NAMES = ("build_app", "combined_review", "draft_spec", "plan_tickets", "draft_acceptance_oracles")
 
 	def test_each_script_lists_the_adapter_choices(self):
 		for name in self.SCRIPT_NAMES:

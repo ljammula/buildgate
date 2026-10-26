@@ -9,52 +9,6 @@ import (
 	"buildgate/internal/run"
 )
 
-func TestArgsIncludesReviewBaseSHAAndThinking(t *testing.T) {
-	got := Args("/path/code_review.py", "/ws", "/ws/ticket.md", "required", "deadbeef", "max", "pi")
-
-	want := []string{
-		"/path/code_review.py",
-		"--workspace", "/ws",
-		"--spec", "/ws/ticket.md",
-		"--review-policy", "required",
-		"--review-base-sha", "deadbeef",
-		"--thinking", "max",
-		"--harness", "pi",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Args()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestArgsOmitsReviewBaseSHAAndThinkingWhenEmpty(t *testing.T) {
-	got := Args("/path/code_review.py", "/ws", "/ws/ticket.md", "advisory", "", "", "pi")
-	want := []string{
-		"/path/code_review.py",
-		"--workspace", "/ws",
-		"--spec", "/ws/ticket.md",
-		"--review-policy", "advisory",
-		"--harness", "pi",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Args()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-	for i, arg := range got {
-		if arg == "--review-base-sha" || arg == "--thinking" {
-			t.Fatalf("Args() included %q at index %d when its value was empty: %v", arg, i, got)
-		}
-	}
-}
-
 func TestValidPolicy(t *testing.T) {
 	for _, p := range []string{PolicyOff, PolicyAdvisory, PolicyRequired} {
 		if !ValidPolicy(p) {
@@ -210,17 +164,6 @@ func TestBlockingReturnsNilWhenNoneAreHigh(t *testing.T) {
 	}
 }
 
-func TestArgsPassesHarnessWhenSet(t *testing.T) {
-	got := Args("/path/code_review.py", "/ws", "/ws/ticket.md", "advisory", "", "", "pifork")
-	if n := len(got); n < 2 || got[n-2] != "--harness" || got[n-1] != "pifork" {
-		t.Fatalf("Args() = %v, want it to end with --harness pifork", got)
-	}
-}
-
-// TestParseResultKeepsNothingOfAnUnavailableReviewsError: the evidence of a
-// real review (gjson, 2026-10-08) whose model call the spend meter refused.
-// The result says the reviewer was unavailable and no more: why is the
-// meter's ledger's to say, never this file's.
 func TestParseResultKeepsNothingOfAnUnavailableReviewsError(t *testing.T) {
 	const meterError = `unexpected status 403 Forbidden: {"binary":"/usr/local/bin/codex","detail":"Request rejected by configured middleware","error":"middleware_denied","host":"chatgpt.com","layer":"l7","method":"POST","middleware":"meter","path":"/backend-api/codex/responses","policy":"model","port":443,"reason_code":"budget_exceeded"}, url: https://chatgpt.com/backend-api/codex/responses`
 	for _, errText := range []string{meterError, "You've hit your usage limit. try again at 3:11 AM.", "review timed out after 1200s"} {
@@ -268,5 +211,137 @@ func TestProviderResetTime(t *testing.T) {
 		if got := ProviderResetTime([]byte(data)); got != "" {
 			t.Errorf("ProviderResetTime(%q) = %q, want none", data, got)
 		}
+	}
+}
+
+func reproFinding(path, content string) map[string]any {
+	return map[string]any{
+		"severity": "high", "summary": "s",
+		"spec_line":    map[string]any{"number": 4, "text": "the line"},
+		"reproduction": map[string]any{"path": path, "content": content},
+	}
+}
+
+func evidenceOf(t *testing.T, findings ...any) []byte {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "required", "available": true, "findings": findings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestParseResultKeepsReproductionAndSpecLine(t *testing.T) {
+	data := evidenceOf(t, reproFinding("pkg/x_repro_test.go", "package pkg\n"))
+	got, err := ParseResult(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := got.Findings[0]
+	if f.SpecLine == nil || f.SpecLine.Number != 4 || f.SpecLine.Text != "the line" {
+		t.Errorf("SpecLine = %+v, want {4 the line}", f.SpecLine)
+	}
+	if f.Reproduction == nil || f.Reproduction.Path != "pkg/x_repro_test.go" || f.Reproduction.Refused != "" {
+		t.Errorf("Reproduction = %+v, want the path kept and nothing refused", f.Reproduction)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "package pkg") {
+		t.Errorf("the run-record shape holds the reproduction's content: %s", encoded)
+	}
+	detailed, err := ParseDetailed(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detailed.ReproductionContent) != 1 || detailed.ReproductionContent[0] != "package pkg\n" {
+		t.Errorf("ReproductionContent = %q, want the file", detailed.ReproductionContent)
+	}
+}
+
+func TestParseResultDropsMalformedSpecLineAndReproduction(t *testing.T) {
+	bad := func(spec, repro any) map[string]any {
+		f := map[string]any{"severity": "high", "summary": "s"}
+		if spec != nil {
+			f["spec_line"] = spec
+		}
+		if repro != nil {
+			f["reproduction"] = repro
+		}
+		return f
+	}
+	data := evidenceOf(t,
+		bad(map[string]any{"number": 0, "text": "x"}, map[string]any{"path": "", "content": "x"}),
+		bad(map[string]any{"number": true, "text": "x"}, map[string]any{"path": "a_test.go", "content": ""}),
+		bad(map[string]any{"number": 1.5, "text": "x"}, "not an object"),
+		bad(map[string]any{"number": 2, "text": "  "}, map[string]any{"path": 7, "content": "x"}),
+	)
+	got, err := ParseResult(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Findings) != 4 {
+		t.Fatalf("Findings = %d, want 4 (a malformed citation does not drop the finding)", len(got.Findings))
+	}
+	for i, f := range got.Findings {
+		if f.SpecLine != nil || f.Reproduction != nil {
+			t.Errorf("finding %d kept a malformed spec_line or reproduction: %+v %+v", i, f.SpecLine, f.Reproduction)
+		}
+	}
+}
+
+func TestParseResultCapsReproductionsAtThreePerReview(t *testing.T) {
+	var findings []any
+	for i := 0; i < 5; i++ {
+		findings = append(findings, reproFinding(strings.Repeat("a", i+1)+"_test.go", "x"))
+	}
+	data := evidenceOf(t, findings...)
+	parsed, err := ParseDetailed(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Result.Findings) != 5 {
+		t.Fatalf("Findings = %d, want all 5 (a cap never drops a finding)", len(parsed.Result.Findings))
+	}
+	for i, f := range parsed.Result.Findings {
+		wantKept := i < maxReproductions
+		if f.Reproduction == nil {
+			t.Fatalf("finding %d lost its reproduction record", i)
+		}
+		if wantKept != (f.Reproduction.Refused == "") || wantKept != (parsed.ReproductionContent[i] != "") {
+			t.Errorf("finding %d: Refused=%q content=%q, want kept=%v", i, f.Reproduction.Refused, parsed.ReproductionContent[i], wantKept)
+		}
+	}
+}
+
+func TestParseResultRefusesAReproductionOverTheByteCap(t *testing.T) {
+	atCap := strings.Repeat("a", maxReproductionBytes)
+	data := evidenceOf(t, reproFinding("a_test.go", atCap), reproFinding("b_test.go", atCap+"a"))
+	parsed, err := ParseDetailed(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := parsed.Result.Findings[0].Reproduction; r.Refused != "" || parsed.ReproductionContent[0] != atCap {
+		t.Errorf("a file at the cap: Refused=%q, want it kept", r.Refused)
+	}
+	if r := parsed.Result.Findings[1].Reproduction; r.Refused != refusedTooBig || parsed.ReproductionContent[1] != "" {
+		t.Errorf("a file over the cap: Refused=%q content kept=%v, want refused", r.Refused, parsed.ReproductionContent[1] != "")
+	}
+}
+
+func TestParseResultOfAnOldFindingEncodesWithoutTheNewKeys(t *testing.T) {
+	old := `{"schema_version":1,"review_policy":"required","available":true,"findings":[{"severity":"high","file":"a.go","line":3,"summary":"s","failure_scenario":"f"}]}`
+	got, err := ParseResult([]byte(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"policy":"required","available":true,"findings":[{"severity":"high","file":"a.go","line":3,"summary":"s","failure_scenario":"f"}]}`
+	if string(encoded) != want {
+		t.Errorf("encoded = %s\nwant %s", encoded, want)
 	}
 }

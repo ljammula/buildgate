@@ -75,15 +75,7 @@ func TestEachTicketRoundGetsARefAndLedgerEntry(t *testing.T) {
 	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		onReady(&run.Run{ID: runID})
-		rr := &run.Run{
-			ID: runID, State: run.StateQuarantined, HaltError: "gate failed: spec_conformity",
-			Branch: "factoryd/" + runID, BaseSHA: base, ResultSHA: first,
-			GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "spec_conformity", Passed: false}},
-			SpecConformityVerdicts: []run.ReviewVerdict{
-				{Criterion: "2. rejects a negative amount", Verdict: "flagged", Detail: "no test covers a negative amount"},
-			},
-		}
-		return rr.Save(dataDir)
+		return requestdrivertest.ReproductionRefusedOn(t, dataDir, runID, "factoryd/"+runID, base, first).Save(dataDir)
 	}
 	requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{
@@ -99,14 +91,14 @@ func TestEachTicketRoundGetsARefAndLedgerEntry(t *testing.T) {
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
 	tags := loaded.Tickets[0].RoundTags
 	if len(tags) != 2 {
-		t.Fatalf("RoundTags = %+v, want the build and the conformity round", tags)
+		t.Fatalf("RoundTags = %+v, want the build and the corrective round", tags)
 	}
 	want := []struct {
 		kind, sha, outcome string
 		failed             []string
 	}{
-		{request.RoundTagBuild, first, "quarantined", []string{"spec_conformity"}},
-		{request.RoundTagConformity, second, "quarantined", []string{"canonical_verify"}},
+		{request.RoundTagBuild, first, "quarantined", []string{"review_reproduction"}},
+		{request.RoundTagCorrective, second, "quarantined", []string{"canonical_verify"}},
 	}
 	for i, w := range want {
 		got := tags[i]

@@ -209,6 +209,10 @@ type Ticket struct {
 	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
 	// changed on its own is never recorded here.
 	Retarget *TicketRetarget `json:"retarget,omitempty"`
+	// Reproductions are the reviewer reproductions every later build of the
+	// ticket must pass again (SC-022, -recheck-reproductions): the ticket's
+	// recheck chain, whose only home this is. See TicketReproduction.
+	Reproductions []TicketReproduction `json:"reproductions,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -238,17 +242,20 @@ type MergeReadiness struct {
 	Blockers []string `json:"blockers,omitempty"`
 }
 
-// ConformityRoundKind marks a Round as an automatic spec_conformity
-// corrective round rather than the PR-review corrective round -- see Round.Kind's own
-// doc comment for why the distinction exists.
+// ConformityRoundKind marks a Round as an automatic review corrective round
+// a request recorded when a review's findings could quarantine a run. No
+// round of this kind is started now (a finding refuses a run only through
+// its reproduction, SC-022, and the build that follows it is a
+// CorrectiveRoundKind round); it stays so such a record still reads and
+// counts against review_corrective_rounds.
 const ConformityRoundKind = "conformity"
 
 // CorrectiveRoundKind marks a Round as an automatic corrective build that
 // followed a run quarantined by checks a build can fix when told about
-// them (internal/handoff's "corrective" bin): it is given the factory's
-// record of that run. It shares review_corrective_rounds with
-// ConformityRoundKind rounds: one budget per ticket build, whatever the
-// kind.
+// them (internal/handoff's "corrective" bin), a reviewer's reproduction
+// that refused it included: it is given the factory's record of that run.
+// It shares review_corrective_rounds with any ConformityRoundKind round a
+// request recorded before: one budget per ticket build.
 const CorrectiveRoundKind = "corrective"
 
 // RestackRoundKind marks a Round as a replay run of the ticket's commits onto
@@ -259,9 +266,9 @@ const RestackRoundKind = "restack"
 
 // Round is one corrective build run against a ticket's own branch, in
 // response either to a batch of newly-surfaced unresolved PR review
-// threads (Kind "") or to a quarantined run's own spec_conformity
-// gate flagging a criterion before any PR exists (Kind
-// ConformityRoundKind). Index is 1-based, counted per ticket: PR-review
+// threads (Kind "") or to a quarantined run before any PR exists (Kind
+// CorrectiveRoundKind, or ConformityRoundKind on an older record). Index is
+// 1-based, counted per ticket: PR-review
 // rounds on their own, the two pre-PR kinds together --
 // max_review_rounds counts only Kind "" rounds and
 // review_corrective_rounds counts Kind ConformityRoundKind and
@@ -433,6 +440,12 @@ type Request struct {
 	TicketIndex int      `json:"ticket_index,omitempty"`
 	TicketCount int      `json:"ticket_count,omitempty"`
 	Tickets     []Ticket `json:"tickets,omitempty"`
+	// DroppedReproductions are the reproductions taken off a ticket's list
+	// (Ticket.Reproductions), with the ticket, who dropped each and why: an
+	// operator's override of a run it refused, a retry of a request halted
+	// because its held copy was gone, or a send-back that discarded the
+	// tickets. Kept on the request, so the record outlives the tickets.
+	DroppedReproductions []DroppedReproduction `json:"dropped_reproductions,omitempty"`
 
 	// Error is the reason recorded by Quarantine or Halt. Empty
 	// otherwise.
@@ -467,15 +480,11 @@ type Request struct {
 	// every transition, so it is only ever set while State is halted.
 	HaltKind HaltKind `json:"halt_kind,omitempty"`
 	// QuarantineCheck names the one check that quarantined this request
-	// (currently only ever "spec_conformity", set by the request driver
-	// wherever reviewOnlyFlagged/tryReviewCorrectiveRound
-	// identifies a conformity-only quarantine) -- empty for every other
-	// quarantine cause and for every non-quarantined state. NextAction
-	// reads it to lead with the one command that actually addresses that
-	// cause (`factoryd reject -to spec`) instead of the generic "fix the
-	// cause, then retry" a spec_conformity-only quarantine would just
-	// repeat (Follow-up B). Cleared by every transition, the same as
-	// HaltKind just above.
+	// (the QuarantineCheck* constants, set by the request driver) -- empty
+	// for every other quarantine cause and for every non-quarantined state.
+	// NextAction reads it to lead with the one command that actually
+	// addresses that cause instead of the generic "fix the cause, then
+	// retry". Cleared by every transition, the same as HaltKind just above.
 	QuarantineCheck string `json:"quarantine_check,omitempty"`
 
 	// ApprovedBy/ApprovedAt/ApprovedSHA256 are the approve/reject flow's
@@ -1112,7 +1121,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	r.StackedWait = nil
 	r.HaltKind = ""
 	// QuarantineCheck names which check quarantined r (set by the request
-	// driver alongside Quarantine itself, e.g. "spec_conformity") -- like
+	// driver alongside Quarantine itself, e.g. "diff_scope") -- like
 	// HaltKind just above, it only describes r's CURRENT terminal state,
 	// so every transition clears it and Quarantine's own caller re-sets it
 	// fresh when the new quarantine warrants one (Follow-up B).
@@ -1377,26 +1386,24 @@ func (r *Request) Halt(reason string, now time.Time) error {
 	return nil
 }
 
-// QuarantineCheckSpecConformity is set by cmd/factoryd's request driver
-// when reviewOnlyFlagged/tryReviewCorrectiveRound determine
-// spec_conformity was the sole gate that failed, matching the literal
-// "spec_conformity" gate-result Check name used elsewhere (e.g.
-// internal/policy.go, internal/triage.go).
-const QuarantineCheckSpecConformity = "spec_conformity"
-
-// QuarantineCheckCodeReview is set instead of QuarantineCheckSpecConformity
-// when a review corrective round's quarantine (or its exhausted budget)
-// was caused by the code_review gate -- either alone or alongside
-// spec_conformity, since the operator's remedy for a code_review finding
-// is the same either way: fix the diff, not redraft the spec. See
-// cmd/factoryd's reviewOnlyFlagged/tryReviewCorrectiveRound.
+// QuarantineCheckCodeReview is the check a request recorded when the
+// code_review gate's findings could quarantine it. No build sets it now (a
+// finding refuses a run only through its reproduction, SC-022:
+// QuarantineCheckReviewReproduction); it stays so such a request still
+// reads its next action.
 const QuarantineCheckCodeReview = "code_review"
 
-// QuarantineCheckDiffScope is set instead of QuarantineCheckSpecConformity/
-// QuarantineCheckCodeReview when a build quarantined because it changed a
-// file outside the ticket's own Allowed-Files: scope (internal/policy's
-// diff_scope gate), and no review-shaped gate (spec_conformity/code_review)
-// also failed alongside it -- the operator's remedy is neither a redraft
+// QuarantineCheckReviewReproduction is set when a reviewer's reproduction
+// refused the ticket's run (the review_reproduction check, SC-022) and no
+// corrective build is left to fix it: the budget is spent, or a corrective
+// build's recheck of the reproduction still failed on its result. The
+// operator reads the finding and decides: adopt the reproduction as a test
+// at pull-request review, or override.
+const QuarantineCheckReviewReproduction = "review_reproduction"
+
+// QuarantineCheckDiffScope is set when a build quarantined because it
+// changed a file outside the ticket's own Allowed-Files: scope
+// (internal/policy's diff_scope gate) -- the operator's remedy is neither a redraft
 // nor a corrective round but widening the ticket's approved scope:
 // `factoryd amend-scope`. See cmd/factoryd's advanceBuilding (the
 // StateQuarantined case) and quarantinedNextAction's own DiffScope branch
@@ -1723,23 +1730,17 @@ func (round *Round) nextAction(prURL string) string {
 	return fmt.Sprintf("corrective round %d on %s was %s and pushed nothing%s: open its run for the cause. The review thread is still open, so the next poll starts another round, up to `max_review_rounds`; resolve the thread on the pull request to stop that, or push a fix to the branch yourself", round.Index, prURL, round.Outcome, why)
 }
 
-// quarantinedNextAction is NextAction's own StateQuarantined branch. A
-// quarantine caused ONLY by spec_conformity (r.QuarantineCheck ==
-// QuarantineCheckSpecConformity) leads with `factoryd reject -to spec`
-// instead of the generic "fix the cause, then retry": retrying rebuilds
-// the exact same ticket against the exact same spec, which just
-// reproduces the identical conformity finding -- the operator's only real
-// fix is to redraft the spec (Follow-up B, following #295's "fix the
-// cause, then retry was the only advice a diff_scope/spec_conformity
-// quarantine ever got" finding through to spec_conformity's specific
-// remedy). Every other quarantine cause keeps the prior wording, since
-// retry genuinely might succeed there (e.g. a flaky verify command).
+// quarantinedNextAction is NextAction's own StateQuarantined branch: a
+// quarantine whose QuarantineCheck names a cause leads with that cause's own
+// remedy; every other quarantine keeps the generic "fix the cause, then
+// retry", since retry genuinely might succeed there (e.g. a flaky verify
+// command).
 func (r *Request) quarantinedNextAction() string {
-	if r.QuarantineCheck == QuarantineCheckSpecConformity && !r.AnyTicketAccepted() {
-		return fmt.Sprintf("spec_conformity quarantined -- the build did not conform to the spec's acceptance criteria; send it back to spec drafting: `factoryd reject -to spec -reason \"...\" %s`, or `factoryd retry %s` to retry unchanged", r.ID, r.ID)
-	}
 	if r.QuarantineCheck == QuarantineCheckCodeReview {
 		return fmt.Sprintf("code_review quarantined -- the reviewer reported blocking defects the corrective round did not fix (see the run's Code review findings); `factoryd retry %s` rebuilds the ticket%s", r.ID, r.sendBackHint())
+	}
+	if r.QuarantineCheck == QuarantineCheckReviewReproduction {
+		return fmt.Sprintf("review_reproduction quarantined -- the factory's run of a reviewer's reproduction test fails on the result (named above). Read the finding in the run's review evidence; if it is right, adopt the reproduction: rebuild with `factoryd retry %s`, or keep it as a test at pull-request review; if it is wrong, override the run: `factoryd override -run <run> -state accepted -by <you> -reason \"...\"`", r.ID)
 	}
 	if r.QuarantineCheck == QuarantineCheckDiffScope {
 		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files (named above). If a file is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())
@@ -1766,6 +1767,8 @@ func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
 	case HaltOracleMaterialize:
 		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
+	case HaltRecheckUnheld:
+		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is still missing (recorded on the request) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltGateExpired:
 		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltAcceptedNoPR:
@@ -1791,7 +1794,7 @@ func (r *Request) haltedNextAction() string {
 // "plan" once an approved spec.md exists to re-plan from, "spec"
 // otherwise -- rather than always guessing "plan" and letting the
 // operator hit a 400 (closing the #295 dead end: "fix the cause, then
-// retry" was the only advice a diff_scope/spec_conformity quarantine
+// retry" was the only advice a diff_scope quarantine
 // ever got, and retry alone can never fix either).
 func (r *Request) sendBackHint() string {
 	if r.AnyTicketAccepted() {

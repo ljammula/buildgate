@@ -66,6 +66,11 @@ const (
 	// in that time), so nothing could be learned of the step's workflow.
 	// A shorter stall is ridden out and is not one.
 	TemporalUnreachable Cause = "temporal_unreachable"
+	// ReproductionUnheld: the factory could not hold a reviewer's
+	// reproduction it had accepted (SC-022): its host copy could not be
+	// written, its hash no longer matched before a launch, or the launch
+	// refused its read-only mount. The reproduction was never judged.
+	ReproductionUnheld Cause = "reproduction_unheld"
 )
 
 // causes holds, for each cause, the operator's clause about what
@@ -83,6 +88,7 @@ var causes = map[Cause]string{
 	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
 
 	TemporalUnreachable: "factoryd lost contact with the Temporal server while the %s step ran",
+	ReproductionUnheld:  "the factory could not hold or mount the reviewer's reproduction for the %s step",
 }
 
 // Known reports whether c is a member of the closed set.

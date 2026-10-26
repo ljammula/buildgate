@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="0.021" timestamp="2026-10-25T23:07:56.960487-05:00" hostname="sandbox"><testcase classname="tests.test_repro" name="test_error" time="0.000"><failure message="ValueError: boom">def test_error():
+&gt;       raise ValueError("boom")
+E       ValueError: boom
+
+tests/test_repro.py:19: ValueError</failure></testcase></testsuite></testsuites>

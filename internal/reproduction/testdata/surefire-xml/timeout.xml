@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0" name="com.example.AddTest" time="60.112" tests="1" errors="1" skipped="0" failures="0">
+  <properties>
+    <property name="java.version" value="21.0.4"/>
+    <property name="junit.jupiter.execution.timeout.default" value="60s"/>
+  </properties>
+  <testcase name="hangs" classname="com.example.AddTest" time="60.009">
+    <error message="hangs() timed out after 60 seconds" type="java.util.concurrent.TimeoutException"><![CDATA[java.util.concurrent.TimeoutException: hangs() timed out after 60 seconds
+	at org.junit.jupiter.engine.extension.TimeoutExceptionFactory.create(TimeoutExceptionFactory.java:29)
+	at org.junit.jupiter.engine.extension.SameThreadTimeoutInvocation.proceed(SameThreadTimeoutInvocation.java:58)
+]]></error>
+  </testcase>
+</testsuite>

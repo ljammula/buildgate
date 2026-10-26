@@ -206,7 +206,7 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
     round: decodeReviewRound(round, roundAt),
   }));
   return {
-    // A round with another kind is a spec-conformity round before any pull
+    // A round with another kind is a corrective round before any pull
     // request exists (the build's business, not the review's), or a restack.
     reviewRounds: rounds.filter((entry) => entry.kind === "").map((entry) => entry.round),
     restackRounds: rounds.filter((entry) => entry.kind === "restack").map((entry) => entry.round),
@@ -764,7 +764,7 @@ export interface RequestSummary {
    */
   readonly wait: RequestWait | null;
   /**
-   * Which check quarantined this request (e.g. "spec_conformity"); null
+   * Which check quarantined this request (e.g. "diff_scope"); null
    * unless currently quarantined for that reason.
    */
   readonly quarantineCheck: string | null;

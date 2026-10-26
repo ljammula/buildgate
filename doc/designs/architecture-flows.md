@@ -169,9 +169,8 @@ RunVerifyActivity                 canonical verify command
   v
 CollectEvidenceActivity           changed-file inventory, evidence
   v
-[RunReviewStepActivity]           conditional, once per enabled step
-  v                                (spec_conformity and code_review; one
-                                   combined call when both are enabled)
+[RunReviewStepActivity]           conditional, once when code_review
+  v                                is enabled (one combined_review.py launch)
 EvaluateRunActivity               policy gates on collected evidence
   v
 DisableWorkerGroupWriteActivity   revoke worker write access
@@ -184,7 +183,7 @@ Conditional Activities not on every run: `CheckChainSuccessorActivity`/
 (setup fails before build), `RunFullSuiteVerifyActivity`/`RunNamedGateActivity`
 (declared full-suite/named-gate policy). Oracle-carrying runs add, in
 order, `RunNamedGateActivity` for `reference_oracle`, `CommitOraclesActivity`
-(after every gate and any conformity review passed), then
+(after every gate and the review passed), then
 `RunPostOracleCommitVerifyActivity`; see
 [`USAGE_REFERENCE.md`](../../USAGE_REFERENCE.md) "Oracle-approved runs".
 

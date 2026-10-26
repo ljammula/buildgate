@@ -14,7 +14,7 @@ import (
 
 // CheckLaunchBudget is the one gate every job-launch point in the request
 // driver (AdvanceSpecDrafting, AdvancePlanning, AdvanceOracleDrafting,
-// AdvanceBuilding, TryReviewCorrectiveRound in request_driver.go, plus
+// AdvanceBuilding, runCorrectiveRounds in request_driver.go, plus
 // RunCorrectiveRound in pr_review_driver.go) calls immediately before
 // starting a container -- see this file's own package doc comment on M3-C2
 // for why a host-side check is needed at all: the relay's own

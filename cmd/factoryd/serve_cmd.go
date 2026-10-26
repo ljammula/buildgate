@@ -181,7 +181,6 @@ type serveFlags struct {
 	daemonTemporalAddress                 *string
 	daemonBuildAppInterpreter             *string
 	daemonBuildAppScript                  *string
-	daemonConformityPolicy                *string
 	daemonMaxRounds                       *int
 	daemonTimeoutMinutes                  *int
 	daemonVerifyCommand                   *string
@@ -234,7 +233,6 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	f.daemonTemporalAddress = flags.String("daemon-temporal-address", "", "Temporal server address for the daemons this server manages; empty turns the /daemons routes off")
 	f.daemonBuildAppInterpreter = flags.String("daemon-build-app-interpreter", "python3", "internal: the interpreter a managed daemon runs its build script with; tests point it at a stand-in")
 	f.daemonBuildAppScript = flags.String("daemon-build-app-script", "", "for managed daemons: path to a build_app.py to run in place of the built-in one")
-	f.daemonConformityPolicy = flags.String("daemon-conformity-policy", "required", "for managed daemons: what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
 	f.daemonMaxRounds = flags.Int("daemon-max-rounds", 3, "for managed daemons: most rounds the build loop may take on one ticket")
 	f.daemonTimeoutMinutes = flags.Int("daemon-timeout-minutes", 45, "for managed daemons: minutes the coding agent may run in one build round")
 	f.daemonVerifyCommand = flags.String("daemon-verify-command", "make verify", "for managed daemons: the canonical verification command, run in the workspace")
@@ -380,7 +378,7 @@ func (sv *serveRun) loadConfig() error {
 	var daemonTemporalAddress *string
 	var corsAllowOrigin *string
 	sv.dataDir, sv.addr, corsAllowOrigin, daemonTemporalAddress = sv.sf.dataDir, sv.sf.addr, sv.sf.corsAllowOrigin, sv.sf.daemonTemporalAddress
-	daemonBuildAppInterpreter, daemonBuildAppScript, daemonConformityPolicy, daemonMaxRounds := sv.sf.daemonBuildAppInterpreter, sv.sf.daemonBuildAppScript, sv.sf.daemonConformityPolicy, sv.sf.daemonMaxRounds
+	daemonBuildAppInterpreter, daemonBuildAppScript, daemonMaxRounds := sv.sf.daemonBuildAppInterpreter, sv.sf.daemonBuildAppScript, sv.sf.daemonMaxRounds
 	var daemonVerifyCommand *string
 	var daemonTimeoutMinutes *int
 	daemonTimeoutMinutes, daemonVerifyCommand, sv.sandboxMemory, sv.sandboxCPUs = sv.sf.daemonTimeoutMinutes, sv.sf.daemonVerifyCommand, sv.sf.sandboxMemory, sv.sf.sandboxCPUs
@@ -450,7 +448,6 @@ func (sv *serveRun) loadConfig() error {
 			dataDir:             *sv.dataDir,
 			buildAppInterpreter: *daemonBuildAppInterpreter,
 			buildAppScript:      *daemonBuildAppScript,
-			conformityPolicy:    *daemonConformityPolicy,
 			maxRounds:           *daemonMaxRounds,
 			timeoutMinutes:      *daemonTimeoutMinutes,
 			verifyCommand:       *daemonVerifyCommand,

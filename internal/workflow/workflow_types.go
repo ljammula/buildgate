@@ -104,20 +104,14 @@ type RunWorkflowInput struct {
 	// shared task queue is real, not just LogDir/CheckpointDir.
 	BuildAppInterpreter string `json:"build_app_interpreter,omitempty"`
 	BuildAppScript      string `json:"build_app_script,omitempty"`
-	// ConformityPolicy overrides Activities.ConformityPolicy for this
-	// execution when set, same treatment as BuildAppScript above: this
-	// governs the per-criterion spec-conformity review
-	// SpecAcceptanceCriteria enables.
-	ConformityPolicy string `json:"conformity_policy,omitempty"`
-	// CodeReviewPolicy is the standalone AI code-review pass's own policy
+	// CodeReviewPolicy is the review step's own policy
 	// (off/advisory/required -- internal/codereview's own constants),
-	// carried per-execution with no Worker-static fallback (unlike
-	// ConformityPolicy's Activities.ConformityPolicy default): the
+	// carried per-execution with no Worker-static fallback: the
 	// submitter alone decides whether this run gets a real code review,
 	// never a Worker-level default a shared task queue's executing
 	// Worker happens to have configured. "" is treated identically to
 	// codereview.PolicyOff -- RunWorkflow never calls
-	// RunReviewStepActivityName for the code-review step in either case,
+	// RunReviewStepActivityName in either case,
 	// matching cmd/factoryd's (-code-review-policy defaults to
 	// "off", never silently enabled).
 	CodeReviewPolicy  string `json:"code_review_policy,omitempty"`
@@ -134,20 +128,10 @@ type RunWorkflowInput struct {
 	// .factory.yml's fast_check_command and always paid for the full
 	// verify command, previously).
 	FastCheckCommand string `json:"fast_check_command,omitempty"`
-	// SpecAcceptanceCriteria overrides Activities.SpecAcceptanceCriteria
-	// for this execution when set, same treatment as FastCheckCommand
-	// above -- cmd/factoryd's own -spec-acceptance-criteria, now
-	// threaded to conformity_review.py's own --spec-acceptance-criteria in
-	// the phase-2 RunSpecConformityReviewActivity (build_app.py no longer
-	// sees it -- see buildActivityArgs' own doc comment). Unlike every
-	// other Activities.*-overriding field above, this one also gates
-	// whether RunWorkflow invokes that Activity at all -- and that
-	// decision can only see this raw field, never
-	// Activities.SpecAcceptanceCriteria's Worker-static fallback, since a
-	// deterministic workflow can't depend on Worker-local config without
-	// risking replay divergence across Workers with different defaults.
-	// Set this per run; a Worker-level default alone does not trigger the
-	// review.
+	// SpecAcceptanceCriteria is read only to replay a history recorded
+	// before reviewReproductionChange, whose review plan ran the retired
+	// spec-conformity review when it was set (legacyReviewPlan). Nothing
+	// sets it.
 	SpecAcceptanceCriteria string `json:"spec_acceptance_criteria,omitempty"`
 	// TestPatterns/TestsRequiredOptOut feed the tests_added gate --
 	// see policy.EvaluateRunInput's own doc comment on the same two
@@ -535,35 +519,49 @@ type RunWorkflowInput struct {
 	Skills       []sandbox.SkillSource `json:"skills,omitempty"`
 	ReviewSkills []sandbox.SkillSource `json:"review_skills,omitempty"`
 	// ReviewThinking is roles.review's resolved Pi reasoning-effort
-	// level, passed to conformity_review.py's own --thinking by
-	// RunSpecConformityReviewActivity and to code_review.py's own
-	// --thinking by RunCodeReviewActivity -- one role, shared by both
-	// review-only phases, as run_ticket.go's reviewThinking feeds both phases' Args.
-	// Renamed from ConformityThinking (M2-C): it was never actually
-	// conformity-specific in meaning, only in which phase used it before
-	// code review existed. Same empty-means-unset convention as Thinking.
+	// level, passed to combined_review.py's own --thinking by
+	// RunReviewStepActivity. Same empty-means-unset convention as Thinking.
 	ReviewThinking string `json:"review_thinking,omitempty"`
-	// ReviewRelayPolicy carries the review role's own relay policy (both
-	// the conformity phase and the code-review phase share it),
+	// ReviewRelayPolicy carries the review role's own relay policy,
 	// credential-free like RoutePolicy above (see its own doc comment
 	// for why: Temporal persists Workflow input in Event History, so a
 	// credential can never travel here). A legacy (routes: not
 	// configured) config sets only the six worker-model fields
 	// (WorkerModelID/API/BasePath/ExtraJSON/UsageFormat/
-	// AllowedPathPrefix) -- like cmd/factoryd's override (conformity.PhaseRelaySpec) without duplicating
+	// AllowedPathPrefix) -- like codereview.PhaseRelaySpec's override, without duplicating
 	// RoutePolicy's other fields (Image/Upstream/AuthMode/budgets),
 	// which each review phase always shares with the build's own
 	// RoutePolicy in that mode. A routes:-configured config instead sets
 	// Route to the review role's own selected route name (which can
 	// differ entirely from the build's own route -- upstream, auth
-	// mode, everything), and RunSpecConformityReviewActivity/
-	// RunCodeReviewActivity each resolve
+	// mode, everything), and RunReviewStepActivity resolves
 	// that route's credential itself via Activities.CheckRoute/
 	// ResolveRouteCredentials, exactly as relaySpecFor does for the
 	// build's own RoutePolicy. nil means
-	// roles.review is unset: the conformity phase keeps RoutePolicy's
+	// roles.review is unset: the review keeps RoutePolicy's
 	// own build fields unchanged, exactly as before roles: existed.
 	ReviewRelayPolicy *sandbox.RoutePolicy `json:"review_relay_policy,omitempty"`
+	// ReviewReproduction is -review-reproduction: the review step holds the
+	// reproductions its findings carry and the factory runs each one
+	// (SC-022), so a finding can refuse the run through the
+	// review_reproduction check. Only a request's ticket build sets it; a
+	// bare run's review is advice only. Read only under
+	// reviewReproductionChange version 1, which no history recorded before
+	// the field existed holds.
+	ReviewReproduction bool `json:"review_reproduction,omitempty"`
+	// ReviewSpecPath is the run's snapshot of -review-spec (the request's
+	// approved spec.md, in the run's directory), which the review numbers
+	// for its citations and the hold checks each citation against;
+	// ReviewSpecSHA256 is its hash when the snapshot was taken, checked
+	// again before the hold reads it. Empty: no line can be cited, so every
+	// finding is advice.
+	ReviewSpecPath   string `json:"review_spec_path,omitempty"`
+	ReviewSpecSHA256 string `json:"review_spec_sha256,omitempty"`
+	// RecheckReproductions is -recheck-reproductions: the reproductions
+	// earlier runs' reviews held, which this build's result must pass, each
+	// run once after the gates. Every host path was checked to be under its
+	// entry's run's review-repro directory before the run started.
+	RecheckReproductions []run.RecheckEntry `json:"recheck_reproductions,omitempty"`
 }
 
 // ReplayInput is RunWorkflowInput.Replay: what a replay run's
@@ -655,28 +653,28 @@ type VerifyActivityResult struct {
 	// DurationMs and LogSHA256 are the rerun's. nil for every other
 	// Activity and when the command was not rerun.
 	Rerun *run.VerifyRerun `json:"rerun,omitempty"`
+	// Reproductions are the review step's held reproductions (SC-022):
+	// one entry per finding that carried one, held or refused. Set only by
+	// RunReviewStepActivity for a run with ReviewReproduction.
+	Reproductions []run.HeldReproduction `json:"reproductions,omitempty"`
 }
 
 // ReviewStepInput is RunReviewStepActivity's input. Embeds RunWorkflowInput
-// the same way NamedGateActivityInput does, plus which of reviewstep.Steps
-// this call is for and this run's ENTIRE relay spend before this step's
-// own launch: this Activity's relay spec is derived from
+// the same way NamedGateActivityInput does, plus which review step this call
+// is for and this run's relay spend before the review's own launch (the
+// build's): this Activity's relay spec is derived from
 // RunWorkflowInput.RoutePolicy the same way relaySpecFor already does for
 // every other relay-backed Activity, then has this spend subtracted before
-// launching a second (or third) relay-backed container, so this run's real
-// total spend never exceeds its one configured lifetime ceiling (see
-// internal/conformity.PhaseRelaySpec). For the spec-conformity step,
-// PriorConsumed* is build's own spend; for the code-review step, it is
-// build's plus the spec-conformity step's own (zero when that step never
-// ran, or the ticket declared no acceptance criteria at all), mirroring
-// run_ticket.go's own runReviewPhase calls, which chain the same way.
-// Passed explicitly by RunWorkflow rather than read from Worker-local
-// state, since an Activity only ever sees its own input, never another
-// Activity's already-returned result directly.
+// launching a second relay-backed container, so this run's real total spend
+// never exceeds its one configured lifetime ceiling (see
+// codereview.PhaseRelaySpec). Passed explicitly by RunWorkflow rather than
+// read from Worker-local state, since an Activity only ever sees its own
+// input, never another Activity's already-returned result directly.
 type ReviewStepInput struct {
 	RunWorkflowInput
-	// Step is a reviewstep.Step.Name ("spec_conformity" or "code_review"),
-	// selecting which step's script/args/no-relay-error this call uses.
+	// Step is a reviewstep.Step.Name: reviewstep.Combined, or a retired
+	// step's name pending in a history recorded before
+	// reviewReproductionChange, which the Activity refuses.
 	Step                      string `json:"step"`
 	PriorConsumedInputTokens  int64  `json:"prior_consumed_input_tokens,omitempty"`
 	PriorConsumedOutputTokens int64  `json:"prior_consumed_output_tokens,omitempty"`
@@ -1097,31 +1095,17 @@ type RunWorkflowResult struct {
 	// strictly weaker acceptance oracle than the path it's meant to share
 	// logic with.
 	GateResults []run.GateResult `json:"gate_results"`
-	// SpecConformityConfigured mirrors run.Run.SpecConformityConfigured's
-	// own doc comment: records whether this run's own ticket declared
-	// -spec-acceptance-criteria at all, independent of whether
-	// RunSpecConformityReviewActivity actually ran -- same "declared,
-	// independent of whether the gate ran" contract
-	// cmd/factoryd's makes for its own r.SpecConformityConfigured
-	// (run_ticket.go). A caller building a durable run.Run record should
-	// copy this straight across, exactly as it already does for
-	// GateResults/Attempts above.
-	SpecConformityConfigured bool `json:"spec_conformity_configured,omitempty"`
 	// CodeReviewConfigured records whether this run's CodeReviewPolicy
-	// requested a real standalone code review (advisory or required),
-	// independent of whether RunCodeReviewActivity actually ran -- same
-	// "declared, independent of whether the gate ran" contract as
-	// SpecConformityConfigured above. Unlike SpecConformityConfigured,
-	// there is no matching run.Run field to copy this into: cmd/factoryd never persists a "CodeReviewPolicy was on" bookkeeping
+	// requested a real review (advisory or required), independent of
+	// whether RunReviewStepActivity actually ran ("declared, independent of
+	// whether the gate ran"). There is no matching run.Run field to copy this into: cmd/factoryd never persists a "CodeReviewPolicy was on" bookkeeping
 	// field either (r.CodeReview being non-nil already says a review ran
 	// and what it found). This field exists solely so
 	// applyRunWorkflowResult knows whether to even attempt retaining
 	// CODE_REVIEW_EVIDENCE.json -- without it, a non-isolated workspace
 	// reused across runs could let a later run with CodeReviewPolicy off
 	// silently retain and attribute a PRIOR run's leftover evidence file
-	// to itself, the exact stale-attribution risk
-	// SpecConformityConfigured's own retention gate in
-	// applyRunWorkflowResult already guards against.
+	// to itself.
 	CodeReviewConfigured bool `json:"code_review_configured,omitempty"`
 	// Attempts carries every RunBuildActivity/RunVerifyActivity attempt
 	// (BuildActivityResult.Attempts followed by VerifyActivityResult.
@@ -1150,6 +1134,13 @@ type RunWorkflowResult struct {
 	// caller inspecting result.Runs needs a way to tell "this request
 	// failed" apart from "this request reached StateHalted on its own".
 	Err string `json:"error,omitempty"`
+	// ReviewReproductions is what the factory decided about each review
+	// finding that carried a reproduction (SC-022), keyed by the finding's
+	// index; ReviewReproductionRechecks are a corrective build's runs of an
+	// earlier run's held reproductions. Both nil for a run without
+	// ReviewReproduction.
+	ReviewReproductions        []run.FindingReproduction `json:"review_reproductions,omitempty"`
+	ReviewReproductionRechecks []run.ReviewReproduction  `json:"review_reproduction_rechecks,omitempty"`
 }
 
 // BaselineVerifyResult is RunBaselineVerifyActivity's result for a run that

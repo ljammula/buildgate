@@ -62,9 +62,9 @@ func lostStepOf(dataDir string, runRecord *run.Run, cause unresolved.Cause, kept
 	return step
 }
 
-// reviewEvidenceFiles are the two reviews' evidence files as retained in a
-// run's directory, the code review's first.
-var reviewEvidenceFiles = []string{codereview.EvidenceFile, "CONFORMITY_EVIDENCE.json"}
+// reviewEvidenceFiles are the review's evidence files as retained in a run's
+// directory.
+var reviewEvidenceFiles = []string{codereview.EvidenceFile}
 
 // maxReviewEvidenceBytes bounds the read of a retained review evidence file,
 // which a worker wrote.
@@ -72,7 +72,7 @@ const maxReviewEvidenceBytes = 10 << 20
 
 // providerResetTimeInEvidence is codereview.ProviderResetTime over the
 // review evidence retained for run id, said with the clock it is on; "" when
-// neither file holds one.
+// no file holds one.
 func providerResetTimeInEvidence(dataDir, id string) string {
 	for _, name := range reviewEvidenceFiles {
 		data, err := evidence.ReadHostileFile(filepath.Join(run.Dir(dataDir, id), name), maxReviewEvidenceBytes)

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/evidence"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
 	"buildgate/internal/release"
-	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
 	"buildgate/internal/triage"
 	"buildgate/internal/workflow"
@@ -110,13 +110,6 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	r.DiffAvailable = result.DiffAvailable
 	r.DiffTruncated = result.DiffTruncated
 	r.GateResults = result.GateResults
-	// See run.Run.SpecConformityConfigured's own doc comment: declared,
-	// independent of whether the Temporal path's spec-conformity review
-	// step (RunReviewStepActivity) actually ran
-	// -- run_ticket.go sets this same field before
-	// its own equivalent gate, so it reflects what the ticket declared,
-	// like AgentEvidence/Attempts below.
-	r.SpecConformityConfigured = result.SpecConformityConfigured
 	// Closes a known gap (see CLAIMS.md): result.Attempts carries every
 	// RunBuildActivity/RunVerifyActivity attempt, mirroring the direct
 	// path's own r.Attempts — previously left empty for every
@@ -164,39 +157,26 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		}
 		attachHarnessEval(r, dataDir, id)
 
-		// Each review step's own evidence file (CONFORMITY_EVIDENCE.json,
-		// CODE_REVIEW_EVIDENCE.json), same isolatedWorkspacePath/best-effort/
-		// os.IsNotExist-is-not-a-warning treatment as run_ticket.go's own
-		// retention of these files (see its comment there): a ticket whose
-		// run never reached a given step (a build/verify failure, an
-		// earlier gate failure) simply never wrote that step's file, same
-		// as a build_app.py old enough to predate it entirely -- not itself
-		// a warning-worthy event, so this only even attempts the read when
-		// that step was actually configured for this run (a non-isolated
-		// workspace reused across runs must never retain and attribute a
-		// PRIOR run's leftover evidence file to a run whose own policy was
-		// off -- see workflow.RunWorkflowResult.CodeReviewConfigured's own
-		// doc comment).
-		stepConfigured := map[string]bool{
-			reviewstep.SpecConformity: r.SpecConformityConfigured,
-			reviewstep.CodeReview:     result.CodeReviewConfigured,
-		}
-		for _, step := range reviewstep.Steps {
-			if !stepConfigured[step.Name] {
-				continue
-			}
-			src := filepath.Join(isolatedWorkspacePath, step.EvidenceFile)
-			dst := filepath.Join(run.Dir(dataDir, id), step.EvidenceFile)
+		// The review's evidence file (CODE_REVIEW_EVIDENCE.json), best-effort,
+		// os.IsNotExist-is-not-a-warning: a ticket whose run never reached the
+		// review (a build/verify failure, an earlier gate failure) never wrote
+		// it. The read is attempted only when the review was configured for
+		// this run: a non-isolated workspace reused across runs must never
+		// retain and attribute a PRIOR run's leftover evidence file to a run
+		// whose own policy was off (see
+		// workflow.RunWorkflowResult.CodeReviewConfigured's own doc comment).
+		// Inside this attributeWorkspaceEvidence block on purpose: a reclaimed
+		// run's delayed call must never attribute a later run's evidence to
+		// this one.
+		if result.CodeReviewConfigured {
+			src := filepath.Join(isolatedWorkspacePath, codereview.EvidenceFile)
+			dst := filepath.Join(run.Dir(dataDir, id), codereview.EvidenceFile)
 			if err := evidence.RetainFile(src, dst); err != nil && !os.IsNotExist(err) {
-				fmt.Printf("run %s: warning: could not retain %s: %v\n", id, step.EvidenceFile, err)
+				fmt.Printf("run %s: warning: could not retain %s: %v\n", id, codereview.EvidenceFile, err)
 			}
 		}
-		// Inside this attributeWorkspaceEvidence block on purpose: a
-		// retained file only exists for a run that just retained it, and a
-		// reclaimed run's delayed call must never attribute a later run's
-		// evidence to this one.
-		loadSpecConformityVerdicts(r, dataDir, id)
 		loadCodeReview(r, dataDir, id)
+		mergeReviewReproductions(r, result.ReviewReproductions, result.ReviewReproductionRechecks)
 	}
 
 	// Outside the attributeWorkspaceEvidence gate above: this reads only

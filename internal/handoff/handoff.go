@@ -111,12 +111,11 @@ type Document struct {
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	Rounds       []Round  `json:"rounds,omitempty"`
 	Checks       []Check  `json:"checks,omitempty"`
-	// UnmetCriteria are the criteria the conformity reviewer flagged,
-	// present when spec_conformity failed.
-	UnmetCriteria []run.ReviewVerdict `json:"unmet_criteria,omitempty"`
-	// ReviewFindings are the code reviewer's, present when code_review
-	// failed.
-	ReviewFindings []run.CodeReviewFinding `json:"review_findings,omitempty"`
+	// ReproducedFindings are the review findings whose reproduction the
+	// factory ran and saw block the run (SC-022), present when
+	// review_reproduction failed: each one line, never the reproduction's
+	// content or the reviewer's failure scenario (SC-018).
+	ReproducedFindings []ReproducedFinding `json:"reproduced_findings,omitempty"`
 	// AgentNotes are the build agent's own notes for whoever attempts the
 	// ticket next: its view, not the factory's record. They never decide
 	// Next or a bin, and Markdown puts them last (SC-018).
@@ -192,31 +191,49 @@ func Build(r *run.Run, dataDir string) Document {
 			NotJudged:   uncommitted && DiffChecks[finding.Check],
 		})
 	}
-	if failed["spec_conformity"] {
-		for _, v := range r.SpecConformityVerdicts {
-			if flaggedVerdict(v.Verdict) && len(doc.UnmetCriteria) < maxReviewItems {
-				doc.UnmetCriteria = append(doc.UnmetCriteria, run.ReviewVerdict{
-					Criterion: clean(v.Criterion, maxSentenceLen), Verdict: clean(v.Verdict, maxWordLen), Detail: clean(v.Detail, maxSentenceLen),
-				})
-			}
-		}
-	}
-	if failed["code_review"] && r.CodeReview != nil {
-		for _, f := range r.CodeReview.Findings {
-			if len(doc.ReviewFindings) == maxReviewItems {
-				break
-			}
-			doc.ReviewFindings = append(doc.ReviewFindings, run.CodeReviewFinding{
-				Severity: clean(f.Severity, maxWordLen), File: clean(f.File, maxNameLen), Line: f.Line,
-				Summary: clean(f.Summary, maxSentenceLen), FailureScenario: clean(f.FailureScenario, maxSentenceLen),
-			})
-		}
+	if failed[policy.ReviewReproductionCheck] {
+		doc.ReproducedFindings = reproducedFindings(r)
 	}
 	doc.Next = Next(r.State == run.StateHalted, doc.Checks)
 	if text, ok := evidence.ReadRetainedAgentNotes(runDir); ok {
 		doc.AgentNotes = parseNotes(text)
 	}
 	return doc
+}
+
+// ReproducedFinding is one blocking finding as a later build is told it:
+// the reviewer's severity and summary, the spec line it cited, the
+// reproduction's path, and one test ID with the failure kind the factory's
+// run recorded for it. Every string is cleaned.
+type ReproducedFinding struct {
+	Severity string `json:"severity"`
+	Summary  string `json:"summary"`
+	SpecLine int    `json:"spec_line,omitempty"`
+	Path     string `json:"path"`
+	TestID   string `json:"test_id,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+}
+
+// reproducedFindings lists the run's blocking findings, at most
+// maxReviewItems.
+func reproducedFindings(r *run.Run) []ReproducedFinding {
+	if r.CodeReview == nil {
+		return nil
+	}
+	var out []ReproducedFinding
+	for _, f := range r.CodeReview.Findings {
+		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil || len(out) == maxReviewItems {
+			continue
+		}
+		rf := ReproducedFinding{Severity: clean(f.Severity, maxWordLen), Summary: clean(f.Summary, maxSentenceLen), Path: clean(f.Reproduction.Path, maxNameLen)}
+		if f.SpecLine != nil {
+			rf.SpecLine = f.SpecLine.Number
+		}
+		id, kind := f.Reproduction.FailedTest()
+		rf.TestID, rf.Kind = clean(id, maxNameLen), clean(kind, maxWordLen)
+		out = append(out, rf)
+	}
+	return out
 }
 
 // oomSentence is what a later build is told of a step whose worker Docker
@@ -244,9 +261,6 @@ func environmentSentence(r *run.Run, check string) string {
 
 // binFor is BinOf with what only the run record shows:
 //
-//   - a review check that failed without a verdict to act on (the reviewer
-//     did not answer) is BinNever: there is nothing to tell a build. When
-//     no other check failed, the run's request waits in resume_review;
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
@@ -269,10 +283,6 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case failsOnBase(r, finding.Check):
 		return BinOperator
-	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
-		return BinNever
-	case finding.Check == "spec_conformity" && !hasActionableVerdict(r.SpecConformityVerdicts):
-		return BinNever
 	case policy.IsRepoGate(finding.Check) && finding.ExitCode == -1:
 		return BinOperator
 	case finding.Check == "canonical_verify" && setupNotRun(r):
@@ -304,25 +314,6 @@ func setupNotRun(r *run.Run) bool {
 		}
 	}
 	return false
-}
-
-// hasActionableVerdict reports whether the conformity reviewer flagged any
-// criterion, as opposed to saying nothing usable.
-func hasActionableVerdict(verdicts []run.ReviewVerdict) bool {
-	for _, v := range verdicts {
-		if flaggedVerdict(v.Verdict) {
-			return true
-		}
-	}
-	return false
-}
-
-// flaggedVerdict reports whether a conformity verdict says the criterion is
-// not met. The reviewer's words are "clean" (met), "unavailable" (it gave
-// no answer) and anything else, "flagged" in practice: the same reading
-// the review corrective round uses (requestdriver.flaggedConformityVerdicts).
-func flaggedVerdict(verdict string) bool {
-	return verdict != "clean" && verdict != "unavailable" && verdict != ""
 }
 
 // outputLines picks the lines of a command's output that report a failure
@@ -513,25 +504,10 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
-	if len(d.UnmetCriteria) > 0 {
-		b.WriteString("## Acceptance criteria the reviewer did not find met\n\n")
-		for _, v := range d.UnmetCriteria {
-			fmt.Fprintf(&b, "- %s: %s%s\n", quote(v.Criterion), quote(v.Verdict), detail(v.Detail))
-		}
-		b.WriteString("\n")
-	}
-	if len(d.ReviewFindings) > 0 {
-		b.WriteString("## Code review findings\n\n")
-		for _, f := range d.ReviewFindings {
-			where := ""
-			if f.File != "" {
-				where = fmt.Sprintf(" (`%s`", f.File)
-				if f.Line > 0 {
-					where += fmt.Sprintf(", line %d", f.Line)
-				}
-				where += ")"
-			}
-			fmt.Fprintf(&b, "- %s%s: %s%s\n", quote(f.Severity), where, quote(f.Summary), detail(f.FailureScenario))
+	if len(d.ReproducedFindings) > 0 {
+		b.WriteString("## Reproduced review findings\n\n")
+		for _, f := range d.ReproducedFindings {
+			b.WriteString(f.line())
 		}
 		b.WriteString("\n")
 	}
@@ -578,6 +554,41 @@ func (d Document) Markdown() string {
 	return out
 }
 
+// ReproducedFindingLines is each blocking finding of r (at most
+// maxReviewItems) as the one list line a later build is told of it, for
+// text other than the Document: the reply a pull-request review round posts
+// on the reviewer's thread. Never the reproduction's content or the failure
+// scenario.
+func ReproducedFindingLines(r *run.Run) []string {
+	var lines []string
+	for _, f := range reproducedFindings(r) {
+		lines = append(lines, f.line())
+	}
+	return lines
+}
+
+// CleanSentence is s as this package makes a sentence someone else wrote
+// safe to show: one line, cut to a fixed length, with no backtick, escape or
+// recognisable secret. CleanWord is the same for a single word.
+func CleanSentence(s string) string { return clean(s, maxSentenceLen) }
+
+// CleanWord: see CleanSentence.
+func CleanWord(s string) string { return clean(s, maxWordLen) }
+
+// line is the finding's one list line: the reviewer's words quoted, the
+// factory's in the sentence.
+func (f ReproducedFinding) line() string {
+	cited := ""
+	if f.SpecLine > 0 {
+		cited = fmt.Sprintf(" (spec line %d)", f.SpecLine)
+	}
+	failure := ""
+	if f.TestID != "" {
+		failure = fmt.Sprintf(": %s %s", quote(f.TestID), f.Kind)
+	}
+	return fmt.Sprintf("- %s %s%s: the factory's run of `%s` failed on the result%s\n", quote(f.Severity), quote(f.Summary), cited, f.Path, failure)
+}
+
 const maxFilesInLine = 12
 
 func fileList(files []string) string {
@@ -599,11 +610,4 @@ func fileList(files []string) string {
 // value cannot close its own quotation.
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, "'") + `"`
-}
-
-func detail(s string) string {
-	if s != "" {
-		return " — " + quote(s)
-	}
-	return ""
 }

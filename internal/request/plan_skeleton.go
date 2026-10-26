@@ -318,7 +318,7 @@ func findNamedAcceptanceCriteriaSectionWithMask(lines []string, mask []bool) (st
 
 // SpecAcceptanceCriteria returns the approved spec's numbered acceptance
 // criteria verbatim ("1. It works."), in order -- the lines a ticket's
-// build hands to build_app.py's --spec-acceptance-criteria conformity review.
+// criteria file holds.
 // The exact "## Acceptance criteria" heading uses the drafted numbered-list
 // parser when its top-level items include a number, and derived list rules
 // when they do not. A case/colon/level variant of that heading uses derived

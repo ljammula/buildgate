@@ -2907,8 +2907,8 @@ type CostSummary struct {
 	AcceptedTickets int `json:"accepted_tickets,omitempty"`
 	// CostPerAcceptedTicketMicroUSD is Total (converted to micro-USD),
 	// including every drafting stage, every ticket's first build, and
-	// every corrective round (conformity or PR-review) that ran --
-	// divided by AcceptedTickets. 0 when AcceptedTickets is 0: an
+	// every corrective round (a review-corrective or PR-review round) that
+	// ran -- divided by AcceptedTickets. 0 when AcceptedTickets is 0: an
 	// undefined "cost per ticket" must never render as a misleadingly
 	// real $0.00 or a divide-by-zero, so a caller checks AcceptedTickets
 	// before treating this as meaningful.
@@ -2921,13 +2921,13 @@ type CostSummary struct {
 // relay that doesn't pin one) -- still counted in Tokens. Role=="" means
 // tokens/cost whose contributing evidence recorded no factory-authored
 // role at all: run.Attempt.Role is empty for any attempt Kind other than
-// "build"/"spec_conformity" (verify/full_suite_verify/reference_oracle,
+// the build and the review step (verify/full_suite_verify/reference_oracle,
 // none of which ever call a model, so this case should never actually
 // carry nonzero tokens/cost) and for an attempt recorded before Role
 // existed -- a display layer must render this "unknown", never coerce it
 // to "execution": an empty Role is not documented anywhere to mean
-// execution, only spec_conformity's own "review" and build's own
-// "execution" are ever actually written.
+// execution, only the review step's "review" and the build's "execution"
+// are ever actually written.
 type ModelUsage struct {
 	Role         string `json:"role,omitempty"`
 	Model        string `json:"model"`
@@ -2937,9 +2937,8 @@ type ModelUsage struct {
 
 // modelUsageKey is modelUsageAccumulator's own grouping key -- (role,
 // model), not model alone, so a run whose attempts span both an
-// "execution" and a "review" role (e.g. a build plus its own
-// spec_conformity attempt) never blends their separate spends into one
-// entry.
+// "execution" and a "review" role (e.g. a build plus its own review
+// attempt) never blends their separate spends into one entry.
 type modelUsageKey struct {
 	Role  string
 	Model string
@@ -3227,8 +3226,8 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 	// records corrective rounds, never a full retry -- silently dropping
 	// $6.42 of $19.81 in real run spend (plus a second ticket's own
 	// quarantined-then-corrected $1.26) from the request's reported
-	// total. Every run a ticket build, a spec_conformity corrective
-	// round, or a PR-review corrective round starts sets RequestID at
+	// total. Every run a ticket build, a review-corrective round, or a
+	// PR-review corrective round starts sets RequestID at
 	// that same start point (request_driver.go, pr_review_driver.go), so
 	// this scan sees all three without needing a second, ticket-shaped
 	// implementation alongside it.
@@ -3312,8 +3311,8 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 		// Total's own dollar figure already sums every source this
 		// rollup can see: both drafting stages (Spec/Plan/Oracle, each
 		// preferring the exact relay-measured Spend when one exists) and
-		// every ticket's build plus every corrective round (conformity or
-		// PR-review) that ran, accepted or not -- exactly "total request
+		// every ticket's build plus every corrective round (review-corrective
+		// or PR-review) that ran, accepted or not -- exactly "total request
 		// spend incl. drafting, failed and corrective rounds". Rounding
 		// through float64 dollars here (rather than summing micro-USD
 		// integers along the way) matches Total's own existing precision;
@@ -3374,7 +3373,7 @@ func addRunModelUsage(r *run.Run, acc *modelUsageAccumulator) (complete, estimat
 				continue
 			}
 			// attempt.Role, not a single run-wide runModel: a run can span
-			// both an "execution" (build) and a "review" (spec_conformity)
+			// both an "execution" (build) and a "review" (the review step)
 			// attempt, each its own relay spend, and ModelUsage's own doc
 			// comment on Role=="" ("unknown", never coerced to
 			// "execution") applies here unchanged.

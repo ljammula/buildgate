@@ -20,8 +20,9 @@ func routeSkipsOf(sel *modelrole.Selection) []run.RouteSkip {
 }
 
 // stampRouteSkips sets each model-backed attempt's RelayRouteSkipped from
-// the skips of the role that ran it: review-step attempts (Kind
-// spec_conformity, code_review or review) take the review role's, build
+// the skips of the role that ran it: review-step attempts (Kind review, or
+// spec_conformity and code_review in a run replayed from before they were
+// retired) take the review role's, build
 // attempts the execution role's. Every other attempt (verify, gates, oracle
 // canary) runs no model and is left alone. An empty list leaves the field untouched.
 func stampRouteSkips(attempts []run.Attempt, opts temporalSliceOptions) {

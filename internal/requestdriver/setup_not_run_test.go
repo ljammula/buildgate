@@ -27,8 +27,8 @@ func TestNoCorrectiveBuildForAVerifyThatNeverRanSetup(t *testing.T) {
 		if err := handoff.Sync(r, dataDir); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := correctableByABuild(dataDir, r); ok != tc.want {
-			t.Errorf("%s: correctableByABuild = %v, want %v", tc.name, ok, tc.want)
+		if _, ok := handoffForABuild(dataDir, r); ok != tc.want {
+			t.Errorf("%s: handoffForABuild = %v, want %v", tc.name, ok, tc.want)
 		}
 		if _, ok := handoffForABuild(dataDir, r); ok != tc.want {
 			t.Errorf("%s: handoffForABuild = %v, want %v", tc.name, ok, tc.want)
@@ -116,8 +116,8 @@ func TestNoCorrectiveBuildForASetupFailureAtTheStartOfABuild(t *testing.T) {
 		if err := handoff.Sync(r, dataDir); err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := correctableByABuild(dataDir, r); ok != tc.corrective {
-			t.Errorf("%s: correctableByABuild = %v, want %v", tc.name, ok, tc.corrective)
+		if _, ok := handoffForABuild(dataDir, r); ok != tc.corrective {
+			t.Errorf("%s: handoffForABuild = %v, want %v", tc.name, ok, tc.corrective)
 		}
 		if _, ok := handoffForABuild(dataDir, r); ok != tc.corrective {
 			t.Errorf("%s: handoffForABuild = %v, want %v", tc.name, ok, tc.corrective)
@@ -177,7 +177,7 @@ func TestASetupFailureInARerunAfterTheOracleCommitKeepsItsSorting(t *testing.T) 
 			t.Errorf("check %+v, want the check's ordinary bin and sentence", c)
 		}
 	}
-	if _, ok := correctableByABuild(dataDir, r); !ok {
-		t.Error("correctableByABuild = false, want true")
+	if _, ok := handoffForABuild(dataDir, r); !ok {
+		t.Error("handoffForABuild = false, want true")
 	}
 }

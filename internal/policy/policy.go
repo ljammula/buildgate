@@ -30,22 +30,13 @@ var (
 // default rather than hand-maintaining a second copy of these strings
 // that could silently drift from EvaluateRun's own.
 //
-// "spec_conformity" is deliberately NOT listed here: unlike
-// full_suite_verify (whose FullSuiteConfigured field already has a
-// merge_policy.go exemption for "declared but the run predates the
-// gate"), spec_conformity has no such exemption yet. Listing it here
-// would make it internal/release.MergePolicy's default RequiredGates
-// member, and any run whose ticket simply didn't declare
-// -spec-acceptance-criteria (i.e. every run today) would then deny
-// release outright for a gate it was never meant to satisfy. Add it
-// here only alongside that same exemption plumbing.
-//
-// "code_review" is excluded for the identical reason: it is off by
-// default (-code-review-policy defaults to "off"), so most runs never
-// declare a code-review command at all, and the same "every run today
-// would deny release outright" trap applies verbatim -- add it here
-// only alongside the same merge_policy.go exemption plumbing
-// spec_conformity would need first.
+// "code_review" is deliberately NOT listed here: it is off by default
+// (-code-review-policy defaults to "off"), so most runs never declare a
+// code-review command at all. Listing it would make it
+// internal/release.MergePolicy's default RequiredGates member, and every run
+// with the review off would then deny release outright for a gate it was
+// never meant to satisfy. Add it here only alongside a merge_policy.go
+// exemption for "declared but not run", as full_suite_verify has.
 var AllGateChecks = append([]string{
 	"canonical_verify",
 	"diff_scope",
@@ -328,40 +319,15 @@ func FullSuiteVerify(cmd []string, exitCode int, durationMs int64, logSHA256 str
 	}
 }
 
-// SpecConformity evaluates the two-phase spec-conformity review's own
-// pass/fail (see cmd/factoryd's conformity-review-second-launch doc
-// comment in run_ticket.go for the full mechanism and why it's a
-// separate phase, not folded into NamedGates): a ticket-declared,
-// model-backed check against the approved spec's own numbered acceptance
-// criteria, distinct from an operator-configured `sh -c` command the way
-// NamedGate's own callers are. cmd is nil exactly when the ticket didn't
-// declare -spec-acceptance-criteria (or the run never reached this gate,
-// e.g. because an earlier gate already failed), and EvaluateRun skips
-// this gate entirely in that case, the same convention FullSuiteVerify
-// already follows.
-func SpecConformity(cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
-	return run.GateResult{
-		Check:      "spec_conformity",
-		Command:    cmd,
-		Passed:     exitCode == 0,
-		ExitCode:   exitCode,
-		DurationMs: durationMs,
-		LogSHA256:  logSHA256,
-	}
-}
-
-// CodeReview evaluates the standalone AI code-review pass's own pass/fail
-// (agent/pi/scripts/code_review.py, internal/codereview) -- a free-form
-// review of the diff for concrete defects, distinct from SpecConformity's
-// per-criterion check against declared acceptance criteria. cmd is nil
-// exactly when -code-review-policy was "off" or the run never reached
-// this phase (an earlier gate already failed), and EvaluateRun skips this
-// gate entirely in that case, the same convention SpecConformity/
-// FullSuiteVerify already follow. exitCode is code_review.py's own exit
-// code, which is already policy-aware (0 under "advisory" regardless of
-// findings, and under "required" iff the reviewer was available and
-// reported no high-severity finding) -- see internal/codereview.Blocking
-// and code_review.py's own run_code_review.
+// CodeReview evaluates the review step's own pass/fail
+// (agent/pi/scripts/combined_review.py, internal/codereview). cmd is nil
+// exactly when -code-review-policy was "off" or the run never reached this
+// phase (an earlier gate already failed), and EvaluateRun skips this gate
+// entirely in that case, the same convention FullSuiteVerify already
+// follows. exitCode is the gate's exit code decoded from the launch
+// (reviewstep.ReviewExitCode): 0 when the reviewer gave a verdict, or under
+// "advisory" regardless; findings never fail it (SC-022: a finding refuses a
+// run only through its reproduction).
 func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
 	return run.GateResult{
 		Check:      "code_review",
@@ -370,6 +336,33 @@ func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) 
 		ExitCode:   exitCode,
 		DurationMs: durationMs,
 		LogSHA256:  logSHA256,
+	}
+}
+
+// ReviewReproductionCheck is the check through which a reviewer's finding
+// refuses a run (SC-022).
+const ReviewReproductionCheck = "review_reproduction"
+
+// ReviewReproductionInput is the factory's runs of the reproductions a
+// review held (SC-022): how many it decided, and how many of those refuse
+// the run (a finding whose reproduction blocks, or, after a corrective build,
+// a held reproduction still failing on its result).
+type ReviewReproductionInput struct {
+	Decided  int
+	Refusing int
+}
+
+// ReviewReproduction evaluates the review_reproduction check: it fails iff
+// any reproduction refuses the run. A finding that is advice never fails it.
+func ReviewReproduction(in ReviewReproductionInput) run.GateResult {
+	exitCode := 0
+	if in.Refusing > 0 {
+		exitCode = 1
+	}
+	return run.GateResult{
+		Check:    "review_reproduction",
+		Passed:   in.Refusing == 0,
+		ExitCode: exitCode,
 	}
 }
 
@@ -465,18 +458,8 @@ type EvaluateRunInput struct {
 	// comment.
 	NamedGates []NamedGateInput
 
-	// SpecConformityCommand/SpecConformityExitCode/... mirror
-	// FullSuiteCommand's own nil-skips-the-gate convention -- nil exactly
-	// when the ticket didn't declare -spec-acceptance-criteria, or the
-	// run never reached the conformity-review phase at all (an earlier
-	// gate already failed). See policy.SpecConformity's own doc comment.
-	SpecConformityCommand    []string
-	SpecConformityExitCode   int
-	SpecConformityDurationMs int64
-	SpecConformityLogSHA256  string
-
 	// CodeReviewCommand/CodeReviewExitCode/... mirror
-	// SpecConformityCommand's own nil-skips-the-gate convention -- nil
+	// FullSuiteCommand's own nil-skips-the-gate convention -- nil
 	// exactly when -code-review-policy was "off", or the run never
 	// reached the code-review phase at all (an earlier gate already
 	// failed). See policy.CodeReview's own doc comment.
@@ -484,6 +467,11 @@ type EvaluateRunInput struct {
 	CodeReviewExitCode   int
 	CodeReviewDurationMs int64
 	CodeReviewLogSHA256  string
+
+	// ReviewReproduction is nil exactly when the run took no reproduction
+	// phase (a run without -review-reproduction, or one that never reached
+	// the review), and EvaluateRun then skips the review_reproduction check.
+	ReviewReproduction *ReviewReproductionInput
 
 	// Oracles is the host-collected committed-oracle evidence (nil for
 	// every run without one). It only ever REMOVES factory-authored,
@@ -505,6 +493,16 @@ type EvaluateRunResult struct {
 	DiffScopeViolations    []string
 	MissingRequiredFiles   []string
 	MissingRequiredContent []string
+}
+
+// add records one gate's result, and its check as failed when it did not
+// pass, and reports whether it passed.
+func (r *EvaluateRunResult) add(gate run.GateResult) bool {
+	r.GateResults = append(r.GateResults, gate)
+	if !gate.Passed {
+		r.FailedChecks = append(r.FailedChecks, gate.Check)
+	}
+	return gate.Passed
 }
 
 // EvaluateRun runs every declared gate against input and combines their
@@ -587,22 +585,11 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		}
 	}
 
-	if input.SpecConformityCommand != nil {
-		conformityGate := SpecConformity(input.SpecConformityCommand, input.SpecConformityExitCode, input.SpecConformityDurationMs, input.SpecConformityLogSHA256)
-		result.GateResults = append(result.GateResults, conformityGate)
-		if !conformityGate.Passed {
-			accepted = false
-			result.FailedChecks = append(result.FailedChecks, conformityGate.Check)
-		}
-	}
-
 	if input.CodeReviewCommand != nil {
-		codeReviewGate := CodeReview(input.CodeReviewCommand, input.CodeReviewExitCode, input.CodeReviewDurationMs, input.CodeReviewLogSHA256)
-		result.GateResults = append(result.GateResults, codeReviewGate)
-		if !codeReviewGate.Passed {
-			accepted = false
-			result.FailedChecks = append(result.FailedChecks, codeReviewGate.Check)
-		}
+		accepted = result.add(CodeReview(input.CodeReviewCommand, input.CodeReviewExitCode, input.CodeReviewDurationMs, input.CodeReviewLogSHA256)) && accepted
+	}
+	if input.ReviewReproduction != nil {
+		accepted = result.add(ReviewReproduction(*input.ReviewReproduction)) && accepted
 	}
 
 	result.Accepted = accepted
@@ -1143,23 +1130,13 @@ var harnessByproducts = []string{
 	".pi-build-session/",
 	// The round loop's resume point (build_app.py write_round_state).
 	".pi-build-round-state.json",
-	// .pi-conformity-session/ is the per-criterion spec-conformity
-	// reviewer's own session directory (run_spec_conformity_review in
-	// build_app.py) -- a distinct harness invocation from the main
-	// .pi-build-session/ round loop, so it needs its own entry here
-	// rather than being covered by that one. Found live: a run that
-	// otherwise succeeded cleanly (canonical_verify, tests_added, and
-	// every conformity verdict all passing) still quarantined on
-	// diff_scope purely because this session directory's own .jsonl
-	// transcript rode along in the diff, unrelated to the ticket's
-	// actual change.
+	// .pi-conformity-session/ is the retired spec-conformity reviewer's
+	// session directory, kept for worktrees an older build left it in: a
+	// harness session's own .jsonl transcript must never ride along in the
+	// diff and quarantine a run on diff_scope.
 	".pi-conformity-session/",
-	// .pi-code-review-session/ is the standalone code-review pass's own
-	// session directory (code_review.py's run_code_review, via
-	// build_app.run_review_turn) -- the same reasoning as
-	// .pi-conformity-session/ above: a distinct harness invocation whose
-	// own .jsonl transcript must not cause a diff-scope quarantine purely
-	// for riding along in the diff.
+	// .pi-code-review-session/ is the retired standalone code review's
+	// session directory, kept for the same reason as the entry above.
 	".pi-code-review-session/",
 	// .pi-combined-review-session/: combined_review.py's session directory
 	// (both reviews in one call) -- same reasoning as the two above.

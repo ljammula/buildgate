@@ -50,10 +50,7 @@ def test_inventory_has_stable_unique_ids_and_does_not_expose_prompt_text():
 		"prompt-source:draft-oracles.criteria-context",
 		"prompt-source:draft-oracles.criterion-index",
 		"prompt-source:build-corrective.context",
-		"prompt-source:code-review",
-		"prompt-source:spec-conformity-review",
 		"prompt-source:combined-review",
-		"prompt-source:spec-conformity-recheck",
 		"prompt-source:review-instructions-diff",
 	} <= set(ids)
 

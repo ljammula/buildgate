@@ -18,6 +18,16 @@ type QueueEntry struct {
 	Project string `json:"project,omitempty"`
 	// SpecPath is the absolute path to the ticket spec.md.
 	SpecPath string `json:"spec_path"`
+	// ReviewSpecPath is the request's approved spec.md (its hash checked
+	// against the approval), forwarded with -review-reproduction as
+	// -review-spec: the review cites it by line and a finding can refuse the
+	// run only through the factory's run of its reproduction (SC-022).
+	// Empty for a request with no approved spec hash, whose review is advice
+	// only.
+	ReviewSpecPath string `json:"review_spec_path,omitempty"`
+	// RecheckReproductions is the build's -recheck-reproductions manifest,
+	// written from the ticket's list (ticketRecheck); "" when it has none.
+	RecheckReproductions string `json:"recheck_reproductions,omitempty"`
 	// VerifyCommand is this ticket's canonical verification command,
 	// resolved at submit time from -verify-command or the workspace's
 	// .factory.yml.
@@ -124,15 +134,6 @@ type QueueEntry struct {
 	// (-execution-thinking): the level of roles.execution.escalation, set
 	// with ExecutionModel by escalate. Empty leaves the role's own.
 	ExecutionThinking string `json:"execution_thinking,omitempty"`
-	// SpecAcceptanceCriteria is the absolute path to a file holding this
-	// ticket's approved-spec acceptance criteria, passed through
-	// to runMainWithReady's own -spec-acceptance-criteria verbatim; empty
-	// (the common case today) means no per-criterion conformity review
-	// runs. The request driver's planning step is the eventual writer of
-	// this field, when it cuts a ticket from an approved spec -- this
-	// field and its threading exist now so that wiring has somewhere to
-	// land.
-	SpecAcceptanceCriteria string `json:"spec_acceptance_criteria,omitempty"`
 	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
 	// own output: an operator-reviewed, plan_review-approved,
 	// hash-pinned reference oracle for this ticket, threaded through to

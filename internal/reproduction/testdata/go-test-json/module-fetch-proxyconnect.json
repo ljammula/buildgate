@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/missingdep","Action":"build-output","Output":"# example.com/repro/p\n"}
+{"ImportPath":"example.com/missingdep","Action":"build-output","Output":"p/repro_test.go:6:2: example.com/missingdep@v1.0.0: Get \"https://proxy.golang.org/example.com/missingdep/@v/v1.0.0.zip\": proxyconnect tcp: dial tcp 127.0.0.1:1: connect: connection refused\n"}
+{"ImportPath":"example.com/missingdep","Action":"build-fail"}
+{"Time":"2026-10-26T17:47:21.454711964Z","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-26T17:47:21.45480179Z","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [setup failed]\n"}
+{"Time":"2026-10-26T17:47:21.454883647Z","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/missingdep"}

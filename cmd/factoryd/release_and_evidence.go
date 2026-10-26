@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"buildgate/internal/conformity"
 	"buildgate/internal/forge"
+	"buildgate/internal/handoff"
 	"buildgate/internal/notify"
 	gatepolicy "buildgate/internal/policy"
 	"buildgate/internal/release"
@@ -940,20 +940,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	if r.TestsRequiredOptOut != "" {
 		fmt.Fprintf(&b, "`tests_added` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
 	}
-	// Per-criterion spec-conformity verdicts, when
-	// -spec-acceptance-criteria was given. Purely informational -- see
-	// run.AgentEvidence.ReviewVerdicts' own doc comment for why this is
-	// never itself a gate: the actual required/advisory/degraded
-	// enforcement already happened inside conformity_review.py, reflected
-	// here only through the run's own accept/quarantine outcome.
-	//
-	// Reads r.SpecConformityVerdicts, the independent phase-2 reviewer's
-	// output. AgentEvidence.ReviewVerdicts is only the fallback for a run
-	// recorded before that field existed: since the phase-2 split
-	// build_app.py no longer receives the criteria, so that legacy field is
-	// empty for every current run and this section never rendered at all.
-	writeSpecConformitySection(&b, r)
-	b.WriteString(renderCodeReviewMarkdown(r.CodeReview))
+	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
 	// Every policy.CommandGate always gets its own line, even when the
 	// project never configured one -- "not configured" is a real,
 	// distinct state a reviewer needs to see, not silence the way an
@@ -1001,57 +988,6 @@ func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
 			}
 		}
 	}
-}
-
-// writeSpecConformitySection lists each criterion's verdict and whether the
-// reference oracle agrees.
-func writeSpecConformitySection(b *strings.Builder, r *run.Run) {
-	verdicts := r.SpecConformityVerdicts
-	if len(verdicts) == 0 && r.AgentEvidence != nil {
-		verdicts = r.AgentEvidence.ReviewVerdicts
-	}
-	if len(verdicts) > 0 {
-		b.WriteString("## Spec conformity\n\n")
-		// Cross-check against the reference oracle: for criteria a
-		// deterministic oracle also covers, say whether the LLM reviewer and the oracle
-		// agree -- a disagreement is the drift signal a human should read.
-		// Still informational only; neither input is a gate here.
-		oraclePassed := conformity.OracleOutcome(r.GateResults)
-		disagreements := 0
-		for i, c := range conformity.CrossCheck(verdicts, r.OracleCoveredCriteria, oraclePassed) {
-			fmt.Fprintf(b, "- %s: **%s**", sanitizeMarkdownField(c.Criterion), sanitizeMarkdownField(c.Verdict))
-			writeRecheckNote(b, verdicts[i].Recheck)
-			switch c.Agreement {
-			case conformity.AgreementAgree:
-				b.WriteString(" (oracle-checked, agrees)")
-			case conformity.AgreementDisagree:
-				disagreements++
-				b.WriteString(" (oracle-checked, **DISAGREES with the reference oracle**)")
-			case conformity.AgreementOracleNotRun:
-				b.WriteString(" (oracle-covered, oracle did not run)")
-			case conformity.AgreementOracleFailed:
-				b.WriteString(" (oracle-covered, the reference oracle failed)")
-			case conformity.AgreementReviewerUnavailable:
-				b.WriteString(" (oracle-covered, reviewer produced no verdict)")
-			}
-			b.WriteString("\n")
-		}
-		if disagreements > 0 {
-			fmt.Fprintf(b, "\n%d criterion verdict(s) disagree with the reference oracle -- the reviewer and the deterministic check reached opposite conclusions, so the prose criterion and the oracle may have drifted apart. Read both before merging.\n", disagreements)
-		}
-		b.WriteString("\n")
-	}
-}
-
-// writeRecheckNote says, after a criterion's verdict, that the verdict came
-// from a second look: an earlier answer flagged the criterion for text a file
-// lacked, and the factory found that text in the result commit. Without it a
-// flag overturned to clean reads as an ordinary clean.
-func writeRecheckNote(b *strings.Builder, recheck *run.ReviewVerdictRecheck) {
-	if recheck == nil {
-		return
-	}
-	fmt.Fprintf(b, " (judged again: an earlier answer flagged it for text the factory then found in the result commit; %s)", sanitizeMarkdownField(recheck.Outcome))
 }
 
 // writeNamedGatesSection lists every command gate and the repository's own
@@ -1278,72 +1214,70 @@ func sanitizeMarkdownField(s string) string {
 	return replacer.Replace(s)
 }
 
-// codeReviewFieldMaxRunes bounds every model-written CodeReviewFinding
-// field (summary, failure scenario, file path) rendered into the PR
-// body: a reviewer turn is free-form prose, unlike the fixed-shape
-// evidence every other section here renders, so nothing else bounds its
-// length before it reaches sanitizePRField below.
-const codeReviewFieldMaxRunes = 400
+// prFieldMaxRunes bounds a model- or repository-written value rendered into
+// the PR body in a code span (a failing test's name), which nothing else
+// bounds before it reaches sanitizePRField below.
+const prFieldMaxRunes = 400
 
-// sanitizePRField makes one model-written code-review finding field safe
-// to embed in the PR body: sanitize.Line first (strips ANSI/control
-// characters, redacts an obvious credential, and folds any embedded
-// newline/line-breaking rune to a single space -- this field is
-// reviewer-authored prose, not the display-only single-line values
-// sanitizeMarkdownField's own callers already control the shape of), then
-// sanitizeMarkdownField (backtick/newline neutralization for the
-// surrounding markdown), then truncated to codeReviewFieldMaxRunes runes
-// (rune-safe: sliced on the decoded rune sequence, not raw bytes, so a
-// multi-byte rune straddling the cutoff is never split into invalid
-// UTF-8) with a trailing "…" when truncation actually happened.
+// sanitizePRField makes one such value safe to embed in the PR body:
+// sanitize.Line first (strips ANSI/control characters, redacts an obvious
+// credential, and folds any embedded newline/line-breaking rune to a single
+// space), then sanitizeMarkdownField (backtick/newline neutralization for
+// the surrounding markdown), then truncated to prFieldMaxRunes runes
+// (rune-safe) with a trailing "…" when truncation actually happened.
 func sanitizePRField(s string) string {
 	s = sanitizeMarkdownField(sanitize.Line(s))
 	runes := []rune(s)
-	if len(runes) <= codeReviewFieldMaxRunes {
+	if len(runes) <= prFieldMaxRunes {
 		return s
 	}
-	return string(runes[:codeReviewFieldMaxRunes]) + "…"
+	return string(runes[:prFieldMaxRunes]) + "…"
 }
 
-// codeReviewFindingsMaxRendered caps how many CodeReviewFinding entries
-// renderCodeReviewMarkdown ever writes into the PR body -- a runaway or
-// adversarial reviewer response ballooning a public PR body without
-// bound is the same class of risk internal/codereview's own maxFindings
-// already defends against for the run record; this is the second,
-// independent cap on what actually reaches GitHub.
-const codeReviewFindingsMaxRendered = 20
+// reviewerAdviceMaxRendered caps how many findings
+// renderReviewerAdviceMarkdown writes into the PR body -- a runaway or
+// adversarial reviewer response ballooning a public PR body without bound
+// is the same class of risk internal/codereview's own maxFindings already
+// defends against for the run record; this is the second, independent cap
+// on what actually reaches GitHub.
+const reviewerAdviceMaxRendered = 20
 
-// renderCodeReviewMarkdown renders the "## Code review" PR-body section
-// for the standalone AI code-review pass (agent/pi/scripts/code_review.py,
-// internal/codereview) -- nil (the ticket never ran this phase, i.e.
-// -code-review-policy was "off" or the run never reached it) renders
-// nothing at all, matching the "## Spec conformity" section's own
-// convention of only appearing when that phase actually ran.
+// renderReviewerAdviceMarkdown renders the "## Reviewer advice" PR-body
+// section: every finding of the review step (agent/pi/scripts/
+// combined_review.py, internal/codereview) that did not refuse the run --
+// Disposition "advice", or "" on a record from before reproductions; a
+// finding that blocks never reaches an accepted run's body. nil (the
+// ticket never ran the review, i.e. -code-review-policy was "off" or the
+// run never reached it) renders nothing at all.
 //
-// Findings are rendered high severity first, then medium, then low,
-// stable within a severity (Go's sort.SliceStable equivalent -- see
-// sort.Stable below) so two findings of the same severity keep
-// code_review.py's own reported order. Capped at
-// codeReviewFindingsMaxRendered, with a final "… N more" line naming
-// exactly how many were left out, pointing at the full evidence file for
-// a reviewer who wants the rest.
-func renderCodeReviewMarkdown(cr *run.CodeReviewResult) string {
+// Each finding is one line, `- **<severity>** <summary>`, both made safe by
+// handoff's rules for what someone else wrote (one line, cut to a fixed
+// length, no backtick, escape or recognisable secret): never the failure
+// scenario, the file, or a reproduction. Findings are sorted high severity
+// first, then medium, then low, stable within a severity, and capped at
+// reviewerAdviceMaxRendered, with a final "… N more" line naming how many
+// were left out.
+func renderReviewerAdviceMarkdown(cr *run.CodeReviewResult) string {
 	if cr == nil {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("## Code review\n\n")
+	b.WriteString("## Reviewer advice\n\n")
 	fmt.Fprintf(&b, "Policy: %s.", sanitizeMarkdownField(cr.Policy))
 	if !cr.Available {
 		b.WriteString(" Reviewer unavailable.")
 	}
 	b.WriteString("\n\n")
-	if cr.Available && len(cr.Findings) == 0 {
+	var advice []run.CodeReviewFinding
+	for _, f := range cr.Findings {
+		if f.Disposition != run.DispositionBlocks {
+			advice = append(advice, f)
+		}
+	}
+	if cr.Available && len(advice) == 0 {
 		b.WriteString("No findings.\n\n")
 		return b.String()
 	}
-	findings := make([]run.CodeReviewFinding, len(cr.Findings))
-	copy(findings, cr.Findings)
 	severityRank := map[string]int{"high": 0, "medium": 1, "low": 2}
 	rank := func(sev string) int {
 		if r, ok := severityRank[sev]; ok {
@@ -1351,34 +1285,16 @@ func renderCodeReviewMarkdown(cr *run.CodeReviewResult) string {
 		}
 		return len(severityRank)
 	}
-	sort.SliceStable(findings, func(i, j int) bool {
-		return rank(findings[i].Severity) < rank(findings[j].Severity)
+	sort.SliceStable(advice, func(i, j int) bool {
+		return rank(advice[i].Severity) < rank(advice[j].Severity)
 	})
-	shown := findings
-	remaining := 0
-	if len(shown) > codeReviewFindingsMaxRendered {
-		remaining = len(shown) - codeReviewFindingsMaxRendered
-		shown = shown[:codeReviewFindingsMaxRendered]
+	shown, remaining := advice, 0
+	if len(shown) > reviewerAdviceMaxRendered {
+		remaining = len(shown) - reviewerAdviceMaxRendered
+		shown = shown[:reviewerAdviceMaxRendered]
 	}
 	for _, f := range shown {
-		b.WriteString("- **")
-		b.WriteString(sanitizeMarkdownField(f.Severity))
-		b.WriteString("**")
-		if f.File != "" {
-			b.WriteString(" `")
-			b.WriteString(sanitizePRField(f.File))
-			if f.Line != 0 {
-				fmt.Fprintf(&b, ":%d", f.Line)
-			}
-			b.WriteString("`")
-		}
-		b.WriteString(" ")
-		b.WriteString(sanitizePRField(f.Summary))
-		if f.FailureScenario != "" {
-			b.WriteString(" — ")
-			b.WriteString(sanitizePRField(f.FailureScenario))
-		}
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "- **%s** %s\n", handoff.CleanWord(f.Severity), handoff.CleanSentence(f.Summary))
 	}
 	if remaining > 0 {
 		fmt.Fprintf(&b, "- … %d more in `CODE_REVIEW_EVIDENCE.json`\n", remaining)

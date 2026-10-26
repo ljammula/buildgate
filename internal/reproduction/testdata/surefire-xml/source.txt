@@ -1,0 +1,41 @@
+package com.example;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+class AddTest {
+    @Test
+    void sumsTwoNumbers() {
+        assertEquals(4, Add.add(1, 2));
+    }
+
+    @Test
+    public void throwsOnOverflow() {
+        throw new IllegalStateException("boom");
+    }
+
+    @Test
+    void hangs() throws InterruptedException {
+        Thread.sleep(3_600_000);
+    }
+
+    @Disabled
+    @Test
+    void later() {}
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void sums(int n) {
+        assertTrue(n == 1);
+    }
+
+    // @Test void commentedOut() {}
+    String s = "@Test void inString() {";
+
+    void helper() {}
+}

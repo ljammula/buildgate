@@ -13,7 +13,7 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
-	"buildgate/internal/conformity"
+	"buildgate/internal/codereview"
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/testfixture"
@@ -70,14 +70,14 @@ func fakeDockerBinary(t *testing.T, body string) string {
 	return path
 }
 
-// TestConformityReviewRoutesWorkerRefusesRoutelessReviewPolicy proves the
+// TestReviewRoutesWorkerRefusesRoutelessReviewPolicy proves the
 // same fail-closed mode rule relaySpecFor already applies to the
 // build's own RoutePolicy also applies to a routed review: on a routes:
 // mode Worker (a.CheckRoute != nil), a ReviewRelayPolicy with NO route
 // name (Route == "") is refused outright, never silently accepted
 // through the legacy six-worker-model-field branch -- that branch is
 // for a legacy (a.CheckRoute == nil) Worker only.
-func TestConformityReviewRoutesWorkerRefusesRoutelessReviewPolicy(t *testing.T) {
+func TestReviewRoutesWorkerRefusesRoutelessReviewPolicy(t *testing.T) {
 	dataDir := t.TempDir()
 	docker := fakeDockerBinary(t, "exit 125\n")
 	activities := &Activities{
@@ -97,24 +97,20 @@ func TestConformityReviewRoutesWorkerRefusesRoutelessReviewPolicy(t *testing.T) 
 		},
 	}
 	input := relayFixtureInput(t, docker, dataDir)
-	input.RunID = "spec-conformity-relay-routeless-review-run"
+	input.RunID = "review-relay-routeless-review-run"
 	input.RoutePolicy.Route = "build-route"
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte("# Spec\n"), 0o600); err != nil {
 		t.Fatalf("write fixture spec: %v", err)
 	}
-	criteriaPath := filepath.Join(t.TempDir(), "criteria.md")
-	if err := os.WriteFile(criteriaPath, []byte("1. Fixture criterion\n"), 0o600); err != nil {
-		t.Fatalf("write fixture criteria: %v", err)
-	}
 	input.SpecPath = specPath
-	input.SpecAcceptanceCriteria = criteriaPath
+	input.CodeReviewPolicy = codereview.PolicyRequired
 	scriptDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(scriptDir, "build_app.py"), []byte("# fixture\n"), 0o644); err != nil {
 		t.Fatalf("write fixture build_app.py: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(scriptDir, conformity.ScriptName), []byte("# fixture\n"), 0o644); err != nil {
-		t.Fatalf("write fixture conformity_review.py: %v", err)
+	if err := os.WriteFile(filepath.Join(scriptDir, reviewstep.CombinedScriptName), []byte("# fixture\n"), 0o644); err != nil {
+		t.Fatalf("write fixture combined_review.py: %v", err)
 	}
 	input.BuildAppScript = filepath.Join(scriptDir, "build_app.py")
 	input.BuildAppInterpreter = "python3"
@@ -126,7 +122,7 @@ func TestConformityReviewRoutesWorkerRefusesRoutelessReviewPolicy(t *testing.T) 
 		WorkerModelID:  "review-model",
 		WorkerModelAPI: "openai-responses",
 	}
-	sciInput := ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.SpecConformity}
+	sciInput := ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}
 
 	wrapper := func(ctx context.Context, in ReviewStepInput) (VerifyActivityResult, error) {
 		return activities.RunReviewStepActivity(ctx, in)
@@ -136,7 +132,7 @@ func TestConformityReviewRoutesWorkerRefusesRoutelessReviewPolicy(t *testing.T) 
 	env.RegisterActivity(wrapper)
 	_, err := env.ExecuteActivity(wrapper, sciInput)
 	if err == nil {
-		t.Fatal("RunSpecConformityReviewActivity: err = nil, want a refusal for a routeless review policy on a routes: mode Worker")
+		t.Fatal("RunReviewStepActivity: err = nil, want a refusal for a routeless review policy on a routes: mode Worker")
 	}
 	if !strings.Contains(err.Error(), "routeless") {
 		t.Errorf("err = %v, want it to reflect the routeless refusal", err)

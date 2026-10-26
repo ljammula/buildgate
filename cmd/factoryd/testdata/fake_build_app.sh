@@ -37,7 +37,6 @@ set -eu
 
 workspace=""
 spec=""
-conformity_policy=""
 max_rounds=""
 timeout_minutes=""
 review_base_sha=""
@@ -49,7 +48,6 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--workspace) workspace="$2"; shift 2 ;;
 	--spec) spec="$2"; shift 2 ;;
-	--conformity-policy) conformity_policy="$2"; shift 2 ;;
 	--max-rounds) max_rounds="$2"; shift 2 ;;
 	--timeout-minutes) timeout_minutes="$2"; shift 2 ;;
 	--review-base-sha) review_base_sha="$2"; shift 2 ;;
@@ -62,7 +60,6 @@ while [ $# -gt 0 ]; do
 done
 
 for name_val in "workspace:$workspace" "spec:$spec" \
-	"conformity_policy:$conformity_policy" \
 	"max_rounds:$max_rounds" "timeout_minutes:$timeout_minutes" "review_base_sha:$review_base_sha"; do
 	name="${name_val%%:*}"
 	val="${name_val#*:}"

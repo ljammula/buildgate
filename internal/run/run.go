@@ -744,29 +744,16 @@ type AgentEvidence struct {
 	// evidence file's JSON unchanged.
 	AgentsMDUsed    bool   `json:"agents_md_used"`
 	AgentsMDGitBlob string `json:"agents_md_git_blob,omitempty"`
-	// ReviewVerdicts is the per-criterion independent-reviewer
-	// outcome against the approved spec's acceptance criteria (build_app.py's
-	// own --spec-acceptance-criteria), one entry per declared criterion.
-	// Empty/nil when no criteria file was given to build_app.py.
-	//
-	// This is agent/reviewer-reported evidence recorded AFTER build_app.py
-	// has already exited, same as every other field on this struct (see
-	// this struct's own doc comment) -- it is rendered in the PR body for
-	// a human to read, and is deliberately NOT consulted by
-	// policy.EvaluateRun or any other accept/quarantine decision.
-	// build_app.py's own review_policy="required" handling already
-	// quarantines a run with a non-clean verdict via its ordinary exit
-	// code (canonical_verify), the same way whole-diff review already
-	// does — a second, Go-side gate re-deciding the same question from
-	// this self-reported field would be exactly the never-trust-self-
-	// report-gates invariant this codebase's ground rules forbid
-	// weakening.
+	// ReviewVerdicts is pre-P2, read only: the per-criterion verdicts a
+	// build_app.py that still ran the spec-conformity review in its own
+	// process reported. Nothing writes it now; it stays so old evidence
+	// decodes unchanged, and nothing renders or decides on it.
 	ReviewVerdicts []ReviewVerdict `json:"review_verdicts,omitempty"`
 }
 
-// ReviewVerdict is one acceptance criterion's independent-reviewer
-// verdict, part of AgentEvidence.ReviewVerdicts -- see that field's own
-// doc comment for why this is informational only, never a gate input.
+// ReviewVerdict is one acceptance criterion's verdict from the retired
+// spec-conformity review, as old records hold it (AgentEvidence.ReviewVerdicts,
+// Run.SpecConformityVerdicts): read only, never a gate input.
 type ReviewVerdict struct {
 	Criterion string `json:"criterion"`
 	Verdict   string `json:"verdict"`
@@ -792,23 +779,163 @@ type ReviewVerdictRecheck struct {
 // criterion, a CodeReviewFinding has no criterion to match against: it is
 // whatever concrete correctness/security/data-loss/concurrency defect the
 // reviewer found, each with its own failure scenario.
+//
+// A finding blocks a run only through a reproduction the factory runs
+// (SC-022). SpecLine is the line of the approved spec it cites; Reproduction
+// is what the factory recorded about the reproduction it carried, never the
+// reproduction's content (which lives in a host copy checked against
+// SHA256); Disposition is "blocks" or "advice", "" for a record from before
+// reproductions. All three are omitted when unset, so an older record
+// re-encodes byte for byte.
 type CodeReviewFinding struct {
-	Severity        string `json:"severity"`
-	File            string `json:"file,omitempty"`
-	Line            int    `json:"line,omitempty"`
-	Summary         string `json:"summary"`
-	FailureScenario string `json:"failure_scenario,omitempty"`
+	Severity        string              `json:"severity"`
+	File            string              `json:"file,omitempty"`
+	Line            int                 `json:"line,omitempty"`
+	Summary         string              `json:"summary"`
+	FailureScenario string              `json:"failure_scenario,omitempty"`
+	SpecLine        *SpecCitation       `json:"spec_line,omitempty"`
+	Reproduction    *ReviewReproduction `json:"reproduction,omitempty"`
+	Disposition     string              `json:"disposition,omitempty"`
+}
+
+// SpecCitation is the line of the approved spec a finding cites: its number
+// and the text the reviewer gave for it. The factory compares the text with
+// the line (SC-022); this record is what the reviewer said.
+type SpecCitation struct {
+	Number int    `json:"number"`
+	Text   string `json:"text"`
+}
+
+// ReviewReproduction is what the run record keeps of a finding's
+// reproduction: where it would be written, the hash of the copy the factory
+// ran, and how the factory's runs went. Never its content.
+type ReviewReproduction struct {
+	Path    string            `json:"path"`
+	SHA256  string            `json:"sha256,omitempty"`
+	Runner  string            `json:"runner,omitempty"`
+	TestIDs []string          `json:"test_ids,omitempty"`
+	Refused string            `json:"refused,omitempty"` // the shape rule that made the finding advice
+	Runs    []ReproductionRun `json:"runs,omitempty"`    // head1, head2, base, recheck
+	Verdict string            `json:"verdict,omitempty"` // blocks | advice | not_run
+	Reason  string            `json:"reason,omitempty"`  // one line
+	// Recheck is the manifest entry a recheck ran (ReviewReproductionRechecks),
+	// so a later build that follows this run can find the held copy again,
+	// under the review-repro directory of the run whose review held it. Nil
+	// on a finding's own reproduction.
+	Recheck *RecheckEntry `json:"recheck,omitempty"`
+}
+
+// FailedTest is the first of the reproduction's test IDs, in order, that
+// failed (an assertion, an error or the timeout) on its last recorded run on
+// the result commit (any pass but the base), and that run's kind for it;
+// "", "" when none did.
+func (rep ReviewReproduction) FailedTest() (id, kind string) {
+	i := len(rep.Runs) - 1
+	for i >= 0 && rep.Runs[i].Pass == "base" {
+		i--
+	}
+	if i < 0 {
+		return "", ""
+	}
+	last := rep.Runs[i]
+	for _, id := range rep.TestIDs {
+		switch k := last.Tests[id]; k {
+		case "fail", "error", "timeout":
+			return id, k
+		}
+	}
+	return "", ""
+}
+
+// ReproductionRun is one launch of a reproduction: which pass, on which
+// commit, and what the runner's report recorded. CapExceeded marks a launch
+// whose command started and ran past the factory's cap: no report is read,
+// and every test is recorded as a timeout.
+type ReproductionRun struct {
+	Pass               string            `json:"pass"`
+	Commit             string            `json:"commit,omitempty"`
+	Outcome            string            `json:"outcome,omitempty"`
+	Tests              map[string]string `json:"tests,omitempty"`
+	ExitCode           int               `json:"exit_code,omitempty"`
+	LogPath            string            `json:"log_path,omitempty"`
+	ReportSHA256       string            `json:"report_sha256,omitempty"`
+	ReproductionSHA256 string            `json:"reproduction_sha256,omitempty"`
+	CapExceeded        bool              `json:"cap_exceeded,omitempty"`
+}
+
+// The dispositions of a finding (CodeReviewFinding.Disposition), and the
+// verdict of a reproduction the factory held and did not run.
+const (
+	DispositionBlocks         = "blocks"
+	DispositionAdvice         = "advice"
+	ReproductionVerdictNotRun = "not_run"
+	ReviewReproductionDirName = "review-repro"
+	ReproductionPassRecheck   = "recheck"
+)
+
+// ReviewReproductionDir is the directory, in the run directory runDir, that
+// holds the host copies of the run's review reproductions (SC-022): one
+// subdirectory per finding, named by the finding's index, holding the
+// reproduction at its repository path.
+func ReviewReproductionDir(runDir string) string {
+	return filepath.Join(runDir, ReviewReproductionDirName)
+}
+
+// HeldReproduction is the factory's record of one finding's reproduction as
+// the review step held it (SC-022): the finding's index among the review's
+// parsed findings, the repository path, and either the shape rule that
+// refused it (Refused, and nothing is held) or the host copy (HostPath, its
+// SHA-256 taken when it was written), the cited spec line, the test IDs and
+// runner the factory chose, and whether the content holds a backticked
+// literal of the cited line that no tracked file of the base commit holds
+// (reproduction.NewLiteral). Never the content.
+type HeldReproduction struct {
+	Finding      int      `json:"finding"`
+	Path         string   `json:"path"`
+	Refused      string   `json:"refused,omitempty"`
+	SHA256       string   `json:"sha256,omitempty"`
+	HostPath     string   `json:"host_path,omitempty"`
+	SpecLine     int      `json:"spec_line,omitempty"`
+	TestIDs      []string `json:"test_ids,omitempty"`
+	Runner       string   `json:"runner,omitempty"`
+	HoldsLiteral bool     `json:"holds_literal,omitempty"`
+}
+
+// FindingReproduction is what the factory decided about one finding's
+// reproduction, keyed by the finding's index as HeldReproduction is; the
+// command that writes the run record copies it onto that finding when the
+// finding there carries the same path.
+type FindingReproduction struct {
+	Finding      int                `json:"finding"`
+	Reproduction ReviewReproduction `json:"reproduction"`
+	Disposition  string             `json:"disposition"`
+}
+
+// RecheckManifest is a build's -recheck-reproductions file: the request
+// whose ticket the build is, and each held copy to run once on the build's
+// result. Every entry's run is a run of that request.
+type RecheckManifest struct {
+	RequestID     string         `json:"request_id"`
+	Reproductions []RecheckEntry `json:"reproductions"`
+}
+
+// RecheckEntry is one reproduction a recheck runs: the run whose review held
+// it (RunID) and the held copy, whose HostPath must be under that run's
+// ReviewReproductionDir.
+type RecheckEntry struct {
+	RunID string `json:"run_id"`
+	HeldReproduction
 }
 
 // CodeReviewResult is the run-record shape of CODE_REVIEW_EVIDENCE.json's
-// outcome -- Policy is the --review-policy this run's code_review.py
+// outcome -- Policy is the --review-policy this run's review
 // launch was given (off/advisory/required, see internal/codereview),
 // Available is false when the reviewer produced no parseable response at
 // all (never conflated with a real, empty Findings list), and Findings is
 // every finding the reviewer reported, capped by internal/codereview's
-// own ParseResult. Like ReviewVerdict/SpecConformityVerdicts, this is
-// informational only, never itself an accept/quarantine gate input -- see
-// this file's own ReviewVerdicts field doc comment for that invariant.
+// own ParseResult. A finding is informational only, never itself an
+// accept/quarantine gate input (SC-022: a finding refuses a run only
+// through the factory's own run of its reproduction).
 type CodeReviewResult struct {
 	Policy    string              `json:"policy"`
 	Available bool                `json:"available"`
@@ -1644,35 +1771,30 @@ type Run struct {
 	// (no separate full_suite_command configured)" apart from a
 	// deliberately configured one.
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
-	// SpecConformityConfigured records whether this run's own ticket
-	// declared -spec-acceptance-criteria at all -- mirrors
-	// FullSuiteConfigured's own "declared, independent of whether the gate
-	// actually ran" auditability. NOT currently in policy.AllGateChecks
-	// (see that var's own doc comment for why); this field exists so a
-	// future exemption there has something to key off of without another
-	// run-shape change.
-	SpecConformityConfigured bool `json:"spec_conformity_configured,omitempty"`
-	// SpecConformityVerdicts is the independent reviewer's per-criterion
-	// verdicts from CONFORMITY_EVIDENCE.json (the separate, later launch
-	// conformity_review.py runs -- see run_ticket.go's "conformity review,
-	// phase 2"), loaded into the run record so the release evidence can show
-	// them. Before this field existed they were retained only as a file:
-	// build_app.py stopped receiving the criteria when phase 2 was split
-	// out, so BUILD_EVIDENCE.json's review_verdicts -- the only place the
-	// evidence renderer read them from -- was silently always empty, and the
-	// PR body's "Spec conformity" section never appeared. Informational
-	// only, like AgentEvidence.ReviewVerdicts: the required/advisory
-	// enforcement already happened inside conformity_review.py.
-	SpecConformityVerdicts []ReviewVerdict `json:"spec_conformity_verdicts,omitempty"`
-	// CodeReview is the independent code reviewer's outcome from
-	// CODE_REVIEW_EVIDENCE.json (agent/pi/scripts/code_review.py's own,
+	// SpecConformityConfigured and SpecConformityVerdicts are pre-P2, read
+	// only: a run recorded before the spec-conformity review was retired
+	// says here whether its ticket declared acceptance criteria and what
+	// that review answered for each. Nothing sets them now, and no renderer
+	// or policy reads them; they stay so old records decode unchanged.
+	SpecConformityConfigured bool            `json:"spec_conformity_configured,omitempty"`
+	SpecConformityVerdicts   []ReviewVerdict `json:"spec_conformity_verdicts,omitempty"`
+	// CodeReview is the independent reviewer's outcome from
+	// CODE_REVIEW_EVIDENCE.json (agent/pi/scripts/combined_review.py's own,
 	// separate one-turn launch -- see internal/codereview's package doc
-	// comment). Nil for a run that never ran this gate. Not yet consumed
-	// by any run path or policy gate (that wiring is PR M2-B); recorded
-	// here only so the release evidence can render it once that wiring
-	// lands, the same additive-field pattern SpecConformityVerdicts above
-	// already established for CONFORMITY_EVIDENCE.json.
+	// comment). Nil for a run that never ran this gate.
 	CodeReview *CodeReviewResult `json:"code_review,omitempty"`
+	// ReviewReproductionRechecks are a corrective build's runs of the
+	// reproductions an earlier run's review held (-recheck-reproductions,
+	// SC-022): one per reproduction, its one run on this run's result
+	// commit, and Verdict "passes" or "still_failing". Nil for every other
+	// run.
+	ReviewReproductionRechecks []ReviewReproduction `json:"review_reproduction_rechecks,omitempty"`
+	// ReviewReproductionRechecksGiven are the -recheck-reproductions entries
+	// this run was given, recorded when it starts, whether or not its
+	// workflow reached the recheck (a run whose gates failed does not).
+	// Evidence only: what a later build rechecks is the ticket's list on the
+	// request (request.Ticket.Reproductions).
+	ReviewReproductionRechecksGiven []RecheckEntry `json:"review_reproduction_rechecks_given,omitempty"`
 	// ReferenceOracleDir is the -reference-oracle-dir this run was
 	// configured with, recorded so any finalization site -- including a
 	// reclaimed run, which sees only this record -- can find the oracle's

@@ -296,19 +296,13 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	var stagedSpecDir, stagedSpec string
 	var cleanupSpec func()
 	// extraRunInputs are host files that arguments reference and the sandbox
-	// must see beside the spec in /inputs/run: -spec-acceptance-criteria's
-	// resolved file, plus any the Activity added with withExtraRunInputs (a
-	// retried build's --handoff note). Found live: without staging, such a
-	// flag's value reached the script as a host path that does not exist
-	// inside the sandbox, and the conformity review died on a
+	// must see beside the spec in /inputs/run: those the Activity added with
+	// withExtraRunInputs (a retried build's --handoff note). Found live:
+	// without staging, such a flag's value reached the script as a host path
+	// that does not exist inside the sandbox, and the step died on a
 	// FileNotFoundError before it ever ran. Empty for most phases, so staging
-	// is then a no-op. Mirrors cmd/factoryd's own
-	// runSandboxWithRetries/stageExtraRunInput -- see that function's own
-	// doc comment.
+	// is then a no-op.
 	var extraRunInputs []string
-	if criteria := a.specAcceptanceCriteriaFor(input); criteria != "" {
-		extraRunInputs = append(extraRunInputs, criteria)
-	}
 	extraRunInputs = append(extraRunInputs, extraRunInputsFrom(ctx)...)
 	stagedExtra := map[string]string{}
 	if input.SpecPath != "" {
@@ -347,11 +341,11 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		}
 		defer cleanup()
 		// The harness scripts import each other as plain sibling modules
-		// (conformity_review.py's own `import build_app`, same as
+		// (combined_review.py's own `import build_app`, same as
 		// draft_spec.py/plan_tickets.py) -- found live, 2026-09-17: the
-		// first real RunSpecConformityReviewActivity run against a live
-		// sandbox died on ModuleNotFoundError before conformity_review.py
-		// ever ran, because this staging block had no equivalent of
+		// first real review run against a live sandbox died on
+		// ModuleNotFoundError before its script ever ran, because this
+		// staging block had no equivalent of
 		// cmd/factoryd's own stageSandboxScript, which has staged siblings
 		// since a live finding. See
 		// sandbox.StageSiblingModules' own doc comment.
@@ -402,6 +396,9 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	if skillsDir != "" {
 		mounts = append(mounts, sandbox.InputMount{Source: skillsDir, Target: "skills"})
 	}
+	// A reproduction's runner helpers (withInputMounts); nothing for any
+	// other launch.
+	mounts = append(mounts, inputMountsFrom(ctx)...)
 	last := runner.Result{ExitCode: -1}
 	var lastErr error
 	// commandRan: an attempt of this step released its command.
@@ -416,7 +413,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	// Safe to block here for as long as it takes: this whole function is
 	// always invoked from inside heartbeatWhileRunning (see every one of
 	// its callers -- RunBuildActivity, RunVerifyActivity,
-	// RunSpecConformityReviewActivity, RunFullSuiteVerifyActivity, the
+	// RunReviewStepActivity, RunFullSuiteVerifyActivity, the
 	// named-gate check), which already runs a ticker calling
 	// activity.RecordHeartbeat concurrently with this call for as long as
 	// it runs, regardless of what it's doing internally -- so a long wait

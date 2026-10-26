@@ -133,6 +133,19 @@ func matchInstructionPath(parts []string) (n int, canon string, ok bool) {
 	return n, canon, n > 0
 }
 
+// IsInstructionPath reports whether the slash-separated repository path p is
+// at or under an entry of the review instruction table (SC-019), matched at
+// any depth under the same fold as the review mask.
+func IsInstructionPath(p string) bool {
+	_, _, ok := matchInstructionPath(strings.Split(p, "/"))
+	return ok
+}
+
+// FoldPath is the fold behind every instruction-path match applied to a whole
+// slash-separated path: two paths a case-insensitive filesystem could alias
+// fold alike. It over-matches (safe).
+func FoldPath(p string) string { return foldName(p) }
+
 // instrPath is a slash-separated path classified against the table.
 type instrPath struct {
 	parts, fold []string

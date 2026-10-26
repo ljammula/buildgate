@@ -21,28 +21,9 @@ import (
 	"buildgate/internal/testfixture"
 )
 
-// TestReviewStepsOrderIsSpecConformityThenCodeReview pins reviewstep.Steps'
-// own order (M4-K3): both cmd/factoryd's and RunWorkflow read
-// this same table and rely on the spec-conformity review running before
-// the code review -- see reviewstep's own package doc comment.
-func TestReviewStepsOrderIsSpecConformityThenCodeReview(t *testing.T) {
-	if len(reviewstep.Steps) != 2 {
-		t.Fatalf("len(reviewstep.Steps) = %d, want 2", len(reviewstep.Steps))
-	}
-	if reviewstep.Steps[0].Name != reviewstep.SpecConformity {
-		t.Errorf("Steps[0].Name = %q, want %q", reviewstep.Steps[0].Name, reviewstep.SpecConformity)
-	}
-	if reviewstep.Steps[1].Name != reviewstep.CodeReview {
-		t.Errorf("Steps[1].Name = %q, want %q", reviewstep.Steps[1].Name, reviewstep.CodeReview)
-	}
-}
-
-// TestRunReviewStepActivityChecksInIndependentlyPerStep proves the
-// unification of RunSpecConformityReviewActivity/RunCodeReviewActivity
-// onto one RunReviewStepActivity implementation (M4-K3) did not collapse
-// the two steps' own durable checkpoints into one: two separate
+// TestRunReviewStepActivityChecksInIndependentlyPerStep proves two launches
+// of the review step keep their own durable checkpoints: two separate
 // ExecuteActivity calls against the SAME run's checkpoint/log directories
-// -- one per reviewstep.Steps entry, exactly as RunWorkflow issues them --
 // must each get their own checkpoint file, keyed by their own distinct
 // ActivityID (Temporal assigns each ExecuteActivity call its own), not
 // share or overwrite one another's.
@@ -79,7 +60,6 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	baseInput.DataDir = dataDir
 	baseInput.LogDir = logDir
 	baseInput.CheckpointDir = checkpointDir
-	baseInput.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	baseInput.CodeReviewPolicy = codereview.PolicyAdvisory
 	policy := *testRelayPolicy()
 	policy.AllowUnauthenticatedUpstream = true
@@ -92,10 +72,10 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(wrapper)
 
-	for _, step := range reviewstep.Steps {
-		in := ReviewStepInput{RunWorkflowInput: baseInput, Step: step.Name}
+	for _, name := range []string{reviewstep.Combined, reviewstep.Combined} {
+		in := ReviewStepInput{RunWorkflowInput: baseInput, Step: name}
 		if _, err := env.ExecuteActivity(wrapper, in); err != nil {
-			t.Fatalf("execute %s review step: %v", step.Name, err)
+			t.Fatalf("execute %s review step: %v", name, err)
 		}
 	}
 
@@ -120,25 +100,23 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	}
 }
 
-// TestReviewStepArgsUsesDiffBaseNotBaseSHA proves both review steps'
+// TestReviewStepArgsUsesDiffBaseNotBaseSHA proves the review's
 // --review-base-sha comes from RunWorkflowInput.DiffBaseSHA (the
 // cumulative ticket diff a -diff-base override names) when it is set,
 // not from BaseSHA (a corrective round's own checkout point) -- see
 // DiffBaseSHA's own doc comment (workflow_types.go) for the incident this
 // guards against: before DiffBaseSHA existed, a Temporal-routed
-// corrective round's spec-conformity/code review always saw only the
+// corrective round's review always saw only the
 // round's own tiny delta.
 func TestReviewStepArgsUsesDiffBaseNotBaseSHA(t *testing.T) {
-	activities := &Activities{}
 	input := fixtureInput()
 	input.BaseSHA = "round-own-checkout-point"
 	input.DiffBaseSHA = "ticket-original-base"
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = "advisory"
 
-	for _, step := range reviewstep.Steps {
+	for _, step := range []reviewstep.Step{reviewstep.CombinedStep} {
 		stepInput := ReviewStepInput{RunWorkflowInput: input, Step: step.Name}
-		args := reviewStepArgs(activities, step, stepInput, "/fixture/"+step.ScriptName)
+		args := reviewStepArgs(stepInput, "/fixture/"+step.ScriptName)
 		found := false
 		for i, a := range args {
 			if a != "--review-base-sha" {
@@ -188,7 +166,6 @@ func TestRunReviewStepActivityRecordsSpendStartAndRefusesSupersededLaunch(t *tes
 	input.DataDir = dataDir
 	input.LogDir = logDir
 	input.CheckpointDir = checkpointDir
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = codereview.PolicyAdvisory
 	policy := *testRelayPolicy()
 	policy.AllowUnauthenticatedUpstream = true
@@ -200,7 +177,7 @@ func TestRunReviewStepActivityRecordsSpendStartAndRefusesSupersededLaunch(t *tes
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(wrapper)
-	_, err := env.ExecuteActivity(wrapper, ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Steps[0].Name})
+	_, err := env.ExecuteActivity(wrapper, ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined})
 	if err == nil || hookErr == nil {
 		t.Fatalf("err = %v, hookErr = %v; want the superseded refusal", err, hookErr)
 	}

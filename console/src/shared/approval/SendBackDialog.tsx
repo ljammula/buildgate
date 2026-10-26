@@ -13,10 +13,8 @@ import { ReasonFlow } from "./ReasonFlow";
  * reason plus a target, then POST `/requests/{id}/reject` with
  * `{ reason, by, to }`, `to` being `plan` or `spec`. The "To planning"
  * target is disabled when `request.canSendBackToPlan` is false (the dialog
- * then starts on spec, the only target the server accepts); it also starts
- * on spec for a `spec_conformity` quarantine, where the criterion itself
- * usually needs rewording. Renders nothing when closed or when the console
- * cannot write.
+ * then starts on spec, the only target the server accepts). Renders nothing
+ * when closed or when the console cannot write.
  */
 export interface SendBackDialogProps extends FlowProps {
   /**
@@ -64,9 +62,7 @@ function SendBackBody({ request, by, onOpenChange, onDone, blocked }: BodyProps)
   // send-back (409) if the request has left it or entered it again since.
   const [seen] = useState({ state: request.state, enteredAt: request.enteredAt });
   const planAllowed = request.canSendBackToPlan;
-  const [target, setTarget] = useState<"plan" | "spec">(
-    planAllowed && request.quarantineCheck !== "spec_conformity" ? "plan" : "spec",
-  );
+  const [target, setTarget] = useState<"plan" | "spec">(planAllowed ? "plan" : "spec");
   return (
     <ReasonFlow
       title="Send back"

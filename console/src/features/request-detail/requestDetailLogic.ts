@@ -199,9 +199,7 @@ export interface RecoveryPlan {
   readonly retryLabel: string;
   readonly showSendBack: boolean;
   readonly sendBackLabel: string;
-  /** A spec_conformity quarantine's usual recovery: Send back leads, ahead of Retry. */
-  readonly sendBackIsPrimary: boolean;
-  /** Mirrors whichever action leads, so copying it never runs a different recovery. */
+  /** Mirrors the action that leads (Retry), so copying it never runs a different recovery. */
   readonly cliEquivalent: string;
   /** The quarantined ticket whose run override the callout links to; null otherwise. */
   readonly overrideTicket: RequestTicket | null;
@@ -239,9 +237,7 @@ export function recoveryPlan(request: RequestSummary): RecoveryPlan {
     request.nextAction !== ""
       ? request.nextAction
       : "Retry the request to move it forward again, or cancel it to abandon it.";
-  const specConformity = request.quarantineCheck === "spec_conformity";
-  const target = specConformity || !request.canSendBackToPlan ? "spec" : "plan";
-  const sendBackIsPrimary = request.canSendBack && specConformity;
+  const target = request.canSendBackToPlan ? "plan" : "spec";
   return {
     quarantined,
     awaitingPullRequest,
@@ -250,10 +246,7 @@ export function recoveryPlan(request: RequestSummary): RecoveryPlan {
     retryLabel: retryLabel(request, awaitingPullRequest),
     showSendBack: request.canSendBack,
     sendBackLabel: target === "plan" ? "Send back to planning" : "Send back to spec",
-    sendBackIsPrimary,
-    cliEquivalent: sendBackIsPrimary
-      ? `factoryd reject -to ${target} -reason "<what to change>" ${request.id}`
-      : `factoryd retry ${request.id}`,
+    cliEquivalent: `factoryd retry ${request.id}`,
     overrideTicket: quarantined ? quarantinedTicket(request) : null,
   };
 }

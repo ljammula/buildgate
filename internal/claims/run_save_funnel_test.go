@@ -205,7 +205,7 @@ func TestNoDirectRunSaveOutsideRunPackage(t *testing.T) {
 					}
 					// The whole declaration, not just Body: a top-level
 					// function's own *run.Run parameter (e.g.
-					// flaggedConformityVerdicts(runRecord *run.Run) in
+					// reviewShapeOnly(runRecord *run.Run) in
 					// request_driver.go) lives in d.Type, not d.Body.
 					scanNode = d
 				case *ast.GenDecl:

@@ -93,8 +93,7 @@ func requireSessionHarnessSandboxImage(settings sessionconfig.Settings, sandboxI
 	return nil
 }
 
-// reviewHarnessFor is the harness every review job (conformity, code and
-// combined review) runs under: roles.review's, or, with no roles.review (the
+// reviewHarnessFor is the harness every review job runs under: roles.review's, or, with no roles.review (the
 // steps then run on the execution role's own model and relay), the execution
 // role's CONFIGURED harness. Review is never requester-selectable, so a
 // request's -execution-harness pick never reaches it.

@@ -54,15 +54,12 @@ var prClosesIssueRefPattern = regexp.MustCompile(`^[^/]+/[^/]+#[0-9]+$`)
 // here rather than resolved.
 var fullSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// -conformity-policy's own flag default ("required") is what governs
-// the per-criterion spec-conformity review when -spec-acceptance-criteria
-// is set. The factory no longer drives a separate legacy whole-diff
-// "reviewer" extension trace at all (that Pi extension was never present
-// in the sandbox image and always reported "unavailable"; correctness
-// rests on spec_conformity, the deterministic gates, and human review) --
-// build_app.py's own --review-policy option still exists for the frozen
-// intake bundle (ticket_runner.py/goal_pilot.py), but the factory never
-// passes it.
+// The factory does not drive a whole-diff "reviewer" extension trace inside
+// the build (that Pi extension was never present in the sandbox image and
+// always reported "unavailable"; correctness rests on the deterministic
+// gates, the review step and human review) -- build_app.py's own
+// --review-policy option still exists for the frozen intake bundle
+// (ticket_runner.py/goal_pilot.py), but the factory never passes it.
 
 // validateFollowUpRunInputs checks the two inputs only a run that follows
 // an earlier one is given: -diff-base, -instruction-base and -earlier-attempt.
@@ -105,7 +102,8 @@ func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*
 
 // replayConflicts names the flags set in f that a replay run refuses: a
 // resume, a chain, an earlier attempt, a baseline check, a pull request it
-// would open, the shared repository queue, and a run serve starts.
+// would open, the shared repository queue, a run serve starts, and the
+// review-reproduction inputs (a replay run's review is advice only).
 func replayConflicts(f runFlags) []string {
 	var set []string
 	for _, c := range []struct {
@@ -120,6 +118,9 @@ func replayConflicts(f runFlags) []string {
 		{"-pr-base", *f.prBase != ""},
 		{"-repository", *f.repository != ""},
 		{"-run-id", *f.runID != ""},
+		{"-review-reproduction", *f.reviewReproduction},
+		{"-review-spec", *f.reviewSpec != ""},
+		{"-recheck-reproductions", *f.recheckReproductions != ""},
 	} {
 		if c.on {
 			set = append(set, c.name)
@@ -199,25 +200,23 @@ func isolationBranchName(id, onBranch string) string {
 // Field names match the flag's own local variable name at every existing
 // call site.
 type runFlags struct {
-	ticket                 *string
-	executionHarness       *string
-	workspace              *string
-	spec                   *string
-	buildAppInterpreter    *string
-	buildAppScript         *string
-	buildAppMaxAttempts    *int
-	conformityPolicy       *string
-	codeReviewPolicy       *string
-	specAcceptanceCriteria *string
-	maxRounds              *int
-	timeoutMinutes         *int
-	timeout                *time.Duration
-	verifyCommand          *string
-	fastCheckCommand       *string
-	verifyMaxAttempts      *int
-	fullSuiteCommand       *string
-	fullSuiteSource        *string
-	fullSuiteCadence       *int
+	ticket              *string
+	executionHarness    *string
+	workspace           *string
+	spec                *string
+	buildAppInterpreter *string
+	buildAppScript      *string
+	buildAppMaxAttempts *int
+	codeReviewPolicy    *string
+	maxRounds           *int
+	timeoutMinutes      *int
+	timeout             *time.Duration
+	verifyCommand       *string
+	fastCheckCommand    *string
+	verifyMaxAttempts   *int
+	fullSuiteCommand    *string
+	fullSuiteSource     *string
+	fullSuiteCadence    *int
 	// gateCommands holds one flag per policy.CommandGate, keyed by its
 	// ID ("lint", "security_audit", "unit_tests", "integration_tests",
 	// "reference_oracle") -- see newRunFlags' own registration loop.
@@ -257,6 +256,9 @@ type runFlags struct {
 	resumeWorktreeOf             *string
 	replay                       *string
 	configPath                   *string
+	reviewReproduction           *bool
+	reviewSpec                   *string
+	recheckReproductions         *string
 }
 
 // newRunFlags builds `factoryd <run>`'s FlagSet in isolation from parsing,
@@ -270,9 +272,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.buildAppInterpreter = flags.String("build-app-interpreter", "python3", "internal: the interpreter that runs -build-app-script; tests point it at a stand-in")
 	f.buildAppScript = flags.String("build-app-script", "", "build script to run instead of the one built into this binary")
 	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "launches the build gets in total when a launch fails for an infrastructure reason")
-	f.conformityPolicy = flags.String("conformity-policy", "required", "required or advisory: whether the spec-conformity review's verdict can fail the run. Only used with -spec-acceptance-criteria")
-	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after the other checks pass: off, advisory (findings recorded, never blocks) or required (a high-severity finding quarantines the run). Unset uses the session config's value")
-	f.specAcceptanceCriteria = flags.String("spec-acceptance-criteria", "", "file of the approved spec's numbered acceptance criteria for this ticket. A reviewer gives a verdict on each, recorded in the build evidence; empty skips that review")
+	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after the other checks pass: off, advisory (findings recorded, never blocks) or required (a review that gives no verdict quarantines the run). Unset uses the session config's value")
 	f.maxRounds = flags.Int("max-rounds", requestdriver.DefaultMaxRounds, "most build rounds the coding agent gets")
 	f.timeoutMinutes = flags.Int("timeout-minutes", 45, "minutes the coding agent may run in one build round")
 	f.timeout = flags.Duration("timeout", 0, "time limit for the whole run; 0 means -timeout-minutes plus 5 minutes")
@@ -324,6 +324,9 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.diffBase = flags.String("diff-base", "", "commit the diff checks and pull request evidence measure from, instead of the run's starting commit: a full 40-character id and an ancestor of it. Build and verify still use the branch tip")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts to continue its build. Refused with -repository, -on-branch or -prior-run, or when the worktree was not kept intact")
 	f.replay = flags.String("replay", "", "internal: file naming commits the host replayed onto a new base; the run judges them instead of building")
+	f.reviewReproduction = flags.Bool("review-reproduction", false, "internal: hold the review's reproductions and run them, so a finding can refuse the run (SC-022); a request's ticket build sets it")
+	f.reviewSpec = flags.String("review-spec", "", "internal: the request's approved spec.md, which the review cites by line and the reproduction check compares citations with")
+	f.recheckReproductions = flags.String("recheck-reproductions", "", "internal: manifest of a quarantined run's held reproductions that this corrective build's result must pass")
 	f.configPath = flags.String("config", "", "session config path, or a profile name; empty uses the active profile or the default paths")
 	finishFlags(flags)
 	flags.Usage = func() {
@@ -354,8 +357,6 @@ type ticketRun struct {
 	buildAppInterpreter          *string
 	buildAppScript               *string
 	buildAppMaxAttempts          *int
-	conformityPolicy             *string
-	specAcceptanceCriteria       *string
 	codeReviewPolicy             *string
 	maxRounds                    *int
 	timeoutMinutes               *int
@@ -402,7 +403,13 @@ type ticketRun struct {
 	resumeWorktreeOf             *string
 	// replay is the record -replay names, read and checked by
 	// validateReplayFlags; nil for every run that builds.
-	replay                                *run.Replay
+	replay *run.Replay
+	// reviewSpecSnapshot/reviewSpecSHA256 are -review-spec's snapshot in the
+	// run's directory and its hash; rechecks is -recheck-reproductions,
+	// checked (snapshotReviewInputs).
+	reviewSpecSnapshot                    string
+	reviewSpecSHA256                      string
+	rechecks                              []run.RecheckEntry
 	args                                  []string
 	settings                              sessionconfig.Settings
 	executionHarnessName                  string
@@ -531,6 +538,9 @@ func runMainWithReady(dp *deps, lifecycleCtx context.Context, args []string, onR
 	if err := tr.snapshotSpec(); err != nil {
 		return err
 	}
+	if err := tr.snapshotReviewInputs(); err != nil {
+		return err
+	}
 	if err := tr.checkScope(); err != nil {
 		return err
 	}
@@ -549,7 +559,7 @@ func (tr *ticketRun) parseFlags() error {
 
 	tr.flags, tr.rf = newRunFlags()
 	tr.ticket, tr.workspace, tr.spec, tr.buildAppInterpreter = tr.rf.ticket, tr.rf.workspace, tr.rf.spec, tr.rf.buildAppInterpreter
-	tr.buildAppScript, tr.buildAppMaxAttempts, tr.conformityPolicy, tr.specAcceptanceCriteria = tr.rf.buildAppScript, tr.rf.buildAppMaxAttempts, tr.rf.conformityPolicy, tr.rf.specAcceptanceCriteria
+	tr.buildAppScript, tr.buildAppMaxAttempts = tr.rf.buildAppScript, tr.rf.buildAppMaxAttempts
 	tr.codeReviewPolicy = tr.rf.codeReviewPolicy
 	tr.maxRounds, tr.timeoutMinutes, tr.timeout, tr.verifyCommand = tr.rf.maxRounds, tr.rf.timeoutMinutes, tr.rf.timeout, tr.rf.verifyCommand
 	tr.fastCheckCommand, tr.verifyMaxAttempts, tr.fullSuiteCommand, tr.fullSuiteCadence = tr.rf.fastCheckCommand, tr.rf.verifyMaxAttempts, tr.rf.fullSuiteCommand, tr.rf.fullSuiteCadence
@@ -689,7 +699,7 @@ func (tr *ticketRun) parseFlags() error {
 	// role (a configuration error validateRoles' own ValidateRouting call
 	// above cannot itself catch) refuses this run up front, the same
 	// fail-fast style as every other pre-launch refusal in this function,
-	// rather than surfacing deep inside the build or conformity launch
+	// rather than surfacing deep inside the build or review launch
 	// below. executionOK/reviewOK false with a nil error means
 	// roles.execution/roles.review is simply unset (an offline build with
 	// no model route needed at all) -- set below, once the credential
@@ -2206,6 +2216,8 @@ func (tr *ticketRun) createRunRecord() error {
 		Repository:                    *tr.repository,
 		ReferenceOracleDir:            *tr.referenceOracleDir,
 		OraclesNotCommittedByRequest:  *tr.noCommitOracles,
+		// The reproductions this run was given to pass again: evidence.
+		ReviewReproductionRechecksGiven: tr.rechecks,
 		// Persisted here so applyRunWorkflowResult's own accepted branch
 		// -- the one completion point every execution path (runViaTemporal,
 		// runViaRepositoryOwner, and reconcileReclaimedRun)
@@ -2592,7 +2604,7 @@ func (tr *ticketRun) dispatch() error {
 		relayOpts.CheckRoute = checkRouteFunc(tr.settings)
 		relayOpts.ResolveRouteCredentials = resolveRouteCredentialsFunc(tr.settings)
 		relayOpts.CheckSkills = checkSkillsFunc(tr.settings)
-		// reviewRelayPolicy carries the conformity phase's own relay
+		// reviewRelayPolicy carries the review step's own relay
 		// policy to the Temporal path -- see
 		// workflow.RunWorkflowInput.ReviewRelayPolicy's doc comment.
 		// reviewSelection's own policy (resolved once above alongside
@@ -2600,7 +2612,7 @@ func (tr *ticketRun) dispatch() error {
 		// route name -- the Temporal Worker resolves that route's
 		// credential itself via ResolveRouteCredentials, exactly as it
 		// does for the build's own RoutePolicy. nil (reviewOK false,
-		// or no relay configured at all) keeps the conformity phase on
+		// or no relay configured at all) keeps the review step on
 		// the build's own relay spec fields, unchanged; the Activity
 		// never re-derives or merges these itself.
 		var reviewRelayPolicy *sandbox.RoutePolicy
@@ -2634,7 +2646,6 @@ func (tr *ticketRun) dispatch() error {
 			BuildAppScript:           *tr.buildAppScript,
 			Harness:                  tr.executionHarnessName,
 			ReviewHarness:            tr.reviewHarnessName,
-			ConformityPolicy:         *tr.conformityPolicy,
 			CodeReviewPolicy:         *tr.codeReviewPolicy,
 			VerifyCommand:            tr.verifyCmd,
 			FastCheckCommand:         *tr.fastCheckCommand,
@@ -2674,12 +2685,15 @@ func (tr *ticketRun) dispatch() error {
 			RequiredContent:          tr.requiredContent,
 			TestPatterns:             tr.testPatterns,
 			TestsRequiredOptOut:      tr.r.TestsRequiredOptOut,
-			SpecAcceptanceCriteria:   *tr.specAcceptanceCriteria,
 			Slice:                    sliceOpts,
 			ReleasePolicy:            releasePolicy,
 			Thinking:                 tr.executionThinking,
 			ReviewThinking:           tr.reviewThinking,
 			ReviewRelayPolicy:        reviewRelayPolicy,
+			ReviewReproduction:       *tr.rf.reviewReproduction,
+			ReviewSpecPath:           tr.reviewSpecSnapshot,
+			ReviewSpecSHA256:         tr.reviewSpecSHA256,
+			RecheckReproductions:     tr.rechecks,
 		}
 		if opts.Repository != "" {
 			return runViaRepositoryOwner(tr.dp, tr.lifecycleCtx, temporalClient, tr.r, opts)

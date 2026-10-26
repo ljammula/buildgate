@@ -428,110 +428,91 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 	return evidenceResult, nil
 }
 
-// reviewOutcome is which review steps ran and what each found.
+// reviewOutcome is which review steps ran and what each found. legacy marks
+// a history recorded before reviewReproductionChange, whose retired
+// spec-conformity review's result, when it ran, is legacyConformity.
 type reviewOutcome struct {
-	specConformity          VerifyActivityResult
-	ranSpecConformityReview bool
-	codeReview              VerifyActivityResult
-	ranCodeReview           bool
+	codeReview       VerifyActivityResult
+	ranCodeReview    bool
+	legacy           bool
+	legacyConformity *VerifyActivityResult
+	reproductions    reproductionOutcome
 }
 
-// runReviewSteps runs the spec-conformity and code-review steps once every
-// earlier gate passed, chaining each step's relay spend into the next.
+// runReviewSteps runs the review step (planReviewSteps) once every earlier
+// gate passed, chaining its relay spend from the build's.
 func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, worktreePath, branch string) (reviewOutcome, error) {
-	// spec-conformity review and code review (reviewstep.Plan -- see
-	// RunReviewStepActivityName's own doc comment for the full
-	// two-phase-design incident and reviewstep/internal/conformity/
-	// internal/codereview for the shared logic cmd/factoryd
-	// also uses). The plan runs only once every earlier gate this run has
-	// already evaluated passed -- so the workspace is guaranteed clean by
+	// The plan runs only once every earlier gate this run has already
+	// evaluated passed -- so the workspace is guaranteed clean by
 	// CollectEvidenceActivity's own safety-net commit just above, giving
 	// the reviewer a real commit to evaluate.
 	//
-	// SpecConformityConfigured/CodeReviewConfigured are set from the raw
-	// input fields, not gated on any of the conditions below -- mirrors
-	// run.Run.SpecConformityConfigured's own "declared, independent of
-	// whether the gate ran" contract (see RunWorkflowResult.
-	// SpecConformityConfigured's own doc comment), as cmd/factoryd sets r.SpecConformityConfigured before its own gate runs.
-	result.SpecConformityConfigured = input.SpecAcceptanceCriteria != ""
-	// Standalone AI code review (run_ticket.go's own "standalone AI code
-	// review" block, PR M2-B/M2-C): a free-form review of the diff for
-	// concrete defects, distinct from the spec-conformity step (which
-	// checks the diff against declared acceptance criteria, when the
-	// ticket declared any). Runs under the exact same gate predicate the
-	// spec-conformity step uses, minus its own "configured" check, and
-	// REGARDLESS of the spec-conformity step's own outcome (a code-review
-	// policy the operator explicitly opted into is not conditioned on
-	// whether the ticket separately declared acceptance criteria, or on
-	// whether that separate review passed).
+	// CodeReviewConfigured is set from the raw input field, not gated on any
+	// of the conditions below: "declared, independent of whether the gate
+	// ran", as run.Run's own contract says.
 	result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
-	// activityFailureContext preserves each step's own wrapActivityFailure
-	// context string from before this unification (M4-K3), plus the
-	// Combined step's own (M4-K? -- combined-review call).
-	activityFailureContext := map[string]string{
-		reviewstep.SpecConformity: "run spec-conformity-review activity",
-		reviewstep.CodeReview:     "run code-review activity",
-		reviewstep.Combined:       "run combined-review activity",
-	}
 	gatesPassed := result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed
-	stepResults := map[string]VerifyActivityResult{}
-	ranStep := map[string]bool{}
-	// consumedInputTokens/OutputTokens/CostMicroUSD accumulate this run's
-	// relay spend as each step runs, so the next step's own PriorConsumed*
-	// chains build's spend plus every earlier step's own -- the same
-	// chaining run_ticket.go's own runReviewPhase calls perform (the
-	// code-review step's own PriorConsumed* is build's plus the
-	// spec-conformity step's own, zero when that step never ran; the
-	// Combined step's own PriorConsumed* is build's alone, since it
-	// replaces both standalone steps and there is no earlier review-phase
-	// spend to chain in).
-	consumedInputTokens := result.Build.RelayConsumedInputTokens
-	consumedOutputTokens := result.Build.RelayConsumedOutputTokens
-	consumedCostMicroUSD := result.Build.RelayConsumedCostMicroUSD
-	if gatesPassed {
-		for _, step := range reviewstep.Plan(result.SpecConformityConfigured, result.CodeReviewConfigured) {
-			stepInput := ReviewStepInput{
-				RunWorkflowInput:          input,
-				Step:                      step.Name,
-				PriorConsumedInputTokens:  consumedInputTokens,
-				PriorConsumedOutputTokens: consumedOutputTokens,
-				PriorConsumedCostMicroUSD: consumedCostMicroUSD,
+	var outcome reviewOutcome
+	if !gatesPassed {
+		return outcome, nil
+	}
+	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
+	outcome.legacy = legacy
+	// SC-022: only at version 1, only for a run given -review-reproduction,
+	// and only when the plan runs the review step: with code review off no
+	// review_reproduction check is recorded, since nothing would stand
+	// behind it. A corrective build's recheck runs first, after the gates
+	// and before its own review.
+	outcome.reproductions.ran = !legacy && input.ReviewReproduction && len(steps) > 0
+	if outcome.reproductions.ran {
+		rechecks, err := recheckReproductions(ctx, ids, buildVerifyCtx, input, current, result, worktreePath, branch)
+		if err != nil {
+			return reviewOutcome{}, err
+		}
+		outcome.reproductions.rechecks, result.ReviewReproductionRechecks = rechecks, rechecks
+	}
+	for _, step := range steps {
+		stepResult, err := runOneReviewStep(ctx, ids, buildVerifyCtx, input, current, result, step, worktreePath, branch)
+		if err != nil {
+			return reviewOutcome{}, err
+		}
+		if legacy {
+			outcome = legacyReviewOutcome(outcome, step, stepResult)
+			continue
+		}
+		// The launch exits reviewstep.CombinedExitBase when it gave a verdict:
+		// the gate's exit code is derived from that (ReviewExitCode), the
+		// command, duration and log hash are the launch's own.
+		stepResult.Result.ExitCode = reviewstep.ReviewExitCode(stepResult.Result.ExitCode)
+		outcome.codeReview, outcome.ranCodeReview = stepResult, true
+		if outcome.reproductions.ran {
+			findings, err := reproduceReviewFindings(ctx, ids, buildVerifyCtx, input, current, result, stepResult.Reproductions, worktreePath, branch)
+			if err != nil {
+				return reviewOutcome{}, err
 			}
-			current.Stage, current.StartedAt = step.Stage, temporalworkflow.Now(ctx)
-			var stepResult VerifyActivityResult
-			if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "review-"+step.Name), RunReviewStepActivityName, stepInput).Get(ctx, &stepResult); err != nil {
-				return reviewOutcome{}, wrapActivityFailure(activityFailureContext[step.Name], err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
-			}
-			result.Attempts = append(result.Attempts, stepResult.Attempts...)
-			if step.Name == reviewstep.Combined {
-				// One launch, two gates: Command/DurationMs/LogSHA256 are
-				// shared, ExitCode is derived from the launch's own
-				// two-independent-bits contract (reviewstep.GateExitCodes)
-				// -- populating both stepResults/ranStep entries this way
-				// means every downstream reader below (the oracle-commit
-				// predicate, policyInput's own SpecConformity*/CodeReview*
-				// fields) stays unchanged, whether one launch or two
-				// produced them.
-				conformityExitCode, codeReviewExitCode := reviewstep.GateExitCodes(stepResult.Result.ExitCode)
-				conformityResult, codeReviewResult := stepResult, stepResult
-				conformityResult.Result.ExitCode = conformityExitCode
-				codeReviewResult.Result.ExitCode = codeReviewExitCode
-				stepResults[reviewstep.SpecConformity] = conformityResult
-				stepResults[reviewstep.CodeReview] = codeReviewResult
-				ranStep[reviewstep.SpecConformity] = true
-				ranStep[reviewstep.CodeReview] = true
-			} else {
-				stepResults[step.Name] = stepResult
-				ranStep[step.Name] = true
-			}
-			consumedInputTokens += stepResult.Result.RelayConsumedInputTokens
-			consumedOutputTokens += stepResult.Result.RelayConsumedOutputTokens
-			consumedCostMicroUSD += stepResult.Result.RelayConsumedCostMicroUSD
+			outcome.reproductions.findings, result.ReviewReproductions = findings, findings
 		}
 	}
-	specConformity, ranSpecConformityReview := stepResults[reviewstep.SpecConformity], ranStep[reviewstep.SpecConformity]
-	codeReview, ranCodeReview := stepResults[reviewstep.CodeReview], ranStep[reviewstep.CodeReview]
-	return reviewOutcome{specConformity: specConformity, ranSpecConformityReview: ranSpecConformityReview, codeReview: codeReview, ranCodeReview: ranCodeReview}, nil
+	return outcome, nil
+}
+
+// runOneReviewStep launches step (RunReviewStepActivity) with the build's
+// relay spend as its prior spend and records its attempts.
+func runOneReviewStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, step reviewstep.Step, worktreePath, branch string) (VerifyActivityResult, error) {
+	stepInput := ReviewStepInput{
+		RunWorkflowInput:          input,
+		Step:                      step.Name,
+		PriorConsumedInputTokens:  result.Build.RelayConsumedInputTokens,
+		PriorConsumedOutputTokens: result.Build.RelayConsumedOutputTokens,
+		PriorConsumedCostMicroUSD: result.Build.RelayConsumedCostMicroUSD,
+	}
+	current.Stage, current.StartedAt = step.Stage, temporalworkflow.Now(ctx)
+	var stepResult VerifyActivityResult
+	if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "review-"+step.Name), RunReviewStepActivityName, stepInput).Get(ctx, &stepResult); err != nil {
+		return VerifyActivityResult{}, wrapActivityFailure("run "+step.Label+" activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	result.Attempts = append(result.Attempts, stepResult.Attempts...)
+	return stepResult, nil
 }
 
 // oracleCommitPhase commits the verified reference-oracle bytes into the
@@ -539,15 +520,14 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 // the committed tree. It may replace verify, gates and evidence with the
 // committed tree's results.
 func oracleCommitPhase(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, gates *gateOutcome, evidenceResult *CollectedEvidence, verify *VerifyActivityResult, reviews reviewOutcome) error {
-	// Committed oracles, Temporal parity with cmd/factoryd:
-	// the factory host commits the verified oracle bytes into the result.
-	// It has to be here rather than in CollectEvidenceActivity because
-	// spec conformity (above) can only run after that Activity, and an
-	// oracle must never be committed for a run that fails conformity or
-	// code review. Same predicate as the verification safety-net commit
-	// plus "reference oracle passed" and "conformity/code-review passed
-	// if declared". The Activity itself is a no-op unless the manifest
-	// declares a target_path.
+	// Committed oracles: the factory host commits the verified oracle bytes
+	// into the result. It has to be here rather than in
+	// CollectEvidenceActivity because the review (above) can only run after
+	// that Activity, and an oracle must never be committed for a run whose
+	// declared review gave no verdict. Same predicate as the verification
+	// safety-net commit plus "reference oracle passed" and "the review gave
+	// a verdict if declared". The Activity itself is a no-op unless the
+	// manifest declares a target_path.
 	if oracleCommitWanted(input, result, gates, reviews) {
 		var committedOracles CommittedOracles
 		current.Stage, current.StartedAt = "commit_oracles", temporalworkflow.Now(ctx)
@@ -593,7 +573,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		RequiredContent:           input.RequiredContent,
 		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
 		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,
-		NamedGates:                gates.namedGateInputs,
+		NamedGates:                legacyConformityGates(gates.namedGateInputs, reviews),
 		TestPatterns:              input.TestPatterns,
 		TestsRequiredOptOut:       input.TestsRequiredOptOut,
 		Oracles:                   result.Oracles,
@@ -605,12 +585,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		policyInput.FullSuiteLogSHA256 = gates.fullSuite.LogSHA256
 		policyInput.FullSuiteRerun = gates.fullSuite.Rerun
 	}
-	if reviews.ranSpecConformityReview {
-		policyInput.SpecConformityCommand = reviews.specConformity.Result.Command
-		policyInput.SpecConformityExitCode = reviews.specConformity.Result.ExitCode
-		policyInput.SpecConformityDurationMs = reviews.specConformity.DurationMs
-		policyInput.SpecConformityLogSHA256 = reviews.specConformity.LogSHA256
-	}
+	policyInput.ReviewReproduction = reviews.reproductions.policyInput()
 	if reviews.ranCodeReview {
 		policyInput.CodeReviewCommand = reviews.codeReview.Result.Command
 		policyInput.CodeReviewExitCode = reviews.codeReview.Result.ExitCode
@@ -632,12 +607,12 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 
 // oracleCommitWanted is the predicate for committing the verified oracle
 // bytes: the verification safety-net commit's, plus "reference oracle
-// passed" and "conformity/code-review passed if declared".
+// passed" and "the review gave a verdict if declared".
 func oracleCommitWanted(input RunWorkflowInput, result *RunWorkflowResult, gates *gateOutcome, reviews reviewOutcome) bool {
 	return gates.passedReferenceOracleSHA256 != "" && input.ReferenceOracleDir != "" &&
 		result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed &&
-		(input.SpecAcceptanceCriteria == "" || (reviews.ranSpecConformityReview && reviews.specConformity.Result.ExitCode == 0)) &&
-		(!result.CodeReviewConfigured || (reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0))
+		(!result.CodeReviewConfigured || (reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0)) &&
+		!legacyConformityBlocksOracleCommit(input, reviews) && !reviews.reproductions.refuses()
 }
 
 // The host commit changed HEAD after every gate ran, so canonical

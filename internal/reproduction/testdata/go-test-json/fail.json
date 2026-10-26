@@ -1,0 +1,9 @@
+{"Time":"2026-10-25T23:07:08.489624-05:00","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-25T23:07:08.644159-05:00","Action":"run","Package":"example.com/repro/p","Test":"TestFail"}
+{"Time":"2026-10-25T23:07:08.644215-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestFail","Output":"=== RUN   TestFail\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:08.644263-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestFail","Output":"    repro_test.go:16: Add(1, 2) = 3, want 4\n","OutputType":"error"}
+{"Time":"2026-10-25T23:07:08.644276-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestFail","Output":"--- FAIL: TestFail (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:08.64428-05:00","Action":"fail","Package":"example.com/repro/p","Test":"TestFail","Elapsed":0}
+{"Time":"2026-10-25T23:07:08.644288-05:00","Action":"output","Package":"example.com/repro/p","Output":"FAIL\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:08.64461-05:00","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p\t0.155s\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:08.644632-05:00","Action":"fail","Package":"example.com/repro/p","Elapsed":0.155}

@@ -170,7 +170,7 @@ def rewrite_sections_text(pairs: list[tuple[str, str]]) -> str:
 
 # --- Worked-example verification (added after live runs where drafted criteria
 # carried wrong arithmetic, e.g. `Eval("10 % 3 ^ 2")` stated as 10 when it is 1;
-# they were caught only by the post-build conformity gate). Advisory only: it
+# they were caught only after the build). Advisory only: it
 # appends a warning to the spec's last section and never blocks or fails the
 # draft -- any error degrades to "no warning".
 EXAMPLE_CHECK_RELATIVE_PATH = Path(".factory-spec-draft") / "EXAMPLE_CHECK.json"

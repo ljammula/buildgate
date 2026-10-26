@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="0.042" timestamp="2026-10-26T13:40:39.880595+00:00" hostname="55182e1887b2"><testcase classname="" name="tests.test_repro" time="0.000"><error message="collection failure">ImportError while importing test module '/w/pk/tests/test_repro.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/__init__.py:1: in &lt;module&gt;
+    import nosuchmodule
+E   ModuleNotFoundError: No module named 'nosuchmodule'</error></testcase></testsuite></testsuites>

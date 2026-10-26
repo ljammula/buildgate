@@ -82,12 +82,13 @@ type WorkerConfig struct {
 	// PR may go through before its request is halted with "review rounds
 	// exhausted for ticket i/n". See -max-review-rounds' own help text.
 	MaxReviewRounds int
-	// reviewCorrectiveRounds caps how many automatic corrective builds a
-	// ticket gets when its run quarantines with its failed gates a subset
-	// of {spec_conformity, code_review}, before the request quarantines as
-	// it does today. See -review-corrective-rounds' own help text and
-	// TryReviewCorrectiveRound (request_driver.go). 0 disables the
-	// corrective round entirely.
+	// ReviewCorrectiveRounds caps how many automatic corrective builds a
+	// ticket gets when its run quarantines with checks a build can fix
+	// when told about them (a reviewer's reproduction that refused it
+	// included), before the request quarantines. The same number caps a
+	// PR-review round's fix attempts. See -review-corrective-rounds' own
+	// help text and TryCheckCorrectiveRound. 0 disables the corrective
+	// round entirely.
 	ReviewCorrectiveRounds int
 	// hitlReminderInterval is how often the worker's reminder ticker
 	// (RemindIfDue) re-reminds a request waiting in spec_review,
@@ -100,37 +101,21 @@ type WorkerConfig struct {
 	// function via the package-level RequestAdvanceOn variable (see its
 	// own doc comment for why), not as a parameter.
 	AdvanceOn string
-	// conformityPolicy mirrors factoryd <run>'s own -conformity-policy
-	// flag -- see workerMain's own flag definition for the default it
-	// was deliberately given and why (issue #164).
-	ConformityPolicy string
-	// conformityPolicyExplicit records whether the operator actually
-	// chose conformityPolicy (CLI flag or session config), as opposed to
-	// it holding worker's own literal default -- BuildTicketRunArgs
-	// must forward the flag to the drained entry's child `factoryd <run>`
-	// invocation only when this is true. Forwarding it unconditionally
-	// (the bug this field exists to fix, caught via adversarial review,
-	// GitHub Codex App, PR #169) makes run_ticket.go's own
-	// flags.Visit-based "was -conformity-policy explicit" check see
-	// worker's default as if the operator had typed it -- there is no
-	// per-target-repo .factory.yml equivalent of this flag today
-	// (internal/projectconfig.Config has no conformity_policy key), but
-	// silently overriding whatever explicit choice -- CLI flag or
-	// factoryd's own session config -- the operator otherwise made is the
-	// same class of bug regardless.
-	ConformityPolicyExplicit bool
 	// codeReviewPolicy mirrors factoryd <run>'s own -code-review-policy
-	// flag -- the standalone AI code-review pass (agent/pi/scripts/
-	// code_review.py, internal/codereview). off (the default) means
+	// flag -- the review step (agent/pi/scripts/combined_review.py,
+	// internal/codereview). off (the default) means
 	// every worker-drained entry never runs it, matching the bare CLI's
 	// own -code-review-policy default.
 	CodeReviewPolicy string
-	// codeReviewPolicyExplicit mirrors conformityPolicyExplicit above --
-	// BuildTicketRunArgs must forward -code-review-policy to the drained
-	// entry's child `factoryd <run>` invocation only when this is true,
-	// for the identical reason (a target repo's own project config has
-	// no code_review_policy key either, but the same
-	// forward-unconditionally class of bug applies regardless).
+	// codeReviewPolicyExplicit records whether the operator actually chose
+	// codeReviewPolicy (CLI flag or session config), as opposed to it
+	// holding worker's own literal default -- BuildTicketRunArgs must
+	// forward -code-review-policy to the drained entry's child
+	// `factoryd <run>` invocation only when this is true. Forwarding it
+	// unconditionally makes run_ticket.go's own flags.Visit-based "was
+	// this explicit" check see worker's default as if the operator had
+	// typed it, silently overriding whatever explicit choice the operator
+	// otherwise made (caught via adversarial review, PR #169).
 	CodeReviewPolicyExplicit bool
 	// settings carries every other relay/registry-proxy/sandbox/release knob
 	// that flags-consolidate (2026-09-10) removed from the CLI entirely
@@ -235,24 +220,10 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 		"-build-app-max-attempts", strconv.Itoa(cfg.BuildAppMaxAttempts),
 		"-verify-max-attempts", strconv.Itoa(cfg.VerifyMaxAttempts),
 	}
-	// -conformity-policy is forwarded only when the operator actually
-	// chose it (CLI flag or session config) -- forwarding worker's own
-	// literal default unconditionally would make run_ticket.go's own
-	// flags.Visit-based "was this explicit" check (validate.go's
-	// applyProjectConfigDefaults) see it as if the operator had typed it,
-	// silently overriding whatever explicit choice the operator otherwise
-	// made with worker's own default -- caught via adversarial review,
-	// GitHub Codex App, PR #169. Omitting the flag entirely when not
-	// explicit lets the child `factoryd <run>` invocation's own flag
-	// default resolve exactly as it would for a direct, unconfigured
-	// invocation -- including for a WorkerConfig{} built directly in a
-	// test that predates this field, which now correctly forwards
-	// nothing rather than a stale placeholder default.
-	if cfg.ConformityPolicyExplicit {
-		args = append(args, "-conformity-policy", cfg.ConformityPolicy)
-	}
-	// -code-review-policy mirrors -conformity-policy above exactly, for
-	// the identical reason.
+	// -code-review-policy is forwarded only when the operator actually
+	// chose it (CLI flag or session config): omitting the flag lets the
+	// child `factoryd <run>` invocation's own flag default resolve exactly
+	// as it would for a direct, unconfigured invocation.
 	if cfg.CodeReviewPolicyExplicit {
 		args = append(args, "-code-review-policy", cfg.CodeReviewPolicy)
 	}
@@ -295,8 +266,13 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}
-	if entry.SpecAcceptanceCriteria != "" {
-		args = append(args, "-spec-acceptance-criteria", entry.SpecAcceptanceCriteria)
+	// A request's ticket build holds and runs its review's reproductions
+	// (SC-022); a bare run never gets these flags.
+	if entry.ReviewSpecPath != "" {
+		args = append(args, "-review-reproduction", "-review-spec", entry.ReviewSpecPath)
+		if entry.RecheckReproductions != "" {
+			args = append(args, "-recheck-reproductions", entry.RecheckReproductions)
+		}
 	}
 	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
 	// own output (Phase 2) -- both set together or neither (see that

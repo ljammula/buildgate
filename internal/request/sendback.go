@@ -29,8 +29,8 @@ func (t SendBackTarget) Valid() bool {
 // drafting -- `factoryd reject -to plan|spec -reason "..." <id>` and POST
 // /requests/{id}/reject with a "to" field: the one
 // dead end Retry (retry.go) never closes. Retry only ever rebuilds the
-// same ticket from the same approved plan, so a diff_scope or
-// spec_conformity quarantine that actually needs a different plan or spec
+// same ticket from the same approved plan, so a quarantine that actually
+// needs a different plan or spec
 // had no recovery but `factoryd cancel` + resubmit -- a full new spec/plan
 // cycle (#295, the 2026-09-26 operator demo on a Flutter + Go app repo).
 //
@@ -167,6 +167,9 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	}
 	r.Rejections = append(r.Rejections, rejection)
 	r.DraftHalt = nil
+	// The tickets go, and their recheck chains end with them: recorded as
+	// dropped, by the operator who sent the request back.
+	r.dropAllReproductions(by, fmt.Sprintf("the request was sent back to %s", stage), now)
 	r.Tickets = nil
 	r.TicketIndex = 0
 	r.TicketCount = 0

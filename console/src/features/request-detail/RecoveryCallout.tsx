@@ -56,11 +56,7 @@ export function RecoveryCallout({
   // The receipts of the run that stopped: its log, diff and gates.
   const evidence = quarantinedTicket(request);
   const sendBack = plan.showSendBack ? (
-    <Button
-      variant={plan.sendBackIsPrimary ? "primary" : "secondary"}
-      disabled={disabled}
-      onClick={onSendBack}
-    >
+    <Button variant="secondary" disabled={disabled} onClick={onSendBack}>
       <Undo2 aria-hidden="true" />
       {plan.sendBackLabel}
     </Button>
@@ -120,7 +116,6 @@ export function RecoveryCallout({
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {plan.sendBackIsPrimary ? sendBack : null}
           <Button variant="primary" disabled={disabled} onClick={onRetry}>
             <RotateCcw aria-hidden="true" />
             {plan.retryLabel}
@@ -129,7 +124,7 @@ export function RecoveryCallout({
             <Ban aria-hidden="true" />
             {REQUEST_VERBS.cancel}
           </Button>
-          {plan.sendBackIsPrimary ? null : sendBack}
+          {sendBack}
         </div>
         <p
           data-testid="recovery-explanation"

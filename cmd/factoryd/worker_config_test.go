@@ -17,7 +17,6 @@ import (
 	"buildgate/internal/meter"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
-	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 )
 
@@ -54,7 +53,7 @@ func TestBuildTicketRunArgsIsAcceptedByRunMainWithReadysOwnFlagSet(t *testing.T)
 	// Empty ID/Workspace/SpecPath, but Project, PreflightProfile and
 	// IssueRef set, so -project, -preflight-profile and -pr-closes-issue
 	// are all in the argv.
-	entry := &requestdriver.QueueEntry{Project: "payments", PreflightProfile: "brownfield", IssueRef: "acme/widgets#42", SpecAcceptanceCriteria: "/repo/tickets/001/criteria.md"}
+	entry := &requestdriver.QueueEntry{Project: "payments", PreflightProfile: "brownfield", IssueRef: "acme/widgets#42"}
 
 	err := runMainWithReady(dp, context.Background(), requestdriver.BuildTicketRunArgs("data", entry, cfg), nil)
 	if err == nil {
@@ -869,84 +868,20 @@ func TestDoctorChecksForAlwaysChecksDocker(t *testing.T) {
 	}
 }
 
-// TestWorkerConfigAcceptsConformityPolicyFlag mirrors
-// TestWorkerConfigAcceptsPlanTicketsFlags: passing this flag must reach
-// past flags.Parse to the -registry-proxy/-sandbox-image refusal, not
-// stop at "flag provided but not defined".
-func TestWorkerConfigAcceptsConformityPolicyFlag(t *testing.T) {
+// TestWorkerConfigRefusesTheRetiredConformityPolicyFlag: the
+// spec-conformity review is retired, so worker refuses its flag as unknown.
+func TestWorkerConfigRefusesTheRetiredConformityPolicyFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
-	_, _, err := loadTestWorkerConfig(dp, []string{
-		"-data-dir", t.TempDir(),
-		"-conformity-policy", "advisory",
-		"-registry-proxy", "-registry-proxy-image", "registry.example/org/rp@sha256:deadbeef",
-	})
-	if err == nil {
-		t.Fatal("loadTestWorkerConfig(-conformity-policy, -registry-proxy without -sandbox-image) = nil, want an error")
-	}
-	if strings.Contains(err.Error(), "not defined") {
-		t.Fatalf("workerMain rejected a real flag: %v", err)
-	}
-	if !strings.Contains(err.Error(), "-registry-proxy requires -sandbox-image") {
-		t.Fatalf("err = %v, want it to name the missing -sandbox-image (proving flag parsing got past -conformity-policy)", err)
+	_, _, err := loadTestWorkerConfig(dp, []string{"-data-dir", t.TempDir(), "-conformity-policy", "advisory"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -conformity-policy") {
+		t.Fatalf("loadTestWorkerConfig(-conformity-policy) = %v, want the unknown-flag refusal", err)
 	}
 }
 
-// TestWorkerConfigRejectsInvalidConformityPolicy covers -conformity-policy's
-// own validation, at worker's own startup rather than deep inside a
-// drained entry (acceptance criterion 3, issue #164): only "required" or
-// "advisory" are legal, mirroring build_app.py's own --conformity-policy
-// argparse choices.
-func TestWorkerConfigRejectsInvalidConformityPolicy(t *testing.T) {
-	dp := newTestDeps(t)
-	isolateSessionConfig(t)
-	_, _, err := loadTestWorkerConfig(dp, []string{
-		"-data-dir", t.TempDir(),
-		"-sandbox-image", "img@sha256:aaaa",
-		"-conformity-policy", "sometimes",
-	})
-	if err == nil || !strings.Contains(err.Error(), `-conformity-policy must be "required" or "advisory"`) {
-		t.Fatalf("loadTestWorkerConfig(-conformity-policy sometimes) = %v, want the invalid-value refusal", err)
-	}
-}
-
-// TestApplySessionConfigFillsConformityPolicy covers the session-config
-// key (conformity_policy) issue #164 also asks for, mirroring
-// TestApplySessionConfigFillsAdvanceOn.
-func TestApplySessionConfigFillsConformityPolicy(t *testing.T) {
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "conformity_policy: advisory\n")
-	fs := flag.NewFlagSet("t", flag.ContinueOnError)
-	fs.String("conformity-policy", "required", "")
-	if _, _, err := applySessionConfig(fs, ""); err != nil {
-		t.Fatalf("applySessionConfig: %v", err)
-	}
-	if got := fs.Lookup("conformity-policy").Value.String(); got != "advisory" {
-		t.Errorf("-conformity-policy = %q, want %q (session-config value silently dropped)", got, "advisory")
-	}
-}
-
-// TestApplySessionConfigLeavesConformityPolicyAtExplicitFlagValue mirrors
-// TestApplySessionConfigLeavesAdvanceOnAtExplicitFlagValue: an explicit
-// CLI flag always wins over the session-config value.
-func TestApplySessionConfigLeavesConformityPolicyAtExplicitFlagValue(t *testing.T) {
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "conformity_policy: advisory\n")
-	fs := flag.NewFlagSet("t", flag.ContinueOnError)
-	fs.String("conformity-policy", "required", "")
-	if err := fs.Parse([]string{"-conformity-policy", "required"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := applySessionConfig(fs, ""); err != nil {
-		t.Fatalf("applySessionConfig: %v", err)
-	}
-	if got := fs.Lookup("conformity-policy").Value.String(); got != "required" {
-		t.Errorf("-conformity-policy = %q, want the explicit flag value %q", got, "required")
-	}
-}
-
-// TestWorkerConfigRejectsInvalidCodeReviewPolicy mirrors
-// TestWorkerConfigRejectsInvalidConformityPolicy for -code-review-policy.
+// TestWorkerConfigRejectsInvalidCodeReviewPolicy: only off, advisory or
+// required are legal, refused at worker's own startup rather than deep
+// inside a drained entry.
 func TestWorkerConfigRejectsInvalidCodeReviewPolicy(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
@@ -960,9 +895,8 @@ func TestWorkerConfigRejectsInvalidCodeReviewPolicy(t *testing.T) {
 	}
 }
 
-// TestApplySessionConfigFillsCodeReviewPolicy mirrors
-// TestApplySessionConfigFillsConformityPolicy for the code_review_policy
-// session-config key.
+// TestApplySessionConfigFillsCodeReviewPolicy covers the code_review_policy
+// session-config key, mirroring TestApplySessionConfigFillsAdvanceOn.
 func TestApplySessionConfigFillsCodeReviewPolicy(t *testing.T) {
 	path := isolateSessionConfig(t)
 	writeSessionConfig(t, path, "code_review_policy: advisory\n")
@@ -977,7 +911,7 @@ func TestApplySessionConfigFillsCodeReviewPolicy(t *testing.T) {
 }
 
 // TestApplySessionConfigLeavesCodeReviewPolicyAtExplicitFlagValue mirrors
-// TestApplySessionConfigLeavesConformityPolicyAtExplicitFlagValue: an
+// TestApplySessionConfigLeavesAdvanceOnAtExplicitFlagValue: an
 // explicit CLI flag always wins over the session-config value.
 func TestApplySessionConfigLeavesCodeReviewPolicyAtExplicitFlagValue(t *testing.T) {
 	path := isolateSessionConfig(t)
@@ -992,128 +926,5 @@ func TestApplySessionConfigLeavesCodeReviewPolicyAtExplicitFlagValue(t *testing.
 	}
 	if got := fs.Lookup("code-review-policy").Value.String(); got != "off" {
 		t.Errorf("-code-review-policy = %q, want the explicit flag value %q", got, "off")
-	}
-}
-
-// runQueueEntryWithPolicyGateFixture is the shared setup for
-// TestTicketRunPolicyGating (acceptance criteria 1/2, issue #164):
-// drives a single QueueEntry through the REAL runQueueEntry/
-// buildTicketRunArgs/runMainWithReady path (not a stub runner), sandboxed
-// through testdata/fake_docker.sh, against
-// testdata/fake_build_app_policy_gate.py -- a fixture that simulates
-// build_app.py's own fail-closed behavior on an unparseable/unreachable
-// conformity verdict (exit 1 when -conformity-policy is "required", exit
-// 0 and commit otherwise) -- and returns the resulting run's terminal
-// state.
-func runQueueEntryWithPolicyGateFixture(dp *deps, t *testing.T, conformityPolicy string) run.State {
-	t.Helper()
-	workspace := newFixtureRepo(t)
-	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- policy-gate fixture doesn't exercise tests_added\n"), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-	script, err := filepath.Abs("testdata/fake_build_app_policy_gate.py")
-	if err != nil {
-		t.Fatalf("resolve fixture script: %v", err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-
-	apiSandboxTestMu.Lock()
-	settings := sessionconfig.DefaultSettings()
-	settings.SandboxDocker = fakeSandboxDockerBinary(t)
-	settings.SandboxImage = fakeSandboxImage
-	tier2SettingsOverride = &settings
-	t.Cleanup(func() {
-		tier2SettingsOverride = nil
-		apiSandboxTestMu.Unlock()
-	})
-
-	dataDir := t.TempDir()
-	entry := &requestdriver.QueueEntry{
-		// "fixture-ticket": matches testfixture.NewGitRepo's own scaffolded
-		// spec/tickets/001-fixture-ticket.md via resolvePiTicketPath's
-		// "???-<ticket>.md" glob fallback (see runFactoryd's own -ticket
-		// value in integration_direct_and_serve_test.go for the same
-		// trick) -- an arbitrary ticket id would fail the mandatory
-		// project-bootstrap preflight's ticket_structure check instead.
-		ID:            "fixture-ticket",
-		Workspace:     workspace,
-		SpecPath:      specPath,
-		VerifyCommand: "true",
-	}
-	cfg := requestdriver.WorkerConfig{
-		BuildAppScript:           script,
-		SandboxImage:             fakeSandboxImage,
-		ConformityPolicy:         conformityPolicy,
-		ConformityPolicyExplicit: true,
-		Settings:                 settings,
-		TemporalAddress:          sharedTemporalAddress(t),
-	}
-
-	before, err := os.ReadDir(filepath.Join(dataDir, "runs"))
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatalf("read runs dir before invocation: %v", err)
-	}
-	existed := make(map[string]bool, len(before))
-	for _, e := range before {
-		existed[e.Name()] = true
-	}
-
-	// runQueueEntry's own error (a non-zero factoryd exit, e.g. for a
-	// quarantined/halted outcome) is not asserted here -- exactly like
-	// runFactoryd's own doc comment: a halted or quarantined run is a
-	// valid, expected outcome for the -required case.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if runErr := runMainWithReady(dp, ctx, requestdriver.BuildTicketRunArgs(dataDir, entry, cfg), func(*run.Run) {}); runErr != nil {
-		t.Logf("runMainWithReady error (may be expected for a blocked/halted outcome): %v", runErr)
-	}
-
-	entries, err := os.ReadDir(filepath.Join(dataDir, "runs"))
-	if err != nil {
-		t.Fatalf("read runs dir: %v", err)
-	}
-	var newEntries []os.DirEntry
-	for _, e := range entries {
-		if !existed[e.Name()] {
-			newEntries = append(newEntries, e)
-		}
-	}
-	if len(newEntries) != 1 {
-		t.Fatalf("expected exactly 1 new run directory, got %d: %v", len(newEntries), entries)
-	}
-	r, err := run.Load(dataDir, newEntries[0].Name())
-	if err != nil {
-		t.Fatalf("load run: %v", err)
-	}
-	return r.State
-}
-
-// TestTicketRunPolicyGating is acceptance criteria 1 and 2 from issue
-// #164: a worker-drained entry with -conformity-policy required (the
-// default) must still block on an unparseable/unreachable conformity
-// response -- proving the flag reaches the drained child at all, not
-// just that build_app.py's own fail-closed default fires with no way to
-// override it -- while advisory, issue #164's own documented escape
-// valve, must let the same scenario through to acceptance instead of
-// quarantining objectively-correct work.
-func TestTicketRunPolicyGating(t *testing.T) {
-	dp := newTestDeps(t)
-	tests := []struct {
-		name             string
-		conformityPolicy string
-		want             run.State
-	}{
-		{"conformity required blocks", "required", run.StateQuarantined},
-		{"conformity advisory does not block", "advisory", run.StateAccepted},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := runQueueEntryWithPolicyGateFixture(dp, t, test.conformityPolicy)
-			if got != test.want {
-				t.Fatalf("state = %q, want %q", got, test.want)
-			}
-		})
 	}
 }

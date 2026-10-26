@@ -2300,11 +2300,10 @@ func TestAdvancePlanningHaltDoesNotStartReminders(t *testing.T) {
 	}
 }
 
-// TestBuildRequestBuildArgsWritesCoveredCriteriaFile: a plan-format
-// ticket's build carries -spec-acceptance-criteria pointing at a file
-// holding exactly the spec criteria the ticket claims, verbatim, so the
-// required conformity review judges this ticket's own criteria only.
-func TestBuildRequestBuildArgsWritesCoveredCriteriaFile(t *testing.T) {
+// TestBuildRequestBuildArgsRefusesACriterionTheSpecDoesNotDeclare: a
+// plan-format ticket's build is launched only when every criterion the
+// ticket claims is one the approved spec declares.
+func TestBuildRequestBuildArgsRefusesACriterionTheSpecDoesNotDeclare(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
 	if err := os.MkdirAll(filepath.Join(request.Dir(dataDir, r.ID), "tickets"), 0o750); err != nil {
@@ -2320,30 +2319,12 @@ func TestBuildRequestBuildArgsWritesCoveredCriteriaFile(t *testing.T) {
 	}
 	seedFirstTicketRun(t, dataDir, r)
 
-	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{})
-	if err != nil {
+	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, request.Ticket{Index: 2, SpecPath: ticketPath}, requestdriver.WorkerConfig{}); err != nil {
 		t.Fatalf("buildRequestBuildArgs: %v", err)
-	}
-	var gotCriteria string
-	for i, a := range args {
-		if a == "-spec-acceptance-criteria" {
-			gotCriteria = args[i+1]
-		}
-	}
-	want := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "002.criteria.md")
-	if gotCriteria != want {
-		t.Fatalf("-spec-acceptance-criteria = %q, want %q", gotCriteria, want)
-	}
-	content, err := os.ReadFile(gotCriteria)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "1. First thing works.\n3. Third thing works.\n" {
-		t.Fatalf("criteria file = %q", content)
 	}
 
 	// A claim outside the spec's own numbering is refused, not silently
-	// dropped: the build would otherwise review against the wrong set.
+	// dropped.
 	if err := os.WriteFile(ticketPath, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 4)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -3024,7 +3005,7 @@ func TestAdvancePlanningRemovesStalePlanFeedbackFile(t *testing.T) {
 }
 
 // TestSharedCriterionReviewedOnlyAtLastCoveringTicket: a criterion listed
-// under several tickets is reviewed only at the last one (all its parts
+// under several tickets is judged only at the last one (all its parts
 // exist by then); earlier tickets' build specs still carry its text,
 // marked as shared. Found live (Flutter + Go app habit-insights request,
 // 2026-09-28): ticket 1 of 3 was reviewed against handler and MCP-tool
@@ -3050,23 +3031,6 @@ func TestSharedCriterionReviewedOnlyAtLastCoveringTicket(t *testing.T) {
 	r.Tickets = []request.Ticket{{Index: 1, SpecPath: t1}, {Index: 2, SpecPath: t2}}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
-	}
-
-	crit1, err := requestdriver.WriteTicketCriteriaFile(dataDir, r, r.Tickets[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	got1, _ := os.ReadFile(crit1)
-	if strings.Contains(string(got1), "longest_streak") || !strings.HasPrefix(string(got1), "1.") {
-		t.Errorf("ticket 1 criteria = %q, want criterion 1 only (8 is shared with ticket 2, reviewed there)", got1)
-	}
-	crit2, err := requestdriver.WriteTicketCriteriaFile(dataDir, r, r.Tickets[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	got2, _ := os.ReadFile(crit2)
-	if !strings.Contains(string(got2), "longest_streak") || !strings.Contains(string(got2), "best_weekday_done_count") {
-		t.Errorf("ticket 2 criteria = %q, want criteria 8 and 9", got2)
 	}
 
 	spec1, err := requestdriver.TicketBuildSpecContent(dataDir, r.ID, r.Tickets[0])

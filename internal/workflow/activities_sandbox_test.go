@@ -90,25 +90,12 @@ func TestRunSandboxWithRetriesDoesNotPadMarginForADisabledComposeSpec(t *testing
 	}
 }
 
-// TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria pins
-// the live bug found immediately after conformity review started
-// actually running on the Temporal path: -spec-acceptance-criteria's
-// value (a host path) reached build_app.py verbatim, never staged into
-// the sandbox the way input.SpecPath itself already is, so it appeared
-// inside the container as its own nonexistent host path and the
-// conformity review died on a FileNotFoundError. Mirrors
-// cmd/factoryd's own TestRunSandboxWithRetriesStagesAndTranslatesBothSpecAndExtraRunInput:
-// a fake Docker binary records its own argv and lists the /inputs/run
-// mount's source directory while the staged files still exist, asserting
-// neither host path survives untranslated and both files land in the one
-// staged directory.
-// TestRunSandboxWithRetriesRejectsSpecAcceptanceCriteriaWithoutSpecPath
-// mirrors cmd/factoryd's own identically-purposed test: extraRunInput (here,
-// SpecAcceptanceCriteria) has nowhere to be staged without input.SpecPath's
-// own directory to share -- refused explicitly, rather than silently left
-// untranslated.
-func TestRunSandboxWithRetriesRejectsSpecAcceptanceCriteriaWithoutSpecPath(t *testing.T) {
-	criteriaPath := filepath.Join(t.TempDir(), "criteria.md")
+// TestRunSandboxWithRetriesRejectsAnExtraRunInputWithoutSpecPath: an extra
+// run input (here, a retried build's note) has nowhere to be staged without
+// input.SpecPath's own directory to share -- refused explicitly, rather
+// than silently left untranslated.
+func TestRunSandboxWithRetriesRejectsAnExtraRunInputWithoutSpecPath(t *testing.T) {
+	criteriaPath := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(criteriaPath, []byte("1. Foo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -117,26 +104,28 @@ func TestRunSandboxWithRetriesRejectsSpecAcceptanceCriteriaWithoutSpecPath(t *te
 	input := fixtureInput()
 	input.WorkspacePath = t.TempDir()
 	input.SpecPath = ""
-	input.SpecAcceptanceCriteria = criteriaPath
 	input.SandboxImage = "factory-worker:test@sha256:deadbeef"
 	input.SandboxDocker = "docker-should-never-run"
 	logPath := func(int) string { return filepath.Join(activities.LogDir, "build.log") }
 
-	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "python3", "--spec-acceptance-criteria", criteriaPath)
+	_, err := activities.runSandboxWithRetries(withExtraRunInputs(context.Background(), criteriaPath), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "python3", "--handoff", criteriaPath)
 	if err == nil {
-		t.Fatal("runSandboxWithRetries(SpecAcceptanceCriteria set, SpecPath empty) = nil error, want a refusal")
+		t.Fatal("runSandboxWithRetries(an extra run input, SpecPath empty) = nil error, want a refusal")
 	}
 	if !strings.Contains(err.Error(), "nowhere to stage it") {
 		t.Errorf("error = %q, want it to name the missing SpecPath to stage into", err)
 	}
 }
 
-func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testing.T) {
+// TestRunSandboxWithRetriesStagesAndTranslatesAnExtraRunInput: an extra run
+// input is staged beside the spec in /inputs/run and its host path is
+// translated in the argv.
+func TestRunSandboxWithRetriesStagesAndTranslatesAnExtraRunInput(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte("# Spec\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	criteriaPath := filepath.Join(t.TempDir(), "criteria.md")
+	criteriaPath := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(criteriaPath, []byte("1. Foo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +155,6 @@ func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testi
 	input.WorkspacePath = t.TempDir()
 	input.ProjectConfigCommitSHA = trustedCommit(t, input.WorkspacePath)
 	input.SpecPath = specPath
-	input.SpecAcceptanceCriteria = criteriaPath
 	input.SandboxImage = "factory-worker:test@sha256:deadbeef"
 	input.SandboxDocker = docker
 	logPath := func(int) string { return filepath.Join(activities.LogDir, "build.log") }
@@ -175,7 +163,7 @@ func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testi
 	// (staged into /inputs/script), not a bare "-c" shell command -- the
 	// script-staging branch below is skipped entirely for "-c", which
 	// would defeat this test's own point.
-	if _, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "/bin/sh", buildScript, "--spec-acceptance-criteria", criteriaPath); err != nil {
+	if _, err := activities.runSandboxWithRetries(withExtraRunInputs(context.Background(), criteriaPath), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "/bin/sh", buildScript, "--handoff", criteriaPath); err != nil {
 		t.Fatalf("runSandboxWithRetries: %v", err)
 	}
 
@@ -185,10 +173,10 @@ func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testi
 	}
 	got := string(argv)
 	if strings.Contains(got, criteriaPath) {
-		t.Errorf("argv still contains the host criteria path %q untranslated:\n%s", criteriaPath, got)
+		t.Errorf("argv still contains the host note path %q untranslated:\n%s", criteriaPath, got)
 	}
-	if !strings.Contains(got, "/inputs/run/criteria.md") {
-		t.Errorf("argv missing translated --spec-acceptance-criteria path /inputs/run/criteria.md:\n%s", got)
+	if !strings.Contains(got, "/inputs/run/note.md") {
+		t.Errorf("argv missing translated --handoff path /inputs/run/note.md:\n%s", got)
 	}
 
 	mountLS, err := os.ReadFile(mountLSPath)
@@ -198,8 +186,8 @@ func TestRunSandboxWithRetriesStagesAndTranslatesSpecAcceptanceCriteria(t *testi
 	if !strings.Contains(string(mountLS), "spec.md") {
 		t.Errorf("spec.md not staged in the /inputs/run mount: %s", mountLS)
 	}
-	if !strings.Contains(string(mountLS), "criteria.md") {
-		t.Errorf("criteria.md not staged in the /inputs/run mount: %s", mountLS)
+	if !strings.Contains(string(mountLS), "note.md") {
+		t.Errorf("note.md not staged in the /inputs/run mount: %s", mountLS)
 	}
 }
 

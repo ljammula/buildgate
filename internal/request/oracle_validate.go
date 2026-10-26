@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"buildgate/internal/conformity"
 	"buildgate/internal/oraclecanary"
+	"buildgate/internal/oraclemanifest"
 )
 
 // maxOracleManifestBytes bounds the MANIFEST.json read at validation.
@@ -300,7 +300,7 @@ func validateOracleManifest(data []byte, criteria []string, files map[string]boo
 			problems = append(problems, fmt.Sprintf("%s: criterion_index %d is outside the spec's %d acceptance criteria", label, e.index, len(criteria)))
 		case manifestLabelMismatch(e.criterion, e.index):
 			problems = append(problems, fmt.Sprintf("%s: criterion is labelled %s but its criterion_index is %d (the label must be AC-%d)", label, manifestLabel(e.criterion), e.index, e.index))
-		case conformity.NormalizeCriterion(stripCriterionID(e.criterion)) != conformity.NormalizeCriterion(stripCriterionID(criteria[e.index-1])):
+		case oraclemanifest.NormalizeCriterion(stripCriterionID(e.criterion)) != oraclemanifest.NormalizeCriterion(stripCriterionID(criteria[e.index-1])):
 			problems = append(problems, fmt.Sprintf("%s: criterion text does not match spec criterion %d (compared exactly, whitespace included) -- %s; fix criterion_index if the oracle was drafted against different numbering, or fix the text", label, e.index, criterionDiff(e.criterion, criteria[e.index-1])))
 		}
 	}
@@ -331,8 +331,8 @@ func validateOracleManifest(data []byte, criteria []string, files map[string]boo
 // whitespace-normalised strings and a short %q snippet of each around it, so
 // a whitespace or backtick-only difference is visible.
 func criterionDiff(manifest, spec string) string {
-	a := []rune(conformity.NormalizeCriterion(manifest))
-	b := []rune(conformity.NormalizeCriterion(spec))
+	a := []rune(oraclemanifest.NormalizeCriterion(manifest))
+	b := []rune(oraclemanifest.NormalizeCriterion(spec))
 	i := 0
 	for i < len(a) && i < len(b) && a[i] == b[i] {
 		i++

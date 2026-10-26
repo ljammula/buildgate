@@ -261,18 +261,19 @@ func TestCheckCorrectiveRoundNeedsAHandoffTheRunVouchesFor(t *testing.T) {
 	}
 }
 
-// One budget covers both kinds of round: a ticket that already had its
-// review round is not given a check round as well, and a round that
-// quarantines again on something a build still can fix stops at the budget.
-func TestCheckCorrectiveRoundSharesTheBudgetWithTheReviewRound(t *testing.T) {
+// One budget covers every corrective round of a ticket: a ticket whose round
+// after a reviewer's reproduction fails lint is not given another, and a
+// round that quarantines again on something a build still can fix stops at
+// the budget.
+func TestCorrectiveRoundsShareOneBudget(t *testing.T) {
 	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
 
-	t.Run("a review round already used the budget", func(t *testing.T) {
+	t.Run("a round after a reproduction already used the budget", func(t *testing.T) {
 		dp := newFakeDeps(t)
 		dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 		branch := "factoryd/" + id + "-001"
-		// The first build fails the conformity review; its review round
-		// then fails lint, which a build could fix: the budget is spent.
+		// A reviewer's reproduction refuses the first build; its round then
+		// fails lint, which a build could fix: the budget is spent.
 		buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, base, "")
 		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 			return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, "lint")
@@ -282,7 +283,7 @@ func TestCheckCorrectiveRoundSharesTheBudgetWithTheReviewRound(t *testing.T) {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		if *calls != 1 {
-			t.Errorf("corrective builds = %d, want the one review round and no more", *calls)
+			t.Errorf("corrective builds = %d, want the one round and no more", *calls)
 		}
 		if loaded, err := request.Load(dataDir, id); err != nil || loaded.State != request.StateQuarantined || len(loaded.Tickets[0].Rounds) != 1 {
 			t.Errorf("request = %+v, %v, want quarantined after one round", loaded, err)
@@ -317,31 +318,32 @@ func TestCheckCorrectiveRoundSharesTheBudgetWithTheReviewRound(t *testing.T) {
 	})
 }
 
-// A gate and a review that gave a verdict failed together: the build is told
-// about both. A repository gate the worker never ran, and a halt, are the
+// What only the run record shows keeps a run from a corrective build: a
+// failed code_review beside a gate (a finding refuses only through its
+// reproduction, SC-022, so the review is never handed to a build), a
+// repository gate the worker never ran, and a halt, which are the
 // operator's.
 func TestCheckCorrectiveRoundEligibilityFromTheRunRecord(t *testing.T) {
 	base, result := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
-	cases := map[string]struct {
-		shape     func(rr *run.Run)
-		wantRound bool
-	}{
-		"a gate and a review with a finding": {func(rr *run.Run) {
+	cases := map[string]func(rr *run.Run){
+		// SC-022: a finding refuses only through its reproduction, so a
+		// failed code_review is never handed to a build, whatever it found.
+		"a gate and a review with a high finding": func(rr *run.Run) {
 			rr.GateResults = []run.GateResult{{Check: "lint", Passed: false, ExitCode: 2}, {Check: "code_review", Passed: false}}
 			rr.CodeReview = &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", File: "sum.go", Summary: "overflows"}}}
-		}, true},
-		"a gate and a conformity review that answered nothing": {func(rr *run.Run) {
+		},
+		"a gate and a conformity review that answered nothing": func(rr *run.Run) {
 			rr.GateResults = []run.GateResult{{Check: "lint", Passed: false, ExitCode: 2}, {Check: "spec_conformity", Passed: false}}
 			rr.SpecConformityVerdicts = []run.ReviewVerdict{{Criterion: "1", Verdict: "clean"}, {Criterion: "2", Verdict: "unavailable"}}
-		}, false},
-		"a repository gate the worker never ran": {func(rr *run.Run) {
+		},
+		"a repository gate the worker never ran": func(rr *run.Run) {
 			rr.GateResults = []run.GateResult{{Check: "repo-docs", Passed: false, ExitCode: -1}}
-		}, false},
-		"a halt": {func(rr *run.Run) {
+		},
+		"a halt": func(rr *run.Run) {
 			rr.State, rr.GateResults, rr.HaltError = run.StateHalted, nil, "context canceled"
-		}, false},
+		},
 	}
-	for name, tc := range cases {
+	for name, shape := range cases {
 		t.Run(name, func(t *testing.T) {
 			dp := newFakeDeps(t)
 			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
@@ -352,27 +354,21 @@ func TestCheckCorrectiveRoundEligibilityFromTheRunRecord(t *testing.T) {
 					onReady(&run.Run{ID: ticket})
 				}
 				rr := requestdrivertest.QuarantinedOn(t, dataDir, ticket, branch, base, result, "lint")
-				tc.shape(rr)
+				shape(rr)
 				if err := handoff.Sync(rr, dataDir); err != nil {
 					t.Fatal(err)
 				}
 				return rr.Save(dataDir)
 			}
-			calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
 			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
-			if got := *calls == 1; got != tc.wantRound {
-				t.Fatalf("corrective round ran = %v, want %v", got, tc.wantRound)
-			}
-			if tc.wantRound {
-				record, err := os.ReadFile(requestdrivertest.ArgValue(*lastArgs, "-earlier-attempt"))
-				if err != nil || !strings.Contains(string(record), "overflows") || !strings.Contains(string(record), "`lint`") {
-					t.Errorf("the record = %q, %v, want the gate and the reviewer's finding", record, err)
-				}
+			if *calls != 0 {
+				t.Fatalf("corrective builds = %d, want none", *calls)
 			}
 		})
 	}

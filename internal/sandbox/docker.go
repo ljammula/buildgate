@@ -2103,7 +2103,7 @@ func StageFile(path, parent string) (dir, staged string, cleanup func(), err err
 // HarnessSiblingModules is the fixed set of agent/pi/scripts files
 // StageSiblingModules may ever copy beside a staged script -- every module
 // the harness scripts themselves import from one another (draft_spec.py
-// and plan_tickets.py both `import build_app`, and conformity_review.py
+// and plan_tickets.py both `import build_app`, and combined_review.py
 // does too), every prompt template they load, and nothing else. An allowlist, not "every .py beside the
 // script" (its original, looser rule): scriptDir is
 // resolveHarnessScript's own extracted harness cache directory in
@@ -2113,18 +2113,17 @@ func StageFile(path, parent string) (dir, staged string, cleanup func(), err err
 // this directory" is a far wider, unintended surface to stage into the
 // sandbox than this mechanism was ever meant to cover.
 var HarnessSiblingModules = map[string]bool{
-	"build_app.py":         true,
-	"harness_adapters.py":  true, // imported by build_app.py and every model-bound script
-	"draft_spec.py":        true,
-	"plan_tickets.py":      true,
-	"ticket_runner.py":     true,
-	"goal_pilot.py":        true,
-	"conformity_review.py": true, // imported by combined_review.py
-	"code_review.py":       true, // imported by combined_review.py
-	"prompt_templates.py":  true, // loads the *.prompt.md templates below
-	"round_feedback.py":    true, // imported by build_app.py
-	"saved_prompts.py":     true, // imported by build_app.py
-	"tree_guard.py":        true, // imported by build_app.py
+	"build_app.py":        true,
+	"harness_adapters.py": true, // imported by build_app.py and every model-bound script
+	"draft_spec.py":       true,
+	"plan_tickets.py":     true,
+	"ticket_runner.py":    true,
+	"goal_pilot.py":       true,
+	"code_review.py":      true, // imported by combined_review.py
+	"prompt_templates.py": true, // loads the *.prompt.md templates below
+	"round_feedback.py":   true, // imported by build_app.py
+	"saved_prompts.py":    true, // imported by build_app.py
+	"tree_guard.py":       true, // imported by build_app.py
 
 	// Run by harness_adapters.py's CopilotAdapter under node, around the
 	// Copilot CLI on a chatgpt-codex route.
@@ -2145,10 +2144,7 @@ var HarnessSiblingModules = map[string]bool{
 	"build_passed_notes.prompt.md":                       true,
 	"build_round_checklist.prompt.md":                    true,
 	"code_review.command_outcome_rule.prompt.md":         true,
-	"code_review.diff_inline.prompt.md":                  true,
-	"code_review.diff_self.prompt.md":                    true,
-	"code_review.json_contract.prompt.md":                true,
-	"code_review.prompt.md":                              true,
+	"code_review.reproduction_rule.prompt.md":            true,
 	"code_review.scope_rule.prompt.md":                   true,
 	"code_review.severity_rule.prompt.md":                true,
 	"combined_review.diff_inline.prompt.md":              true,
@@ -2177,14 +2173,6 @@ var HarnessSiblingModules = map[string]bool{
 	"plan_tickets.scoped_sections.prompt.md":             true,
 	"read_back.prompt.md":                                true,
 	"review.instructions_diff.prompt.md":                 true,
-	"spec_conformity.answers.prompt.md":                  true,
-	"spec_conformity.command_outcome_rule.prompt.md":     true,
-	"spec_conformity.diff_inline.prompt.md":              true,
-	"spec_conformity.diff_self.prompt.md":                true,
-	"spec_conformity.formatting_rule.prompt.md":          true,
-	"spec_conformity.json_contract.prompt.md":            true,
-	"spec_conformity.prompt.md":                          true,
-	"spec_conformity.recheck.prompt.md":                  true,
 }
 
 // StageSiblingModules copies scriptDir's own HarnessSiblingModules
@@ -2195,12 +2183,11 @@ var HarnessSiblingModules = map[string]bool{
 // file alone. Found live on the direct-execution path: the first
 // sandboxed spec draft died on ModuleNotFoundError before the model ran
 // (draft_spec.py's own `import build_app`); found again on the Temporal
-// path, 2026-09-17, the first time the Temporal path's own conformity-
-// review Activity (RunReviewStepActivity since M4-K3, previously
-// RunSpecConformityReviewActivity) ran a real conformity_review.py
-// against a live sandbox -- that Activity's own script-staging block had
-// never called this at all, since no Temporal Activity before it had
-// ever staged a harness script with a sibling import. Shared by both
+// path, 2026-09-17, the first time a Temporal review Activity ran a real
+// review script against a live sandbox -- that Activity's own
+// script-staging block had never called this at all, since no Temporal
+// Activity before it had ever staged a harness script with a sibling
+// import. Shared by both
 // cmd/factoryd's own stageSandboxScript and
 // internal/workflow's runSandboxWithRetries so the two paths cannot drift
 // on this again.

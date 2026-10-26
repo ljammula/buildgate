@@ -141,7 +141,6 @@ describe("recoveryPlan", () => {
       headline: "This request is halted.",
       retryLabel: "Retry request",
       showSendBack: false,
-      sendBackIsPrimary: false,
       cliEquivalent: "factoryd retry req-1",
       overrideTicket: null,
     });
@@ -158,27 +157,11 @@ describe("recoveryPlan", () => {
     });
   });
 
-  test("a spec_conformity quarantine leads with Send back to spec, even when planning is allowed", () => {
-    const plan = recoveryPlan(
-      req("quarantined", {
-        can_send_back: true,
-        can_send_back_to_plan: true,
-        quarantine_check: "spec_conformity",
-      }),
-    );
-    expect(plan).toMatchObject({
-      sendBackLabel: "Send back to spec",
-      sendBackIsPrimary: true,
-      cliEquivalent: 'factoryd reject -to spec -reason "<what to change>" req-1',
-    });
-  });
-
-  test("another quarantine sends back to planning when allowed, else to spec, and Retry leads", () => {
+  test("a quarantine sends back to planning when allowed, else to spec, and Retry leads", () => {
     expect(
       recoveryPlan(req("quarantined", { can_send_back: true, can_send_back_to_plan: true })),
     ).toMatchObject({
       sendBackLabel: "Send back to planning",
-      sendBackIsPrimary: false,
       cliEquivalent: "factoryd retry req-1",
     });
     expect(recoveryPlan(req("quarantined", { can_send_back: true })).sendBackLabel).toBe(

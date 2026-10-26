@@ -36,14 +36,6 @@ def pi_output(review_outcome: str, findings: str = "") -> str:
 	return "\n".join(json.dumps(event) for event in events)
 
 
-def conformity_output(verdicts: list[dict]) -> str:
-	"""A message_end event whose assistant content is the JSON payload
-	parse_conformity_verdicts expects -- the shape a real pi --print
-	--mode json final turn produces."""
-	payload = json.dumps({"criteria": verdicts})
-	return json.dumps({"type": "message_end", "message": {"role": "assistant", "content": payload}})
-
-
 def agent_invocation_calls(mock_) -> list:
 	"""The subset of a mocked sh() or run_agent_streaming's calls that are
 	actual agent invocations (pi/claude), excluding
@@ -100,25 +92,6 @@ def scripted_pi_stream(completions, writes=None):
 			for line in (completed.stdout or "").splitlines():
 				on_event(line)
 		return completed, False
-
-	return side_effect
-
-
-def conformity_sh_side_effect(completion, write=None):
-	"""An sh() side_effect for --spec-acceptance-criteria tests: routes
-	git argv to the real sh() (workspace_fingerprint's own rev-parse/
-	status calls) and returns `completion` for the standalone conformity
-	review's own pi call -- run_spec_conformity_review still calls sh()
-	directly; only the main corrective-round loop's pi invocation moved
-	to run_agent_streaming."""
-	real_sh = build_app.sh
-
-	def side_effect(args, cwd=None, timeout=None, env=None):
-		if args and args[0] == "git":
-			return real_sh(args, cwd=cwd, timeout=timeout, env=env)
-		if write is not None:
-			write()
-		return completion
 
 	return side_effect
 
@@ -929,170 +902,18 @@ class BuildAppTests(unittest.TestCase):
 			self.assertIsNotNone(snapshot)
 			self.assertTrue(failed_once)
 
+	def test_retired_review_flags_are_rejected(self):
+		for flag, value in (("--conformity-policy", "advisory"), ("--spec-acceptance-criteria", "/tmp/criteria.md")):
+			with self.subTest(flag=flag):
+				argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/spec.md", flag, value]
+				with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+					with self.assertRaises(SystemExit) as raised:
+						build_app.main()
+				self.assertEqual(raised.exception.code, 2)
+
 	def test_workspace_fingerprint_returns_none_on_a_non_repo(self):
 		with tempfile.TemporaryDirectory() as directory:
 			self.assertIsNone(build_app.workspace_fingerprint(Path(directory)))
-
-	def test_spec_conformity_review_required_policy_fails_on_flagged_criterion(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Fix the cache")
-			criteria_path = Path(spec_dir) / "criteria.md"
-			criteria_path.write_text("1. Cache evicts by reference\n2. Cache is thread-safe\n")
-			completed = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 0, conformity_output([
-					{"criterion": "1. Cache evicts by reference", "verdict": "clean"},
-					{"criterion": "2. Cache is thread-safe", "verdict": "flagged", "detail": "no locking added"},
-				]), ""),
-			]
-			writes = [lambda: (root / "cache.go").write_text("fixed\n"), lambda: None]
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([completed[0]], [writes[0]])),
-				mock.patch.object(build_app, "sh", side_effect=conformity_sh_side_effect(completed[1], writes[1])),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
-					conformity_policy="required", spec_acceptance_criteria=criteria_path,
-				)
-		self.assertFalse(result.succeeded)
-		self.assertEqual(len(result.review_verdicts), 2)
-		self.assertEqual(result.review_verdicts[0]["verdict"], "clean")
-		self.assertEqual(result.review_verdicts[1]["verdict"], "flagged")
-		self.assertIn("2. Cache is thread-safe", result.stopped_reason)
-
-	def test_spec_conformity_review_unreachable_reviewer_fails_under_required(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Fix the cache")
-			criteria_path = Path(spec_dir) / "criteria.md"
-			criteria_path.write_text("1. Cache evicts by reference\n")
-			completed = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 1, "", "boom"),  # conformity call itself fails
-			]
-			writes = [lambda: (root / "cache.go").write_text("fixed\n"), lambda: None]
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([completed[0]], [writes[0]])),
-				mock.patch.object(build_app, "sh", side_effect=conformity_sh_side_effect(completed[1], writes[1])),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
-					conformity_policy="required", spec_acceptance_criteria=criteria_path,
-				)
-		self.assertFalse(result.succeeded)
-		self.assertEqual(result.review_verdicts, [
-			{"criterion": "1. Cache evicts by reference", "verdict": "unavailable", "detail": "no-review-verdict"},
-		])
-
-	def test_spec_conformity_review_advisory_records_but_does_not_fail(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Fix the cache")
-			criteria_path = Path(spec_dir) / "criteria.md"
-			criteria_path.write_text("1. Cache evicts by reference\n")
-			completed = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 0, conformity_output([
-					{"criterion": "1. Cache evicts by reference", "verdict": "flagged", "detail": "still by value"},
-				]), ""),
-			]
-			writes = [lambda: (root / "cache.go").write_text("fixed\n"), lambda: None]
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([completed[0]], [writes[0]])),
-				mock.patch.object(build_app, "sh", side_effect=conformity_sh_side_effect(completed[1], writes[1])),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
-					conformity_policy="advisory", spec_acceptance_criteria=criteria_path,
-				)
-		self.assertTrue(result.succeeded)
-		self.assertEqual(result.review_verdicts[0]["verdict"], "flagged")
-
-	def test_no_spec_acceptance_criteria_records_no_review_verdicts(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Fix the cache")
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(
-					[subprocess.CompletedProcess([], 0, pi_output("clean"), "")], [lambda: (root / "cache.go").write_text("fixed\n")],
-				)),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
-				)
-		self.assertTrue(result.succeeded)
-		self.assertEqual(result.review_verdicts, [])
-
-	def test_conformity_review_does_not_attempt_to_commit_a_dirty_workspace(self):
-		"""Regression for the 2026-09-17 live-test finding: build_app.py
-		must never try to `git commit` on the caller's behalf (the
-		commit_all_if_dirty mechanism PR #175 added and this change
-		removes) -- internal/sandbox/docker.go mounts `.git` read-only
-		inside factoryd's sandbox unconditionally, so any such attempt
-		there fails closed on "Read-only file system". Conformity review
-		must still run and report honestly against whatever state the
-		workspace is actually in, uncommitted or not, without touching
-		git itself."""
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Add a widget")
-			criteria_path = Path(spec_dir) / "criteria.md"
-			criteria_path.write_text("1. Widget exists\n")
-			completed = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 0, conformity_output([
-					{"criterion": "1. Widget exists", "verdict": "clean"},
-				]), ""),
-			]
-			# The agent leaves its diff uncommitted -- build_app.py must
-			# not itself attempt any git write in response.
-			writes = [lambda: (root / "widget.go").write_text("package widget\n"), lambda: None]
-			git_calls = []
-			real_sh = build_app.sh
-
-			def tracking_sh(args, cwd=None, timeout=None, env=None):
-				if args and args[0] == "git":
-					git_calls.append(args[1])
-					return real_sh(args, cwd=cwd, timeout=timeout, env=env)
-				writes[1]()
-				return completed[1]
-
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream([completed[0]], [writes[0]])),
-				mock.patch.object(build_app, "sh", side_effect=tracking_sh),
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
-					conformity_policy="required", spec_acceptance_criteria=criteria_path,
-				)
-			self.assertTrue(result.succeeded)
-			self.assertEqual(result.review_verdicts[0]["verdict"], "clean")
-			self.assertNotIn("add", git_calls)
-			self.assertNotIn("commit", git_calls)
-			status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True)
-			self.assertNotEqual(status.stdout, "", "workspace should remain exactly as dirty as the agent left it")
-
 
 def init_repo_with_commit(path: Path) -> str:
 	"""git init + one commit, returning its sha. Signing and hooks are
@@ -1848,9 +1669,9 @@ class EnsureGitRepoTests(unittest.TestCase):
 			self.assertIn("BUILD_EVIDENCE.json", (workspace / ".gitignore").read_text())
 
 	def test_gitignores_conformity_evidence_json_too(self):
-		"""conformity_review.py's own CONFORMITY_EVIDENCE.json (the
-		two-phase design's separate evidence file) must never be mistaken
-		for tracked app source, same as BUILD_EVIDENCE.json."""
+		"""CONFORMITY_EVIDENCE.json, which an older review step wrote, must
+		never be mistaken for tracked app source in a workspace that still
+		holds one, same as BUILD_EVIDENCE.json."""
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory) / "work"
 			workspace.mkdir()
@@ -1861,7 +1682,7 @@ class EnsureGitRepoTests(unittest.TestCase):
 			self.assertIn("CONFORMITY_EVIDENCE.json", (workspace / ".gitignore").read_text())
 
 	def test_gitignores_pi_conformity_session_too(self):
-		"""The per-criterion spec-conformity reviewer writes its own
+		"""The retired per-criterion spec-conformity reviewer wrote its own
 		session transcript to .pi-conformity-session/, a distinct harness
 		invocation from the main .pi-build-session/ round loop -- found
 		live: a run that otherwise succeeded cleanly still quarantined on
@@ -1913,7 +1734,6 @@ class WriteEvidenceJSONTests(unittest.TestCase):
 		self.assertEqual(evidence_path, workspace / "BUILD_EVIDENCE.json")
 		self.assertEqual(payload["schema_version"], 2)
 		self.assertEqual(payload["review_policy"], "advisory")
-		self.assertEqual(payload["conformity_policy"], "required")
 		self.assertIsNone(payload["provider"])
 		self.assertIsNone(payload["model"])
 		self.assertFalse(payload["agents_md_used"])
@@ -2020,28 +1840,18 @@ class WriteEvidenceJSONTests(unittest.TestCase):
 			payload = json.loads(build_app.write_evidence_json(result).read_text())
 
 		self.assertEqual(payload["rounds"], [])
-		self.assertEqual(payload["review_verdicts"], [])
 
-	def test_review_verdicts_are_written_matching_run_review_verdict_shape(self):
-		"""review_verdicts' shape (criterion/verdict/detail) is a contract
-		with run.ReviewVerdict (internal/run/run.go) -- see this class's
-		own doc comment."""
+	def test_the_retired_conformity_keys_are_not_written(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)
-			result = build_app.BuildResult(
-				workspace=workspace, spec_path=workspace / "spec.md",
-				review_verdicts=[
-					{"criterion": "1. Foo", "verdict": "clean", "detail": ""},
-					{"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"},
-				],
-			)
+			result = build_app.BuildResult(workspace=workspace, spec_path=workspace / "spec.md")
 
 			payload = json.loads(build_app.write_evidence_json(result).read_text())
+			report = build_app.write_report(result).read_text()
 
-		self.assertEqual(payload["review_verdicts"], [
-			{"criterion": "1. Foo", "verdict": "clean", "detail": ""},
-			{"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"},
-		])
+		self.assertNotIn("conformity_policy", payload)
+		self.assertNotIn("review_verdicts", payload)
+		self.assertNotIn("Conformity policy", report)
 
 	def test_agents_md_used_and_git_blob_are_written_when_set_on_the_result(self):
 		with tempfile.TemporaryDirectory() as directory:
@@ -2612,11 +2422,16 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 		self.assertIn("the ticket's `Verify-Command`", build_app.build_round_checklist(None))
 
 
-class SpecConformityParsingTests(unittest.TestCase):
-	"""Pure-function tests for the per-criterion reviewer plumbing --
-	see run_spec_conformity_review's own doc comment for why this is a
-	separate, standalone mechanism from the whole-diff "reviewer"
-	extension review_signal parses."""
+class AcceptanceCriteriaTests(unittest.TestCase):
+	"""Pure-function tests for the acceptance-criteria file and the
+	criterion comparison key the oracle drafter shares."""
+
+	def test_criterion_key_ignores_the_number_prefix_backticks_and_trailing_punctuation(self):
+		key = build_app.criterion_key
+		self.assertEqual(key("1. Foo does X."), key("Foo does X"))
+		self.assertEqual(key('2) `GET /health` returns "all"'), key('GET /health returns "all"'))
+		self.assertEqual(key("1.2.3 is supported"), "1.2.3 is supported", "a version is not a list marker")
+		self.assertNotEqual(key("1. Foo"), key("1. Bar"))
 
 	def test_read_acceptance_criteria_skips_blank_and_comment_lines(self):
 		with tempfile.TemporaryDirectory() as directory:
@@ -2750,191 +2565,6 @@ class SpecConformityParsingTests(unittest.TestCase):
 			)
 		self.assertEqual(turn.text, "")
 		self.assertIn("no such file or directory", turn.error)
-
-	def test_parse_conformity_verdicts_matches_by_criterion_text(self):
-		output = json.dumps({"criteria": [
-			{"criterion": "1. Foo", "verdict": "clean"},
-			{"criterion": "2. Bar", "verdict": "flagged", "detail": "missing null check"},
-		]})
-		got = build_app.parse_conformity_verdicts(output, ["1. Foo", "2. Bar"])
-		self.assertEqual(got, [
-			{"criterion": "1. Foo", "verdict": "clean", "detail": ""},
-			{"criterion": "2. Bar", "verdict": "flagged", "detail": "missing null check"},
-		])
-
-	def test_parse_conformity_verdicts_matches_when_the_reviewer_drops_the_number_prefix(self):
-		"""Regression for the 2026-09-17 multi-repo validation finding:
-		the prompt asks the reviewer to echo each criterion verbatim, but
-		a real response routinely drops the leading "N. " -- this must
-		still match, not read as unavailable."""
-		output = json.dumps({"criteria": [
-			{"criterion": "`GET /health` responds with HTTP 200", "verdict": "clean"},
-			{"criterion": "The commit for this work has a subject line", "verdict": "flagged", "detail": "no commit"},
-		]})
-		got = build_app.parse_conformity_verdicts(output, [
-			"1. `GET /health` responds with HTTP 200",
-			"2. The commit for this work has a subject line",
-		])
-		self.assertEqual(got, [
-			{"criterion": "1. `GET /health` responds with HTTP 200", "verdict": "clean", "detail": ""},
-			{"criterion": "2. The commit for this work has a subject line", "verdict": "flagged", "detail": "no commit"},
-		])
-
-	def test_parse_conformity_verdicts_matches_when_the_reviewer_drops_backticks(self):
-		"""Regression for the 2026-09-24 codex-route bar run: the reviewer
-		echoed `"all"` as "all", so exactly the criteria quoting a value read
-		as unavailable and a correct build was quarantined."""
-		criterion = '1. Calling `FilterTodos` with state `"all"` returns every todo.'
-		output = json.dumps({"criteria": [
-			{"criterion": '1. Calling `FilterTodos` with state "all" returns every todo.', "verdict": "clean"},
-		]})
-		got = build_app.parse_conformity_verdicts(output, [criterion])
-		self.assertEqual(got, [{"criterion": criterion, "verdict": "clean", "detail": ""}])
-
-	def test_parse_conformity_verdicts_defaults_an_unaccounted_criterion_to_unavailable(self):
-		# Only one of two declared criteria appears in the reviewer's own
-		# JSON -- the missing one must read as unavailable, never as
-		# silently dropped or (worse) implicitly clean.
-		output = json.dumps({"criteria": [{"criterion": "1. Foo", "verdict": "clean"}]})
-		got = build_app.parse_conformity_verdicts(output, ["1. Foo", "2. Bar"])
-		self.assertEqual(got[0], {"criterion": "1. Foo", "verdict": "clean", "detail": ""})
-		self.assertEqual(got[1], {"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"})
-
-	def test_parse_conformity_verdicts_finds_the_real_block_after_leading_json_shaped_prose(self):
-		"""Regression, found live (todo-service run, 2026-09-22): a
-		genuinely correct build was quarantined because the reviewer's
-		response echoed a criterion that itself quotes a JSON example
-		before its real verdict block. The prior greedy r"\\{.*\\}" regex
-		spanned from the first "{" (inside that echoed example) to the
-		last "}" (the end of the real verdict block), producing one
-		invalid JSON blob and defaulting every criterion to
-		"unavailable" even though a real, valid verdict block was
-		present later in the same response."""
-		real = json.dumps({"criteria": [{"criterion": "1. Foo", "verdict": "clean"}]})
-		output = (
-			'Checking criterion 1: the response shape looks like {"title": "HELLO WORLD"} per the spec.\n'
-			+ real
-		)
-		got = build_app.parse_conformity_verdicts(output, ["1. Foo"])
-		self.assertEqual(got, [{"criterion": "1. Foo", "verdict": "clean", "detail": ""}])
-
-	def test_parse_conformity_verdicts_does_not_inherit_a_criterion_from_an_earlier_example_block(self):
-		"""Regression, found by /code-review on the previous fix: the
-		LAST candidate with a "criteria" list must win wholesale, not be
-		merged key-by-key with earlier candidates. A model that echoes
-		the expected answer schema as a worked example (both criteria
-		marked "clean") before giving its real, partial analysis (which
-		only actually covers criterion 1) must not have criterion 2
-		silently inherit the example's "clean" verdict -- an unaccounted
-		criterion must read as "unavailable", never as having passed."""
-		example = json.dumps({"criteria": [
-			{"criterion": "1. Foo", "verdict": "clean"},
-			{"criterion": "2. Bar", "verdict": "clean"},
-		]})
-		real = json.dumps({"criteria": [
-			{"criterion": "1. Foo", "verdict": "flagged", "detail": "real issue found"},
-		]})
-		output = f"Example of the expected shape: {example}\n\nActual analysis follows.\n{real}"
-		got = build_app.parse_conformity_verdicts(output, ["1. Foo", "2. Bar"])
-		self.assertEqual(got, [
-			{"criterion": "1. Foo", "verdict": "flagged", "detail": "real issue found"},
-			{"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"},
-		])
-
-	def test_parse_conformity_verdicts_handles_malformed_output(self):
-		got = build_app.parse_conformity_verdicts("not json at all", ["1. Foo"])
-		self.assertEqual(got, [{"criterion": "1. Foo", "verdict": "unavailable", "detail": "no-review-verdict"}])
-
-	def test_parse_conformity_verdicts_ignores_an_invalid_verdict_value(self):
-		# A reviewer that returns a verdict outside {clean, flagged} (a
-		# schema violation) must not be trusted as if it said "clean".
-		output = json.dumps({"criteria": [{"criterion": "1. Foo", "verdict": "maybe"}]})
-		got = build_app.parse_conformity_verdicts(output, ["1. Foo"])
-		self.assertEqual(got, [{"criterion": "1. Foo", "verdict": "unavailable", "detail": "no-review-verdict"}])
-
-	def test_parse_conformity_verdicts_positional_fallback_on_a_dropped_leading_clause(self):
-		# Live example-app walk, 2026-09-28: the reviewer answered all 6
-		# criteria "clean", in order, but echoed criterion 3 without its
-		# leading clause -- criterion_key's number/backtick/punctuation
-		# stripping doesn't cover a dropped leading clause, so criterion 3
-		# didn't key-match and the build was quarantined despite a clean
-		# review. Every OTHER criterion still matches by key at its own
-		# index, so the positional fallback may resolve criterion 3 from
-		# its own slot.
-		criteria = [
-			"1. Foo passes",
-			"2. Bar passes",
-			"3. For both invalid input categories, `HandleCreateNote` in "
-			"`backend/internal/handler/note.go` returns before invoking the note service's create operation",
-			"4. Qux passes",
-			"5. Quux passes",
-			"6. Corge passes",
-		]
-		entries = [
-			{"criterion": "1. Foo passes", "verdict": "clean"},
-			{"criterion": "2. Bar passes", "verdict": "clean"},
-			{
-				"criterion": "`HandleCreateNote` in `backend/internal/handler/note.go` returns before "
-				"invoking the note service's create operation",
-				"verdict": "clean",
-			},
-			{"criterion": "4. Qux passes", "verdict": "clean"},
-			{"criterion": "5. Quux passes", "verdict": "clean"},
-			{"criterion": "6. Corge passes", "verdict": "clean"},
-		]
-		output = json.dumps({"criteria": entries})
-		got = build_app.parse_conformity_verdicts(output, criteria)
-		self.assertEqual([v["verdict"] for v in got], ["clean"] * 6)
-		self.assertEqual(got[2]["criterion"], criteria[2])
-
-	def test_parse_conformity_verdicts_positional_fallback_skipped_when_entries_are_reordered(self):
-		# A rephrased (non-key-matching) entry only gets rescued by
-		# position when the reviewer otherwise answered strictly in
-		# order. Here "3. Baz" and "1. Foo" are swapped, so "3. Baz"
-		# key-matches an entry NOT at its own index (2) -- that
-		# misalignment disables the fallback for everything, so the
-		# rephrased "2. Bar" stays unavailable exactly as before this fix.
-		criteria = ["1. Foo", "2. Bar", "3. Baz"]
-		entries = [
-			{"criterion": "3. Baz", "verdict": "clean"},
-			{"criterion": "1. Foo", "verdict": "clean"},
-			{"criterion": "Bar, rephrased", "verdict": "clean"},  # key != criterion_key("2. Bar") == "Bar"
-		]
-		output = json.dumps({"criteria": entries})
-		got = build_app.parse_conformity_verdicts(output, criteria)
-		self.assertEqual(got[1], {"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"})
-
-	def test_parse_conformity_verdicts_positional_fallback_skipped_on_count_mismatch(self):
-		# Fewer entries than declared criteria: even a would-be-positional
-		# match must not be attempted, since indices can't correspond --
-		# entries[1] here would (wrongly) look like "2. Bar"'s own slot by
-		# index alone, but it is actually meant for "3. Baz".
-		criteria = ["1. Foo", "2. Bar", "3. Baz"]
-		entries = [
-			{"criterion": "1. Foo", "verdict": "clean"},
-			{"criterion": "Baz-ish, rephrased", "verdict": "clean"},  # key != criterion_key("3. Baz") == "Baz"
-		]
-		output = json.dumps({"criteria": entries})
-		got = build_app.parse_conformity_verdicts(output, criteria)
-		self.assertEqual(got[1], {"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"})
-		self.assertEqual(got[2], {"criterion": "3. Baz", "verdict": "unavailable", "detail": "no-review-verdict"})
-
-	def test_parse_conformity_verdicts_positional_fallback_skipped_when_slot_already_claimed(self):
-		# "2. Bar" is rephrased and sits at index 1, but index 1's entry
-		# ("3. Baz", moved up one slot) already key-matched a different
-		# criterion (index 2) elsewhere -- that misalignment disables the
-		# fallback globally, so "2. Bar" cannot be rescued from a slot
-		# whose own resident entry was already spent on something else.
-		criteria = ["1. Foo", "2. Bar", "3. Baz"]
-		entries = [
-			{"criterion": "1. Foo", "verdict": "clean"},
-			{"criterion": "3. Baz", "verdict": "clean"},
-			{"criterion": "Bar, rephrased", "verdict": "clean"},  # key != criterion_key("2. Bar") == "Bar"
-		]
-		output = json.dumps({"criteria": entries})
-		got = build_app.parse_conformity_verdicts(output, criteria)
-		self.assertEqual(got[1], {"criterion": "2. Bar", "verdict": "unavailable", "detail": "no-review-verdict"})
-
 
 class RunPiStreamingTests(unittest.TestCase):
 	"""run_agent_streaming's own contract: same (stdout, returncode,
@@ -3144,50 +2774,11 @@ class GofmtChangedFilesTests(unittest.TestCase):
 				self.assertEqual(build_app.gofmt_changed_files(root, None), [])
 				self.assertIn("func  Untouched", target.read_text())
 
-	def test_conformity_prompt_excludes_formatting_findings(self):
-		prompt = build_app.spec_conformity_prompt(["1. Foo"], None)
-		self.assertIn("NOT a spec-conformity", prompt)
-		self.assertNotIn("unformatted code", prompt)
-
-	def test_conformity_prompt_without_diff_keeps_the_old_diff_yourself_instruction(self):
-		prompt = build_app.spec_conformity_prompt(["1. Foo"], "abc123")
-		self.assertIn("Diff the workspace against abc123", prompt)
-		self.assertNotIn("do NOT re-run `git diff`", prompt)
-
-	def test_conformity_prompt_with_diff_inlines_it_and_forbids_re_fetching(self):
-		# Live example-app run 3 (2026-09-28): asked to diff the workspace
-		# itself, the conformity reviewer explored with tools for 30 turns
-		# at ~33k input tokens each (1,011,032 total) until the relay's
-		# sliding-window limiter cut it off with three straight 429s and no
-		# verdicts at all. Inlining the diff (mirroring code_review.py's own
-		# fix) turns that into a single read.
-		prompt = build_app.spec_conformity_prompt(
-			["1. Foo"], "abc123", diff=(" 1 file changed\n", "diff --git a/x.go b/x.go\n+line\n"),
-		)
-		self.assertIn("do NOT re-run `git diff`", prompt)
-		self.assertIn("1 file changed", prompt)
-		self.assertIn("diff --git a/x.go b/x.go", prompt)
-		# A hunk line's trailing text is git's guess at the section, not a
-		# line of the file: a reviewer took "@@ ... @@ Unreleased" for a
-		# heading and flagged a correctly placed changelog entry twice.
-		self.assertIn("git's guess at the enclosing function or heading", prompt)
-		# The old "diff the workspace yourself" instruction must be gone --
-		# otherwise the reviewer has no reason not to re-fetch it anyway.
-		self.assertNotIn("Diff the workspace against", prompt)
-
-	def test_conformity_prompt_with_diff_truncates_past_the_limit(self):
-		big_diff = "x" * (build_app._DIFF_TRUNCATE_LIMIT + 500)
-		prompt = build_app.spec_conformity_prompt(["1. Foo"], "abc123", diff=("stat\n", big_diff))
-		self.assertIn("truncated here at 120,000 characters", prompt)
-		self.assertNotIn(big_diff, prompt)
-		self.assertIn("x" * build_app._DIFF_TRUNCATE_LIMIT, prompt)
-
-
 class WorkspaceDiffTest(unittest.TestCase):
 	"""build_app.workspace_diff/format_diff_for_prompt used to be private
 	copies in code_review.py (_workspace_diff/_DIFF_TRUNCATE_LIMIT); moved
-	here so conformity_review.py's own spec-conformity review can share
-	them (example-app run 3, 2026-09-28 -- see spec_conformity_prompt's own
+	here so every review prompt shares
+	them (example-app run 3, 2026-09-28 -- see the review prompts' own
 	doc comment)."""
 
 	def test_diff_and_stat_reflect_a_real_change_against_the_base_commit(self):
@@ -3627,14 +3218,12 @@ class NotesTurnTests(unittest.TestCase):
 	"""The one extra turn a build that ends without passing gets, in its own
 	session, for notes to whoever attempts the ticket next."""
 
-	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, criteria=False, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
+	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			init_repo_with_commit(root)
 			spec = Path(spec_dir) / "spec.md"
 			spec.write_text("Fix the cache")
-			criteria_path = Path(spec_dir) / "criteria.txt"
-			criteria_path.write_text("1. it works\n")
 			if round_result is None:
 				round_result = (subprocess.CompletedProcess([], 0, pi_output("clean" if passing else "flagged", "x"), ""), False)
 			notes_result = (subprocess.CompletedProcess([], 0, assistant_stdout(reply), ""), False)
@@ -3679,7 +3268,7 @@ class NotesTurnTests(unittest.TestCase):
 			):
 				result = build_app.run_build(
 					root, spec, max_rounds=1, timeout_minutes=1,
-					spec_acceptance_criteria=criteria_path if criteria else None, **extra,
+					**extra,
 				)
 				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
 				return {
@@ -3811,7 +3400,6 @@ class NotesTurnTests(unittest.TestCase):
 			"no budget": (dict(budget=None), "no build time budget"),
 			"unparsable budget": (dict(budget="soon"), "no build time budget"),
 			"299 s left": (dict(budget=1000, elapsed=701), "under 300 s of the build time budget left"),
-			"spec acceptance criteria": (dict(criteria=True), "spec acceptance criteria given"),
 		}
 		for name, (kwargs, reason) in cases.items():
 			with self.subTest(name):

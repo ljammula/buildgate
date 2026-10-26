@@ -2,12 +2,10 @@
   "schema_version": 2,
   "generated": "2026-01-01T00:00:00+00:00",
   "review_policy": "advisory",
-  "conformity_policy": "required",
   "provider": "factoryd-relay",
   "model": "gpt-5.6-luna",
   "agents_md_used": true,
   "agents_md_git_blob": "f55d748f1f4a5821f806fe1809936f827ea088e8",
-  "review_verdicts": [],
   "succeeded": true,
   "stopped_reason": "canonical verification passed",
   "notes_turn": {

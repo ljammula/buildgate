@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0" name="com.example.AddTest" time="0.001" tests="1" errors="0" skipped="1" failures="0">
+  <properties>
+    <property name="java.version" value="21.0.4"/>
+    <property name="junit.jupiter.execution.timeout.default" value="60s"/>
+  </properties>
+  <testcase name="later" classname="com.example.AddTest" time="0.0">
+    <skipped message="void com.example.AddTest.later() is @Disabled"/>
+  </testcase>
+</testsuite>

@@ -155,7 +155,7 @@ ci: fmt-check vet verify-live agent-pi-test with-spinner-test install-prereqs-te
 # OpenShell gateway, real model route, real git) end to end against a small fixed set of
 # tickets -- see AGENTS.md's "Live validation" section and
 # scripts/live-smoke.sh's own top-of-file comment for why this exists
-# separately from verify: every gate/build_app.py/conformity-review bug
+# separately from verify: every gate/build_app.py/review bug
 # this repo has hit live was invisible to unit tests and code review
 # alike, and only surfaced on a real run. Not part of `verify` (needs
 # Docker, a configured model route, and ~5-10 minutes, unlike verify's

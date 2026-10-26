@@ -193,10 +193,10 @@ type Config struct {
 	// ReviewCorrectiveRounds mirrors worker's own
 	// -review-corrective-rounds flag: the most
 	// automatic corrective builds a ticket gets when its run quarantines
-	// with its failed gates a subset of {spec_conformity, code_review},
-	// before the request quarantines as it does today, and the most fix
-	// attempts a PR-review corrective round gets when the same two gates
-	// alone quarantine it. Like
+	// with checks a build can fix when told about them (a reviewer's
+	// reproduction that refused it included, SC-022), before the request
+	// quarantines, and the most fix attempts a PR-review corrective round
+	// gets when a reviewer's reproduction alone refuses it. Like
 	// MaxReviewRounds, this is a per-invocation Tier-1 value
 	// (applySessionConfig fills the flag directly from this field), not a
 	// daemon-wide Tier-2 setting. 0 disables the corrective round
@@ -239,19 +239,11 @@ type Config struct {
 	// daemon-wide Tier-2 setting.
 	AdvanceOn *string `yaml:"advance_on,omitempty"`
 
-	// ConformityPolicy mirrors worker's own -conformity-policy flag:
-	// build_app.py's own --conformity-policy (required|advisory, governs
-	// the per-criterion spec-conformity review -spec-acceptance-criteria
-	// enables). Like AdvanceOn above, this is a per-invocation Tier-1
-	// value (applySessionConfig fills the flag directly from this
-	// field), not a daemon-wide Tier-2 setting.
-	ConformityPolicy *string `yaml:"conformity_policy,omitempty"`
-
 	// CodeReviewPolicy mirrors the -code-review-policy flag of worker and
 	// of a single-ticket run (Settings.CodeReviewPolicy):
-	// the standalone AI code-review pass's own policy (off|advisory|
-	// required, agent/pi/scripts/code_review.py, internal/codereview).
-	// Like ConformityPolicy above, this is a per-invocation Tier-1 value
+	// the review step's own policy (off|advisory|required,
+	// agent/pi/scripts/combined_review.py, internal/codereview).
+	// Like AdvanceOn above, this is a per-invocation Tier-1 value
 	// (applySessionConfig fills the flag directly from this field), not
 	// a daemon-wide Tier-2 setting.
 	CodeReviewPolicy *string `yaml:"code_review_policy,omitempty"`
@@ -275,7 +267,7 @@ type Config struct {
 	// RequestTokenBudget/RequestCostBudgetMicroUSD cap one request's own
 	// total spend across every stage it can launch a relay-backed job
 	// through: spec/plan/oracle drafting plus every ticket build and
-	// every corrective round (spec_conformity or PR-review). Unlike
+	// every corrective round (review or PR-review). Unlike
 	// MeterTokenCeiling/MeterCostCeilingMicroUSD above (a per-job ceiling
 	// the relay itself enforces mid-job), these are checked host-side,
 	// before a job is even launched -- see cmd/factoryd's

@@ -194,9 +194,9 @@ func TestGetRequestIncludesNextAction(t *testing.T) {
 
 // TestGetRequestIncludesQuarantineCheck is the regression test for
 // Follow-up B's API half: request.Request.QuarantineCheck, set by the
-// request driver for a spec_conformity-only quarantine, must reach GET
+// request driver for a diff_scope quarantine, must reach GET
 // /requests/{id} as "quarantine_check" (via requestDetailView's embedded
-// *request.Request) so the console can render the same spec-send-back
+// *request.Request) so the console can render the same amend-scope
 // affordance `factoryd watch`/status already print in NextAction.
 func TestGetRequestIncludesQuarantineCheck(t *testing.T) {
 	dataDir := t.TempDir()
@@ -205,7 +205,7 @@ func TestGetRequestIncludesQuarantineCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.QuarantineCheck = request.QuarantineCheckSpecConformity
+	r.QuarantineCheck = request.QuarantineCheckDiffScope
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -223,11 +223,11 @@ func TestGetRequestIncludesQuarantineCheck(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.QuarantineCheck != request.QuarantineCheckSpecConformity {
-		t.Errorf("quarantine_check = %q, want %q", got.QuarantineCheck, request.QuarantineCheckSpecConformity)
+	if got.QuarantineCheck != request.QuarantineCheckDiffScope {
+		t.Errorf("quarantine_check = %q, want %q", got.QuarantineCheck, request.QuarantineCheckDiffScope)
 	}
-	if !strings.Contains(got.NextAction, "factoryd reject -to spec") {
-		t.Errorf("next_action = %q, want it to lead with the spec send-back", got.NextAction)
+	if !strings.Contains(got.NextAction, "factoryd amend-scope") {
+		t.Errorf("next_action = %q, want it to lead with amend-scope", got.NextAction)
 	}
 }
 

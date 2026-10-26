@@ -1,0 +1,8 @@
+require "minitest/autorun"
+require "add"
+
+class AddTest < Minitest::Test
+  def test_raises
+    raise ArgumentError, "boom"
+  end
+end

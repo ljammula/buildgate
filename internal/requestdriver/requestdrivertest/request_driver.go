@@ -584,40 +584,6 @@ func PlanTwoTickets(dp requestdriver.Deps, t *testing.T, dataDir string) *reques
 	return r
 }
 
-// ReviewQuarantinedBuildRunner returns a stub ticketRunner mimicking a
-// ticket's first build quarantining with spec_conformity as the only
-// failed gate (extraGates, if any, are additionally recorded as passed).
-func ReviewQuarantinedBuildRunner(t *testing.T, dataDir, branch, baseSHA string, extraFailedGate string) requestdriver.TicketRunner {
-	t.Helper()
-	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		ticket := ArgValue(args, "-ticket")
-		if onReady != nil {
-			onReady(&run.Run{ID: ticket})
-		}
-		gates := []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "diff_scope", Passed: true},
-		}
-		if extraFailedGate != "" {
-			gates = append(gates, run.GateResult{Check: extraFailedGate, Passed: false})
-		}
-		gates = append(gates, run.GateResult{Check: "spec_conformity", Passed: false})
-		rr := &run.Run{
-			ID:          ticket,
-			State:       run.StateQuarantined,
-			HaltError:   "gate failed: spec_conformity",
-			Branch:      branch,
-			BaseSHA:     baseSHA,
-			GateResults: gates,
-			SpecConformityVerdicts: []run.ReviewVerdict{
-				{Criterion: "1. handles empty input", Verdict: "clean"},
-				{Criterion: "2. rejects a negative amount", Verdict: "flagged", Detail: "no test covers a negative amount"},
-			},
-		}
-		return rr.Save(dataDir)
-	}
-}
-
 // StubReviewCorrectiveRunner installs a package-var override for the
 // duration of the test (mirroring stubPRReviewDeps' own swap-and-restore
 // shape) that records the args it was called with and its call count, and

@@ -1,0 +1,6 @@
+{"ImportPath":"example.com/repro/q","Action":"build-output","Output":"# example.com/repro/q\n"}
+{"ImportPath":"example.com/repro/q","Action":"build-output","Output":"q/q.go:3:25: cannot use \"two\" (untyped string constant) as int value in return statement\n"}
+{"ImportPath":"example.com/repro/q","Action":"build-fail"}
+{"Time":"2026-10-26T13:40:10.839926547Z","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-26T13:40:10.840211897Z","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [build failed]\n"}
+{"Time":"2026-10-26T13:40:10.840333071Z","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/repro/q"}

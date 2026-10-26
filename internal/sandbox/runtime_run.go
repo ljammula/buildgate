@@ -21,11 +21,37 @@ var ErrSandboxRerun = errors.New("the sandbox runtime started the worker command
 
 // ErrSandboxNotStarted reports a launch that ended before the worker's
 // command was released: the route credential could not be stored, the
-// sandbox could not be created, or it showed no worker container. Nothing
+// sandbox could not be created, it showed no worker container, or the
+// guard's "go" file could not be written. Nothing
 // ran, so the worktree is as it was and the step said nothing about the
 // work. An error after the release (a timeout, an output over the limit, a
 // lost wait) never wraps it: the command ran.
 var ErrSandboxNotStarted = errors.New("the sandbox did not start the worker command")
+
+// ErrCommandStarted is in the chain of every error RunThroughRuntime
+// returns after the worker's command started: its output file appeared, the
+// point at which the factory writes the guard's "started" file. It is the
+// positive proof a caller reads before treating a deadline as the command's
+// own (a reproduction that ran past its cap); an error without it, a
+// deadline that passed while the sandbox was starting or while the released
+// command had not yet passed the guard included, says nothing ran. It adds
+// nothing to the error's text.
+var ErrCommandStarted = errors.New("the worker command started")
+
+// startedError marks err as one returned after the command started.
+type startedError struct{ err error }
+
+func (e startedError) Error() string        { return e.err.Error() }
+func (e startedError) Unwrap() error        { return e.err }
+func (e startedError) Is(target error) bool { return target == ErrCommandStarted }
+
+// afterStart marks a non-nil err as returned after the command started.
+func afterStart(err error) error {
+	if err == nil {
+		return nil
+	}
+	return startedError{err}
+}
 
 // commandStartWait bounds how long a released command may take to pass the
 // guard and create its output file.
@@ -125,7 +151,17 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 		return result, ref, fmt.Errorf("%w: %w", ErrSandboxNotStarted, err)
 	}
 
-	exit, err := superviseCommand(runCtx, rt, s, launch, l.PollEvery, io.MultiWriter(os.Stdout, logFile), step)
+	if err := os.WriteFile(filepath.Join(launch.GuardDir, WorkerGuardGoFile), nil, 0o640); err != nil {
+		return result, ref, fmt.Errorf("%w: release sandbox command: %w", ErrSandboxNotStarted, err)
+	}
+	// Once the command has started, every error carries it (ErrCommandStarted).
+	var commandStarted bool
+	defer func() {
+		if commandStarted {
+			err = afterStart(err)
+		}
+	}()
+	exit, commandStarted, err := superviseCommand(runCtx, rt, s, launch, l.PollEvery, io.MultiWriter(os.Stdout, logFile), step)
 	result.FinishedAt = time.Now()
 	if err != nil {
 		if runCtx.Err() != nil {
@@ -203,14 +239,11 @@ func startSandbox(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeLaunch
 	return ref, started, RecordSandbox(s.DataDir, s.RunID, record)
 }
 
-// superviseCommand releases the worker's command, marks it started once its
-// output file appears, relays the output to dst and waits for the exit.
-func superviseCommand(ctx context.Context, rt Runtime, s LaunchSpec, launch SandboxLaunch, pollEvery time.Duration, dst io.Writer, step *sandboxStep) (SandboxExit, error) {
+// superviseCommand waits for the released worker's command, marks it
+// started once its output file appears (and reports that, started), relays the output to dst and waits for the exit.
+func superviseCommand(ctx context.Context, rt Runtime, s LaunchSpec, launch SandboxLaunch, pollEvery time.Duration, dst io.Writer, step *sandboxStep) (exit SandboxExit, started bool, err error) {
 	if pollEvery <= 0 {
 		pollEvery = 200 * time.Millisecond
-	}
-	if err := os.WriteFile(filepath.Join(launch.GuardDir, WorkerGuardGoFile), nil, 0o640); err != nil {
-		return SandboxExit{}, fmt.Errorf("release sandbox command: %w", err)
 	}
 	type waited struct {
 		exit SandboxExit
@@ -229,27 +262,27 @@ func superviseCommand(ctx context.Context, rt Runtime, s LaunchSpec, launch Sand
 	if err != nil {
 		w := <-exited
 		if w.err != nil {
-			return SandboxExit{}, w.err
+			return SandboxExit{}, false, w.err
 		}
 		if errors.Is(err, errNoOutputFile) {
 			// The command exited at the guard, or before it wrote anything.
-			return w.exit, nil
+			return w.exit, false, nil
 		}
-		return SandboxExit{}, err
+		return SandboxExit{}, false, err
 	}
 	defer output.Close()
 	step.end("pass", launch.Name)
 	if err := os.WriteFile(filepath.Join(launch.GuardDir, WorkerGuardStartedFile), nil, 0o640); err != nil {
-		return SandboxExit{}, fmt.Errorf("mark sandbox command started: %w", err)
+		return SandboxExit{}, true, fmt.Errorf("mark sandbox command started: %w", err)
 	}
 	// On a relay error (the size cap, a write failure) the caller's deferred
 	// delete ends the worker; Wait then returns and is drained.
 	relayErr := relayWorkerOutput(&tailReader{file: output, done: done, pollEvery: pollEvery}, dst, s)
 	if relayErr != nil {
-		return SandboxExit{}, relayErr
+		return SandboxExit{}, true, relayErr
 	}
 	w := <-exited
-	return w.exit, w.err
+	return w.exit, true, w.err
 }
 
 var errNoOutputFile = errors.New("the worker command produced no output file")

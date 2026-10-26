@@ -483,7 +483,7 @@ func TestRetriedReviewStepInheritsEarlierAttemptAndJournalsOnlyItsOwn(t *testing
 	workspacePath := testfixture.NewGitRepo(t)
 	dataDir := t.TempDir()
 	logDir := filepath.Join(dataDir, "logs")
-	step := reviewstep.Steps[0].Name
+	step := reviewstep.Combined
 	activities := testRoutedActivities(sandbox.NewRouteSecret("worker-static-upstream-key"))
 	activities.LogDir = logDir
 	activities.runWithRetriesChecked = func(_ context.Context, _ string, logPath func(int) string, _ int, before func(int) error, after func(int, runner.Result, error) error, _ string, _ ...string) (runner.Result, error) {
@@ -505,7 +505,6 @@ func TestRetriedReviewStepInheritsEarlierAttemptAndJournalsOnlyItsOwn(t *testing
 	input.RunID = "review-retry"
 	input.DataDir = dataDir
 	input.LogDir = logDir
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = codereview.PolicyAdvisory
 	policy := *testRelayPolicy()
 	policy.AllowUnauthenticatedUpstream = true

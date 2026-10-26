@@ -143,7 +143,7 @@
       "stage": "review",
       "kind": "inline-assembly",
       "template_refs": ["review.instructions_diff.prompt.md"],
-      "description": "Formats the repository instruction-file changes supplied to code review, spec-conformity review, and combined review prompts, bounded by the instruction-diff size limits."
+      "description": "Formats the repository instruction-file changes supplied to code review and combined review prompts, bounded by the instruction-diff size limits."
     },
     {
       "id": "prompt-source:build-first-round",
@@ -186,44 +186,6 @@
       "description": "Selects the handoff-notes instruction for a failed build or the passed-build notes turn."
     },
     {
-      "id": "prompt-source:code-review",
-      "source_path": "agent/pi/scripts/code_review.py",
-      "fragment": "code_review_prompt",
-      "role": "review",
-      "stage": "code_review",
-      "kind": "inline-assembly",
-      "template_refs": [
-        "code_review.prompt.md",
-        "code_review.diff_self.prompt.md",
-        "code_review.diff_inline.prompt.md",
-        "code_review.scope_rule.prompt.md",
-        "code_review.severity_rule.prompt.md",
-        "code_review.command_outcome_rule.prompt.md",
-        "code_review.json_contract.prompt.md",
-        "review.instructions_diff.prompt.md"
-      ],
-      "description": "Assembles code review instructions with the spec, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
-    },
-    {
-      "id": "prompt-source:spec-conformity-review",
-      "source_path": "agent/pi/scripts/build_app.py",
-      "fragment": "spec_conformity_prompt",
-      "role": "review",
-      "stage": "spec_conformity_review",
-      "kind": "inline-assembly",
-      "template_refs": [
-        "spec_conformity.prompt.md",
-        "spec_conformity.diff_self.prompt.md",
-        "spec_conformity.diff_inline.prompt.md",
-        "spec_conformity.answers.prompt.md",
-        "spec_conformity.command_outcome_rule.prompt.md",
-        "spec_conformity.formatting_rule.prompt.md",
-        "spec_conformity.json_contract.prompt.md",
-        "review.instructions_diff.prompt.md"
-      ],
-      "description": "Assembles spec-conformity review instructions with criteria and the read-back answers approved with the spec, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
-    },
-    {
       "id": "prompt-source:combined-review",
       "source_path": "agent/pi/scripts/combined_review.py",
       "fragment": "combined_review_prompt",
@@ -236,33 +198,11 @@
         "combined_review.diff_inline.prompt.md",
         "code_review.scope_rule.prompt.md",
         "code_review.severity_rule.prompt.md",
+        "code_review.reproduction_rule.prompt.md",
         "code_review.command_outcome_rule.prompt.md",
-        "spec_conformity.answers.prompt.md",
-        "spec_conformity.command_outcome_rule.prompt.md",
-        "spec_conformity.formatting_rule.prompt.md",
         "review.instructions_diff.prompt.md"
       ],
-      "description": "Combines spec-conformity and code-review tasks into one prompt with shared diff context, criteria, both sets of rules, and optional repository-instruction diff."
-    },
-    {
-      "id": "prompt-source:combined-review-retry",
-      "source_path": "agent/pi/scripts/combined_review.py",
-      "fragment": "_ask_missing_part",
-      "role": "review",
-      "stage": "combined_review_retry",
-      "kind": "inline-assembly",
-      "template_refs": [],
-      "description": "Selects the complete combined prompt or rebuilds the missing standalone conformity or code-review prompt for one retry."
-    },
-    {
-      "id": "prompt-source:spec-conformity-recheck",
-      "source_path": "agent/pi/scripts/conformity_review.py",
-      "fragment": "recheck_prompt",
-      "role": "review",
-      "stage": "spec_conformity_recheck",
-      "kind": "inline-assembly",
-      "template_refs": ["spec_conformity.recheck.prompt.md"],
-      "description": "Adds factory-observed facts to a standalone conformity prompt for criteria flagged for recheck."
+      "description": "Assembles the review prompt: the diff (inline or self-fetched), the ticket spec, the approved spec numbered by line, the scope, severity, reproduction and command-outcome rules, the answer format, and the optional repository-instruction diff."
     },
     {
       "id": "prompt-source:goal-pilot-command-wrapper",

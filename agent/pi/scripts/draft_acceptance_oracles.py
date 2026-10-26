@@ -31,8 +31,8 @@ output is evidence, never the oracle" applies doubly here, since this
 script's whole output is itself a set of proposed oracles that must be
 human-reviewed before they're trusted for anything. Reuses
 build_app.py's read_acceptance_criteria so this script parses the exact
-same criteria-file shape build_app.py's own --spec-acceptance-criteria
-already does, instead of an independent Python re-implementation of
+same criteria-file shape (flat, one criterion per line, blank and
+# comment lines skipped), instead of an independent Python re-implementation of
 internal/request.SpecAcceptanceCriteria's markdown parsing that could
 drift from it.
 
@@ -54,7 +54,7 @@ reader of the approved spec. It follows the criteria in every criterion's
 prompt, labelled as answers, never as criteria.
 
 --criteria is the same flat, one-criterion-per-line file
-build_app.py's own --spec-acceptance-criteria takes (e.g. what
+build_app.read_acceptance_criteria reads (e.g. what
 cmd/factoryd/request_driver.go's writeTicketCriteriaFile already
 produces per ticket) -- not spec.md itself, so this script never needs
 its own copy of the markdown-section parser that already lives in Go.
@@ -671,12 +671,11 @@ def validate_manifest(manifest: object, criteria: list[str], draft_dir: Path) ->
 	already is, since an untrustworthy manifest is no more usable than
 	no manifest at all.
 
-	Deliberately all-or-nothing, not build_app.py's parse_conformity_verdicts'
-	own dict-keyed, per-entry-degrading pattern for the same "match a
-	model's echoed criterion back to the canonical list" problem
-	(considered, found via review): conformity-review is judging an
-	already-final diff, where "unavailable" is a legitimate per-criterion
-	answer under -conformity-policy advisory. This script is itself
+	Deliberately all-or-nothing, not a dict-keyed, per-entry-degrading
+	pattern for the same "match a model's echoed criterion back to the
+	canonical list" problem (considered, found via review): a partial
+	match would be a legitimate answer for a per-criterion judgement of
+	an already-final diff. This script is itself
 	validating an UNPROVEN classification heuristic, explicitly meant to
 	"validate the classification heuristic... before automating
 	anything" -- silently accepting a partially-matched manifest here
@@ -1239,7 +1238,7 @@ def run_draft_oracles(
 
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-	parser.add_argument("--criteria", required=True, type=Path, help="path to the flat, one-per-line acceptance-criteria file (same shape as build_app.py's own --spec-acceptance-criteria)")
+	parser.add_argument("--criteria", required=True, type=Path, help="path to the flat, one-per-line acceptance-criteria file (flat criteria file, see build_app.read_acceptance_criteria)")
 	parser.add_argument("--workspace", required=True, type=Path, help="repository checkout the oracles are drafted against, read from at HEAD")
 	parser.add_argument("--out-dir", required=True, type=Path, help="directory the drafted MANIFEST.json and any oracle files are copied into on success")
 	parser.add_argument("--evidence", required=True, type=Path, help="where usage/exit-code/duration/manifest-summary evidence JSON is always written, success or failure")

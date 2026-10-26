@@ -20,7 +20,7 @@ import (
 // container and forward the command to build_app.py, mirroring cmd/factoryd's build-phase block.
 
 func TestBuildActivityArgsForwardsReferenceOracleCommand(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", "required", 3, 45, "deadbeef", "make verify", "", "cd verify && go test ./...", "", "", "")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "make verify", "", "cd verify && go test ./...", "", "")
 	found := false
 	for i, a := range got {
 		if a == "--reference-oracle-command" {
@@ -36,7 +36,7 @@ func TestBuildActivityArgsForwardsReferenceOracleCommand(t *testing.T) {
 }
 
 func TestBuildActivityArgsOmitsReferenceOracleCommandWhenEmpty(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", "required", 3, 45, "deadbeef", "make verify", "", "", "", "", "")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "make verify", "", "", "", "")
 	for _, a := range got {
 		if a == "--reference-oracle-command" {
 			t.Fatalf("buildActivityArgs included --reference-oracle-command for an empty command: %v", got)

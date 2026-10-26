@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Regenerates internal/evidence/testdata/golden/*.json from the REAL
-Python writers (build_app.write_evidence_json, conformity_review.
-write_conformity_evidence_json, code_review.write_code_review_evidence_json,
+Python writers (build_app.write_evidence_json, code_review.write_code_review_evidence_json,
 draft_spec.write_evidence, plan_tickets.write_evidence,
 draft_acceptance_oracles.write_evidence), called with a fixed, realistic
 input and a fixed clock so the output is byte-stable across runs.
@@ -69,11 +68,11 @@ def _freeze_clock(module) -> None:
 
 
 def generate(out_dir: Path) -> dict[str, Path]:
-	"""Writes all six golden files into out_dir and returns {name: path}."""
+	"""Writes all five golden files into out_dir and returns {name: path}."""
 	out_dir.mkdir(parents=True, exist_ok=True)
 	written: dict[str, Path] = {}
 
-	# Each fixed-name writer (BUILD_EVIDENCE.json, CONFORMITY_EVIDENCE.json,
+	# Each fixed-name writer (BUILD_EVIDENCE.json,
 	# CODE_REVIEW_EVIDENCE.json) gets its own scratch subdirectory before
 	# its output is moved to out_dir under this repo's lowercase golden
 	# name: on a case-insensitive filesystem (the macOS default),
@@ -90,10 +89,8 @@ def generate(out_dir: Path) -> dict[str, Path]:
 		workspace=build_scratch,
 		spec_path=Path("ticket.spec.md"),
 		review_policy="advisory",
-		conformity_policy="required",
 		agents_md_used=True,
 		agents_md_git_blob="f55d748f1f4a5821f806fe1809936f827ea088e8",
-		review_verdicts=[],
 		succeeded=True,
 		stopped_reason="canonical verification passed",
 		rounds=[
@@ -140,36 +137,10 @@ def generate(out_dir: Path) -> dict[str, Path]:
 	target.write_text(path.read_text())
 	written["build_evidence.json"] = target
 
-	# 2. CONFORMITY_EVIDENCE.json, via
-	# conformity_review.write_conformity_evidence_json. The evidence dict
-	# is built by hand (mirroring run_conformity_review's own shape)
-	# rather than through run_conformity_review itself, which requires a
-	# live model turn -- the writer under test is the file-write, not the
-	# review pipeline.
-	conformity_scratch = out_dir / "_scratch_conformity"
-	conformity_scratch.mkdir(exist_ok=True)
-	conformity_review = _load("conformity_review")
-	conformity_evidence = {
-		"schema_version": conformity_review.CONFORMITY_EVIDENCE_SCHEMA_VERSION,
-		"generated": FIXED_NOW.isoformat(),
-		"conformity_policy": "required",
-		"thinking": "max",
-		"succeeded": False,
-		"stopped_reason": "spec conformity review flagged 1 of 2 criteria",
-		"error": "",
-		"review_verdicts": [
-			{"criterion": "1. Returns 200 on success.", "verdict": "clean", "detail": ""},
-			{"criterion": "2. Handles empty payload.", "verdict": "flagged", "detail": "crashes on nil"},
-		],
-	}
-	path = conformity_review.write_conformity_evidence_json(conformity_scratch, conformity_evidence)
-	target = out_dir / "conformity_evidence.json"
-	target.write_text(path.read_text())
-	written["conformity_evidence.json"] = target
-
-	# 3. CODE_REVIEW_EVIDENCE.json, via
-	# code_review.write_code_review_evidence_json -- same "hand-built
-	# evidence dict, real file-writer" split as conformity above.
+	# 2. CODE_REVIEW_EVIDENCE.json, via
+	# code_review.write_code_review_evidence_json: the evidence dict is built
+	# by hand rather than through a live model turn -- the writer under test
+	# is the file-write, not the review pipeline.
 	code_review_scratch = out_dir / "_scratch_code_review"
 	code_review_scratch.mkdir(exist_ok=True)
 	code_review = _load("code_review")
@@ -199,7 +170,7 @@ def generate(out_dir: Path) -> dict[str, Path]:
 
 	usage = {"input": 200, "output": 80, "cacheRead": 0, "cacheWrite": 0, "reasoning": 0, "totalTokens": 280}
 
-	# 4. Spec draft evidence.json, via draft_spec.write_evidence.
+	# 3. Spec draft evidence.json, via draft_spec.write_evidence.
 	draft_spec = _load("draft_spec")
 	_freeze_clock(draft_spec)
 	target = out_dir / "spec_draft_evidence.json"
@@ -209,7 +180,7 @@ def generate(out_dir: Path) -> dict[str, Path]:
 	)
 	written["spec_draft_evidence.json"] = target
 
-	# 5. Plan evidence.json, via plan_tickets.write_evidence.
+	# 4. Plan evidence.json, via plan_tickets.write_evidence.
 	plan_tickets = _load("plan_tickets")
 	_freeze_clock(plan_tickets)
 	target = out_dir / "plan_evidence.json"
@@ -219,7 +190,7 @@ def generate(out_dir: Path) -> dict[str, Path]:
 	)
 	written["plan_evidence.json"] = target
 
-	# 6. Oracle draft evidence.json, via
+	# 5. Oracle draft evidence.json, via
 	# draft_acceptance_oracles.write_evidence.
 	draft_acceptance_oracles = _load("draft_acceptance_oracles")
 	_freeze_clock(draft_acceptance_oracles)
@@ -234,11 +205,10 @@ def generate(out_dir: Path) -> dict[str, Path]:
 	)
 	written["oracle_draft_evidence.json"] = target
 
-	# The three fixed-name writers' own scratch subdirectories are no
+	# The two fixed-name writers' own scratch subdirectories are no
 	# longer needed once their content is copied into out_dir under this
 	# repo's golden names -- never left behind in a committed golden dir.
 	shutil.rmtree(build_scratch)
-	shutil.rmtree(conformity_scratch)
 	shutil.rmtree(code_review_scratch)
 
 	return written

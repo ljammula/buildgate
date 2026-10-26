@@ -255,7 +255,7 @@
   <tbody>
     <tr><td><code>planning</code></td><td>Spec and plan drafting</td><td>Within the role's allow-list</td></tr>
     <tr><td><code>execution</code></td><td>The build and its corrective rounds</td><td>Within the role's allow-list</td></tr>
-    <tr><td><code>review</code></td><td>Acceptance-test drafting, <code>spec_conformity</code>, <code>code_review</code></td><td>Never: the requester can't pick a lenient reviewer</td></tr>
+    <tr><td><code>review</code></td><td>Acceptance-test drafting, <code>code_review</code></td><td>Never: the requester can't pick a lenient reviewer</td></tr>
   </tbody>
 </table></div>
 <pre><code>roles:
@@ -371,7 +371,7 @@ serve       the console and its API, over the same data dir</code></pre>
   <rect class="box" x="420" y="220" width="300" height="130" rx="8"/>
   <text class="label" x="436" y="246">Factory-run checks</text>
   <text class="small" x="436" y="268">canonical verify → diff scope → required files</text>
-  <text class="small" x="436" y="286">→ tests added → full suite → spec conformity</text>
+  <text class="small" x="436" y="286">→ tests added → full suite → code review</text>
   <text class="small" x="436" y="304">→ code review → acceptance tests + canary</text>
   <text class="small" x="436" y="330">Fail with rounds left: back to the agent</text>
 
@@ -410,8 +410,7 @@ serve       the console and its API, over the same data dir</code></pre>
     <tr><td><code>required_files_changed</code></td><td>Every file the plan says must change did</td><td>The agent decides an existing helper already multiplies and only adds a test; <code>mathops.go</code> is unchanged, so the gate fails</td></tr>
     <tr><td><code>tests_added</code></td><td>At least one test file changed, unless the ticket opted out with a stated reason (recorded on the release decision)</td><td><code>Multiply</code> is correct and verify passes, but no <code>_test.go</code> changed</td></tr>
     <tr><td><code>full_suite_verify</code></td><td>The repo-wide suite still passes, not just the ticket's tests</td><td>While there, the agent changes the signature of <code>mathops.Divide</code> and updates its tests; <code>./mathops</code> passes, but package <code>report</code>, which calls <code>Divide</code>, no longer compiles under <code>go test ./...</code></td></tr>
-    <tr><td><code>spec_conformity</code></td><td>Each acceptance criterion is met by the diff, judged by the review role, never the builder. An opinion, so it sits beside the deterministic gates</td><td>Criterion 2 says "including zero and negative inputs"; the agent's table test only has positive cases. Verdict: criterion 2 not evidenced</td></tr>
-    <tr><td><code>code_review</code></td><td>Correctness review with structured findings posted to the PR, in the same review-role call. Under <code>required</code> (what <code>quickstart</code> writes) a high finding quarantines; <code>advisory</code> never blocks</td><td>The test computes its expected value by calling <code>Multiply</code> itself, so it can never fail: flagged as a test that proves nothing</td></tr>
+    <tr><td><code>code_review</code></td><td>Correctness review with structured findings posted to the PR, in the same review-role call. A finding is advice, listed in the PR; it refuses a request's build only through a reproduction test the factory runs itself (<code>review_reproduction</code>). Under <code>required</code> (what <code>quickstart</code> writes) a review with no verdict waits for a person</td><td>The test computes its expected value by calling <code>Multiply</code> itself, so it can never fail: flagged as a test that proves nothing</td></tr>
     <tr><td><code>reference_oracle</code> + canary</td><td>The human-approved acceptance tests pass. They were drafted from the spec before any code existed, are hash-pinned and mounted read-only. The canary reruns the gate with a copy that must fail; if that copy "passes", the tests aren't really running and the gate fails closed</td><td>The approved oracle expects <code>Multiply(-2, 5) == -10</code>; an implementation that returns <code>abs(a*b)</code> fails it. Or the agent adds a <code>TestMain</code> that exits before any test runs: the canary passes too, so the gate fails</td></tr>
   </tbody>
 </table></div>
@@ -552,7 +551,7 @@ factoryd stop                      # stop what quickstart started</code></pre>
     {
       id: "building", title: "Building", who: "factory",
       what: "The execution role's coding agent works in a sandbox with no network interface, reaching the model only through its supervisor and the meter. If the repo's docker-compose.yml declares Postgres, Kafka or Redis, they run as sidecars the agent and the gates can reach. The agent self-checks with focused tests; the factory then reruns the full verify command and the gates itself. A failure with rounds left goes back to the agent, with the failure attached.",
-      see: '<pre><code>$ factoryd watch &lt;request-id&gt;\nbuilding   round 1  agent committed 2 files\nverify     go test ./...            pass\ngates      diff_scope               pass\n           tests_added              pass\n           full_suite_verify        pass\n           spec_conformity          pass\n           code_review              pass\n           reference_oracle         pass\nresult     accepted</code></pre>',
+      see: '<pre><code>$ factoryd watch &lt;request-id&gt;\nbuilding   round 1  agent committed 2 files\nverify     go test ./...            pass\ngates      diff_scope               pass\n           tests_added              pass\n           full_suite_verify        pass\n           code_review              pass\n           reference_oracle         pass\nresult     accepted</code></pre>',
       why: 'If the Mac sleeps, factoryd crashes or you force a stop mid-build, the request waits in <code>resume_review</code> and the build keeps its code: <code>factoryd resume &lt;request-id&gt;</code> continues it. See <a href="#build">Inside the build</a> for the full picture. <code>factoryd logs -f &lt;request-id&gt;</code> follows the raw log. A shared local model host is serialized automatically; a waiting job shows "queued behind &lt;run&gt;".'
     },
     {

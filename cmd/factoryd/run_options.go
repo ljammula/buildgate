@@ -35,7 +35,6 @@ type runOptions struct {
 	BuildAppScript      string
 	Harness             string
 	ReviewHarness       string
-	ConformityPolicy    string
 	CodeReviewPolicy    string
 	VerifyCommand       string
 	FastCheckCommand    string
@@ -90,12 +89,11 @@ type runOptions struct {
 	GoModuleDir     string
 	ComposeServices composeServicesOptions
 
-	AllowedFiles           []string
-	RequiredChangedFiles   []string
-	RequiredContent        []string
-	TestPatterns           []string
-	TestsRequiredOptOut    string
-	SpecAcceptanceCriteria string
+	AllowedFiles         []string
+	RequiredChangedFiles []string
+	RequiredContent      []string
+	TestPatterns         []string
+	TestsRequiredOptOut  string
 
 	Slice         temporalSliceOptions
 	ReleasePolicy release.MergePolicy
@@ -106,6 +104,15 @@ type runOptions struct {
 	Thinking          string
 	ReviewThinking    string
 	ReviewRelayPolicy *sandbox.RoutePolicy
+
+	// ReviewReproduction, ReviewSpecPath, ReviewSpecSHA256 and
+	// RecheckReproductions are -review-reproduction, -review-spec's
+	// snapshot and hash, and -recheck-reproductions' checked manifest; see
+	// the RunWorkflowInput fields of the same names.
+	ReviewReproduction   bool
+	ReviewSpecPath       string
+	ReviewSpecSHA256     string
+	RecheckReproductions []run.RecheckEntry
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not
@@ -129,20 +136,14 @@ func runDirOfCheckpointDir(checkpointDir string) string {
 // what only the executing worker knows (sandbox limits, credentials).
 func (o runOptions) activities() *workflow.Activities {
 	activities := &workflow.Activities{
-		BuildAppInterpreter: o.BuildAppInterpreter,
-		BuildAppScript:      o.BuildAppScript,
-		BuildMaxAttempts:    o.BuildAppMaxAttempts,
-		ConformityPolicy:    o.ConformityPolicy,
-		MaxRounds:           o.MaxRounds,
-		TimeoutMinutes:      o.TimeoutMinutes,
-		VerifyCommand:       o.VerifyCommand,
-		VerifyMaxAttempts:   o.VerifyMaxAttempts,
-		FastCheckCommand:    o.FastCheckCommand,
-		// SpecAcceptanceCriteria is this Worker's own static fallback,
-		// same treatment as FastCheckCommand above -- almost always unset
-		// at this level, since the criteria file is per-ticket, but kept
-		// for the identical reason.
-		SpecAcceptanceCriteria:   o.SpecAcceptanceCriteria,
+		BuildAppInterpreter:      o.BuildAppInterpreter,
+		BuildAppScript:           o.BuildAppScript,
+		BuildMaxAttempts:         o.BuildAppMaxAttempts,
+		MaxRounds:                o.MaxRounds,
+		TimeoutMinutes:           o.TimeoutMinutes,
+		VerifyCommand:            o.VerifyCommand,
+		VerifyMaxAttempts:        o.VerifyMaxAttempts,
+		FastCheckCommand:         o.FastCheckCommand,
 		SandboxImage:             o.SandboxImage,
 		SandboxDocker:            o.SandboxDocker,
 		SandboxUser:              o.SandboxUser,

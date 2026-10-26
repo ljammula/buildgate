@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="0.046" timestamp="2026-10-26T17:25:44.552902+00:00" hostname="b606f9e402ba"><testcase classname="" name="tests.test_repro" time="0.000"><error message="collection failure">tests/test_repro.py:3: in &lt;module&gt;
+    SUBTRACT = app.subtract
+               ^^^^^^^^^^^^
+E   AttributeError: module 'app' has no attribute 'subtract'</error></testcase></testsuite></testsuites>

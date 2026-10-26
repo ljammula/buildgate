@@ -17,7 +17,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"buildgate/internal/codereview"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
 	"buildgate/internal/policy"
@@ -944,6 +943,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
 	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
+	if errors.Is(err, errNoRecheck) {
+		return haltWithoutRecheck(dataDir, r, err, now)
+	}
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -1008,6 +1010,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// one second after building began -- before the run had even started --
 	// for a build that took four minutes.
 	now = time.Now()
+	// What refused the build goes on the ticket's list (SC-022) at once,
+	// whatever becomes of the request next: every later build rechecks it.
+	noteRunRefusals(dataDir, r, ticket.Index, ticket.RunID)
 	// stillInState: see its own doc comment. Checked once, after runner
 	// above returns (the build itself is the long-running job here), before
 	// any of runErr/runRecord's outcome is persisted below -- a cancel that
@@ -1086,23 +1091,11 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
 		}
-		// TryReviewCorrectiveRound returning handled=false still
-		// includes the review-eligible-but-budget-0/ineligible cases (see
-		// its own doc comment). QuarantineCheck names which of
-		// spec_conformity/code_review actually failed whenever every
-		// failed gate is one of those two (reviewShapeOnly) -- unlike
-		// ReviewOnlyFlagged, this does NOT require actionable content: a
-		// conformity failure with every criterion answered "clean" still
-		// tells the operator which check to look at, even though it gave
-		// this function nothing to build a corrective round's addendum
-		// from. (A review that gave no verdict is not here: it left for
-		// resume_review in tryCorrectiveRound.)
-		check := ""
-		if reviewShapeOnly(runRecord) {
-			check = quarantineCheckFor(runRecord)
-		} else if failedGate(runRecord, "diff_scope") {
-			check = request.QuarantineCheckDiffScope
-		}
+		// No round ran (none applies, or the budget is spent or zero): the
+		// quarantine names the check whose remedy NextAction leads with. A
+		// review that gave no verdict is not here: it left for
+		// resume_review in tryCorrectiveRound.
+		check := quarantineCheckOf(runRecord)
 		return quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
 	case run.StateHalted:
 		return afterHaltedTicketRun(dp, dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
@@ -1366,131 +1359,35 @@ func releaseRefusal(dataDir string, r *request.Request, ticket *request.Ticket, 
 	return noPullRequestHaltReason(dataDir, r, ticket)
 }
 
-// ReviewCorrectiveRunner, when a test sets it, runs an automatic
-// review-corrective build in place of runMainWithReady, exactly like
+// ReviewCorrectiveRunner, when a test sets it, runs an automatic corrective
+// round's build in place of runMainWithReady, exactly like
 // PrReviewCorrectiveRunner (pr_review_driver.go).
 var ReviewCorrectiveRunner TicketRunner
 
-// flaggedConformityVerdicts returns runRecord.SpecConformityVerdicts'
-// non-"clean" entries -- the addendum content a review corrective round's
-// "## Spec conformity review to address" section is built from. Unlike
-// ReviewOnlyFlagged, this makes no judgment about which OTHER gates
-// failed; it is also called on a run known to be review-eligible already.
-func flaggedConformityVerdicts(runRecord *run.Run) []run.ReviewVerdict {
-	var flagged []run.ReviewVerdict
-	for _, v := range runRecord.SpecConformityVerdicts {
-		if v.Verdict != "clean" && v.Verdict != unavailableVerdict {
-			flagged = append(flagged, v)
-		}
-	}
-	return flagged
-}
-
-// unavailableVerdict is the verdict build_app.py's parse_conformity_verdicts
-// gives a criterion the reviewer never answered. It is an absence of an
-// opinion, not a finding: there is nothing in it for a corrective round to
-// fix, so it is never "flagged".
-const unavailableVerdict = "unavailable"
-
-// reviewUnavailable reports whether runRecord's review produced no verdict
-// to act on: nothing flagged and nothing blocking, and every review gate
-// that failed did so because its reviewer did not answer -- a criterion
-// went unanswered for spec_conformity, the reviewer returned nothing for
-// code_review. A spec_conformity gate that failed with every criterion
-// answered failed for a real reason, whatever an advisory code reviewer
-// did, and is never reported as unavailable. Only meaningful for a run
-// reviewShapeOnly already accepted.
+// reviewUnavailable reports whether runRecord's review produced no verdict:
+// its code_review gate failed and the review result it records says the
+// reviewer did not answer. A code_review gate fails for nothing else
+// (SC-022: findings never fail it); a failure with no review result recorded
+// at all is not read as one. Only meaningful for a run reviewShapeOnly
+// already accepted.
 func reviewUnavailable(runRecord *run.Run) bool {
-	if len(flaggedConformityVerdicts(runRecord)) > 0 || len(blockingCodeReviewFindings(runRecord)) > 0 {
-		return false
-	}
-	if failedGate(runRecord, "spec_conformity") && !conformityUnanswered(runRecord) {
-		return false
-	}
-	if failedGate(runRecord, "code_review") && (runRecord.CodeReview == nil || runRecord.CodeReview.Available) {
-		return false
-	}
-	return true
+	return failedGate(runRecord, "code_review") && runRecord.CodeReview != nil && !runRecord.CodeReview.Available
 }
 
-func conformityUnanswered(runRecord *run.Run) bool {
-	for _, v := range runRecord.SpecConformityVerdicts {
-		if v.Verdict == unavailableVerdict {
-			return true
-		}
-	}
-	return false
+// quarantineAfterRound quarantines r after a corrective round whose run was
+// quarantined again without anything a further round could fix, naming the
+// check a first run's quarantine would name (quarantineCheckOf). A round
+// whose review gave no verdict never reaches here: its request went to
+// resume_review (correctiveRoundOutcome's unresolved cause).
+func quarantineAfterRound(dataDir string, r *request.Request, roundRun *run.Run, reason string, now time.Time) error {
+	return quarantineRequestWithCheck(dataDir, r, reason, quarantineCheckOf(roundRun), now)
 }
 
-// quarantineAfterReviewRound quarantines r after a corrective round whose
-// run was quarantined again without anything a further round could fix.
-// When only review gates failed, the cause is named the same way a first
-// run's is (quarantineCheckFor). A round whose review gave no verdict never
-// reaches here: its request went to resume_review (correctiveRoundOutcome's
-// unresolved cause).
-func quarantineAfterReviewRound(dataDir string, r *request.Request, roundRun *run.Run, reason string, now time.Time) error {
-	if !reviewShapeOnly(roundRun) {
-		// The same check an uncorrected quarantine names (AdvanceBuilding):
-		// a round that again left Allowed-Files still points the operator
-		// at amend-scope.
-		return quarantineRequestWithCheck(dataDir, r, reason, nonReviewQuarantineCheck(roundRun), now)
-	}
-	return quarantineRequestWithCheck(dataDir, r, reason, quarantineCheckFor(roundRun), now)
-}
-
-// blockingCodeReviewFindings returns runRecord.CodeReview's "high"-severity
-// findings (codereview.Blocking) -- the addendum content a review
-// corrective round's "## Code review findings to address" section is built
-// from. Nil when the run never ran code_review at all.
-func blockingCodeReviewFindings(runRecord *run.Run) []run.CodeReviewFinding {
-	if runRecord.CodeReview == nil {
-		return nil
-	}
-	return codereview.Blocking(runRecord.CodeReview.Findings)
-}
-
-// ReviewOnlyFlagged reports whether runRecord -- a just-quarantined run --
-// is eligible for an automatic review-corrective round: every failed
-// GateResult is either spec_conformity or code_review (any other failed
-// gate disqualifies it immediately, the same "never triggered when any
-// deterministic gate failed" guard the original spec_conformity-only round
-// enforced), and at least one of those two failures carries something an
-// addendum could actually address -- a flagged (non-"clean") spec-
-// conformity verdict, or a "high"-severity code-review finding. A failed
-// gate with nothing actionable (spec_conformity failed but every verdict
-// was "clean" -- never triggered by design; code_review failed because the
-// reviewer was unavailable, or ran and found nothing "high") is NOT
-// eligible: quarantine as today.
-func ReviewOnlyFlagged(runRecord *run.Run) bool {
-	sawFailure := false
-	for _, g := range runRecord.GateResults {
-		switch g.Check {
-		case "spec_conformity", "code_review":
-			if !g.Passed {
-				sawFailure = true
-			}
-		default:
-			if !g.Passed {
-				return false
-			}
-		}
-	}
-	if !sawFailure {
-		return false
-	}
-	return len(flaggedConformityVerdicts(runRecord)) > 0 || len(blockingCodeReviewFindings(runRecord)) > 0
-}
-
-// reviewShapeOnly reports whether every failed GateResult in runRecord is
-// spec_conformity and/or code_review -- any other failed gate disqualifies
-// it, the identical shape guard ReviewOnlyFlagged enforces -- but, unlike
-// ReviewOnlyFlagged, makes no requirement that either failure carry
-// anything actionable. Used only to decide whether QuarantineCheck should
-// name which of the two checks caused the quarantine (quarantineCheckFor),
-// which the operator benefits from knowing even when there was nothing an
-// automatic corrective round could act on (an unavailable code reviewer,
-// or a spec_conformity failure with no flagged verdict) -- ReviewOnlyFlagged
-// itself gates only whether a round actually launches.
+// reviewShapeOnly reports whether code_review is the only check runRecord
+// failed (or spec_conformity, the review a run recorded before it was
+// retired; such a run's failure is not handed to a build either). Such a
+// run's review gave no verdict (reviewUnavailable), and its request goes to
+// resume_review, never to a corrective round.
 func reviewShapeOnly(runRecord *run.Run) bool {
 	sawFailure := false
 	for _, g := range runRecord.GateResults {
@@ -1508,30 +1405,23 @@ func reviewShapeOnly(runRecord *run.Run) bool {
 	return sawFailure
 }
 
-// quarantineCheckFor names which gate caused a review-shaped quarantine
-// (or exhausted review-corrective budget) for request.QuarantineCheck: a
-// failed code_review gate -- alone or alongside spec_conformity -- always
-// takes QuarantineCheckCodeReview, since the operator's remedy is the
-// same either way (fix the diff, not redraft the spec); otherwise
-// QuarantineCheckSpecConformity. Only meaningful when reviewShapeOnly (or
-// a round's own re-check of ReviewOnlyFlagged, which implies it) already
-// returned true. A run whose reviews gave no verdict is never quarantined
-// under a check: reviewNoVerdictCause takes it to resume_review first.
-func quarantineCheckFor(runRecord *run.Run) string {
-	for _, g := range runRecord.GateResults {
-		if g.Check == "code_review" && !g.Passed {
-			return request.QuarantineCheckCodeReview
-		}
+// quarantineCheckOf names the check a request's quarantine records for a
+// quarantined ticket run, so NextAction leads with that check's remedy:
+// review_reproduction when a reviewer's reproduction refused the run
+// (SC-022), diff_scope when the diff left Allowed-Files (amend-scope), none
+// otherwise.
+func quarantineCheckOf(runRecord *run.Run) string {
+	switch {
+	case failedGate(runRecord, policy.ReviewReproductionCheck):
+		return request.QuarantineCheckReviewReproduction
+	case failedGate(runRecord, "diff_scope"):
+		return request.QuarantineCheckDiffScope
 	}
-	return request.QuarantineCheckSpecConformity
+	return ""
 }
 
 // failedGate reports whether runRecord's own GateResults records check as
-// having failed -- AdvanceBuilding's own StateQuarantined case uses this to
-// tell request.QuarantineCheckDiffScope apart from an ordinary, unnamed
-// quarantine cause, only once reviewShapeOnly has already ruled out a
-// review-shaped one (a diff_scope failure alongside spec_conformity/
-// code_review keeps the review-shaped cause, not this one).
+// having failed.
 func failedGate(runRecord *run.Run, check string) bool {
 	for _, g := range runRecord.GateResults {
 		if g.Check == check && !g.Passed {
@@ -1541,76 +1431,8 @@ func failedGate(runRecord *run.Run, check string) bool {
 	return false
 }
 
-// TryReviewCorrectiveRound is the review corrective round's hook: called
-// from AdvanceBuilding's own StateQuarantined case, before it would
-// otherwise quarantine the request. When runRecord's quarantine is
-// eligible (ReviewOnlyFlagged) and the ticket still has corrective budget
-// (cfg.reviewCorrectiveRounds, counted the same way RunCorrectiveRound
-// counts max_review_rounds -- only Kind == request.ConformityRoundKind
-// rounds, excluding a start failure; the round KIND's on-disk value is
-// unchanged even though it now also covers code_review), it writes an
-// addendum spec (the ticket spec plus the flagged spec-conformity criteria
-// and/or the blocking code-review findings -- WriteReviewAddendum) and
-// runs a new build on the quarantined run's own branch, via -on-branch
-// (mirrors RunCorrectiveRound's PR-review round mechanism, pr_review_driver.go).
-// -diff-base prefers the quarantined run's own DiffBaseSHA (an earlier
-// round's own -diff-base, when this is round 2+) over its BaseSHA (which
-// for a run itself built via -on-branch is only that round's own checkout
-// point, not the ticket's true original base), so the diff-shape gates
-// always judge the ticket's real cumulative diff -- see
-// RunCorrectiveRound's identical fix (pr_review_driver.go) for the same
-// reasoning. -open-pull-request is left at cfg's own value, NOT forced off
-// like a PR-review round: no PR exists yet for this branch (a quarantined
-// run never opens one), so an accepted corrective round opens it exactly
-// as the ticket's first build would.
-//
-// A budget greater than 1 runs up to that many CONSECUTIVE rounds, not
-// just one: when a round's own run quarantines again with the identical
-// review-eligible shape (a fresh ReviewOnlyFlagged read against ITS OWN
-// GateResults/SpecConformityVerdicts/CodeReview), the loop writes a new
-// addendum from that round's own flagged content and tries again, until
-// either one round accepts, a round's outcome stops being review-eligible
-// (a different gate failed, or the run halted -- never triggered by
-// design, so no further round is attempted), or the budget is exhausted
-// (found via adversarial review: the original implementation always
-// quarantined after exactly one round regardless of budget, contradicting
-// -review-corrective-rounds' own flag help).
-//
-// After every round's own build returns, this re-checks the request is
-// still building (stillInState) exactly as AdvanceBuilding does after the
-// ticket's own first build -- a cancel that lands mid-round must not be
-// resurrected by this function's own r.Save calls -- and, mirroring
-// AdvanceBuilding's identical ctx.Err() handling, a shutdown mid-round
-// (runErr != nil and ctx.Err() != nil) returns immediately with that round
-// unrecorded and its budget unspent, leaving the request in building rather
-// than treating a shutdown as a quarantine (both found via adversarial
-// review: neither check existed before). The next worker poll re-enters
-// AdvanceBuilding, which rebuilds the ticket from scratch, not the
-// interrupted round. Rounds already recorded are saved one by one, so they
-// survive, and they keep counting against the budget.
-//
-// Each round's own outcome is driven through the SAME accepted/quarantined
-// handling AdvanceBuilding itself uses: accepted sets ticket.Branch/PRURL
-// from that round's run and calls startNextTicketOrFinish, exactly as an
-// ordinary first-build acceptance does; a non-eligible-for-another-round
-// outcome quarantines the request, as today (Phase 1's `reject -to spec`
-// is the operator's next step, or a diff fix for a code_review-caused
-// quarantine). ticket.RunID is repointed at whichever round's run
-// actually started, each time, so retry/PR logic and the console keep
-// following the run that most recently decided the ticket's outcome.
-//
-// Returns handled=false -- do nothing, let the caller quarantine exactly
-// as it did before this existed -- when the quarantine isn't eligible for
-// even a first round, or the budget is 0 (disabled) or already exhausted;
-// handled=true means this function fully drove the request to its next
-// state itself (err is whatever that drive produced, possibly nil).
-//
-// Every path (direct, -temporal-address, -repository) builds the round on
-// the quarantined run's own branch via -on-branch, so a round for ticket
-// 2+ keeps the earlier tickets' work (#341 threaded OnBranch through the
-// Temporal path; before it, rounds for ticket 2+ were skipped there).
 // recordTicketRunStarted points ticket ticketIndex's RunID at runID on
-// disk the moment a review corrective round's run starts, so the
+// disk the moment a corrective round's run starts, so the
 // console and status follow the running round instead of showing the
 // quarantined first run as the ticket's state until the round finishes
 // (found live, 2026-09-26 Flutter + Go app run: a red "Quarantined" ticket while
@@ -1639,31 +1461,15 @@ func recordTicketRunStarted(dataDir, requestID string, ticketIndex int, runID st
 	return nil
 }
 
-func TryReviewCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
-	return runCorrectiveRounds(dp, ctx, dataDir, r, ticket, runRecord, cfg, now, reviewCorrectivePlan(dataDir, r, ticket, cfg))
-}
-
-// nonReviewQuarantineCheck is the check a request's quarantine names for a
-// run that failed more than the reviews: diff_scope when the diff left
-// Allowed-Files (its next action is amend-scope), none otherwise.
-func nonReviewQuarantineCheck(runRecord *run.Run) string {
-	if failedGate(runRecord, "diff_scope") {
-		return request.QuarantineCheckDiffScope
-	}
-	return ""
-}
-
-// tryCorrectiveRound follows a quarantined ticket run with the corrective
-// round its failure allows, if any: the review round when the two reviews
-// alone failed with something to address, else the check round when every
-// failed check is one a build can fix when told about it.
+// tryCorrectiveRound follows a quarantined ticket run with a corrective
+// round when every check it failed is one a build can fix when told about it
+// (TryCheckCorrectiveRound), a reviewer's reproduction that refused the run
+// included (SC-022). A run whose review gave no verdict goes to
+// resume_review first.
 func tryCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
 	// Before any round: a run whose review gave no verdict was not judged,
 	// and a corrective build would be spent on nothing.
 	if handled, err := afterUnjudgedTicketRun(dp, dataDir, r, runRecord, now); handled {
-		return true, err
-	}
-	if handled, err := TryReviewCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 		return true, err
 	}
 	return TryCheckCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now)
@@ -1686,30 +1492,10 @@ type correctivePlan struct {
 	args func(current *run.Run, roundIndex int, roundRunID, diffBase string) (argv []string, about string, err error)
 }
 
-// reviewCorrectivePlan is the round that follows a run quarantined by the
-// two reviews alone: its spec is the ticket's build spec plus the flagged
-// criteria and blocking findings (WriteReviewAddendum).
-func reviewCorrectivePlan(dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig) correctivePlan {
-	return correctivePlan{
-		kind: request.ConformityRoundKind, suffix: "conformity", label: "review corrective round",
-		eligible: ReviewOnlyFlagged,
-		args: func(current *run.Run, roundIndex int, roundRunID, diffBase string) ([]string, string, error) {
-			flaggedVerdicts := flaggedConformityVerdicts(current)
-			findings := blockingCodeReviewFindings(current)
-			addendumPath, err := WriteReviewAddendum(dataDir, r.ID, ticket, flaggedVerdicts, findings, roundIndex)
-			if err != nil {
-				return nil, "", fmt.Errorf("write addendum: %w", err)
-			}
-			argv, err := BuildReviewCorrectiveArgs(dataDir, r, *ticket, cfg, addendumPath, roundRunID, current.Branch, diffBase)
-			about := fmt.Sprintf("review flagged %d spec-conformity criterion/criteria and %d code-review finding(s)", len(flaggedVerdicts), len(findings))
-			return argv, about, err
-		},
-	}
-}
-
 // correctiveRoundsUsed counts the corrective rounds a ticket's build has
-// already had, of either kind: one budget (-review-corrective-rounds)
-// covers them all, so a ticket is not given one round per kind of failure.
+// already had: one budget (-review-corrective-rounds) covers them all,
+// including the review rounds (ConformityRoundKind) a request recorded
+// before a finding could refuse a run only through its reproduction.
 // A round whose run never started, or gave no verdict, does not count
 // (request.Round.Counted).
 func correctiveRoundsUsed(ticket *request.Ticket) int {
@@ -1753,6 +1539,9 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 			log.Printf("request %s: ticket %d: record corrective run %s: %v", r.ID, ticket.Index, started.ID, err)
 		}
 	})
+	// What refused the round goes on the ticket's list at once, whatever
+	// becomes of the request next.
+	noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
 	// stillInState: see AdvanceBuilding's own identical check and doc
 	// comment. A cancel that lands while this round built must not be
 	// resurrected by the caller's own r.Save calls.
@@ -1817,6 +1606,9 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		diffBase := current.DiffBase()
 		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
 		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
+		if errors.Is(err, errNoRecheck) {
+			return true, haltWithoutRecheck(dataDir, r, err, now)
+		}
 		if err != nil {
 			return true, fmt.Errorf("request %s: ticket %d: %s %d: %w", r.ID, ticket.Index, plan.label, roundIndex, err)
 		}
@@ -1897,308 +1689,46 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		}
 		if !plan.eligible(nextRun) {
 			// Quarantined again, but with nothing a further round of this
-			// kind could fix: a different check failed this time, or the
-			// round's own review gave no verdict.
-			return true, quarantineAfterReviewRound(dataDir, r, nextRun, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
+			// kind could fix: a check a build is not told of failed this
+			// time, or a reviewer's reproduction still fails after the
+			// round's recheck. The reason is the run's own (its triage
+			// sentence names the check, and for a reproduction its path).
+			if errText == "" {
+				errText = StatusReason(nextRun)
+			}
+			return true, quarantineAfterRound(dataDir, r, nextRun, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
 		}
 		current = nextRun
 	}
 	// The loop's own condition failed after a round that WAS still
 	// eligible -- budget exhausted. The message quotes the last round's
-	// own reason (which criteria, findings or checks were still failing),
-	// so the operator sees why from the banner without opening each run --
-	// found live 2026-09-26: "rounds exhausted (1/1)" alone named no
-	// criterion. quarantineCheckFor picks the right NextAction advice for
-	// a review-shaped quarantine: the spec_conformity-specific send-back
-	// (Follow-up B) only when code_review wasn't itself among the failed
-	// gates.
-	exhaustedCheck := nonReviewQuarantineCheck(current)
-	if reviewShapeOnly(current) {
-		exhaustedCheck = quarantineCheckFor(current)
-	}
+	// own reason (which checks were still failing), so the operator sees
+	// why from the banner without opening each run -- found live
+	// 2026-09-26: "rounds exhausted (1/1)" alone named nothing.
+	exhaustedCheck := quarantineCheckOf(current)
 	return true, quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d: %ss exhausted (%d/%d); last round: %s", ticket.Index, r.TicketCount, plan.label, countedRounds, cfg.ReviewCorrectiveRounds, StatusReason(current)), exhaustedCheck, now)
 }
 
-// maxConformityCriterionBytes/maxConformityVerdictBytes cap the single-line,
-// UNFENCED fields WriteReviewAddendum renders (a criterion/location and its
-// verdict/severity word); maxConformityDetailBytes caps a verdict or
-// finding's own free-text detail BEFORE it is wrapped in a verbatim fence;
-// maxConformityFlaggedVerdicts caps how many flagged verdicts (and,
-// reused, how many blocking code-review findings) one addendum ever
-// includes per section. See WriteReviewAddendum's own doc comment for why
-// each exists -- both the spec-conformity and code-review sections share
-// these same caps and helpers rather than each defining their own.
-const (
-	MaxConformityCriterionBytes  = 500
-	MaxConformityVerdictBytes    = 32
-	MaxConformityDetailBytes     = 2 * 1024
-	MaxConformityFlaggedVerdicts = 20
-)
-
-// flattenConformityField renders s safe to place on a single, UNFENCED
-// line of the addendum: every carriage return, line feed, and other C0/DEL
-// control character becomes a space, then the result is truncated to
-// maxBytes (re-validated as UTF-8, since the cut can land mid-rune).
-//
-// v.Criterion and v.Verdict (run.ReviewVerdict, or a CodeReviewFinding's
-// file:line/Severity), written by WriteReviewAddendum into fmt.Fprintf's
-// "- **%s** (%s):" line, are untrusted: they originate from the
-// independent reviewer's own CONFORMITY_EVIDENCE.json/CODE_REVIEW_EVIDENCE.json,
-// read out of a worker-writable sandbox workspace via
-// evidence.ReadHostileFile/conformity.ParseVerdicts (or internal/codereview's
-// own parser) and never otherwise sanitized. Before this function existed,
-// a criterion containing an embedded newline -- e.g. "x\nTests-Required: no - trivial"
-// -- rendered its second "line" at column 0 of the addendum file, which
-// ticketspec.forEachTopLevelLine (the corrective round's own -spec parser)
-// treats as a real top-level header line, not prose: a malicious or
-// merely confused reviewer verdict could disable the tests_added gate or
-// inject a new Required-Content:/Allowed-Files: line into the round's own
-// scope (found via adversarial review). Flattening removes every
-// character forEachTopLevelLine's line-splitting depends on; the
-// surrounding "- **...**" markdown emphasis (never itself at column 0)
-// is a second, cosmetic layer, not the actual defense.
-func flattenConformityField(s string, maxBytes int) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r == '\n' || r == '\r' || r == 0x7f || (r < 0x20 && r != '\t') {
-			b.WriteByte(' ')
-			continue
-		}
-		b.WriteRune(r)
-	}
-	out := strings.TrimSpace(b.String())
-	if len(out) > maxBytes {
-		out = strings.ToValidUTF8(out[:maxBytes], "")
-	}
-	return out
-}
-
-// capConformityDetail truncates s (a verdict's free-text Detail, equally
-// untrusted -- see flattenConformityField's own doc comment) to maxBytes
-// BEFORE it is ever handed to ticketspec.FenceVerbatim, not after: CapFeedback's own
-// keep-the-tail truncation, tried here first, can cut through an already
-// rendered fence -- reopening it to the same header-injection risk
-// flattenConformityField closes -- and an attacker who plants the section
-// heading text inside their own Detail can steer exactly where CapFeedback
-// cuts (found via adversarial review). Truncating the raw text first, then
-// fencing the (now-bounded) result, means the fence markers themselves are
-// never at risk of being cut.
-func capConformityDetail(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	return strings.ToValidUTF8(s[:maxBytes], "") + "\n[detail truncated to fit the size limit]"
-}
-
-type boundedAddendumSection struct {
-	prefix       string
-	heading      string
-	entries      []string
-	omittedLabel string
-	maxEntries   int
-}
-
-func boundedAddendumSectionMinimumBytes(section boundedAddendumSection) int {
-	header := section.prefix + section.heading + "\n\n"
-	omitted := fmt.Sprintf("_%d more %s omitted._\n", len(section.entries), section.omittedLabel)
-	return len([]byte(header + omitted))
-}
-
-// renderBoundedAddendumSections keeps complete entries, dropping only whole
-// trailing entries when the shared ticket-build input writer's remaining
-// byte budget is tight. Each section keeps its own count/byte omission note.
-func renderBoundedAddendumSections(sections []boundedAddendumSection, maxBytes int) string {
-	rendered, _ := renderBoundedAddendumSectionsWithCounts(sections, maxBytes)
-	return rendered
-}
-
-func renderBoundedAddendumSectionsWithCounts(sections []boundedAddendumSection, maxBytes int) (string, []int) {
-	active := make([]boundedAddendumSection, 0, len(sections))
-	for _, section := range sections {
-		if len(section.entries) > 0 {
-			active = append(active, section)
-		}
-	}
-	var out strings.Builder
-	includedCounts := make([]int, 0, len(active))
-	for i, section := range active {
-		remaining := maxBytes - out.Len()
-		reserve := 0
-		for _, later := range active[i+1:] {
-			reserve += boundedAddendumSectionMinimumBytes(later)
-		}
-		candidate, included := renderOneBoundedAddendumSection(section, remaining-reserve)
-		includedCounts = append(includedCounts, included)
-		if candidate == "" {
-			continue
-		}
-		out.WriteString(candidate)
-	}
-	return out.String(), includedCounts
-}
-
-func renderOneBoundedAddendumSection(section boundedAddendumSection, maxBytes int) (string, int) {
-	if len(section.entries) == 0 || section.maxEntries < 0 {
-		return "", 0
-	}
-	maxIncluded := len(section.entries)
-	if maxIncluded > section.maxEntries {
-		maxIncluded = section.maxEntries
-	}
-	header := section.prefix + section.heading + "\n\n"
-	for included := maxIncluded; included >= 0; included-- {
-		omitted := len(section.entries) - included
-		note := ""
-		if omitted > 0 {
-			note = fmt.Sprintf("_%d more %s omitted._\n", omitted, section.omittedLabel)
-		}
-		candidate := header + strings.Join(section.entries[:included], "") + note
-		if len([]byte(candidate)) <= maxBytes {
-			return candidate, included
-		}
-	}
-	return "", 0
-}
-
-// reviewFindingsSection renders the review gate's flagged spec-conformity
-// criteria and blocking code-review findings as bounded addendum sections.
-func reviewFindingsSection(flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, maxBytes int) string {
-	return renderBoundedAddendumSections(reviewFindingsSections(flaggedVerdicts, findings), maxBytes)
-}
-
-func reviewFindingsSections(flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding) []boundedAddendumSection {
-	var sections []boundedAddendumSection
-	if len(flaggedVerdicts) > 0 {
-		entries := make([]string, 0, len(flaggedVerdicts))
-		for _, v := range flaggedVerdicts {
-			criterion := flattenConformityField(v.Criterion, MaxConformityCriterionBytes)
-			verdict := flattenConformityField(v.Verdict, MaxConformityVerdictBytes)
-			detail := capConformityDetail(v.Detail, MaxConformityDetailBytes)
-			entries = append(entries, fmt.Sprintf("- **%s** (%s):\n\n%s\n", criterion, verdict, ticketspec.FenceVerbatim(detail)))
-		}
-		sections = append(sections, boundedAddendumSection{
-			heading: "\n## Spec conformity review to address", entries: entries,
-			omittedLabel: "flagged criteria", maxEntries: MaxConformityFlaggedVerdicts,
-		})
-	}
-	if len(findings) > 0 {
-		entries := make([]string, 0, len(findings))
-		for _, f := range findings {
-			loc := f.File
-			if loc != "" && f.Line > 0 {
-				loc = fmt.Sprintf("%s:%d", f.File, f.Line)
-			}
-			if loc == "" {
-				loc = "unknown location"
-			}
-			location := flattenConformityField(loc, MaxConformityCriterionBytes)
-			severity := flattenConformityField(f.Severity, MaxConformityVerdictBytes)
-			text := f.Summary
-			if f.FailureScenario != "" {
-				text += "\n\nFailure scenario: " + f.FailureScenario
-			}
-			detail := capConformityDetail(text, MaxConformityDetailBytes)
-			entries = append(entries, fmt.Sprintf("- **%s** (%s):\n\n%s\n", location, severity, ticketspec.FenceVerbatim(detail)))
-		}
-		sections = append(sections, boundedAddendumSection{
-			heading: "\n## Code review findings to address", entries: entries,
-			omittedLabel: "findings", maxEntries: MaxConformityFlaggedVerdicts,
-		})
-	}
-	return sections
-}
-
-// WriteReviewAddendum writes
-// <request>/rounds/<ticket>-conformity<round>/addendum.md: the ticket's
-// own build spec (TicketBuildSpecContent -- its spec plus the
-// approved-spec acceptance criteria it covers, verbatim), plus a "##
-// Spec conformity review to address"
-// section listing each flagged criterion with the independent reviewer's
-// own verdict and detail (only when flaggedVerdicts is non-empty), plus a
-// "## Code review findings to address" section listing each blocking
-// ("high"-severity) code-review finding's location, severity, summary and
-// failure scenario (only when findings is non-empty) -- mirrors
-// WriteRoundAddendum's PR-review shape (pr_review_driver.go), built from
-// run.ReviewVerdict/run.CodeReviewFinding rather than a human's
-// forge.Thread. The ticket header (Allowed-Files:, Verify-Command:, ...)
-// is carried through unchanged, so a corrective round can never widen
-// scope beyond what the ticket already declared.
-//
-// Every value from an untrusted run.ReviewVerdict/run.CodeReviewFinding is
-// bounded before it is ever written, with the SAME helpers and caps for
-// both sections: the single-line fields (Criterion/Verdict, or a finding's
-// file:line/Severity) are flattened to one line and length-capped
-// (flattenConformityField) since they render OUTSIDE any fence, the
-// free-text field (Detail, or a finding's Summary/FailureScenario) is
-// length-capped BEFORE fencing (capConformityDetail) since CapFeedback's
-// own tail-keeping truncation could otherwise reopen an already-closed
-// fence, and at most maxConformityFlaggedVerdicts entries are included per
-// section, with the remainder counted in a trailing note -- so each
-// section is size-bounded without ever needing to truncate through the
-// middle of a fenced block (both found via adversarial review;
-// CapFeedback is deliberately not used here at all).
-func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flaggedVerdicts []run.ReviewVerdict, findings []run.CodeReviewFinding, roundIndex int) (string, error) {
-	// buildSpec, not the raw ticket spec: the corrective round's own
-	// -spec must carry the same acceptance-criteria text (exact field/
-	// error-code names) the ticket's first build received, not just its
-	// covered-criteria NUMBERS -- see TicketBuildSpecContent's own doc
-	// comment for why. Embedding both would duplicate the criteria
-	// section; this embeds the build spec once, then appends this
-	// round's own findings on top of it.
-	buildSpec, err := TicketBuildSpecContent(dataDir, requestID, *ticket)
-	if err != nil {
-		return "", fmt.Errorf("build spec for ticket %s: %w", ticket.SpecPath, err)
-	}
-
-	var b strings.Builder
-	b.WriteString(buildSpec)
-	if len(buildSpec) == 0 || buildSpec[len(buildSpec)-1] != '\n' {
-		b.WriteString("\n")
-	}
-	// A spec that ends inside an unclosed fence would read the section's
-	// first verbatim-fence opener as that fence's close, turning every
-	// Detail line after it into a top-level header line (adversarial
-	// review round 2, 2026-09-26). Close it first.
-	if closing := ticketspec.ClosingFenceIfOpen(buildSpec); closing != "" {
-		b.WriteString(closing + "\n")
-	}
-	if section := reviewFindingsSection(flaggedVerdicts, findings, MaxTicketBuildInputBytes-len([]byte(b.String()))); section != "" {
-		b.WriteString(section)
-	}
-
-	dir := filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-conformity%d", ticket.Index, roundIndex))
-	path := filepath.Join(dir, "addendum.md")
-	if err := writeTicketBuildSpecFile(path, b.String()); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
-	}
-	return path, nil
-}
-
-// BuildReviewCorrectiveArgs builds one review-corrective round's
-// runMainWithReady argv from the exact same ticketQueueEntry builder
-// BuildRequestBuildArgs uses for this ticket's ordinary build -- so the two
-// can never silently drift apart on harness/model-alias/full-suite-fallback
-// handling (see ticketQueueEntry's own doc comment) -- overriding only the
-// run id and -spec (addendumPath, never widening Allowed-Files -- see
-// WriteReviewAddendum), then appending -on-branch/-diff-base so the run
-// checks out the quarantined run's own existing branch/diff base instead of
-// starting a fresh one. -spec-acceptance-criteria still names the ticket's
-// own criteria file (WriteTicketCriteriaFile, unaffected by the addendum),
-// so the fresh, independent spec_conformity (and code_review) review this
-// round exists to re-run actually runs again. -open-pull-request is left
-// at cfg's own value -- see TryReviewCorrectiveRound's own doc comment for
-// why, unlike a PR-review corrective round's forced-off.
-//
-// -on-branch/-diff-base make the round build on the quarantined run's own
-// branch, measured against the ticket's original base, on every execution
-// path (direct, -temporal-address, -repository).
+// BuildCorrectiveArgs builds one corrective round's runMainWithReady argv
+// from the exact same ticketQueueEntry builder BuildRequestBuildArgs uses
+// for this ticket's ordinary build -- so the two can never silently drift
+// apart on harness/model-alias/full-suite-fallback handling (see
+// ticketQueueEntry's own doc comment) -- overriding only the run id and
+// -spec (specPath, the ticket's own build spec), then appending
+// -on-branch/-diff-base so the run checks out the quarantined run's own
+// existing branch, measured against the ticket's original base, on every
+// execution path (direct, -temporal-address, -repository), and its fresh,
+// independent review runs again. -open-pull-request is left at cfg's own
+// value: no pull request exists yet for the branch (a quarantined run never
+// opens one), so an accepted round opens it exactly as the ticket's first
+// build would, unlike a PR-review round, which forces it off.
 //
 // With roles.execution.escalation configured the round's build runs on that
-// model at that level (escalate), whatever model the request picked. Both
-// automatic rounds are built here, the review round and the check round; a
-// PR-review round (runRoundAttempt) is not, and stays on the role's model.
-func BuildReviewCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, addendumPath, roundID, branch, diffBase string) ([]string, error) {
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, addendumPath)
+// model at that level (escalate), whatever model the request picked. A
+// PR-review round (runRoundAttempt) is not built here, and stays on the
+// role's model.
+func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string) ([]string, error) {
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -2564,7 +2094,7 @@ func quarantineRequest(dataDir string, r *request.Request, reason string, now ti
 
 // quarantineRequestWithCheck is quarantineRequest's own extended form:
 // check, when non-empty, is recorded on r.QuarantineCheck (e.g.
-// request.QuarantineCheckSpecConformity) so NextAction can name the one
+// request.QuarantineCheckReviewReproduction) so NextAction can name the one
 // command that actually addresses that cause (Follow-up B) -- set AFTER
 // r.Quarantine, since advance() itself unconditionally clears
 // QuarantineCheck on every transition, the same way it clears HaltKind.
@@ -2606,19 +2136,19 @@ func RequestSpecPath(dataDir, id string) string {
 
 // ticketQueueEntry builds the QueueEntry shape shared by a ticket's
 // ordinary first build (BuildRequestBuildArgs), its automatic review
-// corrective round (BuildReviewCorrectiveArgs) and its PR-review corrective
+// corrective round (BuildCorrectiveArgs) and its PR-review corrective
 // round (RunCorrectiveRound, pr_review_driver.go) --
 // everything they need computed identically (the legacy
-// full-suite-command fallback, the reference oracle, the acceptance-
-// criteria file), varying only in id and specPath. Found via adversarial
-// review: BuildReviewCorrectiveArgs used to hand-build its own
+// full-suite-command fallback, the reference oracle), varying only in id
+// and specPath. Found via adversarial
+// review: BuildCorrectiveArgs used to hand-build its own
 // QueueEntry from scratch and silently dropped ExecutionHarness and the legacy
 // full-suite fallback, so a corrective round for a request submitted with
 // `factoryd submit -harness` silently reverted to the session's own default
 // harness instead of the request's actual one. One shared builder keeps
 // them in step: the PR-review round built its own too and ran with no
 // acceptance-criteria file, so no spec_conformity review at all.
-func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string) (*QueueEntry, error) {
+func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string, reproduce bool) (*QueueEntry, error) {
 	// prBase: ticket N (N>1) stacks its draft PR on ticket N-1's own
 	// branch while that PR is still open and unmerged -- see
 	// QueueEntry.PRBase's own doc comment for why.
@@ -2626,10 +2156,6 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	verifyCommand, err := ticketspec.ParseVerifyCommand(ticket.SpecPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve verify command for request %s ticket %d: %w", r.ID, ticket.Index, err)
-	}
-	criteriaPath, err := WriteTicketCriteriaFile(dataDir, r, ticket)
-	if err != nil {
-		return nil, fmt.Errorf("acceptance criteria for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
 	oracleDir, oracleCommand, err := ResolveTicketOracle(dataDir, r, ticket)
 	if err != nil {
@@ -2658,17 +2184,22 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
+	reviewSpec, recheck, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce)
+	if err != nil {
+		return nil, err
+	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
 		Project:                r.Project,
 		SpecPath:               specPath,
+		ReviewSpecPath:         reviewSpec,
+		RecheckReproductions:   recheck,
 		VerifyCommand:          verifyCommand,
 		FullSuiteCommand:       fullSuiteCommand,
 		FullSuiteSource:        fullSuiteSource,
 		NoCommitOracles:        r.NoCommitOracles,
 		Bug:                    r.Bug,
-		SpecAcceptanceCriteria: criteriaPath,
 		ReferenceOracleDir:     oracleDir,
 		ReferenceOracleCommand: oracleCommand,
 		// ExecutionHarness: r.Harnesses["execution"] is `factoryd submit
@@ -2710,6 +2241,57 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil
+}
+
+// reproductionInputs are a ticket build's -review-spec (approvedSpecPath)
+// and -recheck-reproductions manifest (ticketRecheck) when the build holds
+// and runs reviewer reproductions (reproduce), "" for both otherwise: a
+// restack's replay run, which cannot take a corrective build, holds and runs
+// none and leaves the ticket's list as it is. A ticket whose list is not
+// empty is never built without it: with no approved spec to run them under,
+// the build is refused (errNoRecheck).
+func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, reproduce bool) (reviewSpec, recheck string, err error) {
+	if !reproduce {
+		return "", "", nil
+	}
+	if reviewSpec, err = approvedSpecPath(dataDir, r); err != nil {
+		return "", "", err
+	}
+	if index < 1 || index > len(r.Tickets) {
+		return reviewSpec, "", nil
+	}
+	ticket := &r.Tickets[index-1]
+	if reviewSpec == "" {
+		if len(ticket.Reproductions) > 0 {
+			return "", "", fmt.Errorf("ticket %d: %w: the request has no approved spec to run them under", index, errNoRecheck)
+		}
+		return "", "", nil
+	}
+	recheck, err = ticketRecheck(dataDir, r, ticket, buildID)
+	return reviewSpec, recheck, err
+}
+
+// requestSpecFile is the request's spec, relative to its directory.
+const requestSpecFile = "spec.md"
+
+// approvedSpecPath is the request's spec.md when spec_review approved it by
+// hash: the spec a ticket build's review cites and its reproduction check
+// compares citations with (SC-022). "" for a request with no approved spec
+// hash. A spec whose content no longer matches the approval is an error, so
+// a review never cites an unapproved line.
+func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
+	approved, ok := r.ApprovedSHA256[requestSpecFile]
+	if !ok {
+		return "", nil
+	}
+	current, err := request.HashFile(dataDir, r.ID, requestSpecFile)
+	if err != nil {
+		return "", fmt.Errorf("request %s: hash %s: %w", r.ID, requestSpecFile, err)
+	}
+	if current != approved {
+		return "", fmt.Errorf("request %s: %s has changed since spec_review approved it -- re-approve before continuing", r.ID, requestSpecFile)
+	}
+	return filepath.Join(request.Dir(dataDir, r.ID), requestSpecFile), nil
 }
 
 // requestInstructionBase is the commit a ticket build's reviews read the
@@ -2777,7 +2359,7 @@ func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath, true)
 	if err != nil {
 		return nil, err
 	}
@@ -2830,83 +2412,18 @@ func replacesEscalatedBuild(dataDir string, r *request.Request, ticket *request.
 	return err == nil && previous.RequestID == r.ID && previous.State == run.StateHalted && previous.Escalated
 }
 
-// WriteTicketCriteriaFile writes the subset of the approved spec's
-// acceptance criteria this ticket claims (its "### Acceptance criteria
-// covered" numbers, resolved against spec.md's own numbered list) to
-// <ticket>.criteria.md beside the ticket, one criterion per line in
-// build_app.py's read_acceptance_criteria shape, then the read-back answers
-// approved with the spec (AnsweredReadBackBlock), and returns its path --
-// what the ticket's build passes as -spec-acceptance-criteria so the
-// required per-criterion conformity review judges exactly the criteria
-// this ticket owns, not the whole spec. A ticket without the plan
-// sections (a hand-written or greenfield-format one) claims nothing and gets no
-// file: returns "" with no error, leaving the build's review policy at
-// its own default. A ticket that DOES have a "## Plan" section but whose
-// "### Acceptance criteria covered" list fails to parse is a different
-// case -- a malformed plan ticket, not a legacy one -- and is returned as
-// a fatal error naming the ticket file, so the required per-criterion
-// conformity review is never silently disabled for a ticket that was
-// supposed to have one.
-func WriteTicketCriteriaFile(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
-	ticketContent, err := os.ReadFile(ticket.SpecPath)
-	if err != nil {
-		return "", err
-	}
-	numbers, err := request.TicketCoveredCriteria(string(ticketContent))
-	if err != nil {
-		if strings.Contains(string(ticketContent), "## Plan") {
-			return "", fmt.Errorf("ticket %s has a %q section but its acceptance criteria could not be parsed: %w", ticket.SpecPath, "## Plan", err)
-		}
-		return "", nil
-	}
-	// A criterion a later ticket also covers is reviewed there, not here:
-	// see lastCoveringTicket's own doc comment.
-	later := lastCoveringTickets(r.Tickets)
-	own := numbers[:0:0]
-	for _, n := range numbers {
-		if last, ok := later[n]; ok && last > ticket.Index {
-			continue
-		}
-		own = append(own, n)
-	}
-	if len(own) == 0 {
-		return "", nil
-	}
-	texts, err := resolveApprovedCriteriaTexts(dataDir, r.ID, own)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	for _, t := range texts {
-		b.WriteString(t)
-		b.WriteString("\n")
-	}
-	// The read-back answers approved with the spec follow the criteria, for
-	// the reviewer to read them with; build_app.py's read_acceptance_criteria
-	// stops at their heading, and read_spec_answers reads them.
-	if block := AnsweredReadBackBlock(r.ReadBack.Answered()); block != "" {
-		b.WriteString("\n" + block)
-	}
-	path := strings.TrimSuffix(ticket.SpecPath, ".spec.md") + ".criteria.md"
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
 // lastCoveringTickets maps each approved-spec criterion number to the
 // highest ticket index whose "### Acceptance criteria covered" list names
 // it. A criterion that spans several tickets' files is listed under every
 // ticket that owns one of them (the planner rule the plan-time
 // criterion-files check enforces), but it can only be judged once all of
-// its parts exist, so the per-ticket conformity review checks it only at
-// the last covering ticket; earlier tickets still see its text in their
+// its parts exist, so it is judged only at the last covering ticket; earlier tickets still see its text in their
 // build spec, marked as shared. Found live (Flutter + Go app habit-insights
 // request, 2026-09-28): ticket 1 of 3 (pure functions) was reviewed
 // against criteria about the handler and the MCP tool that tickets 2 and
 // 3 build, and quarantined after its corrective round could not satisfy
 // them. Tickets whose spec cannot be read or whose coverage does not
-// parse are skipped here (WriteTicketCriteriaFile reports those for the
+// parse are skipped here (ticketBuildSpecContent reports those for the
 // ticket being built).
 func lastCoveringTickets(tickets []request.Ticket) map[int]int {
 	last := map[int]int{}
@@ -2930,10 +2447,8 @@ func lastCoveringTickets(tickets []request.Ticket) map[int]int {
 
 // resolveApprovedCriteriaTexts reads the request's approved spec.md and
 // returns the full verbatim text ("N. ...") of each criterion number in
-// numbers, in order -- the shared primitive WriteTicketCriteriaFile and
-// TicketBuildSpecContent both resolve a ticket's claimed criteria
-// against, so the two can never silently disagree on what a criterion's
-// own text is.
+// numbers, in order -- the primitive TicketBuildSpecContent resolves a
+// ticket's claimed criteria against.
 func resolveApprovedCriteriaTexts(dataDir, requestID string, numbers []int) ([]string, error) {
 	specContent, err := os.ReadFile(RequestSpecPath(dataDir, requestID))
 	if err != nil {
@@ -2968,13 +2483,13 @@ const BuildSpecCriteriaFooter = "These are the approved spec's exact criteria; n
 // before the one writer applies this final limit.
 const MaxTicketBuildInputBytes = 180_000
 
-// MaxTicketBuildBaseInputBytes caps TicketBuildSpecContent before a review
-// addendum is appended.
+// MaxTicketBuildBaseInputBytes caps TicketBuildSpecContent before a
+// PR-review round's addendum is appended.
 const MaxTicketBuildBaseInputBytes = 150_000
 
 // TicketBuildSpecContent returns the string a caller writes to disk as the
-// ticket's actual -spec (writeTicketBuildSpecFile) or embeds as a review
-// addendum's own base (WriteReviewAddendum, pr_review_driver.go's
+// ticket's actual -spec (writeTicketBuildSpecFile) or embeds as a
+// PR-review round addendum's own base (pr_review_driver.go's
 // WriteRoundAddendum). New requests put the approved spec verbatim before
 // the ticket and its covered criteria; an old request record with no
 // BuildInput keeps the legacy ticket-first shape.
@@ -2984,12 +2499,11 @@ const MaxTicketBuildBaseInputBytes = 150_000
 // a build actually receives as -spec listed covered criteria by NUMBER
 // ONLY (the "### Acceptance criteria covered" list, e.g. "8, 9") --  the
 // criteria's own exact TEXT (field names like longest_streak,
-// best_weekday_done_count) reached only the conformity reviewer, via
-// WriteTicketCriteriaFile's own -spec-acceptance-criteria file, never
-// the builder. Three separate builds of that ticket each guessed a
+// best_weekday_done_count) reached only the reviewer, never the
+// builder. Three separate builds of that ticket each guessed a
 // different field name for a JSON shape the approved spec named exactly
 // (count/best_weekday_count/longest_done_streak), each flagged by
-// conformity review, spending roughly $15 without converging -- while a
+// review, spending roughly $15 without converging -- while a
 // bare run given the original request text got every name right. This
 // section puts the same exact text in front of the builder, not just the
 // reviewer.
@@ -3172,8 +2686,7 @@ const TicketOracleRunCommandFilename = request.TicketOracleRunCommandFilename
 
 // resolveTicketOracle resolves ticket's own approved reference oracle,
 // if it has one, for BuildRequestBuildArgs to wire into the ticket's
-// build the same way WriteTicketCriteriaFile already resolves its
-// acceptance criteria. Returns ("", "", nil) -- not an error -- for the
+// build. Returns ("", "", nil) -- not an error -- for the
 // ordinary case, a ticket with no <NNN>.oracle/ directory at all.
 //
 // <NNN>.oracle/ (a sibling of <NNN>.spec.md, sharing its own numbering)

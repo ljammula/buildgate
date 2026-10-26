@@ -9,7 +9,6 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
-	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
@@ -104,13 +103,10 @@ func TestRunReviewStepActivityEmptyReviewHarnessResolvesToPi(t *testing.T) {
 // Harness/ReviewHarness are empty runs pi in the command (--harness pi) exactly
 // as the worker environment resolves it, so the two can never disagree.
 func TestEmptyHarnessResolvesToPiInCommandAndEnvironment(t *testing.T) {
-	in := RunWorkflowInput{SpecAcceptanceCriteria: "/ws/criteria.md"}
-	a := &Activities{}
-	for _, step := range append(append([]reviewstep.Step{}, reviewstep.Steps...), reviewstep.CombinedStep) {
-		args := reviewStepArgs(a, step, ReviewStepInput{RunWorkflowInput: in}, "/s.py")
-		if n := len(args); args[n-2] != "--harness" || args[n-1] != "pi" {
-			t.Errorf("reviewStepArgs(%s) = %v, want --harness pi for an empty ReviewHarness", step.Name, args)
-		}
+	in := RunWorkflowInput{}
+	args := reviewStepArgs(ReviewStepInput{RunWorkflowInput: in}, "/s.py")
+	if n := len(args); args[n-2] != "--harness" || args[n-1] != "pi" {
+		t.Errorf("reviewStepArgs = %v, want --harness pi for an empty ReviewHarness", args)
 	}
 	if len(executionHarnessEnv(in)) != 0 || len(reviewHarnessEnv(in)) != 0 {
 		t.Error("an empty harness got a worker environment, but resolves to pi")

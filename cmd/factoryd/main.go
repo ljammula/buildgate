@@ -27,10 +27,10 @@ import (
 	"time"
 
 	"buildgate/internal/codereview"
-	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
 	"buildgate/internal/harness"
 	"buildgate/internal/notify"
+	"buildgate/internal/oraclemanifest"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
@@ -142,50 +142,17 @@ func main() {
 	}
 }
 
-// loadSpecConformityVerdicts fills r.SpecConformityVerdicts from the
-// retained CONFORMITY_EVIDENCE.json (run.Dir/CONFORMITY_EVIDENCE.json,
-// already copied out of the untrusted workspace by evidence.RetainFile).
-// Shared by the run setup and applyRunWorkflowResult so both
-// record identical evidence. Best-effort and informational, exactly
-// like loadAgentEvidence: a missing file is not an event (the run may never
-// have reached the conformity phase), a malformed one is a warning, and
-// neither ever changes the run's outcome.
-func loadSpecConformityVerdicts(r *run.Run, dataDir, id string) {
-	// Cleared first, so a re-finalization whose conformity phase produced no
-	// evidence this time never keeps verdicts from an earlier attempt and
-	// renders them as if they were current (found via review).
-	r.SpecConformityVerdicts = nil
-	if !r.SpecConformityConfigured {
-		return
-	}
-	path := filepath.Join(run.Dir(dataDir, id), "CONFORMITY_EVIDENCE.json")
-	data, err := evidence.ReadHostileFile(path, maxAgentEvidenceFileSize)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Printf("run %s: warning: could not read retained CONFORMITY_EVIDENCE.json: %v\n", id, err)
-		}
-		return
-	}
-	verdicts, err := conformity.ParseVerdicts(data)
-	if err != nil {
-		fmt.Printf("run %s: warning: %v\n", id, err)
-		return
-	}
-	r.SpecConformityVerdicts = verdicts
-}
-
 // loadCodeReview fills r.CodeReview from the retained CODE_REVIEW_EVIDENCE.json
 // (cmd/factoryd's own code_review phase already retained it into the run
-// dir via evidence.RetainFile) -- informational only, the same convention
-// loadSpecConformityVerdicts follows: the code_review gate itself already
+// dir via evidence.RetainFile) -- informational only, like
+// loadAgentEvidence: the code_review gate itself already
 // judged pass/fail off the phase's own exit code, so a missing or
 // malformed evidence file here never changes that outcome, only what the
 // run record/PR body can say about it.
 func loadCodeReview(r *run.Run, dataDir, id string) {
 	// Cleared first, so a re-finalization whose code-review phase
 	// produced no evidence this time never keeps a finding set from an
-	// earlier attempt and renders it as if it were current (the same
-	// guard loadSpecConformityVerdicts has).
+	// earlier attempt and renders it as if it were current.
 	r.CodeReview = nil
 	path := filepath.Join(run.Dir(dataDir, id), codereview.EvidenceFile)
 	data, err := evidence.ReadHostileFile(path, maxAgentEvidenceFileSize)
@@ -205,13 +172,13 @@ func loadCodeReview(r *run.Run, dataDir, id string) {
 
 // loadOracleCoverage fills r.OracleCoveredCriteria from the operator's
 // MANIFEST.json in r.ReferenceOracleDir, so the release evidence can say
-// which criteria had a deterministic second check. Unlike the verdicts it
-// depends only on the run record, so a reclaimed run -- which must not read
+// which criteria had a deterministic second check. Unlike the review's
+// findings it depends only on the run record, so a reclaimed run -- which must not read
 // workspace evidence at all -- can still call it. ReadHostileFile because
 // the directory is operator-populated: a symlink, FIFO or oversized
 // MANIFEST.json must not hang or exhaust this process.
 func loadOracleCoverage(r *run.Run, id string) {
-	// Cleared first for the same stale-state reason as loadSpecConformityVerdicts.
+	// Cleared first for the same stale-state reason as loadCodeReview.
 	r.OracleCoveredCriteria = nil
 	if r.ReferenceOracleDir == "" {
 		return
@@ -223,7 +190,7 @@ func loadOracleCoverage(r *run.Run, id string) {
 		}
 		return
 	}
-	covered, err := conformity.ParseOracleManifest(data)
+	covered, err := oraclemanifest.CoveredCriteria(data)
 	if err != nil {
 		fmt.Printf("run %s: warning: %v\n", id, err)
 		return

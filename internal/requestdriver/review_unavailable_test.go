@@ -63,16 +63,14 @@ func buildingRequest(t *testing.T) (string, *request.Request) {
 	return dataDir, r
 }
 
-// A review that timed out answers no criterion: every verdict is
-// "unavailable" and the code reviewer is not available. That is no finding
-// to fix, so no corrective round runs, and it is no quarantine either: the
-// run has a cause, read from the gate results and the meter's ledger.
+// A review that timed out gave no verdict: the code reviewer is not
+// available (and, on a record from before the spec-conformity review was
+// retired, every criterion is "unavailable"). That is no finding to fix, so
+// no corrective round runs, and it is no quarantine either: the run has a
+// cause, read from the gate results and the meter's ledger.
 func TestAReviewWithNoVerdictIsNeitherFlaggedNorAResult(t *testing.T) {
 	timedOut := unansweredReviewRun("run-1", nil)
-	if got := flaggedConformityVerdicts(timedOut); len(got) != 0 {
-		t.Errorf("flagged = %v, want none", got)
-	}
-	if ReviewOnlyFlagged(timedOut) {
+	if _, ok := handoffForABuild(t.TempDir(), timedOut); ok {
 		t.Error("a review with no verdict is eligible for a corrective round")
 	}
 	if got := reviewNoVerdictCause(timedOut); got != unresolved.NoVerdict {
@@ -92,45 +90,37 @@ func TestAReviewWithNoVerdictIsNeitherFlaggedNorAResult(t *testing.T) {
 	}
 }
 
-// A review with something to act on, or a run that failed another gate, is a
-// result whatever the meter counted: it keeps its check and its corrective
-// round, and has no cause.
+// A review that gave a verdict, or a run that failed another check, is a
+// result whatever the meter counted: it has no cause, and its quarantine
+// names the check whose remedy comes first.
 func TestAReviewThatJudgedSomethingHasNoCause(t *testing.T) {
-	unavailable := run.ReviewVerdict{Criterion: "1. a", Verdict: "unavailable"}
-	flagged := run.ReviewVerdict{Criterion: "2. b", Verdict: "flagged", Detail: "wrong status"}
+	available := &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", Summary: "nil deref"}}}
 	clean := run.ReviewVerdict{Criterion: "3. c", Verdict: "clean"}
-	blocking := &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", Summary: "nil deref"}}}
 	refused := []run.Attempt{{Kind: "review", Role: run.AttemptRoleReview, RelayCalls: reviewLedgers[unresolved.ProviderQuota]}}
 	for name, tc := range map[string]struct {
 		run       *run.Run
 		wantCheck string
-		wantRound bool
 	}{
-		"one criterion flagged, another unanswered": {reviewRun([]run.ReviewVerdict{unavailable, flagged}, nil, "spec_conformity"), request.QuarantineCheckSpecConformity, true},
-		"a blocking finding, criteria unanswered":   {reviewRun([]run.ReviewVerdict{unavailable}, blocking, "spec_conformity", "code_review"), request.QuarantineCheckCodeReview, true},
-		"a flagged criterion, reviewer available":   {reviewRun([]run.ReviewVerdict{flagged}, &run.CodeReviewResult{Policy: "required", Available: true}, "spec_conformity"), request.QuarantineCheckSpecConformity, true},
-		// A real conformity failure is never hidden behind an unavailable
-		// advisory code reviewer: spec_conformity failed with every
-		// criterion answered, and code_review, advisory, passed without one.
-		"criteria answered, advisory reviewer silent": {reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "advisory"}, "spec_conformity"), request.QuarantineCheckSpecConformity, false},
-		// Both gates failed, but only the code reviewer went unanswered.
-		"criteria answered, required reviewer silent": {reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "required"}, "spec_conformity", "code_review"), request.QuarantineCheckCodeReview, false},
+		"a reviewer's reproduction refused it": {reviewRun(nil, available, "review_reproduction"), request.QuarantineCheckReviewReproduction},
+		// A record from a worker whose code_review still failed on a
+		// finding: the reviewer answered.
+		"code_review failed with a verdict": {reviewRun(nil, available, "code_review"), ""},
+		// A real conformity failure on an old record is never hidden behind
+		// an unavailable advisory code reviewer.
+		"criteria answered, advisory reviewer silent": {reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "advisory"}, "spec_conformity"), ""},
+		"the diff left Allowed-Files":                 {reviewRun(nil, available, "diff_scope"), request.QuarantineCheckDiffScope},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tc.run.Attempts = refused
 			if got := reviewNoVerdictCause(tc.run); got != "" {
 				t.Errorf("cause = %q, want none: the review judged something", got)
 			}
-			if got := quarantineCheckFor(tc.run); got != tc.wantCheck {
+			if got := quarantineCheckOf(tc.run); got != tc.wantCheck {
 				t.Errorf("check = %q, want %q", got, tc.wantCheck)
-			}
-			if got := ReviewOnlyFlagged(tc.run); got != tc.wantRound {
-				t.Errorf("corrective round eligible = %v, want %v", got, tc.wantRound)
 			}
 		})
 	}
-	// The code reviewer alone went unanswered, every criterion clean: no
-	// verdict to act on.
+	// The code reviewer alone went unanswered: no verdict to act on.
 	silent := reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "required"}, "code_review")
 	if got := reviewNoVerdictCause(silent); got != unresolved.NoVerdict {
 		t.Errorf("a silent required code reviewer: cause = %q, want %q", got, unresolved.NoVerdict)
@@ -140,11 +130,6 @@ func TestAReviewThatJudgedSomethingHasNoCause(t *testing.T) {
 	other.GateResults = append(other.GateResults, run.GateResult{Check: "canonical_verify", Passed: false})
 	if got := reviewNoVerdictCause(other); got != "" {
 		t.Errorf("a failed verify beside the silent reviews: cause = %q, want none", got)
-	}
-	// The addendum for the mixed case carries only the real finding.
-	mixed := reviewRun([]run.ReviewVerdict{unavailable, flagged}, nil, "spec_conformity")
-	if got := flaggedConformityVerdicts(mixed); len(got) != 1 || got[0].Verdict != "flagged" {
-		t.Errorf("flagged = %+v, want only the flagged criterion", got)
 	}
 }
 
@@ -239,7 +224,7 @@ func TestARoundWhoseReviewGaveNoVerdictIsUnresolved(t *testing.T) {
 		}
 	}
 
-	const reason = "ticket 1/1: review corrective round 1/1 quarantined: gate failed: canonical_verify"
+	const reason = "ticket 1/1: corrective round 1/1 quarantined: gate failed: canonical_verify"
 	otherGate := reviewRun(nil, nil, "canonical_verify")
 	otherGate.ID = "round-verify"
 	if err := otherGate.Save(dataDir); err != nil {
@@ -248,7 +233,7 @@ func TestARoundWhoseReviewGaveNoVerdictIsUnresolved(t *testing.T) {
 	if got, err := correctiveRoundOutcome(dataDir, otherGate.ID, nil); err != nil || got.unresolved != "" {
 		t.Fatalf("a failed verify: outcome %+v, err %v, want no cause", got, err)
 	}
-	if err := quarantineAfterReviewRound(dataDir, r, otherGate, reason, time.Now()); err != nil {
+	if err := quarantineAfterRound(dataDir, r, otherGate, reason, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if r.State != request.StateQuarantined || r.QuarantineCheck != "" || r.Error != reason {

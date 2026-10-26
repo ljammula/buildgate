@@ -295,8 +295,8 @@ func TestVerifyAttemptCarriesTheSetupDigestThroughTheSandboxRuntime(t *testing.T
 }
 
 func TestBuildActivityArgsWithoutSetupAddsNothing(t *testing.T) {
-	without := buildActivityArgs("/b.py", "/ws", "/s.md", "required", 3, 45, "sha", "make verify", "", "", "", "", "pi")
-	with := buildActivityArgs("/b.py", "/ws", "/s.md", "required", 3, 45, "sha", "make verify", "", "", "", "", "pi", "echo one", "echo two")
+	without := buildActivityArgs("/b.py", "/ws", "/s.md", 3, 45, "sha", "make verify", "", "", "", "pi")
+	with := buildActivityArgs("/b.py", "/ws", "/s.md", 3, 45, "sha", "make verify", "", "", "", "pi", "echo one", "echo two")
 	if strings.Contains(strings.Join(without, " "), "--setup-command") {
 		t.Errorf("args %q carry --setup-command", without)
 	}

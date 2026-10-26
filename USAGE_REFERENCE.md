@@ -35,7 +35,7 @@ and [`USAGE.md`](USAGE.md). When this page and
 | `factoryd remote-console` | Makes this profile's console usable from another machine on the tailnet in one step: adds a `tailscale serve` HTTPS listener in front of the profile's `serve` (starting it when none runs), writes a gate token if none is usable, and records the address in `<config name>.remote-console` beside the session config (mode 0600; `serve` reads it on each request and accepts that `Host`, with no restart). While it is on, Slack and Discord notifications link to that address. Prints the console address and the token to paste there. Running it again changes nothing that is already in place, and keeps the address when `serve` has moved to another port. Needs the Tailscale CLI, connected. [USAGE.md § The console from another machine](USAGE.md#the-console-from-another-machine). `-off` removes the accepted `Host`, the gate token if this command wrote it, and the listener unless it was since pointed elsewhere. `-https-port` is the listener's port: by default the one it used before, else the first free of 443, 8443, 8444 and up; a port that serves something else, or a Funnel port, is refused. `-ttl` is the lifetime of a gate token it writes (default 12h); a usable token is kept. |
 | `factoryd gate-token` | The credential of a console that is not on the host, and of the console on the host once `install-service -require-tokens` set a read token: writes `<config name>.gate-token` beside the session config (mode 0600, one per profile, with an expiry) if no usable one exists, then prints the token and its expiry. Paste the token into the field the console shows under the address it is served at for that machine, or append the printed fragment `#gate=<token>` to that address. It opens reads and request actions, never a run override, a start route or `/mcp`. While the file exists, a console that is not on the host needs the token to read; with a read token, every console does, and the command's messages say which. `serve` reads the file on each request, so nothing restarts. [USAGE.md § The console from another machine](USAGE.md#the-console-from-another-machine). `-ttl` is how long a written token works (1m to 720h, default 12h). `-rotate` writes a new token and the old one stops at once. `-disable` leaves the gate on with no gate token, so nothing opens a console that needs it but the other tokens; `-remove` deletes the file, which turns the gate off; with a read token, no console reads until a new one is written. |
 | `factoryd inbox` | Lists every request waiting on the operator (`spec_review`, `oracle_review`, `plan_review`, `pr_review`, `resume_review`, `halted`, `quarantined`) across the distinct data dirs of all profiles (`-config <profile>`: that profile's alone; `-project <name>`: that repository's requests), oldest first (waiting since `WaitingSince`, else `EnteredAt`): age, profile, state, id, title, then the commands or PR URL or `reason:`/`next:`, then `look before deciding: factoryd inspect -config <profile> <id>` when there is anything to look at, then the console link. Empty: `Nothing is waiting on you.`. `-json` prints the same entries as an array: `profile`, `data_dir`, `id`, `title`, `state`, `since`, `age_seconds`, `reason`, `next`, `approve`, `reject`, `pr_urls`, `console_url`, `inspect`. |
-| `factoryd inspect <request-id \| run-id>` | Prints the commands that show the work before a decision, each under what it shows. At `spec_review`, `oracle_review` and `plan_review`: `less`/`ls` of the drafted spec, oracle files and tickets. At `pr_review`, `quarantined`, `halted` and `resume_review`, for each ticket, its latest run with a result (the build, or the last corrective round): its worktree, then `git -C <repository> log`, `diff --stat` and `diff` of the ticket's base `..` that result commit (read from the repository, so they work after the worktree is gone; only hex commit names are used), `git worktree add ~/review/<run-id> <result>` for a copy of your own (the one line that writes); a run with no result commit gets its worktree's `HEAD`, labelled as not checked by the gates; `less` of the ticket snapshot, the conformity verdicts and the build report where they exist, and `factoryd logs`. A run id prints that run's block. Paths under the home directory are written from `~`. A note follows: try or change the work in your own copy, not the factory's worktree (the push is pinned to the checked commit and a moved branch is refused, a retry or reconcile may reuse or remove the folder, a review does not start on a worktree that is not clean); running the build's tests on the host runs model-written code outside the sandbox; and how a change goes back in that state (with a pull request: a comment from a reviewer the factory trusts, not the account it pushes as; `quarantined`: `retry`, `amend-scope`, `reject -to spec`; `halted`: the printed next step; `resume_review`: `resume`). Other states: `Nothing to inspect`. `-json` prints `commands`, `tickets` (`ticket`, `run_id`, `worktree`, `base`, `result`, `commands`) and `note`. The console's request page shows the same block, with a copy button per command |
+| `factoryd inspect <request-id \| run-id>` | Prints the commands that show the work before a decision, each under what it shows. At `spec_review`, `oracle_review` and `plan_review`: `less`/`ls` of the drafted spec, oracle files and tickets. At `pr_review`, `quarantined`, `halted` and `resume_review`, for each ticket, its latest run with a result (the build, or the last corrective round): its worktree, then `git -C <repository> log`, `diff --stat` and `diff` of the ticket's base `..` that result commit (read from the repository, so they work after the worktree is gone; only hex commit names are used), `git worktree add ~/review/<run-id> <result>` for a copy of your own (the one line that writes); a run with no result commit gets its worktree's `HEAD`, labelled as not checked by the gates; `less` of the ticket snapshot, the review's findings (`CODE_REVIEW_EVIDENCE.json`) and the build report where they exist, and `factoryd logs`. A run id prints that run's block. Paths under the home directory are written from `~`. A note follows: try or change the work in your own copy, not the factory's worktree (the push is pinned to the checked commit and a moved branch is refused, a retry or reconcile may reuse or remove the folder, a review does not start on a worktree that is not clean); running the build's tests on the host runs model-written code outside the sandbox; and how a change goes back in that state (with a pull request: a comment from a reviewer the factory trusts, not the account it pushes as; `quarantined`: `retry`, `amend-scope`, `reject -to spec`; `halted`: the printed next step; `resume_review`: `resume`). Other states: `Nothing to inspect`. `-json` prints `commands`, `tickets` (`ticket`, `run_id`, `worktree`, `base`, `result`, `commands`) and `note`. The console's request page shows the same block, with a copy button per command |
 | `factoryd memory <subcommand>` | Repository memory for one repository: `list` (the switch, the budget, the lines in force, the candidates; with memory on it first collects candidates from finished runs' notes), `show <id>`, `add "<text>"`, `drop <id>`, `propose [<id>...]` (opens one request that rewrites the fenced section of `AGENTS.md` and stops at `spec_review`), `on`, `off`. See "Repository memory" below. Every subcommand but `list` and `show` is refused while memory is off. |
 | `factoryd sandbox <show\|approve\|evict> -repo <repository>` | A repository's committed `sandbox:` block (see "Sandbox block"). `show` prints the block read from the committed `.factory.yml`, its commit, its SHA-256 and whether you approved it. `approve` prints the same and records your approval of that hash for this repository under `<data-dir>/sandbox-approvals/`: it asks y/N on a terminal; without one `-sha256 <hex>` must equal the hash it prints. `approve -revoke <hex>` removes one approval. A repository cannot approve its own block. `evict` removes the repository's install images (every repository's without `-repo`); the next run builds what it needs |
 | `factoryd stop` | Stops the `worker` and the `serve` of the data dir, one output line per process (`stopped (pid N)`, `not running`, or why it was skipped). Finds pids from `<data-dir>/quickstart-queue-run.pid` or the worker heartbeat, and from `<data-dir>/console-address` or `quickstart-serve.pid`, and signals a pid only while it still looks like factoryd. A running launchd service (`dev.factoryd.worker`/`dev.factoryd.serve`) for that data dir is left alone (`factoryd uninstall-service` removes it). Refuses when the heartbeat names any request being built or run (all are listed). With `-force`, the running builds halt at the next worker start and their requests wait in `resume_review` (`factoryd resume <id>` continues or rebuilds one). Exits non-zero on a refusal or a process that would not exit. `-all` stops every profile's data dir, then, when `~/.config/factoryd/openshell` exists, the OpenShell gateway and meter (`docker compose -p buildgate-openshell stop gateway meter`, refused while a request or sandbox is active), then Temporal (`docker compose -f ~/.config/factoryd/temporal/docker-compose.yml stop`), then `colima stop` when colima is the Docker provider and no other container runs (`FACTORYD_AUTOSTART=0` leaves the VM running, as `factoryd uninstall` does). It refuses while a worker is still live and is exclusive with `-config` and `-data-dir`. `-force` stops despite a building request, cancelling its build, or, with `-all`, despite a live worker. |
@@ -149,7 +149,7 @@ each `daemon` child it runs.
 | Stale `factoryd` on `$PATH` | `doctor` runs or fixes a shadowing binary only in `$HOME/.local/bin`, `$GOPATH/bin` or a Homebrew prefix (elsewhere: `stat` only). `-fix` prints the `rm`/`mv`; add `FACTORYD_DOCTOR_APPLY_PATH_FIX=1` to rename it to `<path>.stale-<date>`. |
 | `worker` start after a kill -9 | With the drain lock held, it reclaims every nonterminal run whose owner is gone: the pid in the run's `sandbox-owner.pid` no longer exists (a live pid, no marker, or a terminal run is never touched). Each is halted with the triage "the factoryd process running this build stopped mid-run", its Temporal workflow is terminated if still `Running` (unreachable Temporal: the run is left for the next start), and its worker, supervisor, registry-proxy and compose containers are removed; its ticket rebuilds as a new run. One log line per run. |
 | Paths colima does not share | colima should share only `~/buildgate` read-write and your repositories read-only (USAGE.md, "Data directory and colima"), so a data dir or workspace anywhere else — `/tmp`, `~/.cache` — fails inside the sandbox ("does not appear to share ... into its containers"). `doctor -workspace <dir>` probes the workspace and data dir; `worker` and `factoryd <run>` preflights probe the data dir when it already exists. `doctor -fix` can repoint `data_dir` to `~/buildgate/data`. `mkdir -p` the data dir before a first bare `factoryd` run. On macOS `doctor` also warns (`Docker VM does not share all of $HOME`) while the VM still sees all of `$HOME`. |
-| Correct work quarantined as all-"unavailable" | A slow/local model's conformity review can time out or return unparseable output; under `-conformity-policy required` (default) every criterion reads `unavailable` and blocks. If `agent_evidence.stopped_reason` lists every criterion as unmet, retry with `-conformity-policy advisory` (flag or `conformity_policy` key). The verdict is still recorded. |
+| Correct work waiting in `resume_review` after a review | A slow or local model's review can time out or return unparseable output; under `-code-review-policy required` that is a review with no verdict, which judges nothing and quarantines nothing: the request waits in `resume_review` with the cause, and `factoryd resume <id>` reviews the kept build again. Under `advisory` or `off` the run is not held. |
 | Docker's disk is nearly full, or a sandbox process is killed for want of memory | The factory reads Docker's free space (the meter container's `factoryd-meter statfs`) before each launch and refuses one under 2 GiB free (`sandbox_disk`, every step, the build included); a verify, baseline, full-suite or named-gate command that fails with under 1 GiB free after it exited, most of the space gone before it started, is `sandbox_disk` too, without a second run. A baseline verify that fails in a sandbox whose worker container Docker reports OOM-killed is `sandbox_memory`; a later step killed the same way is an ordinary failure, not run again, whose attempt records the reading and whose next build is told the kernel killed a process of it. The floors are constants, not config keys. The request waits in `resume_review` with the cause; a build only records the readings on its attempt (`sandbox_resources`). See USAGE.md's `resume_review` table |
 | The model provider's usage limit ran out mid-request | Nothing was judged, so nothing quarantines: the request waits in `resume_review` with cause `provider_quota` and the reason "the model provider refused the requests of the building step with its own rate or usage limit, so the work was not judged (it said to try again after ...)". The cause is read from the spend meter's record of the step's model requests (the provider answered them `429`), never from the worker's output. The time is the provider's `Retry-After` as the meter recorded it; when it sent none, a plain time of day in the codex CLI's usage-limit message is shown instead ("3:11 AM by the worker container's clock", UTC unless the image sets another), and otherwise no time. Run `factoryd resume <id>` after that time: a build it refused continues in its kept worktree, and a build whose review it refused is reviewed again without building. No session-config budget governs this limit. |
 | Configured image is out of date with its own source | `factoryd doctor`/`quickstart` compare each configured image's stamped build-inputs label against the checkout named by `image_source_root` (session config, written by `factoryd configure-images`) and warn (never fail) when it's stale; `quickstart` offers to rebuild, `worker`/`serve` print one warning line at startup. Run `make install` in that checkout to rebuild. No `image_source_root` recorded (or the checkout is unreadable): nothing is checked. |
@@ -322,50 +322,26 @@ meanwhile; the factory marks it ready again by its usual rule (checks pass,
 no thread open, the release decision allows the new head), so no ready state
 crosses a head the factory changed.
 
-A ticket that quarantines with its failed gates a subset of
-`spec_conformity`/`code_review` (every other gate passed), where at least
-one of those two carries something actionable (a flagged, non-"clean"
-spec-conformity criterion, or a "high"-severity code-review finding),
-first gets up to `-review-corrective-rounds` (default `1`, `0` disables;
-key `review_corrective_rounds`; the retired key
-`conformity_corrective_rounds` is refused)
-automatic corrective builds on its own branch before the request
-quarantines: each round's addendum spec is the ticket spec plus a "Spec
-conformity review to address" section (the flagged criteria and the
-reviewer's own detail) when spec_conformity was flagged, and/or a "Code
-review findings to address" section (each blocking finding's file:line,
-severity, summary and failure scenario) when code_review was flagged,
-rebuilt via `-on-branch`/`-diff-base` against the quarantined run's own
-branch/base SHA, through every gate again including a fresh, independent
-review. A review that gave no verdict (the reviewer timed out, returned
-nothing parseable, or had its model calls refused by the spend meter or by
-the model provider's own limit) is not actionable, gets no round and is no
-quarantine: the request waits in `resume_review` with the cause, read from
-the spend meter's record of the review's model requests (`provider_quota`,
-`meter_denied`, `model_unavailable`, or `no_verdict` when the model was
-served), and `factoryd resume <id>` reviews the kept build again without
-building it. A corrective round whose own review gave no verdict is not
-counted and leaves the request there too, with only
+A finding of the review never quarantines a ticket by its severity: it
+refuses the run only through a reproduction the factory ran
+(`review_reproduction`, below), and a run that check refused gets the same
+corrective build as any other check a build can fix (below), with its
+reproductions rechecked. A review that gave no verdict (the reviewer timed
+out, returned nothing parseable, or had its model calls refused by the spend
+meter or by the model provider's own limit) is not actionable, gets no round
+and is no quarantine: the request waits in `resume_review` with the cause,
+read from the spend meter's record of the review's model requests
+(`provider_quota`, `meter_denied`, `model_unavailable`, or `no_verdict` when
+the model was served), and `factoryd resume <id>` reviews the kept build
+again without building it. A corrective round whose own review gave no
+verdict is not counted and leaves the request there too, with only
 `factoryd resume -from scratch <id>` to choose (a round keeps no worktree).
-A quarantine names `code_review` when that gate
-failed, else `spec_conformity`. Accepted opens the PR and advances exactly like an ordinary
-first-build acceptance; quarantined or halted again quarantines the
-request as usual. A budget greater than `1` runs up to that many
-*consecutive* rounds, not just one: a round that itself quarantines again
-with the identical review-eligible shape starts another round from its own
-flagged content, until one accepts, a round's own outcome stops being
-review-eligible, or the budget runs out. Never triggered when any other
-gate also failed, or the run halted rather than quarantined. Counted
-separately from `-max-review-rounds`' own PR-review-round cap, so neither
-budget can consume the other's rounds. The budget is per ticket and is not
-reset by `factoryd retry`: a ticket that already used its rounds gets none
-on a rebuild, because a human chose that retry. With
-`roles.execution.escalation` configured, every automatic corrective build
-(this one and the one for other checks below) runs on the escalation's
-model and level instead of the first build's; see "Model routes".
+With `roles.execution.escalation` configured, every automatic corrective
+build runs on the escalation's model and level instead of the first build's;
+see "Model routes".
 
-**Corrective builds for other checks.** A ticket run quarantined by checks
-other than the two reviews alone is followed by a corrective build when its
+**Corrective builds.** A ticket run quarantined is followed by a corrective
+build when its
 handoff sorts every judged failed check as `corrective` (see "What a stopped
 run left behind" in USAGE.md for the bins). A named or repository gate that
 fails the same way on the base commit is sorted `operator`, so no corrective
@@ -376,9 +352,12 @@ build spec, unchanged, and the handoff rendered as text as
 build's first prompt receives, never a review. The file is kept in the
 request's directory (`rounds/<ticket>-corrective<n>/earlier-attempt.md`), the
 round's run is `<request>-<ticket>-corrective<n>`, and the round is recorded
-on the ticket with kind `corrective`. `-review-corrective-rounds` is one
-budget per ticket build for this round and the review round together; `0`
-disables both. Not eligible: `tests_added` on a committed diff, a review that
+on the ticket with kind `corrective`. `-review-corrective-rounds` (default
+`1`; key `review_corrective_rounds`) is one budget per ticket build, `0`
+disables it, and it is counted separately from `max_review_rounds`. An
+accepted round opens the PR and advances exactly like a first build's
+acceptance. A budget greater than `1` runs up to that many consecutive
+rounds while each round's own outcome is still eligible. Not eligible: `tests_added` on a committed diff, a review that
 gave no verdict, an unknown check, a repository gate the worker never ran, a
 build a `setup:` command stopped before its first agent turn (decided only by
 the factory's own records: the meter counted no token for the build and the
@@ -388,12 +367,49 @@ halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
 
+A run a reviewer's reproduction refused (`review_reproduction`, SC-022) gets
+this corrective build too, with what the factory ran and nothing else:
+
+| | |
+|---|---|
+| Told | Each blocking finding as one line of the record (`## Reproduced review findings`: severity, summary, the cited spec line, the reproduction's path, one failing test and its kind). Never the reproduction, the reviewer's failure scenario, a finding that is advice, or a high finding with no reproduction the factory ran |
+| Mounted | Nothing more: the build does not see the reproduction |
+| Rechecked | The ticket's list of reproductions (`reproductions` on the ticket in the request record): every reproduction that refused a run of the ticket, each once by path and hash, with the id of the run that holds it (path, SHA-256, runner, test IDs, the host copy under that run's `review-repro/`). Every build of the ticket gets it as a manifest in `rounds/<build>/recheck.json`, checked again by `factoryd` before the build starts (each run a run of the request). The build's workflow runs each copy once on its result, after the gates and before its own review; anything but a pass on every test refuses the build |
+| Still failing | The recheck runs once per automatic build: a round whose recheck still fails is not followed by another, whatever the budget, and the request is quarantined with check `review_reproduction`, its reason the run's triage sentence (``review_reproduction: "<path>" still fails on the result commit after the corrective build ("<test>" <kind>); …``). A new blocking finding in the round's own review is a new refusal: it gets the next round while the budget lasts |
+| No build | A held copy that is gone or no longer matches its hash: no build of the ticket, the request halted with halt kind `recheck_unheld` and the paths. `factoryd retry <id>` checks each copy again, takes those still missing off the list (recorded on the request, under `dropped_reproductions`, with the ticket, who and why) and builds again. Not the run's unresolved cause `reproduction_unheld`, which halts one run whose copy could not be held or mounted while it ran (see below) |
+
+Every build of the ticket rechecks the list the same way: a retry, a
+`retry -from <N>`, a resume and every PR-review round, also after a recheck
+that still fails and after an accepted or restacked round. The list grows
+only by refusals, each bounded by `review_corrective_rounds` and
+`max_review_rounds`. A reproduction's refusal of a run `factoryd override`
+accepted is taken off it (recorded under `dropped_reproductions`, with the
+runs it covers): the override is the decision on that refusal. A send-back
+to spec or to plan discards the tickets and with them their lists: an
+operator's action that ends the chain, each entry recorded under
+`dropped_reproductions` with who sent it back. A drop covers only the
+refusals it was made for (the ticket and the runs): the same reproduction
+refusing another run, a later one or one of a ticket planned again, is on
+the list again. A run that started before the request's last send-back
+notes nothing: the tickets it judged are gone. A restack's replay run holds and runs no reproduction, and leaves the
+list for the round after it. The list is written to the request as soon as
+the run that a reproduction refused ends, whatever the request's state, and
+each build first notes again what refused every run recorded on the ticket;
+one window is left: a worker killed inside a PR-review round, between a fix
+attempt's end and that write, when the attempt's run is not yet on the
+ticket.
+
+| Token | What it is | Way out |
+|---|---|---|
+| `recheck_unheld` | A request's halt kind: a build of the ticket would run without a reproduction on its list whose held copy is gone or changed | `factoryd retry <id>` drops the ones still missing, recorded, and builds again |
+| `reproduction_unheld` | A run's unresolved cause: a copy could not be held, no longer matched its hash before a launch, or its mount was refused during that run | `factoryd resume <id>` or `-from scratch` (resume_review) |
+
 The build agent's own notes for the next attempt (the last section of
 `earlier-attempt.md`, labelled as the agent's unverified view):
 
 | | |
 |---|---|
-| Runs when | A build ends without passing, or passes after at least one round that did not (never a build that passes in its first round), after at least one round in the process, its last turn finished cleanly (no timeout, exit 0, no error, the model route reachable), the harness can continue the session (Copilot: its session id was stored), no `--spec-acceptance-criteria`, and at least 300 seconds of the build's time budget are left (`FACTORY_BUILD_TIME_BUDGET_SECONDS`, the launch's timeout, set for the build launch only; the script measures its own elapsed time against it, not the container's clock). A build that passed needs 60 seconds more, plus one and a half times what its last round's setup, verify and oracle took |
+| Runs when | A build ends without passing, or passes after at least one round that did not (never a build that passes in its first round), after at least one round in the process, its last turn finished cleanly (no timeout, exit 0, no error, the model route reachable), the harness can continue the session (Copilot: its session id was stored), and at least 300 seconds of the build's time budget are left (`FACTORY_BUILD_TIME_BUDGET_SECONDS`, the launch's timeout, set for the build launch only; the script measures its own elapsed time against it, not the container's clock). A build that passed needs 60 seconds more, plus one and a half times what its last round's setup, verify and oracle took |
 | Skipped when | Any of the above fails, or the turn itself fails (`notes_turn failed: <exception class>`, the partial file removed, the build unaffected); `BUILD_EVIDENCE.json`'s `notes_turn` says `ran`, `skipped_reason`, `duration_s` and the turn's usage |
 | The turn | One reply in the build's own session, 180 s at most, asked for five fixed headings and no file change or command; `changed_files_during_notes` is set in `notes_turn` when the tree changed anyway. The notes file is written by the script, as it ends, from the reply of this launch's turn; anything else at its path (a file, a link, a directory) is removed on every way out of the build, a skipped turn included, and a path that cannot be cleared skips the turn (`notes path could not be cleared`) |
 | After a pass | The build script records the worktree before the turn and again after it: every path outside `.git` and the session folder, tracked, untracked and ignored, with its kind, permission bits and the SHA-256 of its content or its link target. Equal records keep the reply. Otherwise the reply is removed (`discarded_reason`, `changed_paths` as a count) and the tree is put back only if every difference can be undone exactly (files git does not ignore are copied aside first, 32 MiB at most; if one changed file has no intact copy, nothing is touched and the tree stays as the turn left it: `tree_restore_attempted: false`). A third record equal to the first (`tree_restored: true`) leaves the build passed with no check run again. Only when the tree cannot be shown equal do the build's setup, fast check, verify and oracle run on it as it stands (`reverify_passed`); if they fail, the build ends as not passed with its last round recorded as failed (its `failure_log`, the round state and a second `round end` progress event say so), and no further round runs. The records show the tree at the moment of the last one: a process the turn left running can write afterwards, as after any build round, and the host's verify, gates and reviews of the committed result are the authority. A launch lost after the pass is resumed (`--resume-from-state`; the round state says `passed`, and `notes_turn_started` once the turn began) with no further round and no second turn, its tree checked again only if the turn had started; the host's resume precondition lets such a state through whatever its round count, and only when the script itself accepts it (exact key spelling, types, one record per round, a non-empty `next_prompt`); any other state with no round left is still refused. The turn is skipped, never run unguarded, when the tree has more than 250,000 entries or 4 GiB of file content or takes over 20 s to record (`workspace too large to record: ...`). `notes_turn` also says `after_pass`, `tree_entries`, `tree_bytes` and `tree_record_s`. Pi is given only its reading tools for this turn and Copilot is denied its shell and write tools; Codex has no such flag. The comparison, not the flag, is the guarantee |
@@ -407,9 +423,9 @@ for the operator to read:
 | | |
 |---|---|
 | Saved by | `agent/pi/scripts/saved_prompts.py`'s `save_prompt(session_dir, name, text)`, at the one place each script hands a prompt to the harness. It never raises and never changes the turn; a failure is one progress note naming the exception class |
-| Names | `build-round-<n>`, `build-notes` (the build); `review-conformity`, `review-code`, `review-combined`, `review-conformity-recheck`; `draft-spec`, `draft-spec-example-check`, `draft-plan`, `draft-oracle-c<nnn>`. A name saved twice in one session (a relaunch) gets `-2`, `-3`. Not covered: `goal_pilot.py`, which `factoryd intake` runs outside a run's or request's directory; the factory composes no prompt text there (each prompt is the one line `/spec-plan <input file> <pilot dir>` or `/contract-plan <pilot dir>`), and the model's output is in `<pilot dir>/logs/` |
+| Names | `build-round-<n>`, `build-notes` (the build); `review-combined`; `draft-spec`, `draft-spec-example-check`, `draft-plan`, `draft-oracle-c<nnn>`. A name saved twice in one session (a relaunch) gets `-2`, `-3`. Not covered: `goal_pilot.py`, which `factoryd intake` runs outside a run's or request's directory; the factory composes no prompt text there (each prompt is the one line `/spec-plan <input file> <pilot dir>` or `/contract-plan <pilot dir>`), and the model's output is in `<pilot dir>/logs/` |
 | Caps | 2 MiB per prompt (cut, with a last line saying how many bytes), 50 per launch; the host enforces both again, takes only regular files named `[a-z0-9-]{1,64}.md`, and follows no link |
-| Stored | `<session folder>/prompts/<name>.md` in the worktree, copied by the host (through `sanitize.Text`: escapes, control characters and recognisable credentials removed) to `prompts/<launch>-<n>/<name>.md` in the run's directory (`<launch>` is `build`, `spec_conformity`, `code_review` or `review`; `<n>` the Temporal attempt), or in the request's directory (`spec-<n>`, `plan-<n>`, `oracle-<n>`) for a drafting job, then removed from the worktree before any later launch. A launch's prompts folder is also emptied before the launch (a folder left read-only is made removable first; a review or a build whose folder cannot be emptied fails as an infrastructure error and is not launched), so only files written during the launch are copied. No field of `run.json` names them |
+| Stored | `<session folder>/prompts/<name>.md` in the worktree, copied by the host (through `sanitize.Text`: escapes, control characters and recognisable credentials removed) to `prompts/<launch>-<n>/<name>.md` in the run's directory (`<launch>` is `build` or `review`; `<n>` the Temporal attempt), or in the request's directory (`spec-<n>`, `plan-<n>`, `oracle-<n>`) for a drafting job, then removed from the worktree before any later launch. A launch's prompts folder is also emptied before the launch (a folder left read-only is made removable first; a review or a build whose folder cannot be emptied fails as an infrastructure error and is not launched), so only files written during the launch are copied. No field of `run.json` names them |
 | What a saved prompt proves | A saved prompt is what the build's session folder held when the host copied it; a build can alter its own before that (the script and the coding agent run as one user in one sandbox). A review's prompt is saved by a launch that runs no build agent |
 | Readable by | The operator: `factoryd logs -list` / `-prompt`, `GET /runs/{id}/prompts` (name, attempt, bytes, time) and `GET /runs/{id}/prompts/{attempt}/{name}` (`text/plain`), gated like `GET /runs/{id}`, and the run page's **Prompts as saved by the build**. Not a model, a review, an MCP tool, a pull request, a notification, the progress feed or `run.json`. A prompt may quote repository files, failing output and the record of an earlier attempt |
 
@@ -420,7 +436,7 @@ as a fresh run with every gate again. Where it starts and what it is told:
 |---|---|---|
 | Quarantined, with a handoff a build may be given (the corrective round's rule), built from the ticket's own spec as it is now, and it committed something | On that run's branch, from its commit (`-on-branch`, with the run's diff base); given the record (`rounds/<ticket>-retry/earlier-attempt.md`), which opens by saying the attempt's commit is in the workspace | From the base commit; given the record, which opens by saying the workspace starts from the base |
 | The same, but it committed nothing (verification never passed) or recorded no branch | From the base commit; given the record | The same |
-| Anything else: a failure a build is never told about (`tests_added`, a review with no verdict), a spec changed since (`amend-scope`, an edit), a review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
+| Anything else: a failure a build is never told about (`tests_added`, a review with no verdict, a failed `code_review`), a spec changed since (`amend-scope`, an edit), an older record's review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
 
 The gates and the release decision of a rebuild that continues judge the
 ticket's whole change, measured from the diff base, so nothing in the commit
@@ -429,9 +445,9 @@ scratch` always starts from the base. A lost rebuild that was continuing on a
 branch cannot be resumed in its worktree (only `resume -from scratch`).
 
 **The round ledger.** Each build round that ends in a commit of its own (the
-ticket's first build, a rebuild, an automatic corrective or conformity round, a
+ticket's first build, a rebuild, an automatic corrective round, a
 PR-review round) is recorded on its ticket (`round_tags`: round number per
-ticket, kind `build`, `corrective`, `conformity` or `pr_review`, run, commit,
+ticket, kind `build`, `corrective`, `conformity` (a label only older records carry) or `pr_review`, run, commit,
 base and diff base, outcome `accepted`, `quarantined` or `halted`, and the
 checks that failed) and kept under a local ref
 `refs/buildgate/rounds/<request-id>/t<ticket>/r<n>` in the target repository, so
@@ -462,7 +478,7 @@ under the same checks:
 | Lost, worktree kept (a retry's rebuild from the base; the worktree of a corrective round, which runs on an existing branch, is never kept) | `factoryd resume` in that worktree | `rounds/<ticket>-resume/earlier-attempt.md`; opens by saying the record is of the attempt before the interrupted build, and whether the interrupted build ran on that attempt's branch |
 | Lost or halted | `factoryd resume -from scratch` or `factoryd retry` | `rounds/<ticket>-retry/earlier-attempt.md`, as for any retry |
 
-**`-on-branch`/`-diff-base`.** A corrective round (review or PR-review)
+**`-on-branch`/`-diff-base`.** A corrective round (pre-PR or PR-review)
 checks out the quarantined run's own existing branch and gates the
 cumulative diff from `-diff-base`, for every ticket in a multi-ticket
 request.
@@ -501,24 +517,30 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   starts no further round unless the reviewer comments again.
 - A round passes every gate the ticket's first build passes, judged on the
   whole pull request diff: verify, the full suite, the diff-shape gates,
-  spec conformity against the ticket's acceptance criteria, and code review.
-- A round the review gate alone quarantines (only `spec_conformity` and/or
-  `code_review` failed, with a flagged criterion or a `high` finding) gets up
-  to `review_corrective_rounds` fix attempts (default `1`, `0` disables) on
-  the same branch before it ends, each told what the gate flagged in the
-  attempt before it. The last attempt decides the round, and the round uses
+  and the code review.
+- A round a reviewer's reproduction alone refused (only `review_reproduction`
+  failed, SC-022) gets up to `review_corrective_rounds` fix attempts
+  (default `1`, `0` disables) on the same branch before it ends, each given
+  the record of the attempt before it (`-earlier-attempt`, the reproduced
+  findings one line each) and rechecking its held copies; an attempt whose recheck still fails gets no
+  further one. A high finding with no
+  reproduction the factory ran starts no fix attempt and is told to no later
+  build. The last attempt decides the round, and the round uses
   one slot of `max_review_rounds` however many attempts it took. The request
   page links each earlier attempt's run under the round.
 - A quarantined attempt's commits stay on the local branch, unpushed, and
   the next attempt or round builds on them. Each one's ticket is the
-  ticket's own spec plus:
-
-  | Section | Content |
-  |---|---|
-  | `## Reviewer comments to address` | Each open trusted thread: path, line, author, body |
-  | `## Why the previous attempt was not pushed` | Only after an attempt the review gate quarantined: that the earlier attempt is on the branch and was refused |
-  | `## Spec conformity review to address` | That attempt's flagged acceptance criteria, with the reviewer's detail |
-  | `## Code review findings to address` | That attempt's blocking (`high`) findings: location, summary, failure scenario |
+  ticket's own spec plus `## Reviewer comments to address` (each open
+  trusted thread: path, line, author, body). After an attempt a reviewer's
+  reproduction refused, the next attempt or round is also given that
+  attempt's record as `-earlier-attempt` (opening by saying the attempt's
+  commit is in the workspace; its blocking findings one line each under
+  `## Reproduced review findings`: severity, summary, cited spec line, the
+  reproduction's path, one failing test and its kind; never the failure
+  scenario or the reproduction). Every attempt and round rechecks the
+  ticket's list of reproductions (see "Corrective builds"), whatever the
+  round before it was, so a later round cannot undo a fix a reproduction
+  proved. The reply posted on the thread quotes the same lines.
 - No new threads, still a draft, checks passing, no unresolved thread
   from any non-bot/non-self author (trusted or not — an untrusted human's
   open comment still blocks readiness, it just can't trigger a round),
@@ -612,7 +634,7 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 | Request text | Optional with `-spec-file`: the first `## Problem` heading's text is used when present. With no Problem heading, the first heading's text (without `#`) is used; if there is no heading, the first non-blank line outside leading `---` front matter is used. A request text, `-request-file` or `-issue` may still be given |
 | Review | The same `spec_review` gate and approval hash as a drafted spec. Planning, oracles and builds read it exactly like a drafted one |
 | Read-back | On every spec drafting pass of a handed-over spec (the first, and each redraft after a reject), one sandboxed job (`read_back.py`, the planning role's model and harness) reads the spec text the pass is about to put up for review and writes what it will build, in its own words (at most 1,500 bytes), and up to 7 questions it would otherwise guess at (at most 400 bytes each), only where the spec leaves a choice that changes behaviour, an interface or a test result. It runs before `spec.md` is written, so a read-back stopped part-way leaves the reviewed `spec.md` in place; the drafting job's spend is recorded first. A pass that puts up the same spec bytes again (a retry) keeps the read-back and its answers and runs no job. What the job spent is recorded even when the pass stops or the request is cancelled while it runs. The console's spec review and `factoryd watch` show it, marked as model-written, with each question's id and current answer; it is never a check. Answer any question in the console or with `factoryd answer -q Q2 -hash <hash> -text "..." <id>` (the hash `watch` prints beside the question) (at most 2,000 bytes); approve with questions unanswered if they do not matter. A read-back that could not be drafted (no job, the spend ceiling reached, the job failed, or its output malformed or over the limits) leaves one review note naming the cause, and the request reaches `spec_review` as usual |
-| Answers | The spec approval pins the answered questions beside the spec's hash: answering is refused after it, and a build whose answers changed since is refused like an edited spec. The console's approval also sends the digest of the answers it showed with the spec's hash, and is refused (409) when the stored answers differ or the spec's hash is missing; it warns when an answer box holds text not yet saved, and a box whose stored answer changed under unsaved text keeps the text and shows the stored answer. Approval is refused when the spec and the answered questions together are over 120,000 bytes. Under `# Questions answered at spec review`, each question and answer quoted in its own fence (so neither can declare a ticket header line or the goal), they reach every reader of the approved spec: every ticket's build input after the spec, the planner beside the spec, the oracle drafter after the criteria, and the in-build spec-conformity reviewer after the ticket's criteria, labelled as your answers to questions about the spec. Unanswered questions and the summary are not included. A reject drafts a new read-back; the answers given before it go to the redraft with your feedback. Answers still held when the spec is redrafted any other way (a retry of a halted draft) go to that redraft in a section of their own. A spec edited after its read-back was drafted gets a review note saying the read-back describes an earlier version |
+| Answers | The spec approval pins the answered questions beside the spec's hash: answering is refused after it, and a build whose answers changed since is refused like an edited spec. The console's approval also sends the digest of the answers it showed with the spec's hash, and is refused (409) when the stored answers differ or the spec's hash is missing; it warns when an answer box holds text not yet saved, and a box whose stored answer changed under unsaved text keeps the text and shows the stored answer. Approval is refused when the spec and the answered questions together are over 120,000 bytes. Under `# Questions answered at spec review`, each question and answer quoted in its own fence (so neither can declare a ticket header line or the goal), they reach every reader of the approved spec: every ticket's build input after the spec, the planner beside the spec, the oracle drafter after the criteria, labelled as your answers to questions about the spec. Unanswered questions and the summary are not included. A reject drafts a new read-back; the answers given before it go to the redraft with your feedback. Answers still held when the spec is redrafted any other way (a retry of a halted draft) go to that redraft in a section of their own. A spec edited after its read-back was drafted gets a review note saying the read-back describes an earlier version |
 | After a reject | An operator-shaped spec stays operator-shaped: the drafting model applies the feedback while keeping its headings, order and list structure, and scoped comments can name any heading in that document. A drafted spec keeps the skeleton rules. The drafting cost shows in `factoryd cost` |
 | Edited in the console | At `spec_review` and `plan_review` the console's Edit saves the file in place. Each save is recorded on the request: who, when, the changed lines, and the replaced text as a revision (the request page's Audit lists them). If you then reject that stage, the changed lines go to the planning model with your feedback, marked to be kept; an edit you approve reaches no model, since nothing redrafts the file |
 | Not in the skeleton | Hand the document over with `-spec-file`; only the criterion rule above is required of its shape |
@@ -695,11 +717,8 @@ ticket. A timed-out draft keeps files already written if `MANIFEST.json`
 existed first; otherwise the draft fails and you redraft. `factoryd
 retry` returns a materialization halt to `oracle_review`.
 
-**Triage hint on quarantine.** When `spec_conformity` fails and this
-run's `reference_oracle` gate shows the build *passed* the approved
-oracle, the triage sentence names the oracle file(s) covering the
-flagged criteria as a possible cause — a hedged hint from durable gate
-evidence, never a guess.
+**Triage hint on quarantine.** When `diff_scope` fails, the triage sentence may add that an approved
+oracle could be the thing that is wrong, naming it.
 
 ## Session config
 
@@ -1145,7 +1164,7 @@ other text of the spec.
 |---|---|---|
 | `plan_review` | `criterion N names <file>, which ticket T may change, but the tickets covering criterion N may not` | The criterion names, in backticks, a file that is in the `Allowed-Files` of a ticket that does not list the criterion as covered, and in those of no ticket that does. Only names and ticket headers are read: any wording earns it |
 | `plan_review` | `criterion N says <file> changes, but no ticket may change it` | The file exists, no ticket may change it, and the words around its name say it changes (`adds`, `gains`, `new`, `updated`, `removed` ...) without denying it (`no`, `not`, `unchanged`) or only referring to it (`already`, `pattern`, `like`, `from`) |
-| `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written; the conformity review, which sees only the diff, is told not to judge a requirement on the commit's text and to judge every other part of the criterion as usual |
+| `spec_review` | `criterion N reads as a rule for the commit message, which the factory writes; keep, edit or remove it` | The criterion speaks of "the commit message", "each commit's subject", "Conventional Commits" and the like. It stays in the spec as written. Wording only: nothing refuses |
 | `spec_review` | `criterion N is not in the "When ..., the system shall ..." form` | The spec's criteria carry `AC-N:` labels and criterion N's text does not start with `When`, `While`, `If` or `Where` ... `, the system shall`, or `The system shall`. Wording only: the spec is not changed |
 | `plan_review` | `criterion N has no test: no covering ticket's Tests to add cites AC-N` (`and no approved oracle covers it` when the request has an approved oracle) | The spec's criteria carry labels, a ticket lists criterion N as covered, no listing ticket's `### Tests to add` mentions `AC-N`, and no approved oracle manifest entry covers it. A ticket cites a criterion in `### Acceptance criteria covered` as `- N` or `- AC-N`, and the plan prompt asks for `(AC-N)` at the end of each step and test |
 
@@ -1158,58 +1177,83 @@ a version (`HTTP/1.1`), a media type, a route template
 Go identifier qualified by its package (`internal/domain.Calculate`) are
 not files.
 
-Real correctness coverage is `-conformity-policy`'s
-per-criterion review (default `required`, no `.factory.yml` key) plus the
-deterministic gates and the human gates.
+Real correctness coverage is the review (`-code-review-policy`, below) plus
+the deterministic gates and the human gates.
 
-The conformity reviewer is told that the ticket's verify command already
-passed on the tree it reviews, so a test it predicts would fail is no ground
-for a flag. A flag may name a file and the exact text the file lacks. Under
-`required`, when the result commit holds that text (and the worktree's copy of
-the file is the commit's), those criteria are judged once more by a fresh call
-in the same sandbox, shown the commit's lines that hold the text and nothing
-the first answer said; its verdict replaces the flag, and a call that gives
-none leaves it. The two calls share the review's 20 minutes, and the second is
-skipped under 5. `CONFORMITY_EVIDENCE.json` then holds a `recheck` line, each
-such criterion a `recheck` record, and the PR's `## Spec conformity` section
-marks it "judged again". This trades a quarantine on a false flag for the
-chance that the second call passes a criterion the first rightly flagged. Formatting drift never reaches
-the conformity reviewer:
-`build_app.py` runs `gofmt -w` on changed `.go` files once a round's
-verify passes, and the reviewer prompt excludes pure formatting/lint
-drift from spec-conformity findings.
+Formatting drift never reaches the reviewer: `build_app.py` runs `gofmt -w`
+on changed `.go` files once a round's verify passes.
 
 `-code-review-policy` (`off`/`advisory`/`required`, default `off`; session
-config: `code_review_policy`) is the standalone AI code-review pass
-(`agent/pi/scripts/code_review.py`) -- a free-form review of the diff for
-concrete correctness/security/data-loss/concurrency defects, distinct
-from `-conformity-policy`'s own check against declared acceptance
-criteria: it runs regardless of whether the ticket declared any, right
-after build, canonical verification, full suite (if run), and every
-named gate have all passed. `off` never runs it. `advisory` runs it and
-records every finding in the run record and the PR body, but never
-blocks. `required` quarantines the run (`code_review` gate) on any
-`high`-severity finding, or if the reviewer produced no parseable
-response at all. Findings reach the PR body under a `## Code review`
-section, sanitized and capped at 20.
+config: `code_review_policy`; `quickstart` writes `required`) is the AI code
+review: one launch of `agent/pi/scripts/combined_review.py` (progress stage
+`review`, attempt kind `review`), a free-form review of the diff for
+concrete correctness/security/data-loss/concurrency defects. It runs right
+after build, canonical verification, full suite (if run), and every named
+gate have all passed, whether or not the ticket declares acceptance
+criteria. `off` never runs it. `advisory` and `required` run it and record
+every finding in `CODE_REVIEW_EVIDENCE.json`, the run record and the PR
+body. A finding never fails the `code_review` gate, whatever its severity:
+under `required` the gate fails only when the reviewer gave no verdict (the
+attempt's `exit_code` is 40 for a verdict; any other value is no verdict),
+which sends the request to `resume_review` rather than quarantining it.
+Every finding that is advice reaches the PR body under `## Reviewer advice`,
+one line each (`- **<severity>** <summary>`, made one line, cut to 300
+characters and stripped of backticks, escapes and recognisable credentials),
+`high` first and capped at 20; never its file, failure scenario or
+reproduction. A finding blocks a run only through a reproduction the factory
+runs itself (SC-022 in `safety-contract.md`), and only on a request's ticket
+build:
 
-When both `-conformity-policy` (via a declared `-spec-acceptance-criteria`)
-and `-code-review-policy` are enabled for the same run, both reviews run
-as ONE combined call (`agent/pi/scripts/combined_review.py`) instead of
-two separate sandboxed sessions over the same diff. That review attempt's
-`exit_code` is 40 plus 1 when the conformity review did not succeed and
-plus 2 when the code review did not: 40 is both passed, 43 both failed, and
-any other value fails both gates. An answer that lacks one of the two
-reviews is asked for that review alone, and an answer with neither is asked
-for both again: one further call at most, in the same sandbox, told nothing of
-the first and unable to read its transcript. The two calls share the 20 minutes
-one call gets, so the review takes no longer; the second is skipped when under
-5 minutes are left. Both evidence
-files then hold a `retry` line saying what was asked again and why, or why
+| Run | Review |
+|---|---|
+| A request's ticket build, its corrective rounds and its PR-review rounds | Findings are advice; a reproduction can refuse the run (`review_reproduction`), and a refused run gets one corrective build that rechecks it |
+| A bare `factoryd -ticket` run | Advice only: no reproduction is held or run, no `review_reproduction` check, no corrective round |
+| A restack's replay run | Advice only, the same |
+
+Severity orders the advice and nothing else. An answer without a parseable verdict is asked for
+again once at most, in the same sandbox, told nothing of the first and
+unable to read its transcript; the two calls share the 20 minutes one call
+gets, and the second is skipped when under 5 minutes are left. The evidence
+file then holds a `retry` line saying what was asked again and why, or why
 nothing was. A call that failed is not made again in the sandbox: the factory
 launches the review once more when the spend meter's record shows its model
 served nothing, and a review that still gave no verdict leaves the request in
 `resume_review`.
+
+A request's ticket build runs the reviewer's reproductions (the
+`review_reproduction` check, progress stage `review_reproduction`, attempt
+kind `review_reproduction`):
+
+| Step | What the factory does |
+|---|---|
+| Hold | After the review, each finding's reproduction is checked against the shape rules: it cites a line of the request's approved `spec.md` byte for byte, its path is new in the judged commit (case-folded), matches `test_patterns`, is not an instruction path, under `.factory/` or protected, and a runner applies (`go test -json`, pytest, vitest, Maven Surefire, minitest), with 1 to 20 tests. An accepted one is copied once, read-only, to the run's `review-repro/<finding>/<path>` and its SHA-256 recorded; a refused one is advice, its rule recorded on the finding |
+| Run | Each held copy runs in a scratch worktree of the result commit, never the run's own, launched as a gate (the run's image, setup commands, `.factory/`, registry proxy and compose services, no model route), mounted read-only after its hash is checked, under the runner's own command and per-test timeout of 60 s (JUnit's in a separate thread, so a loop that ignores interrupts still times out; a default: a vitest reproduction can set its own per-test timeout, with a test's own timeout argument or `vi.setConfig`, and is then cut only by the launch's cap). It runs twice on the result, the second time only after a failure, then once on the commit the ticket started from only after two failures |
+| Decide | It blocks when some of its tests failed on both result launches and, on the base, it does not compile or does not fail the same way (same test, same kind); failing the same way blocks only when the reproduction holds a backticked literal of the cited line that no tracked file of the base commit holds (a value the spec states, not a name the base already has; case-sensitive, searched when the reproduction is held, none with an unknown base). A launch that runs past its cap after its command started (its output appeared) is a timeout of every test (a cap that passes before that is no verdict); a run is a compile error only when the build or collection output names the reproduction's own file and is no module resolution failure (`go test`'s build output, Go 1.24 and later: an undefined name or a type error in the reproduction; pytest's collection error: `cannot import name` or an `AttributeError` at import, a syntax error; `mvn test-compile`'s output). A module that cannot be resolved or fetched, whichever file imports it (Go's `cannot find module providing package`, `no required module provides package` or any module fetch error; Python's `ModuleNotFoundError`, whatever the module), any other failure of that step (a dependency that does not build, a conftest that does not import) and an older Go that names no file are a missing report: advice, never a block, since false advice is better than a false block. Everything else is advice: a pass, a compile or collection error, a missing report, one failure, an unknown base |
+| Gate | `review_reproduction` fails when any finding blocks. The finding records each run (pass, commit, outcome, each test's kind, report hash), the verdict and the reason, and its disposition (`blocks` or `advice`) |
+
+The `review_reproduction` triage sentence names the reproduction's path and
+one failing test with its kind, for example ``review_reproduction: the
+factory's run of the reviewer's reproduction "p/repro_test.go" fails on the
+result commit ("TestRepro" fail); the finding is in the run's review
+evidence``. The handoff a later build reads lists each blocking finding as
+one line under `## Reproduced review findings` (severity, summary, the cited
+spec line, the path, the test and its kind), never the reproduction's
+content or the reviewer's failure scenario. A corrective build handed an
+earlier run's held copies (see "Corrective builds") runs each once on its
+own result, after the gates and before its review: anything but a pass on every test, a result commit that holds the path
+included, is still failing and fails `review_reproduction`. Known limits: no
+runner for Gradle, jest, cargo, .NET or PHP (their reproductions are advice);
+a vitest reproduction can set its own per-test timeout; a ticket of a
+multi-ticket request may cite any line of the approved spec; a recheck that
+still fails starts no further automatic build; pytest reads any
+`ModuleNotFoundError` as a missing report (advice), a module the reproduction
+names that the commit adds included, while Go's `main module does not
+contain package` (a package of the module the commit does not have) reads as
+a compile error. A copy that cannot be held, no longer matches its hash
+before a launch, or whose mount is refused halts the run with the unresolved
+cause `reproduction_unheld`. A bare `factoryd -ticket` run, a restack's replay
+run and a run with code review off hold and run no reproduction and record no
+`review_reproduction` check: their review is advice only.
 
 | Restriction | Why |
 |---|---|
@@ -1535,7 +1579,7 @@ roles:
   | Build | Model and level |
   |---|---|
   | A ticket's first build | `roles.execution.model` (or the request's `submit -model execution=...`) at `roles.execution.thinking` |
-  | An automatic corrective build, after a review or after another check (see "review_corrective_rounds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
+  | An automatic corrective build, after a check a build can fix, a reviewer's reproduction included (see "Corrective builds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
   | The build that takes the place of an automatic corrective build that never finished (`factoryd resume`, `resume -from scratch`, `retry` after a halt) | `escalation.model` at `escalation.thinking`, as configured when it starts |
   | A rebuild after `factoryd retry` of a ticket whose corrective round finished quarantined | As a first build: the retry is the operator's, not an automatic corrective build |
   | A PR-review round (a reviewer's comments) | As a first build |
@@ -1562,8 +1606,8 @@ roles:
   A request may pick a harness for `planning` and/or `execution` only
   (`submit -harness role=name`, POST /requests' `harnesses` body field,
   `run -execution-harness` for a bare `factoryd` run); each job launches with its own
-  role's harness (build and corrective rounds: execution; conformity, code and
-  combined review, oracle drafting: review; spec and plan drafting: planning --
+  role's harness (build and corrective rounds: execution; review and
+  oracle drafting: review; spec and plan drafting: planning --
   a role with no `roles:` entry uses `pi`, except drafting/review jobs whose
   role is unset, which run as the execution role). A role whose harness needs
   its own worker image (`pifork`) requires an explicit digest-pinned
@@ -1802,8 +1846,7 @@ third-party skill like any dependency.
 
 ### What a review reads of the repository's instructions
 
-Every model review of a run (spec conformity, code review, the combined
-review; a pull-request round's fix runs through the same ones) launches with
+Every model review of a run (the review; a pull-request round's fix runs through the same ones) launches with
 the repository's instruction files as the base commit holds them. Each path
 below counts in any directory of the repository, at any depth
 (`packages/app/.github/instructions` as `.github/instructions`). Build, verify
@@ -1950,9 +1993,9 @@ Control shows.
 Nothing is stored and no model is called.
 
 A **ticket attempt series** is the finished runs of one ticket in the order
-they were created: its own run, then any retry, corrective round, conformity
-round or PR-review round (a run named `<ticket>-corrective1`,
-`-conformity1`, `-review2`, each possibly with `-fix1`, belongs to
+they were created: its own run, then any retry, corrective round
+or PR-review round (a run named `<ticket>-corrective1`,
+`-review2`, each possibly with `-fix1`, belongs to
 `<ticket>`). A ticket whose first run is still in progress is not counted.
 A ticket belongs to the bucket its first run began in; buckets are UTC days,
 oldest first, empty ones kept, at most 26 (the newest).
@@ -2080,7 +2123,7 @@ lists configured files, the selected role/stage, source path, and SHA-256; it
 does not record this hash in durable request evidence yet. The worker reads
 session configuration at startup; restart it after changing the selection or
 directory list. An edit to the selected file affects the next drafting job.
-This slot does not configure plan, oracle, build, conformity, or review prompts;
+This slot does not configure plan, oracle, build, or review prompts;
 worker skills and design guides remain separate features.
 
 | Key | Meaning |
@@ -2168,7 +2211,7 @@ fields there, not top-level keys), `roles` (per-kind-of-work model/
 thinking picks over `models:` -- see above), `workspaces`,
 and the flag-mirroring keys (`sandbox_image`, `meter_image`,
 `registry_proxy*`, `pr_*`, `max_review_rounds`, `review_corrective_rounds`, `hitl_reminder_interval`,
-`advance_on`, `conformity_policy`, `code_review_policy`, `open_pull_request`,
+`advance_on`, `code_review_policy`, `open_pull_request`,
 `compose_services`, `egress_ca_bundle`).
 
 **Release policy.** The bare defaults above (`0` / `0` / empty) make
@@ -2287,7 +2330,7 @@ factoryd supervise -temporal-address localhost:7233 \
   Empty searches the default session-config paths.
 - `daemon` and `supervise` take the build-tuning flags of a single-ticket run
   (`-build-app-script`, `-max-rounds`, `-timeout-minutes`,
-  `-verify-command`, `-conformity-policy`).
+  `-verify-command`, `-code-review-policy`).
 - Sandbox resource knobs (`sandbox_docker`, `sandbox_memory`, etc.) and
   build/verify attempt limits come only from the session config
   ("Keys with no CLI flag of their own"). They are
@@ -2384,7 +2427,7 @@ A run with an approved oracle (`submit -draft-oracles`, or
 | Activity | What it does |
 |---|---|
 | `RunNamedGateActivity` | Runs the `reference_oracle` gate (and other named gates). The oracle gate also runs the runtime canary, so its timeout is doubled |
-| `CommitOraclesActivity` | After every gate and conformity review passes, commits the oracle files plus `.buildgate/oracles.json` on the factory host. With `-no-commit-oracles`: validate only, nothing committed |
+| `CommitOraclesActivity` | After every gate and the review pass, commits the oracle files plus `.buildgate/oracles.json` on the factory host. With `-no-commit-oracles`: validate only, nothing committed |
 | `RunPostOracleCommitVerifyActivity` | Re-runs canonical verify, full suite, and named gates on the committed tree. Failure quarantines the run |
 
 `-no-commit-oracles` travels as the `no_commit_oracles` input field; older

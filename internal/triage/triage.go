@@ -15,9 +15,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"buildgate/internal/codereview"
-	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
+	"buildgate/internal/oraclemanifest"
 	"buildgate/internal/policy"
 	"buildgate/internal/progress"
 	"buildgate/internal/run"
@@ -141,9 +140,8 @@ func commandGateLogTail(r *run.Run, check string) string {
 
 // gateSentence is the sentence for one failing gate. forOperator is Run's
 // form: a canonical_verify sentence also says how many other gates failed
-// (it stands alone), and a diff_scope or spec_conformity sentence may add
-// the hint that an approved oracle could be the thing that is wrong, naming
-// it. FailedGates lists every gate for a later build attempt, which is not
+// (it stands alone), and a diff_scope sentence may add the hint that an
+// approved oracle could be the thing that is wrong, naming it. FailedGates lists every gate for a later build attempt, which is not
 // told about the oracle, so it gets neither.
 func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool) string {
 	switch g.Check {
@@ -155,8 +153,8 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		return triageRequiredContentPresent(r, dataDir)
 	case "tests_added":
 		return triageTestsAdded(r)
-	case "spec_conformity":
-		return triageSpecConformity(r, dataDir, forOperator)
+	case policy.ReviewReproductionCheck:
+		return triageReviewReproduction(r)
 	case "canonical_verify":
 		if g.SetupNotRun() {
 			return "canonical_verify: " + run.SetupNotRunMessage
@@ -309,7 +307,7 @@ const maxTriageOracleManifestBytes = 64 * 1024
 // own doc comment forbids trusting (see Run's own doc comment), so this
 // derives the same signal from durable gate evidence instead: a reference
 // oracle was active for this run (r.ReferenceOracleDir != "") AND its own
-// gate PASSED this run (conformity.OracleOutcome), i.e. the build
+// gate PASSED this run (oraclemanifest.GateOutcome), i.e. the build
 // succeeded specifically at satisfying the oracle -- exactly the situation
 // under which an over-reaching oracle assertion can force a scope-widening
 // edit. This never claims the oracle caused THIS SPECIFIC violation (that
@@ -320,13 +318,13 @@ func oracleScopeHint(r *run.Run) string {
 	if r.ReferenceOracleDir == "" {
 		return ""
 	}
-	passed := conformity.OracleOutcome(r.GateResults)
+	passed := oraclemanifest.GateOutcome(r.GateResults)
 	if passed == nil || !*passed {
 		return ""
 	}
 	name := "(the reference oracle)"
 	if data, err := evidence.ReadHostileFile(filepath.Join(r.ReferenceOracleDir, "MANIFEST.json"), maxTriageOracleManifestBytes); err == nil {
-		if covered, parseErr := conformity.ParseOracleManifest(data); parseErr == nil && len(covered) > 0 {
+		if covered, parseErr := oraclemanifest.CoveredCriteria(data); parseErr == nil && len(covered) > 0 {
 			name = strings.TrimSpace(covered[0])
 			if len(covered) > 1 {
 				name += fmt.Sprintf(" (+%d more criteria)", len(covered)-1)
@@ -339,19 +337,8 @@ func oracleScopeHint(r *run.Run) string {
 	)
 }
 
-// maxTriageConformityEvidenceBytes bounds the CONFORMITY_EVIDENCE.json read
-// below -- the reviewer's own untrusted output (produced by an LLM reading
-// the agent's diff), same caution as maxTriageOracleManifestBytes above.
-const maxTriageConformityEvidenceBytes = 256 * 1024
-
-// maxTriageConformityDetailLen bounds how much of a flagged verdict's own
-// "detail" field triageSpecConformity quotes -- long enough to be useful,
-// short enough that one criterion's detail can't crowd out the rest of the
-// sentence (Run's own 200-byte overall cap truncates further if needed).
-const maxTriageConformityDetailLen = 80
-
 // leadingCriterionNumber extracts a criterion's own leading "N." / "N)"
-// ordinal, the same convention conformity.NormalizeCriterion strips.
+// ordinal, the same convention oraclemanifest.NormalizeCriterion strips.
 var leadingCriterionNumber = regexp.MustCompile(`^\s*(\d+)[.)]`)
 
 // criterionNumber returns criterion's leading ordinal ("2" from
@@ -363,133 +350,6 @@ func criterionNumber(criterion string) string {
 		return m[1]
 	}
 	return strings.TrimSpace(criterion)
-}
-
-// readConformityVerdicts reads and parses this run's own retained
-// CONFORMITY_EVIDENCE.json (run.Dir/CONFORMITY_EVIDENCE.json, the same
-// host-retained copy loadSpecConformityVerdicts reads -- see its own doc
-// comment for why the retained copy, not the workspace original). Treated
-// as untrusted like every other agent-influenced evidence file this
-// package reads (evidence.ReadHostileFile): a missing or malformed file
-// returns ok=false so the caller falls back to the plain log-based
-// sentence, never a guess.
-func readConformityVerdicts(r *run.Run, dataDir string) (verdicts []run.ReviewVerdict, ok bool) {
-	path := filepath.Join(run.Dir(dataDir, r.ID), "CONFORMITY_EVIDENCE.json")
-	data, err := evidence.ReadHostileFile(path, maxTriageConformityEvidenceBytes)
-	if err != nil {
-		return nil, false
-	}
-	verdicts, err = conformity.ParseVerdicts(data)
-	if err != nil {
-		return nil, false
-	}
-	return verdicts, true
-}
-
-// triageSpecConformity reports the criteria the independent conformity
-// reviewer flagged, and -- when the run's OWN gate evidence is consistent
-// with an approved oracle having encoded the wrong behaviour for one of
-// those criteria -- names the oracle so a human checks it before retrying
-// the build (live incident 2026-09-24: an operator-approved oracle
-// wrongly expected non-RFC-7396 merge-patch semantics, the build agent
-// invented a rule to satisfy it, reference_oracle passed, and
-// spec_conformity correctly flagged the criteria the wrong oracle covered
-// -- but the triage sentence at the time just said "spec_conformity
-// failed: exit 1", giving no hint the approved oracle was the likely
-// culprit). Falls back to the plain log-based sentence (triageLogGate)
-// whenever CONFORMITY_EVIDENCE.json is missing/malformed or nothing was
-// flagged, so this never invents criteria the evidence doesn't support.
-func triageSpecConformity(r *run.Run, dataDir string, oracleHint bool) string {
-	verdicts, ok := readConformityVerdicts(r, dataDir)
-	if !ok {
-		return triageLogGate(r, "spec_conformity", 0)
-	}
-	var flagged []run.ReviewVerdict
-	for _, v := range verdicts {
-		if v.Verdict == "flagged" {
-			flagged = append(flagged, v)
-		}
-	}
-	if len(flagged) == 0 {
-		return triageLogGate(r, "spec_conformity", 0)
-	}
-	nums := make([]string, 0, len(flagged))
-	for _, v := range flagged {
-		nums = append(nums, criterionNumber(v.Criterion))
-	}
-	base := fmt.Sprintf("spec_conformity failed: criteria %s flagged", strings.Join(nums, ", "))
-	if oracleHint {
-		if hint := conformityOracleHint(r, flagged); hint != "" {
-			return base + " -- " + hint
-		}
-	}
-	for _, v := range flagged {
-		detail := strings.TrimSpace(v.Detail)
-		if detail == "" {
-			continue
-		}
-		if len(detail) > maxTriageConformityDetailLen {
-			detail = detail[:maxTriageConformityDetailLen] + "..."
-		}
-		return base + ": " + detail
-	}
-	return base
-}
-
-// conformityOracleHint returns a hedged clause naming any approved
-// oracle(s) that cover a criterion the conformity reviewer just flagged --
-// only when this run's OWN gate evidence shows the reference_oracle gate
-// PASSED (i.e. the build succeeded specifically at satisfying that
-// oracle), the same "passed, not merely configured" precondition
-// oracleScopeHint applies for the same reason (see its own doc comment).
-// Returns "" whenever the oracle didn't pass, wasn't configured, its
-// manifest can't be read, or none of the flagged criteria are
-// oracle-covered -- never a guess.
-func conformityOracleHint(r *run.Run, flagged []run.ReviewVerdict) string {
-	if r.ReferenceOracleDir == "" {
-		return ""
-	}
-	passed := conformity.OracleOutcome(r.GateResults)
-	if passed == nil || !*passed {
-		return ""
-	}
-	data, err := evidence.ReadHostileFile(filepath.Join(r.ReferenceOracleDir, "MANIFEST.json"), maxTriageOracleManifestBytes)
-	if err != nil {
-		return ""
-	}
-	coverage, err := conformity.ParseOracleCoverage(data)
-	if err != nil || len(coverage) == 0 {
-		return ""
-	}
-	oracleByCriterion := make(map[string]string, len(coverage))
-	for _, c := range coverage {
-		oracleByCriterion[conformity.NormalizeCriterion(c.Criterion)] = c.OracleFile
-	}
-	var nums, names []string
-	seen := make(map[string]bool)
-	for _, v := range flagged {
-		oracle, covered := oracleByCriterion[conformity.NormalizeCriterion(v.Criterion)]
-		if !covered {
-			continue
-		}
-		nums = append(nums, criterionNumber(v.Criterion))
-		if !seen[oracle] {
-			seen[oracle] = true
-			names = append(names, oracle)
-		}
-	}
-	if len(nums) == 0 {
-		return ""
-	}
-	// Kept short and name-first so Run's maxTriageSentenceLen cap can't cut
-	// off the actionable part: at most two oracle names, then a count.
-	shown := names
-	more := ""
-	if len(names) > 2 {
-		shown = names[:2]
-		more = fmt.Sprintf(" +%d more", len(names)-2)
-	}
-	return fmt.Sprintf("approved oracle(s) %s%s may encode the wrong behaviour; re-check before retrying", strings.Join(shown, ", "), more)
 }
 
 // triageRequiredFilesChanged mirrors triageDiffScope for the
@@ -591,22 +451,61 @@ func triageNoChanges(r *run.Run) string {
 	return fmt.Sprintf("build: agent made no changes in %d round%s", rounds, progress.Plural(rounds))
 }
 
-// triageCodeReview words a failed code_review gate by how many blocking
-// findings the run record carries (r.CodeReview, filled from the retained
-// CODE_REVIEW_EVIDENCE.json by codereview.ParseResult before a run is saved),
-// counted by codereview.Blocking. Only that number appears: the findings are
-// model-written text and are never quoted. "" for any other check, and for a
-// record with no review result or no blocking finding, so the log-based
-// sentence stands.
+// triageCodeReview words a failed code_review gate: the gate fails only when
+// the reviewer gave no verdict under a required policy (findings never fail
+// it), which the run record says (r.CodeReview.Available, filled from the
+// retained CODE_REVIEW_EVIDENCE.json by codereview.ParseResult before a run
+// is saved). "" for any other check, and for a record with no review result
+// or one that gave a verdict, so the log-based sentence stands.
 func triageCodeReview(r *run.Run, check string) string {
-	if check != "code_review" || r.CodeReview == nil {
+	if check != "code_review" || r.CodeReview == nil || r.CodeReview.Available {
 		return ""
 	}
-	n := len(codereview.Blocking(r.CodeReview.Findings))
-	if n == 0 {
+	return "code_review: the reviewer gave no verdict"
+}
+
+// maxReproductionNameLen caps a reproduction's path or test ID in a sentence.
+const maxReproductionNameLen = 160
+
+// triageReviewReproduction words a failed review_reproduction check
+// (SC-022): the path of the first reproduction a corrective build's recheck
+// found still failing, else of the first blocking finding's, with one test
+// ID and its failure kind. The path and the ID are the reviewer's, quoted;
+// the reviewer's summary and scenario are never in the sentence.
+func triageReviewReproduction(r *run.Run) string {
+	const where = "; the finding is in the run's review evidence"
+	for _, rc := range r.ReviewReproductionRechecks {
+		if rc.Verdict == "still_failing" {
+			id, kind := rc.FailedTest()
+			return fmt.Sprintf("review_reproduction: %q still fails on the result commit after the corrective build%s%s", reproductionName(rc.Path), testFailure(id, kind), where)
+		}
+	}
+	if r.CodeReview != nil {
+		for _, f := range r.CodeReview.Findings {
+			if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
+				id, kind := f.Reproduction.FailedTest()
+				return fmt.Sprintf("review_reproduction: the factory's run of the reviewer's reproduction %q fails on the result commit%s%s", reproductionName(f.Reproduction.Path), testFailure(id, kind), where)
+			}
+		}
+	}
+	return "review_reproduction: a reviewer's reproduction refused the run" + where
+}
+
+// reproductionName is a reviewer-chosen path or test ID made one bounded line.
+func reproductionName(s string) string {
+	s = sanitize.Line(s)
+	if runes := []rune(s); len(runes) > maxReproductionNameLen {
+		s = string(runes[:maxReproductionNameLen]) + "…"
+	}
+	return s
+}
+
+// testFailure is " (<id> <kind>)", or "" without an ID.
+func testFailure(id, kind string) string {
+	if id == "" {
 		return ""
 	}
-	return fmt.Sprintf("code_review found %d blocking finding%s", n, progress.Plural(n))
+	return fmt.Sprintf(" (%q %s)", reproductionName(id), kind)
 }
 
 // triageLogGate reports the first failure marker found in the failing
@@ -616,8 +515,7 @@ func triageCodeReview(r *run.Run, check string) string {
 // consulted only by the wholeLine-marker branch, which is the one that
 // closes a %q quote and so is the one where truncating the FINISHED
 // sentence afterward (fitTriageSuffix) risks cutting the closing quote
-// off entirely. Every other caller (spec_conformity's own fallback, the
-// default case) passes 0.
+// off entirely. Every other caller (the default case) passes 0.
 func triageLogGate(r *run.Run, check string, suffixReserve int) string {
 	attempt, ok := attemptForCheck(r, check)
 	if !ok {
@@ -778,7 +676,7 @@ func otherFailingGatesSuffix(r *run.Run, check string) string {
 // build that itself failed is checked first, falling back to the verify
 // attempt's own log otherwise. Every other check's Attempt.Kind is
 // recorded identically to its GateResult.Check (see run_ticket.go's
-// runGate/full-suite/spec-conformity attempt construction).
+// runGate/full-suite attempt construction).
 func attemptForCheck(r *run.Run, check string) (run.Attempt, bool) {
 	if check == "canonical_verify" {
 		if a, found := lastAttempt(r, "build"); found && a.ExitCode != 0 {
@@ -1020,6 +918,8 @@ func triageHalt(r *run.Run) string {
 		return factoryDirSentence(r)
 	case string(unresolved.TemporalUnreachable):
 		return temporalUnreachableTriage
+	case string(unresolved.ReproductionUnheld):
+		return "halted after the review: a reviewer's reproduction could not be held or mounted, so its finding was not judged and nothing was refused"
 	case run.HaltReasonOracleNotRunOnBase:
 		return "halted before the build: the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected), so it says nothing about the bug; no model call was made"
 	case run.HaltReasonOraclePassesOnBase:

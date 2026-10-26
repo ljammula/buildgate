@@ -139,24 +139,21 @@ func TestActivitiesSandboxResourceLimitsUseConfiguredValues(t *testing.T) {
 	}
 }
 
-// TestReviewStepPassedDecodesCombinedExit: a passing combined review exits
-// 40, not 0, and must mark its progress stage passed.
+// TestReviewStepPassedDecodesCombinedExit: a passing review exits 40, not 0,
+// and must mark its progress stage passed.
 func TestReviewStepPassedDecodesCombinedExit(t *testing.T) {
 	for _, tc := range []struct {
-		step string
 		exit int
 		want bool
 	}{
-		{reviewstep.Combined, reviewstep.CombinedExitBase, true},
-		{reviewstep.Combined, reviewstep.CombinedExitBase + 1, false},
-		{reviewstep.Combined, reviewstep.CombinedExitBase + 2, false},
-		{reviewstep.Combined, 0, false}, // outside 40..43: a crash, never a pass
-		{reviewstep.Combined, 1, false},
-		{reviewstep.CodeReview, 0, true},
-		{reviewstep.CodeReview, 40, false},
+		{reviewstep.CombinedExitBase, true},
+		{reviewstep.CombinedExitBase + 1, false},
+		{reviewstep.CombinedExitBase + 2, false},
+		{0, false}, // a crash, never a pass
+		{1, false},
 	} {
-		if got := reviewStepPassed(tc.step, tc.exit); got != tc.want {
-			t.Errorf("reviewStepPassed(%q, %d) = %v, want %v", tc.step, tc.exit, got, tc.want)
+		if got := reviewStepPassed(tc.exit); got != tc.want {
+			t.Errorf("reviewStepPassed(%d) = %v, want %v", tc.exit, got, tc.want)
 		}
 	}
 }

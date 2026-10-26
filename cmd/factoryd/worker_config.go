@@ -47,18 +47,6 @@ const defaultMaxReviewRounds = 3
 // default -- 0 disables it.
 const defaultReviewCorrectiveRounds = 1
 
-// conformityPolicyRequired/conformityPolicyAdvisory are the only legal
-// values of -conformity-policy (mirroring build_app.py's own
-// --conformity-policy argparse choices) -- named once here and used at
-// every site (flag defaults, startup validation, buildTicketRunArgs' own
-// zero-value fallback) instead of repeating the literal strings, the
-// same convention meter.CredentialModeStatic already follows in this
-// same file.
-const (
-	conformityPolicyRequired = "required"
-	conformityPolicyAdvisory = "advisory"
-)
-
 // workerFlags bundles every `factoryd worker` flag's *pointer, so
 // newWorkerFlags (below) can hand them back to workerMain without an
 // unwieldy multi-value return list. Field names match the flag's own local
@@ -89,7 +77,6 @@ type workerFlags struct {
 	reviewCorrectiveRounds    *int
 	hitlReminderInterval      *time.Duration
 	advanceOn                 *string
-	conformityPolicy          *string
 	codeReviewPolicy          *string
 	temporalAddress           *string
 }
@@ -137,7 +124,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// reviewCorrectiveRounds: counted
 	// separately from maxReviewRounds above -- see request.Round.Kind's
 	// own doc comment for why the two budgets never share one counter.
-	f.reviewCorrectiveRounds = flags.Int("review-corrective-rounds", defaultReviewCorrectiveRounds, "most automatic fix builds a ticket gets when only the spec-conformity or code-review gate failed and named something to fix; 0 disables them, and a negative value is refused")
+	f.reviewCorrectiveRounds = flags.Int("review-corrective-rounds", defaultReviewCorrectiveRounds, "most automatic fix builds a ticket gets after a check a build can fix, such as a reviewer's reproduction, failed; 0 disables them, and a negative value is refused")
 
 	// hitlReminderInterval: the request driver's own reminder ticker. A
 	// request that enters spec_review or plan_review is reminded
@@ -151,27 +138,10 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// what each value means.
 	f.advanceOn = flags.String("advance-on", requestdriver.AdvanceOnAccepted, `when a request moves on to its next ticket: "accepted" as soon as the ticket's run is accepted, or "pr_approved" only once its pull request is approved`)
 
-	// conformityPolicy mirrors factoryd <run>'s own -conformity-policy
-	// flag (previously missing on this command entirely -- every
-	// worker-drained entry always ran under build_app.py's hardcoded
-	// "required" conformity policy with no escape hatch, even after an
-	// operator hit the "unavailable" verdict failure mode -conformity-
-	// policy advisory exists specifically for; see issue #164). Defaults
-	// to exactly what run_ticket.go's own flag defaults to ("required")
-	// -- so an unconfigured worker entry behaves identically to an
-	// unconfigured `factoryd <run>` invocation, the same "worker
-	// should behave like the direct CLI by default" reasoning
-	// -open-pull-request's own doc comment gives for its one deliberate
-	// divergence.
-	f.conformityPolicy = flags.String("conformity-policy", conformityPolicyRequired, "what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
-
 	// codeReviewPolicy mirrors factoryd <run>'s own -code-review-policy
-	// flag exactly, defaulting to "off" like the bare CLI -- unlike
-	// -conformity-policy's deliberately-"required" default (issue #164),
-	// there is no equivalent operator complaint yet for a gate that is
-	// off by default, so this stays off until an operator opts a
-	// drained entry into it.
-	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after every other gate passes: off never runs it, advisory records findings without blocking, required quarantines the run on a high-severity finding")
+	// flag exactly, defaulting to "off" like the bare CLI, so it stays off
+	// until an operator opts a drained entry into it.
+	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after every other gate passes: off never runs it, advisory records findings without blocking, required quarantines the run when the review gives no verdict")
 
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts Temporal with Docker if it is down; with FACTORYD_AUTOSTART=0 an address is required.")
 	finishFlags(flags)
@@ -190,7 +160,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	registryProxy, registryProxyImage, egressCABundle, composeServices := qf.registryProxy, qf.registryProxyImage, qf.egressCABundle, qf.composeServices
 	prPollInterval, prIgnoreAuthors, prTrustedAuthors, maxReviewRounds, hitlReminderInterval := qf.prPollInterval, qf.prIgnoreAuthors, qf.prTrustedAuthors, qf.maxReviewRounds, qf.hitlReminderInterval
 	reviewCorrectiveRounds := qf.reviewCorrectiveRounds
-	advanceOn, conformityPolicy := qf.advanceOn, qf.conformityPolicy
+	advanceOn := qf.advanceOn
 	codeReviewPolicy := qf.codeReviewPolicy
 	temporalAddress := qf.temporalAddress
 
@@ -211,13 +181,12 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	if err != nil {
 		return requestdriver.WorkerConfig{}, "", err
 	}
-	// conformityPolicyExplicit is checked after applySessionConfig:
-	// applySessionConfig's own strFlag helper calls flags.Set("conformity-policy", ...) when the
+	// codeReviewPolicyExplicit is checked after applySessionConfig:
+	// applySessionConfig's own strFlag helper calls flags.Set("code-review-policy", ...) when the
 	// session config supplies a value and the operator didn't already
 	// pass the flag -- so flagsWasVisited here correctly reports
 	// "explicit" for either source, uniformly, the same as strFlag's own
 	// set[name] check already treats them.
-	conformityPolicyExplicit := flagsWasVisited(flags, "conformity-policy")
 	codeReviewPolicyExplicit := flagsWasVisited(flags, "code-review-policy")
 	buildAppScriptExplicit := flagsWasVisited(flags, "build-app-script")
 	// -registry-proxy mirrors run_ticket.go's own default-on resolution
@@ -299,15 +268,6 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	if *advanceOn != requestdriver.AdvanceOnAccepted && *advanceOn != requestdriver.AdvanceOnPRApproved {
 		return requestdriver.WorkerConfig{}, "", fmt.Errorf("-advance-on must be %q or %q, got %q", requestdriver.AdvanceOnAccepted, requestdriver.AdvanceOnPRApproved, *advanceOn)
 	}
-	// Rejected here, at startup, for the same fail-fast reasoning
-	// -preflight-profile/-pr-closes-issue/-registry-proxy already get
-	// above (see that comment): otherwise this would pass worker's own
-	// startup check cleanly and only fail deep inside run_ticket.go, once
-	// per drained entry. Mirrors build_app.py's own --conformity-policy
-	// argparse `choices`.
-	if *conformityPolicy != conformityPolicyRequired && *conformityPolicy != conformityPolicyAdvisory {
-		return requestdriver.WorkerConfig{}, "", fmt.Errorf("-conformity-policy must be %q or %q, got %q", conformityPolicyRequired, conformityPolicyAdvisory, *conformityPolicy)
-	}
 	if !codereview.ValidPolicy(*codeReviewPolicy) {
 		return requestdriver.WorkerConfig{}, "", fmt.Errorf("-code-review-policy must be one of off/advisory/required, got %q", *codeReviewPolicy)
 	}
@@ -341,8 +301,6 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 		ReviewCorrectiveRounds:    *reviewCorrectiveRounds,
 		HitlReminderInterval:      *hitlReminderInterval,
 		AdvanceOn:                 *advanceOn,
-		ConformityPolicy:          *conformityPolicy,
-		ConformityPolicyExplicit:  conformityPolicyExplicit,
 		CodeReviewPolicy:          *codeReviewPolicy,
 		CodeReviewPolicyExplicit:  codeReviewPolicyExplicit,
 		Settings:                  settings,
@@ -535,7 +493,6 @@ func applySessionConfig(flags *flag.FlagSet, configPath string) (sessionconfig.S
 		"review-corrective-rounds": intFlag("review-corrective-rounds", cfg.ReviewCorrectiveRounds),
 		"hitl-reminder-interval":   strFlag("hitl-reminder-interval", cfg.HITLReminderInterval),
 		"advance-on":               strFlag("advance-on", cfg.AdvanceOn),
-		"conformity-policy":        strFlag("conformity-policy", cfg.ConformityPolicy),
 		"code-review-policy":       strFlag("code-review-policy", cfg.CodeReviewPolicy),
 	} {
 		if err != nil {

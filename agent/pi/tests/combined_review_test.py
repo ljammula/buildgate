@@ -18,7 +18,8 @@ SPEC.loader.exec_module(combined_review)
 
 build_app = combined_review.build_app
 code_review = combined_review.code_review
-conformity_review = combined_review.conformity_review
+
+APPROVED_SPEC = "# Widget\n\nThe widget is `rounded` to two places.\nIt never panics.\n"
 
 
 def init_repo_with_commit(path: Path) -> None:
@@ -32,204 +33,6 @@ def init_repo_with_commit(path: Path) -> None:
 	run("commit", "-m", "init")
 
 
-def combined_output(criteria: list[dict], findings: list[dict]) -> str:
-	payload = json.dumps({"criteria": criteria, "findings": findings})
-	return json.dumps({"type": "message_end", "message": {"role": "assistant", "content": payload}})
-
-
-class CombinedReviewPromptTests(unittest.TestCase):
-	def test_diff_comes_before_the_ticket_spec_and_both_task_rule_sets_are_present(self):
-		prompt = combined_review.combined_review_prompt(
-			["1. Widget exists"], "Add a widget to the app.", "abc123",
-			diff=("stat text", "diff text"),
-		)
-		diff_index = prompt.index("diff text")
-		spec_index = prompt.index("Add a widget to the app.")
-		self.assertLess(diff_index, spec_index, "diff block must precede the ticket spec")
-		self.assertIn("git's guess at the enclosing function or heading", prompt)
-
-		# Task A: every existing conformity rule.
-		self.assertIn("1. Widget exists", prompt)
-		self.assertIn("cannot run to completion here", prompt)  # command-outcome rule
-		# Only the text of the commit's message is left unjudged: the rest of
-		# such a criterion, and what "the commit" does to the code, is judged.
-		self.assertIn("judge every other part of the same criterion as usual, and flag the criterion if any judged part is not met", prompt)
-		self.assertIn("is a product requirement and is judged in full", prompt)
-		self.assertNotIn("criterion about the commit itself", prompt)
-		self.assertIn("Pure formatting or lint drift", prompt)  # formatting rule
-		self.assertIn("using each criterion's exact text", prompt)  # exact-echo instruction
-
-		# Task B: every existing code-review rule.
-		self.assertIn("Report only concrete correctness, security, data-loss", prompt)
-		self.assertIn("\"high\" is a defect a reviewer would block the merge for", prompt)
-		self.assertIn("IMPORTANT rule for command-outcome findings", prompt)
-
-		# One JSON contract covering both tasks.
-		self.assertIn('"criteria"', prompt)
-		self.assertIn('"findings"', prompt)
-		self.assertEqual(prompt.count("Respond with ONLY a single JSON object"), 1)
-
-	def test_falls_back_to_instruction_only_diff_when_diff_is_none(self):
-		prompt = combined_review.combined_review_prompt(["1. Widget exists"], "spec text", "abc123", diff=None)
-		self.assertIn("Diff the workspace against abc123", prompt)
-
-
-class RunCombinedReviewTests(unittest.TestCase):
-	def _workspace_and_files(self, directory: str, spec_dir: str):
-		root = Path(directory)
-		init_repo_with_commit(root)
-		criteria_path = Path(spec_dir) / "criteria.md"
-		criteria_path.write_text("1. Widget exists\n2. Widget is documented\n")
-		spec_path = Path(spec_dir) / "ticket.md"
-		spec_path.write_text("Add a widget.\n")
-		return root, criteria_path, spec_path
-
-	def test_one_turn_yields_both_evidences_and_parsing_matches_the_standalone_scripts(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root, criteria_path, spec_path = self._workspace_and_files(directory, spec_dir)
-			completed = subprocess.CompletedProcess([], 0, combined_output(
-				criteria=[
-					{"criterion": "1. Widget exists", "verdict": "clean"},
-					{"criterion": "2. Widget is documented", "verdict": "flagged", "detail": "no docs"},
-				],
-				findings=[
-					{"severity": "high", "file": "a.go", "line": 12, "summary": "nil deref",
-					 "failure_scenario": "calling Foo(nil) panics"},
-				],
-			), "")
-			git_calls = []
-
-			def side_effect(args, **kwargs):
-				if args and args[0] == "git":
-					git_calls.append(args[1])
-					return subprocess.run(args, capture_output=True, text=True, cwd=kwargs.get("cwd"))
-				return completed
-
-			with mock.patch.object(build_app, "sh", side_effect=side_effect):
-				conformity, review = combined_review.run_combined_review(
-					root, criteria_path=criteria_path, spec_path=spec_path,
-					conformity_policy="required", review_policy="required",
-				)
-
-			self.assertNotIn("add", git_calls)
-			self.assertNotIn("commit", git_calls)
-
-			self.assertFalse(conformity["succeeded"])
-			self.assertIn("2. Widget is documented", conformity["stopped_reason"])
-			self.assertEqual(conformity["review_verdicts"][0]["verdict"], "clean")
-			self.assertEqual(conformity["review_verdicts"][1]["verdict"], "flagged")
-
-			self.assertFalse(review["succeeded"])
-			self.assertIn("1 blocking high-severity", review["stopped_reason"])
-			self.assertEqual(review["findings"][0]["summary"], "nil deref")
-
-	def test_exit_bits_cover_all_four_pass_fail_combinations(self):
-		cases = [
-			# (conformity verdict, finding severity, expected exit code)
-			("clean", None, 0),
-			("flagged", None, 1),
-			("clean", "high", 2),
-			("flagged", "high", 3),
-		]
-		for conformity_verdict, severity, expected_exit in cases:
-			with self.subTest(conformity_verdict=conformity_verdict, severity=severity):
-				with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-					root, criteria_path, spec_path = self._workspace_and_files(directory, spec_dir)
-					findings = []
-					if severity is not None:
-						findings.append({
-							"severity": severity, "file": "a.go", "line": 1, "summary": "bug",
-							"failure_scenario": "triggers on nil",
-						})
-					completed = subprocess.CompletedProcess([], 0, combined_output(
-						criteria=[
-							{"criterion": "1. Widget exists", "verdict": conformity_verdict},
-							{"criterion": "2. Widget is documented", "verdict": "clean"},
-						],
-						findings=findings,
-					), "")
-					with mock.patch.object(build_app, "sh", return_value=completed):
-						conformity, review = combined_review.run_combined_review(
-							root, criteria_path=criteria_path, spec_path=spec_path,
-							conformity_policy="required", review_policy="required",
-						)
-					exit_code = combined_review.COMBINED_EXIT_BASE + ((0 if conformity["succeeded"] else 1) | (0 if review["succeeded"] else 2))
-					self.assertEqual(exit_code, combined_review.COMBINED_EXIT_BASE + expected_exit)
-
-	def test_advisory_policies_never_fail_either_review(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root, criteria_path, spec_path = self._workspace_and_files(directory, spec_dir)
-			completed = subprocess.CompletedProcess([], 0, combined_output(
-				criteria=[
-					{"criterion": "1. Widget exists", "verdict": "flagged", "detail": "missing"},
-					{"criterion": "2. Widget is documented", "verdict": "clean"},
-				],
-				findings=[{"severity": "high", "file": "a.go", "line": 1, "summary": "bug", "failure_scenario": "x"}],
-			), "")
-			with mock.patch.object(build_app, "sh", return_value=completed):
-				conformity, review = combined_review.run_combined_review(
-					root, criteria_path=criteria_path, spec_path=spec_path,
-					conformity_policy="advisory", review_policy="advisory",
-				)
-			self.assertTrue(conformity["succeeded"])
-			self.assertTrue(review["succeeded"])
-
-	def test_unavailable_turn_marks_both_reviews_unavailable_with_the_error_recorded(self):
-		# Mirrors conformity_review_test.py's/code_review_test.py's own 429
-		# incident test -- one relay 429 on the combined turn must leave
-		# BOTH evidence files naming the cause, not just one of them.
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root, criteria_path, spec_path = self._workspace_and_files(directory, spec_dir)
-			error_output = json.dumps({
-				"type": "message_end",
-				"message": {"role": "assistant", "stopReason": "error", "errorMessage": '429 "token budget exceeded"'},
-			})
-			completed = subprocess.CompletedProcess([], 0, error_output, "")
-			with mock.patch.object(build_app, "sh", return_value=completed):
-				conformity, review = combined_review.run_combined_review(
-					root, criteria_path=criteria_path, spec_path=spec_path,
-					conformity_policy="required", review_policy="required",
-				)
-			self.assertFalse(conformity["succeeded"])
-			self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
-			self.assertIn("429", conformity["stopped_reason"])
-
-			self.assertFalse(review["succeeded"])
-			self.assertFalse(review["available"])
-			self.assertIn("429", review["stopped_reason"])
-			self.assertEqual(review["findings"], [])
-
-
-	def test_the_combined_turn_gets_twice_a_standalone_reviews_time_and_a_timeout_names_it(self):
-		# One turn does both reviews' work. A turn that runs out of time
-		# leaves every criterion unavailable, with the limit in the reason.
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root, criteria_path, spec_path = self._workspace_and_files(directory, spec_dir)
-			timeouts = []
-
-			def timing_out(command, *, cwd, timeout, env):
-				timeouts.append(timeout)
-				raise subprocess.TimeoutExpired(command, timeout)
-
-			ticks = iter([0.0, 20 * 60.0])
-			with (
-				mock.patch.object(build_app, "sh", side_effect=timing_out),
-				mock.patch.object(combined_review, "clock", side_effect=lambda: next(ticks)),
-			):
-				conformity, review = combined_review.run_combined_review(
-					root, criteria_path=criteria_path, spec_path=spec_path,
-					conformity_policy="required", review_policy="required",
-				)
-			# A turn that failed is not asked again.
-			self.assertEqual(timeouts, [20 * 60])
-			self.assertNotIn("retry", review)
-			self.assertNotIn("retry", conformity)
-			self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
-			self.assertIn("timed out after 20 minutes", conformity["stopped_reason"])
-			self.assertFalse(review["available"])
-			self.assertIn("timed out after 20 minutes", review["stopped_reason"])
-
-
 def answer(payload) -> subprocess.CompletedProcess:
 	text = payload if isinstance(payload, str) else json.dumps(payload)
 	return subprocess.CompletedProcess([], 0, json.dumps({"type": "message_end", "message": {"role": "assistant", "content": text}}), "")
@@ -241,22 +44,196 @@ def failed_turn(message: str) -> subprocess.CompletedProcess:
 	}), "")
 
 
-VERDICTS = [
-	{"criterion": "1. Widget exists", "verdict": "clean"},
-	{"criterion": "2. Widget is documented", "verdict": "flagged", "detail": "no docs"},
-]
 FINDINGS = [{"severity": "high", "file": "a.go", "line": 12, "summary": "nil deref", "failure_scenario": "Foo(nil) panics"}]
 
 
-class CombinedReviewRetryTests(unittest.TestCase):
-	"""An answer that lacks a part is asked for once more: the missing review
-	alone, or the combined turn again when the answer had neither. A turn
-	that failed is not asked again."""
+def repro_finding(n: int, content: str = "package a\n") -> dict:
+	return {
+		"severity": "high", "file": "a.go", "line": n, "summary": f"bug {n}", "failure_scenario": "x",
+		"spec_line": {"number": 4, "text": "It never panics."},
+		"reproduction": {"path": f"a/repro{n}_test.go", "content": content},
+	}
 
-	def _run(self, answers, *, thinking="high", clock=None, base=True):
+
+class CombinedReviewPromptTests(unittest.TestCase):
+	def test_diff_comes_before_the_specs_and_the_one_tasks_rules_are_present(self):
+		prompt = combined_review.combined_review_prompt(
+			"Add a widget to the app.", "abc123", diff=("stat text", "diff text"), approved_spec=APPROVED_SPEC,
+		)
+		diff_index = prompt.index("diff text")
+		self.assertLess(diff_index, prompt.index("Add a widget to the app."), "diff block must precede the ticket spec")
+		self.assertLess(prompt.index("Add a widget to the app."), prompt.index("L1: # Widget"))
+		self.assertIn("git's guess at the enclosing function or heading", prompt)
+		self.assertIn("Report only concrete correctness, security, data-loss", prompt)
+		self.assertIn("IMPORTANT rule for command-outcome findings", prompt)
+		self.assertEqual(prompt.count("Respond with ONLY a single JSON object"), 1)
+		self.assertIn('"spec_line"', prompt)
+		self.assertIn('"reproduction"', prompt)
+
+	def test_there_is_no_conformity_task(self):
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC)
+		for gone in ('"criteria"', "Task A", "acceptance criteri", "Pure formatting or lint drift"):
+			self.assertNotIn(gone, prompt)
+
+	def test_the_approved_spec_is_numbered_by_file_line_blank_lines_included(self):
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC)
+		for want in ("L1: # Widget", "L2: ", "L3: The widget is `rounded` to two places.", "L4: It never panics."):
+			self.assertIn(want, prompt.split("\n"))
+		self.assertNotIn("L5:", prompt)
+
+	def test_crlf_line_ends_are_not_shown(self):
+		self.assertEqual(
+			combined_review.numbered_spec("a\r\nb\r\n").splitlines()[1:3], ["L1: a", "L2: b"],
+		)
+
+	def test_without_an_approved_spec_nothing_is_citable(self):
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"))
+		self.assertIn("No approved spec is given", prompt)
+		self.assertNotIn("L1:", prompt)
+
+	def test_the_reproduction_rule_and_severity_rule_are_in_the_prompt(self):
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC)
+		self.assertIn("blocks the change only through a reproduction", prompt)
+		self.assertIn("You write no file in the workspace", prompt)
+		self.assertIn("A reproduction at an existing path is advice", prompt)
+		self.assertIn("A test that hangs or raises an exception counts as a failure", prompt)
+		self.assertIn("A finding without both a spec line and a reproduction is advice", prompt)
+		self.assertIn('"high" is a finding that breaks a behaviour the approved spec states', prompt)
+		self.assertIn('is "medium" (real, non-blocking) or "low"', prompt)
+
+	def test_falls_back_to_instruction_only_diff_when_diff_is_none(self):
+		prompt = combined_review.combined_review_prompt("spec text", "abc123", diff=None)
+		self.assertIn("Diff the workspace against abc123", prompt)
+
+
+class RunCombinedReviewTests(unittest.TestCase):
+	def _files(self, directory: str, spec_dir: str):
+		root = Path(directory)
+		init_repo_with_commit(root)
+		spec_path = Path(spec_dir) / "ticket.md"
+		spec_path.write_text("Add a widget.\n")
+		approved = Path(spec_dir) / "spec.md"
+		approved.write_text(APPROVED_SPEC)
+		return root, spec_path, approved
+
+	def test_one_turn_yields_the_findings_with_citations_and_reproductions(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, approved = self._files(directory, spec_dir)
+			git_calls = []
+
+			def side_effect(args, **kwargs):
+				if args and args[0] == "git":
+					git_calls.append(args[1])
+					return subprocess.run(args, capture_output=True, text=True, cwd=kwargs.get("cwd"))
+				return answer({"findings": [repro_finding(1), FINDINGS[0]]})
+
+			with mock.patch.object(build_app, "sh", side_effect=side_effect):
+				review = combined_review.run_combined_review(
+					root, spec_path=spec_path, approved_spec_path=approved, review_policy="required",
+				)
+			self.assertNotIn("add", git_calls)
+			self.assertNotIn("commit", git_calls)
+			self.assertTrue(review["succeeded"], "a finding never fails the review")
+			self.assertIn("2 finding(s), 2 high-severity", review["stopped_reason"])
+			self.assertEqual(review["findings"][0]["spec_line"], {"number": 4, "text": "It never panics."})
+			self.assertEqual(review["findings"][0]["reproduction"], {"path": "a/repro1_test.go", "content": "package a\n"})
+			self.assertNotIn("spec_line", review["findings"][1])
+			self.assertNotIn("reproduction", review["findings"][1])
+			self.assertNotIn("notes", review)
+
+	def test_the_approved_spec_reaches_the_prompt_numbered(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, approved = self._files(directory, spec_dir)
+			with mock.patch.object(build_app, "sh", return_value=answer({"findings": []})) as sh:
+				combined_review.run_combined_review(root, spec_path=spec_path, approved_spec_path=approved)
+			self.assertIn("L4: It never panics.", sh.call_args.args[0][-1])
+
+	def test_a_high_finding_does_not_fail_a_required_review_and_a_missing_list_does(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, _ = self._files(directory, spec_dir)
+			with mock.patch.object(build_app, "sh", return_value=answer({"findings": FINDINGS})):
+				review = combined_review.run_combined_review(root, spec_path=spec_path, review_policy="required")
+			self.assertTrue(review["succeeded"])
+
+	def test_advisory_policy_never_fails_the_review(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, _ = self._files(directory, spec_dir)
+			with mock.patch.object(build_app, "sh", return_value=failed_turn("boom")):
+				review = combined_review.run_combined_review(root, spec_path=spec_path, review_policy="advisory")
+			self.assertTrue(review["succeeded"])
+			self.assertFalse(review["available"])
+
+	def test_unavailable_turn_records_the_error(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, _ = self._files(directory, spec_dir)
+			with mock.patch.object(build_app, "sh", return_value=failed_turn('429 "token budget exceeded"')):
+				review = combined_review.run_combined_review(root, spec_path=spec_path, review_policy="required")
+			self.assertFalse(review["succeeded"])
+			self.assertFalse(review["available"])
+			self.assertIn("429", review["stopped_reason"])
+			self.assertEqual(review["findings"], [])
+
+	def test_at_most_three_reproductions_are_kept_and_the_rest_become_advice_with_a_note(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, _ = self._files(directory, spec_dir)
+			findings = [repro_finding(n) for n in range(1, 6)]
+			with mock.patch.object(build_app, "sh", return_value=answer({"findings": findings})):
+				review = combined_review.run_combined_review(root, spec_path=spec_path)
+			self.assertTrue(review["succeeded"], "a cap never fails the review")
+			self.assertEqual(len(review["findings"]), 5)
+			self.assertEqual(["reproduction" in f for f in review["findings"]], [True, True, True, False, False])
+			self.assertTrue(all("spec_line" in f for f in review["findings"]))
+			self.assertEqual(len(review["notes"]), 2)
+			self.assertIn("reproduction dropped", review["notes"][0])
+			self.assertIn("at most 3", review["notes"][0])
+
+	def test_a_reproduction_over_32_kib_is_dropped_with_a_note_and_one_at_the_cap_is_kept(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, _ = self._files(directory, spec_dir)
+			at_cap = "a" * code_review.MAX_REPRODUCTION_BYTES
+			findings = [repro_finding(1, at_cap), repro_finding(2, at_cap + "a"), repro_finding(3, "é" * 20_000)]
+			with mock.patch.object(build_app, "sh", return_value=answer({"findings": findings})):
+				review = combined_review.run_combined_review(root, spec_path=spec_path)
+			self.assertEqual(["reproduction" in f for f in review["findings"]], [True, False, False])
+			self.assertEqual(len(review["notes"]), 2, "bytes are counted, not characters")
+			self.assertIn("over the 32768 byte cap", review["notes"][0])
+			self.assertTrue(review["succeeded"])
+
+	def test_the_cap_does_not_count_a_dropped_oversize_file_against_the_three(self):
+		findings = [repro_finding(1, "a" * (code_review.MAX_REPRODUCTION_BYTES + 1)), repro_finding(2), repro_finding(3), repro_finding(4)]
+		notes = code_review.cap_reproductions(findings)
+		self.assertEqual(["reproduction" in f for f in findings], [False, True, True, True])
+		self.assertEqual(len(notes), 1)
+
+	def test_a_timeout_names_the_limit_and_is_not_asked_again(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root, spec_path, _ = self._files(directory, spec_dir)
+			timeouts = []
+
+			def timing_out(command, *, cwd, timeout, env):
+				timeouts.append(timeout)
+				raise subprocess.TimeoutExpired(command, timeout)
+
+			ticks = iter([0.0, 20 * 60.0])
+			with (
+				mock.patch.object(build_app, "sh", side_effect=timing_out),
+				mock.patch.object(combined_review, "clock", side_effect=lambda: next(ticks)),
+			):
+				review = combined_review.run_combined_review(root, spec_path=spec_path)
+			self.assertEqual(timeouts, [20 * 60])
+			self.assertNotIn("retry", review)
+			self.assertFalse(review["available"])
+			self.assertIn("timed out after 20 minutes", review["stopped_reason"])
+
+
+class CombinedReviewRetryTests(unittest.TestCase):
+	"""An answer with no parseable findings list is asked for once more, with
+	the same prompt. A turn that failed is not asked again."""
+
+	def _run(self, answers, *, thinking="high", clock=None, review_policy="required"):
 		"""Runs the review with the model turns answered in order by answers
-		(a CompletedProcess, or an exception to raise). Returns (conformity,
-		review, turns, root): turns holds, per model call, its prompt, session
+		(a CompletedProcess, or an exception to raise). Returns (review,
+		turns, root): turns holds, per model call, its prompt, session
 		folder, timeout, thinking level and review base."""
 		directory = tempfile.TemporaryDirectory()
 		spec_dir = tempfile.TemporaryDirectory()
@@ -266,27 +243,22 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		init_repo_with_commit(root)
 		base_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 		(root / "seed.txt").write_text("seed\nchanged by the build\n")
-		criteria_path = Path(spec_dir.name) / "criteria.md"
-		criteria_path.write_text("1. Widget exists\n2. Widget is documented\n")
 		spec_path = Path(spec_dir.name) / "ticket.md"
 		spec_path.write_text("Add a widget.\n")
-		self.base_sha = base_sha if base else None
-		self.diff = build_app.workspace_diff(root, base_sha) if base else None
+		self.base_sha = base_sha
 		queue = list(answers)
 		turns = []
 
 		def fake_sh(command, *, cwd, timeout, env):
 			session = Path(command[command.index("--session-dir") + 1])
+			first = root / ".pi-combined-review-session"
 			turns.append({
 				"prompt": command[-1], "session": session, "timeout": timeout,
 				"thinking": command[command.index("--thinking") + 1],
 				"base": env.get("AI_REVIEW_BASE_SHA"),
 				"session_was_empty": not session.exists() or not [p for p in session.iterdir() if p.name != "prompts"],
-				"first_session": sorted(p.name for p in (root / ".pi-combined-review-session").iterdir()) if (root / ".pi-combined-review-session").is_dir() else [],
-				"evidence": {
-					name: json.loads((root / name).read_text())
-					for name in ("CONFORMITY_EVIDENCE.json", "CODE_REVIEW_EVIDENCE.json") if (root / name).exists()
-				},
+				"first_session": sorted(p.name for p in first.iterdir()) if first.is_dir() else [],
+				"evidence": json.loads((root / "CODE_REVIEW_EVIDENCE.json").read_text()) if (root / "CODE_REVIEW_EVIDENCE.json").exists() else None,
 			})
 			# What a harness leaves behind: session state the next turn must not find.
 			session.mkdir(parents=True, exist_ok=True)
@@ -306,84 +278,31 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		with contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()):
 			for patch in patches:
 				stack.enter_context(patch)
-			conformity, review = combined_review.run_combined_review(
-				root, criteria_path=criteria_path, spec_path=spec_path,
-				conformity_policy="required", review_policy="required",
-				review_base_sha=base_sha if base else None, thinking=thinking,
+			review = combined_review.run_combined_review(
+				root, spec_path=spec_path, review_policy=review_policy, review_base_sha=base_sha, thinking=thinking,
 			)
 		self.assertEqual(queue, [], "every prepared answer is one model call")
-		return conformity, review, turns, root
+		return review, turns, root
 
 	def _saved_prompts(self, root: Path) -> dict[str, str]:
 		folder = root / ".pi-combined-review-session" / "prompts"
 		return {p.name: p.read_text() for p in sorted(folder.iterdir())}
 
 	def test_a_whole_first_answer_makes_exactly_one_model_call_and_records_no_retry(self):
-		conformity, review, turns, root = self._run([answer({"criteria": VERDICTS, "findings": FINDINGS})])
+		review, turns, root = self._run([answer({"findings": FINDINGS})])
 		self.assertEqual(len(turns), 1)
-		self.assertNotIn("retry", conformity)
 		self.assertNotIn("retry", review)
 		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
 		self.assertIn("account for every relevant return value and branch", self._saved_prompts(root)["review-combined.md"])
 		self.assertFalse((root / ".pi-combined-review-session" / "retry").exists())
 
-	def test_a_missing_findings_list_is_asked_for_alone_and_the_verdicts_are_kept(self):
-		conformity, review, turns, root = self._run([
-			answer({"criteria": VERDICTS}),
-			answer({"findings": FINDINGS}),
-		])
-		self.assertEqual(len(turns), 2)
-		# The conformity half is the first answer's, untouched.
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
-		self.assertFalse(conformity["succeeded"])
-		self.assertIn("2. Widget is documented", conformity["stopped_reason"])
-		self.assertEqual(conformity["error"], "")
-		# The code review half is the retry's.
+	def test_an_empty_findings_list_is_a_whole_answer(self):
+		review, turns, _ = self._run([answer({"findings": []})])
+		self.assertEqual(len(turns), 1)
 		self.assertTrue(review["available"])
-		self.assertEqual(review["findings"][0]["summary"], "nil deref")
-		self.assertIn("1 blocking high-severity", review["stopped_reason"])
-		# The retry is the standalone code review's own prompt over the first turn's diff.
-		prompts = self._saved_prompts(root)
-		self.assertEqual(list(prompts), ["review-code-retry.md", "review-combined.md"])
-		self.assertEqual(turns[1]["prompt"], prompts["review-code-retry.md"])
-		self.assertEqual(turns[1]["prompt"], code_review.code_review_prompt("Add a widget.\n", self.base_sha, diff=self.diff))
-		self.assertIn("changed by the build", turns[1]["prompt"])
-		self.assertNotIn("rewritten by reviewer", turns[1]["prompt"])
-		self.assertNotIn("1. Widget exists", turns[1]["prompt"], "the code review prompt carries no criteria")
-		self.assertEqual(turns[1]["timeout"], 10 * 60)
-		for evidence in (conformity, review):
-			self.assertIn("asked once more for the code review alone", evidence["retry"])
-			self.assertIn("no parseable findings list", evidence["retry"])
-
-	def test_missing_verdicts_are_asked_for_alone_and_the_findings_are_kept(self):
-		conformity, review, turns, root = self._run([
-			answer({"findings": FINDINGS}),
-			answer({"criteria": VERDICTS}),
-		])
-		self.assertEqual(len(turns), 2)
-		self.assertEqual(review["findings"][0]["summary"], "nil deref")
-		self.assertTrue(review["available"])
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
-		self.assertIn("2. Widget is documented", conformity["stopped_reason"])
-		prompts = self._saved_prompts(root)
-		self.assertEqual(list(prompts), ["review-combined.md", "review-conformity-retry.md"])
-		self.assertEqual(turns[1]["prompt"], prompts["review-conformity-retry.md"])
-		self.assertEqual(turns[1]["prompt"], build_app.spec_conformity_prompt(
-			["1. Widget exists", "2. Widget is documented"], self.base_sha, diff=self.diff,
-		))
-		self.assertIn("1. Widget exists", turns[1]["prompt"])
-		self.assertIn("changed by the build", turns[1]["prompt"])
-		self.assertNotIn("rewritten by reviewer", turns[1]["prompt"])
-		self.assertNotIn('"findings"', turns[1]["prompt"], "the conformity prompt asks for no findings")
-		self.assertEqual(turns[1]["timeout"], 10 * 60)
-		for evidence in (conformity, review):
-			self.assertIn("asked once more for the spec conformity review alone", evidence["retry"])
-			self.assertIn("no verdict for any criterion", evidence["retry"])
+		self.assertNotIn("retry", review)
 
 	def test_a_failed_turn_is_not_asked_again(self):
-		# Whether the model was served is the spend meter's record, which the
-		# host reads: it launches the review again, or hands the step to a
-		# human. Each of these is one model call, whatever the error says.
 		deny = '403 {"middleware":"meter","reason_code":"%s","detail":"x"}'
 		errors = [
 			"upstream connection reset",
@@ -393,99 +312,53 @@ class CombinedReviewRetryTests(unittest.TestCase):
 		]
 		for error in errors:
 			with self.subTest(error=error):
-				conformity, review, turns, root = self._run([failed_turn(error)])
+				review, turns, root = self._run([failed_turn(error)])
 				self.assertEqual(len(turns), 1)
 				self.assertFalse(review["available"])
-				self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
 				self.assertEqual(review["error"], error)
-				self.assertEqual(conformity["error"], error)
 				self.assertEqual(review["stopped_reason"], "code review was unavailable: " + error)
-				for evidence in (conformity, review):
-					self.assertNotIn("retry", evidence)
+				self.assertNotIn("retry", review)
 				self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
 				self.assertFalse((root / ".pi-combined-review-session" / "retry").exists())
 
-	def test_an_answer_with_no_json_at_all_runs_the_combined_turn_once_more(self):
-		conformity, review, turns, _ = self._run([
-			answer("Everything looks fine to me."),
-			answer({"criteria": VERDICTS, "findings": FINDINGS}),
-		])
+	def test_an_answer_with_no_json_at_all_runs_the_same_prompt_once_more(self):
+		review, turns, root = self._run([answer("Everything looks fine to me."), answer({"findings": FINDINGS})])
 		self.assertEqual(len(turns), 2)
 		self.assertEqual(turns[1]["prompt"], turns[0]["prompt"], "the same question, word for word")
+		self.assertIn("changed by the build", turns[1]["prompt"])
+		self.assertNotIn("rewritten by reviewer", turns[1]["prompt"])
 		self.assertTrue(review["available"])
-		self.assertIn("asked once more for both reviews", review["retry"])
-		self.assertIn("neither a verdict for any criterion nor a findings list", review["retry"])
-
-	def test_a_combined_retry_shares_the_one_turns_time(self):
-		ticks = iter([0.0, 2 * 60.0])
-		conformity, review, turns, root = self._run([
-			answer("Everything looks fine to me."),
-			answer({"criteria": VERDICTS, "findings": []}),
-		], clock=lambda: next(ticks))
-		self.assertEqual(len(turns), 2)
-		# The two turns share the one turn's 20 minutes: 2 used, 18 left.
-		self.assertEqual(turns[1]["timeout"], 18 * 60)
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
-		self.assertTrue(review["succeeded"])
+		self.assertEqual(review["findings"][0]["summary"], "nil deref")
+		self.assertIn("asked once more, in a new session", review["retry"])
+		self.assertIn("no parseable findings list", review["retry"])
 		self.assertEqual(list(self._saved_prompts(root)), ["review-combined-retry.md", "review-combined.md"])
 
+	def test_a_retry_shares_the_one_turns_time(self):
+		ticks = iter([0.0, 2 * 60.0])
+		review, turns, _ = self._run(
+			[answer("Everything looks fine to me."), answer({"findings": []})], clock=lambda: next(ticks),
+		)
+		self.assertEqual(turns[1]["timeout"], 18 * 60)
+		self.assertTrue(review["succeeded"])
+
 	def test_a_retry_that_fails_stays_unavailable_with_the_retrys_error_and_no_third_call(self):
-		conformity, review, turns, _ = self._run([
-			answer("Everything looks fine to me."),
-			failed_turn("second failure"),
-		])
+		review, turns, _ = self._run([answer("Everything looks fine to me."), failed_turn("second failure")])
 		self.assertEqual(len(turns), 2)
-		self.assertFalse(conformity["succeeded"])
-		self.assertTrue(all(v["verdict"] == "unavailable" for v in conformity["review_verdicts"]))
-		self.assertEqual(conformity["error"], "second failure")
-		self.assertEqual(conformity["stopped_reason"], "spec conformity review was unavailable: second failure")
 		self.assertFalse(review["available"])
 		self.assertFalse(review["succeeded"])
 		self.assertEqual(review["error"], "second failure")
 		self.assertEqual(review["stopped_reason"], "code review was unavailable: second failure")
-		for evidence in (conformity, review):
-			self.assertIn("asked once more for both reviews", evidence["retry"])
-
-	def test_a_half_retry_that_fails_leaves_that_half_unavailable_and_the_other_as_it_was(self):
-		conformity, review, turns, _ = self._run([
-			answer({"criteria": VERDICTS}),
-			subprocess.TimeoutExpired("pi", 600),
-		])
-		self.assertEqual(len(turns), 2)
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
-		self.assertEqual(conformity["error"], "")
-		self.assertFalse(review["available"])
-		self.assertEqual(review["stopped_reason"], "code review was unavailable: timed out after 10 minutes")
-
-	def test_a_combined_retry_that_answers_half_is_not_retried_again(self):
-		conformity, review, turns, _ = self._run([
-			answer("Everything looks fine to me."),
-			answer({"criteria": VERDICTS}),
-		])
-		self.assertEqual(len(turns), 2)
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
-		self.assertFalse(review["available"])
-		self.assertIn("no parseable response", review["stopped_reason"])
+		self.assertIn("asked once more", review["retry"])
 
 	def test_the_retry_has_its_own_empty_session_folder_and_the_first_turns_settings(self):
-		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), answer("Everything looks fine to me.")):
-			with self.subTest(first=first.stdout[:60]):
-				_, _, turns, root = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})], thinking="max")
-				first_turn, retry = turns
-				self.assertEqual(first_turn["session"], root / ".pi-combined-review-session")
-				self.assertEqual(retry["session"], root / ".pi-combined-review-session" / "retry")
-				self.assertTrue(retry["session_was_empty"])
-				self.assertEqual(retry["thinking"], first_turn["thinking"])
-				self.assertEqual(retry["thinking"], "max")
-				self.assertEqual(retry["base"], first_turn["base"])
-				self.assertEqual(retry["base"], self.base_sha)
-				# The retry is told nothing of the first turn: its prompt is
-				# one a first launch would send, built from the same inputs.
-				self.assertIn(retry["prompt"], (
-					first_turn["prompt"],
-					code_review.code_review_prompt("Add a widget.\n", self.base_sha, diff=self.diff),
-					build_app.spec_conformity_prompt(["1. Widget exists", "2. Widget is documented"], self.base_sha, diff=self.diff),
-				))
+		_, turns, root = self._run([answer("Everything looks fine to me."), answer({"findings": FINDINGS})], thinking="max")
+		first_turn, retry = turns
+		self.assertEqual(first_turn["session"], root / ".pi-combined-review-session")
+		self.assertEqual(retry["session"], root / ".pi-combined-review-session" / "retry")
+		self.assertTrue(retry["session_was_empty"])
+		self.assertEqual(retry["thinking"], "max")
+		self.assertEqual(retry["base"], first_turn["base"])
+		self.assertEqual(retry["base"], self.base_sha)
 
 	def test_what_an_earlier_launch_left_in_the_retry_folder_is_removed_first(self):
 		for plant in ("folder", "link"):
@@ -505,63 +378,44 @@ class CombinedReviewRetryTests(unittest.TestCase):
 					return seen["path"]
 
 				with mock.patch.object(combined_review, "fresh_retry_session_dir", side_effect=planting):
-					_, _, turns, _ = self._run([answer("Everything looks fine to me."), answer({"criteria": VERDICTS, "findings": []})])
+					_, turns, _ = self._run([answer("Everything looks fine to me."), answer({"findings": []})])
 				self.assertTrue(turns[1]["session_was_empty"])
 				self.assertFalse(seen["path"].is_symlink())
 				self.assertEqual((Path(outside) / "keep.txt").exists(), plant == "link")
 
 	def test_a_retry_that_does_not_fit_the_reviews_time_is_skipped_and_the_reason_recorded(self):
-		# The clock is read at the start and once when the retry is sized:
-		# 16 of the review's 20 minutes are gone by then.
 		ticks = iter([0.0, 16 * 60.0])
-		conformity, review, turns, root = self._run([answer({"criteria": VERDICTS})], clock=lambda: next(ticks))
+		review, turns, root = self._run([answer("Everything looks fine to me.")], clock=lambda: next(ticks))
 		self.assertEqual(len(turns), 1)
-		self.assertEqual([v["verdict"] for v in conformity["review_verdicts"]], ["clean", "flagged"])
 		self.assertFalse(review["available"])
-		for evidence in (conformity, review):
-			self.assertTrue(evidence["retry"].startswith("not asked again (the combined answer had no parseable findings list)"), evidence["retry"])
-			self.assertIn("under 5 of the review's 20 minutes", evidence["retry"])
+		self.assertTrue(review["retry"].startswith("not asked again (the first answer had no parseable findings list)"), review["retry"])
+		self.assertIn("under 5 of the review's 20 minutes", review["retry"])
 		self.assertEqual(list(self._saved_prompts(root)), ["review-combined.md"])
 
 	def test_the_two_turns_together_never_get_more_than_the_one_turns_time(self):
-		for used_minutes, own in ((13.5, "half"), (13.5, "whole"), (0.1, "half"), (0.1, "whole"), (14.9, "whole")):
-			with self.subTest(used_minutes=used_minutes, own=own):
+		for used_minutes in (13.5, 0.1, 14.9):
+			with self.subTest(used_minutes=used_minutes):
 				ticks = iter([0.0, used_minutes * 60.0])
-				first = answer({"criteria": VERDICTS}) if own == "half" else answer("Everything looks fine to me.")
-				_, _, turns, _ = self._run([first, answer({"criteria": VERDICTS, "findings": []})], clock=lambda: next(ticks))
+				_, turns, _ = self._run(
+					[answer("Everything looks fine to me."), answer({"findings": []})], clock=lambda: next(ticks),
+				)
 				self.assertEqual(turns[0]["timeout"], 20 * 60)
 				self.assertLessEqual(used_minutes * 60 + turns[1]["timeout"], 20 * 60)
 				self.assertGreaterEqual(turns[1]["timeout"], 5 * 60)
-				self.assertLessEqual(turns[1]["timeout"], (10 if own == "half" else 20) * 60)
 
 	def test_the_first_turns_evidence_is_on_disk_before_the_retry_starts(self):
-		# A retry killed from outside leaves what the first turn alone gave.
-		cases = [
-			(answer({"criteria": VERDICTS}), ["clean", "flagged"], False, ""),
-			(answer({"findings": FINDINGS}), ["unavailable", "unavailable"], True, ""),
-			(answer("Everything looks fine to me."), ["unavailable", "unavailable"], False, ""),
-		]
-		for first, verdicts, available, error in cases:
-			with self.subTest(first=first.stdout[:60]):
-				_, _, turns, _ = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})])
-				self.assertEqual(turns[0]["evidence"], {})
-				on_disk = turns[1]["evidence"]
-				self.assertEqual([v["verdict"] for v in on_disk["CONFORMITY_EVIDENCE.json"]["review_verdicts"]], verdicts)
-				self.assertEqual(on_disk["CODE_REVIEW_EVIDENCE.json"]["available"], available)
-				self.assertEqual(on_disk["CODE_REVIEW_EVIDENCE.json"]["error"], error)
-				for evidence in on_disk.values():
-					self.assertNotIn("retry", evidence)
+		_, turns, _ = self._run([answer("Everything looks fine to me."), answer({"findings": FINDINGS})])
+		self.assertIsNone(turns[0]["evidence"])
+		on_disk = turns[1]["evidence"]
+		self.assertFalse(on_disk["available"])
+		self.assertNotIn("retry", on_disk)
 
 	def test_the_retry_cannot_read_the_first_turns_transcript(self):
-		for first in (answer({"criteria": VERDICTS}), answer({"findings": FINDINGS}), answer("Everything looks fine to me.")):
-			with self.subTest(first=first.stdout[:60]):
-				_, _, turns, root = self._run([first, answer({"criteria": VERDICTS, "findings": FINDINGS})])
-				# All the retry finds in the first turn's folder: both saved
-				# prompts and its own empty folder.
-				self.assertEqual(turns[1]["first_session"], ["prompts", "retry"])
-				self.assertEqual(len(self._saved_prompts(root)), 2)
-				left = [p for p in root.rglob("*") if ".git" not in p.parts and p.is_file() and "turn 1" in p.read_text(errors="replace")]
-				self.assertEqual(left, [])
+		_, turns, root = self._run([answer("Everything looks fine to me."), answer({"findings": FINDINGS})])
+		self.assertEqual(turns[1]["first_session"], ["prompts", "retry"])
+		self.assertEqual(len(self._saved_prompts(root)), 2)
+		left = [p for p in root.rglob("*") if ".git" not in p.parts and p.is_file() and "turn 1" in p.read_text(errors="replace")]
+		self.assertEqual(left, [])
 
 	def test_a_session_folder_that_is_a_link_is_never_followed(self):
 		with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as outside:
@@ -574,7 +428,6 @@ class CombinedReviewRetryTests(unittest.TestCase):
 			self.assertEqual(retry, root / ".pi-combined-review-session" / "retry")
 			self.assertFalse((root / ".pi-combined-review-session").is_symlink())
 			self.assertEqual(list(retry.iterdir()), [])
-			self.assertEqual(retry.resolve(), (root / ".pi-combined-review-session" / "retry").resolve())
 			self.assertTrue((Path(outside) / "keep.txt").exists())
 			self.assertTrue((Path(outside) / "retry" / "keep.txt").exists())
 
@@ -596,188 +449,113 @@ class CombinedReviewRetryTests(unittest.TestCase):
 
 	def test_a_session_folder_that_cannot_be_emptied_asks_nothing_again(self):
 		with mock.patch.object(combined_review, "fresh_retry_session_dir", return_value=None):
-			conformity, review, turns, _ = self._run([answer("Everything looks fine to me.")])
+			review, turns, _ = self._run([answer("Everything looks fine to me.")])
 		self.assertEqual(len(turns), 1)
 		self.assertFalse(review["available"])
-		self.assertIn("could not be emptied", conformity["retry"])
 		self.assertIn("could not be emptied", review["retry"])
 
 
-class CombinedReviewRecheckTests(unittest.TestCase):
-	"""A conformity flag naming text the result commit holds is judged once
-	more, alone, by a fresh turn told only what the factory found; the code
-	review half is never touched."""
+class WriteCombinedEvidenceTests(unittest.TestCase):
+	def test_writes_only_the_code_review_evidence_file(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			review = code_review.code_review_evidence(True, [], "", review_policy="required", thinking=None)
+			path = combined_review.write_combined_evidence(root, review)
+			self.assertEqual(path.name, "CODE_REVIEW_EVIDENCE.json")
+			self.assertEqual(json.loads(path.read_text()), review)
+			self.assertEqual(review["schema_version"], 1)
+			self.assertIn("findings", review)
+			self.assertEqual(sorted(p.name for p in root.iterdir()), ["CODE_REVIEW_EVIDENCE.json"])
 
-	FLAG = {
-		"criterion": "2. Widget is documented", "verdict": "flagged", "detail": "README does not mention the widget",
-		"missing": {"file": "README.md", "text": "## Widget"},
-	}
 
-	reviewer_rewrites_readme = False
-
-	def _run(self, answers, *, clock=None):
+class MainTests(unittest.TestCase):
+	def _main(self, payload, *extra):
 		directory = tempfile.TemporaryDirectory()
 		spec_dir = tempfile.TemporaryDirectory()
 		self.addCleanup(directory.cleanup)
 		self.addCleanup(spec_dir.cleanup)
 		root = Path(directory.name)
 		init_repo_with_commit(root)
-		base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
-		(root / "README.md").write_text("# App\n\n## Widget\n\nIt widgets.\n")
-		subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True)
-		subprocess.run(["git", "commit", "-m", "docs"], cwd=root, check=True, capture_output=True)
-		criteria_path = Path(spec_dir.name) / "criteria.md"
-		criteria_path.write_text("1. Widget exists\n2. Widget is documented\n")
 		spec_path = Path(spec_dir.name) / "ticket.md"
 		spec_path.write_text("Add a widget.\n")
-		queue, turns = list(answers), []
+		approved = Path(spec_dir.name) / "spec.md"
+		approved.write_text(APPROVED_SPEC)
+		argv = [str(SCRIPT), "--workspace", str(root), "--spec", str(spec_path), "--approved-spec", str(approved), *extra]
+		with (
+			mock.patch.object(sys, "argv", argv),
+			mock.patch.object(build_app, "sh", return_value=payload),
+			contextlib.redirect_stdout(io.StringIO()),
+		):
+			return combined_review.main(), root
 
-		def fake_sh(command, *, cwd, timeout, env):
-			session = Path(command[command.index("--session-dir") + 1])
-			turns.append({
-				"prompt": command[-1], "session": session, "timeout": timeout,
-				"session_was_empty": not session.exists() or not [p for p in session.iterdir() if p.name != "prompts"],
-				"evidence": json.loads((root / "CONFORMITY_EVIDENCE.json").read_text()) if (root / "CONFORMITY_EVIDENCE.json").exists() else None,
-			})
-			session.mkdir(parents=True, exist_ok=True)
-			(session / "transcript.jsonl").write_text("README does not mention the widget\n")
-			# A reviewer that edits another file changes neither the check nor the recheck's diff.
-			(root / "seed.txt").write_text("rewritten by reviewer turn %d\n" % len(turns))
-			if self.reviewer_rewrites_readme:
-				(root / "README.md").write_text("emptied by reviewer turn %d\n" % len(turns))
-			return queue.pop(0)
+	def test_a_verdict_exits_40_whatever_the_findings(self):
+		for findings in ([], FINDINGS, [repro_finding(1)]):
+			with self.subTest(findings=len(findings)):
+				exit_code, root = self._main(answer({"findings": findings}), "--thinking", "max")
+				self.assertEqual(exit_code, 40)
+				self.assertEqual(exit_code, combined_review.COMBINED_EXIT_BASE)
+				evidence = json.loads((root / "CODE_REVIEW_EVIDENCE.json").read_text())
+				self.assertEqual(evidence["thinking"], "max")
+				self.assertFalse((root / "CONFORMITY_EVIDENCE.json").exists())
 
-		patches = [mock.patch.object(build_app, "sh", side_effect=fake_sh)]
-		if clock is not None:
-			patches.append(mock.patch.object(combined_review, "clock", side_effect=clock))
-		with contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()):
-			for patch in patches:
-				stack.enter_context(patch)
-			conformity, review = combined_review.run_combined_review(
-				root, criteria_path=criteria_path, spec_path=spec_path, review_base_sha=base, thinking="high",
-			)
-		self.assertEqual(queue, [], "every prepared answer is one model call")
-		return conformity, review, turns, root
+	def test_no_verdict_exits_42(self):
+		exit_code, root = self._main(failed_turn("boom"))
+		self.assertEqual(exit_code, 42)
+		self.assertEqual(exit_code, combined_review.COMBINED_EXIT_BASE + 2)
+		self.assertFalse(json.loads((root / "CODE_REVIEW_EVIDENCE.json").read_text())["available"])
 
-	def test_a_contradicted_flag_is_judged_again_alone_and_the_code_review_is_kept(self):
-		conformity, review, turns, root = self._run([
-			answer({"criteria": [VERDICTS[0], self.FLAG], "findings": []}),
-			answer({"criteria": [{"criterion": "2. Widget is documented", "verdict": "clean"}]}),
-		])
-		self.assertEqual(len(turns), 2)
-		recheck = turns[1]["prompt"]
-		self.assertIn('The factory read "README.md":\n    line 2: ""\n    line 3: "## Widget"\n    line 4: ""', recheck)
-		self.assertNotIn("README does not mention", recheck)
-		self.assertNotIn("1. Widget exists", recheck)
-		self.assertIn("+## Widget", recheck, "the recheck reviews the first turn's diff")
-		self.assertNotIn("rewritten by reviewer", recheck)
-		self.assertEqual(turns[1]["session"], root / ".pi-combined-review-session" / "recheck")
-		self.assertTrue(turns[1]["session_was_empty"])
-		self.assertEqual(turns[1]["evidence"]["review_verdicts"][1]["verdict"], "flagged", "the answer so far is on disk first")
+	def test_no_verdict_under_advisory_policy_exits_40(self):
+		exit_code, _ = self._main(failed_turn("boom"), "--review-policy", "advisory")
+		self.assertEqual(exit_code, 40)
 
-		self.assertTrue(conformity["succeeded"])
-		self.assertEqual(conformity["review_verdicts"][1]["recheck"]["outcome"], "answered clean")
-		self.assertIn("asked once more about criteria 2", conformity["recheck"])
-		self.assertNotIn("recheck", review)
-		self.assertNotIn("retry", conformity)
-		self.assertTrue(review["available"])
-		saved = sorted(p.name for p in (root / ".pi-combined-review-session" / "prompts").iterdir())
-		self.assertEqual(saved, ["review-combined.md", "review-conformity-recheck.md"])
+	def test_bit_zero_is_never_set(self):
+		for payload in (answer({"findings": FINDINGS}), failed_turn("x"), answer("no json")):
+			exit_code, _ = self._main(payload)
+			self.assertEqual((exit_code - combined_review.COMBINED_EXIT_BASE) & 1, 0)
 
-	def test_a_flag_from_a_conformity_retry_is_rechecked_too_within_the_same_time(self):
-		times = iter([0.0, 4 * 60.0, 9 * 60.0])
-		conformity, review, turns, _ = self._run([
-			answer({"findings": []}),
-			answer({"criteria": [VERDICTS[0], self.FLAG]}),
-			answer({"criteria": [{"criterion": "2. Widget is documented", "verdict": "clean"}]}),
-		], clock=lambda: next(times))
-		self.assertEqual(len(turns), 3)
-		self.assertEqual(turns[2]["timeout"], 10 * 60)
-		self.assertIn("asked once more for the spec conformity review alone", conformity["retry"])
-		self.assertIn("asked once more about criteria 2", conformity["recheck"])
-		self.assertTrue(conformity["succeeded"])
-
-	def test_a_file_the_first_turn_rewrote_is_not_checked_and_the_flag_stands(self):
-		self.reviewer_rewrites_readme = True
-		conformity, _, turns, _ = self._run([answer({"criteria": [VERDICTS[0], self.FLAG], "findings": []})])
-		self.assertEqual(len(turns), 1)
-		self.assertFalse(conformity["succeeded"])
-		self.assertNotIn("recheck", conformity)
-
-	def test_the_recheck_never_gets_more_than_is_left_of_the_one_turns_time(self):
-		times = iter([0.0, 17 * 60.0])
-		conformity, _, turns, _ = self._run(
-			[answer({"criteria": [VERDICTS[0], self.FLAG], "findings": []})], clock=lambda: next(times),
-		)
-		self.assertEqual(len(turns), 1)
-		self.assertFalse(conformity["succeeded"])
-		self.assertIn("not asked again", conformity["recheck"])
-
-
-class WriteCombinedEvidenceTests(unittest.TestCase):
-	def test_writes_both_evidence_files_in_their_existing_schema(self):
-		with tempfile.TemporaryDirectory() as directory:
-			root = Path(directory)
-			conformity = conformity_review.conformity_evidence(
-				[{"criterion": "1. Widget exists", "verdict": "clean", "detail": ""}],
-				"", conformity_policy="required", thinking=None,
-			)
-			review = code_review.code_review_evidence(
-				True, [], "", review_policy="required", thinking=None,
-			)
-			conformity_path, review_path = combined_review.write_combined_evidence(root, conformity, review)
-			self.assertEqual(conformity_path.name, "CONFORMITY_EVIDENCE.json")
-			self.assertEqual(review_path.name, "CODE_REVIEW_EVIDENCE.json")
-			self.assertEqual(json.loads(conformity_path.read_text()), conformity)
-			self.assertEqual(json.loads(review_path.read_text()), review)
-			# Byte-compatible with each standalone script's own schema: the
-			# same keys a Go golden test/evidence loader already expects.
-			self.assertEqual(conformity["schema_version"], 1)
-			self.assertIn("review_verdicts", conformity)
-			self.assertEqual(review["schema_version"], 1)
-			self.assertIn("findings", review)
-
-
-class MainTests(unittest.TestCase):
-	def test_exit_code_bits_and_thinking_flow_through_main(self):
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			criteria_path = Path(spec_dir) / "criteria.md"
-			criteria_path.write_text("1. Widget exists\n")
-			spec_path = Path(spec_dir) / "ticket.md"
-			spec_path.write_text("Add a widget.\n")
-			argv = [
-				str(SCRIPT), "--workspace", str(root), "--spec", str(spec_path),
-				"--spec-acceptance-criteria", str(criteria_path), "--thinking", "max",
-			]
-			completed = subprocess.CompletedProcess([], 0, combined_output(
-				criteria=[{"criterion": "1. Widget exists", "verdict": "flagged", "detail": "missing"}],
-				findings=[{"severity": "high", "file": "a.go", "line": 1, "summary": "bug", "failure_scenario": "x"}],
-			), "")
-			with (
-				mock.patch.object(sys, "argv", argv),
-				mock.patch.object(build_app, "sh", return_value=completed),
-			):
-				exit_code = combined_review.main()
-			self.assertEqual(exit_code, combined_review.COMBINED_EXIT_BASE + 3)
-			self.assertEqual(
-				json.loads((root / "CONFORMITY_EVIDENCE.json").read_text())["thinking"], "max",
-			)
-			self.assertEqual(
-				json.loads((root / "CODE_REVIEW_EVIDENCE.json").read_text())["thinking"], "max",
-			)
+	def test_the_conformity_flags_are_gone(self):
+		for flag in ("--conformity-policy", "--spec-acceptance-criteria"):
+			argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/ticket.md", flag, "x"]
+			with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+				with self.assertRaises(SystemExit) as raised:
+					combined_review.main()
+			self.assertEqual(raised.exception.code, 2)
 
 	def test_main_thinking_option_rejects_unknown(self):
-		base_argv = [
-			str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/ticket.md",
-			"--spec-acceptance-criteria", "/tmp/criteria.md",
-		]
+		base_argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/ticket.md"]
 		with mock.patch.object(sys, "argv", base_argv + ["--thinking", "unknown"]):
 			with contextlib.redirect_stderr(io.StringIO()):
 				with self.assertRaises(SystemExit) as raised:
 					combined_review.main()
 		self.assertEqual(raised.exception.code, 2)
+
+
+class ParseSpecLineAndReproductionTests(unittest.TestCase):
+	def _parse(self, finding):
+		return code_review.parse_code_review_findings(json.dumps({"findings": [{"severity": "high", "summary": "s", **finding}]}))[1][0]
+
+	def test_well_formed_values_are_kept(self):
+		f = self._parse({"spec_line": {"number": 3, "text": "t"}, "reproduction": {"path": " x_test.go ", "content": "c"}})
+		self.assertEqual(f["spec_line"], {"number": 3, "text": "t"})
+		self.assertEqual(f["reproduction"], {"path": "x_test.go", "content": "c"})
+
+	def test_malformed_values_are_dropped_and_the_finding_stays(self):
+		for finding in (
+			{"spec_line": {"number": 0, "text": "t"}},
+			{"spec_line": {"number": True, "text": "t"}},
+			{"spec_line": {"number": "3", "text": "t"}},
+			{"spec_line": {"number": 3, "text": " "}},
+			{"spec_line": "L3"},
+			{"reproduction": {"path": "", "content": "c"}},
+			{"reproduction": {"path": "a_test.go", "content": ""}},
+			{"reproduction": {"path": 1, "content": "c"}},
+			{"reproduction": ["a_test.go"]},
+		):
+			with self.subTest(finding=finding):
+				f = self._parse(finding)
+				self.assertEqual(f["summary"], "s")
+				self.assertNotIn("spec_line", f)
+				self.assertNotIn("reproduction", f)
 
 
 if __name__ == "__main__":

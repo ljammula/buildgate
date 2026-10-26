@@ -370,7 +370,6 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		CheckpointDir:                    o.checkpointDir(),
 		BuildAppInterpreter:              o.BuildAppInterpreter,
 		BuildAppScript:                   o.BuildAppScript,
-		ConformityPolicy:                 o.ConformityPolicy,
 		CodeReviewPolicy:                 o.CodeReviewPolicy,
 		MaxRounds:                        o.MaxRounds,
 		TimeoutMinutes:                   o.TimeoutMinutes,
@@ -378,7 +377,6 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		VerifyCommand:                    o.VerifyCommand,
 		VerifyMaxAttempts:                o.VerifyMaxAttempts,
 		FastCheckCommand:                 o.FastCheckCommand,
-		SpecAcceptanceCriteria:           o.SpecAcceptanceCriteria,
 		FullSuiteCommand:                 o.FullSuiteCommand,
 		BaselineCheck:                    o.BaselineCheck,
 		GateCommands:                     o.GateCommands,
@@ -417,6 +415,10 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		Thinking:                         o.Thinking,
 		ReviewThinking:                   o.ReviewThinking,
 		ReviewRelayPolicy:                o.ReviewRelayPolicy,
+		ReviewReproduction:               o.ReviewReproduction,
+		ReviewSpecPath:                   o.ReviewSpecPath,
+		ReviewSpecSHA256:                 o.ReviewSpecSHA256,
+		RecheckReproductions:             o.RecheckReproductions,
 	}
 }
 

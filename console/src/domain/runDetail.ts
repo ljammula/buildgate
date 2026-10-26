@@ -6,17 +6,17 @@ import type { AgentEvidenceRound, Attempt, GateResult, ProgressEvent, Run } from
 import { agentEvidenceRoundOutcome, runIsTerminal } from "@/domain/run";
 
 /**
- * The exit line for an attempt. A combined review launch exits
- * `combinedReviewExitBase` + bits (bit 0: spec conformity did not pass, bit
- * 1: code review did not pass; reviewstep.CombinedExitBase in Go), so its 40
- * reads as the pass it is rather than an unexplained failure code.
+ * The exit line for an attempt. A review launch exits `combinedReviewExitBase`
+ * when the reviewer gave a verdict and `combinedReviewExitBase` + 2 when it
+ * gave none (reviewstep.ReviewExitCode in Go), so its 40 reads as the pass it
+ * is rather than an unexplained failure code.
  */
 export function attemptExitText(attempt: Pick<Attempt, "kind" | "exitCode">): string {
-  const bits = attempt.exitCode - combinedReviewExitBase;
-  if (attempt.kind === "review" && bits >= 0 && bits <= 3) {
-    const conformity = (bits & 1) === 0 ? "passed" : "failed";
-    const codeReview = (bits & 2) === 0 ? "passed" : "failed";
-    return `Exit code: ${attempt.exitCode} (spec conformity ${conformity}, code review ${codeReview})`;
+  if (attempt.kind === "review" && attempt.exitCode === combinedReviewExitBase) {
+    return `Exit code: ${attempt.exitCode} (review passed)`;
+  }
+  if (attempt.kind === "review" && attempt.exitCode === combinedReviewExitBase + 2) {
+    return `Exit code: ${attempt.exitCode} (review gave no verdict)`;
   }
   return `Exit code: ${attempt.exitCode}`;
 }
@@ -92,17 +92,13 @@ const stageOrder: readonly string[] = [
   "full_suite",
   "gate",
   "evidence",
+  // conformity_review and code_review are the retired standalone review
+  // stages, kept so an older run's Timeline still reads; 'review' is the one
+  // review launch (reviewstep.CombinedStep) every run now has.
   "conformity_review",
   "code_review",
-  // 'review' is the combined-launch stage (reviewstep.CombinedStep): when
-  // both spec-conformity and code review are enabled for a run, factoryd
-  // runs ONE combined_review.py launch in place of the two standalone stages
-  // above (measured live, a Flutter + Go app repo request, 2026-09-28:
-  // review was 50% of buildgate's whole spend, split across two separate
-  // fresh sandboxed sessions over the same diff). The two standalone stages
-  // stay in this order for a run with only one review enabled -- this is
-  // additive, not a replacement.
   "review",
+  "review_reproduction",
   "commit_oracles",
   "post_oracle_commit_verify",
   "evaluate",
@@ -122,7 +118,8 @@ export const stageLabels: Readonly<Record<string, string>> = {
   evidence: "Evidence",
   conformity_review: "Conformity review",
   code_review: "Code review",
-  review: "Review (conformity + code)",
+  review: "Review",
+  review_reproduction: "Reviewer reproduction",
   commit_oracles: "Commit oracles",
   post_oracle_commit_verify: "Re-verify after oracle commit",
   evaluate: "Evaluate",
