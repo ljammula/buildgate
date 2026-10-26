@@ -51,6 +51,23 @@ func (dp *deps) SaveReviewEntry(dataDir string, r *request.Request) error {
 	return r.Save(dataDir)
 }
 
+func (dp *deps) FetchBranchCommit(ctx context.Context, dir string, branch string, sha string) error {
+	return dp.forge.fetchBranchCommit(ctx, dir, branch, sha)
+}
+func (dp *deps) RevListRange(dir string, from string, to string) ([]string, []string, error) {
+	return dp.forge.revListRange(dir, from, to)
+}
+func (dp *deps) PatchID(dir string, sha string) (string, error) { return dp.forge.patchID(dir, sha) }
+func (dp *deps) ReplayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error) {
+	return dp.forge.replayCommits(ctx, dir, worktreePath, branch, onto, commits)
+}
+func (dp *deps) PushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error {
+	return dp.forge.pushWithLease(ctx, dir, sha, branch, expected)
+}
+func (dp *deps) MoveBranch(dir string, branch string, sha string) error {
+	return dp.forge.moveBranch(dir, branch, sha)
+}
+
 func (dp *deps) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {
 	return runMainWithReady(dp, ctx, args, onReady)
 }

@@ -106,6 +106,16 @@ type forgeBoundary interface {
 	createRef(dir string, ref string, sha string) error
 	createBranchAt(dir string, branch string, sha string) error
 	pruneRoundRefs(dir string, id string, keepPrefixes []string) error
+	// The git calls of a restack: fetchBranchCommit fetches origin's tip of
+	// a branch when it is not in dir, pushWithLease is the restack's leased
+	// forced push, and revListRange, patchID, replayCommits and moveBranch
+	// read and change only dir's local repository.
+	fetchBranchCommit(ctx context.Context, dir string, branch string, sha string) error
+	revListRange(dir string, from string, to string) ([]string, []string, error)
+	patchID(dir string, sha string) (string, error)
+	replayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
+	pushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
+	moveBranch(dir string, branch string, sha string) error
 	userLogin() (string, error)
 }
 

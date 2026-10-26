@@ -97,6 +97,12 @@ type fakeForge struct {
 	createRefFn                   func(dir string, ref string, sha string) error
 	createBranchAtFn              func(dir string, branch string, sha string) error
 	pruneRoundRefsFn              func(dir string, id string, keepPrefixes []string) error
+	fetchBranchCommitFn           func(ctx context.Context, dir, branch, sha string) error
+	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
+	patchIDFn                     func(dir, sha string) (string, error)
+	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
+	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
+	moveBranchFn                  func(dir, branch, sha string) error
 	userLoginFn                   func() (string, error)
 }
 
@@ -145,6 +151,22 @@ func (f *fakeForge) pruneRoundRefs(dir string, id string, keepPrefixes []string)
 }
 func (f *fakeForge) createBranchAt(dir string, branch string, sha string) error {
 	return f.createBranchAtFn(dir, branch, sha)
+}
+func (f *fakeForge) fetchBranchCommit(ctx context.Context, dir, branch, sha string) error {
+	return f.fetchBranchCommitFn(ctx, dir, branch, sha)
+}
+func (f *fakeForge) revListRange(dir, from, to string) ([]string, []string, error) {
+	return f.revListRangeFn(dir, from, to)
+}
+func (f *fakeForge) patchID(dir, sha string) (string, error) { return f.patchIDFn(dir, sha) }
+func (f *fakeForge) replayCommits(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error) {
+	return f.replayCommitsFn(ctx, dir, worktreePath, branch, onto, commits)
+}
+func (f *fakeForge) pushWithLease(ctx context.Context, dir, sha, branch, expected string) error {
+	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
+}
+func (f *fakeForge) moveBranch(dir, branch, sha string) error {
+	return f.moveBranchFn(dir, branch, sha)
 }
 func (f *fakeForge) userLogin() (string, error) { return f.userLoginFn() }
 
@@ -343,7 +365,23 @@ func newTestDeps(t testing.TB) *deps {
 		createRefFn:                   realForge.createRef,
 		createBranchAtFn:              realForge.createBranchAt,
 		pruneRoundRefsFn:              realForge.pruneRoundRefs,
-		userLoginFn:                   realForge.userLogin,
+		// A restack's git calls are refused: a test that restacks sets the
+		// ones it needs (realForge's, on its own temp repositories).
+		fetchBranchCommitFn: func(context.Context, string, string, string) error {
+			return errors.New("test forge: no branch is fetched")
+		},
+		revListRangeFn: func(string, string, string) ([]string, []string, error) {
+			return nil, nil, errors.New("test forge: no commits are listed")
+		},
+		patchIDFn: func(string, string) (string, error) { return "", errors.New("test forge: no patch id is computed") },
+		replayCommitsFn: func(context.Context, string, string, string, string, []string) ([]string, error) {
+			return nil, errors.New("test forge: nothing is replayed")
+		},
+		pushWithLeaseFn: func(context.Context, string, string, string, string) error {
+			return errors.New("test forge: nothing is pushed with a lease")
+		},
+		moveBranchFn: func(string, string, string) error { return errors.New("test forge: no branch is moved") },
+		userLoginFn:  realForge.userLogin,
 	}
 	realHost := realHost{dp: dp}
 	dp.host = &fakeHost{

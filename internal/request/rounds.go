@@ -154,3 +154,40 @@ func (r *Request) RetryChoiceFor(ticketIndex int) (scratch bool, round int) {
 func (r *Request) ClearRetryChoice() {
 	r.RetryFromScratch, r.RetryFromRound, r.RetryTicket = false, 0, 0
 }
+
+// TicketRestack is Ticket.Restack: a restack of the ticket in flight. Its
+// commits are replayed onto OntoSHA on the local branch Branch
+// (buildgate/<request>/t<n>-restack<N>), and RunID, once set, is the replay
+// run that judges them.
+type TicketRestack struct {
+	N       int    `json:"n"`
+	Branch  string `json:"branch"`
+	OntoSHA string `json:"onto_sha"`
+	RunID   string `json:"run_id,omitempty"`
+	Since   string `json:"since"`
+}
+
+// nextAction says what the restack of ticket index/count does now; nothing
+// is asked of the operator.
+func (rs *TicketRestack) nextAction(index, count int, prURL string) string {
+	onto := rs.OntoSHA
+	if len(onto) > 12 {
+		onto = onto[:12]
+	}
+	what := fmt.Sprintf("ticket %d/%d (%s) is being restacked: its commits are replayed onto %s on %s", index, count, prURL, onto, rs.Branch)
+	if rs.RunID != "" {
+		what += fmt.Sprintf(" and judged again by run %s", rs.RunID)
+	}
+	return what + "; the pull request is updated once every gate passes, and nothing is asked of you"
+}
+
+// RestackInFlight is the first ticket of r with a restack under way
+// (Ticket.Restack), nil when none has one.
+func (r *Request) RestackInFlight() *Ticket {
+	for i := range r.Tickets {
+		if r.Tickets[i].Restack != nil {
+			return &r.Tickets[i]
+		}
+	}
+	return nil
+}

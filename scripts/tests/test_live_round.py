@@ -50,6 +50,48 @@ class ThreadOutcomes(unittest.TestCase):
 		self.assertEqual(got, {1: (True, 1), 4: (False, 0)})
 
 
+class Replays(unittest.TestCase):
+	def test_a_reply_naming_a_replayed_commit_resolves_through_its_replay(self):
+		replays = live_round.replayed_commits([
+			[{"original": "a" * 40, "replayed": "b" * 40, "original_patch_id": "p" * 40, "replayed_patch_id": "p" * 40}],
+			[{"original": "b" * 40, "replayed": "c" * 40, "original_patch_id": "p" * 40, "replayed_patch_id": "p" * 40}],
+		])
+		self.assertEqual(replays["a" * 40], "c" * 40)
+		comments = [{"id": 1, "body": "fix"}, {"id": 2, "in_reply_to_id": 1, "body": "Addressed in aaaaaaaa."}]
+		self.assertEqual(live_round.thread_outcomes(comments, [1], ["c" * 40], replays), {1: (True, 0)})
+		self.assertEqual(live_round.thread_outcomes(comments, [1], ["c" * 40]), {1: (False, 0)})
+
+	def test_a_pair_whose_patch_ids_differ_is_not_a_replay(self):
+		replays = live_round.replayed_commits([[{"original": "a" * 40, "replayed": "b" * 40, "original_patch_id": "p" * 40, "replayed_patch_id": "q" * 40}]])
+		self.assertEqual(replays, {})
+
+
+class Stacked(unittest.TestCase):
+	def test_finds_ticket_two_stacked_on_ticket_one(self):
+		prs = [
+			{"url": "u0", "headRefName": "factoryd/other-001-x", "baseRefName": "main"},
+			{"url": "u2", "headRefName": "factoryd/req-1-002-20261025-1-abc", "baseRefName": "factoryd/req-1-001-20261025-1-def"},
+			{"url": "u1", "headRefName": "factoryd/req-1-001-20261025-1-def", "baseRefName": "main"},
+		]
+		first, second = live_round.stacked_pull_requests(prs, "req-1")
+		self.assertEqual((first["url"], second["url"]), ("u1", "u2"))
+
+	def test_nothing_until_ticket_two_stacks_on_ticket_one(self):
+		prs = [
+			{"url": "u1", "headRefName": "factoryd/req-1-001-x", "baseRefName": "main"},
+			{"url": "u2", "headRefName": "factoryd/req-1-002-x", "baseRefName": "main"},
+		]
+		self.assertEqual(live_round.stacked_pull_requests(prs, "req-1"), (None, None))
+
+	def test_restack_rounds_are_the_pushed_accepted_ones(self):
+		ticket = {"rounds": [
+			{"kind": "restack", "outcome": "accepted", "pushed": True, "run_id": "r1"},
+			{"kind": "restack", "outcome": "quarantined", "run_id": "r2"},
+			{"outcome": "accepted", "pushed": True, "run_id": "review"},
+		]}
+		self.assertEqual([r["run_id"] for r in live_round.restack_rounds(ticket)], ["r1"])
+
+
 class Summary(unittest.TestCase):
 	def test_share_counts_comments_over_all_recorded_runs(self):
 		total = live_round.summarize([

@@ -116,7 +116,7 @@ func holdForEarlierTicket(dp Deps, ctx context.Context, dataDir string, r *reque
 	case err != nil:
 		return true, HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: %v", idx, r.TicketCount, err), now)
 	case hold.park != "":
-		return true, parkRequest(dataDir, r, hold.park, now)
+		return true, parkRequest(dp, dataDir, r, hold.park, now)
 	case hold.wait != "":
 		return true, recordStackedWait(dataDir, r, hold.wait, cfg.HitlReminderInterval, now)
 	}
@@ -175,7 +175,7 @@ func stackedWaitReminderDue(r *request.Request, interval time.Duration, now time
 // resume after the repair still continues the kept build instead of
 // rebuilding the ticket. No ticket's merge readiness holds while the request
 // is parked.
-func parkRequest(dataDir string, r *request.Request, reason string, now time.Time) error {
+func parkRequest(dp Deps, dataDir string, r *request.Request, reason string, now time.Time) error {
 	for i := range r.Tickets {
 		r.Tickets[i].MergeReadiness = nil
 	}
@@ -183,7 +183,7 @@ func parkRequest(dataDir string, r *request.Request, reason string, now time.Tim
 	if r.PendingResumeVerb() == request.ResumeRound && r.Resume.LostRunID != "" {
 		step.RunID, step.Cause, step.RetryAt = r.Resume.LostRunID, r.Resume.Cause, r.Resume.RetryAt
 	}
-	return EnterResumeReview(dataDir, r, step, now)
+	return EnterResumeReview(dp, dataDir, r, step, now)
 }
 
 // recordTicketMerged records that ticket's pull request merged.
@@ -286,4 +286,29 @@ func continuedStackBase(dataDir string, ticket *request.Ticket, recordOf, resume
 		return ""
 	}
 	return run.StackBase(dataDir, rec)
+}
+
+// staleStackBase says why work of ticket idx recorded in record (a kept build
+// to resume, or an attempt to continue on its branch) no longer sits on the
+// earlier ticket's current PR head: the earlier ticket's head moved (a review
+// round or a restack was pushed) after it was built. "" when it still does,
+// for the first ticket, and when either commit is not recorded (a record
+// from before stack bases), which is checked as it was before.
+func staleStackBase(dataDir string, r *request.Request, idx int, record *run.Run) string {
+	if idx <= 1 {
+		return ""
+	}
+	prev, err := TicketAt(r, idx-1)
+	if err != nil {
+		return ""
+	}
+	head, err := run.Load(dataDir, prev.PRHeadRunID())
+	if err != nil {
+		return ""
+	}
+	base := run.StackBase(dataDir, record)
+	if base == "" || head.ResultSHA == "" || base == head.ResultSHA {
+		return ""
+	}
+	return fmt.Sprintf("run %s sits on %s, but ticket %d's pull-request head is now %s (run %s): it is built on ticket %d's old head", record.ID, shortSHA(base), prev.Index, shortSHA(head.ResultSHA), head.ID, prev.Index)
 }

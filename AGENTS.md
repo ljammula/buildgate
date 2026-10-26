@@ -327,7 +327,9 @@ A change to the PR-review pipeline (`internal/requestdriver/pr_review_driver.go`
 `make live-round`: one real pull request on `LIVE_ROUND_REPO`'s origin,
 reviewed by a second `gh` account (`LIVE_ROUND_REVIEWER`, in the config's
 `pr_trusted_authors`), which passes only when every review comment is
-answered by a pushed commit within `max_review_rounds`.
+answered by a pushed commit within `max_review_rounds`. A change to the
+restack of stacked tickets (`internal/requestdriver/restack.go`, the replay
+run) runs it with `LIVE_ROUND_STACKED=1`.
 `make live-round-results` prints the share of reviewer comments resolved
 within the cap over the recorded runs; `scripts/live_round.py`'s doc comment
 has the settings.

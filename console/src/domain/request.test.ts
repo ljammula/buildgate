@@ -444,8 +444,16 @@ test("request-every-field decodes with every optional field populated", () => {
       content: expect.stringContaining("Verify-Command: true") as string,
       fullPath: "/data/requests/req-every-field/tickets/001.spec.md",
       // The fixture's one round carries a kind (a conformity round), so it is
-      // not a review round.
+      // neither a review round nor a restack.
       reviewRounds: [],
+      restackRounds: [],
+      restack: {
+        n: 3,
+        branch: "every-field branch",
+        ontoSha: "every-field onto_sha",
+        runId: "every-field run_id",
+        since: "every-field since",
+      },
       activeRoundRunId: "",
       estimatedChangedLines: 0,
       builtChangedLines: 0,
@@ -678,6 +686,8 @@ test("a ticket's PR-review rounds are decoded; conformity rounds are left out", 
   expect(r.tickets[0]?.activeRoundRunId).toBe("req-1-001-review3-x");
   expect(r.tickets[1]).toMatchObject({
     reviewRounds: [],
+    restackRounds: [],
+    restack: null,
     activeRoundRunId: "",
     mergeReadiness: null,
   });

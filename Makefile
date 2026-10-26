@@ -226,6 +226,8 @@ live-smoke-test:
 # comment on its pull request as LIVE_ROUND_REVIEWER, and pass only if every
 # comment is answered by a pushed commit within max_review_rounds. It opens a
 # pull request on LIVE_ROUND_REPO's origin, so it is never part of verify.
+# LIVE_ROUND_STACKED=1 runs a two-ticket request and also checks that the
+# stacked ticket is restacked onto the reviewed ticket's new head.
 live-round:
 	python3 scripts/live_round.py
 

@@ -66,6 +66,12 @@ const (
 	// in that time), so nothing could be learned of the step's workflow.
 	// A shorter stall is ridden out and is not one.
 	TemporalUnreachable Cause = "temporal_unreachable"
+	// RestackConflict: a stacked ticket's commits did not apply cleanly onto
+	// the new tip of the branch its pull request stacks on (git's cherry-pick
+	// stopped on a conflict, read by the host), so nothing was replayed and
+	// nothing judged. The factory never rebuilds the ticket from its spec to
+	// resolve it.
+	RestackConflict Cause = "restack_conflict"
 )
 
 // causes holds, for each cause, the operator's clause about what
@@ -83,6 +89,7 @@ var causes = map[Cause]string{
 	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
 
 	TemporalUnreachable: "factoryd lost contact with the Temporal server while the %s step ran",
+	RestackConflict:     "a stacked ticket's commits did not apply cleanly onto the new tip of the branch its pull request stacks on during the %s step, so nothing was replayed or judged",
 }
 
 // Known reports whether c is a member of the closed set.

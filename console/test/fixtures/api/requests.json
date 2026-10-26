@@ -305,7 +305,14 @@
             ],
             "at": "2026-09-10T09:00:00Z"
           }
-        ]
+        ],
+        "restack": {
+          "n": 3,
+          "branch": "every-field branch",
+          "onto_sha": "every-field onto_sha",
+          "run_id": "every-field run_id",
+          "since": "every-field since"
+        }
       }
     ],
     "error": "every-field error",

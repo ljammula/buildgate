@@ -332,6 +332,13 @@
           "at": "2026-09-10T09:00:00Z"
         }
       ],
+      "restack": {
+        "n": 3,
+        "branch": "every-field branch",
+        "onto_sha": "every-field onto_sha",
+        "run_id": "every-field run_id",
+        "since": "every-field since"
+      },
       "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "full_path": "/data/requests/req-every-field/tickets/001.spec.md"
     }

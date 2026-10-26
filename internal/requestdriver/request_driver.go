@@ -60,6 +60,20 @@ type Deps interface {
 	// returns, the moment an operator's decision can land between the two
 	// writes.
 	SaveReviewEntry(dataDir string, r *request.Request) error
+	// The git calls of a restack (restack.go). FetchBranchCommit makes
+	// origin's tip sha of branch present in dir. RevListRange lists
+	// from..to oldest first, and the merge commits among them. PatchID is a
+	// commit's `git patch-id --stable`, "" for one that changes nothing.
+	// ReplayCommits cherry-picks commits onto onto on a new local branch in
+	// a scratch worktree (workspace.ReplayCommits). PushWithLease pushes sha
+	// to branch only while origin has it at expected. MoveBranch points a
+	// local branch at sha.
+	FetchBranchCommit(ctx context.Context, dir string, branch string, sha string) error
+	RevListRange(dir string, from string, to string) (commits []string, merges []string, err error)
+	PatchID(dir string, sha string) (string, error)
+	ReplayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
+	PushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
+	MoveBranch(dir string, branch string, sha string) error
 }
 
 // RequestDriverOwnsState reports whether driveRequests knows how to

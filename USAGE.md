@@ -131,13 +131,33 @@ line), merge ticket N's pull request (ticket N+1 then builds on the merge),
 or `factoryd cancel <id>`; a read that failed names `gh auth status` or
 git's access to origin.
 
+After ticket N+1's pull request is open, the factory keeps it on ticket N.
+On each PR poll, when ticket N's branch has moved (a review round pushed to
+it), or ticket N merged by a squash or rebase, ticket N+1 is restacked: the
+host replays its commits onto ticket N's new tip (or the branch ticket N
+merged into) on a local branch `buildgate/<id>/t<n>-restack<k>`, a replay run
+judges them with every gate and review and no build, and the result replaces
+ticket N+1's pull-request branch through a push leased on the commit the
+factory last pushed. A ready pull request is turned back to draft first, and
+until the restack is pushed and confirmed the pull request is neither
+retargeted nor marked ready. Tickets are restacked in order. The restack in
+progress is on the ticket in the console, in `factoryd watch` and in the
+request's next action. What can stop it:
+
+| What happened | The request | What you do |
+|---|---|---|
+| A commit the factory did not make is on ticket N+1's branch (or its leased push lost to one) | Parks in `resume_review` | Move the branch back to the commit the reason names, then `factoryd resume <id>`; or `factoryd cancel <id>` |
+| A merge commit, or a commit none of the ticket's runs made, is in ticket N+1's commits | Parks in `resume_review` | Take it out of the branch, then `factoryd resume <id>`; or cancel |
+| The commits conflict on the new tip | `resume_review`, cause `restack_conflict` | `factoryd resume <id>` replays again; or cancel |
+| The replay run is quarantined or halted | `halted`, nothing pushed | Read the run, fix the cause, `factoryd retry <id>` restacks again; or cancel |
+
 A park is not a lost step: `resume.reason` says which ticket and what to
 repair, and `resume.cause` is empty. Reopen the pull request or restore the
 branch, then `factoryd resume <id>` checks again and continues; or
 `factoryd cancel <id>`. A park that interrupted your `factoryd resume` of a
 lost build keeps that build: the next `factoryd resume` continues it.
 
-For a lost step, the reason names one of ten causes (`resume.cause` in the
+For a lost step, the reason names one of eleven causes (`resume.cause` in the
 request's `request.json`). The four that say a model was not served, or a review
 gave no verdict, are read from the spend meter's record of the step's model
 requests, never from what the worker printed:
@@ -155,6 +175,7 @@ requests, never from what the worker printed:
 | "the spend meter refused the model requests ..." | `meter_denied` | Raise the ceiling, window budget or request rate in the session config (or wait out a budget's window; `factoryd cost` shows the spend), then `factoryd restart` |
 | "the model route served none of the last requests ..." | `model_unavailable` | Check the route (`factoryd doctor`). A review whose model served nothing was already launched once more by the factory |
 | "the review of the ... step gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
+| "a stacked ticket's commits did not apply cleanly onto the new tip ..." | `restack_conflict` | The ticket's commits conflict with what changed under them (see the restack below). `factoryd resume <id>` replays them again, which helps once the earlier ticket's branch changed; the factory never rebuilds the ticket to resolve it |
 
 `done`, `closed` and `cancelled` are terminal; `cancel` (`factoryd cancel <id>`) refuses the first two. Full mechanics
 (reminders, ticket sequencing, PR review loop): [USAGE_REFERENCE.md § Request lifecycle](USAGE_REFERENCE.md#request-lifecycle).

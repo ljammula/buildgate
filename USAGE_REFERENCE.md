@@ -252,6 +252,34 @@ reviewer's latest opinion (an approval, a change request or a dismissal; a
 comment is none) approves the pull request's current head commit and no
 reviewer's latest opinion approves an earlier commit.
 
+A stacked ticket's open pull request is restacked when the branch it stacks
+on moves: on each PR poll, ticket N+1 needs a restack when ticket N's branch
+tip on origin is not under ticket N+1's PR head, or, after ticket N merged,
+when ticket N+1's `stack_base_sha` is not under the tip of the branch
+ticket N merged into (a squash or rebase merge; a merge commit needs none).
+Tickets are restacked in order, each after every earlier ticket's restack is
+pushed and confirmed. The factory checks that origin's branch is at the
+PR-head run's commit and that every commit since the stack base is the work
+of one of the ticket's own runs and no merge commit, replays those commits
+with `git cherry-pick` onto the new tip on the local branch
+`buildgate/<request>/t<n>-restack<k>` (pruned with the request's other
+local branches), and starts a replay run (round kind `restack`,
+no round budget used) that builds nothing and runs every gate and review on
+the replayed head from the new base. An accepted one is pushed: the pull
+request back to draft if it was ready, the release decision re-checked, a
+push leased on the commit read, the remote read back; only then is the
+replay run the PR-head run and the local branch moved to it. Until then the
+pull request is neither retargeted nor marked ready. A human commit, a merge
+commit or a commit no run of the ticket made parks the request
+(`resume.reason`); a conflict waits in `resume_review` with cause
+`restack_conflict` (`factoryd resume` replays again); a replay run not
+accepted halts the request with nothing pushed (`factoryd retry` restacks
+again). The ticket's `restack` field holds a restack in flight; `rounds`
+holds the finished ones. A resume of a kept build of ticket N+1 whose
+`stack_base_sha` is not ticket N's current PR head is refused (use
+`factoryd resume -from scratch`), and a retry of such an attempt builds
+from ticket N's current PR-head run instead of continuing on its branch.
+
 A ticket that quarantines with its failed gates a subset of
 `spec_conformity`/`code_review` (every other gate passed), where at least
 one of those two carries something actionable (a flagged, non-"clean"

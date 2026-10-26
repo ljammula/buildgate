@@ -53,6 +53,12 @@ type fakeDeps struct {
 	pruneRoundRefsFn              func(dir string, id string, keepPrefixes []string) error
 	runTicketFn                   func(ctx context.Context, args []string, onReady func(*run.Run)) error
 	saveReviewEntryFn             func(dataDir string, r *request.Request) error
+	fetchBranchCommitFn           func(ctx context.Context, dir, branch, sha string) error
+	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
+	patchIDFn                     func(dir, sha string) (string, error)
+	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
+	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
+	moveBranchFn                  func(dir, branch, sha string) error
 }
 
 var _ requestdriver.Deps = (*fakeDeps)(nil)
@@ -113,6 +119,20 @@ func (f *fakeDeps) afterReviewSave(after func(dataDir, id string)) {
 		return nil
 	}
 }
+func (f *fakeDeps) FetchBranchCommit(ctx context.Context, dir, branch, sha string) error {
+	return f.fetchBranchCommitFn(ctx, dir, branch, sha)
+}
+func (f *fakeDeps) RevListRange(dir, from, to string) ([]string, []string, error) {
+	return f.revListRangeFn(dir, from, to)
+}
+func (f *fakeDeps) PatchID(dir, sha string) (string, error) { return f.patchIDFn(dir, sha) }
+func (f *fakeDeps) ReplayCommits(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error) {
+	return f.replayCommitsFn(ctx, dir, worktreePath, branch, onto, commits)
+}
+func (f *fakeDeps) PushWithLease(ctx context.Context, dir, sha, branch, expected string) error {
+	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
+}
+func (f *fakeDeps) MoveBranch(dir, branch, sha string) error { return f.moveBranchFn(dir, branch, sha) }
 
 func newFakeDeps(testing.TB) *fakeDeps {
 	refused := func(what string) error { return errors.New("test deps: " + what + " is not set by this test") }
@@ -146,7 +166,17 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		runTicketFn: func(context.Context, []string, func(*run.Run)) error {
 			return refused("RunTicket")
 		},
-		saveReviewEntryFn: func(dataDir string, r *request.Request) error { return r.Save(dataDir) },
+		saveReviewEntryFn:   func(dataDir string, r *request.Request) error { return r.Save(dataDir) },
+		fetchBranchCommitFn: func(context.Context, string, string, string) error { return refused("FetchBranchCommit") },
+		revListRangeFn: func(string, string, string) ([]string, []string, error) {
+			return nil, nil, refused("RevListRange")
+		},
+		patchIDFn: func(string, string) (string, error) { return "", refused("PatchID") },
+		replayCommitsFn: func(context.Context, string, string, string, string, []string) ([]string, error) {
+			return nil, refused("ReplayCommits")
+		},
+		pushWithLeaseFn: func(context.Context, string, string, string, string) error { return refused("PushWithLease") },
+		moveBranchFn:    func(string, string, string) error { return refused("MoveBranch") },
 	}
 }
 

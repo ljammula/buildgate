@@ -647,7 +647,7 @@ func TestStackedParkKeepsTheLostBuildToResume(t *testing.T) {
 	runner := acceptingStackedBuildRunner(t, dataDir, &built)
 	r := buildFirstTicket(t, dp, dataDir, id, runner)
 	const lost = "req-1-002"
-	if err := requestdriver.EnterResumeReview(dataDir, r, request.LostStep{RunID: lost, Cause: unresolved.WorkerLost}, time.Now()); err != nil {
+	if err := requestdriver.EnterResumeReview(dp, dataDir, r, request.LostStep{RunID: lost, Cause: unresolved.WorkerLost}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	resumed, err := request.ResumeRequest(dataDir, id, request.ResumeRound, "alice", time.Now(), nil)

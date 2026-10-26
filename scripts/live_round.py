@@ -35,6 +35,21 @@ run fails before its pull request.
     LIVE_ROUND_RESULTS_FILE  default ~/buildgate/live-round/results.jsonl
     FACTORYD_BIN         default factoryd
 
+Stacked mode, LIVE_ROUND_STACKED=1 (fixture default todo-kafka-stacked):
+the handed-over plan has two tickets, so ticket 2's pull request stacks on
+ticket 1's branch. The comments go on ticket 1's pull request; once its
+round is pushed, the factory must restack ticket 2. The run passes when
+every comment is resolved, ticket 2's pull request head contains ticket 1's
+new head, ticket 2's restack run is accepted with its gates recorded, and a
+ticket 2 pull request that was ready when the comments were posted was
+turned back to draft. With LIVE_ROUND_STACKED_MERGE=1 the reviewer account
+then squash-merges ticket 1's pull request, and the run also needs ticket 2
+restacked onto the default branch and retargeted to it.
+
+    LIVE_ROUND_DATA_DIR  the factoryd data dir the requests are in (required
+                         in stacked mode: the restack is read from its
+                         request and run records)
+
 Prerequisites are the operator's working setup, as for live-smoke: Docker,
 the gateway and meter, a model route, `open_pull_request: true`. A short
 `pr_poll_interval` (1m) keeps the wait down.
@@ -80,9 +95,31 @@ def added_line(diff, anchor):
 	return None
 
 
-def thread_outcomes(comments, roots, pr_commits):
+def replayed_commits(replays):
+	"""original sha -> the commit it was last replayed as, from the commit
+	pairs of replay runs' records (run.json's replay.commits). A pair counts
+	only when its two patch ids are equal: the replay is the same change. A
+	commit replayed again is followed to its last replay."""
+	moved = {}
+	for pairs in replays:
+		for p in pairs:
+			if p.get("original_patch_id") == p.get("replayed_patch_id"):
+				moved[p["original"]] = p["replayed"]
+	def last(sha):
+		seen = set()
+		while sha in moved and sha not in seen:
+			seen.add(sha)
+			sha = moved[sha]
+		return sha
+	return {sha: last(sha) for sha in moved}
+
+
+def thread_outcomes(comments, roots, pr_commits, replays=None):
 	"""For each root comment id: (resolved, rounds_not_pushed). comments is
-	GitHub's flat review-comment list (id, in_reply_to_id, body)."""
+	GitHub's flat review-comment list (id, in_reply_to_id, body). A reply
+	naming a commit a restack replayed (replays: replayed_commits) counts
+	when the replay is a commit of the pull request."""
+	moved = replays or {}
 	outcomes = {}
 	for root in roots:
 		resolved, not_pushed = False, 0
@@ -91,8 +128,11 @@ def thread_outcomes(comments, roots, pr_commits):
 				continue
 			body = (c.get("body") or "").strip()
 			addressed = ADDRESSED.match(body)
-			if addressed and any(sha.startswith(addressed.group(1)) for sha in pr_commits):
-				resolved = True
+			if addressed:
+				named = [o for o in moved if o.startswith(addressed.group(1))]
+				candidates = [addressed.group(1)] + [moved[o] for o in named]
+				if any(sha.startswith(c) for sha in pr_commits for c in candidates):
+					resolved = True
 			elif NOT_PUSHED.match(body):
 				not_pushed += 1
 		outcomes[root] = (resolved, not_pushed)
@@ -125,6 +165,24 @@ def print_results(limit):
 	print(f"reviewer comments resolved within the cap: {t['resolved']}/{t['comments']} ({share}) over {t['runs']} run(s), {t['passed']} passed")
 
 
+def stacked_pull_requests(prs, request):
+	"""Ticket 1's and ticket 2's open pull requests of request among prs
+	(gh pr list --json url,number,headRefName,baseRefName): ticket n's head
+	branch names its run, <request>-00n-...; ticket 2's must stack on ticket
+	1's branch. (None, None) until both are open."""
+	first = next((p for p in prs if f"{request}-001-" in p["headRefName"]), None)
+	second = next((p for p in prs if f"{request}-002-" in p["headRefName"]), None)
+	if first is None or second is None or second["baseRefName"] != first["headRefName"]:
+		return None, None
+	return first, second
+
+
+def restack_rounds(ticket):
+	"""A request ticket's restack rounds (request.json's tickets[].rounds of
+	kind restack) whose push was confirmed, oldest first."""
+	return [r for r in ticket.get("rounds") or [] if r.get("kind") == "restack" and r.get("outcome") == "accepted" and r.get("pushed")]
+
+
 def sh(args, env=None, check=True, cwd=None):
 	p = subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd)
 	if check and p.returncode != 0:
@@ -138,7 +196,10 @@ class Round:
 		self.repo = os.environ.get("LIVE_ROUND_REPO", "")
 		self.reviewer = os.environ.get("LIVE_ROUND_REVIEWER", "")
 		self.config = os.environ.get("LIVE_ROUND_CONFIG", "")
-		self.name = os.environ.get("LIVE_ROUND_FIXTURE", "todo-kafka-version")
+		self.stacked = os.environ.get("LIVE_ROUND_STACKED") == "1"
+		self.name = os.environ.get("LIVE_ROUND_FIXTURE", "todo-kafka-stacked" if self.stacked else "todo-kafka-version")
+		self.data_dir = os.environ.get("LIVE_ROUND_DATA_DIR", "")
+		self.second = ""
 		self.timeout = 60 * int(os.environ.get("LIVE_ROUND_TIMEOUT", "90"))
 		self.dir = FIXTURES / self.name
 		self.fixture = json.loads((self.dir / "fixture.json").read_text())
@@ -233,12 +294,22 @@ class Round:
 			print(f"live-round: {self.reviewer} commented on {c['path']}:{line}", flush=True)
 		return slug, view["number"], roots
 
+	def replays(self):
+		"""The commit pairs of this request's replay runs (stacked mode)."""
+		if not (self.stacked and self.data_dir and self.request):
+			return {}
+		pairs = []
+		for t in self.request_record().get("tickets") or []:
+			for rnd in restack_rounds(t):
+				pairs.append((self.run_record(rnd["run_id"]).get("replay") or {}).get("commits") or [])
+		return replayed_commits(pairs)
+
 	def watch(self, slug, number, roots):
 		def step():
 			comments = json.loads(self.gh("api", "--paginate", "--slurp", f"repos/{slug}/pulls/{number}/comments") or "[]")
 			comments = [c for page in comments for c in page]
 			commits = [c["oid"] for c in self.pr_json("commits")["commits"]]
-			outcomes = thread_outcomes(comments, roots, commits)
+			outcomes = thread_outcomes(comments, roots, commits, self.replays())
 			resolved = sum(1 for ok, _ in outcomes.values() if ok)
 			not_pushed = max((n for _, n in outcomes.values()), default=0)
 			state = self.state().get("state", "")
@@ -248,6 +319,81 @@ class Round:
 			return None, note
 		return self.wait("corrective rounds", step)
 
+	# Stacked mode: two tickets, the restack of ticket 2 checked from the
+	# factory's own records.
+
+	def record(self, *parts):
+		return json.loads((pathlib.Path(self.data_dir).expanduser() / pathlib.Path(*parts)).read_text())
+
+	def request_record(self):
+		return self.record("requests", self.request, "request.json")
+
+	def run_record(self, run_id):
+		return self.record("runs", run_id, "run.json")
+
+	def to_stacked_pull_requests(self):
+		def step():
+			state = self.state().get("state", "")
+			if state in ("spec_review", "plan_review"):
+				self.factoryd("approve", self.request, check=False)
+				return None, state
+			if state in STOPPED:
+				raise RuntimeError(f"request stopped before its pull requests: {state}: {self.state().get('error', '')}")
+			prs = json.loads(self.gh("pr", "list", "--state", "open", "--json", "url,number,headRefName,baseRefName"))
+			first, second = stacked_pull_requests(prs, self.request)
+			if state == "pr_review" and first and second:
+				return (first, second), state
+			return None, state
+		first, second = self.wait("stacked pull requests", step)
+		self.pr, self.second = first["url"], second["url"]
+		print(f"live-round: ticket 1 {self.pr}, ticket 2 {self.second} (stacked on {first['headRefName']})", flush=True)
+
+	def restacked(self, onto_check, what):
+		"""Wait until ticket 2 has a pushed restack whose replay run passes
+		onto_check(run); return that run."""
+		def step():
+			state = self.state().get("state", "")
+			r = self.request_record()
+			rounds = restack_rounds(r["tickets"][1])
+			for rnd in reversed(rounds):
+				rec = self.run_record(rnd["run_id"])
+				if rec.get("state") == "accepted" and rec.get("gate_results") and onto_check(rec):
+					return rec, f"restack run {rec['id']} accepted"
+			if state in STOPPED:
+				raise RuntimeError(f"request stopped before ticket 2 was restacked ({what}): {state}: {r.get('error', '')}")
+			return None, f"{len(rounds)} restack(s) pushed, request {state}"
+		return self.wait(f"ticket 2 restacked {what}", step)
+
+	def contains(self, slug, ancestor, head):
+		cmp = json.loads(self.gh("api", f"repos/{slug}/compare/{ancestor}...{head}"))
+		return cmp.get("behind_by") == 0
+
+	def stacked_checks(self, slug, record, second_was_ready):
+		pr1_head = self.pr_json("headRefOid")["headRefOid"]
+		rec = self.restacked(lambda rec: (rec.get("replay") or {}).get("onto_sha") == pr1_head, "onto ticket 1's new head")
+		second = json.loads(self.gh("pr", "view", self.second, "--json", "headRefOid,number,isDraft,baseRefName"))
+		record["restack_run"] = rec["id"]
+		if second["headRefOid"] != rec.get("result_sha") or not self.contains(slug, pr1_head, second["headRefOid"]):
+			raise RuntimeError(f"ticket 2's pull request head {second['headRefOid']} is not the restack's {rec.get('result_sha')} on ticket 1's head {pr1_head}")
+		if second_was_ready:
+			events = json.loads(self.gh("api", "--paginate", "--slurp", f"repos/{slug}/issues/{second['number']}/timeline") or "[]")
+			if not any(e.get("event") == "convert_to_draft" for page in events for e in page):
+				raise RuntimeError("ticket 2's pull request was ready, and was not turned back to draft before the restack")
+		if os.environ.get("LIVE_ROUND_STACKED_MERGE") != "1":
+			return
+		first = self.pr_json("baseRefName")
+		self.gh("pr", "merge", self.pr, "--squash", as_reviewer=True)
+		base = first["baseRefName"]
+		merge = json.loads(self.gh("pr", "view", self.pr, "--json", "mergeCommit"))["mergeCommit"]["oid"]
+		print(f"live-round: {self.reviewer} squash-merged ticket 1 into {base} as {merge}", flush=True)
+		rec = self.restacked(lambda rec: self.contains(slug, merge, rec.get("result_sha", "")), f"onto {base}")
+		def retargeted():
+			view = json.loads(self.gh("pr", "view", self.second, "--json", "headRefOid,baseRefName"))
+			note = f"ticket 2 on {view['baseRefName']} at {view['headRefOid'][:12]}"
+			return (view if view["baseRefName"] == base and view["headRefOid"] == rec.get("result_sha") else None), note
+		self.wait(f"ticket 2 retargeted to {base}", retargeted)
+		record["merge_restack_run"] = rec["id"]
+
 	def cleanup(self):
 		if os.environ.get("LIVE_ROUND_KEEP") == "1":
 			return
@@ -255,11 +401,15 @@ class Round:
 		# which a cancel then refuses.
 		if self.request:
 			self.factoryd("cancel", "-reason", "live-round fixture finished", self.request, check=False)
-		if self.pr:
-			self.gh("pr", "close", self.pr, "--delete-branch", check=False)
+		for pr in (self.second, self.pr):
+			if pr:
+				self.gh("pr", "close", pr, "--delete-branch", check=False)
 
 	def run(self):
-		for name, value in (("LIVE_ROUND_REPO", self.repo), ("LIVE_ROUND_REVIEWER", self.reviewer)):
+		required = [("LIVE_ROUND_REPO", self.repo), ("LIVE_ROUND_REVIEWER", self.reviewer)]
+		if self.stacked:
+			required.append(("LIVE_ROUND_DATA_DIR", self.data_dir))
+		for name, value in required:
 			if not value:
 				raise SystemExit(f"live-round: {name} is required (see this script's doc comment)")
 		record = {"date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "fixture": self.name,
@@ -268,13 +418,20 @@ class Round:
 		started = time.time()
 		try:
 			self.submit()
-			self.to_pull_request()
+			if self.stacked:
+				self.to_stacked_pull_requests()
+				record["stacked_pull_request"] = self.second
+				second_was_ready = not json.loads(self.gh("pr", "view", self.second, "--json", "isDraft"))["isDraft"]
+			else:
+				self.to_pull_request()
 			record["pull_request"] = self.pr
 			slug, number, roots = self.comment()
 			# Counted only once posted: a run that stopped before its pull
 			# request put no comment in front of the factory.
 			record["comments"] = len(roots)
 			record["resolved"], record["rounds_not_pushed"], record["request_state"] = self.watch(slug, number, roots)
+			if self.stacked and roots and record["resolved"] == len(roots):
+				self.stacked_checks(slug, record, second_was_ready)
 			if roots and record["resolved"] == len(roots):
 				record["outcome"] = "pass"
 		except RuntimeError as err:

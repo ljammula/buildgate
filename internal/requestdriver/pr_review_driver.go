@@ -457,10 +457,17 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 		ticket.PRBase = state.BaseRefName
 	}
 	if state.ShouldStopPolling() {
-		return handleClosedOrMergedTicket(dataDir, r, ticket, state, now)
+		return handleClosedOrMergedTicket(dp, dataDir, r, ticket, state, now)
 	}
 	noteReopenedPR(ticket, state)
-	if merged := mergedTicketOnBranch(r, ticket, state.BaseRefName); merged != nil {
+	// A stacked ticket whose base moved is restacked first (restack.go):
+	// until its restack is pushed and confirmed it is neither retargeted nor
+	// marked ready, whatever its base on GitHub now says.
+	restacked, restackHeld, err := restackIfNeeded(dp, ctx, dataDir, r, ticket, cfg, now)
+	if err != nil || restacked {
+		return err
+	}
+	if merged := mergedTicketOnBranch(r, ticket, state.BaseRefName); merged != nil && !restackHeld {
 		if retargetOffMergedTicket(dp, ctx, dataDir, r, ticket, merged, state) {
 			return r.Save(dataDir)
 		}
@@ -486,6 +493,10 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	}
 	if len(newThreads) > 0 {
 		return RunCorrectiveRound(dp, ctx, dataDir, r, ticket, newThreads, cfg, now)
+	}
+	if restackHeld {
+		ticket.MergeReadiness = nil
+		return r.Save(dataDir)
 	}
 
 	return advancePRReadyOrApproved(dp, ctx, dataDir, r, ticket, state, now)
@@ -542,7 +553,7 @@ func prPollDue(lastPolledAt string, interval time.Duration, now time.Time) (bool
 // resume, or cancel. Any other state is a read the poll does not trust (an
 // empty or unknown state from gh): it is logged and the next poll reads
 // again, so a misread can never end a request.
-func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *request.Ticket, state forge.ReviewState, now time.Time) error {
+func handleClosedOrMergedTicket(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, state forge.ReviewState, now time.Time) error {
 	switch {
 	case state.MergedAt != nil || state.State == forge.PRStateMerged:
 		recordTicketMerged(ticket)
@@ -562,7 +573,7 @@ func handleClosedOrMergedTicket(dataDir string, r *request.Request, ticket *requ
 	case state.State == forge.PRStateClosed:
 		ticket.PRState = "closed"
 		if ticket.Index < r.TicketCount {
-			return parkRequest(dataDir, r, fmt.Sprintf("ticket %d/%d's pull request %s was closed without merging, and ticket %d builds on it: reopen it", ticket.Index, r.TicketCount, ticket.PRURL, ticket.Index+1), now)
+			return parkRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d's pull request %s was closed without merging, and ticket %d builds on it: reopen it", ticket.Index, r.TicketCount, ticket.PRURL, ticket.Index+1), now)
 		}
 		reason := fmt.Sprintf("ticket %d/%d: pull request %s closed without merging", ticket.Index, r.TicketCount, ticket.PRURL)
 		if err := r.Close(reason, now); err != nil {

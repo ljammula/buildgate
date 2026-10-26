@@ -194,6 +194,11 @@ type Ticket struct {
 	// RoundTags is the ticket's round ledger: one entry per build round that
 	// ended in a commit, with the ref that keeps it and the gates' verdict.
 	RoundTags []RoundTag `json:"round_tags,omitempty"`
+	// Restack is set while a restack of the ticket is in flight: from just
+	// before its commits are replayed until the restack's round is recorded
+	// (internal/requestdriver's restack.go). A pass that finds it set learns
+	// a restack was interrupted, and reconciles it before anything else.
+	Restack *TicketRestack `json:"restack,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -1633,6 +1638,10 @@ func (r *Request) prReviewNextAction() string {
 	var parts []string
 	for _, t := range r.Tickets {
 		if t.PRURL == "" {
+			continue
+		}
+		if t.Restack != nil {
+			parts = append(parts, t.Restack.nextAction(t.Index, r.TicketCount, t.PRURL))
 			continue
 		}
 		if failed := t.lastFailedReviewRound(); failed != nil && t.PRState == "ready" {
