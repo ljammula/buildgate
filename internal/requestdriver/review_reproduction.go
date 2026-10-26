@@ -89,8 +89,9 @@ func refusingReproductions(dataDir string, runRecord *run.Run) []run.RecheckEntr
 // index, to that ticket's list on the request on disk, under the request's
 // lock and from its current record, whatever its state (a request that left
 // building while the run ran keeps them too), except a cancelled one; a
-// reproduction already dropped from the ticket (Request.ReproductionDropped)
-// is never added again. r is brought up to the same list, so a later save of
+// refusal a drop already ended (Request.RefusalDropped: the same
+// reproduction, ticket and run) is not added again; the same reproduction
+// refusing another run is. r is brought up to the same list, so a later save of
 // r does not undo the write.
 func recordReproductionRefusals(dataDir string, r *request.Request, index int, runID string, entries []run.RecheckEntry) error {
 	unlock, err := request.Lock(dataDir, r.ID)
@@ -122,7 +123,7 @@ func noteOn(req *request.Request, index int, runID string, entries []run.Recheck
 	}
 	changed := false
 	for _, e := range entries {
-		if !req.ReproductionDropped(index, e) && req.Tickets[index-1].NoteReproductionRefusal(e, runID) {
+		if !req.RefusalDropped(index, e, runID) && req.Tickets[index-1].NoteReproductionRefusal(e, runID) {
 			changed = true
 		}
 	}
@@ -137,12 +138,14 @@ func mergeTicketList(r *request.Request, index int, current *request.Request) {
 		return
 	}
 	for _, d := range current.DroppedReproductions {
-		if !r.ReproductionDropped(d.Ticket, d.RecheckEntry) {
+		if !slices.ContainsFunc(r.DroppedReproductions, func(x request.DroppedReproduction) bool {
+			return x.At == d.At && x.Ticket == d.Ticket && request.ReproductionKey(x.RecheckEntry) == request.ReproductionKey(d.RecheckEntry)
+		}) {
 			r.DroppedReproductions = append(r.DroppedReproductions, d)
 		}
 	}
 	t := &r.Tickets[index-1]
-	t.Reproductions = slices.DeleteFunc(t.Reproductions, func(rp request.TicketReproduction) bool { return r.ReproductionDropped(index, rp.RecheckEntry) })
+	t.Reproductions = slices.DeleteFunc(t.Reproductions, func(rp request.TicketReproduction) bool { return r.ReproductionDropped(index, rp) })
 	for _, rp := range current.Tickets[index-1].Reproductions {
 		for _, id := range rp.RefusedRuns {
 			noteOn(r, index, id, []run.RecheckEntry{rp.RecheckEntry})
@@ -202,8 +205,8 @@ func ticketRecheck(dataDir string, r *request.Request, ticket *request.Ticket, b
 // attempts. It is the safety net under the notes made where a run's outcome
 // is observed: a run refused but never noted (a worker stopped between the
 // run's end and the note, a request moved out of its state while the run
-// ran) is on the list before the next build. A dropped reproduction is not
-// added again.
+// ran) is on the list before the next build. A refusal a drop ended (the
+// same reproduction and run) is not added again.
 func renoteTicketRuns(dataDir string, r *request.Request, ticket *request.Ticket) {
 	ids := []string{ticket.RunID}
 	for _, rnd := range ticket.Rounds {
@@ -218,26 +221,57 @@ func renoteTicketRuns(dataDir string, r *request.Request, ticket *request.Ticket
 	}
 }
 
-// dropOverridden takes off ticket index's list every reproduction that
-// refused a run an operator's override then accepted (run.Run.Overrides):
-// the override is the human's decision on it. It is the one place an
-// override is observed for the list; each drop is recorded with the
-// override's author.
+// dropOverridden ends, on ticket index's list, every refusal of a run an
+// operator's override then accepted (run.Run.Overrides): the override is
+// the human's decision on it. The drop covers those runs alone: the same
+// reproduction refusing another run stays, or comes back. It is the one
+// place an override is observed for the list; each drop is recorded with
+// the override's author, on disk at once (recordReproductionDrop).
 func dropOverridden(dataDir string, r *request.Request, index int, now time.Time) {
 	for _, rp := range slices.Clone(r.Tickets[index-1].Reproductions) {
-		by, runID := overriddenBy(dataDir, rp.RefusedRuns)
-		if by == "" {
+		by, runs := overriddenRuns(dataDir, rp.RefusedRuns)
+		if len(runs) == 0 {
 			continue
 		}
 		key := request.ReproductionKey(rp.RecheckEntry)
-		r.DropReproductions(index, func(x request.TicketReproduction) bool { return request.ReproductionKey(x.RecheckEntry) == key }, by,
-			fmt.Sprintf("run %s, which it refused, was accepted by an operator's override", runID), now)
+		ended := func(x request.TicketReproduction) []string {
+			if request.ReproductionKey(x.RecheckEntry) != key {
+				return nil
+			}
+			return runs
+		}
+		why := fmt.Sprintf("run %s, which it refused, was accepted by an operator's override", strings.Join(runs, ", "))
+		if err := recordReproductionDrop(dataDir, r, index, ended, by, why, now); err != nil {
+			log.Printf("request %s: ticket %d: record the drop of %s: %v", r.ID, index, rp.Path, err)
+		}
 	}
 }
 
-// overriddenBy is the author of the override that accepted one of runIDs,
-// and that run, or "" when none was.
-func overriddenBy(dataDir string, runIDs []string) (by, runID string) {
+// recordReproductionDrop ends refusals on ticket index's list
+// (request.Request.DropRefusals): on the request on disk at once, under its
+// lock and from its current record, unless it was cancelled, and in r.
+func recordReproductionDrop(dataDir string, r *request.Request, index int, ended func(request.TicketReproduction) []string, by, why string, now time.Time) error {
+	r.DropRefusals(index, ended, by, why, now)
+	unlock, err := request.Lock(dataDir, r.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	current, err := request.Load(dataDir, r.ID)
+	if err != nil || current.State == request.StateCancelled || index > len(current.Tickets) {
+		return err
+	}
+	current.DropRefusals(index, ended, by, why, now)
+	if err := current.Save(dataDir); err != nil {
+		return err
+	}
+	mergeTicketList(r, index, current)
+	return nil
+}
+
+// overriddenRuns are those of runIDs an operator's override accepted, and
+// the author of the first such override; none when no override did.
+func overriddenRuns(dataDir string, runIDs []string) (by string, runs []string) {
 	for _, id := range runIDs {
 		rec, err := run.Load(dataDir, id)
 		if err != nil || rec.State != run.StateAccepted {
@@ -245,11 +279,15 @@ func overriddenBy(dataDir string, runIDs []string) (by, runID string) {
 		}
 		for _, o := range rec.Overrides {
 			if o.NewState == run.StateAccepted {
-				return o.By, id
+				if by == "" {
+					by = o.By
+				}
+				runs = append(runs, id)
+				break
 			}
 		}
 	}
-	return "", ""
+	return by, runs
 }
 
 // aRecheckStillFails reports whether a recheck r ran is still failing. The

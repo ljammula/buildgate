@@ -25,12 +25,18 @@ func TestTicketReproductionsAreDeduplicatedAndDropsRecorded(t *testing.T) {
 		t.Fatalf("list = %+v, want a once (held by r1, refused r1 and r3) and b", tk.Reproductions)
 	}
 	r := &Request{Tickets: []Ticket{tk}}
-	r.DropReproductions(1, func(rp TicketReproduction) bool { return rp.Path == b.Path }, "bob", "overridden", time.Now())
-	if len(r.Tickets[0].Reproductions) != 1 || len(r.DroppedReproductions) != 1 || r.DroppedReproductions[0].By != "bob" || r.DroppedReproductions[0].Path != b.Path || r.DroppedReproductions[0].Ticket != 1 || !r.ReproductionDropped(1, b) || r.ReproductionDropped(1, a) {
+	r.DropRefusals(1, everyRefusalIf(func(rp TicketReproduction) bool { return rp.Path == b.Path }), "bob", "overridden", time.Now())
+	// Ending one refusal of a reproduction that refused two runs keeps it,
+	// for the other.
+	r.DropRefusals(1, func(rp TicketReproduction) []string { return []string{"r3"} }, "dan", "overridden", time.Now())
+	if len(r.Tickets[0].Reproductions) != 1 || !slices.Equal(r.Tickets[0].Reproductions[0].RefusedRuns, []string{"r1"}) || !r.RefusalDropped(1, a, "r3") {
+		t.Fatalf("list %+v; want a kept for r1 alone", r.Tickets[0].Reproductions)
+	}
+	if len(r.Tickets[0].Reproductions) != 1 || len(r.DroppedReproductions) != 2 || r.DroppedReproductions[0].By != "bob" || r.DroppedReproductions[0].Path != b.Path || r.DroppedReproductions[0].Ticket != 1 || !r.RefusalDropped(1, b, "r2") || r.RefusalDropped(1, b, "r9") || r.RefusalDropped(2, b, "r2") || r.RefusalDropped(1, a, "r1") {
 		t.Errorf("list %+v, dropped %+v; want b dropped by bob", r.Tickets[0].Reproductions, r.DroppedReproductions)
 	}
 	r.dropAllReproductions("carol", "sent back", time.Now())
-	if len(r.Tickets[0].Reproductions) != 0 || len(r.DroppedReproductions) != 2 || r.DroppedReproductions[1].By != "carol" {
+	if len(r.Tickets[0].Reproductions) != 0 || len(r.DroppedReproductions) != 3 || r.DroppedReproductions[2].By != "carol" {
 		t.Errorf("after a send-back: list %+v, dropped %+v; want every one dropped by carol", r.Tickets[0].Reproductions, r.DroppedReproductions)
 	}
 }

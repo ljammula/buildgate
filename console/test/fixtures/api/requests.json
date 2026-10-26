@@ -360,6 +360,9 @@
         ],
         "runner": "every-field runner",
         "holds_literal": true,
+        "refused_runs": [
+          "every-field refused_runs"
+        ],
         "by": "every-field by",
         "at": "2026-09-10T09:00:00Z",
         "why": "every-field why"

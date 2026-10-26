@@ -251,8 +251,9 @@ func TestAnOverrideTakesTheReproductionOffTheTicketsList(t *testing.T) {
 		t.Errorf("dropped = %+v, want the overridden one, by bob, naming o-run", dropped)
 	}
 
-	// The rest of the list overridden too: no recheck, and no refusal.
-	r.Tickets[0].Reproductions[0].RefusedRuns = append(r.Tickets[0].Reproductions[0].RefusedRuns, "o-run")
+	// The rest of the list refused only overridden runs too: no recheck,
+	// and no refusal.
+	r.Tickets[0].Reproductions[0].RefusedRuns = []string{"o-run"}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +461,7 @@ func TestARetryDropIsNotAddedBack(t *testing.T) {
 		return requestdrivertest.AcceptingBuildRunner(t, dataDir)(ctx, args, onReady)
 	})
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
-	if len(after) != 1 || requestdrivertest.HasFlag(after[0], "-recheck-reproductions") || len(loaded.Tickets[0].Reproductions) != 0 || !loaded.ReproductionDropped(1, e) {
+	if len(after) != 1 || requestdrivertest.HasFlag(after[0], "-recheck-reproductions") || len(loaded.Tickets[0].Reproductions) != 0 || !loaded.RefusalDropped(1, e, id+"-001") {
 		t.Errorf("builds %v, list %+v, dropped %+v; want a build with no recheck and the drop kept", after, loaded.Tickets[0].Reproductions, loaded.DroppedReproductions)
 	}
 }
@@ -504,7 +505,110 @@ func TestAnOverrideDropIsNotAddedBack(t *testing.T) {
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, r.ID)
 	e := requestdrivertest.HeldEntry(t, dataDir, head.ID)
-	if len(argvs) != 2 || requestdrivertest.HasFlag(argvs[0], "-recheck-reproductions") || requestdrivertest.HasFlag(argvs[1], "-recheck-reproductions") || len(loaded.Tickets[0].Reproductions) != 0 || !loaded.ReproductionDropped(1, e) {
+	if len(argvs) != 2 || requestdrivertest.HasFlag(argvs[0], "-recheck-reproductions") || requestdrivertest.HasFlag(argvs[1], "-recheck-reproductions") || len(loaded.Tickets[0].Reproductions) != 0 || !loaded.RefusalDropped(1, e, head.ID) {
 		t.Errorf("builds %d, list %+v, dropped %+v; want two rounds with no recheck and the drop kept", len(argvs), loaded.Tickets[0].Reproductions, loaded.DroppedReproductions)
+	}
+}
+
+// SC-022: a drop covers only the refusals it was made for. After an
+// override dropped a reproduction for run X, a later run Z refused by the
+// identical reproduction puts it back on the list, for Z alone: the safety
+// net reading run X again does not add X's refusal back, and the next round
+// rechecks Z's copy.
+func TestADropCoversOnlyTheRefusalsItWasMadeFor(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	approveRequestSpec(t, dataDir, r)
+	head, err := run.Load(dataDir, r.Tickets[0].RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := requestdrivertest.ReproductionRefusedOn(t, dataDir, head.ID, "", head.BaseSHA, head.ResultSHA)
+	x.Project, x.RequestID, x.TicketIndex = head.Project, r.ID, 1
+	if err := x.ApplyOverride("bob", "not what the spec asks", run.StateAccepted, func() string { return time.Now().UTC().Format(time.RFC3339) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := x.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var argvs [][]string
+	var z string
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
+		argvs = append(argvs, a)
+		id := requestdrivertest.ArgValue(a, "-ticket")
+		if len(argvs) == 1 {
+			z = id
+			return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
+		}
+		return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}
+	for i, thread := range []forge.Thread{
+		{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5},
+		{ID: "thread-2", Path: "b.go", Line: 2, Author: "alice", Body: "and this", CommentID: 6},
+	} {
+		stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: []forge.Thread{thread}, ActionableThreads: []forge.Thread{thread}}, nil)
+		if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(time.Duration(i)*2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(argvs) < 2 {
+		t.Fatalf("builds = %d, want two rounds", len(argvs))
+	}
+	if requestdrivertest.HasFlag(argvs[0], "-recheck-reproductions") {
+		t.Errorf("round 1 rechecks the overridden reproduction: %v", argvs[0])
+	}
+	if want := requestdrivertest.HeldEntry(t, dataDir, z); !manifestHas(t, argvs[1], want) || len(readRecheckManifest(t, argvs[1]).Reproductions) != 1 {
+		t.Errorf("round 2's manifest = %+v, want only Z's copy %+v", readRecheckManifest(t, argvs[1]).Reproductions, want)
+	}
+	loaded := requestdrivertest.LoadRequest(t, dataDir, r.ID)
+	if list := loaded.Tickets[0].Reproductions; len(list) != 1 || !slices.Equal(list[0].RefusedRuns, []string{z}) {
+		t.Errorf("list = %+v, want the reproduction back for run %s alone", list, z)
+	}
+}
+
+// SC-022: a send-back's drops are keyed by the old tickets' runs, so the
+// same reproduction refusing a run of the new ticket 1 is noted.
+func TestASendBackDropDoesNotCoverTheNewTicketsRefusals(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	var builds [][]string
+	drive := func(runner requestdriver.TicketRunner) {
+		t.Helper()
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+	}
+	drive(refusedBuildRunner(t, dataDir, id, &builds))
+	before := requestdrivertest.LoadRequest(t, dataDir, id)
+	sent, err := request.SendBack(dataDir, id, "alice", "a different plan", request.SendBackToPlan, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sent.DroppedReproductions) != 1 || !slices.Equal(sent.DroppedReproductions[0].RefusedRuns, []string{id + "-001"}) {
+		t.Fatalf("drops after the send-back = %+v, want one for run %s-001", sent.DroppedReproductions, id)
+	}
+	// The replan's new ticket 1, built again (stood in for by the old
+	// ticket with its list and run cleared).
+	before.DroppedReproductions = sent.DroppedReproductions
+	before.Tickets[0].Reproductions, before.Tickets[0].RunID = nil, ""
+	if err := before.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	drive(func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		runID := requestdrivertest.ArgValue(args, "-ticket") + "-new"
+		onReady(&run.Run{ID: runID})
+		rr := requestdrivertest.ReproductionRefusedOn(t, dataDir, runID, "factoryd/"+runID, sha40(1), sha40(2))
+		return saveAsBuiltFrom(t, dataDir, id, args, rr)
+	})
+	list := requestdrivertest.LoadRequest(t, dataDir, id).Tickets[0].Reproductions
+	if len(list) != 1 || !slices.Equal(list[0].RefusedRuns, []string{id + "-001-new"}) {
+		t.Errorf("list = %+v, want the new ticket's refusal noted", list)
 	}
 }

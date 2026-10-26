@@ -382,12 +382,15 @@ Every build of the ticket rechecks the list the same way: a retry, a
 `retry -from <N>`, a resume and every PR-review round, also after a recheck
 that still fails and after an accepted or restacked round. The list grows
 only by refusals, each bounded by `review_corrective_rounds` and
-`max_review_rounds`. A reproduction that refused a run `factoryd override`
-accepted is taken off it (recorded under `dropped_reproductions`): the
-override is the decision on it. A send-back to spec or to plan discards the
-tickets and with them their lists: an operator's action that ends the
-chain, each entry recorded under `dropped_reproductions` with who sent it
-back. A restack's replay run holds and runs no reproduction, and leaves the
+`max_review_rounds`. A reproduction's refusal of a run `factoryd override`
+accepted is taken off it (recorded under `dropped_reproductions`, with the
+runs it covers): the override is the decision on that refusal. A send-back
+to spec or to plan discards the tickets and with them their lists: an
+operator's action that ends the chain, each entry recorded under
+`dropped_reproductions` with who sent it back. A drop covers only the
+refusals it was made for (the ticket and the runs): the same reproduction
+refusing another run, a later one or one of a ticket planned again, is on
+the list again. A restack's replay run holds and runs no reproduction, and leaves the
 list for the round after it. The list is written to the request as soon as
 the run that a reproduction refused ends, whatever the request's state, and
 each build first notes again what refused every run recorded on the ticket;
