@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -66,6 +68,7 @@ func newReproFixture(t *testing.T) *reproFixture {
 	writeFile(t, spec, reproSpec)
 	input.ReviewReproduction, input.ReviewSpecPath, input.ReviewSpecSHA256 = true, spec, sha256Of([]byte(reproSpec))
 	input.CheckpointDir = t.TempDir()
+	input.BaseSHA = f.commit
 	f.input = input
 	rt.onCreate = func(req sandbox.SandboxRequest) {
 		f.mu.Lock()
@@ -189,6 +192,39 @@ func TestHoldReproductionsCopiesAcceptedOnesReadOnly(t *testing.T) {
 	again, err := f.hold()
 	if err != nil || len(again) != 3 || again[0].SHA256 != h.SHA256 {
 		t.Errorf("hold again = %+v, %v; want the same copy", again, err)
+	}
+}
+
+// The hold counts a backticked literal of the cited line only when the
+// reproduction holds it and no tracked file of the base commit does
+// (case-sensitive, byte-exact); a file the worktree holds untracked does not
+// make it the base's, and an unknown base counts none.
+func TestHoldCountsOnlyALiteralTheBaseDoesNotHold(t *testing.T) {
+	holdsLiteral := func(f *reproFixture) bool {
+		t.Helper()
+		f.writeEvidence(reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`."))
+		held, err := f.hold()
+		if err != nil || len(held) != 1 || held[0].Refused != "" {
+			t.Fatalf("hold = %+v, %v; want one held reproduction", held, err)
+		}
+		return held[0].HoldsLiteral
+	}
+	notInBase := newReproFixture(t)
+	writeFile(t, filepath.Join(notInBase.repo, "p", "notes.txt"), "Add(1, 2) is 3\n")
+	writeFile(t, filepath.Join(notInBase.repo, "p", "case.go"), "package p\n\n// add(1, 2)\n")
+	if !holdsLiteral(notInBase) {
+		t.Error("literals only in the reproduction and an untracked file: want the literal to count")
+	}
+	inBase := newReproFixture(t)
+	writeFile(t, filepath.Join(inBase.repo, "p", "doc.go"), "package p\n\n// Add(1, 2) returns 3.\n")
+	inBase.input.BaseSHA = trustedCommit(t, inBase.repo)
+	if holdsLiteral(inBase) {
+		t.Error("every literal the reproduction holds is in a tracked file of the base: want none to count")
+	}
+	unknown := newReproFixture(t)
+	unknown.input.BaseSHA = ""
+	if holdsLiteral(unknown) {
+		t.Error("unknown base: want no literal to count")
 	}
 }
 
@@ -490,5 +526,76 @@ func TestReviewWithNoVerdictHoldsNothing(t *testing.T) {
 	}
 	if len(res.Reproductions) != 0 || reviewStepPassed(res.Result.ExitCode) {
 		t.Errorf("exit %d, held %+v; want no verdict and nothing held", res.Result.ExitCode, res.Reproductions)
+	}
+}
+
+// A launch whose sandbox started the reproduction's command and whose wait
+// then ended on the launch's deadline is a pass with every test a timeout
+// (cap_exceeded), fed to the decision as any other timeout. A sandbox that never started its command, or a wait lost for any
+// other reason, stays the launch's own failure and gives no verdict.
+func TestReproductionThatRunsPastItsCapIsATimeout(t *testing.T) {
+	f := newReproFixture(t)
+	h := f.held()
+	f.rt.WaitErr = context.DeadlineExceeded
+	findings := liveReproduce(t, f.acts, f.input, []run.HeldReproduction{h}, f.commit)
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v", findings)
+	}
+	rep := findings[0].Reproduction
+	if len(rep.Runs) != 3 {
+		t.Fatalf("runs = %+v; want head1, head2 and base", rep.Runs)
+	}
+	for _, r := range rep.Runs {
+		if !r.CapExceeded || r.Outcome != string(reproduction.OutcomeFailed) || r.Tests["TestRepro"] != string(reproduction.KindTimeout) || r.ReportSHA256 != "" {
+			t.Errorf("run %s = %+v; want every test a timeout, cap exceeded, no report read", r.Pass, r)
+		}
+	}
+	// The base hangs the same way; the cited line's literals are in the
+	// reproduction and not in the base, so it blocks on that.
+	if rep.Verdict != string(reproduction.VerdictBlocks) || !strings.Contains(rep.Reason, "fails the same way on the base and holds a literal") {
+		t.Errorf("verdict = %s (%s); want blocks on the same timeout and the literal", rep.Verdict, rep.Reason)
+	}
+
+	for name, rt := range map[string]*sandboxtest.WorkerRuntime{
+		"never started": {CreateErr: context.DeadlineExceeded},
+		"wait lost":     {WaitErr: errors.New("the gateway closed the stream")},
+	} {
+		g := newReproFixture(t)
+		hg := g.held()
+		g.rt.WorkerRuntime = rt
+		if _, err := g.launch(hg, reproductionPassHead1, g.commit); err == nil || failureType(err) == ReproductionUnheldFailureType {
+			t.Errorf("%s: err = %v (%s); want the launch's own failure", name, err, failureType(err))
+		} else if name == "never started" && failureType(err) != SandboxLaunchFailureType {
+			t.Errorf("%s: type %s, want %s", name, failureType(err), SandboxLaunchFailureType)
+		}
+	}
+}
+
+// ranPastLaunchCap reads only the launch's own cap: the Activity's deadline
+// ending first, or a context that ended, is not a hang the factory timed.
+func TestRanPastLaunchCapReadsOnlyTheLaunchsDeadline(t *testing.T) {
+	act, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	launch, cancelLaunch := context.WithTimeout(act, time.Minute)
+	defer cancelLaunch()
+	started := fmt.Errorf("sandbox x: %w", context.DeadlineExceeded)
+	notStarted := fmt.Errorf("%w: %w", sandbox.ErrSandboxNotStarted, context.DeadlineExceeded)
+	if !ranPastLaunchCap(act, launch, started) {
+		t.Error("a started command cut by the launch's cap: want true")
+	}
+	if ranPastLaunchCap(act, launch, notStarted) || ranPastLaunchCap(act, launch, errors.New("lost")) {
+		t.Error("a sandbox that never started, or another error: want false")
+	}
+	short, cancelShort := context.WithTimeout(context.Background(), time.Second)
+	defer cancelShort()
+	inShort, cancelIn := context.WithTimeout(short, time.Minute)
+	defer cancelIn()
+	if ranPastLaunchCap(short, inShort, started) {
+		t.Error("the Activity's deadline before the cap: want false")
+	}
+	done, cancelDone := context.WithCancel(context.Background())
+	cancelDone()
+	if ranPastLaunchCap(done, launch, started) {
+		t.Error("the Activity's context ended: want false")
 	}
 }

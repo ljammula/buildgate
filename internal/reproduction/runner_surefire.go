@@ -9,9 +9,19 @@ import (
 
 // surefireXML runs a JUnit test class with Maven Surefire and reads the
 // class's TEST-<class>.xml report. The per-test timeout is JUnit Jupiter's
-// default timeout, which reports a TimeoutException; a JUnit 4 test has no
-// per-test timeout and is cut only by the launch's.
+// default timeout (JUnit 5.9 or later) in its separate-thread mode, so a test
+// that never checks for an interrupt (a busy loop) still reports a
+// TimeoutException when it passes; an older JUnit 5 ignores the thread mode
+// and only interrupts, and a JUnit 4 test has no per-test timeout: both are
+// then cut only by the launch's cap, which reads as a timeout of every test
+// (CapExceeded).
 type surefireXML struct{}
+
+// surefireCompileExit is the launch's exit status when `mvn test-compile`,
+// run on its own before any test, fails: the module or the reproduction does
+// not compile. Maven itself exits 0 or 1, and a test that ends its JVM makes
+// Surefire fail with 1, so only the script's own compile step returns it.
+const surefireCompileExit = 86
 
 func (surefireXML) ID() string { return "surefire-xml" }
 
@@ -54,11 +64,14 @@ func (surefireXML) TestIDs(_ string, content []byte) ([]string, error) {
 	return uniqueIDs(ids), nil
 }
 
-// Command runs the one class in its module and copies its report out; the
-// class's binary name is read from the path under src/test/java. The
-// module's surefire-reports directory is deleted before Maven runs, so the
-// report copied out is one this launch wrote: a commit that tracks a report
-// there (a stale pass) leaves none, and the launch reads as missing.
+// Command compiles the module's main and test sources on their own first
+// (`mvn test-compile`); when that fails the script exits
+// surefireCompileExit before any test runs. It then runs the one class in
+// its module and copies its report out; the class's binary name is read
+// from the path under src/test/java. The module's surefire-reports
+// directory is deleted before Maven runs, so the report copied out is one
+// this launch wrote: a commit that tracks a report there (a stale pass)
+// leaves none, and the launch reads as missing.
 func (surefireXML) Command(inv Invocation) Command {
 	i := strings.Index("/"+inv.Path, "/"+surefireSourceRoot)
 	module := inv.Path[:i]
@@ -66,17 +79,22 @@ func (surefireXML) Command(inv Invocation) Command {
 	class := path.Base(strings.ReplaceAll(fqcn, ".", "/"))
 	reports := module + "target/surefire-reports"
 	report := reports + "/TEST-" + fqcn + ".xml"
-	script := fmt.Sprintf("rm -rf -- %s || exit 125; mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
-		shellQuote(reports), shellQuote(module+"pom.xml"), shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
+	pom := shellQuote(module + "pom.xml")
+	script := fmt.Sprintf("rm -rf -- %s || exit 125; mvn -B -q -f %s test-compile || exit %d; "+
+		"mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds -Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
+		shellQuote(reports), pom, surefireCompileExit, pom, shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 
-// Classify: no report is missing (Surefire writes none when the module does
-// not compile, so a compile error reads as missing). A case's name is its
-// method, with any "(...)" or "[...]" suffix dropped.
-func (surefireXML) Classify(_ string, report []byte, _ int, ids []string) (map[string]Kind, Outcome) {
+// Classify: no report after the compile step failed (surefireCompileExit)
+// is a compile error; any other launch with no report is missing. A case's
+// name is its method, with any "(...)" or "[...]" suffix dropped.
+func (surefireXML) Classify(_ string, report []byte, exit int, ids []string) (map[string]Kind, Outcome) {
 	cases, ok := readJUnit(report)
 	if !ok {
+		if report == nil && exit == surefireCompileExit {
+			return allKind(ids, KindCompile), OutcomeCompile
+		}
 		return allKind(ids, KindMissing), OutcomeMissing
 	}
 	kinds := map[string]Kind{}

@@ -843,7 +843,9 @@ func (rep ReviewReproduction) FailedTest() (id, kind string) {
 }
 
 // ReproductionRun is one launch of a reproduction: which pass, on which
-// commit, and what the runner's report recorded.
+// commit, and what the runner's report recorded. CapExceeded marks a launch
+// whose command started and ran past the factory's cap: no report is read,
+// and every test is recorded as a timeout.
 type ReproductionRun struct {
 	Pass               string            `json:"pass"`
 	Commit             string            `json:"commit,omitempty"`
@@ -853,6 +855,7 @@ type ReproductionRun struct {
 	LogPath            string            `json:"log_path,omitempty"`
 	ReportSHA256       string            `json:"report_sha256,omitempty"`
 	ReproductionSHA256 string            `json:"reproduction_sha256,omitempty"`
+	CapExceeded        bool              `json:"cap_exceeded,omitempty"`
 }
 
 // The dispositions of a finding (CodeReviewFinding.Disposition), and the
@@ -879,7 +882,8 @@ func ReviewReproductionDir(runDir string) string {
 // refused it (Refused, and nothing is held) or the host copy (HostPath, its
 // SHA-256 taken when it was written), the cited spec line, the test IDs and
 // runner the factory chose, and whether the content holds a backticked
-// literal of the cited line. Never the content.
+// literal of the cited line that no tracked file of the base commit holds
+// (reproduction.NewLiteral). Never the content.
 type HeldReproduction struct {
 	Finding      int      `json:"finding"`
 	Path         string   `json:"path"`

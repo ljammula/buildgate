@@ -17,12 +17,13 @@ const (
 	VerdictStillFailing Verdict = "still_failing" // a recheck: anything but a pass
 )
 
-// Evidence is what Decide reads: whether the reproduction's content holds a
-// backticked literal of the cited line (CitesLiteral, taken by the caller
-// when it held the content, so the content never travels with the verdict),
-// and the factory's launches of it. A nil launch did not run (the second head
-// launch runs only after a failed first, the base only after two; a run whose
-// base commit is unknown has no base launch).
+// Evidence is what Decide reads: whether the reproduction holds a literal
+// the cited line states that the base commit does not (HoldsLiteral, from
+// NewLiteral, taken by the caller when it held the content, so the content
+// never travels with the verdict), and the factory's launches of it. A nil
+// launch did not run (the second head launch runs only after a failed first,
+// the base only after two; a run whose base commit is unknown has no base
+// launch).
 type Evidence struct {
 	HoldsLiteral bool
 	Head1        *RunResult
@@ -42,8 +43,8 @@ func advice(reason string) Decision { return Decision{Verdict: VerdictAdvice, Re
 // Decide is SC-022's table. The reproduction blocks only when some of its own
 // test IDs failed on both head launches and, on the base, it does not
 // compile or they do not all fail the same way (same ID, same kind); when
-// they do, it blocks only when the cited line's backticked literal appears
-// byte-for-byte in the content. A base launch with no report is advice, and
+// they do, it blocks only when the reproduction holds a backticked literal of
+// the cited line that no tracked file of the base holds (NewLiteral). A base launch with no report is advice, and
 // so is a base pass that could not be staged ("base not checked").
 func Decide(e Evidence) Decision {
 	if e.Head1 == nil || e.Head2 == nil {
@@ -72,7 +73,7 @@ func Decide(e Evidence) Decision {
 		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails on the result commit and not the same way on the base", TestIDs: failing}
 	}
 	if e.HoldsLiteral {
-		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails the same way on the base and holds the cited line's literal", TestIDs: failing}
+		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails the same way on the base and holds a literal of the cited line the base does not", TestIDs: failing}
 	}
 	return Decision{Verdict: VerdictAdvice, Reason: "the reproduction fails the same way on the base", TestIDs: failing}
 }
@@ -103,11 +104,19 @@ func sameOnBase(failing []string, e Evidence) bool {
 
 var backticked = regexp.MustCompile("`([^`]+)`")
 
-// CitesLiteral reports whether a backticked literal of the cited line
-// appears byte-for-byte in the content.
-func CitesLiteral(line string, content []byte) bool {
+// NewLiteral reports whether a backticked literal of the cited line appears
+// byte-for-byte in the content and in no tracked file of the base commit:
+// a value the spec states, not an identifier the base already has (an API
+// name the reproduction calls appears in the base, so it never counts).
+// inBase reports whether the literal appears, case-sensitive and
+// byte-exact, in any tracked file of the base; nil (the base is unknown)
+// counts no literal.
+func NewLiteral(line string, content []byte, inBase func(literal string) bool) bool {
+	if inBase == nil {
+		return false
+	}
 	for _, m := range backticked.FindAllStringSubmatch(line, -1) {
-		if bytes.Contains(content, []byte(m[1])) {
+		if bytes.Contains(content, []byte(m[1])) && !inBase(m[1]) {
 			return true
 		}
 	}

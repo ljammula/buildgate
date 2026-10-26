@@ -76,5 +76,5 @@
   },
   "plan_expected": "blocks",
   "spec_text": "- When the value being encoded contains a cycle, `Marshal` returns a nil byte slice",
-  "want_verdict": "blocks"
+  "want_verdict": "advice"
 }

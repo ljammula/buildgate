@@ -86,9 +86,12 @@ func TestRunnerClassifiesEveryOutcome(t *testing.T) {
 			{"fail.xml", "src/test/java/com/example/AddTest.java", 1, "sumsTwoNumbers", KindFail, OutcomeFailed},
 			{"error.xml", "src/test/java/com/example/AddTest.java", 1, "throwsOnOverflow", KindError, OutcomeFailed},
 			{"timeout.xml", "src/test/java/com/example/AddTest.java", 1, "hangs", KindTimeout, OutcomeFailed},
+			{"timeout-separate-thread.xml", "src/test/java/com/example/BusyTest.java", 1, "spins", KindTimeout, OutcomeFailed},
+			{"", "src/test/java/com/example/NewApiTest.java", surefireCompileExit, "usesNewApi", KindCompile, OutcomeCompile},
 			{"skipped.xml", "src/test/java/com/example/AddTest.java", 0, "later", KindSkipped, OutcomeInconclusive},
 			{"param.xml", "src/test/java/com/example/AddTest.java", 1, "sums", KindFail, OutcomeFailed},
 			{"", "src/test/java/com/example/AddTest.java", 1, "sumsTwoNumbers", KindMissing, OutcomeMissing},
+			{"", "src/test/java/com/example/AddTest.java", 0, "sumsTwoNumbers", KindMissing, OutcomeMissing},
 		},
 		"minitest-json": {
 			{"pass.json", "test/pass_test.rb", 0, "AddTest#test_sums", KindPass, OutcomePassed},
@@ -269,7 +272,8 @@ func TestRunnerCommandsAreFactoryOwned(t *testing.T) {
 		{"vitest-json", "src/a.test.ts", []string{"a"},
 			[]string{"npx --no-install vitest run 'src/a.test.ts' --reporter=json --outputFile='/out/report' --testTimeout=60000"}, ""},
 		{"surefire-xml", "core/src/test/java/com/x/FooTest.java", []string{"a"},
-			[]string{"-f 'core/pom.xml' -Dtest='FooTest'", "timeout.default=60s", "cp 'core/target/surefire-reports/TEST-com.x.FooTest.xml' '/out/report'", "exit $rc"}, ""},
+			[]string{"mvn -B -q -f 'core/pom.xml' test-compile || exit 86; mvn ", "-f 'core/pom.xml' -Dtest='FooTest'", "timeout.default=60s",
+				"-Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD", "cp 'core/target/surefire-reports/TEST-com.x.FooTest.xml' '/out/report'", "exit $rc"}, ""},
 		{"minitest-json", "test/cart_test.rb", []string{"CartTest#test_a"},
 			[]string{"BG_REPRO_REPORT='/out/report' BG_REPRO_TEST_TIMEOUT=60", "-I'/inputs/reproduction' -rbg_repro_reporter", "'test/cart_test.rb'"}, minitestReporter},
 	}

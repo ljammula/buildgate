@@ -19,7 +19,9 @@ import (
 // goTest runs a Go test file with go test -json, selecting only its own
 // top-level tests. The per-test timeout is go test's -timeout over all of
 // them: when it passes, the binary panics with "test timed out" and every
-// selected test still running is a timeout.
+// selected test still running is a timeout. The panic comes from the
+// binary's own timer goroutine and the runtime preempts a busy loop, so a
+// hang that never yields still reads as a timeout.
 type goTest struct{}
 
 func (goTest) ID() string { return "go-test-json" }

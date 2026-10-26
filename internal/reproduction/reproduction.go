@@ -65,6 +65,15 @@ type RunResult struct {
 	Tests   map[string]Kind
 }
 
+// CapExceeded is the result of a launch whose sandbox started the command
+// and which ran past the launch's cap (Command.Timeout plus the caller's
+// margin): the factory's own wall clock ended it, so every test ID is a
+// timeout. A hang is a failure (SC-022), whether or not the runner's
+// per-test timeout could interrupt it.
+func CapExceeded(ids []string) RunResult {
+	return RunResult{Outcome: OutcomeFailed, Tests: allKind(ids, KindTimeout)}
+}
+
 // outcomeOf sums per-ID kinds into a launch outcome.
 func outcomeOf(kinds map[string]Kind, ids []string) Outcome {
 	passed := len(ids) > 0

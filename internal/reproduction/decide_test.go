@@ -32,42 +32,63 @@ func TestDecideBlocksOnlyOnTwoHeadFailures(t *testing.T) {
 		{"error then timeout", fails(KindError), fails(KindTimeout), VerdictBlocks},
 	}
 	for _, c := range cases {
-		d := Decide(Evidence{HoldsLiteral: CitesLiteral(citedLiteral, []byte("x")), Head1: c.head1, Head2: c.head2, Base: base})
+		d := Decide(Evidence{HoldsLiteral: NewLiteral(citedLiteral, []byte("x"), notInBase), Head1: c.head1, Head2: c.head2, Base: base})
 		if d.Verdict != c.want || d.Reason == "" {
 			t.Errorf("%s: %+v, want %s", c.name, d, c.want)
 		}
 	}
 }
 
+// notInBase is a base commit that holds no literal.
+func notInBase(string) bool { return false }
+
 // TestDecideSameBaseFailureIsAdviceUnlessLiteral is the base half: a base
 // that does not run, passes, or fails another way blocks; the same failure
-// on the base is advice unless the cited line's backticked literal is in the
-// reproduction; an unknown base, or one the reproduction could not be staged
-// in, is advice ("base not checked").
+// on the base is advice unless the reproduction holds a backticked literal of
+// the cited line that no tracked file of the base holds (an API name the base
+// already has never counts, and an unknown base counts none); an unknown
+// base, or one the reproduction could not be staged in, is advice ("base not
+// checked").
 func TestDecideSameBaseFailureIsAdviceUnlessLiteral(t *testing.T) {
 	without := []byte("func TestA(t *testing.T) { Parse(\"b\") }")
 	with := []byte("func TestA(t *testing.T) { Parse(\"a=1\") }")
+	baseHas := func(lits ...string) func(string) bool {
+		return func(l string) bool {
+			for _, x := range lits {
+				if x == l {
+					return true
+				}
+			}
+			return false
+		}
+	}
 	cases := []struct {
 		name    string
 		base    *RunResult
 		content []byte
 		spec    string
+		inBase  func(string) bool
 		want    Verdict
 	}{
-		{"base unknown", nil, with, citedLiteral, VerdictAdvice},
-		{"base not staged", res(OutcomeUnstaged, nil), with, citedLiteral, VerdictAdvice},
-		{"base passes", res(OutcomePassed, map[string]Kind{"TestA": KindPass}), without, citedLiteral, VerdictBlocks},
-		{"base does not compile", res(OutcomeCompile, map[string]Kind{"TestA": KindCompile}), without, citedLiteral, VerdictBlocks},
-		{"base report missing", res(OutcomeMissing, map[string]Kind{"TestA": KindMissing}), with, citedLiteral, VerdictAdvice},
-		{"base fails another kind", fails(KindError), without, citedLiteral, VerdictBlocks},
-		{"base skips", res(OutcomeInconclusive, map[string]Kind{"TestA": KindSkipped}), without, citedLiteral, VerdictBlocks},
-		{"same failure, no literal in content", fails(KindFail), without, citedLiteral, VerdictAdvice},
-		{"same failure, literal in content", fails(KindFail), with, citedLiteral, VerdictBlocks},
-		{"same failure, line has no literal", fails(KindFail), with, "- Parse returns a map.", VerdictAdvice},
-		{"same failure, literal differs by a byte", fails(KindFail), []byte("Parse(\"a=2\")"), "- `Parse(\"a=1\")` returns.", VerdictAdvice},
+		{"base unknown", nil, with, citedLiteral, notInBase, VerdictAdvice},
+		{"base not staged", res(OutcomeUnstaged, nil), with, citedLiteral, notInBase, VerdictAdvice},
+		{"base passes", res(OutcomePassed, map[string]Kind{"TestA": KindPass}), without, citedLiteral, notInBase, VerdictBlocks},
+		{"base does not compile", res(OutcomeCompile, map[string]Kind{"TestA": KindCompile}), without, citedLiteral, notInBase, VerdictBlocks},
+		{"base report missing", res(OutcomeMissing, map[string]Kind{"TestA": KindMissing}), with, citedLiteral, notInBase, VerdictAdvice},
+		{"base fails another kind", fails(KindError), without, citedLiteral, notInBase, VerdictBlocks},
+		{"base skips", res(OutcomeInconclusive, map[string]Kind{"TestA": KindSkipped}), without, citedLiteral, notInBase, VerdictBlocks},
+		{"same failure, no literal in content", fails(KindFail), without, citedLiteral, notInBase, VerdictAdvice},
+		{"same failure, literal in content, not in base", fails(KindFail), with, citedLiteral, notInBase, VerdictBlocks},
+		{"same failure, only literal in content is in base", fails(KindFail), with, citedLiteral, baseHas("Parse(\"a=1\")", "a=1"), VerdictAdvice},
+		{"same failure, one literal of two is in base", fails(KindFail), with, citedLiteral, baseHas("a=1"), VerdictBlocks},
+		{"same failure, API name in base", fails(KindFail), []byte("toml.Marshal(v)"), "- `toml.Marshal` returns an error with `cycle`.", baseHas("toml.Marshal", "cycle"), VerdictAdvice},
+		{"same failure, base unknown to the literal check", fails(KindFail), with, citedLiteral, nil, VerdictAdvice},
+		{"same failure, line has no literal", fails(KindFail), with, "- Parse returns a map.", notInBase, VerdictAdvice},
+		{"same failure, literal differs by a byte", fails(KindFail), []byte("Parse(\"a=2\")"), "- `Parse(\"a=1\")` returns.", notInBase, VerdictAdvice},
+		{"same failure, literal differs in case", fails(KindFail), []byte("parse(\"a=1\")"), "- `Parse(\"a=1\")` returns.", notInBase, VerdictAdvice},
 	}
 	for _, c := range cases {
-		d := Decide(Evidence{HoldsLiteral: CitesLiteral(c.spec, c.content), Head1: fails(KindFail), Head2: fails(KindFail), Base: c.base})
+		d := Decide(Evidence{HoldsLiteral: NewLiteral(c.spec, c.content, c.inBase), Head1: fails(KindFail), Head2: fails(KindFail), Base: c.base})
 		if d.Verdict != c.want {
 			t.Errorf("%s: %+v, want %s", c.name, d, c.want)
 		}

@@ -76,5 +76,5 @@
   },
   "plan_expected": "advice",
   "spec_text": "2. AC-2: When `toml.Marshal` receives a value containing a pointer cycle through a struct, including a pointer back to an ancestor at any nesting depth, the system shall return a nil byte slice and a non-nil error whose message contains the word `cycle`.",
-  "want_verdict": "blocks"
+  "want_verdict": "advice"
 }

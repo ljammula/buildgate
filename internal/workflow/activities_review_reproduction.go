@@ -113,6 +113,7 @@ func (a *Activities) holdReproductions(ctx context.Context, input RunWorkflowInp
 		}
 	}
 	dir := run.ReviewReproductionDir(a.logDirFor(input))
+	inBase := baseLiteralSearch(ctx, input)
 	var held []run.HeldReproduction
 	for i, c := range reproduction.CheckAll(findings, judged) {
 		rep := parsed.Result.Findings[i].Reproduction
@@ -124,7 +125,7 @@ func (a *Activities) holdReproductions(ctx context.Context, input RunWorkflowInp
 		case c.Accepted == nil:
 			held = append(held, run.HeldReproduction{Finding: i, Path: rep.Path, Refused: c.Refused})
 		default:
-			h, err := holdOne(dir, i, *c.Accepted, findings[i].Content)
+			h, err := holdOne(dir, i, *c.Accepted, findings[i].Content, reproduction.NewLiteral(c.Accepted.SpecText, findings[i].Content, inBase))
 			if err != nil {
 				return nil, err
 			}
@@ -134,16 +135,36 @@ func (a *Activities) holdReproductions(ctx context.Context, input RunWorkflowInp
 	return held, nil
 }
 
+// baseLiteralSearch is reproduction.NewLiteral's search of the base commit
+// (gateBaseCommit, the commit the base launch runs on): whether a literal
+// appears, case-sensitive and byte-exact, in any tracked file of it, read by
+// a host git grep that runs nothing of the repository's. An unknown base is
+// nil, which counts no literal; a search that fails reports the literal as
+// in the base, so it does not count either.
+func baseLiteralSearch(ctx context.Context, input RunWorkflowInput) func(string) bool {
+	base, _ := gateBaseCommit(input)
+	if base == "" {
+		return nil
+	}
+	return func(literal string) bool {
+		err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(input.WorkspacePath),
+			"grep", "-q", "-F", "--no-textconv", "--no-recurse-submodules", "-e", literal, base, "--")...).Run()
+		var exit *exec.ExitError
+		return !(errors.As(err, &exit) && exit.ExitCode() == 1)
+	}
+}
+
 // holdOne writes one accepted reproduction's content to
-// dir/<finding>/<path>, exclusively and read-only. A copy an earlier attempt
+// dir/<finding>/<path>, exclusively and read-only; holdsLiteral is
+// reproduction.NewLiteral's answer for it. A copy an earlier attempt
 // of the same review already wrote with the same bytes is kept; any other
 // file there is a failure to hold.
-func holdOne(dir string, finding int, acc reproduction.Accepted, content []byte) (run.HeldReproduction, error) {
+func holdOne(dir string, finding int, acc reproduction.Accepted, content []byte, holdsLiteral bool) (run.HeldReproduction, error) {
 	sum := sha256.Sum256(content)
 	held := run.HeldReproduction{
 		Finding: finding, Path: acc.Path, SHA256: hex.EncodeToString(sum[:]),
 		SpecLine: acc.SpecLine, TestIDs: acc.TestIDs, Runner: acc.Runner,
-		HoldsLiteral: reproduction.CitesLiteral(acc.SpecText, content),
+		HoldsLiteral: holdsLiteral,
 	}
 	target, err := filepath.Abs(filepath.Join(dir, strconv.Itoa(finding), filepath.FromSlash(acc.Path)))
 	if err != nil {
@@ -579,9 +600,44 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 		return a.runSandboxWithRetries(mounted, onScratch, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after, nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
 	})
 	if runErr != nil {
+		if ranPastLaunchCap(ctx, launchCtx, runErr) {
+			return capExceededReproduction(input, result, res), nil
+		}
 		return res, runErr
 	}
 	return classifyReproduction(l, input, result, res)
+}
+
+// ranPastLaunchCap reports a launch whose sandbox started the reproduction's
+// command (runErr does not wrap sandbox.ErrSandboxNotStarted, which every
+// error before the command's release does) and which ended because the
+// launch's own cap passed: the error carries context.DeadlineExceeded, the
+// Activity's context is still live, and the cap's deadline is the earlier
+// of the two. Anything else (a sandbox that never started, a lost
+// gateway, the Activity's own deadline) stays the launch's failure.
+func ranPastLaunchCap(ctx, launchCtx context.Context, runErr error) bool {
+	if errors.Is(runErr, sandbox.ErrSandboxNotStarted) || !errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
+		return false
+	}
+	capAt, ok := launchCtx.Deadline()
+	if !ok {
+		return false
+	}
+	activityAt, ok := ctx.Deadline()
+	return !ok || capAt.Before(activityAt)
+}
+
+// capExceededReproduction records a launch that ran past its cap after its
+// command started: every test ID a timeout (reproduction.CapExceeded), no
+// report read.
+func capExceededReproduction(input ReproductionRunInput, result runner.Result, res ReproductionRunResult) ReproductionRunResult {
+	r := reproduction.CapExceeded(input.Held.TestIDs)
+	res.Run.Outcome, res.Run.ExitCode, res.Run.LogPath, res.Run.CapExceeded = string(r.Outcome), result.ExitCode, result.LogPath, true
+	res.Run.Tests = make(map[string]string, len(r.Tests))
+	for id, k := range r.Tests {
+		res.Run.Tests[id] = string(k)
+	}
+	return res
 }
 
 // classifyReproduction reads the launch's report from the scratch worktree

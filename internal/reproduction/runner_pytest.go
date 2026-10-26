@@ -8,7 +8,11 @@ import (
 
 // pytestJUnit runs a Python test file with pytest and reads its JUnit XML
 // report. The embedded bg_repro_timeout plugin sets an alarm for each test
-// phase; its BgReproTimeout exception names a timeout in the report.
+// phase; its BgReproTimeout exception names a timeout in the report. Python
+// runs the alarm's handler in the main thread between bytecodes, so a loop
+// in Python code is interrupted; one inside a C call that never returns to
+// the interpreter, or code that catches the exception, is cut only by the
+// launch's cap, which reads as a timeout of every test (CapExceeded).
 type pytestJUnit struct{}
 
 const pytestTimeoutPlugin = "bg_repro_timeout.py"

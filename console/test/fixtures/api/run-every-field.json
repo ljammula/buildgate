@@ -421,7 +421,8 @@
               "exit_code": 3,
               "log_path": "every-field log_path",
               "report_sha256": "every-field report_sha256",
-              "reproduction_sha256": "every-field reproduction_sha256"
+              "reproduction_sha256": "every-field reproduction_sha256",
+              "cap_exceeded": true
             }
           ],
           "verdict": "every-field verdict",
@@ -451,7 +452,8 @@
           "exit_code": 3,
           "log_path": "every-field log_path",
           "report_sha256": "every-field report_sha256",
-          "reproduction_sha256": "every-field reproduction_sha256"
+          "reproduction_sha256": "every-field reproduction_sha256",
+          "cap_exceeded": true
         }
       ],
       "verdict": "every-field verdict",

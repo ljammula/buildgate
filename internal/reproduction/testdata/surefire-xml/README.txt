@@ -8,3 +8,12 @@ default timeout an <error> of type java.util.concurrent.TimeoutException,
 "method(args)[n]". Surefire writes no report for a module that does not
 compile, which the runner reads as missing. Replace these with recorded runs
 when a JDK is available.
+
+Recorded: timeout-separate-thread.xml is a real Surefire 3.2.5 report (JUnit
+Jupiter 5.10.2, Temurin 21, in the maven:3.9-eclipse-temurin-21 image, its
+<properties> block dropped) of a test whose busy loop never checks for an
+interrupt, run with the runner's command and a 5 s default timeout in
+SEPARATE_THREAD mode: the test reports a TimeoutException and the JVM exits.
+The same command over a test class that calls a method the main sources do
+not have exits 86 from its `mvn test-compile` step and writes no report,
+which the runner reads as a compile error.

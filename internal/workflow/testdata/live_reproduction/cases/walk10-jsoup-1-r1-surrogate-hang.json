@@ -76,6 +76,6 @@
   },
   "plan_expected": "blocks",
   "spec_text": "stops soon after the limit: an input that never ends still finishes parsing. The",
-  "want_verdict": "",
+  "want_verdict": "blocks",
   "note": "No verdict: the head1 launch never ends. JUnit Jupiter's default timeout runs on the test thread and only interrupts it; the decoder spin ignores the interrupt, so the launch hits its context deadline and the Activity fails with InfrastructureFailure."
 }

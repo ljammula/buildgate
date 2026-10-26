@@ -9,7 +9,10 @@ import (
 
 // vitestJSON runs a JavaScript or TypeScript test file with vitest and reads
 // its JSON reporter's output. The per-test timeout is vitest's own
-// --testTimeout.
+// --testTimeout, a timer on the test's event loop: a synchronous loop that
+// never yields blocks the timer, and a test may raise its own timeout, so
+// such a test is cut only by the launch's cap, which reads as a timeout of
+// every test (CapExceeded).
 type vitestJSON struct{}
 
 func (vitestJSON) ID() string { return "vitest-json" }

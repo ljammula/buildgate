@@ -11,7 +11,11 @@ import (
 // minitestJSON runs a Ruby test file under Minitest with the embedded
 // bg_repro_reporter, which runs each test under the per-test timeout and
 // writes a JSON report; it loads the file itself, so a load or syntax error
-// is reported as one.
+// is reported as one. The timeout is Ruby's Timeout.timeout, raised in the
+// test's thread at the VM's next interrupt check: a loop in Ruby code is
+// interrupted; one inside a C call that never checks, or code that rescues
+// the exception, is cut only by the launch's cap, which reads as a timeout
+// of every test (CapExceeded).
 type minitestJSON struct{}
 
 const minitestReporter = "bg_repro_reporter.rb"
