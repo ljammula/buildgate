@@ -2264,8 +2264,8 @@ func TestRunCorrectiveRoundAfterAQuarantinedRoundCarriesTheGatesFindings(t *test
 	if !strings.Contains(record, "## Reproduced review findings\n\n"+reproducedLine) {
 		t.Errorf("round 2's record lacks the finding's line:\n%s", record)
 	}
-	if m := readRecheckManifest(t, argvs[1]); m.RunID != requestdrivertest.ArgValue(argvs[0], "-ticket") {
-		t.Errorf("round 2 rechecks run %q, want round 1's", m.RunID)
+	if m := readRecheckManifest(t, argvs[1]); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != requestdrivertest.ArgValue(argvs[0], "-ticket") {
+		t.Errorf("round 2 rechecks %+v, want round 1's", m.Reproductions)
 	}
 	spec := string(mustReadFile(t, requestdrivertest.ArgValue(argvs[1], "-spec")))
 	if !strings.Contains(spec, "set an Allow header on the 405") || strings.Contains(spec, requestdrivertest.ReproductionSummary) {
@@ -2295,6 +2295,44 @@ func approveRequestSpec(t *testing.T, dataDir string, r *request.Request) {
 		r.ApprovedSHA256 = map[string]string{}
 	}
 	r.ApprovedSHA256["spec.md"] = sum
+}
+
+// TestPRReviewRoundAfterAStillFailingFixAttemptRechecks (SC-022): a fix
+// attempt whose recheck is still failing ends its round (no further
+// automatic attempt), and the next round, which builds on its commits,
+// rechecks the first attempt's reproduction from that attempt's held copy.
+func TestPRReviewRoundAfterAStillFailingFixAttemptRechecks(t *testing.T) {
+	dp := newFakeDeps(t)
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	approveRequestSpec(t, dataDir, r)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	var argvs [][]string
+	var first string
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		argvs = append(argvs, args)
+		id := requestdrivertest.ArgValue(args, "-ticket")
+		if len(argvs) == 2 {
+			return requestdrivertest.StillFailingAfterRecheck(t, dataDir, id, first, "", "", "").Save(dataDir)
+		}
+		if first == "" {
+			first = id
+		}
+		return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
+	}
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 2}
+	for i := 0; i < 2; i++ {
+		if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(time.Duration(i)*2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(argvs) < 3 || !strings.HasSuffix(requestdrivertest.ArgValue(argvs[2], "-ticket"), "-review2") {
+		t.Fatalf("builds = %d, want round 1, its one fix attempt, then round 2", len(argvs))
+	}
+	m := readRecheckManifest(t, argvs[2])
+	if want := requestdrivertest.HeldEntry(t, dataDir, first); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
+		t.Errorf("round 2's manifest = %+v, want round 1's first attempt's held copy %+v", m.Reproductions, want)
+	}
 }
 
 // TestPRReviewRoundBlocksOnlyOnAReproducedFinding (SC-022): a PR-review
@@ -2361,7 +2399,7 @@ func TestPRReviewRoundBlocksOnlyOnAReproducedFinding(t *testing.T) {
 					t.Errorf("the fix attempt's inputs carry %q", leaked)
 				}
 			}
-			if m := readRecheckManifest(t, argvs[1]); m.RunID != "req-1-001-review1" || len(m.Reproductions) != 1 {
+			if m := readRecheckManifest(t, argvs[1]); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != "req-1-001-review1" {
 				t.Errorf("the fix attempt's manifest = %+v, want the round's first build's held reproduction", m)
 			}
 		})
@@ -2673,6 +2711,9 @@ func TestRunCorrectiveRoundQuarantinedRepliesOnTheThread(t *testing.T) {
 		{ID: "thread-2", Path: "b.go", Line: 2, Author: "alice", Body: "and this", CommentID: 6},
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	// The rounds hold and run their reviewer's reproductions, so round 2
+	// may build on round 1's refused commits.
+	approveRequestSpec(t, dataDir, r)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		q := reviewFlaggedRoundRun(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "nil map write @octocat ```\n# heading")

@@ -2,6 +2,7 @@ package requestdriver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,59 +21,134 @@ const recheckFileName = "recheck.json"
 // that passed on every test ID on the result (reproduction.VerdictPasses).
 const reproductionPasses = "passes"
 
+// needsRecheck reports whether a build that continues on previous's commits
+// must run reviewer reproductions again (SC-022): a reproduction refused
+// previous, or previous itself ran rechecks, passing or not (the build must
+// not undo a fix earlier in the ticket's chain).
+func needsRecheck(previous *run.Run) bool {
+	return refusedByAReproduction(previous) || len(previous.ReviewReproductionRechecks) > 0
+}
+
 // recheckManifestFor is the run.RecheckManifest a build that follows
-// quarantined is given when a reviewer's reproduction refused quarantined
-// (SC-022): each blocking finding's held copy, under quarantined's own
-// review-repro directory, to run once on that build's result. ok is false
-// when there is nothing a further build may be given: no blocking finding
-// whose held copy is on disk with the hash the run recorded, or a recheck
-// quarantined itself ran that is still failing (the recheck runs once: a
-// corrective build that left a reproduction failing is not followed by
-// another).
-func recheckManifestFor(dataDir string, quarantined *run.Run) (m run.RecheckManifest, ok bool) {
-	for _, rc := range quarantined.ReviewReproductionRechecks {
-		if rc.Verdict != reproductionPasses {
-			return run.RecheckManifest{}, false
+// previous is given: every recheck previous ran (the entry it ran, under the
+// review-repro directory of the run that held it), and each of previous's own
+// blocking findings' held copies, without repeats (by hash and path). Each
+// entry's file is on disk with the hash recorded for it. An error says why
+// none can be made when needsRecheck(previous) and an entry cannot be found
+// again, or nothing is left to run.
+func recheckManifestFor(dataDir string, previous *run.Run) (run.RecheckManifest, error) {
+	var m run.RecheckManifest
+	seen := map[string]bool{}
+	add := func(e run.RecheckEntry) {
+		if key := e.SHA256 + " " + e.Path; !seen[key] {
+			seen[key] = true
+			m.Reproductions = append(m.Reproductions, e)
 		}
 	}
-	if quarantined.CodeReview == nil {
-		return run.RecheckManifest{}, false
+	for i, rc := range previous.ReviewReproductionRechecks {
+		if rc.Recheck == nil || !heldCopyOnDisk(dataDir, *rc.Recheck) {
+			return run.RecheckManifest{}, fmt.Errorf("run %s's recheck %d names no held copy that is still on disk with its hash", previous.ID, i)
+		}
+		add(*rc.Recheck)
 	}
-	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, quarantined.ID)))
+	own, err := blockingCopies(dataDir, previous)
 	if err != nil {
-		return run.RecheckManifest{}, false
+		return run.RecheckManifest{}, err
 	}
-	m.RunID = quarantined.ID
-	for i, f := range quarantined.CodeReview.Findings {
+	for _, e := range own {
+		add(e)
+	}
+	if len(m.Reproductions) == 0 {
+		return run.RecheckManifest{}, fmt.Errorf("run %s holds no reviewer reproduction to run again", previous.ID)
+	}
+	return m, nil
+}
+
+// blockingCopies is the recheck entry of each of r's blocking findings: its
+// held copy under r's own review-repro directory.
+func blockingCopies(dataDir string, r *run.Run) ([]run.RecheckEntry, error) {
+	if r.CodeReview == nil {
+		return nil, nil
+	}
+	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, r.ID)))
+	if err != nil {
+		return nil, err
+	}
+	var out []run.RecheckEntry
+	for i, f := range r.CodeReview.Findings {
 		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil {
 			continue
 		}
-		held, ok := heldBlockingCopy(dir, i, f)
-		if !ok {
-			return run.RecheckManifest{}, false
+		e, ok := heldBlockingCopy(r.ID, dir, i, f)
+		if !ok || !heldCopyOnDisk(dataDir, e) {
+			return nil, fmt.Errorf("run %s's blocking finding %d has no held copy on disk with its hash", r.ID, i)
 		}
-		m.Reproductions = append(m.Reproductions, held)
+		out = append(out, e)
 	}
-	return m, len(m.Reproductions) > 0
+	return out, nil
 }
 
-// heldBlockingCopy is the held copy of finding i's reproduction under dir
-// (the run's review-repro directory), when the file there has the hash the
-// run recorded for it.
-func heldBlockingCopy(dir string, i int, f run.CodeReviewFinding) (run.HeldReproduction, bool) {
+// heldBlockingCopy is the recheck entry of finding i's reproduction, held by
+// run runID under dir (its review-repro directory).
+func heldBlockingCopy(runID, dir string, i int, f run.CodeReviewFinding) (run.RecheckEntry, bool) {
 	rep := f.Reproduction
 	if rep.SHA256 == "" || rep.Runner == "" || len(rep.TestIDs) == 0 || !filepath.IsLocal(filepath.FromSlash(rep.Path)) {
-		return run.HeldReproduction{}, false
+		return run.RecheckEntry{}, false
 	}
-	host := filepath.Join(dir, strconv.Itoa(i), filepath.FromSlash(rep.Path))
-	if sum, err := evidence.SHA256File(host); err != nil || sum != rep.SHA256 {
-		return run.HeldReproduction{}, false
-	}
-	held := run.HeldReproduction{Finding: i, Path: rep.Path, SHA256: rep.SHA256, HostPath: host, TestIDs: rep.TestIDs, Runner: rep.Runner}
+	held := run.HeldReproduction{Finding: i, Path: rep.Path, SHA256: rep.SHA256, HostPath: filepath.Join(dir, strconv.Itoa(i), filepath.FromSlash(rep.Path)), TestIDs: rep.TestIDs, Runner: rep.Runner}
 	if f.SpecLine != nil {
 		held.SpecLine = f.SpecLine.Number
 	}
-	return held, true
+	return run.RecheckEntry{RunID: runID, HeldReproduction: held}, true
+}
+
+// heldCopyOnDisk reports whether e's host path is a file under its run's
+// review-repro directory in dataDir with the hash e records. factoryd checks
+// every entry again, links included, before the build starts.
+func heldCopyOnDisk(dataDir string, e run.RecheckEntry) bool {
+	if !run.ValidID(e.RunID) || e.SHA256 == "" {
+		return false
+	}
+	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, e.RunID)))
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(dir, e.HostPath)
+	if err != nil || !filepath.IsLocal(rel) {
+		return false
+	}
+	sum, err := evidence.SHA256File(e.HostPath)
+	return err == nil && sum == e.SHA256
+}
+
+// aRecheckStillFails reports whether a recheck r ran is still failing. The
+// recheck runs once per automatic correction: a corrective build that left a
+// reproduction failing is not followed by another automatic one (a
+// corrective round, a PR-review round's fix attempt). An operator's retry,
+// resume or a later PR-review round may follow it, and rechecks again.
+func aRecheckStillFails(r *run.Run) bool {
+	for _, rc := range r.ReviewReproductionRechecks {
+		if rc.Verdict != reproductionPasses {
+			return true
+		}
+	}
+	return false
+}
+
+// automaticCorrectionMayFollow reports whether an automatic corrective
+// build may follow quarantined on its commits: a build may be given its
+// record (handoffForABuild), no recheck it ran is still failing
+// (aRecheckStillFails), and the recheck that build must run can be made
+// (recheckManifestFor).
+func automaticCorrectionMayFollow(dataDir string, quarantined *run.Run) bool {
+	if _, ok := handoffForABuild(dataDir, quarantined); !ok || aRecheckStillFails(quarantined) {
+		return false
+	}
+	if !needsRecheck(quarantined) {
+		return true
+	}
+	_, err := recheckManifestFor(dataDir, quarantined)
+	return err == nil
 }
 
 // refusedByAReproduction reports whether a reviewer's reproduction refused
@@ -110,26 +186,35 @@ func writeRecheckManifest(dir string, m run.RecheckManifest) (string, error) {
 	return path, nil
 }
 
-// withRecheck appends -recheck-reproductions to args when quarantined was
-// refused by a reviewer's reproduction: the manifest (recheckManifestFor) is
-// written in dir. A build given no -review-reproduction runs no reproduction,
-// so it is given no manifest either. ok is false when quarantined was
-// refused by a reproduction and no manifest can be made for it: a build
-// that follows it would not run the reproduction again.
-func withRecheck(dataDir, dir string, quarantined *run.Run, args []string) (argv []string, ok bool, err error) {
-	if !refusedByAReproduction(quarantined) {
-		return args, true, nil
+// withRecheck appends -recheck-reproductions to args when a build that
+// continues on previous's commits must run reviewer reproductions again
+// (needsRecheck): the manifest (recheckManifestFor) is written in dir. The
+// error says why such a build may not start (SC-022): no manifest can be
+// made, or args lack -review-reproduction, so it would run none. It is the
+// one rule every build that follows a run goes through (a corrective round,
+// a retry, a resume, a PR-review round); none is built without the recheck.
+func withRecheck(dataDir, dir string, previous *run.Run, args []string) ([]string, error) {
+	if !needsRecheck(previous) {
+		return args, nil
 	}
-	m, ok := recheckManifestFor(dataDir, quarantined)
-	if !ok || !hasFlag(args, "-review-reproduction") {
-		return args, false, nil
+	m, err := recheckManifestFor(dataDir, previous)
+	if err != nil {
+		return args, fmt.Errorf("%w: %w", errNoRecheck, err)
+	}
+	if !hasFlag(args, "-review-reproduction") {
+		return args, fmt.Errorf("%w: run %s needs its reviewer reproductions run again and the build runs none", errNoRecheck, previous.ID)
 	}
 	path, err := writeRecheckManifest(dir, m)
 	if err != nil {
-		return args, false, err
+		return args, err
 	}
-	return append(args, "-recheck-reproductions", path), true, nil
+	return append(args, "-recheck-reproductions", path), nil
 }
+
+// errNoRecheck is in the chain of withRecheck's refusals: a build that
+// would continue on a run's commits without the reproductions that run must
+// pass again.
+var errNoRecheck = errors.New("not built without a recheck of the reviewer's reproductions")
 
 // hasFlag reports whether flag is one of argv's arguments.
 func hasFlag(argv []string, flag string) bool {

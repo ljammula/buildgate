@@ -85,7 +85,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 	if err := os.WriteFile(held, []byte("package p\n"), 0o444); err != nil {
 		t.Fatalf("write the held reproduction: %v", err)
 	}
-	manifest := fmt.Sprintf(`{"run_id":"golden-quarantined","reproductions":[{"finding":0,"path":"held_test.go","sha256":"%s","host_path":%q,"spec_line":3,"test_ids":["TestHeld"],"runner":"go-test-json"}]}`, strings.Repeat("a", 64), held)
+	manifest := fmt.Sprintf(`{"reproductions":[{"run_id":"golden-quarantined","finding":0,"path":"held_test.go","sha256":"%s","host_path":%q,"spec_line":3,"test_ids":["TestHeld"],"runner":"go-test-json"}]}`, strings.Repeat("a", 64), held)
 	head, err := runGit(t, workspace, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("read the workspace's head: %v", err)

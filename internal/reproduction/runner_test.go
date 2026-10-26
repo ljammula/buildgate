@@ -2,6 +2,7 @@ package reproduction
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -88,6 +89,7 @@ func TestRunnerClassifiesEveryOutcome(t *testing.T) {
 			{"timeout.xml", "src/test/java/com/example/AddTest.java", 1, "hangs", KindTimeout, OutcomeFailed},
 			{"timeout-separate-thread.xml", "src/test/java/com/example/BusyTest.java", 1, "spins", KindTimeout, OutcomeFailed},
 			{"", "src/test/java/com/example/NewApiTest.java", surefireCompileExit, "usesNewApi", KindCompile, OutcomeCompile},
+			{"", "src/test/java/com/example/NewApiTest.java", surefireBuildExit, "usesNewApi", KindMissing, OutcomeMissing},
 			{"skipped.xml", "src/test/java/com/example/AddTest.java", 0, "later", KindSkipped, OutcomeInconclusive},
 			{"param.xml", "src/test/java/com/example/AddTest.java", 1, "sums", KindFail, OutcomeFailed},
 			{"", "src/test/java/com/example/AddTest.java", 1, "sumsTwoNumbers", KindMissing, OutcomeMissing},
@@ -272,7 +274,8 @@ func TestRunnerCommandsAreFactoryOwned(t *testing.T) {
 		{"vitest-json", "src/a.test.ts", []string{"a"},
 			[]string{"npx --no-install vitest run 'src/a.test.ts' --reporter=json --outputFile='/out/report' --testTimeout=60000"}, ""},
 		{"surefire-xml", "core/src/test/java/com/x/FooTest.java", []string{"a"},
-			[]string{"mvn -B -q -f 'core/pom.xml' test-compile || exit 86; mvn ", "-f 'core/pom.xml' -Dtest='FooTest'", "timeout.default=60s",
+			[]string{`log=$(mktemp) || exit 125; mvn -B -q -f 'core/pom.xml' test-compile >"$log" 2>&1; rc=$?; cat "$log"; `,
+				`if [ "$rc" -ne 0 ]; then grep -qF -- '/core/src/test/java/com/x/FooTest.java' "$log" && exit 86; exit 87; fi; mvn `, "-f 'core/pom.xml' -Dtest='FooTest'", "timeout.default=60s",
 				"-Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD", "cp 'core/target/surefire-reports/TEST-com.x.FooTest.xml' '/out/report'", "exit $rc"}, ""},
 		{"minitest-json", "test/cart_test.rb", []string{"CartTest#test_a"},
 			[]string{"BG_REPRO_REPORT='/out/report' BG_REPRO_TEST_TIMEOUT=60", "-I'/inputs/reproduction' -rbg_repro_reporter", "'test/cart_test.rb'"}, minitestReporter},
@@ -335,5 +338,45 @@ func TestLaunchTimeoutIsCapped(t *testing.T) {
 	}
 	if got := launchTimeout([]string{"a"}); got != 2*time.Minute {
 		t.Errorf("launchTimeout(1 ID) = %s", got)
+	}
+}
+
+// surefire-xml's compile step: a failed `mvn test-compile` is a compile
+// (surefireCompileExit) only when its output names the reproduction's own
+// file; any other failure of that step (a dependency that could not be
+// fetched, a main source that does not compile) exits surefireBuildExit,
+// which reads as missing. The script runs here with a stand-in mvn.
+func TestSurefireCompileStepNamesTheReproductionOrIsMissing(t *testing.T) {
+	const repro = "core/src/test/java/com/x/FooTest.java"
+	script := surefireXML{}.Command(Invocation{Path: repro, TestIDs: []string{"a"}, ReportPath: filepath.Join(t.TempDir(), "report")}).Script
+	bin := t.TempDir()
+	fake := "#!/bin/sh\ncase \"$*\" in *test-compile*) printf '%s\\n' \"$FAKE_MVN_OUT\"; exit \"$FAKE_MVN_RC\";; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "mvn"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		out  string
+		rc   string
+		want int
+	}{
+		"the reproduction does not compile": {"[ERROR] /workspace/" + repro + ":[3,8] cannot find symbol", "1", surefireCompileExit},
+		"a main source does not compile":    {"[ERROR] /workspace/core/src/main/java/com/x/Foo.java:[3,8] cannot find symbol", "1", surefireBuildExit},
+		"a dependency could not be fetched": {"[ERROR] Failed to execute goal on project core: Could not resolve dependencies", "1", surefireBuildExit},
+		"another file ending in its name":   {"[ERROR] /workspace/core/src/test/java/com/x/MyFooTest.java:[3,8] cannot find symbol", "1", surefireBuildExit},
+		"it compiles":                       {"", "0", 0},
+	} {
+		cmd := exec.Command("sh", "-c", script)
+		cmd.Dir = t.TempDir()
+		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FAKE_MVN_OUT="+tc.out, "FAKE_MVN_RC="+tc.rc)
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if exit, ok := err.(*exec.ExitError); ok {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if code != tc.want || !strings.Contains(string(out), tc.out) {
+			t.Errorf("%s: exit %d, output %q; want exit %d with the compile output in the log", name, code, out, tc.want)
+		}
 	}
 }

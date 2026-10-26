@@ -374,12 +374,15 @@ this corrective build too, with what the factory ran and nothing else:
 |---|---|
 | Told | Each blocking finding as one line of the record (`## Reproduced review findings`: severity, summary, the cited spec line, the reproduction's path, one failing test and its kind). Never the reproduction, the reviewer's failure scenario, a finding that is advice, or a high finding with no reproduction the factory ran |
 | Mounted | Nothing more: the build does not see the reproduction |
-| Rechecked | A manifest in `rounds/<ticket>-corrective<n>/recheck.json`: the quarantined run's id and each held copy (path, SHA-256, runner, test IDs, the host copy under that run's `review-repro/`), checked again by `factoryd` before the build starts. The build's workflow runs each copy once on its result, after the gates and before its own review; anything but a pass on every test refuses the build |
-| Still failing | The recheck runs once: a round whose recheck still fails is not followed by another, whatever the budget, and the request is quarantined with check `review_reproduction`, its reason the run's triage sentence (``review_reproduction: "<path>" still fails on the result commit after the corrective build ("<test>" <kind>); …``). A new blocking finding in the round's own review is a new refusal: it gets the next round while the budget lasts |
+| Rechecked | A manifest in `rounds/<ticket>-corrective<n>/recheck.json`: the held copy of each of the quarantined run's blocking findings and every reproduction that run itself rechecked, each once, with the id of the run that holds it (path, SHA-256, runner, test IDs, the host copy under that run's `review-repro/`), checked again by `factoryd` before the build starts. The build's workflow runs each copy once on its result, after the gates and before its own review; anything but a pass on every test refuses the build |
+| Still failing | The recheck runs once per automatic build: a round whose recheck still fails is not followed by another, whatever the budget, and the request is quarantined with check `review_reproduction`, its reason the run's triage sentence (``review_reproduction: "<path>" still fails on the result commit after the corrective build ("<test>" <kind>); …``). A new blocking finding in the round's own review is a new refusal: it gets the next round while the budget lasts |
 | No round | A held copy that is gone or no longer matches its hash: no corrective build, the request quarantined with check `review_reproduction` |
 
-A retry, a `retry -from <N>` and a resume given the record of a run a
-reproduction refused recheck its held copies the same way.
+A retry, a `retry -from <N>`, a resume given the record of a run a
+reproduction refused and the next PR-review round recheck its held copies
+the same way, also after a recheck that still fails. A build that would
+continue on that run's commits when a copy is gone or changed is not built:
+the request halts with the reason.
 
 The build agent's own notes for the next attempt (the last section of
 `earlier-attempt.md`, labelled as the agent's unverified view):
@@ -514,8 +517,10 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   commit is in the workspace; its blocking findings one line each under
   `## Reproduced review findings`: severity, summary, cited spec line, the
   reproduction's path, one failing test and its kind; never the failure
-  scenario or the reproduction) and rechecks its held copies. The reply posted on the thread quotes the
-  same lines.
+  scenario or the reproduction) and rechecks its held copies, and those that
+  attempt rechecked, also when its recheck still failed. With a copy gone
+  or changed the round is not built: the request halts with the reason. The
+  reply posted on the thread quotes the same lines.
 - No new threads, still a draft, checks passing, no unresolved thread
   from any non-bot/non-self author (trusted or not — an untrusted human's
   open comment still blocks readiness, it just can't trigger a round),
@@ -1203,7 +1208,7 @@ kind `review_reproduction`):
 |---|---|
 | Hold | After the review, each finding's reproduction is checked against the shape rules: it cites a line of the request's approved `spec.md` byte for byte, its path is new in the judged commit (case-folded), matches `test_patterns`, is not an instruction path, under `.factory/` or protected, and a runner applies (`go test -json`, pytest, vitest, Maven Surefire, minitest), with 1 to 20 tests. An accepted one is copied once, read-only, to the run's `review-repro/<finding>/<path>` and its SHA-256 recorded; a refused one is advice, its rule recorded on the finding |
 | Run | Each held copy runs in a scratch worktree of the result commit, never the run's own, launched as a gate (the run's image, setup commands, `.factory/`, registry proxy and compose services, no model route), mounted read-only after its hash is checked, under the runner's own command and per-test timeout of 60 s (JUnit's in a separate thread, so a loop that ignores interrupts still times out; a default: a vitest reproduction can set its own per-test timeout, with a test's own timeout argument or `vi.setConfig`, and is then cut only by the launch's cap). It runs twice on the result, the second time only after a failure, then once on the commit the ticket started from only after two failures |
-| Decide | It blocks when some of its tests failed on both result launches and, on the base, it does not compile or does not fail the same way (same test, same kind); failing the same way blocks only when the reproduction holds a backticked literal of the cited line that no tracked file of the base commit holds (a value the spec states, not a name the base already has; case-sensitive, searched when the reproduction is held, none with an unknown base). A launch that runs past its cap after its command started is a timeout of every test; a Maven module whose `mvn test-compile` fails is a compile error. Everything else is advice: a pass, a compile or collection error, a missing report, one failure, an unknown base |
+| Decide | It blocks when some of its tests failed on both result launches and, on the base, it does not compile or does not fail the same way (same test, same kind); failing the same way blocks only when the reproduction holds a backticked literal of the cited line that no tracked file of the base commit holds (a value the spec states, not a name the base already has; case-sensitive, searched when the reproduction is held, none with an unknown base). A launch that runs past its cap after its sandbox released its command is a timeout of every test (a cap that passes while the sandbox starts is no verdict); a Maven module whose `mvn test-compile` fails with output that names the reproduction's file is a compile error, and any other failure of that step a missing report. Everything else is advice: a pass, a compile or collection error, a missing report, one failure, an unknown base |
 | Gate | `review_reproduction` fails when any finding blocks. The finding records each run (pass, commit, outcome, each test's kind, report hash), the verdict and the reason, and its disposition (`blocks` or `advice`) |
 
 The `review_reproduction` triage sentence names the reproduction's path and
@@ -1219,8 +1224,8 @@ own result, after the gates and before its review: anything but a pass on every 
 included, is still failing and fails `review_reproduction`. Known limits: no
 runner for Gradle, jest, cargo, .NET or PHP (their reproductions are advice);
 a vitest reproduction can set its own per-test timeout; a ticket of a
-multi-ticket request may cite any line of the approved spec; the recheck runs
-once. A copy that cannot be held, no longer matches its hash
+multi-ticket request may cite any line of the approved spec; a recheck that
+still fails starts no further automatic build. A copy that cannot be held, no longer matches its hash
 before a launch, or whose mount is refused halts the run with the unresolved
 cause `reproduction_unheld`. A bare `factoryd -ticket` run, a restack's replay
 run and a run with code review off hold and run no reproduction and record no

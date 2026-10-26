@@ -818,6 +818,11 @@ type ReviewReproduction struct {
 	Runs    []ReproductionRun `json:"runs,omitempty"`    // head1, head2, base, recheck
 	Verdict string            `json:"verdict,omitempty"` // blocks | advice | not_run
 	Reason  string            `json:"reason,omitempty"`  // one line
+	// Recheck is the manifest entry a recheck ran (ReviewReproductionRechecks),
+	// so a later build that follows this run can find the held copy again,
+	// under the review-repro directory of the run whose review held it. Nil
+	// on a finding's own reproduction.
+	Recheck *RecheckEntry `json:"recheck,omitempty"`
 }
 
 // FailedTest is the first of the reproduction's test IDs, in order, that
@@ -906,13 +911,18 @@ type FindingReproduction struct {
 	Disposition  string             `json:"disposition"`
 }
 
-// RecheckManifest is a corrective build's -recheck-reproductions file: the
-// quarantined run whose review held the reproductions, and each held copy,
-// to run once on the corrective build's result. Every HostPath must be under
-// that run's ReviewReproductionDir.
+// RecheckManifest is a build's -recheck-reproductions file: each held copy
+// to run once on the build's result.
 type RecheckManifest struct {
-	RunID         string             `json:"run_id"`
-	Reproductions []HeldReproduction `json:"reproductions"`
+	Reproductions []RecheckEntry `json:"reproductions"`
+}
+
+// RecheckEntry is one reproduction a recheck runs: the run whose review held
+// it (RunID) and the held copy, whose HostPath must be under that run's
+// ReviewReproductionDir.
+type RecheckEntry struct {
+	RunID string `json:"run_id"`
+	HeldReproduction
 }
 
 // CodeReviewResult is the run-record shape of CODE_REVIEW_EVIDENCE.json's

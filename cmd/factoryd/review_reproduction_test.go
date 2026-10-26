@@ -57,7 +57,7 @@ func TestRecheckManifestHostPathsMustBeUnderTheQuarantinedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	good := run.HeldReproduction{Path: "p/repro_test.go", SHA256: strings.Repeat("a", 64), HostPath: host, TestIDs: []string{"TestRepro"}, Runner: "go-test-json"}
-	got, err := loadRecheckManifest(dataDir, writeRecheckManifest(t, run.RecheckManifest{RunID: "run-q", Reproductions: []run.HeldReproduction{good}}))
+	got, err := loadRecheckManifest(dataDir, writeRecheckManifest(t, run.RecheckManifest{Reproductions: []run.RecheckEntry{{RunID: "run-q", HeldReproduction: good}}}))
 	if err != nil || len(got) != 1 || got[0].HostPath != host {
 		t.Fatalf("a valid manifest = %+v, %v; want it accepted", got, err)
 	}
@@ -80,17 +80,17 @@ func TestRecheckManifestHostPathsMustBeUnderTheQuarantinedRun(t *testing.T) {
 		"an unknown runner":             func(m *run.RecheckManifest) { m.Reproductions[0].Runner = "cargo" },
 		"no test IDs":                   func(m *run.RecheckManifest) { m.Reproductions[0].TestIDs = nil },
 		"a refused finding":             func(m *run.RecheckManifest) { m.Reproductions[0].Refused = "no runner" },
-		"an invalid run id":             func(m *run.RecheckManifest) { m.RunID = "../run-q" },
+		"an invalid run id":             func(m *run.RecheckManifest) { m.Reproductions[0].RunID = "../run-q" },
 		"no reproduction":               func(m *run.RecheckManifest) { m.Reproductions = nil },
 	} {
-		m := run.RecheckManifest{RunID: "run-q", Reproductions: []run.HeldReproduction{good}}
+		m := run.RecheckManifest{Reproductions: []run.RecheckEntry{{RunID: "run-q", HeldReproduction: good}}}
 		mutate(&m)
 		if _, err := loadRecheckManifest(dataDir, writeRecheckManifest(t, m)); err == nil {
 			t.Errorf("%s: manifest accepted, want it refused", name)
 		}
 	}
 	unknown := filepath.Join(t.TempDir(), "unknown.json")
-	if err := os.WriteFile(unknown, []byte(`{"run_id":"run-q","reproductions":[],"command":"rm -rf /"}`), 0o600); err != nil {
+	if err := os.WriteFile(unknown, []byte(`{"reproductions":[],"command":"rm -rf /"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadRecheckManifest(dataDir, unknown); err == nil {

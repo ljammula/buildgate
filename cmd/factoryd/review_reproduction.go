@@ -63,13 +63,13 @@ func (tr *ticketRun) snapshotReviewInputs() error {
 	return nil
 }
 
-// loadRecheckManifest reads a run.RecheckManifest and checks it: a valid run
-// id, and for each reproduction a held copy (no refusal) whose host path is
-// a regular file, reached through no link, under that run's review-repro
+// loadRecheckManifest reads a run.RecheckManifest and checks it: for each
+// reproduction a valid run id and a held copy (no refusal) whose host path
+// is a regular file, reached through no link, under that run's review-repro
 // directory in dataDir, with a SHA-256, a runner the registry has and
 // between one and reproduction.MaxTestIDs test IDs. The copies' content is
 // checked against the hash by the workflow before each launch.
-func loadRecheckManifest(dataDir, path string) ([]run.HeldReproduction, error) {
+func loadRecheckManifest(dataDir, path string) ([]run.RecheckEntry, error) {
 	data, err := evidence.ReadHostileFile(path, maxRecheckManifestBytes)
 	if err != nil {
 		return nil, err
@@ -80,26 +80,32 @@ func loadRecheckManifest(dataDir, path string) ([]run.HeldReproduction, error) {
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	if !run.ValidID(m.RunID) {
-		return nil, fmt.Errorf("run id %q is not valid", m.RunID)
-	}
 	if len(m.Reproductions) == 0 {
 		return nil, errors.New("it names no reproduction")
 	}
-	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, m.RunID)))
-	if err != nil {
-		return nil, err
-	}
-	realDir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return nil, fmt.Errorf("run %s holds no reproductions: %w", m.RunID, err)
-	}
-	for i, h := range m.Reproductions {
-		if err := checkRecheckEntry(dir, realDir, h); err != nil {
+	for i, e := range m.Reproductions {
+		if err := checkRecheckRun(dataDir, e); err != nil {
 			return nil, fmt.Errorf("reproduction %d: %w", i, err)
 		}
 	}
 	return m.Reproductions, nil
+}
+
+// checkRecheckRun checks e's run id and its held copy (checkRecheckEntry)
+// against that run's review-repro directory.
+func checkRecheckRun(dataDir string, e run.RecheckEntry) error {
+	if !run.ValidID(e.RunID) {
+		return fmt.Errorf("run id %q is not valid", e.RunID)
+	}
+	dir, err := filepath.Abs(run.ReviewReproductionDir(run.Dir(dataDir, e.RunID)))
+	if err != nil {
+		return err
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return fmt.Errorf("run %s holds no reproductions: %w", e.RunID, err)
+	}
+	return checkRecheckEntry(dir, realDir, e.HeldReproduction)
 }
 
 // checkRecheckEntry is loadRecheckManifest's check of one entry.

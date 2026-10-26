@@ -324,8 +324,8 @@ func TestAProgressLineFromTheSandboxIsRecordedAsTheWorkersNeverTheFactorys(t *te
 func TestRunThroughRuntimeSaysWhetherTheCommandEverStarted(t *testing.T) {
 	spec := runtimeSpec(t)
 	_, _, err := RunThroughRuntime(context.Background(), &workerRuntime{createErr: errors.New("image pull failed")}, spec, fastLaunch())
-	if !errors.Is(err, ErrSandboxNotStarted) {
-		t.Errorf("a sandbox that could not be created: err = %v, want ErrSandboxNotStarted", err)
+	if !errors.Is(err, ErrSandboxNotStarted) || errors.Is(err, ErrCommandReleased) {
+		t.Errorf("a sandbox that could not be created: err = %v, want ErrSandboxNotStarted and not ErrCommandReleased", err)
 	}
 
 	// The same launch whose delete cannot be confirmed is both, and the
@@ -347,8 +347,8 @@ func TestRunThroughRuntimeSaysWhetherTheCommandEverStarted(t *testing.T) {
 	spec = runtimeSpec(t)
 	spec.Timeout = 300 * time.Millisecond
 	_, _, err = RunThroughRuntime(context.Background(), &workerRuntime{hang: true, startedAt: "t"}, spec, fastLaunch())
-	if err == nil || errors.Is(err, ErrSandboxNotStarted) {
-		t.Errorf("a command that started and timed out: err = %v, want an error that is not ErrSandboxNotStarted", err)
+	if err == nil || errors.Is(err, ErrSandboxNotStarted) || !errors.Is(err, ErrCommandReleased) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("a command that started and timed out: err = %v, want the deadline with ErrCommandReleased and not ErrSandboxNotStarted", err)
 	}
 
 	// So did one that exited non-zero: a result, and no error at all.
@@ -368,5 +368,18 @@ func TestRunThroughRuntimeACancelledStartIsNotANotStartedSandbox(t *testing.T) {
 	_, _, err := RunThroughRuntime(ctx, &workerRuntime{createErr: context.Canceled}, spec, fastLaunch())
 	if err == nil || errors.Is(err, ErrSandboxNotStarted) {
 		t.Errorf("err = %v, want the cancellation and not ErrSandboxNotStarted", err)
+	}
+}
+
+// A deadline that passes while the sandbox is starting is returned as the
+// caller's own, never as a released command: only the release is proof the
+// command may have run.
+func TestRunThroughRuntimeADeadlineBeforeTheReleaseIsNotAReleasedCommand(t *testing.T) {
+	spec := runtimeSpec(t)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, _, err := RunThroughRuntime(ctx, &workerRuntime{createErr: context.DeadlineExceeded}, spec, fastLaunch())
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrCommandReleased) {
+		t.Errorf("err = %v, want the deadline without ErrCommandReleased", err)
 	}
 }

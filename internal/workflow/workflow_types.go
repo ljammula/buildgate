@@ -557,11 +557,11 @@ type RunWorkflowInput struct {
 	// finding is advice.
 	ReviewSpecPath   string `json:"review_spec_path,omitempty"`
 	ReviewSpecSHA256 string `json:"review_spec_sha256,omitempty"`
-	// RecheckReproductions is -recheck-reproductions: the reproductions a
-	// quarantined run's review held, which this corrective build's result
-	// must pass, each run once after the gates. Every host path was checked
-	// to be under that run's review-repro directory before the run started.
-	RecheckReproductions []run.HeldReproduction `json:"recheck_reproductions,omitempty"`
+	// RecheckReproductions is -recheck-reproductions: the reproductions
+	// earlier runs' reviews held, which this build's result must pass, each
+	// run once after the gates. Every host path was checked to be under its
+	// entry's run's review-repro directory before the run started.
+	RecheckReproductions []run.RecheckEntry `json:"recheck_reproductions,omitempty"`
 }
 
 // ReplayInput is RunWorkflowInput.Replay: what a replay run's

@@ -555,9 +555,10 @@ func (d Document) Markdown() string {
 }
 
 // ReproducedFindingLines is each blocking finding of r (at most
-// maxReviewItems) as the one list line a later build is told of it, for a
-// build input other than the Document: a pull-request review round's
-// addendum. Never the reproduction's content or the failure scenario.
+// maxReviewItems) as the one list line a later build is told of it, for
+// text other than the Document: the reply a pull-request review round posts
+// on the reviewer's thread. Never the reproduction's content or the failure
+// scenario.
 func ReproducedFindingLines(r *run.Run) []string {
 	var lines []string
 	for _, f := range reproducedFindings(r) {

@@ -47,6 +47,7 @@
       "finding": 0,
       "host_path": "<DATA_DIR>/runs/golden-quarantined/review-repro/0/held_test.go",
       "path": "held_test.go",
+      "run_id": "golden-quarantined",
       "runner": "go-test-json",
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "spec_line": 3,

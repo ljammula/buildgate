@@ -112,7 +112,7 @@ type runOptions struct {
 	ReviewReproduction   bool
 	ReviewSpecPath       string
 	ReviewSpecSHA256     string
-	RecheckReproductions []run.HeldReproduction
+	RecheckReproductions []run.RecheckEntry
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not

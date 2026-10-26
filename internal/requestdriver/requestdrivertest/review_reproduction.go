@@ -85,27 +85,61 @@ func ReproductionRefusedOn(t *testing.T, dataDir, id, branch, baseSHA, resultSHA
 }
 
 // StillFailingAfterRecheck builds the run of a corrective build whose recheck
-// of the earlier run's reproduction still failed on its result: it is
-// refused by review_reproduction with no finding of its own, and its handoff
-// is written.
-func StillFailingAfterRecheck(t *testing.T, dataDir, id, branch, baseSHA, resultSHA string) *run.Run {
+// of origin's reproduction (ReproductionRefusedOn's held copy) still failed
+// on its result: it is refused by review_reproduction with no finding of its
+// own, and its handoff is written.
+func StillFailingAfterRecheck(t *testing.T, dataDir, id, origin, branch, baseSHA, resultSHA string) *run.Run {
 	t.Helper()
+	return AfterRecheck(t, dataDir, id, origin, branch, baseSHA, resultSHA, "still_failing", "review_reproduction")
+}
+
+// AfterRecheck builds the quarantined run of a build that rechecked
+// origin's reproduction (ReproductionRefusedOn's held copy, recorded as the
+// manifest entry it ran) on its result with verdict, and failed
+// failedChecks; it has no finding of its own, and its handoff is written.
+func AfterRecheck(t *testing.T, dataDir, id, origin, branch, baseSHA, resultSHA, verdict string, failedChecks ...string) *run.Run {
+	t.Helper()
+	entry := HeldEntry(t, dataDir, origin)
+	kind, outcome := "fail", "failed"
+	if verdict == "passes" {
+		kind, outcome = "pass", "passed"
+	}
 	rr := &run.Run{
 		ID: id, Ticket: id, State: run.StateQuarantined, Branch: branch, BaseSHA: baseSHA, DiffBaseSHA: baseSHA, ResultSHA: resultSHA,
-		GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "review_reproduction", Passed: false, ExitCode: 1}},
+		GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}},
 		CodeReview:  &run.CodeReviewResult{Policy: "required", Available: true},
 		ReviewReproductionRechecks: []run.ReviewReproduction{{
-			Path: ReproductionPath, Runner: ReproductionRunner, TestIDs: []string{ReproductionTestID},
-			Runs:    []run.ReproductionRun{{Pass: run.ReproductionPassRecheck, Commit: resultSHA, Outcome: "failed", Tests: map[string]string{ReproductionTestID: "fail"}}},
-			Verdict: "still_failing",
+			Path: ReproductionPath, SHA256: entry.SHA256, Runner: ReproductionRunner, TestIDs: []string{ReproductionTestID},
+			Runs:    []run.ReproductionRun{{Pass: run.ReproductionPassRecheck, Commit: resultSHA, Outcome: outcome, Tests: map[string]string{ReproductionTestID: kind}}},
+			Verdict: verdict, Recheck: &entry,
 		}},
+	}
+	for _, check := range failedChecks {
+		rr.GateResults = append(rr.GateResults, run.GateResult{Check: check, Passed: false, ExitCode: 1})
 	}
 	// The sentence cmd/factoryd's save records (triage.Run) for it.
 	rr.Triage = fmt.Sprintf("review_reproduction: %q still fails on the result commit after the corrective build (%q fail); the finding is in the run's review evidence", ReproductionPath, ReproductionTestID)
+	if verdict == "passes" {
+		rr.Triage = fmt.Sprintf("%s failed", failedChecks[0])
+	}
 	if err := handoff.Sync(rr, dataDir); err != nil {
 		t.Fatalf("write the handoff: %v", err)
 	}
 	return rr
+}
+
+// HeldEntry is the recheck manifest entry of ReproductionRefusedOn's held
+// copy under run origin's review-repro directory.
+func HeldEntry(t *testing.T, dataDir, origin string) run.RecheckEntry {
+	t.Helper()
+	host, err := filepath.Abs(filepath.Join(run.ReviewReproductionDir(run.Dir(dataDir, origin)), "0", filepath.FromSlash(ReproductionPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(ReproductionContent))
+	return run.RecheckEntry{RunID: origin, HeldReproduction: run.HeldReproduction{
+		Path: ReproductionPath, SHA256: hex.EncodeToString(sum[:]), HostPath: host, SpecLine: ReproductionSpecLine, TestIDs: []string{ReproductionTestID}, Runner: ReproductionRunner,
+	}}
 }
 
 // ReviewQuarantinedBuildRunner returns a stub ticketRunner mimicking a

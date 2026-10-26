@@ -409,7 +409,7 @@ type ticketRun struct {
 	// checked (snapshotReviewInputs).
 	reviewSpecSnapshot                    string
 	reviewSpecSHA256                      string
-	rechecks                              []run.HeldReproduction
+	rechecks                              []run.RecheckEntry
 	args                                  []string
 	settings                              sessionconfig.Settings
 	executionHarnessName                  string

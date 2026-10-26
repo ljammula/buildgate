@@ -253,13 +253,15 @@ func reproduceReviewFindings(ctx temporalworkflow.Context, ids *activityIDs, bui
 func recheckReproductions(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) ([]run.ReviewReproduction, error) {
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	var out []run.ReviewReproduction
-	for k, h := range input.RecheckReproductions {
+	for k, e := range input.RecheckReproductions {
+		h := e.HeldReproduction
 		current.Stage, current.StartedAt = reproductionAttemptKind, temporalworkflow.Now(ctx)
 		res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-recheck-%d", k), run.ReproductionPassRecheck, result.ResultSHA, worktreePath, branch)
 		if err != nil {
 			return nil, err
 		}
-		rep := run.ReviewReproduction{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs, Runs: []run.ReproductionRun{res.Run}}
+		entry := e
+		rep := run.ReviewReproduction{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs, Runs: []run.ReproductionRun{res.Run}, Recheck: &entry}
 		var ran *reproduction.RunResult
 		if !res.PathInCommit && res.Run.Outcome != "" {
 			ran = runResultOf(res.Run)

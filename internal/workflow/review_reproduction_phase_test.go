@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -202,7 +203,7 @@ func TestRefusedReproductionIsAdviceWithNoLaunch(t *testing.T) {
 func TestSingleTicketRunSchedulesNoReproduction(t *testing.T) {
 	input := reproductionInput()
 	input.ReviewReproduction = false
-	input.RecheckReproductions = []run.HeldReproduction{heldFixture()}
+	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
 	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
 	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": reproRun(reproduction.OutcomePassed, reproduction.KindPass), "recheck": fail}), false)
 	if p.err != nil {
@@ -220,7 +221,7 @@ func TestSingleTicketRunSchedulesNoReproduction(t *testing.T) {
 // reproduction and no recheck, even with the input set.
 func TestHistoryRecordedBeforeReviewReproductionSchedulesNoReproduction(t *testing.T) {
 	input := reproductionInput()
-	input.RecheckReproductions = []run.HeldReproduction{heldFixture()}
+	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
 	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
 	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail, "recheck": fail}), true)
 	if p.err != nil {
@@ -252,7 +253,7 @@ func TestRecheckRunsEachHeldCopyOnceOnTheResult(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input := reproductionInput()
-			input.RecheckReproductions = []run.HeldReproduction{heldFixture()}
+			input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
 			p := runReproductionPhase(t, input, nil, byPass(map[string]ReproductionRunResult{"recheck": tc.res}), false)
 			if p.err != nil {
 				t.Fatalf("workflow error: %v", p.err)
@@ -262,6 +263,8 @@ func TestRecheckRunsEachHeldCopyOnceOnTheResult(t *testing.T) {
 			}
 			if got := p.result.ReviewReproductionRechecks; len(got) != 1 || got[0].Verdict != string(tc.wantVerdict) || len(got[0].Runs) != 1 {
 				t.Errorf("rechecks = %+v, want one %s with its run", got, tc.wantVerdict)
+			} else if got[0].Recheck == nil || !reflect.DeepEqual(*got[0].Recheck, input.RecheckReproductions[0]) {
+				t.Errorf("recheck entry = %+v, want the manifest entry it ran %+v", got[0].Recheck, input.RecheckReproductions[0])
 			}
 			if gate, ok := reproductionGate(p.result); !ok || gate.Passed != tc.wantAccepted {
 				t.Errorf("gate = %+v (%v), want passed=%v", gate, ok, tc.wantAccepted)
@@ -275,7 +278,7 @@ func TestRecheckRunsEachHeldCopyOnceOnTheResult(t *testing.T) {
 // for it).
 func TestRecheckResultCommitAddingPathIsStillFailing(t *testing.T) {
 	input := reproductionInput()
-	input.RecheckReproductions = []run.HeldReproduction{heldFixture()}
+	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
 	p := runReproductionPhase(t, input, nil, func(in ReproductionRunInput) (ReproductionRunResult, error) {
 		return ReproductionRunResult{Run: run.ReproductionRun{Pass: in.Pass, Commit: in.Commit}, PathInCommit: true}, nil
 	}, false)
@@ -310,7 +313,7 @@ func TestReproductionUnheldHaltsWithItsCause(t *testing.T) {
 func TestCodeReviewOffRecordsNoReviewReproductionCheck(t *testing.T) {
 	input := reproductionInput()
 	input.CodeReviewPolicy = "off"
-	input.RecheckReproductions = []run.HeldReproduction{heldFixture()}
+	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
 	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
 	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail, "recheck": fail}), false)
 	if p.err != nil {

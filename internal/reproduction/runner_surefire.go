@@ -18,10 +18,18 @@ import (
 type surefireXML struct{}
 
 // surefireCompileExit is the launch's exit status when `mvn test-compile`,
-// run on its own before any test, fails: the module or the reproduction does
-// not compile. Maven itself exits 0 or 1, and a test that ends its JVM makes
-// Surefire fail with 1, so only the script's own compile step returns it.
+// run on its own before any test, fails and its output names the
+// reproduction's own source file: the reproduction does not compile. Maven
+// itself exits 0 or 1, and a test that ends its JVM makes Surefire fail with
+// 1, so only the script's own compile step returns it.
 const surefireCompileExit = 86
+
+// surefireBuildExit is the launch's exit status when `mvn test-compile`
+// fails and its output does not name the reproduction's file: the module did
+// not build for another reason (a dependency it could not fetch, a main
+// source that does not compile, a plugin error). It is no compile verdict on
+// the reproduction, and reads as missing.
+const surefireBuildExit = 87
 
 func (surefireXML) ID() string { return "surefire-xml" }
 
@@ -65,8 +73,12 @@ func (surefireXML) TestIDs(_ string, content []byte) ([]string, error) {
 }
 
 // Command compiles the module's main and test sources on their own first
-// (`mvn test-compile`); when that fails the script exits
-// surefireCompileExit before any test runs. It then runs the one class in
+// (`mvn test-compile`, its output kept in a temporary file and then copied
+// to the log); when that fails the script exits before any test runs:
+// surefireCompileExit when the output names the reproduction's path (the
+// factory-checked relative path, IsCleanRelative, after a "/", searched as a
+// fixed string; javac names a file by its absolute path), surefireBuildExit
+// otherwise. It then runs the one class in
 // its module and copies its report out; the class's binary name is read
 // from the path under src/test/java. The module's surefire-reports
 // directory is deleted before Maven runs, so the report copied out is one
@@ -80,14 +92,18 @@ func (surefireXML) Command(inv Invocation) Command {
 	reports := module + "target/surefire-reports"
 	report := reports + "/TEST-" + fqcn + ".xml"
 	pom := shellQuote(module + "pom.xml")
-	script := fmt.Sprintf("rm -rf -- %s || exit 125; mvn -B -q -f %s test-compile || exit %d; "+
+	script := fmt.Sprintf(`rm -rf -- %s || exit 125; log=$(mktemp) || exit 125; mvn -B -q -f %s test-compile >"$log" 2>&1; rc=$?; cat "$log"; `+
+		`if [ "$rc" -ne 0 ]; then grep -qF -- %s "$log" && exit %d; exit %d; fi; `+
 		"mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds -Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
-		shellQuote(reports), pom, surefireCompileExit, pom, shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
+		shellQuote(reports), pom, shellQuote("/"+inv.Path), surefireCompileExit, surefireBuildExit,
+		pom, shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 
-// Classify: no report after the compile step failed (surefireCompileExit)
-// is a compile error; any other launch with no report is missing. A case's
+// Classify: no report after the compile step failed naming the
+// reproduction (surefireCompileExit) is a compile error; any other launch
+// with no report, one whose compile step failed without naming it
+// (surefireBuildExit) included, is missing. A case's
 // name is its method, with any "(...)" or "[...]" suffix dropped.
 func (surefireXML) Classify(_ string, report []byte, exit int, ids []string) (map[string]Kind, Outcome) {
 	cases, ok := readJUnit(report)

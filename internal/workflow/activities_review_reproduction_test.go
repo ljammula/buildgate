@@ -578,13 +578,19 @@ func TestRanPastLaunchCapReadsOnlyTheLaunchsDeadline(t *testing.T) {
 	defer cancel()
 	launch, cancelLaunch := context.WithTimeout(act, time.Minute)
 	defer cancelLaunch()
-	started := fmt.Errorf("sandbox x: %w", context.DeadlineExceeded)
+	started := fmt.Errorf("%w: sandbox x: %w", sandbox.ErrCommandReleased, context.DeadlineExceeded)
 	notStarted := fmt.Errorf("%w: %w", sandbox.ErrSandboxNotStarted, context.DeadlineExceeded)
 	if !ranPastLaunchCap(act, launch, started) {
 		t.Error("a started command cut by the launch's cap: want true")
 	}
 	if ranPastLaunchCap(act, launch, notStarted) || ranPastLaunchCap(act, launch, errors.New("lost")) {
 		t.Error("a sandbox that never started, or another error: want false")
+	}
+	// The cap passing inside the sandbox's start: sandbox.RunThroughRuntime
+	// returns the bare deadline, with no ErrSandboxNotStarted and no
+	// release (TestRunThroughRuntimeADeadlineBeforeTheReleaseIsNotAReleasedCommand).
+	if ranPastLaunchCap(act, launch, fmt.Errorf("sandbox attempts exhausted: %w", context.DeadlineExceeded)) {
+		t.Error("a cap that passed before the command's release: want false")
 	}
 	short, cancelShort := context.WithTimeout(context.Background(), time.Second)
 	defer cancelShort()

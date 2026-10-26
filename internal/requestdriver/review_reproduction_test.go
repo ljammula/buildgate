@@ -103,7 +103,7 @@ func TestReviewReproductionCorrectiveRoundAccepted(t *testing.T) {
 			t.Errorf("the corrective build lacks %s: %v", flag, args)
 		}
 	}
-	if m := readRecheckManifest(t, args); m.RunID != id+"-001" || len(m.Reproductions) != 1 {
+	if m := readRecheckManifest(t, args); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != id+"-001" {
 		t.Errorf("manifest = %+v, want the quarantined run's one held reproduction", m)
 	}
 	assertToldOnlyTheLine(t, dataDir, id+"-001", args, true)
@@ -152,8 +152,8 @@ func TestReviewReproductionCorrectiveCarriesTheRecheckManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := run.HeldReproduction{Finding: 0, Path: rep.Path, SHA256: rep.SHA256, HostPath: wantHost, SpecLine: requestdrivertest.ReproductionSpecLine, TestIDs: rep.TestIDs, Runner: rep.Runner}
-	if m.RunID != quarantined.ID || len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
+	want := run.RecheckEntry{RunID: quarantined.ID, HeldReproduction: run.HeldReproduction{Finding: 0, Path: rep.Path, SHA256: rep.SHA256, HostPath: wantHost, SpecLine: requestdrivertest.ReproductionSpecLine, TestIDs: rep.TestIDs, Runner: rep.Runner}}
+	if len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
 		t.Errorf("manifest = %+v, want run %s and %+v", m, quarantined.ID, want)
 	}
 
@@ -192,7 +192,7 @@ func TestReviewReproductionStillFailingQuarantines(t *testing.T) {
 	branch, baseSHA := "factoryd/"+id+"-001", fmt.Sprintf("%040d", 1)
 	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, baseSHA, "")
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
-		return requestdrivertest.StillFailingAfterRecheck(t, dataDir, roundRunID, branch, fmt.Sprintf("%040d", 2), fmt.Sprintf("%040d", 3))
+		return requestdrivertest.StillFailingAfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 2), fmt.Sprintf("%040d", 3))
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
@@ -254,8 +254,8 @@ func TestReviewReproductionNewFindingInARoundRunsTheNextRound(t *testing.T) {
 	if got := requestdrivertest.ArgValue(round2Args, "-diff-base"); got != originalBase {
 		t.Errorf("round 2's -diff-base = %q, want the original base %q", got, originalBase)
 	}
-	if m := readRecheckManifest(t, round2Args); m.RunID != id+"-001-corrective1" {
-		t.Errorf("round 2 rechecks run %q, want round 1's %s-001-corrective1", m.RunID, id)
+	if m := readRecheckManifest(t, round2Args); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != id+"-001-corrective1" {
+		t.Errorf("round 2 rechecks %+v, want round 1's %s-001-corrective1", m.Reproductions, id)
 	}
 	if loaded := requestdrivertest.LoadRequest(t, dataDir, id); loaded.State != request.StatePRReview {
 		t.Fatalf("State = %q, want %q", loaded.State, request.StatePRReview)
@@ -374,10 +374,152 @@ func TestARetryAfterAReproductionRechecksIt(t *testing.T) {
 	if requestdrivertest.HasFlag(builds[0], "-recheck-reproductions") {
 		t.Errorf("the first build rechecks with nothing before it: %v", builds[0])
 	}
-	if m := readRecheckManifest(t, builds[1]); m.RunID != id+"-001" || len(m.Reproductions) != 1 {
+	if m := readRecheckManifest(t, builds[1]); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != id+"-001" {
 		t.Errorf("manifest = %+v, want the quarantined run's held reproduction", m)
 	}
 	assertToldOnlyTheLine(t, dataDir, id+"-001", builds[1], true)
+}
+
+// refusedBuildRunner is a ticket build a reviewer's reproduction refuses
+// (ReproductionRefusedOn), recording the request and the spec it was built
+// from as a real build does; each build's args are appended to builds.
+func refusedBuildRunner(t *testing.T, dataDir, id string, builds *[][]string) requestdriver.TicketRunner {
+	return func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		*builds = append(*builds, args)
+		ticket := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: ticket})
+		}
+		rr := requestdrivertest.ReproductionRefusedOn(t, dataDir, ticket, "factoryd/"+ticket, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2))
+		return saveAsBuiltFrom(t, dataDir, id, args, rr)
+	}
+}
+
+// saveAsBuiltFrom saves rr with the request id and the hash of the -spec it
+// was built from, as a real build records them.
+func saveAsBuiltFrom(t *testing.T, dataDir, id string, args []string, rr *run.Run) error {
+	t.Helper()
+	sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
+	if err != nil {
+		return err
+	}
+	rr.RequestID, rr.SpecSHA256 = id, sum
+	return rr.Save(dataDir)
+}
+
+// assertRechecksTheFirstRunsCopy checks that args' manifest runs the held
+// copy of the first build (origin), from under origin's own review-repro
+// directory.
+func assertRechecksTheFirstRunsCopy(t *testing.T, dataDir, origin string, args []string) {
+	t.Helper()
+	m := readRecheckManifest(t, args)
+	want := requestdrivertest.HeldEntry(t, dataDir, origin)
+	if len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
+		t.Errorf("manifest = %+v, want the first run's held copy %+v", m.Reproductions, want)
+	}
+}
+
+// SC-022: after a corrective build whose recheck is still failing, the
+// automatic rounds stop, but an operator's retry, which builds on that
+// build's commits, still rechecks the first run's reproduction.
+func TestARetryAfterAStillFailingRecheckRechecksTheFirstRunsCopy(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	var builds, rounds [][]string
+	buildRunner := refusedBuildRunner(t, dataDir, id, &builds)
+	orig := requestdriver.ReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		rounds = append(rounds, args)
+		roundRunID := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: roundRunID})
+		}
+		rr := requestdrivertest.StillFailingAfterRecheck(t, dataDir, roundRunID, id+"-001", "factoryd/"+id+"-001", fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3))
+		return saveAsBuiltFrom(t, dataDir, id, args, rr)
+	}
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
+	drive := func() {
+		t.Helper()
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+	}
+	drive()
+	if len(builds) != 1 || len(rounds) != 1 {
+		t.Fatalf("builds %d, rounds %d; want the first build and one corrective round, then no automatic round after the still-failing recheck", len(builds), len(rounds))
+	}
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	drive()
+	if len(builds) != 2 {
+		t.Fatalf("builds = %d, want the retry", len(builds))
+	}
+	assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", builds[1])
+}
+
+// SC-022: a corrective build whose recheck passed but which another check
+// quarantined is followed by a round that still rechecks the reproduction:
+// a later round must not undo an earlier one's fix.
+func TestARoundAfterAPassingRecheckStillRechecksIt(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	branch := "factoryd/" + id + "-001"
+	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), "")
+	var rounds [][]string
+	orig := requestdriver.ReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		rounds = append(rounds, args)
+		roundRunID := requestdrivertest.ArgValue(args, "-ticket")
+		if onReady != nil {
+			onReady(&run.Run{ID: roundRunID})
+		}
+		if len(rounds) == 1 {
+			return requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "lint").Save(dataDir)
+		}
+		return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
+	}
+	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if len(rounds) != 2 {
+		t.Fatalf("corrective rounds = %d, want 2", len(rounds))
+	}
+	assertRechecksTheFirstRunsCopy(t, dataDir, id+"-001", rounds[1])
+}
+
+// SC-022: a build that would continue on the commits of a run a reviewer's
+// reproduction refused, when that reproduction's held copy is gone, is not
+// built: the request halts with the reason.
+func TestARetryWithTheHeldCopyGoneIsRefused(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	var builds [][]string
+	buildRunner := refusedBuildRunner(t, dataDir, id, &builds)
+	drive := func() {
+		t.Helper()
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			t.Fatalf("driveRequests: %v", err)
+		}
+	}
+	drive()
+	if err := os.Remove(requestdrivertest.HeldEntry(t, dataDir, id+"-001").HostPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	drive()
+	if len(builds) != 1 {
+		t.Fatalf("builds = %d, want no build after the retry", len(builds))
+	}
+	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
+	if loaded.State != request.StateHalted || !strings.Contains(loaded.Error, "not built without a recheck") {
+		t.Errorf("State %q, Error %q; want halted with the recheck's reason", loaded.State, loaded.Error)
+	}
 }
 
 // A ticket run with only a review that gave no verdict is not judged: no

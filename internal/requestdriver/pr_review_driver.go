@@ -4,6 +4,7 @@ import (
 	"buildgate/internal/unresolved"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
@@ -1009,11 +1010,11 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// (forge.ThreadSeenKey), so a reviewer replying "still not fixed" on
 	// an already-addressed thread counts as new.
 
-	// The round before this one, when a reviewer's reproduction refused
-	// it: its commits are the tip this round builds on
-	// (priorRoundRefusal), so its builder is given that attempt's record,
-	// beside the reviewer's comments, and runs those reproductions again on
-	// its result.
+	// The round before this one, when it was quarantined and a reviewer's
+	// reproduction refused it or it ran rechecks: its commits are the tip
+	// this round builds on (priorRoundRefusal), so its builder runs those
+	// reproductions again on its result and is given that attempt's record,
+	// beside the reviewer's comments.
 	refused := priorRoundRefusal(dataDir, r, ticket)
 	// One round is one build plus, when a reviewer's reproduction alone
 	// refused it (SC-022: a finding blocks only through its reproduction,
@@ -1037,6 +1038,11 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 			attemptID = fmt.Sprintf("%s-fix%d", roundRunID, fix)
 		}
 		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase, stackBaseSHA, refused)
+		if errors.Is(err, errNoRecheck) {
+			// The round would build on commits a reviewer's reproduction
+			// must judge again, and cannot: no build (SC-022).
+			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: review round %d: %v", ticket.Index, r.TicketCount, roundIndex, err), now)
+		}
 		if err != nil {
 			return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
 		}
@@ -1133,8 +1139,8 @@ type roundOutcome struct {
 // runRoundAttempt runs one build of a PR-review round on the pull request's
 // branch, with specPath (the round's addendum) as its ticket, and reports
 // how it ended. ticketID is the -ticket value; the run's own id comes from
-// onReady. refused, when not nil, is the build before this one that a
-// reviewer's reproduction refused: this one is given its record as
+// onReady. refused, when not nil, is the build before this one, which a
+// reviewer's reproduction refused or which ran rechecks: this one is given its record as
 // -earlier-attempt, which says each blocking finding in one line (SC-018),
 // and runs its reproductions again (withRecheck), both from files beside
 // the addendum.
@@ -1218,8 +1224,9 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 // attempt after attempt (its fix-th, counted from 0), and returns attempt's
 // run, which that fix attempt is given the record of and rechecks, or nil.
 // It does when a reviewer's reproduction alone refused attempt
-// (onlyAReproductionRefused), its record and held copies can be handed on
-// (refusalToHandOn: never after a recheck that is still failing), fewer
+// (onlyAReproductionRefused), an automatic correction may follow it
+// (automaticCorrectionMayFollow: never after a recheck that is still
+// failing), fewer
 // than review_corrective_rounds fix attempts have run, the worker is not
 // stopping, and the request and monthly budgets still allow a launch. A
 // finding with no reproduction the factory ran never starts one, whatever
@@ -1231,7 +1238,7 @@ func roundFixRefusal(ctx context.Context, dataDir string, r *request.Request, cf
 		return nil
 	}
 	loaded, err := run.Load(dataDir, attempt.runID)
-	if err != nil || !onlyAReproductionRefused(loaded) || !refusalToHandOn(dataDir, loaded) {
+	if err != nil || !onlyAReproductionRefused(loaded) || !automaticCorrectionMayFollow(dataDir, loaded) {
 		return nil
 	}
 	if check, _, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil || check != "" {
@@ -1240,36 +1247,26 @@ func roundFixRefusal(ctx context.Context, dataDir string, r *request.Request, cf
 	return loaded
 }
 
-// refusalToHandOn reports whether a build may be given refused's record
-// (handoffForABuild) and its reviewer reproductions to recheck
-// (recheckManifestFor).
-func refusalToHandOn(dataDir string, refused *run.Run) bool {
-	if _, ok := handoffForABuild(dataDir, refused); !ok {
-		return false
-	}
-	_, ok := recheckManifestFor(dataDir, refused)
-	return ok
-}
-
 // withRefusedAttempt adds to a PR-review build's args, from files it writes
-// in dir, the record of refused (-earlier-attempt, opening by saying the
-// attempt's commit is in the workspace) and the recheck of its reviewer
-// reproductions (-recheck-reproductions). A build given no
-// -review-reproduction runs no reproduction, and is given neither.
+// in dir, the reviewer reproductions refused must pass again
+// (-recheck-reproductions, withRecheck, whose refusal is returned: the build
+// is on refused's commits) and, when it is a failure a build is told about,
+// refused's record (-earlier-attempt, opening by saying the attempt's commit
+// is in the workspace).
 func withRefusedAttempt(dataDir, dir string, refused *run.Run, args []string) ([]string, error) {
-	doc, ok := handoffForABuild(dataDir, refused)
-	if !ok || !hasFlag(args, "-review-reproduction") {
-		return args, nil
-	}
-	withCheck, ok, err := withRecheck(dataDir, dir, refused, args)
-	if err != nil || !ok {
+	args, err := withRecheck(dataDir, dir, refused, args)
+	if err != nil {
 		return args, err
+	}
+	doc, ok := handoffForABuild(dataDir, refused)
+	if !ok {
+		return args, nil
 	}
 	path, err := writeRecordFile(dir, doc, startsOnItsBranch)
 	if err != nil {
 		return args, err
 	}
-	return append(withCheck, "-earlier-attempt", path), nil
+	return append(args, "-earlier-attempt", path), nil
 }
 
 // correctiveRoundOutcome resolves a just-finished corrective run's real
@@ -1471,18 +1468,19 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 }
 
 // priorRoundRefusal returns ticket's most recent PR-review round that
-// ran, when a reviewer's reproduction refused it and its record and held
-// copies can be handed on (refusalToHandOn), nil otherwise. A quarantined
-// round is never pushed, but its commits stay on the local PR branch
-// (PrepareOnBranch checks the branch itself out), so the next round builds
-// on top of them, and its builder is told why they were refused. Found live
+// ran, when it was quarantined and a build on its commits must run reviewer
+// reproductions again (needsRecheck: one refused it, or it ran rechecks), nil
+// otherwise. A quarantined round is never pushed, but its commits stay on the
+// local PR branch (PrepareOnBranch checks the branch itself out), so the next
+// round builds on top of them, runs those reproductions again, and its
+// builder is told why they were refused (withRefusedAttempt). Found live
 // (2026-10-06, three rounds on one pull request): each round was given only
 // the reviewer's comment, built on the refused commits, and was quarantined
 // for the finding the round before it had already been quarantined for.
 //
 // Nothing is returned after an accepted round (it was not refused) or a
-// halted one (whether it committed is unknown), for a round no reproduction
-// refused, or when the round's run record cannot be read: the round then
+// halted one (whether it committed is unknown), for a round that needs no
+// recheck, or when the round's run record cannot be read: the round then
 // runs on the reviewer's comments alone.
 func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticket) *run.Run {
 	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
@@ -1498,7 +1496,7 @@ func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticke
 			log.Printf("request %s: ticket %d: load quarantined round %d's run %s for its review findings: %v", r.ID, ticket.Index, rnd.Index, rnd.RunID, err)
 			return nil
 		}
-		if !refusedByAReproduction(loaded) || !refusalToHandOn(dataDir, loaded) {
+		if !needsRecheck(loaded) {
 			return nil
 		}
 		return loaded
