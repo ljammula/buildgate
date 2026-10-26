@@ -303,3 +303,23 @@ func TestReproductionUnheldHaltsWithItsCause(t *testing.T) {
 		t.Errorf("cause = %q, want %q", got, unresolved.ReproductionUnheld)
 	}
 }
+
+// A request run with code review off (-review-reproduction set, no review
+// step in the plan) launches no reproduction or recheck and records no
+// review_reproduction check: a passing check would have nothing behind it.
+func TestCodeReviewOffRecordsNoReviewReproductionCheck(t *testing.T) {
+	input := reproductionInput()
+	input.CodeReviewPolicy = "off"
+	input.RecheckReproductions = []run.HeldReproduction{heldFixture()}
+	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
+	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail, "recheck": fail}), false)
+	if p.err != nil {
+		t.Fatalf("workflow error: %v", p.err)
+	}
+	if len(p.calls) != 0 || p.result.ReviewReproductions != nil || p.result.ReviewReproductionRechecks != nil {
+		t.Errorf("launches %v, findings %+v, rechecks %+v; want none", p.calls, p.result.ReviewReproductions, p.result.ReviewReproductionRechecks)
+	}
+	if g, ok := reproductionGate(p.result); ok {
+		t.Errorf("review_reproduction = %+v, want no check recorded", g)
+	}
+}

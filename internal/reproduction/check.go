@@ -62,9 +62,10 @@ var (
 	errNoReproduced = errors.New("the finding carries no reproduction")
 )
 
-// CheckAll applies Check to each finding of one review, in order. Past
-// MaxReproductions, and for a path an earlier one already took (folded), the
-// finding is refused.
+// CheckAll applies Check to each finding of one review, in order. Only an
+// accepted reproduction counts toward MaxReproductions and takes its path
+// (folded): past the cap, and for a path an earlier accepted one took, the
+// finding is refused; a refused one crowds out nothing.
 func CheckAll(findings []Finding, j Judged) []Checked {
 	out := make([]Checked, len(findings))
 	seen := map[string]bool{}
@@ -75,25 +76,29 @@ func CheckAll(findings []Finding, j Judged) []Checked {
 			continue
 		}
 		fold := sandbox.FoldPath(f.Path)
-		switch {
-		case held >= MaxReproductions:
-			out[i] = Checked{Refused: errTooMany.Error()}
-			continue
-		case seen[fold]:
+		if seen[fold] {
 			out[i] = Checked{Refused: errDuplicate.Error()}
 			continue
 		}
-		seen[fold] = true
-		held++
 		a, err := Check(f, j)
-		if err != nil {
+		switch {
+		case err != nil:
 			out[i] = Checked{Refused: err.Error()}
-			continue
+		case held >= MaxReproductions:
+			out[i] = Checked{Refused: errTooMany.Error()}
+		default:
+			seen[fold] = true
+			held++
+			out[i] = Checked{Accepted: &a}
 		}
-		out[i] = Checked{Accepted: &a}
 	}
 	return out
 }
+
+// IsCleanRelative reports whether p is a reproduction path's shape: relative,
+// clean, no "." or ".." component, no control or backslash character, and no
+// leading '-' or ':'.
+func IsCleanRelative(p string) bool { return cleanRelative(p) }
 
 // Check applies SC-022's shape rules to one finding's reproduction. A refusal
 // makes the finding advice; it is never a verdict on the run.

@@ -55,15 +55,19 @@ func (surefireXML) TestIDs(_ string, content []byte) ([]string, error) {
 }
 
 // Command runs the one class in its module and copies its report out; the
-// class's binary name is read from the path under src/test/java.
+// class's binary name is read from the path under src/test/java. The
+// module's surefire-reports directory is deleted before Maven runs, so the
+// report copied out is one this launch wrote: a commit that tracks a report
+// there (a stale pass) leaves none, and the launch reads as missing.
 func (surefireXML) Command(inv Invocation) Command {
 	i := strings.Index("/"+inv.Path, "/"+surefireSourceRoot)
 	module := inv.Path[:i]
 	fqcn := strings.ReplaceAll(strings.TrimSuffix(inv.Path[i+len(surefireSourceRoot):], ".java"), "/", ".")
 	class := path.Base(strings.ReplaceAll(fqcn, ".", "/"))
-	report := module + "target/surefire-reports/TEST-" + fqcn + ".xml"
-	script := fmt.Sprintf("mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
-		shellQuote(module+"pom.xml"), shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
+	reports := module + "target/surefire-reports"
+	report := reports + "/TEST-" + fqcn + ".xml"
+	script := fmt.Sprintf("rm -rf -- %s || exit 125; mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
+		shellQuote(reports), shellQuote(module+"pom.xml"), shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 

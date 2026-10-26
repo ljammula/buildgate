@@ -60,6 +60,9 @@ type reviewFixture struct {
 	input ReviewStepInput
 	// launches counts the fake runner's launches.
 	launches int
+	// exitOffset is added to reviewstep.CombinedExitBase for the fake
+	// launch's exit status: 0 a verdict, 2 none.
+	exitOffset int
 }
 
 // newReviewFixture commits baseFiles, then applies change and commits that.
@@ -125,7 +128,7 @@ func (f *reviewFixture) fakeLaunch(during func(args []string), launchErr error) 
 		if err := os.WriteFile(log, []byte("clean\n"), 0o600); err != nil {
 			return runner.Result{}, err
 		}
-		result := runner.Result{Command: []string{"python3", "review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: reviewstep.CombinedExitBase, LogPath: log}
+		result := runner.Result{Command: []string{"python3", "review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: reviewstep.CombinedExitBase + f.exitOffset, LogPath: log}
 		return result, after(1, result, nil)
 	}
 }

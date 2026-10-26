@@ -293,6 +293,37 @@ func TestRunnerCommandsAreFactoryOwned(t *testing.T) {
 	}
 }
 
+// A report a commit could hold before the launch is never read: every runner
+// but surefire-xml writes its report straight to Invocation.ReportPath (which
+// the caller removes before the launch), and surefire-xml deletes the
+// module's surefire-reports directory before Maven runs, so the report it
+// copies out is one this launch wrote.
+func TestRunnerReadsNoReportACommitCouldHold(t *testing.T) {
+	for _, r := range Runners() {
+		p := map[string]string{"go-test-json": "x/a_test.go", "pytest-junitxml": "tests/test_a.py", "vitest-json": "src/a.test.ts", "surefire-xml": "core/src/test/java/com/x/FooTest.java", "minitest-json": "test/a_test.rb"}[r.ID()]
+		if p == "" {
+			t.Fatalf("runner %s has no case here: add one", r.ID())
+		}
+		script := r.Command(Invocation{Path: p, TestIDs: []string{"a"}, ReportPath: "/out/report", HelperDir: "/inputs/reproduction"}).Script
+		if r.ID() != "surefire-xml" {
+			if !strings.Contains(script, "'/out/report'") || strings.Contains(script, "cp ") {
+				t.Errorf("%s: script %q does not write its report to the report path", r.ID(), script)
+			}
+			continue
+		}
+		rm := strings.Index(script, "rm -rf -- 'core/target/surefire-reports' || exit 125;")
+		mvn := strings.Index(script, "mvn ")
+		cp := strings.Index(script, "cp 'core/target/surefire-reports/TEST-com.x.FooTest.xml'")
+		if rm != 0 || mvn < rm || cp < mvn {
+			t.Errorf("surefire-xml: script %q does not delete the module's reports before Maven runs and copy after", script)
+		}
+	}
+	root := surefireXML{}.Command(Invocation{Path: "src/test/java/FooTest.java", TestIDs: []string{"a"}, ReportPath: "/out/report"}).Script
+	if !strings.HasPrefix(root, "rm -rf -- 'target/surefire-reports' || exit 125;") {
+		t.Errorf("surefire-xml at the root: script %q", root)
+	}
+}
+
 func TestLaunchTimeoutIsCapped(t *testing.T) {
 	ids := make([]string, MaxTestIDs)
 	if got := launchTimeout(ids); got != LaunchTimeout {

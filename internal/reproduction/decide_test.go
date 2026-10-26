@@ -22,6 +22,7 @@ func TestDecideBlocksOnlyOnTwoHeadFailures(t *testing.T) {
 		{"report missing on head", res(OutcomeMissing, map[string]Kind{"TestA": KindMissing}), nil, VerdictAdvice},
 		{"passes on head", res(OutcomePassed, map[string]Kind{"TestA": KindPass}), nil, VerdictAdvice},
 		{"skipped on head", res(OutcomeInconclusive, map[string]Kind{"TestA": KindSkipped}), nil, VerdictAdvice},
+		{"not staged on head", res(OutcomeUnstaged, nil), nil, VerdictAdvice},
 		{"second launch not run", fails(KindFail), nil, VerdictAdvice},
 		{"second launch passes", fails(KindFail), res(OutcomePassed, map[string]Kind{"TestA": KindPass}), VerdictAdvice},
 		{"second launch compile", fails(KindFail), res(OutcomeCompile, map[string]Kind{"TestA": KindCompile}), VerdictAdvice},
@@ -41,7 +42,8 @@ func TestDecideBlocksOnlyOnTwoHeadFailures(t *testing.T) {
 // TestDecideSameBaseFailureIsAdviceUnlessLiteral is the base half: a base
 // that does not run, passes, or fails another way blocks; the same failure
 // on the base is advice unless the cited line's backticked literal is in the
-// reproduction; an unknown base is advice.
+// reproduction; an unknown base, or one the reproduction could not be staged
+// in, is advice ("base not checked").
 func TestDecideSameBaseFailureIsAdviceUnlessLiteral(t *testing.T) {
 	without := []byte("func TestA(t *testing.T) { Parse(\"b\") }")
 	with := []byte("func TestA(t *testing.T) { Parse(\"a=1\") }")
@@ -53,6 +55,7 @@ func TestDecideSameBaseFailureIsAdviceUnlessLiteral(t *testing.T) {
 		want    Verdict
 	}{
 		{"base unknown", nil, with, citedLiteral, VerdictAdvice},
+		{"base not staged", res(OutcomeUnstaged, nil), with, citedLiteral, VerdictAdvice},
 		{"base passes", res(OutcomePassed, map[string]Kind{"TestA": KindPass}), without, citedLiteral, VerdictBlocks},
 		{"base does not compile", res(OutcomeCompile, map[string]Kind{"TestA": KindCompile}), without, citedLiteral, VerdictBlocks},
 		{"base report missing", res(OutcomeMissing, map[string]Kind{"TestA": KindMissing}), with, citedLiteral, VerdictAdvice},

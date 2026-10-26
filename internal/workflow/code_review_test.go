@@ -263,6 +263,41 @@ exit 0
 	}
 }
 
+// TestRunReviewStepActivityRefusesAPendingLegacyCombinedReview: the combined
+// review a retired plan scheduled (legacyReviewPlan with acceptance criteria,
+// so its input carries SpecAcceptanceCriteria, which nothing sets since)
+// still pending in a history recorded before reviewReproductionChange is
+// refused, non-retryably, as no verdict on the work, before any launch; the
+// combined review a version-1 plan schedules is not.
+func TestRunReviewStepActivityRefusesAPendingLegacyCombinedReview(t *testing.T) {
+	input := ReviewStepInput{Step: reviewstep.Combined}
+	if retiredReviewStep(input) {
+		t.Fatal("a version-1 combined review was read as retired")
+	}
+	activities := testRoutedActivities(sandbox.NewRouteSecret("worker-static-upstream-key"))
+	activities.runWithRetriesChecked = func(context.Context, string, func(int) string, int, func(int) error, func(int, runner.Result, error) error, string, ...string) (runner.Result, error) {
+		t.Fatal("a legacy combined review launched")
+		return runner.Result{}, nil
+	}
+	input = codeReviewFixtureInput(t, testfixture.NewGitRepo(t))
+	input.Step = reviewstep.Combined
+	input.SpecAcceptanceCriteria = filepath.Join(t.TempDir(), "criteria.md")
+	wrapper := func(ctx context.Context, in ReviewStepInput) (VerifyActivityResult, error) {
+		return activities.RunReviewStepActivity(ctx, in)
+	}
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestActivityEnvironment()
+	env.RegisterActivity(wrapper)
+	_, err := env.ExecuteActivity(wrapper, input)
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != ReviewStepRetiredFailureType || !appErr.NonRetryable() {
+		t.Fatalf("error = %v, want a non-retryable %s", err, ReviewStepRetiredFailureType)
+	}
+	if got := UnresolvedCauseFromError(err); got != unresolved.NoVerdict {
+		t.Errorf("UnresolvedCauseFromError = %q, want %q", got, unresolved.NoVerdict)
+	}
+}
+
 // TestRunReviewStepActivityRefusesARetiredStep: a retired step pending in a
 // history recorded before reviewReproductionChange reaches this Worker. It is
 // refused, non-retryably, as no verdict on the work, before any launch.

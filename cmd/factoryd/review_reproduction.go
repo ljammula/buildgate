@@ -107,6 +107,8 @@ func checkRecheckEntry(dir, realDir string, h run.HeldReproduction) error {
 	switch {
 	case h.Refused != "" || h.Path == "":
 		return errors.New("it is not a held reproduction")
+	case !reproduction.IsCleanRelative(h.Path):
+		return fmt.Errorf("its path %q is not a clean relative path", h.Path)
 	case !sha256Hex.MatchString(h.SHA256):
 		return errors.New("its sha256 is not a SHA-256")
 	case len(h.TestIDs) == 0 || len(h.TestIDs) > reproduction.MaxTestIDs:

@@ -962,7 +962,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	countedRounds := 0
 	for _, rnd := range ticket.Rounds {
 		// Kind == request.ConformityRoundKind rounds are the automatic
-		// spec_conformity corrective rounds, counted separately
+		// review-corrective rounds, counted separately
 		// against -review-corrective-rounds
 		// (TryReviewCorrectiveRound, request_driver.go) -- excluded
 		// here so a ticket's PR-review budget is never burned by a round
@@ -1427,8 +1427,8 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 
 // priorRoundGateFindings returns what the review gate flagged in ticket's
 // most recent PR-review round that ran, when that round was quarantined:
-// its run's flagged spec-conformity criteria and blocking code-review
-// findings. A quarantined round is never pushed, but its commits stay on
+// the flagged spec-conformity criteria a run recorded before that review
+// was retired, and its blocking code-review findings. A quarantined round is never pushed, but its commits stay on
 // the local PR branch (PrepareOnBranch checks the branch itself out), so
 // the next round builds on top of them and these findings describe the
 // tree its builder starts from. Found live (2026-10-06, three rounds on one
@@ -1546,7 +1546,8 @@ func failedGateNames(runRecord *run.Run) string {
 }
 
 // replyFindings renders what the review flagged in runRecord for a reply:
-// the flagged criteria and blocking findings a fix attempt is given
+// the flagged criteria (only a run recorded before the spec-conformity
+// review was retired has any) and blocking findings a fix attempt is given
 // (flaggedConformityVerdicts, blockingCodeReviewFindings), at most
 // maxReplyFindings of them, or "" when there are none.
 func replyFindings(runRecord *run.Run) string {

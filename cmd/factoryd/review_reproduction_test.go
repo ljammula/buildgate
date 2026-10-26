@@ -43,7 +43,8 @@ func heldCopy(t *testing.T, dataDir, id string) string {
 
 // A recheck manifest is accepted only when every held copy it names is a
 // regular file under the quarantined run's review-repro directory, reached
-// through no link, with a hash, a known runner and its test IDs.
+// through no link, with a clean relative reproduction path, a hash, a known
+// runner and its test IDs.
 func TestRecheckManifestHostPathsMustBeUnderTheQuarantinedRun(t *testing.T) {
 	dataDir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -71,12 +72,16 @@ func TestRecheckManifestHostPathsMustBeUnderTheQuarantinedRun(t *testing.T) {
 		"a missing file": func(m *run.RecheckManifest) {
 			m.Reproductions[0].HostPath = filepath.Join(filepath.Dir(host), "gone_test.go")
 		},
-		"no hash":           func(m *run.RecheckManifest) { m.Reproductions[0].SHA256 = "" },
-		"an unknown runner": func(m *run.RecheckManifest) { m.Reproductions[0].Runner = "cargo" },
-		"no test IDs":       func(m *run.RecheckManifest) { m.Reproductions[0].TestIDs = nil },
-		"a refused finding": func(m *run.RecheckManifest) { m.Reproductions[0].Refused = "no runner" },
-		"an invalid run id": func(m *run.RecheckManifest) { m.RunID = "../run-q" },
-		"no reproduction":   func(m *run.RecheckManifest) { m.Reproductions = nil },
+		"an absolute reproduction path": func(m *run.RecheckManifest) { m.Reproductions[0].Path = "/p/repro_test.go" },
+		"a dot-dot reproduction path":   func(m *run.RecheckManifest) { m.Reproductions[0].Path = "p/../../repro_test.go" },
+		"an unclean reproduction path":  func(m *run.RecheckManifest) { m.Reproductions[0].Path = "p//repro_test.go" },
+		"an option-like path":           func(m *run.RecheckManifest) { m.Reproductions[0].Path = "-p/repro_test.go" },
+		"no hash":                       func(m *run.RecheckManifest) { m.Reproductions[0].SHA256 = "" },
+		"an unknown runner":             func(m *run.RecheckManifest) { m.Reproductions[0].Runner = "cargo" },
+		"no test IDs":                   func(m *run.RecheckManifest) { m.Reproductions[0].TestIDs = nil },
+		"a refused finding":             func(m *run.RecheckManifest) { m.Reproductions[0].Refused = "no runner" },
+		"an invalid run id":             func(m *run.RecheckManifest) { m.RunID = "../run-q" },
+		"no reproduction":               func(m *run.RecheckManifest) { m.Reproductions = nil },
 	} {
 		m := run.RecheckManifest{RunID: "run-q", Reproductions: []run.HeldReproduction{good}}
 		mutate(&m)

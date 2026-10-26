@@ -30,9 +30,10 @@ func reviewStepPassed(exitCode int) bool {
 // RunReviewStepActivity invokes the review step (reviewstep.CombinedStep,
 // agent/pi/scripts/combined_review.py) through runner.RunWithRetries.
 // A step a retired plan scheduled (input.Step "spec_conformity" or
-// "code_review", pending in a history recorded before
-// reviewReproductionChange) is refused with the non-retryable
-// ReviewStepRetiredFailureType: this Worker no longer runs it.
+// "code_review", or a combined review carrying acceptance criteria, pending
+// in a history recorded before reviewReproductionChange: retiredReviewStep)
+// is refused with the non-retryable ReviewStepRetiredFailureType: this
+// Worker no longer runs it.
 //
 // RunWorkflow only calls this once CollectEvidenceActivity's own
 // safety-net commit has already landed, so the workspace is guaranteed
@@ -44,8 +45,8 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	ctx, endGuard := GuardStep(ctx)
 	defer endGuard()
 	step := reviewstep.CombinedStep
-	if input.Step != reviewstep.Combined {
-		return VerifyActivityResult{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("review step %q is retired: this Worker runs only the %q review", input.Step, reviewstep.Combined), ReviewStepRetiredFailureType, nil)
+	if retiredReviewStep(input) {
+		return VerifyActivityResult{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("review step %q is retired: this Worker runs only the %q review without the spec-conformity task", input.Step, reviewstep.Combined), ReviewStepRetiredFailureType, nil)
 	}
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
@@ -312,6 +313,16 @@ func withReviewSpec(ctx context.Context, input RunWorkflowInput) context.Context
 	return withExtraRunInputs(ctx, input.ReviewSpecPath)
 }
 
+// retiredReviewStep reports whether input is a review a retired plan
+// scheduled: a step other than reviewstep.Combined, or a combined review
+// carrying acceptance criteria. Only legacyReviewPlan (a history recorded
+// before reviewReproductionChange) schedules the combined review with
+// SpecAcceptanceCriteria set, since nothing sets it since; that launch also
+// ran the retired spec-conformity task, so this Worker cannot run it.
+func retiredReviewStep(input ReviewStepInput) bool {
+	return input.Step != reviewstep.Combined || input.SpecAcceptanceCriteria != ""
+}
+
 // reviewStepNoRelayError names the review's trigger condition for the
 // no-relay-configured halt.
 func reviewStepNoRelayError(input ReviewStepInput) string {
@@ -372,9 +383,11 @@ func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInp
 			}
 		}
 	}
-	if runErr == nil && err == nil {
+	if runErr == nil && err == nil && reviewStepPassed(result.ExitCode) {
 		// SC-022: the reproductions are held from the clean worktree the
-		// review judged, before the checkpoint records the review.
+		// review judged, before the checkpoint records the review, and only
+		// when the launch gave a verdict: a review with no verdict holds
+		// nothing.
 		var holdErr error
 		if stepResult.Reproductions, holdErr = a.holdReproductions(ctx, input.RunWorkflowInput); holdErr != nil {
 			return a.failHold(ctx, step.Label, checkpoint, path, stepResult, holdErr)

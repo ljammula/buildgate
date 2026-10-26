@@ -417,7 +417,12 @@ func (a *Activities) runReproduction(ctx context.Context, input ReproductionRunI
 		// failing, with nothing launched (reproduction.Recheck).
 		return res, nil
 	}
-	launch, err := stageReproductionLaunch(input, r, root, scratch)
+	launch, err := stageReproductionLaunch(input, r, root, scratch, tree)
+	if errors.Is(err, errUnstageable) {
+		// Nothing written, nothing launched: advice (reproduction.Decide).
+		res.Run.Outcome = string(reproduction.OutcomeUnstaged)
+		return res, nil
+	}
 	if err != nil {
 		return res, err
 	}
@@ -428,8 +433,13 @@ func (a *Activities) runReproduction(ctx context.Context, input ReproductionRunI
 // hash, to a staged file outside the worktree, makes the mountpoint in the
 // scratch worktree, writes the runner's helpers and removes any report the
 // commit holds.
-func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, root, scratch string) (reproductionLaunch, error) {
+func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, root, scratch string, tree []string) (reproductionLaunch, error) {
 	l := reproductionLaunch{scratch: scratch, runner: r, staged: filepath.Join(root, "held"), helpers: filepath.Join(root, "helpers")}
+	if dir := path.Dir(input.Held.Path); dir != "." && pathInTree(tree, dir) {
+		// A parent of the path is a file, a link or a submodule in this
+		// commit: no mountpoint is made under it.
+		return l, errUnstageable
+	}
 	content, err := evidence.ReadHostileFile(input.Held.HostPath, reproduction.MaxContentBytes)
 	if err != nil {
 		return l, unheld("read the host copy: %v", err)
@@ -440,19 +450,13 @@ func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, 
 	if err := os.WriteFile(l.staged, content, 0o444); err != nil {
 		return l, unheld("stage the reproduction: %v", err)
 	}
-	mountpoint := filepath.Join(scratch, filepath.FromSlash(input.Held.Path))
-	if err := os.MkdirAll(filepath.Dir(mountpoint), 0o750); err != nil {
-		return l, unheld("make the reproduction's mountpoint: %v", err)
-	}
-	if _, err := os.Lstat(mountpoint); errors.Is(err, fs.ErrNotExist) {
-		if err := os.WriteFile(mountpoint, nil, 0o644); err != nil {
-			return l, unheld("make the reproduction's mountpoint: %v", err)
-		}
+	if err := makeMountpoint(scratch, input.Held.Path); err != nil {
+		return l, err
 	}
 	if err := wsisolation.EnableWorkerGroupWrite(scratch, os.Getgid()); err != nil {
 		return l, fmt.Errorf("make the scratch worktree writable for the worker: %w", err)
 	}
-	if err := os.RemoveAll(filepath.Join(scratch, reproductionReportName)); err != nil {
+	if err := removeInRoot(scratch, reproductionReportName); err != nil {
 		return l, fmt.Errorf("remove a report the commit holds: %w", err)
 	}
 	l.cmd = r.Command(reproduction.Invocation{Path: input.Held.Path, TestIDs: input.Held.TestIDs, ReportPath: "/workspace/" + reproductionReportName, HelperDir: reproductionHelperDir})
@@ -465,6 +469,51 @@ func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, 
 		}
 	}
 	return l, nil
+}
+
+// errUnstageable: the reproduction's path cannot be mounted in this commit's
+// checkout (a parent of it is a file, a link or a submodule, or the path
+// itself is something other than a regular file). The pass is advice, with
+// nothing written and nothing launched.
+var errUnstageable = errors.New("the reproduction's path cannot be staged in this commit")
+
+// makeMountpoint makes the reproduction's mountpoint at rel in the scratch
+// worktree: the commit's own regular file there (the base may track the
+// path), or else an empty file and its parent directories, all through an
+// os.Root on the scratch worktree, so a link in the commit's checkout can
+// never take a write outside it. Anything else at rel, or a parent that is
+// not a directory inside the root, is errUnstageable.
+func makeMountpoint(scratch, rel string) error {
+	root, err := os.OpenRoot(scratch)
+	if err != nil {
+		return unheld("open the scratch worktree: %v", err)
+	}
+	defer root.Close()
+	name := filepath.FromSlash(rel)
+	if info, err := root.Lstat(name); err == nil {
+		if info.Mode().IsRegular() {
+			return nil
+		}
+		return errUnstageable
+	}
+	if err := root.MkdirAll(filepath.Dir(name), 0o750); err != nil {
+		return fmt.Errorf("%w: %v", errUnstageable, err)
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errUnstageable, err)
+	}
+	return f.Close()
+}
+
+// removeInRoot removes rel, and anything under it, inside dir only.
+func removeInRoot(dir, rel string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.RemoveAll(rel)
 }
 
 // checkHeldHash compares content with the hash the hold recorded.

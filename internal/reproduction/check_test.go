@@ -162,3 +162,38 @@ func TestReproductionShapeCapsAReviewsReproductions(t *testing.T) {
 		}
 	}
 }
+
+// A refused reproduction takes no place under MaxReproductions and no path:
+// three refused ones before them crowd out none of the valid ones, and a
+// refused path may be carried again by a valid one.
+func TestReproductionShapeRefusedOnesDoNotCountTowardTheCap(t *testing.T) {
+	var fs []Finding
+	for _, p := range []string{"a/bad1_test.go", "a/bad2_test.go", "a/bad3_test.go"} {
+		f := goodFinding()
+		f.Path, f.SpecText = p, "not the spec's line"
+		fs = append(fs, f)
+	}
+	for _, p := range []string{"a/one_test.go", "a/two_test.go", "a/bad1_test.go", "a/four_test.go"} {
+		f := goodFinding()
+		f.Path = p
+		fs = append(fs, f)
+	}
+	got := CheckAll(fs, goodJudged())
+	want := []string{errSpecLine.Error(), errSpecLine.Error(), errSpecLine.Error(), "", "", "", errTooMany.Error()}
+	for i, c := range got {
+		if c.Refused != want[i] || (c.Refused == "") != (c.Accepted != nil) {
+			t.Errorf("finding %d: %+v, want refused %q", i, c, want[i])
+		}
+	}
+}
+
+func TestIsCleanRelative(t *testing.T) {
+	for p, want := range map[string]bool{
+		"a/b_test.go": true, "": false, "/a/b_test.go": false, "a/../b_test.go": false, "./a_test.go": false,
+		"a//b_test.go": false, "-a_test.go": false, `a\b_test.go`: false, "a/\x01b_test.go": false,
+	} {
+		if got := IsCleanRelative(p); got != want {
+			t.Errorf("IsCleanRelative(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

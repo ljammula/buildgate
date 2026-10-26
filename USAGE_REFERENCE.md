@@ -1188,7 +1188,7 @@ kind `review_reproduction`):
 | Step | What the factory does |
 |---|---|
 | Hold | After the review, each finding's reproduction is checked against the shape rules: it cites a line of the request's approved `spec.md` byte for byte, its path is new in the judged commit (case-folded), matches `test_patterns`, is not an instruction path, under `.factory/` or protected, and a runner applies (`go test -json`, pytest, vitest, Maven Surefire, minitest), with 1 to 20 tests. An accepted one is copied once, read-only, to the run's `review-repro/<finding>/<path>` and its SHA-256 recorded; a refused one is advice, its rule recorded on the finding |
-| Run | Each held copy runs in a scratch worktree of the result commit, never the run's own, launched as a gate (the run's image, setup commands, `.factory/`, registry proxy and compose services, no model route), mounted read-only after its hash is checked, under the runner's own command and per-test timeout of 60 s. It runs twice on the result, the second time only after a failure, then once on the commit the ticket started from only after two failures |
+| Run | Each held copy runs in a scratch worktree of the result commit, never the run's own, launched as a gate (the run's image, setup commands, `.factory/`, registry proxy and compose services, no model route), mounted read-only after its hash is checked, under the runner's own command and per-test timeout of 60 s (a default: a vitest reproduction can set its own per-test timeout, with a test's own timeout argument or `vi.setConfig`, and is then cut only by the launch's cap). It runs twice on the result, the second time only after a failure, then once on the commit the ticket started from only after two failures |
 | Decide | It blocks when some of its tests failed on both result launches and, on the base, it does not compile or does not fail the same way (same test, same kind); failing the same way blocks only when the cited line's backticked literal is in the reproduction. Everything else is advice: a pass, a compile or collection error, a missing report, one failure, an unknown base |
 | Gate | `review_reproduction` fails when any finding blocks. The finding records each run (pass, commit, outcome, each test's kind, report hash), the verdict and the reason, and its disposition (`blocks` or `advice`) |
 
@@ -1205,7 +1205,9 @@ the gates and before its review: anything but a pass on every test, a result
 commit that holds the path included, is still failing and fails
 `review_reproduction`. A copy that cannot be held, no longer matches its hash
 before a launch, or whose mount is refused halts the run with the unresolved
-cause `reproduction_unheld`.
+cause `reproduction_unheld`. A bare `factoryd -ticket` run, a restack's replay
+run and a run with code review off hold and run no reproduction and record no
+`review_reproduction` check: their review is advice only.
 
 | Restriction | Why |
 |---|---|

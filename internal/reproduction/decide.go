@@ -43,7 +43,8 @@ func advice(reason string) Decision { return Decision{Verdict: VerdictAdvice, Re
 // test IDs failed on both head launches and, on the base, it does not
 // compile or they do not all fail the same way (same ID, same kind); when
 // they do, it blocks only when the cited line's backticked literal appears
-// byte-for-byte in the content. A base launch with no report is advice.
+// byte-for-byte in the content. A base launch with no report is advice, and
+// so is a base pass that could not be staged ("base not checked").
 func Decide(e Evidence) Decision {
 	if e.Head1 == nil || e.Head2 == nil {
 		return advice("the reproduction did not fail on the result commit")
@@ -55,7 +56,7 @@ func Decide(e Evidence) Decision {
 	if len(failing) == 0 {
 		return advice("no test of the reproduction failed on both launches on the result commit")
 	}
-	if e.Base == nil {
+	if e.Base == nil || e.Base.Outcome == OutcomeUnstaged {
 		return advice("base not checked")
 	}
 	switch e.Base.Outcome {

@@ -458,10 +458,12 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	}
 	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
 	outcome.legacy = legacy
-	// SC-022: only at version 1, and only for a run given
-	// -review-reproduction. A corrective build's recheck runs first, after
-	// the gates and before its own review.
-	outcome.reproductions.ran = !legacy && input.ReviewReproduction
+	// SC-022: only at version 1, only for a run given -review-reproduction,
+	// and only when the plan runs the review step: with code review off no
+	// review_reproduction check is recorded, since nothing would stand
+	// behind it. A corrective build's recheck runs first, after the gates
+	// and before its own review.
+	outcome.reproductions.ran = !legacy && input.ReviewReproduction && len(steps) > 0
 	if outcome.reproductions.ran {
 		rechecks, err := recheckReproductions(ctx, ids, buildVerifyCtx, input, current, result, worktreePath, branch)
 		if err != nil {

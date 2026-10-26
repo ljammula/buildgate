@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/evidence"
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/runner"
@@ -50,6 +51,11 @@ func (a *Activities) prepareReviewLaunch(ctx context.Context, input ReviewStepIn
 	}
 	if err := evidence.DropSavedPrompts(input.WorkspacePath, []string{reviewSessionDir}); err != nil {
 		return prep, temporal.NewApplicationErrorWithCause("remove the prompts found in the review's session folder before its launch", InfrastructureFailureType, err)
+	}
+	// SC-022: the evidence the hold reads is the one this launch writes. A
+	// file already at its path was written by the build or an earlier step.
+	if err := os.Remove(filepath.Join(input.WorkspacePath, codereview.EvidenceFile)); err != nil && !os.IsNotExist(err) {
+		return prep, temporal.NewApplicationErrorWithCause("remove the review evidence found in the worktree before the review's launch", InfrastructureFailureType, err)
 	}
 	return prep, nil
 }

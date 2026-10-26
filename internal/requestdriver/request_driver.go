@@ -1451,16 +1451,15 @@ func blockingCodeReviewFindings(runRecord *run.Run) []run.CodeReviewFinding {
 
 // ReviewOnlyFlagged reports whether runRecord -- a just-quarantined run --
 // is eligible for an automatic review-corrective round: every failed
-// GateResult is either spec_conformity or code_review (any other failed
-// gate disqualifies it immediately, the same "never triggered when any
-// deterministic gate failed" guard the original spec_conformity-only round
-// enforced), and at least one of those two failures carries something an
-// addendum could actually address -- a flagged (non-"clean") spec-
-// conformity verdict, or a "high"-severity code-review finding. A failed
-// gate with nothing actionable (spec_conformity failed but every verdict
-// was "clean" -- never triggered by design; code_review failed because the
-// reviewer was unavailable, or ran and found nothing "high") is NOT
-// eligible: quarantine as today.
+// GateResult is code_review, or spec_conformity in a run recorded before
+// that review was retired (any other failed gate disqualifies it
+// immediately: never triggered when any deterministic gate failed), and at
+// least one of those failures carries something an addendum could actually
+// address -- a "high"-severity code-review finding, or a flagged
+// (non-"clean") verdict such an older run recorded. A failed gate with
+// nothing actionable (code_review failed because the reviewer gave no
+// verdict, or ran and found nothing "high") is NOT eligible: quarantine as
+// today.
 func ReviewOnlyFlagged(runRecord *run.Run) bool {
 	sawFailure := false
 	for _, g := range runRecord.GateResults {
@@ -1482,14 +1481,16 @@ func ReviewOnlyFlagged(runRecord *run.Run) bool {
 }
 
 // reviewShapeOnly reports whether every failed GateResult in runRecord is
-// spec_conformity and/or code_review -- any other failed gate disqualifies
-// it, the identical shape guard ReviewOnlyFlagged enforces -- but, unlike
+// code_review (or spec_conformity, in a run recorded before that review was
+// retired) -- any other failed gate disqualifies it, the identical shape
+// guard ReviewOnlyFlagged enforces -- but, unlike
 // ReviewOnlyFlagged, makes no requirement that either failure carry
 // anything actionable. Used only to decide whether QuarantineCheck should
 // name which of the two checks caused the quarantine (quarantineCheckFor),
 // which the operator benefits from knowing even when there was nothing an
-// automatic corrective round could act on (an unavailable code reviewer,
-// or a spec_conformity failure with no flagged verdict) -- ReviewOnlyFlagged
+// automatic corrective round could act on (a code review with no verdict,
+// or an older run's spec_conformity failure with no flagged verdict) --
+// ReviewOnlyFlagged
 // itself gates only whether a round actually launches.
 func reviewShapeOnly(runRecord *run.Run) bool {
 	sawFailure := false

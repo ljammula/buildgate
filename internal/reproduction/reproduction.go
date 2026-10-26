@@ -53,6 +53,10 @@ const (
 	OutcomeCompile      Outcome = "compile"      // compile or collection error
 	OutcomeMissing      Outcome = "missing"      // no readable report
 	OutcomeInconclusive Outcome = "inconclusive" // no failure, but not every ID passed
+	// OutcomeUnstaged: nothing launched, because the reproduction's
+	// mountpoint could not be made inside the commit's checkout (a parent of
+	// its path is a file, a link or a submodule there).
+	OutcomeUnstaged Outcome = "unstaged"
 )
 
 // RunResult is one launch's classified report.

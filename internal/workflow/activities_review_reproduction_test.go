@@ -389,3 +389,106 @@ func TestReviewStepWhoseHoldFailsIsUnheld(t *testing.T) {
 		t.Errorf("review step = %v, want %s", err, ReproductionUnheldFailureType)
 	}
 }
+
+// A pass on a commit where a parent of the reproduction's path is a link (here
+// the base tracks p as a symlink to a directory outside the scratch) or a
+// file makes no mountpoint and launches nothing: the host writes nothing
+// through the link, and the pass is unstaged, which reproduction.Decide reads
+// as advice ("base not checked" for the base).
+func TestReproductionWithALinkedParentIsNotStaged(t *testing.T) {
+	cases := []struct {
+		name  string
+		plant func(t *testing.T, repo, outside string)
+	}{
+		{"symlinked parent", func(t *testing.T, repo, outside string) {
+			if err := os.Symlink(outside, filepath.Join(repo, "p")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"file parent", func(t *testing.T, repo, _ string) {
+			writeFile(t, filepath.Join(repo, "p"), "not a directory\n")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newReproFixture(t)
+			h := f.held()
+			outside := t.TempDir()
+			if err := os.RemoveAll(filepath.Join(f.repo, "p")); err != nil {
+				t.Fatal(err)
+			}
+			c.plant(t, f.repo, outside)
+			base := trustedCommit(t, f.repo)
+			for _, pass := range []string{reproductionPassBase, reproductionPassHead1} {
+				res, err := f.launch(h, pass, base)
+				if err != nil {
+					t.Fatalf("%s: %v", pass, err)
+				}
+				if res.Run.Outcome != string(reproduction.OutcomeUnstaged) || len(f.creates) != 0 {
+					t.Errorf("%s: outcome %q, launches %d; want unstaged and none", pass, res.Run.Outcome, len(f.creates))
+				}
+			}
+			entries, err := os.ReadDir(outside)
+			if err != nil || len(entries) != 0 {
+				t.Errorf("the directory the link points to holds %v (%v), want nothing written", entries, err)
+			}
+			fail := &reproduction.RunResult{Outcome: reproduction.OutcomeFailed, Tests: map[string]reproduction.Kind{"TestRepro": reproduction.KindFail}}
+			unstaged := &reproduction.RunResult{Outcome: reproduction.OutcomeUnstaged}
+			if d := reproduction.Decide(reproduction.Evidence{Head1: fail, Head2: fail, Base: unstaged}); d.Verdict != reproduction.VerdictAdvice || d.Reason != "base not checked" {
+				t.Errorf("Decide with an unstaged base = %+v, want advice: base not checked", d)
+			}
+		})
+	}
+}
+
+// A base commit that tracks the reproduction's path as a regular file (the
+// build deleted it) is mounted over, with no stub made.
+func TestReproductionOverATrackedBaseFileLaunches(t *testing.T) {
+	f := newReproFixture(t)
+	h := f.held()
+	writeFile(t, filepath.Join(f.repo, "p", "repro_test.go"), "package p\n")
+	base := trustedCommit(t, f.repo)
+	res, err := f.launch(h, reproductionPassBase, base)
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	if len(f.creates) != 1 || len(f.mounted) != 1 || f.mounted[0] != "ro "+h.SHA256 || res.Run.Outcome != string(reproduction.OutcomeFailed) {
+		t.Errorf("launches %d, mounted %v, outcome %q; want one launch of the held copy", len(f.creates), f.mounted, res.Run.Outcome)
+	}
+}
+
+// Evidence already in the worktree when the review starts (the build wrote
+// it) is removed before the launch, so a launch that writes none holds
+// nothing from it.
+func TestReviewStepHoldsNoEvidenceItDidNotWrite(t *testing.T) {
+	f, _ := reviewStepWithReproduction(t, sha256Of([]byte(reproSpec)))
+	planted := filepath.Join(f.repo, codereview.EvidenceFile)
+	data, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "advisory", "available": true, "findings": []any{reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`.")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, planted, string(data))
+	var foundAtLaunch bool
+	f.fakeLaunch(func([]string) { foundAtLaunch = exists(planted) }, nil)
+	res, err := f.run()
+	if err != nil {
+		t.Fatalf("review step: %v", err)
+	}
+	if foundAtLaunch || len(res.Reproductions) != 0 {
+		t.Errorf("evidence present at launch %v, held %+v; want it removed and nothing held", foundAtLaunch, res.Reproductions)
+	}
+}
+
+// A review that gave no verdict (CombinedExitBase+2) holds nothing, even
+// when its launch wrote evidence carrying a reproduction.
+func TestReviewWithNoVerdictHoldsNothing(t *testing.T) {
+	f, _ := reviewStepWithReproduction(t, sha256Of([]byte(reproSpec)))
+	f.exitOffset = 2
+	res, err := f.run()
+	if err != nil {
+		t.Fatalf("review step: %v", err)
+	}
+	if len(res.Reproductions) != 0 || reviewStepPassed(res.Result.ExitCode) {
+		t.Errorf("exit %d, held %+v; want no verdict and nothing held", res.Result.ExitCode, res.Reproductions)
+	}
+}
