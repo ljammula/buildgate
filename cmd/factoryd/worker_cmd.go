@@ -110,7 +110,9 @@ func workerMain(dp *deps, args []string) error {
 	defer stop()
 	// A request in resume_review has an old workflow still waiting on its lost step; ended
 	// here, its lost-step move cannot fire later and undo a decision made in between.
-	terminateRequestWorkflows(ctx, temporalClient, queueID, lightQueue, haltedIDs)
+	for id, err := range terminateRequestWorkflows(ctx, temporalClient, queueID, lightQueue, haltedIDs) {
+		log.Printf("factoryd worker: end workflow of halted request %s: %v", id, err)
+	}
 	if err := startRequestWorkflows(ctx, temporalClient, dataDir, queueID, jobsQueue, lightQueue); err != nil {
 		return err
 	}
@@ -146,17 +148,6 @@ const requestWorkerStopTimeout = 10 * time.Second
 // rather than derived from the path, so two machines that mount one data dir
 // at different paths still share its queues.
 const requestQueueIDFileName = "worker-queue-id"
-
-// requestTaskQueues returns dataDir's jobs and light task queue names,
-// creating its queue id on first use.
-func requestTaskQueues(dataDir string) (jobs, light string, err error) {
-	id, err := requestQueueID(dataDir)
-	if err != nil {
-		return "", "", err
-	}
-	jobs, light = taskQueuesFor(id)
-	return jobs, light, nil
-}
 
 // taskQueuesFor names the jobs and light task queues of the data dir whose
 // queue id is id.

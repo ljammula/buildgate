@@ -45,6 +45,9 @@ type requestActivities struct {
 	// consoleStart guards consoleStartedAt, when ensureConsole last tried.
 	consoleStart     sync.Mutex
 	consoleStartedAt time.Time
+
+	// steps is the requests with a step running (AdvanceRequest).
+	steps stepGuard
 }
 
 func (a *requestActivities) registerLight(w temporalworker.Worker) {
@@ -142,6 +145,39 @@ func stackedWaitRecheck(cfg requestdriver.WorkerConfig) time.Duration {
 // build.
 const requestRepoBusyRetryAfter = 30 * time.Second
 
+// stepInProgressErrorType is the application error type of an AdvanceRequest
+// refused because a step of the same request is already running.
+const stepInProgressErrorType = "StepInProgress"
+
+// stepGuard holds the requests with a step running. In-process is enough:
+// every activity of a data dir runs in the one worker process that holds the
+// drain lock (acquireWorkerLock in workerMain, which starts both the jobs and
+// the light task queue workers). The zero value is ready.
+type stepGuard struct {
+	mu      sync.Mutex
+	running map[string]bool
+}
+
+// begin marks id as running a step and reports whether it was free.
+func (g *stepGuard) begin(id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.running[id] {
+		return false
+	}
+	if g.running == nil {
+		g.running = map[string]bool{}
+	}
+	g.running[id] = true
+	return true
+}
+
+func (g *stepGuard) end(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.running, id)
+}
+
 // repositoryBusyErrorType is the application error type of a build step that
 // gave its slot back because another build holds the repository.
 const repositoryBusyErrorType = "RepositoryBusy"
@@ -165,6 +201,15 @@ const requestHeartbeatInterval = 5 * time.Second
 // and a cancel of the activity, or of the request, cancels the step. A stall of the connection to
 // Temporal shorter than the heartbeat timeout does not.
 func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (string, error) {
+	// One step per request at a time. A second RequestWorkflow for the same
+	// request (an older binary's wake started one under another id) must not
+	// run the step beside the first: it fails with stepInProgressErrorType,
+	// which RequestWorkflow handles as any failed step, waiting RetryAfter
+	// before it loads the request again.
+	if !a.steps.begin(id) {
+		return "", temporal.NewApplicationError("another step of this request is running", stepInProgressErrorType)
+	}
+	defer a.steps.end(id)
 	// The step runs under a context a stalled connection to Temporal cannot
 	// cancel (workflow.GuardStep): a build that lost nothing is not killed.
 	ctx, endGuard := workflow.GuardStep(ctx)

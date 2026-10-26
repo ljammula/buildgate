@@ -108,8 +108,10 @@ func runPredatesState(r *request.Request, lost *run.Run) bool {
 
 // terminateRequestWorkflows ends the driver workflow (requestDriverWorkflowID)
 // of each request id. A workflow that is already closed or never existed is
-// fine; other failures are logged.
-func terminateRequestWorkflows(ctx context.Context, c workflowTerminator, queueID, lightQueue string, ids []string) {
+// fine. It returns the requests it could not end, with why, for the caller to
+// tell the operator.
+func terminateRequestWorkflows(ctx context.Context, c workflowTerminator, queueID, lightQueue string, ids []string) map[string]error {
+	failed := map[string]error{}
 	for _, id := range ids {
 		wfID, err := requestDriverWorkflowID(ctx, c, queueID, lightQueue, id)
 		if err == nil {
@@ -117,7 +119,8 @@ func terminateRequestWorkflows(ctx context.Context, c workflowTerminator, queueI
 		}
 		var notFound *serviceerror.NotFound
 		if err != nil && !errors.As(err, &notFound) {
-			log.Printf("factoryd worker: end workflow of halted request %s: %v", id, err)
+			failed[id] = err
 		}
 	}
+	return failed
 }

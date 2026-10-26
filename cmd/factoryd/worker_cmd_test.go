@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,38 +23,36 @@ func saveRequestInState(t *testing.T, dataDir, id string, state request.State) {
 	}
 }
 
-func TestRequestTaskQueuesAreStablePerDataDir(t *testing.T) {
+func TestQueueNamesAreStablePerDataDir(t *testing.T) {
 	dataDir := t.TempDir()
-	jobs, light, err := requestTaskQueues(dataDir)
+	id, err := requestQueueID(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(jobs, "factoryd-jobs-") || !strings.HasPrefix(light, "factoryd-light-") ||
-		strings.TrimPrefix(jobs, "factoryd-jobs-") != strings.TrimPrefix(light, "factoryd-light-") {
+	jobs, light := taskQueuesFor(id)
+	if jobs != "factoryd-jobs-"+id || light != "factoryd-light-"+id {
 		t.Fatalf("queues = %q, %q", jobs, light)
 	}
-	jobs2, light2, err := requestTaskQueues(dataDir)
-	if err != nil {
-		t.Fatal(err)
+	if again, err := requestQueueID(dataDir); err != nil || again != id {
+		t.Fatalf("second call = %q, %v; want %q", again, err, id)
 	}
-	if jobs2 != jobs || light2 != light {
-		t.Fatalf("second call = %q, %q; want %q, %q", jobs2, light2, jobs, light)
+	if got, found, err := readRequestQueueID(dataDir); err != nil || !found || got != id {
+		t.Fatalf("read = %q, %v, %v", got, found, err)
 	}
-	other, _, err := requestTaskQueues(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+	if other, err := requestQueueID(t.TempDir()); err != nil || other == id {
+		t.Fatalf("two data dirs share queue id %q (%v)", id, err)
 	}
-	if other == jobs {
-		t.Fatalf("two data dirs share queue %q", jobs)
+	if _, found, err := readRequestQueueID(t.TempDir()); err != nil || found {
+		t.Fatalf("a data dir with no worker has a queue id (%v, %v)", found, err)
 	}
 }
 
-func TestRequestTaskQueuesRejectsEmptyID(t *testing.T) {
+func TestQueueIDRejectsAnEmptyFile(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dataDir, requestQueueIDFileName), []byte("\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := requestTaskQueues(dataDir); err == nil {
+	if _, err := requestQueueID(dataDir); err == nil {
 		t.Fatal("want an error for an empty queue id file")
 	}
 }
@@ -63,6 +60,7 @@ func TestRequestTaskQueuesRejectsEmptyID(t *testing.T) {
 type recordingStarter struct {
 	stubWorkflowTerminator // Describe: the legacy workflows that run
 	signaled               []string
+	signalErr              error
 	ids                    []string
 	options                []client.StartWorkflowOptions
 	inputs                 []workflow.RequestWorkflowInput
@@ -71,7 +69,7 @@ type recordingStarter struct {
 
 func (s *recordingStarter) SignalWorkflow(_ context.Context, workflowID, _, _ string, _ interface{}) error {
 	s.signaled = append(s.signaled, workflowID)
-	return nil
+	return s.signalErr
 }
 
 func (s *recordingStarter) SignalWithStartWorkflow(_ context.Context, workflowID, signalName string, _ interface{}, options client.StartWorkflowOptions, _ interface{}, workflowArgs ...interface{}) (client.WorkflowRun, error) {

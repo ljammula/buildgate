@@ -60,10 +60,17 @@ func wakeOrStartRequestWorkflow(ctx context.Context, c requestWorkflowStarter, q
 		return err
 	}
 	if id == workflow.LegacyRequestWorkflowID(requestID) {
-		if err := c.SignalWorkflow(ctx, id, "", workflow.RequestWakeSignalName, nil); err != nil {
+		err := c.SignalWorkflow(ctx, id, "", workflow.RequestWakeSignalName, nil)
+		var notFound *serviceerror.NotFound
+		if err == nil {
+			return nil
+		}
+		if !errors.As(err, &notFound) {
 			return fmt.Errorf("wake workflow %s: %w", id, err)
 		}
-		return nil
+		// The legacy workflow finished between the lookup and the signal: the
+		// new id's workflow reads the request, finds it done, and returns.
+		id = workflow.RequestWorkflowID(queueID, requestID)
 	}
 	return startRequestWorkflow(ctx, c, id, requestID, jobsQueue, lightQueue)
 }

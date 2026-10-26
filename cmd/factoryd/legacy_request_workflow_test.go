@@ -5,9 +5,16 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/temporal"
+
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver"
 	"buildgate/internal/workflow"
 )
 
@@ -102,7 +109,7 @@ func TestStartRequestWorkflowsLeavesALegacyDriverRunning(t *testing.T) {
 	if len(s.terminated) != 0 {
 		t.Errorf("terminated %v, want none", s.terminated)
 	}
-	if r, _ := request.Load(dataDir, "reclaimed"); r.State != request.StateResumeReview || r.Resume != nil && r.Resume.Generation > 1 {
+	if r, _ := request.Load(dataDir, "reclaimed"); r.State != request.StateResumeReview || r.Resume != nil {
 		t.Errorf("reclaimed request changed: %s %+v", r.State, r.Resume)
 	}
 }
@@ -140,5 +147,140 @@ func TestEndRequestWorkflowsEndsTheLegacyDriver(t *testing.T) {
 	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"old"}, &out)
 	if want := []string{workflow.LegacyRequestWorkflowID("old")}; !slices.Equal(stub.terminated, want) || out.Len() != 0 {
 		t.Errorf("terminated %v (output %q), want %v", stub.terminated, out.String(), want)
+	}
+}
+
+// The legacy driver can finish between the lookup and the signal; the wake
+// then starts the new id, whose workflow finds the request done and returns.
+func TestWakeFallsThroughToTheNewIDWhenTheLegacyDriverIsGone(t *testing.T) {
+	s := &recordingStarter{stubWorkflowTerminator: legacyOn("light-q", "r"), signalErr: serviceerror.NewNotFound("gone")}
+	if err := wakeOrStartRequestWorkflow(context.Background(), s, "qid", "r", "jobs-q", "light-q"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{workflow.RequestWorkflowID("qid", "r")}; !slices.Equal(s.ids, want) {
+		t.Fatalf("started %v, want %v", s.ids, want)
+	}
+	s = &recordingStarter{stubWorkflowTerminator: legacyOn("light-q", "r"), signalErr: errors.New("down")}
+	if err := wakeOrStartRequestWorkflow(context.Background(), s, "qid", "r", "jobs-q", "light-q"); err == nil || len(s.ids) != 0 {
+		t.Fatalf("another signal failure must fail the wake without a second driver: %v, %v", err, s.ids)
+	}
+}
+
+// A workflow that closed between the lookup and the terminate is fine; any
+// other failure is returned, and doctor prints both ids.
+func TestTerminateRequestWorkflowsReportsWhatItCannotEnd(t *testing.T) {
+	stub := legacyOn("light-q", "gone")
+	stub.terminateErr = serviceerror.NewNotFound("closed")
+	if failed := terminateRequestWorkflows(context.Background(), &stub, "qid", "light-q", []string{"gone"}); len(failed) != 0 {
+		t.Fatalf("a NotFound terminate is not a failure: %v", failed)
+	}
+	stub = legacyOn("light-q", "r")
+	stub.terminateErr = errors.New("denied")
+	stub.describeErr = map[string]error{workflow.LegacyRequestWorkflowID("sick"): errors.New("slow")}
+	failed := terminateRequestWorkflows(context.Background(), &stub, "qid", "light-q", []string{"r", "sick"})
+	if failed["r"] == nil || failed["sick"] == nil || len(failed) != 2 {
+		t.Fatalf("failed = %v, want r and sick", failed)
+	}
+}
+
+func TestEndRequestWorkflowsNamesBothIDsWhenTemporalIsUnreachable(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	queueID, err := requestQueueID(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) {
+		return nil, nil, errors.New("temporal is down")
+	}
+	var out bytes.Buffer
+	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"r"}, &out)
+	for _, id := range []string{workflow.RequestWorkflowID(queueID, "r"), workflow.LegacyRequestWorkflowID("r")} {
+		if !strings.Contains(out.String(), "--workflow-id "+id) {
+			t.Errorf("output %q lacks %s", out.String(), id)
+		}
+	}
+}
+
+// A Describe that fails in doctor reaches the operator, not only the log.
+func TestEndRequestWorkflowsTellsTheOperatorWhenALookupFails(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	if _, err := requestQueueID(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	stub := &stubWorkflowTerminator{describeErr: map[string]error{workflow.LegacyRequestWorkflowID("r"): errors.New("slow")}}
+	fakeTemporalOf(dp).dialTerminatorFn = func(context.Context, string) (workflowTerminator, func(), error) { return stub, func() {}, nil }
+	var out bytes.Buffer
+	endRequestWorkflows(dp, context.Background(), "stub:7233", dataDir, []string{"r"}, &out)
+	if !strings.Contains(out.String(), "slow") || len(stub.terminated) != 0 {
+		t.Errorf("output %q, terminated %v", out.String(), stub.terminated)
+	}
+}
+
+// DescribeWorkflowExecution must fill the task queue of a running workflow:
+// every legacy decision depends on it. Against the shared test Temporal server.
+func TestDescribeFillsTheTaskQueueOfARunningWorkflow(t *testing.T) {
+	c, err := client.Dial(client.Options{HostPort: sharedTemporalAddress(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	queue := "factoryd-light-describe-" + t.Name()
+	legacyID := workflow.LegacyRequestWorkflowID("describe-" + t.Name())
+	run, err := c.ExecuteWorkflow(context.Background(), client.StartWorkflowOptions{ID: legacyID, TaskQueue: queue}, "NoSuchWorkflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.TerminateWorkflow(context.Background(), legacyID, run.GetRunID(), "test over") })
+	desc, err := c.DescribeWorkflowExecution(context.Background(), legacyID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := desc.GetWorkflowExecutionInfo().GetTaskQueue(); got != queue {
+		t.Fatalf("task queue = %q, want %q", got, queue)
+	}
+	for q, want := range map[string]string{queue: legacyID, "factoryd-light-elsewhere": workflow.RequestWorkflowID("qid", "describe-"+t.Name())} {
+		got, err := requestDriverWorkflowID(context.Background(), c, "qid", q, "describe-"+t.Name())
+		if err != nil || got != want {
+			t.Errorf("driver on %s = %q, %v; want %q", q, got, err, want)
+		}
+	}
+}
+
+// Two AdvanceRequest calls for one request, as when an older binary started a
+// second RequestWorkflow for it: one step runs, the other is refused with an
+// error RequestWorkflow retries after a pause.
+func TestAdvanceRequestRunsOneStepPerRequestAtATime(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-1", request.StateSpecDrafting)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var runs atomic.Int32
+	acts := &requestActivities{dp: dp, dataDir: dataDir,
+		specRunner: func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+			if runs.Add(1) == 1 {
+				close(started)
+			}
+			<-release
+			return "", nil, errors.New("stop here")
+		},
+	}
+	done := make(chan error, 1)
+	go func() { _, err := acts.AdvanceRequest(context.Background(), "req-1"); done <- err }()
+	<-started
+	_, err := acts.AdvanceRequest(context.Background(), "req-1")
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != stepInProgressErrorType {
+		t.Fatalf("second step err = %v, want %s", err, stepInProgressErrorType)
+	}
+	close(release)
+	<-done
+	if n := runs.Load(); n != 1 {
+		t.Fatalf("step ran %d times, want 1", n)
+	}
+	if !acts.steps.begin("req-1") {
+		t.Fatal("the guard was not released when the step ended")
 	}
 }

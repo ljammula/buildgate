@@ -23,10 +23,11 @@ import (
 // stubWorkflowTerminator records TerminateWorkflow calls and reports every
 // workflow in running as Running.
 type stubWorkflowTerminator struct {
-	running     map[string]bool
-	queues      map[string]string // task queue per workflow id; empty when absent
-	describeErr map[string]error  // Describe fails with this for the workflow id
-	terminated  []string
+	running      map[string]bool
+	queues       map[string]string // task queue per workflow id; empty when absent
+	describeErr  map[string]error  // Describe fails with this for the workflow id
+	terminateErr error             // TerminateWorkflow fails with this
+	terminated   []string
 }
 
 func (s *stubWorkflowTerminator) DescribeWorkflowExecution(_ context.Context, workflowID, _ string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
@@ -48,7 +49,7 @@ func (s *stubWorkflowTerminator) DescribeWorkflowExecution(_ context.Context, wo
 
 func (s *stubWorkflowTerminator) TerminateWorkflow(_ context.Context, workflowID, _, _ string, _ ...interface{}) error {
 	s.terminated = append(s.terminated, workflowID)
-	return nil
+	return s.terminateErr
 }
 
 // deadPID returns the PID of a process that has already exited.

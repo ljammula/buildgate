@@ -128,7 +128,7 @@ func reclaimDeadOwnerRuns(dp *deps, ctx context.Context, dataDir, dockerBinary, 
 				terminators[addr] = t
 				closers = append(closers, closeFn)
 			}
-			did, termErr := terminateRunningWorkflow(ctx, t, r.TemporalWorkflowID, r.TemporalRunID, "owning factoryd process is gone; reclaimed by worker")
+			did, termErr := terminateRunningWorkflow(ctx, t, r.TemporalWorkflowID, r.TemporalRunID)
 			if termErr != nil {
 				log.Printf("worker: run %s left as is: could not terminate workflow %s: %v", id, r.TemporalWorkflowID, termErr)
 				continue
@@ -223,7 +223,7 @@ func reclaimDeadRequestJobs(ctx context.Context, dataDir, dockerBinary string) {
 // Running, and reports whether it did. A workflow Temporal does not know, or
 // already closed, needs nothing; any other answer is an error so the caller
 // leaves the run for a later start.
-func terminateRunningWorkflow(ctx context.Context, t workflowTerminator, workflowID, runID, reason string) (bool, error) {
+func terminateRunningWorkflow(ctx context.Context, t workflowTerminator, workflowID, runID string) (bool, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	desc, err := t.DescribeWorkflowExecution(callCtx, workflowID, runID)
@@ -237,7 +237,7 @@ func terminateRunningWorkflow(ctx context.Context, t workflowTerminator, workflo
 	if desc.GetWorkflowExecutionInfo().GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		return false, nil
 	}
-	if err := t.TerminateWorkflow(callCtx, workflowID, runID, reason); err != nil {
+	if err := t.TerminateWorkflow(callCtx, workflowID, runID, "owning factoryd process is gone; reclaimed by worker"); err != nil {
 		var notFound *serviceerror.NotFound
 		if errors.As(err, &notFound) {
 			return false, nil

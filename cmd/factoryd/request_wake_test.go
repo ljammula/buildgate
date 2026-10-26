@@ -105,14 +105,11 @@ func TestWakeRequestWorkflowSignalsWithStartForALiveWorker(t *testing.T) {
 	if err := wakeRequestWorkflowWith(dp, context.Background(), dialer, dataDir, "req-1"); err != nil {
 		t.Fatalf("wake: %v", err)
 	}
-	jobs, light, err := requestTaskQueues(dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
 	queueID, err := requestQueueID(dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	jobs, light := taskQueuesFor(queueID)
 	if len(dialer.dialed) != 1 || dialer.dialed[0] != "temporal.example:7233" {
 		t.Errorf("dialed %v, want the heartbeat's Temporal address once", dialer.dialed)
 	}
