@@ -69,7 +69,7 @@ func rejectedSpecFixtureWithImport(t *testing.T, imported bool, spec string, anc
 func advanceSpec(t *testing.T, dataDir string, r *request.Request, drafted string) {
 	t.Helper()
 	runner, _ := stubSpecDraftRunner(drafted, &request.SpecEvidence{}, nil)
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatalf("AdvanceSpecDrafting: %v", err)
 	}
 }
@@ -178,7 +178,7 @@ func plannedAndRejected(t *testing.T, anchors ...request.RejectionAnchor) (dataD
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 	r = requestdrivertest.LoadRequest(t, dataDir, id)
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := request.RejectAnchored(dataDir, id, "bob", "", anchors, time.Now()); err != nil {
@@ -203,7 +203,7 @@ func TestScopedPlanRedraftKeepsUncommentedTicketsByteIdentical(t *testing.T) {
 		{Filename: "003.spec.md", Content: rewrite(originals[1].Content)},
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(drafted, &request.PlanEvidence{}, nil)
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -235,7 +235,7 @@ func TestScopedPlanRedraftMissingACommentedTicketGetsOneReplan(t *testing.T) {
 		}
 		return originals, &request.PlanEvidence{}, nil
 	}
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
@@ -255,7 +255,7 @@ func TestScopedPlanRetryAfterAHaltedScopedReplanStillKeepsTheReviewedTickets(t *
 	emptied := strings.Replace(originals[0].Content, "1. Add an idempotency check.\n", "", 1)
 	bad := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: emptied}, originals[1]}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	halted := requestdrivertest.LoadRequest(t, dataDir, "req-1")
@@ -283,7 +283,7 @@ func TestScopedPlanRetryAfterAHaltedScopedReplanStillKeepsTheReviewedTickets(t *
 		{Filename: "002.spec.md", Content: "REWRITTEN " + originals[1].Content},
 	}
 	runner, _ = requestdrivertest.StubPlanTicketsRunner(good, &request.PlanEvidence{}, nil)
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, halted, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, halted, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1"); loaded.State != request.StatePlanReview {
@@ -305,7 +305,7 @@ func TestScopedPlanWithNoReviewedTicketsHaltsInsteadOfBecomingAFullRedraft(t *te
 		calls++
 		return originals, &request.PlanEvidence{}, nil
 	}
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, "req-1")

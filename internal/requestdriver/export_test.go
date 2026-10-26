@@ -7,14 +7,33 @@ import (
 	"buildgate/internal/request"
 )
 
-// OperatorResumesBetweenTheSaves makes the operator decide request id
-// (`factoryd resume -from scratch`) at the moment the driver has saved it in
-// resume_review and has not yet recorded the first reminder. The returned
-// flag reports whether that moment came.
-func OperatorResumesBetweenTheSaves(t *testing.T, id string) *bool {
+// ReviewSaveDeps is the Deps of a test in this package that enters a review
+// state with no other dependency: its review save runs AfterSave, when set,
+// right after the record is written.
+type ReviewSaveDeps struct {
+	Deps
+	AfterSave func(dataDir, id string)
+}
+
+func (d ReviewSaveDeps) SaveReviewEntry(dataDir string, r *request.Request) error {
+	if err := r.Save(dataDir); err != nil {
+		return err
+	}
+	if d.AfterSave != nil {
+		d.AfterSave(dataDir, r.ID)
+	}
+	return nil
+}
+
+// OperatorResumesBetweenTheSaves returns the function that makes the operator
+// decide request id (`factoryd resume -from scratch`) at the moment the
+// driver has saved it in resume_review and has not yet recorded the first
+// reminder; the test sets it as its Deps' review-entry save callback. The
+// returned flag reports whether that moment came.
+func OperatorResumesBetweenTheSaves(t *testing.T, id string) (func(dataDir, savedID string), *bool) {
 	t.Helper()
 	decided := false
-	betweenReviewSaves = func(dataDir, savedID string) {
+	return func(dataDir, savedID string) {
 		if savedID != id || decided {
 			return
 		}
@@ -27,9 +46,7 @@ func OperatorResumesBetweenTheSaves(t *testing.T, id string) *bool {
 			return
 		}
 		decided = true
-	}
-	t.Cleanup(func() { betweenReviewSaves = nil })
-	return &decided
+	}, &decided
 }
 
 // RequireOperatorResumeKept fails t unless request id, on disk, carries the
@@ -50,11 +67,4 @@ func RequireOperatorResumeKept(t *testing.T, dataDir, id string, decided *bool, 
 	if got.NotifyCount != 0 {
 		t.Errorf("NotifyCount = %d: a reminder was recorded for a review the operator had already decided", got.NotifyCount)
 	}
-}
-
-// SetBetweenReviewSaves runs f at the moment OperatorResumesBetweenTheSaves
-// decides in.
-func SetBetweenReviewSaves(t *testing.T, f func(dataDir, id string)) {
-	betweenReviewSaves = f
-	t.Cleanup(func() { betweenReviewSaves = nil })
 }

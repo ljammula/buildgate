@@ -1088,7 +1088,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		// (an outage would repeat without end). A human decides; the
 		// reviewer is told nothing, since nothing was judged.
 		log.Printf("request %s: ticket %d: round %d gave no verdict (%s): %s", r.ID, ticket.Index, roundIndex, attempt.unresolved, errText)
-		return EnterResumeReview(dataDir, r, request.LostStep{Cause: attempt.unresolved, RetryAt: attempt.retryAt}, now)
+		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: attempt.unresolved, RetryAt: attempt.retryAt}, now)
 	}
 	if outcome != request.RoundAccepted {
 		// Quarantined or halted: never push, request stays in pr_review,

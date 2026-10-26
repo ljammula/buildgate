@@ -2,6 +2,7 @@ package main
 
 import (
 	"buildgate/internal/forge"
+	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
 	"context"
@@ -44,6 +45,10 @@ func (dp *deps) PruneRoundRefs(dir string, id string, keepPrefixes []string) err
 }
 func (dp *deps) UndoMarkPullRequestReady(ctx context.Context, prURL string) error {
 	return dp.forge.undoMarkPullRequestReady(ctx, prURL)
+}
+
+func (dp *deps) SaveReviewEntry(dataDir string, r *request.Request) error {
+	return r.Save(dataDir)
 }
 
 func (dp *deps) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {

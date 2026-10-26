@@ -14,13 +14,13 @@ import (
 // between the saves survives.
 func TestAResumeDecidedAfterAnUnjudgedTicketRunEntersResumeReviewIsKept(t *testing.T) {
 	dataDir, r := buildingRequest(t)
-	decided := OperatorResumesBetweenTheSaves(t, r.ID)
+	after, decided := OperatorResumesBetweenTheSaves(t, r.ID)
 	runRecord := unansweredReviewRun("run-1", reviewLedgers[unresolved.ModelUnavailable])
 	runRecord.WorkspacePath = filepath.Join(t.TempDir(), "worktree")
 	if err := runRecord.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if handled, err := afterUnjudgedTicketRun(dataDir, r, runRecord, time.Now()); err != nil || !handled {
+	if handled, err := afterUnjudgedTicketRun(ReviewSaveDeps{AfterSave: after}, dataDir, r, runRecord, time.Now()); err != nil || !handled {
 		t.Fatalf("handled %v, err %v", handled, err)
 	}
 	RequireOperatorResumeKept(t, dataDir, r.ID, decided, request.StateBuilding)

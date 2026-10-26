@@ -992,7 +992,7 @@ func TestAdvanceSpecDraftingAccumulatesSpendAcrossRedraft(t *testing.T) {
 	firstRunner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: firstSpend}, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, firstRunner, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, firstRunner, time.Now()); err != nil {
 		t.Fatalf("advanceSpecDrafting (first pass): %v", err)
 	}
 	if r.SpecEvidence == nil || r.SpecEvidence.Spend == nil {
@@ -1013,7 +1013,7 @@ func TestAdvanceSpecDraftingAccumulatesSpendAcrossRedraft(t *testing.T) {
 	secondRunner := func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0, Spend: secondSpend}, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, secondRunner, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, secondRunner, time.Now()); err != nil {
 		t.Fatalf("advanceSpecDrafting (second pass): %v", err)
 	}
 

@@ -139,7 +139,7 @@ func TestAdvanceSpecDraftingQuarantinesWhenRequestBudgetExhausted(t *testing.T) 
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 500}}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, cfg, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, cfg, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatalf("advanceSpecDrafting: %v", err)
 	}
 	if r.State != request.StateQuarantined {
@@ -290,7 +290,7 @@ func TestAdvancePlanningQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestCostBudgetMicroUSD: 1_000_000}}
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, cfg, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, cfg, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatalf("advancePlanning: %v", err)
 	}
 	if r.State != request.StateQuarantined {
@@ -317,7 +317,7 @@ func TestAdvanceOracleDraftingQuarantinesWhenRequestBudgetExhausted(t *testing.T
 		t.Fatal("oracleDraftRunner must not be called once the request budget is already exhausted")
 		return request.OracleDraft{}, nil
 	}
-	if err := requestdriver.AdvanceOracleDrafting(context.Background(), dataDir, r, cfg, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvanceOracleDrafting(newFakeDeps(t), context.Background(), dataDir, r, cfg, runner, time.Now()); err != nil {
 		t.Fatalf("advanceOracleDrafting: %v", err)
 	}
 	if r.State != request.StateQuarantined {

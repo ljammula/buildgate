@@ -38,7 +38,7 @@ func TestHandedOverSpecGetsItsReadBackAtSpecReview(t *testing.T) {
 		}
 		return draftedReadBack(), &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 42}, Usage: map[string]any{"totalTokens": float64(900)}}, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(runner), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(runner), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if r.State != request.StateSpecReview {
@@ -89,7 +89,7 @@ func TestAFailedReadBackLeavesOneNoteAndStillReachesSpecReview(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
-			if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(tc.runner), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+			if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(tc.runner), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			if r.State != request.StateSpecReview {
@@ -125,7 +125,7 @@ func TestADraftedSpecGetsNoReadBack(t *testing.T) {
 		t.Fatal("the read-back ran for a drafted spec")
 		return nil, nil, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), draft, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(readBack), draft, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if r.State != request.StateSpecReview || r.ReadBack != nil {
@@ -152,7 +152,7 @@ func TestARedraftOfAHandedOverSpecIsReadBackAgain(t *testing.T) {
 		read = spec
 		return draftedReadBack(), nil, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), draft, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(readBack), draft, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if read != revised {
@@ -171,7 +171,7 @@ func TestAReadBackStoppedByItsContextLeavesTheRequestInSpecDrafting(t *testing.T
 		cancel()
 		return nil, nil, context.Canceled
 	}
-	if err := requestdriver.AdvanceSpecDrafting(ctx, dataDir, r, readBackConfig(readBack), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); !errors.Is(err, context.Canceled) {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), ctx, dataDir, r, readBackConfig(readBack), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("AdvanceSpecDrafting = %v, want the context's error", err)
 	}
 	loaded, err := request.Load(dataDir, r.ID)
@@ -348,7 +348,7 @@ func TestAStoppedReadBackKeepsTheReviewedSpecAndTheDraftingSpend(t *testing.T) {
 				tc.stop(t, dataDir, r.ID, cancel)
 				return nil, &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 5}, Usage: map[string]any{"totalTokens": float64(40)}}, context.Canceled
 			}
-			err := requestdriver.AdvanceSpecDrafting(ctx, dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now())
+			err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), ctx, dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now())
 			if !errors.Is(err, tc.wantErr) && !(tc.wantErr == nil && err == nil) {
 				t.Fatalf("AdvanceSpecDrafting = %v, want %v", err, tc.wantErr)
 			}
@@ -379,7 +379,7 @@ func TestARedraftsReadBackAddsItsSpendAndUsageToTheDraftingEvidence(t *testing.T
 	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 		return draftedReadBack(), &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 5}, Usage: map[string]any{"totalTokens": float64(40)}}, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(readBack), spendingRedraft(revised), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	ev := r.SpecEvidence
@@ -405,7 +405,7 @@ func TestARetryOfTheSameSpecKeepsTheAnsweredReadBack(t *testing.T) {
 		t.Error("a read-back ran for spec bytes already read back")
 		return draftedReadBack(), nil, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(readBack), requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := request.Load(dataDir, r.ID)
@@ -444,7 +444,7 @@ func TestAnswersToAReplacedReadBackReachThisPassRedraft(t *testing.T) {
 	readBack := func(context.Context, string, *request.Request, string, requestdriver.WorkerConfig) (*request.ReadBack, *request.SpecEvidence, error) {
 		return draftedReadBack(), nil, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, readBackConfig(readBack), redraft, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, readBackConfig(readBack), redraft, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	rejected, section, found := strings.Cut(feedbackRead, "## Read-back answers given about an earlier draft (from the factory)")

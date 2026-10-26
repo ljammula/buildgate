@@ -121,10 +121,10 @@ func keepForResume(dataDir string, runRecord *run.Run) bool {
 // quarantined ticket run whose review gave no verdict: nothing was judged,
 // so there is no quarantine and no corrective build. handled is false for
 // any other run.
-func afterUnjudgedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, now time.Time) (handled bool, err error) {
+func afterUnjudgedTicketRun(dp Deps, dataDir string, r *request.Request, runRecord *run.Run, now time.Time) (handled bool, err error) {
 	cause := reviewNoVerdictCause(runRecord)
 	if cause == "" {
 		return false, nil
 	}
-	return true, EnterResumeReview(dataDir, r, lostStepOf(dataDir, runRecord, cause, keepForResume(dataDir, runRecord)), now)
+	return true, EnterResumeReview(dp, dataDir, r, lostStepOf(dataDir, runRecord, cause, keepForResume(dataDir, runRecord)), now)
 }

@@ -22,11 +22,11 @@ import (
 // recorded, so it is recorded on the request as it is on disk
 // (saveAndRemind). The caller must not hold the request's lock; one that
 // does calls EnterResumeReviewHoldingLock.
-func EnterResumeReview(dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
+func EnterResumeReview(dp Deps, dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
 	if err := enterResumeReview(r, step, now); err != nil {
 		return err
 	}
-	return saveAndRemind(dataDir, r, now)
+	return saveAndRemind(dp, dataDir, r, now)
 }
 
 // EnterResumeReviewHoldingLock is EnterResumeReview for a caller that holds

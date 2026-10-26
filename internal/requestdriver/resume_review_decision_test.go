@@ -25,7 +25,8 @@ import (
 func TestAResumeDecidedAfterAHaltedTicketRunEntersResumeReviewIsKept(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
-	decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
+	after, decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
+	dp.afterReviewSave(after)
 	runner := func(_ context.Context, args []string, onReady func(*run.Run)) error {
 		rid := requestdrivertest.ArgValue(args, "-ticket")
 		onReady(&run.Run{ID: rid, State: run.StateReady})
@@ -38,7 +39,8 @@ func TestAResumeDecidedAfterAHaltedTicketRunEntersResumeReviewIsKept(t *testing.
 func TestAResumeDecidedAfterAnUnresolvedCorrectiveRoundIsKept(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
-	decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
+	after, decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
+	dp.afterReviewSave(after)
 	branch := "factoryd/" + id + "-001"
 	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")
 	requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(_, roundRunID string) *run.Run {
@@ -54,7 +56,8 @@ func TestAResumeDecidedAfterAnUnresolvedCorrectiveRoundIsKept(t *testing.T) {
 func TestAResumeDecidedAfterAnUnresolvedPRReviewRoundIsKept(t *testing.T) {
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	decided := requestdriver.OperatorResumesBetweenTheSaves(t, r.ID)
+	after, decided := requestdriver.OperatorResumesBetweenTheSaves(t, r.ID)
+	dp.afterReviewSave(after)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
 	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
@@ -75,7 +78,8 @@ func TestAResumeDecidedAfterAnUnresolvedPRReviewRoundIsKept(t *testing.T) {
 func TestAResumeDecidedAfterAnOracleDraftingJobFailureIsKept(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
+	after, decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
+	dp.afterReviewSave(after)
 	failure := &requestdriver.OracleDraftJobFailure{Cause: unresolved.SandboxLaunch, Err: errors.New("the gateway refused the sandbox")}
 	runner, _ := requestdrivertest.StubOracleDraftRunner(request.OracleDraft{}, fmt.Errorf("oracle job: %w", failure))
 	if err := driveOracleDrafting(t, dp, context.Background(), dataDir, runner); err != nil {
@@ -90,7 +94,7 @@ func TestAnOracleDraftingJobFailureIsSavedWithItsDetailBeforeTheReminder(t *test
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
 	var atFirstSave string
-	requestdriver.SetBetweenReviewSaves(t, func(dataDir, savedID string) {
+	dp.afterReviewSave(func(dataDir, savedID string) {
 		if r, err := request.Load(dataDir, savedID); err == nil && savedID == id {
 			atFirstSave = r.Error
 		}

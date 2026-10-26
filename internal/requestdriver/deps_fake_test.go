@@ -9,6 +9,7 @@ import (
 	"buildgate/internal/consolelink"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
+	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
@@ -51,6 +52,7 @@ type fakeDeps struct {
 	createBranchAtFn              func(dir string, branch string, sha string) error
 	pruneRoundRefsFn              func(dir string, id string, keepPrefixes []string) error
 	runTicketFn                   func(ctx context.Context, args []string, onReady func(*run.Run)) error
+	saveReviewEntryFn             func(dataDir string, r *request.Request) error
 }
 
 var _ requestdriver.Deps = (*fakeDeps)(nil)
@@ -95,6 +97,23 @@ func (f *fakeDeps) RunTicket(ctx context.Context, args []string, onReady func(*r
 	return f.runTicketFn(ctx, args, onReady)
 }
 
+func (f *fakeDeps) SaveReviewEntry(dataDir string, r *request.Request) error {
+	return f.saveReviewEntryFn(dataDir, r)
+}
+
+// afterReviewSave makes the save of a request entering a review state run
+// after right after the record is written: the point where a test lands an
+// operator's write before the reminder.
+func (f *fakeDeps) afterReviewSave(after func(dataDir, id string)) {
+	f.saveReviewEntryFn = func(dataDir string, r *request.Request) error {
+		if err := r.Save(dataDir); err != nil {
+			return err
+		}
+		after(dataDir, r.ID)
+		return nil
+	}
+}
+
 func newFakeDeps(testing.TB) *fakeDeps {
 	refused := func(what string) error { return errors.New("test deps: " + what + " is not set by this test") }
 	return &fakeDeps{
@@ -127,6 +146,7 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		runTicketFn: func(context.Context, []string, func(*run.Run)) error {
 			return refused("RunTicket")
 		},
+		saveReviewEntryFn: func(dataDir string, r *request.Request) error { return r.Save(dataDir) },
 	}
 }
 

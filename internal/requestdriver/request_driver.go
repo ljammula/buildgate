@@ -55,6 +55,11 @@ type Deps interface {
 	PruneRoundRefs(dir string, id string, keepPrefixes []string) error
 	// RunTicket builds one ticket: the command's single-ticket run.
 	RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error
+	// SaveReviewEntry saves r, which has just entered a review state; the real
+	// body is r.Save. The reminder of that review is not sent until it
+	// returns, the moment an operator's decision can land between the two
+	// writes.
+	SaveReviewEntry(dataDir string, r *request.Request) error
 }
 
 // RequestDriverOwnsState reports whether driveRequests knows how to
@@ -130,11 +135,11 @@ func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		log.Printf("request %s: submitted -> spec_drafting (starting spec draft)", r.ID)
 		return r.Save(dataDir)
 	case request.StateSpecDrafting:
-		return AdvanceSpecDrafting(ctx, dataDir, r, cfg, specRunner, now)
+		return AdvanceSpecDrafting(dp, ctx, dataDir, r, cfg, specRunner, now)
 	case request.StateOracleDrafting:
-		return AdvanceOracleDrafting(ctx, dataDir, r, cfg, oracleRunner, now)
+		return AdvanceOracleDrafting(dp, ctx, dataDir, r, cfg, oracleRunner, now)
 	case request.StatePlanning:
-		return AdvancePlanning(ctx, dataDir, r, cfg, planRunner, now)
+		return AdvancePlanning(dp, ctx, dataDir, r, cfg, planRunner, now)
 	case request.StateBuilding:
 		return AdvanceBuilding(dp, ctx, dataDir, r, cfg, buildRunner, now)
 	case request.StatePRReview:
@@ -150,9 +155,9 @@ func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Req
 // comment. Split out of AdvanceRequest for the same reason
 // AdvanceRequest itself is a single switch: one state, one function, easy
 // to read top to bottom.
-func AdvanceSpecDrafting(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time) error {
+func AdvanceSpecDrafting(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time) error {
 	for attempt := 1; ; attempt++ {
-		retry, err := advanceSpecDraftingAttempt(ctx, dataDir, r, cfg, runner, now, attempt)
+		retry, err := advanceSpecDraftingAttempt(dp, ctx, dataDir, r, cfg, runner, now, attempt)
 		if err != nil || !retry {
 			return err
 		}
@@ -169,7 +174,7 @@ const maxSpecDraftingAttempts = 2
 // advanceSpecDraftingAttempt is one drafting launch of AdvanceSpecDrafting.
 // retry is true when the drafted spec was refused for its criteria and the
 // caller should draft again.
-func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time, attempt int) (retry bool, err error) {
+func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time, attempt int) (retry bool, err error) {
 	// A spec_review rejection's reason must reach draft_spec.py the same way an
 	// oracle_review rejection already reaches the oracle drafter (see
 	// AdvanceOracleDrafting's identical block) -- this dedicated feedback
@@ -290,7 +295,7 @@ func advanceSpecDraftingAttempt(ctx context.Context, dataDir string, r *request.
 	// (request.SpecReviewNotes): it changes nothing in the document.
 	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: spec_drafting -> spec_review (spec drafted)", r.ID)
-	return false, saveAndRemind(dataDir, r, now)
+	return false, saveAndRemind(dp, dataDir, r, now)
 }
 
 // saveSpecDraftSpend saves r.SpecEvidence, as this pass accumulated it, to
@@ -348,20 +353,12 @@ func updateLocked(dataDir, id string, mutate func(*request.Request) bool) (*requ
 // hold the request's lock (a driver pass after its job). A crash between the
 // two writes costs at most one duplicate reminder (the ticker re-sends on its
 // next tick), never a re-run of the job that led here.
-func saveAndRemind(dataDir string, r *request.Request, now time.Time) error {
-	if err := r.Save(dataDir); err != nil {
+func saveAndRemind(dp Deps, dataDir string, r *request.Request, now time.Time) error {
+	if err := dp.SaveReviewEntry(dataDir, r); err != nil {
 		return err
-	}
-	if betweenReviewSaves != nil {
-		betweenReviewSaves(dataDir, r.ID)
 	}
 	return remindOnDisk(dataDir, r, now)
 }
-
-// betweenReviewSaves, when a test sets it, runs in saveAndRemind after r is
-// saved in its review state and before the reminder is recorded: the moment
-// an operator's decision can land between the two writes.
-var betweenReviewSaves func(dataDir, id string)
 
 // remindOnDisk sends the first reminder of the review r has entered
 // (RemindRequest) and records it on the request as it is on disk
@@ -462,7 +459,7 @@ func readImportedSpec(dataDir, id string) (string, error) {
 // input changed), a stop request mid-run (r is left as it is, so the next
 // pass re-runs the job), and a job that ended before it produced a draft
 // (OracleDraftJobFailure: the request waits in resume_review with the cause).
-func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner OracleDraftRunner, now time.Time) error {
+func AdvanceOracleDrafting(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner OracleDraftRunner, now time.Time) error {
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -505,7 +502,7 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 			return jobErr
 		}
 		if failure := firstOracleJobFailure(r, jobErr); failure != nil {
-			return unresolvedOracleDrafting(dataDir, r, failure, now)
+			return unresolvedOracleDrafting(dp, dataDir, r, failure, now)
 		}
 		draft = failedOracleDraft(jobErr)
 	case !draft.Status.Valid():
@@ -523,7 +520,7 @@ func AdvanceOracleDrafting(ctx context.Context, dataDir string, r *request.Reque
 		return err
 	}
 	log.Printf("request %s: oracle_drafting -> oracle_review (%s)", r.ID, draft.Status)
-	return saveAndRemind(dataDir, r, now)
+	return saveAndRemind(dp, dataDir, r, now)
 }
 
 // maxPlanningAttempts bounds AdvancePlanning's own automatic re-plan
@@ -628,7 +625,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 // Verify-Command drift, ...) gets the same single re-plan, told the check's
 // own message; a handed-over plan and an I/O error halt on the first
 // attempt -- see planRedraftable and maxPlanningAttempts.
-func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner PlanTicketsRunner, now time.Time) error {
+func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner PlanTicketsRunner, now time.Time) error {
 	inputs, err := loadPlanningInputs(dataDir, r, now)
 	if errors.Is(err, errPlanningInputsHalted) {
 		return nil
@@ -741,7 +738,7 @@ func AdvancePlanning(ctx context.Context, dataDir string, r *request.Request, cf
 	// re-plan: that reading of the spec's prose can be wrong.
 	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: planning -> plan_review (plan drafted: %d ticket(s))", r.ID, r.TicketCount)
-	return saveAndRemind(dataDir, r, now)
+	return saveAndRemind(dp, dataDir, r, now)
 }
 
 // planRedraftable reports whether a plan refused with err gets the one
@@ -919,7 +916,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
-	resumeRunID, moved, err := settlePriorRun(ctx, dataDir, r, ticket, cfg, now)
+	resumeRunID, moved, err := settlePriorRun(dp, ctx, dataDir, r, ticket, cfg, now)
 	if moved || err != nil {
 		return err
 	}
@@ -1077,7 +1074,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		}
 		return quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
 	case run.StateHalted:
-		return afterHaltedTicketRun(dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
+		return afterHaltedTicketRun(dp, dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
 	default:
 		// Defensive only: whenever a run record exists (nil runErr, or
 		// non-nil runErr with ticket.RunID set -- see above),
@@ -1129,7 +1126,7 @@ func noteLostCause(dataDir, requestID, runID string) error {
 // (err is then that move's result and no build starts). Otherwise
 // resumeRunID is the run whose kept worktree the build continues, "" for a
 // build from scratch, and any kept run of the request has been reaped.
-func settlePriorRun(ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (resumeRunID string, moved bool, err error) {
+func settlePriorRun(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (resumeRunID string, moved bool, err error) {
 	// A human chose to continue the lost build in its kept worktree
 	// (`factoryd resume`, verb round): check it still can be, then adopt that
 	// worktree. A decision answering an earlier resume_review (a stale
@@ -1141,10 +1138,10 @@ func settlePriorRun(ctx context.Context, dataDir string, r *request.Request, tic
 			// must not loop here every poll with no notice: back to
 			// resume_review with the reason, where `-from scratch` or cancel
 			// (or a later resume, once fixed) are possible.
-			return "", true, refuseResume(dataDir, r, []string{fmt.Sprintf("could not check whether the lost build can be resumed: %v", err)}, now)
+			return "", true, refuseResume(dp, dataDir, r, []string{fmt.Sprintf("could not check whether the lost build can be resumed: %v", err)}, now)
 		}
 		if len(reasons) > 0 {
-			return "", true, refuseResume(dataDir, r, reasons, now)
+			return "", true, refuseResume(dp, dataDir, r, reasons, now)
 		}
 		return r.Resume.LostRunID, false, nil
 	}
@@ -1152,7 +1149,7 @@ func settlePriorRun(ctx context.Context, dataDir string, r *request.Request, tic
 	// has decided what to do about it (a build lost to Temporal whose step
 	// then failed or was retried): reap and rebuild nothing.
 	if lost := unresolvedRunAwaitingDecision(dataDir, r, ticket); lost != nil {
-		return "", true, afterHaltedTicketRun(dataDir, r, lost, fmt.Sprintf("ticket %d/%d halted: %s", ticket.Index, r.TicketCount, StatusReason(lost)), now)
+		return "", true, afterHaltedTicketRun(dp, dataDir, r, lost, fmt.Sprintf("ticket %d/%d halted: %s", ticket.Index, r.TicketCount, StatusReason(lost)), now)
 	}
 	if err := ClearKeptRunsOfRequest(dataDir, r.ID); err != nil {
 		// A fresh build of this ticket (a retry, a resume from scratch, or
@@ -1208,7 +1205,7 @@ func unresolvedRunAwaitingDecision(dataDir string, r *request.Request, ticket *r
 // (a build continuing on an earlier attempt's branch keeps no worktree),
 // with only a rebuild left to choose. Any other halt halts the request with
 // reason.
-func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
+func afterHaltedTicketRun(dp Deps, dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
 	if check := baseOracleQuarantineCheck(runRecord); check != "" {
 		// A verdict on the oracle, not a lost step: the request is
 		// quarantined naming the check, so its next action says what to do.
@@ -1216,7 +1213,7 @@ func afterHaltedTicketRun(dataDir string, r *request.Request, runRecord *run.Run
 	}
 	cause := run.UnresolvedCauseOf(runRecord)
 	if runRecord.KeptForResume || cause != "" {
-		return EnterResumeReview(dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
+		return EnterResumeReview(dp, dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
 	}
 	return HaltRequest(dataDir, r, reason, now)
 }
@@ -1274,12 +1271,12 @@ func withEarlierTicketsWork(r *request.Request, idx int, args []string, resumeRu
 // history was rewritten, ...) to resume_review, with the reasons: only
 // `-from scratch` or cancel are possible from there. The reminder goes out at
 // once, as on every entry into resume_review.
-func refuseResume(dataDir string, r *request.Request, reasons []string, now time.Time) error {
+func refuseResume(dp Deps, dataDir string, r *request.Request, reasons []string, now time.Time) error {
 	if err := r.RefuseResume(reasons, now); err != nil {
 		return err
 	}
 	log.Printf("request %s: building -> resume_review (%s)", r.ID, r.Error)
-	return saveAndRemind(dataDir, r, now)
+	return saveAndRemind(dp, dataDir, r, now)
 }
 
 // acceptTicketRun records runRecord -- an accepted run, the ticket's first
@@ -1629,7 +1626,7 @@ func nonReviewQuarantineCheck(runRecord *run.Run) string {
 func tryCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
 	// Before any round: a run whose review gave no verdict was not judged,
 	// and a corrective build would be spent on nothing.
-	if handled, err := afterUnjudgedTicketRun(dataDir, r, runRecord, now); handled {
+	if handled, err := afterUnjudgedTicketRun(dp, dataDir, r, runRecord, now); handled {
 		return true, err
 	}
 	if handled, err := TryReviewCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
@@ -1849,7 +1846,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if launched.unresolved != "" {
 			// No verdict on the round's work, so no quarantine: a human
 			// decides what runs next, and the round used none of the budget.
-			return true, EnterResumeReview(dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt}, now)
+			return true, EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt}, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by
