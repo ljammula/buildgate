@@ -129,18 +129,26 @@ func earlierRestackPending(dp Deps, ctx context.Context, dataDir string, r *requ
 }
 
 // restackIfNeeded is the PR poll's restack step for ticket, run before its
-// retarget, review rounds and ready flip. ran is true when it acted on the
-// ticket (reconciled an interrupted restack, waited on its replay run that
-// has not ended, or restacked it), and the poll of this ticket is over. held
+// retarget, review rounds and ready flip. prHeadSHA is the head of the
+// ticket's pull request (its branch on origin) as the poll read it: when it
+// is the result of an accepted replay run of the ticket whose push is not
+// confirmed, that push is recorded first (confirmLandedRestack), whether or
+// not a restack is needed now. ran is true when it acted on the ticket
+// (reconciled an interrupted restack, waited on its replay run that has not
+// ended, recorded a landed push, or restacked it), and the poll of this
+// ticket is over. held
 // is true when the ticket needs a restack that cannot run yet (an earlier
 // ticket's comes first), or whether it needs one cannot be told: its pull request
 // is then neither retargeted nor marked ready this poll. A need that cannot
 // be told is recorded on the ticket (Ticket.RestackHold), shown in the
 // request's next action and watch, and reminded at the reminder interval,
 // until a poll can tell.
-func restackIfNeeded(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (ran, held bool, err error) {
+func restackIfNeeded(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, prHeadSHA string, cfg WorkerConfig, now time.Time) (ran, held bool, err error) {
 	if ticket.Restack != nil {
 		return reconcileRestack(dp, ctx, dataDir, r, ticket, now)
+	}
+	if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, prHeadSHA, now); confirmed || err != nil {
+		return true, false, err
 	}
 	need, err := checkRestackNeed(dp, ctx, dataDir, r, ticket)
 	if err != nil {
@@ -210,12 +218,15 @@ func humanCommitPark(r *request.Request, ticket *request.Ticket, need restackNee
 	return fmt.Sprintf("ticket %d/%d's branch %s is at %s on origin, not at %s, the commit of its run %s, so it cannot be restacked onto %s: a commit the factory did not make is on it. Move the branch back to %s, or take the commit out of it", ticket.Index, r.TicketCount, need.head.Branch, shortSHA(remote), shortSHA(need.head.Run.ResultSHA), need.head.Run.ID, shortSHA(need.onto), shortSHA(need.head.Run.ResultSHA))
 }
 
-// restackTicket restacks ticket: it checks the branch on origin and the
-// commits to replay, replays them (replayTicketCommits), judges the result
+// restackTicket restacks ticket: it checks the host's git (hostGitRefusal),
+// the branch on origin and the commits to replay, replays them (replayTicketCommits), judges the result
 // with a replay run (judgeRestack) and pushes it (pushRestack). A human
 // commit on the branch, a merge commit, or a commit none of the ticket's own
 // runs judged parks the request before anything is replayed.
 func restackTicket(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, need restackNeed, cfg WorkerConfig, now time.Time) error {
+	if why := hostGitRefusal(dp, ctx); why != nil {
+		return parkRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d cannot be restacked onto %s: %v. Upgrade git to %s or later", ticket.Index, r.TicketCount, shortSHA(need.onto), why, workspace.GitFloor), now)
+	}
 	head := need.head.Run.ResultSHA
 	remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, need.head.Branch)
 	if err != nil {
@@ -223,7 +234,7 @@ func restackTicket(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 		return r.Save(dataDir)
 	}
 	if remote != head {
-		if confirmed, err := confirmLandedRestack(dp, dataDir, r, ticket, remote, now); confirmed || err != nil {
+		if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, remote, now); confirmed || err != nil {
 			return err
 		}
 		return parkRequest(dp, dataDir, r, humanCommitPark(r, ticket, need, remote), now)
@@ -249,6 +260,17 @@ func restackTicket(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 		return err
 	}
 	return judgeRestack(dp, ctx, dataDir, r, ticket, need, replay, file, cfg, now)
+}
+
+// hostGitRefusal says why the host's git cannot run a restack's git calls
+// (workspace.CheckGitFloor): older than workspace.GitFloor, or its version
+// cannot be read. nil when it can.
+func hostGitRefusal(dp Deps, ctx context.Context) error {
+	out, err := dp.HostGitVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("the host's git version cannot be read (%w)", err)
+	}
+	return workspace.CheckGitFloor(out)
 }
 
 // restackSources are the ticket's own runs whose judged range (from the
@@ -475,7 +497,8 @@ func judgeRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 // round, of kind restack, with its round ref, and acts on how it ended: an
 // accepted run is pushed (pushRestack); one that gave no verdict on the work
 // waits in resume_review; one that never started is tried again on the next
-// poll; any other pushes nothing and halts the request.
+// poll, until maxRestackStartFailures in a row (restackStartFailures) halt
+// the request; any other pushes nothing and halts the request.
 func settleRestackRun(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, need restackNeed, runID string, ended roundOutcome, now time.Time) error {
 	ticket.Restack = nil
 	ticket.Rounds = append(ticket.Rounds, request.Round{
@@ -494,12 +517,39 @@ func settleRestackRun(dp Deps, ctx context.Context, dataDir string, r *request.R
 		log.Printf("request %s: ticket %d: restack run %s gave no verdict (%s): %s", r.ID, ticket.Index, runID, ended.unresolved, ended.errText)
 		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: ended.unresolved, RetryAt: ended.retryAt}, now)
 	case ended.startFailure:
+		if n := restackStartFailures(r, ticket); n >= maxRestackStartFailures {
+			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: the replay run of its restack onto %s did not start %d times in a row, the last (run %s): %s. Nothing was pushed. `factoryd retry %s` restacks again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), n, runID, ended.errText, r.ID, r.ID), now)
+		}
 		log.Printf("request %s: ticket %d: restack run %s did not start (%s); the next poll restacks again", r.ID, ticket.Index, runID, ended.errText)
 		return r.Save(dataDir)
 	case ended.outcome != request.RoundAccepted:
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d's restack onto %s was not accepted: run %s %s (%s); nothing was pushed, and the factory does not rebuild the ticket to fix it. Read the run's report (`factoryd status %s`), then `factoryd retry %s` to restack again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), runID, ended.outcome, ended.errText, runID, r.ID, r.ID), now)
 	}
 	return pushRestack(dp, ctx, dataDir, r, ticket, runID, need, now)
+}
+
+// maxRestackStartFailures is how many replay runs of a ticket's restack in a
+// row may fail to start before the request halts.
+const maxRestackStartFailures = 3
+
+// restackStartFailures counts the ticket's last rounds that are restack
+// rounds whose replay run never started, recorded since the request last
+// entered its state: a `factoryd retry` of the halted request moves it back
+// to pr_review, so the count starts again from zero.
+func restackStartFailures(r *request.Request, ticket *request.Ticket) int {
+	since, sinceOK := r.InStateSince()
+	n := 0
+	for i := len(ticket.Rounds) - 1; i >= 0; i-- {
+		rnd := ticket.Rounds[i]
+		if rnd.Kind != request.RestackRoundKind || !rnd.StartFailure {
+			break
+		}
+		if at, err := time.Parse(time.RFC3339Nano, rnd.At); sinceOK && err == nil && at.Before(since) {
+			break
+		}
+		n++
+	}
+	return n
 }
 
 // runReplay runs the replay run of restack rs of ticket: the ticket's own
@@ -550,7 +600,8 @@ func replayRunOutcome(dataDir, runID string, runErr error) (roundOutcome, error)
 }
 
 // pushRestack pushes ticket's accepted replay run runID to its pull-request
-// branch. Before the push: origin's branch must still be at the commit of
+// branch. Before the push: the run's result must be the replayed head or
+// descend from it (replayResultRefusal), origin's branch must still be at the commit of
 // the ticket's PR-head run (else it is a human commit, and the request
 // parks), a ready pull request is turned back to draft
 // (draftBeforeFactoryPush), and the run's release decision must allow it.
@@ -568,13 +619,16 @@ func pushRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 	if err != nil {
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: load restack run %s: %v", ticket.Index, r.TicketCount, runID, err), now)
 	}
+	if why := replayResultRefusal(dp, r, rec); why != "" {
+		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s: %s; nothing was pushed", ticket.Index, r.TicketCount, runID, why), now)
+	}
 	branch, old := need.head.Branch, need.head.Run.ResultSHA
 	remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch)
 	switch {
 	case err != nil:
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: read branch %s before pushing restack run %s: %v; nothing was pushed", ticket.Index, r.TicketCount, branch, runID, err), now)
 	case remote != old:
-		if confirmed, err := confirmLandedRestack(dp, dataDir, r, ticket, remote, now); confirmed || err != nil {
+		if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, remote, now); confirmed || err != nil {
 			return err
 		}
 		return parkRequest(dp, dataDir, r, humanCommitPark(r, ticket, need, remote), now)
@@ -606,10 +660,31 @@ func pushRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 	if pushErr != nil {
 		log.Printf("request %s: ticket %d: the push of restack run %s reported %v; origin reads %s", r.ID, ticket.Index, runID, pushErr, shortSHA(back))
 	}
-	if confirmed, err := confirmLandedRestack(dp, dataDir, r, ticket, back, now); confirmed || err != nil {
+	if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, back, now); confirmed || err != nil {
 		return err
 	}
 	return parkRequest(dp, dataDir, r, humanCommitPark(r, ticket, need, back), now)
+}
+
+// replayResultRefusal says why replay run rec's result may not be pushed as
+// its restack: it records no replay, or its ResultSHA is neither the
+// replayed head it judged (run.Replay.HeadSHA) nor a descendant of it (the
+// evidence step's commit of what verification left behind). "" when it may.
+func replayResultRefusal(dp Deps, r *request.Request, rec *run.Run) string {
+	if rec.Replay == nil {
+		return "its record holds no replay"
+	}
+	if rec.ResultSHA == rec.Replay.HeadSHA {
+		return ""
+	}
+	under, err := dp.RoundResultDescendsFromHead(r.Workspace, rec.Replay.HeadSHA, rec.ResultSHA)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("whether its result %s descends from the replayed head %s cannot be told: %v", shortSHA(rec.ResultSHA), shortSHA(rec.Replay.HeadSHA), err)
+	case !under:
+		return fmt.Sprintf("its result %s does not descend from the replayed head %s it judged", shortSHA(rec.ResultSHA), shortSHA(rec.Replay.HeadSHA))
+	}
+	return ""
 }
 
 // confirmLandedRestack is the one answer to origin's branch of ticket at
@@ -618,10 +693,11 @@ func pushRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 // whose push is not yet confirmed (the restack in flight, Ticket.Restack,
 // or a restack round recorded after the PR-head run's round), that restack's
 // push landed: its round is recorded as pushed (appended, for the one in
-// flight), the local branch is moved to remote, and the pull request is
-// polled again on the next pass. confirmed is false, and nothing is changed,
-// for any other commit: the caller treats it as a human commit.
-func confirmLandedRestack(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, remote string, now time.Time) (confirmed bool, err error) {
+// flight), the local branch is moved to remote, the pull request is turned
+// back to draft if it is ready (redraftAfterFactoryPush), and it is polled
+// again on the next pass. confirmed is false, and nothing is changed, for
+// any other commit: the caller treats it as a human commit.
+func confirmLandedRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, remote string, now time.Time) (confirmed bool, err error) {
 	runID, slice := landedRestackRun(dataDir, r, ticket, remote)
 	if runID == "" {
 		return false, nil
@@ -642,6 +718,7 @@ func confirmLandedRestack(dp Deps, dataDir string, r *request.Request, ticket *r
 	// flip held for this restack is due.
 	ticket.LastPolledAt = ""
 	log.Printf("request %s: ticket %d: origin's %s is at %s, the result of restack run %s: recorded its push", r.ID, ticket.Index, branch, shortSHA(remote), runID)
+	redraftAfterFactoryPush(dp, ctx, r, ticket)
 	return true, r.Save(dataDir)
 }
 
@@ -680,7 +757,9 @@ func landedRestackRun(dataDir string, r *request.Request, ticket *request.Ticket
 // branch (a restack's, and a PR-review round's), so no ready state crosses
 // a head the factory changed; the ready flip (advancePRReadyOrApproved)
 // runs again on the new head. GitHub's own state is read, not the ticket's:
-// a person may have marked it ready.
+// a person may have marked it ready. A pull request GitHub reports draft is
+// recorded as draft (markTicketDraft) whoever turned it, so a flip whose save
+// a crash lost leaves no ready state on the ticket.
 func draftBeforeFactoryPush(dp Deps, ctx context.Context, ticket *request.Ticket) error {
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -688,14 +767,49 @@ func draftBeforeFactoryPush(dp Deps, ctx context.Context, ticket *request.Ticket
 	if err != nil {
 		return err
 	}
+	if !state.IsDraft {
+		if err := dp.UndoMarkPullRequestReady(readCtx, ticket.PRURL); err != nil {
+			return err
+		}
+	}
+	markTicketDraft(ticket)
+	return nil
+}
+
+// redraftAfterFactoryPush is draftBeforeFactoryPush's second half, run once
+// a push the factory made to ticket's open branch is confirmed on origin (a
+// restack's, confirmLandedRestack, and a PR-review round's): a person may
+// have marked the pull request ready between the flip to draft and the
+// push, so GitHub's state is read once more and a ready pull request is
+// turned back to draft. A read or a flip that fails is logged: the poll's
+// ready flip judges the new head either way, and the merge-readiness check
+// reads GitHub's own draft state.
+func redraftAfterFactoryPush(dp Deps, ctx context.Context, r *request.Request, ticket *request.Ticket) {
+	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	state, err := dp.ReadReviewState(readCtx, ticket.PRURL, forge.AuthorPolicy{})
+	if err != nil {
+		log.Printf("request %s: ticket %d: read pull request %s after the factory's push: %v", r.ID, ticket.Index, ticket.PRURL, err)
+		return
+	}
 	if state.IsDraft {
-		return nil
+		markTicketDraft(ticket)
+		return
 	}
 	if err := dp.UndoMarkPullRequestReady(readCtx, ticket.PRURL); err != nil {
-		return err
+		log.Printf("request %s: ticket %d: pull request %s was marked ready before the factory's push landed, and turning it back to draft failed: %v", r.ID, ticket.Index, ticket.PRURL, err)
+		return
 	}
-	ticket.PRState = "draft"
-	return nil
+	markTicketDraft(ticket)
+	log.Printf("request %s: ticket %d: pull request %s was marked ready before the factory's push landed; turned it back to draft for the new head", r.ID, ticket.Index, ticket.PRURL)
+}
+
+// markTicketDraft records ticket's pull request as draft; a stacked one
+// ("stacked", itself a draft) keeps its state.
+func markTicketDraft(ticket *request.Ticket) {
+	if ticket.PRState != "stacked" {
+		ticket.PRState = "draft"
+	}
 }
 
 // reconcileRestack settles a restack that a pass left in flight
@@ -707,20 +821,29 @@ func draftBeforeFactoryPush(dp Deps, ctx context.Context, ticket *request.Ticket
 // (confirmLandedRestack); origin's branch still at the PR-head run's result
 // it was replayed from means it was never pushed, and it is settled as if
 // this pass had run it (settleRestackRun: an accepted one is pushed, any
-// other halts or waits as it would have). Otherwise, or with no run
-// started, the restack is dropped, and the next poll checks again whether
-// one is needed.
+// other halts or waits as it would have). Otherwise, with no run started,
+// or with a run whose record does not exist, the restack is dropped, and
+// the next poll checks again whether one is needed. A run record or an
+// origin branch that cannot be read decides nothing: the restack is kept,
+// and the ticket is held with its poll ended this pass (as for a need that
+// cannot be told), so a push that landed is never taken for a human commit.
 func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) (ran, held bool, err error) {
 	rs := ticket.Restack
 	if rs.RunID != "" {
 		rec, loadErr := run.Load(dataDir, rs.RunID)
-		if loadErr == nil && !runEnded(rec) {
+		switch {
+		case loadErr == nil && !runEnded(rec):
 			log.Printf("request %s: ticket %d: restack %d's replay run %s is still %s; no other replay or round of the ticket starts until it ends", r.ID, ticket.Index, rs.N, rec.ID, rec.State)
 			return true, false, r.Save(dataDir)
-		}
-		branch := ticketPRBranch(dataDir, ticket)
-		if remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch); err == nil && loadErr == nil {
-			if confirmed, err := confirmLandedRestack(dp, dataDir, r, ticket, remote, now); confirmed || err != nil {
+		case loadErr != nil && !errors.Is(loadErr, os.ErrNotExist):
+			return holdInterruptedRestack(dataDir, r, ticket, fmt.Errorf("its replay run %s cannot be read: %w", rs.RunID, loadErr))
+		case loadErr == nil:
+			branch := ticketPRBranch(dataDir, ticket)
+			remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch)
+			if err != nil {
+				return holdInterruptedRestack(dataDir, r, ticket, fmt.Errorf("its branch %s cannot be read on origin: %w", branch, err))
+			}
+			if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, remote, now); confirmed || err != nil {
 				return true, false, err
 			}
 			if adopted, err := settleAdoptedReplay(dp, ctx, dataDir, r, ticket, rs, rec, remote, now); adopted || err != nil {
@@ -732,6 +855,14 @@ func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.R
 	ticket.LastPolledAt = ""
 	log.Printf("request %s: ticket %d: dropped the interrupted restack %d (%s); the next poll checks again", r.ID, ticket.Index, rs.N, strings.TrimSpace(rs.Branch))
 	return true, false, r.Save(dataDir)
+}
+
+// holdInterruptedRestack keeps ticket's interrupted restack for the next
+// pass because why: what it needs to settle it could not be read. The
+// ticket's poll ends this pass.
+func holdInterruptedRestack(dataDir string, r *request.Request, ticket *request.Ticket, why error) (ran, held bool, err error) {
+	log.Printf("request %s: ticket %d: the interrupted restack %d is kept for the next poll: %v", r.ID, ticket.Index, ticket.Restack.N, why)
+	return true, true, r.Save(dataDir)
 }
 
 // settleAdoptedReplay settles rec, the ended replay run of the interrupted

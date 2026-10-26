@@ -273,19 +273,30 @@ that changed something replayed as a commit that changes nothing, parks the
 request before any replay run. Otherwise it starts a replay run (round kind
 `restack`, no round budget used) that builds nothing, checks the same patch
 ids again, and runs every gate and review on the replayed head from the new
-base. An accepted one is pushed: the pull request back to draft if it was
-ready, the release decision re-checked, a push leased on the commit read, the
-remote read back; only when origin reads the replay run's commit is it the
-PR-head run and the local branch moved to it, also when the push reported an
-error after landing. Until then the pull request is neither retargeted nor
-marked ready. A human commit, a merge commit or a commit no run of the
+base. The replay run's result is the replayed head, or a commit on top of it
+when verification left files behind (the evidence step commits them on the
+host, as for any run); a result that does not descend from the replayed head
+halts the request with nothing pushed. An accepted one is pushed: the pull
+request back to draft if it was ready, the release decision re-checked, a
+push leased on the commit read, the remote read back; only when origin reads
+the replay run's commit is it the PR-head run and the local branch moved to
+it, also when the push reported an error after landing. Whenever a poll
+finds the pull request's head at the commit of an accepted replay run whose
+push was not recorded, it records the push then, needed restack or not.
+Until then the pull request is neither retargeted nor marked ready. A human commit, a merge commit or a commit no run of the
 ticket made parks the request (`resume.reason`); so does a conflict, whose
 reason says what resolves it: `factoryd resume` replays again, which succeeds
 once the branch under the ticket has moved, or cancel; a fix pushed by hand
 to the ticket's branch is refused as a human commit. A replay run not
 accepted halts the request with nothing pushed (`factoryd retry` restacks
-again); a read-back that fails halts it, and the poll after `factoryd retry`
-records the push when origin is at the replay run's commit. While whether a
+again); a replay run that never starts is tried again on the next poll, and
+the third in a row halts the request (`factoryd retry` restacks again, with
+the count started over); a read-back that fails halts it, and the poll after
+`factoryd retry` records the push when origin is at the replay run's commit.
+The host's git must be 2.41 or later (the replay reads attributes with `git
+--attr-source`): an older one parks the request naming both versions, and
+`factoryd resume` restacks once git is upgraded; `factoryd doctor` warns
+about it. While whether a
 restack is needed cannot be told (origin cannot be read, or the pull request
 is on ticket N's branch and its run records no `stack_base_sha`), the ticket's
 `restack_hold` names it, the request's next action and `factoryd watch`
@@ -293,7 +304,8 @@ show it, it is reminded every `-hitl-reminder-interval`, and the pull request
 is neither retargeted nor marked ready. The ticket's `restack` field holds a
 restack in flight: a worker that stopped mid-restack leaves its replay run
 running, and the next pass waits for that run and settles it rather than
-start another. `rounds` holds the finished ones. The ticket's `retarget`
+start another; while that run's record or origin's branch cannot be read,
+the restack is kept and the ticket's poll ends there. `rounds` holds the finished ones. The ticket's `retarget`
 records the factory's own `gh pr edit --base`; a base GitHub changed on its
 own is not recorded. A resume of a kept build of ticket N+1 whose
 `stack_base_sha` is not ticket N's current PR head is refused (use
@@ -302,9 +314,11 @@ from ticket N's current PR-head run instead of continuing on its branch.
 
 Before every push the factory makes to an open pull request's branch, a
 PR-review round's as well as a restack's, a pull request that is ready for
-review is turned back to draft; the factory marks it ready again by its
-usual rule (checks pass, no thread open, the release decision allows the new
-head), so no ready state crosses a head the factory changed.
+review is turned back to draft, and once the push is confirmed the pull
+request is read again and turned back to draft if someone marked it ready
+meanwhile; the factory marks it ready again by its usual rule (checks pass,
+no thread open, the release decision allows the new head), so no ready state
+crosses a head the factory changed.
 
 A ticket that quarantines with its failed gates a subset of
 `spec_conformity`/`code_review` (every other gate passed), where at least

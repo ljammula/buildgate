@@ -67,6 +67,9 @@ func (dp *deps) PushWithLease(ctx context.Context, dir string, sha string, branc
 func (dp *deps) MoveBranch(dir string, branch string, sha string) error {
 	return dp.forge.moveBranch(dir, branch, sha)
 }
+func (dp *deps) HostGitVersion(ctx context.Context) (string, error) {
+	return dp.forge.hostGitVersion(ctx)
+}
 
 func (dp *deps) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {
 	return runMainWithReady(dp, ctx, args, onReady)

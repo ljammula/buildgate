@@ -46,15 +46,16 @@ type restackFixture struct {
 	cfg     requestdriver.WorkerConfig
 	now     time.Time
 
-	remote    map[string]string
-	under     map[[2]string]bool
-	ranges    map[[2]string][]string
-	merges    []string
-	prs       map[string]forge.ReviewState
-	events    []string
-	runArgs   [][]string
-	replayEnd run.State
-	replayErr error
+	remote     map[string]string
+	under      map[[2]string]bool
+	ranges     map[[2]string][]string
+	merges     []string
+	prs        map[string]forge.ReviewState
+	events     []string
+	runArgs    [][]string
+	replayEnd  run.State
+	replayErr  error
+	gitVersion string
 }
 
 func newRestackFixture(t *testing.T, tickets int) *restackFixture {
@@ -65,10 +66,11 @@ func newRestackFixture(t *testing.T, tickets int) *restackFixture {
 		cfg:    requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3},
 		remote: map[string]string{"factoryd/run-1": newTip, "factoryd/run-2": head},
 		// The replayed head sits on the tip it was replayed onto.
-		under:     map[[2]string]bool{{newTip, r2}: true, {mainTip, r2}: true},
-		ranges:    map[[2]string][]string{{oldTip, head}: {c1, head}},
-		prs:       map[string]forge.ReviewState{},
-		replayEnd: run.StateAccepted,
+		under:      map[[2]string]bool{{newTip, r2}: true, {mainTip, r2}: true},
+		ranges:     map[[2]string][]string{{oldTip, head}: {c1, head}},
+		prs:        map[string]forge.ReviewState{},
+		replayEnd:  run.StateAccepted,
+		gitVersion: "git version 2.50.1 (Apple Git-155)",
 	}
 	// Ticket 1: built to oldTip, a pushed review round moved it to newTip.
 	f.saveRun(&run.Run{ID: "run-1", BaseSHA: hexSHA('0'), ResultSHA: oldTip, Branch: "factoryd/run-1"})
@@ -182,6 +184,7 @@ func (f *restackFixture) wire() {
 		return nil
 	}
 	dp.createRefFn = func(string, string, string) error { return nil }
+	dp.hostGitVersionFn = func(context.Context) (string, error) { return f.gitVersion, nil }
 }
 
 // pass runs one PR-review pass, every ticket's poll due.
@@ -815,5 +818,202 @@ func TestRestackNamesAnOldSourceRunsTicketUnderItsLock(t *testing.T) {
 	}
 	if !f.did("push " + r2) {
 		t.Errorf("events %v: want the restack to go on", f.events)
+	}
+}
+
+// landedReplayRun saves ticket 2's accepted replay run of restack 1, whose
+// result is r2.
+func (f *restackFixture) landedReplayRun() string {
+	f.t.Helper()
+	id := "req-1-002-restack1-x"
+	replay := &run.Replay{RequestID: "req-1", TicketIndex: 2, OfRunID: "run-2", SourceRunIDs: []string{"run-2"}, UpstreamSHA: oldTip, SourceHeadSHA: head, OntoSHA: newTip, HeadSHA: r2}
+	f.saveRun(&run.Run{ID: id, TicketIndex: 2, BaseSHA: r2, ResultSHA: r2, DiffBaseSHA: newTip, StackBaseSHA: newTip, Branch: "buildgate/req-1/t2-restack1", Replay: replay})
+	return id
+}
+
+// TestAnInterruptedRestackIsKeptWhileOriginCannotBeRead: the worker stopped
+// after the restack's push landed and before it was recorded, and the next
+// pass cannot read origin: the restack is kept and nothing is decided; the
+// pass after reads origin at the replay run's result and records the push,
+// never taking it for a human commit.
+func TestAnInterruptedRestackIsKeptWhileOriginCannotBeRead(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	id := f.landedReplayRun()
+	f.remote["factoryd/run-2"] = r2
+	f.r.Tickets[1].Restack = &request.TicketRestack{N: 1, Branch: "buildgate/req-1/t2-restack1", OntoSHA: newTip, RunID: id}
+	f.save()
+	read := f.dp.remoteBranchHeadSHAFn
+	failed := false
+	f.dp.remoteBranchHeadSHAFn = func(ctx context.Context, dir, branch string) (string, error) {
+		if branch == "factoryd/run-2" && !failed {
+			failed = true
+			return "", errors.New("network down")
+		}
+		return read(ctx, dir, branch)
+	}
+	f.pass()
+	if f.r.Tickets[1].Restack == nil || f.r.State != request.StatePRReview || f.did("replay") || f.did("move") {
+		t.Fatalf("state %s (%v), restack %+v, events %v: want the restack kept and nothing decided", f.r.State, f.r.Resume, f.r.Tickets[1].Restack, f.events)
+	}
+	f.pass()
+	t2 := f.r.Tickets[1]
+	if f.r.State != request.StatePRReview || t2.Restack != nil || t2.PRHeadRunID() != id || !f.did("move factoryd/run-2 to "+r2) || f.did("replay") {
+		t.Fatalf("state %s (%v), ticket 2 head %s, events %v: want the landed push confirmed, not parked", f.r.State, f.r.Resume, t2.PRHeadRunID(), f.events)
+	}
+}
+
+// TestRestackParksOnAGitOlderThanTheFloor: the host's git is older than the
+// floor a restack's git calls need: the request parks naming the installed
+// version, the floor and the remedy, before anything is replayed.
+func TestRestackParksOnAGitOlderThanTheFloor(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	f.gitVersion = "git version 2.39.5 (Apple Git-154)"
+	f.pass()
+	if f.r.State != request.StateResumeReview || f.r.Resume == nil {
+		t.Fatalf("state %s, error %q: want parked in resume_review", f.r.State, f.r.Error)
+	}
+	for _, want := range []string{"2.39", workspace.GitFloor, "upgrade git"} {
+		if !strings.Contains(strings.ToLower(f.r.Resume.Reason), strings.ToLower(want)) {
+			t.Errorf("park reason %q does not name %q", f.r.Resume.Reason, want)
+		}
+	}
+	if f.did("replay") || f.did("push") || len(f.runArgs) != 0 {
+		t.Errorf("events %v: want nothing replayed, run or pushed", f.events)
+	}
+}
+
+// TestARestackWhoseReplayRunNeverStartsHaltsAfterThree: a replay run that
+// never starts is tried again on the next poll, and the third in a row
+// halts the request naming the error and the retry; after `factoryd retry`
+// the count starts again, and a replay run that starts is pushed.
+func TestARestackWhoseReplayRunNeverStartsHaltsAfterThree(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	runTicket := f.dp.runTicketFn
+	f.dp.runTicketFn = func(context.Context, []string, func(*run.Run)) error {
+		f.event("run (never started)")
+		return errors.New("temporal unreachable")
+	}
+	for i := 1; i <= 2; i++ {
+		f.pass()
+		if f.r.State != request.StatePRReview {
+			t.Fatalf("pass %d: state %s (%s): want still in pr_review", i, f.r.State, f.r.Error)
+		}
+	}
+	f.pass()
+	if f.r.State != request.StateHalted || !strings.Contains(f.r.Error, "temporal unreachable") || !strings.Contains(f.r.Error, "`factoryd retry req-1` restacks again") {
+		t.Fatalf("state %s, error %q: want halted naming the error and the retry", f.r.State, f.r.Error)
+	}
+	retried, err := request.Retry(f.dataDir, "req-1", "alice", "temporal is back", f.now.Add(time.Second), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.r = retried
+	f.pass()
+	if f.r.State != request.StatePRReview {
+		t.Fatalf("after the retry: state %s (%s): want one start failure counted, not halted", f.r.State, f.r.Error)
+	}
+	f.dp.runTicketFn = runTicket
+	f.pass()
+	if t2 := f.r.Tickets[1]; f.r.State != request.StatePRReview || !strings.HasPrefix(t2.PRHeadRunID(), "req-1-002-restack") || !f.did("push "+r2) {
+		t.Fatalf("state %s (%s), head %s, events %v: want the restack pushed", f.r.State, f.r.Error, t2.PRHeadRunID(), f.events)
+	}
+}
+
+// TestRestackRecordsADraftPullRequestAsDraft: GitHub already has the pull
+// request draft while the ticket still records it ready (a crash lost the
+// save after the factory's flip): the restack records it as draft before
+// the push, so the merge-readiness check sees the draft, even when the push
+// then fails.
+func TestRestackRecordsADraftPullRequestAsDraft(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	f.r.Tickets[1].PRState = "ready"
+	f.save()
+	f.dp.pushWithLeaseFn = func(context.Context, string, string, string, string) error {
+		f.remote["factoryd/run-2"] = hexSHA('9')
+		return errors.New("stale info")
+	}
+	f.pass()
+	if f.r.Tickets[1].PRState != "draft" || f.did("draft") {
+		t.Fatalf("PR state %q, events %v: want it recorded draft, with no flip", f.r.Tickets[1].PRState, f.events)
+	}
+}
+
+// TestRestackTurnsAPullRequestMarkedReadyDuringThePushBackToDraft: a person
+// marks the pull request ready while the restack's push lands: once the
+// push is confirmed the pull request is turned back to draft.
+func TestRestackTurnsAPullRequestMarkedReadyDuringThePushBackToDraft(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	pr := f.r.Tickets[1].PRURL
+	push := f.dp.pushWithLeaseFn
+	f.dp.pushWithLeaseFn = func(ctx context.Context, dir, sha, branch, expected string) error {
+		st := f.prs[pr]
+		st.IsDraft = false
+		f.prs[pr] = st
+		return push(ctx, dir, sha, branch, expected)
+	}
+	f.pass()
+	pushAt := slices.IndexFunc(f.events, func(e string) bool { return strings.HasPrefix(e, "push ") })
+	draftAt := slices.Index(f.events, "draft "+pr)
+	if state := f.r.Tickets[1].PRState; pushAt < 0 || draftAt < pushAt || (state != "draft" && state != "stacked") || !f.prs[pr].IsDraft {
+		t.Fatalf("events %v, PR state %q: want the pull request turned back to draft after the push", f.events, f.r.Tickets[1].PRState)
+	}
+}
+
+// TestALandedRestackIsConfirmedWhenNoRestackIsNeeded: an accepted replay
+// run's push landed and was not confirmed, and ticket 1's branch has since
+// moved so that ticket 2 needs no restack: the poll reads the pull request
+// at the replay run's result and records the push, and the run becomes the
+// PR head.
+func TestALandedRestackIsConfirmedWhenNoRestackIsNeeded(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	id := f.landedReplayRun()
+	t2 := &f.r.Tickets[1]
+	t2.Rounds = []request.Round{{Index: 1, Kind: request.RestackRoundKind, RunID: id, Outcome: request.RoundAccepted}}
+	f.remote["factoryd/run-2"] = r2
+	f.remote["factoryd/run-1"] = oldTip
+	f.under[[2]string{oldTip, head}] = true
+	st := f.prs[t2.PRURL]
+	st.HeadSHA = r2
+	f.prs[t2.PRURL] = st
+	f.save()
+	f.pass()
+	t2 = &f.r.Tickets[1]
+	if !t2.Rounds[0].Pushed || t2.PRHeadRunID() != id || !f.did("move factoryd/run-2 to "+r2) || f.did("replay") || f.r.State != request.StatePRReview {
+		t.Fatalf("state %s (%v), ticket 2 rounds %+v, events %v: want the landed push recorded", f.r.State, f.r.Resume, t2.Rounds, f.events)
+	}
+}
+
+// TestRestackPushesOnlyAResultOnTheReplayedHead: a replay run whose result
+// does not descend from the replayed head it judged halts the request and
+// pushes nothing; one whose result is a commit on top of it (the evidence
+// step's commit of what verification left) is pushed.
+func TestRestackPushesOnlyAResultOnTheReplayedHead(t *testing.T) {
+	onTop := hexSHA('c')
+	for _, descends := range []bool{false, true} {
+		f := newRestackFixture(t, 2)
+		runTicket := f.dp.runTicketFn
+		f.dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+			if err := runTicket(ctx, args, onReady); err != nil {
+				return err
+			}
+			rec, err := run.Load(f.dataDir, requestdrivertest.ArgValue(args, "-ticket")+"-x")
+			if err != nil {
+				return err
+			}
+			rec.ResultSHA = onTop
+			return rec.Save(f.dataDir)
+		}
+		f.under[[2]string{r2, onTop}] = descends
+		f.under[[2]string{newTip, onTop}] = true
+		f.pass()
+		if !descends {
+			if f.r.State != request.StateHalted || !strings.Contains(f.r.Error, "does not descend from the replayed head") || f.did("push") {
+				t.Errorf("state %s, error %q, events %v: want halted with nothing pushed", f.r.State, f.r.Error, f.events)
+			}
+			continue
+		}
+		if f.r.State != request.StatePRReview || !f.did("push "+onTop) || f.r.Tickets[1].PRHeadRunID() != "req-1-002-restack1-x" {
+			t.Errorf("state %s (%s), events %v: want the result on the replayed head pushed", f.r.State, f.r.Error, f.events)
+		}
 	}
 }

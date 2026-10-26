@@ -463,7 +463,7 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	// A stacked ticket whose base moved is restacked first (restack.go):
 	// until its restack is pushed and confirmed it is neither retargeted nor
 	// marked ready, whatever its base on GitHub now says.
-	restacked, restackHeld, err := restackIfNeeded(dp, ctx, dataDir, r, ticket, cfg, now)
+	restacked, restackHeld, err := restackIfNeeded(dp, ctx, dataDir, r, ticket, state.HeadSHA, cfg, now)
 	if err != nil || restacked {
 		return err
 	}
@@ -855,8 +855,9 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 //
 // "The last code review of the whole diff" is the code_review gate of the
 // run whose commit is the pull request's head (Ticket.PRHeadRunID): the
-// ticket's first build, or the last corrective round that was accepted and
-// pushed, each of which reviews the diff from the ticket's base. A head the
+// ticket's first build, or the last corrective round or restack replay run
+// that was accepted and pushed, each of which reviews the diff from the
+// ticket's base (a replay run's, from the new base it was replayed onto). A head the
 // factory did not build (someone pushed to the branch) has no such review,
 // and neither has a run built with code review off: both are blockers, not
 // passes. A repository with no checks configured has none failing.
@@ -1402,6 +1403,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	// The next pass polls the pull request at once, so the ready flip on
 	// the new head is not left a full poll interval behind.
 	ticket.LastPolledAt = ""
+	redraftAfterFactoryPush(dp, ctx, r, ticket)
 
 	// The isolated worktree is no longer needed once its commit is pushed
 	// -- removed here (worktree only; branch untouched, see

@@ -74,6 +74,9 @@ type Deps interface {
 	ReplayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	PushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	MoveBranch(dir string, branch string, sha string) error
+	// HostGitVersion is the host's `git version` output, checked against
+	// workspace.GitFloor before a restack's first git call.
+	HostGitVersion(ctx context.Context) (string, error)
 }
 
 // RequestDriverOwnsState reports whether driveRequests knows how to

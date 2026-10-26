@@ -36,6 +36,7 @@ import (
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/spinner"
 	"buildgate/internal/workflow"
+	"buildgate/internal/workspace"
 )
 
 // doctorCheck is one factoryd doctor probe's outcome: a nil Err means
@@ -994,6 +995,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorCheckStaleTemporalWorkflows(ctx, in.temporalAddress))
 	}
 	checks = append(checks, doctorCheckBuildx(ctx, in.sandboxDocker))
+	checks = append(checks, doctorCheckHostGit(ctx))
 	if in.composeServices {
 		checks = append(checks, doctorCheckComposeVersion(ctx, in.sandboxDocker))
 	}
@@ -1675,6 +1677,28 @@ func doctorCheckComposeVersion(ctx context.Context, dockerBinary string) doctorC
 		return doctorCheck{Name: name,
 			Err: fmt.Errorf("docker compose version %q is older than the minimum 2.20", version),
 			Fix: "upgrade the Docker Compose v2 CLI plugin to >= 2.20"}
+	}
+	return doctorCheck{Name: name}
+}
+
+// doctorCheckHostGit warns (advisory) when the host's git is older than the
+// oldest a restack of stacked pull requests runs on (workspace.GitFloor), or
+// its version cannot be read. Nothing else needs that version, so it never
+// fails doctor; a restack on such a git parks its request instead.
+func doctorCheckHostGit(ctx context.Context) doctorCheck {
+	return doctorHostGitCheck(workspace.HostGitVersion(ctx))
+}
+
+// doctorHostGitCheck is doctorCheckHostGit on the `git version` output read
+// (out), or the error reading it.
+func doctorHostGitCheck(out string, err error) doctorCheck {
+	name := "host git is " + workspace.GitFloor + " or later (restacks stacked pull requests)"
+	if err == nil {
+		err = workspace.CheckGitFloor(out)
+	}
+	if err != nil {
+		return doctorCheck{Name: name, Err: err, Advisory: true,
+			Fix: "upgrade git to " + workspace.GitFloor + " or later (Homebrew: `brew install git`); until then a request whose stacked pull request needs a restack parks"}
 	}
 	return doctorCheck{Name: name}
 }

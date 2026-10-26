@@ -103,6 +103,7 @@ type fakeForge struct {
 	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
+	hostGitVersionFn              func(ctx context.Context) (string, error)
 	userLoginFn                   func() (string, error)
 }
 
@@ -167,6 +168,9 @@ func (f *fakeForge) pushWithLease(ctx context.Context, dir, sha, branch, expecte
 }
 func (f *fakeForge) moveBranch(dir, branch, sha string) error {
 	return f.moveBranchFn(dir, branch, sha)
+}
+func (f *fakeForge) hostGitVersion(ctx context.Context) (string, error) {
+	return f.hostGitVersionFn(ctx)
 }
 func (f *fakeForge) userLogin() (string, error) { return f.userLoginFn() }
 
@@ -381,7 +385,10 @@ func newTestDeps(t testing.TB) *deps {
 			return errors.New("test forge: nothing is pushed with a lease")
 		},
 		moveBranchFn: func(string, string, string) error { return errors.New("test forge: no branch is moved") },
-		userLoginFn:  realForge.userLogin,
+		hostGitVersionFn: func(context.Context) (string, error) {
+			return "", errors.New("test forge: no git version is read")
+		},
+		userLoginFn: realForge.userLogin,
 	}
 	realHost := realHost{dp: dp}
 	dp.host = &fakeHost{

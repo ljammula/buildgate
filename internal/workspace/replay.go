@@ -23,8 +23,9 @@ var replayIdentity = []string{"-c", "user.name=buildgate", "-c", "user.email=bui
 // checkout and the cherry-pick run with nothing from configuration that runs
 // a program or changes the result, and no attribute from the commits
 // (ReplayGitArgs, HardenedGitEnv), rerere off and no signing: `git
-// cherry-pick --allow-empty --empty=keep`, which applies each named commit,
-// an already-applied one included, squashes nothing and moves no other ref.
+// cherry-pick --allow-empty --keep-redundant-commits` (the spelling git
+// before 2.45 knows of `--empty=keep`), which applies each named commit, an
+// already-applied one included, squashes nothing and moves no other ref.
 // A commit that becomes empty is kept, so the replay stays one for one; the
 // caller refuses a replay in which a commit that changed something became
 // empty.
@@ -63,7 +64,7 @@ func ReplayCommits(ctx context.Context, repoDir, worktreePath, branch, onto stri
 		}
 	}()
 	defer removeScratchWorktreeLocked(ctx, repoDir, worktreePath)
-	pick := append(append(append([]string{}, replayIdentity...), "-c", "rerere.enabled=false", "-c", "commit.gpgsign=false", "cherry-pick", "--allow-empty", "--empty=keep", "--no-rerere-autoupdate"), commits...)
+	pick := append(append(append([]string{}, replayIdentity...), "-c", "rerere.enabled=false", "-c", "commit.gpgsign=false", "cherry-pick", "--allow-empty", "--keep-redundant-commits", "--no-rerere-autoupdate"), commits...)
 	if out, pickErr := worktreeGit(ctx, worktreePath, pick...); pickErr != nil {
 		_, conflictErr := worktreeGit(ctx, worktreePath, "rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD")
 		_, _ = worktreeGit(ctx, worktreePath, "cherry-pick", "--abort")

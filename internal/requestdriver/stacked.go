@@ -101,7 +101,7 @@ func checkEarlierTicketBranch(dp Deps, ctx context.Context, dataDir string, r *r
 	if err == nil && remote != head.Run.ResultSHA {
 		// A restack of prev whose push landed unconfirmed is its head,
 		// not a human commit (confirmLandedRestack); idx then builds on it.
-		if confirmed, err := confirmLandedRestack(dp, dataDir, r, prev, remote, time.Now()); confirmed || err != nil {
+		if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, prev, remote, time.Now()); confirmed || err != nil {
 			return stackHold{}, err
 		}
 	}

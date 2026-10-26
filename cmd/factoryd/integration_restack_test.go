@@ -166,9 +166,9 @@ func (x *restackIntegration) request() *request.Request {
 	return r
 }
 
-// deps is the driver's deps: the real git calls of a restack, a GitHub
-// whose two pull requests are open drafts at their heads, and builds run
-// through the integration binary.
+// deps is the driver's deps: the real git calls of a restack and the host's
+// git version, a GitHub whose two pull requests are open drafts at their
+// heads, and builds run through the integration binary.
 func (x *restackIntegration) deps(r *request.Request) requestdriver.Deps {
 	dp := newTestDeps(x.t)
 	f, real := fakeForgeOf(dp), realForge{dp: dp}
@@ -181,6 +181,7 @@ func (x *restackIntegration) deps(r *request.Request) requestdriver.Deps {
 	f.markPullRequestReadyFn = func(context.Context, string) error { return nil }
 	f.fetchBranchCommitFn, f.revListRangeFn, f.patchIDFn = real.fetchBranchCommit, real.revListRange, real.patchID
 	f.replayCommitsFn, f.pushWithLeaseFn, f.moveBranchFn = real.replayCommits, real.pushWithLease, real.moveBranch
+	f.hostGitVersionFn = real.hostGitVersion
 	return restackDeps{deps: dp, runTicket: runReplayThroughTheBinary(x.t, x.dataDir, x.env)}
 }
 

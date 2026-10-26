@@ -2978,10 +2978,36 @@ func TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush(t *testing.T) {
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	trueVal := true
 	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	events := readyPullRequestForARound(t, dp, dataDir, false)
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	if len(*events) != 2 || (*events)[0] != "draft "+r.Tickets[0].PRURL || !strings.HasPrefix((*events)[1], "push ") {
+		t.Fatalf("events %v (state %s, %s): want the draft, then the push", *events, r.State, r.Error)
+	}
+	if t1 := r.Tickets[0]; t1.PRState != "draft" || t1.LastPolledAt != "" || !t1.Rounds[0].Pushed {
+		t.Errorf("ticket %+v: want it draft, pushed, and due for a poll", t1)
+	}
+}
+
+// readyPullRequestForARound makes dp's pull request ready until the factory
+// turns it to draft, runs an accepted review round, and records the draft
+// flips and pushes in order. markedReadyDuringPush marks it ready again as
+// the round's push lands, as a person could.
+func readyPullRequestForARound(t *testing.T, dp *fakeDeps, dataDir string, markedReadyDuringPush bool) *[]string {
+	t.Helper()
+	isDraft := false
+	inner := dp.readReviewStateFn
+	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
+		state, err := inner(ctx, prURL, policy)
+		state.IsDraft = isDraft
+		return state, err
+	}
 	var events []string
 	dp.undoMarkPullRequestReadyFn = func(_ context.Context, prURL string) error {
 		events = append(events, "draft "+prURL)
+		isDraft = true
 		return nil
 	}
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
@@ -2991,16 +3017,35 @@ func TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush(t *testing.T) {
 	dp.pushExistingBranchFn = func(_ context.Context, _, sha, branch string) error {
 		events = append(events, "push "+branch)
 		requestdrivertest.LastPushedSHA[branch] = sha
+		if markedReadyDuringPush {
+			isDraft = false
+		}
 		return nil
 	}
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
+	return &events
+}
+
+// TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft: a
+// person marks the pull request ready between the factory's flip to draft
+// and its push landing; once the push is confirmed it is turned back to
+// draft (redraftAfterFactoryPush), so no ready state carries across the new
+// head.
+func TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	trueVal := true
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	events := readyPullRequestForARound(t, dp, dataDir, true)
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
-	if len(events) != 2 || events[0] != "draft "+r.Tickets[0].PRURL || !strings.HasPrefix(events[1], "push ") {
-		t.Fatalf("events %v (state %s, %s): want the draft, then the push", events, r.State, r.Error)
+	pr := r.Tickets[0].PRURL
+	if len(*events) != 3 || (*events)[0] != "draft "+pr || !strings.HasPrefix((*events)[1], "push ") || (*events)[2] != "draft "+pr {
+		t.Fatalf("events %v (state %s, %s): want the draft, the push, then the draft again", *events, r.State, r.Error)
 	}
-	if t1 := r.Tickets[0]; t1.PRState != "draft" || t1.LastPolledAt != "" || !t1.Rounds[0].Pushed {
-		t.Errorf("ticket %+v: want it draft, pushed, and due for a poll", t1)
+	if t1 := r.Tickets[0]; t1.PRState != "draft" || !t1.Rounds[0].Pushed || r.State != request.StatePRReview {
+		t.Errorf("ticket %+v, state %s: want it draft and pushed, still in pr_review", t1, r.State)
 	}
 }

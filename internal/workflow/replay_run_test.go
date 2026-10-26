@@ -198,7 +198,8 @@ func TestRunWorkflowRefusesAnIncoherentReplayInput(t *testing.T) {
 
 // TestOrdinaryRunAsksNoReplayVersion: a run that is not a replay records no
 // replay-run marker, so every history recorded before replay runs replays
-// unchanged.
+// unchanged. TestHistoryRecordedBeforeReplayRunsReplaysUnchanged pins the
+// same for a history at DefaultVersion, the isolation guard's pattern.
 func TestOrdinaryRunAsksNoReplayVersion(t *testing.T) {
 	f := newReplayFixture(t)
 	// Asking for the version at all fails the run.
@@ -212,6 +213,25 @@ func TestOrdinaryRunAsksNoReplayVersion(t *testing.T) {
 	}
 	if slices.Contains(f.started, ApplyReplayActivityName) {
 		t.Errorf("an ordinary run started %s: %v", ApplyReplayActivityName, f.started)
+	}
+}
+
+// TestHistoryRecordedBeforeReplayRunsReplaysUnchanged pins replay-run to
+// DefaultVersion, what a history recorded before replayRunChange replays
+// as: an ordinary run builds with RunBuildActivity and is accepted, as it
+// was, and never schedules ApplyReplayActivity.
+func TestHistoryRecordedBeforeReplayRunsReplaysUnchanged(t *testing.T) {
+	f := newReplayFixture(t)
+	f.env.OnGetVersion(replayRunChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	f.env.RegisterActivityWithOptions(func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
+		return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
+	}, activity.RegisterOptions{Name: RunBuildActivityName})
+	result, err := f.run(t, fixtureInput())
+	if err != nil || result.State != run.StateAccepted {
+		t.Fatalf("replay of a pre-replay-run history: err=%v state=%q, want accepted", err, result.State)
+	}
+	if !slices.Contains(f.started, RunBuildActivityName) || slices.Contains(f.started, ApplyReplayActivityName) {
+		t.Errorf("Activities %v: want the build, and no replay step", f.started)
 	}
 }
 
