@@ -124,15 +124,6 @@ type QueueEntry struct {
 	// (-execution-thinking): the level of roles.execution.escalation, set
 	// with ExecutionModel by escalate. Empty leaves the role's own.
 	ExecutionThinking string `json:"execution_thinking,omitempty"`
-	// SpecAcceptanceCriteria is the absolute path to a file holding this
-	// ticket's approved-spec acceptance criteria, passed through
-	// to runMainWithReady's own -spec-acceptance-criteria verbatim; empty
-	// (the common case today) means no per-criterion conformity review
-	// runs. The request driver's planning step is the eventual writer of
-	// this field, when it cuts a ticket from an approved spec -- this
-	// field and its threading exist now so that wiring has somewhere to
-	// land.
-	SpecAcceptanceCriteria string `json:"spec_acceptance_criteria,omitempty"`
 	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
 	// own output: an operator-reviewed, plan_review-approved,
 	// hash-pinned reference oracle for this ticket, threaded through to

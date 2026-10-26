@@ -744,29 +744,16 @@ type AgentEvidence struct {
 	// evidence file's JSON unchanged.
 	AgentsMDUsed    bool   `json:"agents_md_used"`
 	AgentsMDGitBlob string `json:"agents_md_git_blob,omitempty"`
-	// ReviewVerdicts is the per-criterion independent-reviewer
-	// outcome against the approved spec's acceptance criteria (build_app.py's
-	// own --spec-acceptance-criteria), one entry per declared criterion.
-	// Empty/nil when no criteria file was given to build_app.py.
-	//
-	// This is agent/reviewer-reported evidence recorded AFTER build_app.py
-	// has already exited, same as every other field on this struct (see
-	// this struct's own doc comment) -- it is rendered in the PR body for
-	// a human to read, and is deliberately NOT consulted by
-	// policy.EvaluateRun or any other accept/quarantine decision.
-	// build_app.py's own review_policy="required" handling already
-	// quarantines a run with a non-clean verdict via its ordinary exit
-	// code (canonical_verify), the same way whole-diff review already
-	// does — a second, Go-side gate re-deciding the same question from
-	// this self-reported field would be exactly the never-trust-self-
-	// report-gates invariant this codebase's ground rules forbid
-	// weakening.
+	// ReviewVerdicts is pre-P2, read only: the per-criterion verdicts a
+	// build_app.py that still ran the spec-conformity review in its own
+	// process reported. Nothing writes it now; it stays so old evidence
+	// decodes unchanged, and nothing renders or decides on it.
 	ReviewVerdicts []ReviewVerdict `json:"review_verdicts,omitempty"`
 }
 
-// ReviewVerdict is one acceptance criterion's independent-reviewer
-// verdict, part of AgentEvidence.ReviewVerdicts -- see that field's own
-// doc comment for why this is informational only, never a gate input.
+// ReviewVerdict is one acceptance criterion's verdict from the retired
+// spec-conformity review, as old records hold it (AgentEvidence.ReviewVerdicts,
+// Run.SpecConformityVerdicts): read only, never a gate input.
 type ReviewVerdict struct {
 	Criterion string `json:"criterion"`
 	Verdict   string `json:"verdict"`
@@ -847,14 +834,14 @@ type ReproductionRun struct {
 }
 
 // CodeReviewResult is the run-record shape of CODE_REVIEW_EVIDENCE.json's
-// outcome -- Policy is the --review-policy this run's code_review.py
+// outcome -- Policy is the --review-policy this run's review
 // launch was given (off/advisory/required, see internal/codereview),
 // Available is false when the reviewer produced no parseable response at
 // all (never conflated with a real, empty Findings list), and Findings is
 // every finding the reviewer reported, capped by internal/codereview's
-// own ParseResult. Like ReviewVerdict/SpecConformityVerdicts, this is
-// informational only, never itself an accept/quarantine gate input -- see
-// this file's own ReviewVerdicts field doc comment for that invariant.
+// own ParseResult. A finding is informational only, never itself an
+// accept/quarantine gate input (SC-022: a finding refuses a run only
+// through the factory's own run of its reproduction).
 type CodeReviewResult struct {
 	Policy    string              `json:"policy"`
 	Available bool                `json:"available"`
@@ -1690,34 +1677,17 @@ type Run struct {
 	// (no separate full_suite_command configured)" apart from a
 	// deliberately configured one.
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
-	// SpecConformityConfigured records whether this run's own ticket
-	// declared -spec-acceptance-criteria at all -- mirrors
-	// FullSuiteConfigured's own "declared, independent of whether the gate
-	// actually ran" auditability. NOT currently in policy.AllGateChecks
-	// (see that var's own doc comment for why); this field exists so a
-	// future exemption there has something to key off of without another
-	// run-shape change.
-	SpecConformityConfigured bool `json:"spec_conformity_configured,omitempty"`
-	// SpecConformityVerdicts is the independent reviewer's per-criterion
-	// verdicts from CONFORMITY_EVIDENCE.json (the separate, later launch
-	// conformity_review.py runs -- see run_ticket.go's "conformity review,
-	// phase 2"), loaded into the run record so the release evidence can show
-	// them. Before this field existed they were retained only as a file:
-	// build_app.py stopped receiving the criteria when phase 2 was split
-	// out, so BUILD_EVIDENCE.json's review_verdicts -- the only place the
-	// evidence renderer read them from -- was silently always empty, and the
-	// PR body's "Spec conformity" section never appeared. Informational
-	// only, like AgentEvidence.ReviewVerdicts: the required/advisory
-	// enforcement already happened inside conformity_review.py.
-	SpecConformityVerdicts []ReviewVerdict `json:"spec_conformity_verdicts,omitempty"`
-	// CodeReview is the independent code reviewer's outcome from
-	// CODE_REVIEW_EVIDENCE.json (agent/pi/scripts/code_review.py's own,
+	// SpecConformityConfigured and SpecConformityVerdicts are pre-P2, read
+	// only: a run recorded before the spec-conformity review was retired
+	// says here whether its ticket declared acceptance criteria and what
+	// that review answered for each. Nothing sets them now, and no renderer
+	// or policy reads them; they stay so old records decode unchanged.
+	SpecConformityConfigured bool            `json:"spec_conformity_configured,omitempty"`
+	SpecConformityVerdicts   []ReviewVerdict `json:"spec_conformity_verdicts,omitempty"`
+	// CodeReview is the independent reviewer's outcome from
+	// CODE_REVIEW_EVIDENCE.json (agent/pi/scripts/combined_review.py's own,
 	// separate one-turn launch -- see internal/codereview's package doc
-	// comment). Nil for a run that never ran this gate. Not yet consumed
-	// by any run path or policy gate (that wiring is PR M2-B); recorded
-	// here only so the release evidence can render it once that wiring
-	// lands, the same additive-field pattern SpecConformityVerdicts above
-	// already established for CONFORMITY_EVIDENCE.json.
+	// comment). Nil for a run that never ran this gate.
 	CodeReview *CodeReviewResult `json:"code_review,omitempty"`
 	// ReferenceOracleDir is the -reference-oracle-dir this run was
 	// configured with, recorded so any finalization site -- including a

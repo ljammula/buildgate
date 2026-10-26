@@ -182,10 +182,9 @@ Inside `building`, one ticket at a time:
        v                                                                 v
   gates, all factory-owned:                              run halts, worktree is kept,
     canonical_verify        full_suite_verify            request waits in resume_review:
-    diff_scope              spec_conformity                factoryd resume <id>
-    required_files_changed  code_review       (policy)     factoryd resume -from scratch <id>
-    tests_added             reference_oracle  (oracles,    factoryd cancel <id>
-                                               + canary)
+    diff_scope              code_review       (policy)     factoryd resume <id>
+    required_files_changed  reference_oracle  (oracles,    factoryd resume -from scratch <id>
+    tests_added                               + canary)    factoryd cancel <id>
        |              |
      pass            fail
        |              |

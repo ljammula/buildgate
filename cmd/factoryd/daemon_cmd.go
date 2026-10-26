@@ -51,7 +51,7 @@ const reclaimComposeGateTry = 3 * time.Second
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
 
-func newDaemonFlags() (flags *flag.FlagSet, temporalAddress, repository, dataDir, buildAppInterpreter, buildAppScript, conformityPolicy *string, maxRounds, timeoutMinutes *int, verifyCommand, egressCABundle, configPath *string) {
+func newDaemonFlags() (flags *flag.FlagSet, temporalAddress, repository, dataDir, buildAppInterpreter, buildAppScript *string, maxRounds, timeoutMinutes *int, verifyCommand, egressCABundle, configPath *string) {
 	flags = flag.NewFlagSet("daemon", flag.ContinueOnError)
 	// configPath resolves this daemon's own settings (sandbox/relay
 	// budgets, release policy -- see resolveSettings's replacement below)
@@ -69,7 +69,6 @@ func newDaemonFlags() (flags *flag.FlagSet, temporalAddress, repository, dataDir
 	dataDir = flags.String("data-dir", "data", "directory for durable run records, logs, and checkpoints")
 	buildAppInterpreter = flags.String("build-app-interpreter", "python3", "internal: the interpreter that runs -build-app-script; tests point it at a stand-in")
 	buildAppScript = flags.String("build-app-script", "", "path to a build_app.py to run in place of the built-in one")
-	conformityPolicy = flags.String("conformity-policy", "required", "what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
 	maxRounds = flags.Int("max-rounds", 3, "most rounds the build loop may take on one ticket")
 	timeoutMinutes = flags.Int("timeout-minutes", 45, "minutes the coding agent may run in one build round")
 	verifyCommand = flags.String("verify-command", "make verify", "canonical verification command, run in the workspace")
@@ -88,7 +87,6 @@ type daemonRun struct {
 	repository              *string
 	buildAppInterpreter     *string
 	buildAppScript          *string
-	conformityPolicy        *string
 	maxRounds               *int
 	timeoutMinutes          *int
 	verifyCommand           *string
@@ -135,7 +133,7 @@ func (d *daemonRun) loadConfig() error {
 	var configPath *string
 	var dataDir *string
 	var flags *flag.FlagSet
-	flags, d.temporalAddress, d.repository, dataDir, d.buildAppInterpreter, d.buildAppScript, d.conformityPolicy, d.maxRounds, d.timeoutMinutes, d.verifyCommand, d.egressCABundle, configPath = newDaemonFlags()
+	flags, d.temporalAddress, d.repository, dataDir, d.buildAppInterpreter, d.buildAppScript, d.maxRounds, d.timeoutMinutes, d.verifyCommand, d.egressCABundle, configPath = newDaemonFlags()
 	if err := flags.Parse(d.args); err != nil {
 		return err
 	}
@@ -430,7 +428,6 @@ func (d *daemonRun) startWorker() error {
 		BuildAppInterpreter: *d.buildAppInterpreter,
 		BuildAppScript:      *d.buildAppScript,
 		BuildMaxAttempts:    *d.buildAppMaxAttempts,
-		ConformityPolicy:    *d.conformityPolicy,
 		MaxRounds:           *d.maxRounds,
 		TimeoutMinutes:      *d.timeoutMinutes,
 		VerifyCommand:       *d.verifyCommand,

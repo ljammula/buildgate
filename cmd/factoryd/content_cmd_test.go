@@ -16,11 +16,11 @@ import (
 func TestPromptEntriesUseHarnessAllowlistAndIdentifyRoleAndStage(t *testing.T) {
 	dir := t.TempDir()
 	for name, text := range map[string]string{
-		"draft_spec.prompt.md":                "draft spec\n",
-		"build_corrective.agent.prompt.md":    "fix build\n",
-		"code_review.json_contract.prompt.md": "review contract\n",
-		"not-allowlisted.prompt.md":           "ignore me\n",
-		"build_app.py":                        "not a prompt\n",
+		"draft_spec.prompt.md":             "draft spec\n",
+		"build_corrective.agent.prompt.md": "fix build\n",
+		"code_review.scope_rule.prompt.md": "review contract\n",
+		"not-allowlisted.prompt.md":        "ignore me\n",
+		"build_app.py":                     "not a prompt\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
 			t.Fatal(err)
@@ -44,9 +44,9 @@ func TestPromptEntriesUseHarnessAllowlistAndIdentifyRoleAndStage(t *testing.T) {
 		}
 	}
 	for name, want := range map[string][2]string{
-		"draft_spec.prompt.md":                {"planning", "spec drafting"},
-		"build_corrective.agent.prompt.md":    {"execution", "corrective build"},
-		"code_review.json_contract.prompt.md": {"review", "code review"},
+		"draft_spec.prompt.md":             {"planning", "spec drafting"},
+		"build_corrective.agent.prompt.md": {"execution", "corrective build"},
+		"code_review.scope_rule.prompt.md": {"review", "code review"},
 	} {
 		if got[name].role != want[0] || got[name].stage != want[1] {
 			t.Errorf("%s role/stage = %s/%s, want %s/%s", name, got[name].role, got[name].stage, want[0], want[1])

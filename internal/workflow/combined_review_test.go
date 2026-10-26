@@ -17,16 +17,14 @@ import (
 	"buildgate/internal/testfixture"
 )
 
-// combinedReviewFixtureInput is fixtureInput() plus the relay policy,
-// spec, and criteria path RunReviewStepActivity needs for the Combined
-// step -- mirrors codeReviewFixtureInput.
+// combinedReviewFixtureInput is fixtureInput() plus the relay policy and
+// spec RunReviewStepActivity needs for the Combined step.
 func combinedReviewFixtureInput(t *testing.T, workspacePath string) ReviewStepInput {
 	t.Helper()
 	input := fixtureInput()
 	input.WorkspacePath = workspacePath
 	input.RunID = "combined-review-run"
 	input.SpecPath = "/fixture/spec.md"
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = codereview.PolicyRequired
 	dataDir := t.TempDir()
 	input.DataDir = dataDir
@@ -38,14 +36,10 @@ func combinedReviewFixtureInput(t *testing.T, workspacePath string) ReviewStepIn
 	return ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}
 }
 
-// TestRunReviewStepActivityAcceptsCombinedStepDespiteItNotBeingInSteps
-// proves RunReviewStepActivity resolves Step == reviewstep.Combined via
-// reviewstep.CombinedStep instead of reviewstep.ByName -- which never
-// finds Combined (it is deliberately absent from reviewstep.Steps, see
-// that table's own doc comment) -- so a combined-review launch does not
-// fail with "unknown review step" the way an unrecognized Step value
-// correctly still does.
-func TestRunReviewStepActivityAcceptsCombinedStepDespiteItNotBeingInSteps(t *testing.T) {
+// TestRunReviewStepActivityRunsTheCombinedStep proves RunReviewStepActivity
+// launches Step == reviewstep.Combined and returns the launch's raw exit
+// status: the workflow, not the Activity, decodes it.
+func TestRunReviewStepActivityRunsTheCombinedStep(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	logDir := t.TempDir()
 	activities := testRoutedActivities(sandbox.NewRouteSecret("worker-static-upstream-key"))
@@ -96,7 +90,7 @@ func TestRunReviewStepActivityAcceptsCombinedStepDespiteItNotBeingInSteps(t *tes
 	}
 }
 
-// TestReviewStepArgsForCombinedStepIncludesBothHostPaths proves
+// TestReviewStepArgsForCombinedStepIncludesTheSpecPathAndNoConformityFlags proves
 // reviewStepArgs builds combined_review.py's own argv (via
 // reviewstep.CombinedArgs) with input.SpecPath verbatim -- a.runSandboxWithRetries
 // always stages that host path (specPath), so it must appear in args
@@ -104,14 +98,12 @@ func TestRunReviewStepActivityAcceptsCombinedStepDespiteItNotBeingInSteps(t *tes
 // translate it to its in-container path. No criteria and no conformity
 // policy are passed: the conformity review is retired.
 func TestReviewStepArgsForCombinedStepIncludesTheSpecPathAndNoConformityFlags(t *testing.T) {
-	activities := &Activities{}
 	input := fixtureInput()
 	input.SpecPath = "/fixture/spec.md"
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = "required"
 	stepInput := ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}
 
-	args := reviewStepArgs(activities, reviewstep.CombinedStep, stepInput, "/fixture/"+reviewstep.CombinedScriptName)
+	args := reviewStepArgs(stepInput, "/fixture/"+reviewstep.CombinedScriptName)
 
 	assertArgValue := func(flag, want string) {
 		for i, a := range args {
@@ -139,11 +131,10 @@ func TestReviewStepArgsForCombinedStepIncludesTheSpecPathAndNoConformityFlags(t 
 // step's no-relay halt text names the policy that needs the model.
 func TestReviewStepNoRelayErrorNamesTheCombinedStep(t *testing.T) {
 	input := fixtureInput()
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = "required"
 	stepInput := ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}
 
-	got := reviewStepNoRelayError(reviewstep.CombinedStep, stepInput)
+	got := reviewStepNoRelayError(stepInput)
 	if got == "" {
 		t.Fatal("reviewStepNoRelayError returned empty string for the Combined step")
 	}

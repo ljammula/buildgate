@@ -550,8 +550,6 @@ func promptRoleStage(name string) (string, string) {
 		return "review", "combined review"
 	case strings.HasPrefix(name, "review."):
 		return "review", "review setup"
-	case strings.HasPrefix(name, "spec_conformity."):
-		return "review", "spec conformity"
 	case strings.HasPrefix(name, "draft_spec."):
 		return "planning", "spec drafting"
 	case strings.HasPrefix(name, "draft_acceptance_oracles."):

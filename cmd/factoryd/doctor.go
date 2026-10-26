@@ -2915,7 +2915,7 @@ func doctorCheckReleasePolicy(maxFilesChanged, maxInsertions int, rollbackPlan s
 // a hard FAIL unless allow_shared_model is set.
 //
 // A schema-clean routes: config is a plain OK here: the direct build/
-// conformity/drafting paths resolve an actual route via
+// review/drafting paths resolve an actual route via
 // modelrole.SelectRoute, and the Temporal path (`factoryd daemon`,
 // `factoryd run -temporal-address`) resolves one too
 // (modelrole.CheckRouteBinding, the Worker's own trust check, plus

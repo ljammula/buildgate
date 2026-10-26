@@ -1,39 +1,15 @@
-#!/usr/bin/env python3
-"""The code review's finding parser and evidence writer, shared with
-combined_review.py (the review step the factory launches), plus a
-standalone CLI for a code-review-only launch. A one-turn review runs as a
-distinct script rather than a mode flag on build_app.py: build_app.py's own
-main() always overwrites BUILD_EVIDENCE.json/BUILD_REPORT.md, so a
-review-only pass needs its own evidence file. The CLI only ever reads git
-(a diff/diff --stat to build the reviewer's own prompt, see
-build_app.workspace_diff), never writes -- .git is mounted read-only inside
-the sandbox unconditionally.
-
-Before the live example-app walk (2026-09-28), the reviewer was told to run
-`git diff` itself and did: ~13 tool-use turns at ~77k input tokens each
-against a real ticket, burning the relay's whole 1M-token/hour
-sliding-window budget before ever answering, and ending with four 429s
-and no findings at all. Fetching the diff here and inlining it in the
-prompt (capped at 120,000 characters -- see build_app._DIFF_TRUNCATE_LIMIT) turns
-that into a single read instead of an open-ended exploration.
-
-This script asks an independent model turn for a free-form code review of
-the diff: concrete correctness, security,
-data-loss, or concurrency defects, each with a failure scenario. It is
-not a style/lint/formatting pass -- build_app.py's own round loop already
-formats changed Go files, and a reviewer flagging style drift here would
-just be false-positive noise on top of that.
-
-Usage:
-    python3 code_review.py --workspace /path/to/app --spec ticket.md \\
-        [--review-policy required] [--review-base-sha <sha>]
-
-Writes CODE_REVIEW_EVIDENCE.json into --workspace. Exit code 0 iff the
-review succeeded under the declared --review-policy.
+"""The code review's shared helpers, imported by combined_review.py (the
+only review step the factory launches): the finding parser
+(parse_code_review_findings, with each finding's spec_line and
+reproduction), the reproduction caps (MAX_REPRODUCTIONS,
+MAX_REPRODUCTION_BYTES, cap_reproductions), the rule texts the review prompt
+embeds (SCOPE_RULE, SEVERITY_RULE, REPRODUCTION_RULE, COMMAND_OUTCOME_RULE),
+and the CODE_REVIEW_EVIDENCE.json builder and writer (code_review_evidence,
+write_code_review_evidence_json). It has no command line and runs no model
+turn.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from datetime import datetime, timezone
@@ -41,7 +17,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_app  # noqa: E402
-import harness_adapters  # noqa: E402
 import prompt_templates  # noqa: E402
 
 CODE_REVIEW_EVIDENCE_SCHEMA_VERSION = 1
@@ -70,45 +45,8 @@ COMMAND_OUTCOME_RULE = (
 	prompt_templates.load_text("code_review.command_outcome_rule")
 )
 
-JSON_CONTRACT = (
-	prompt_templates.load_text("code_review.json_contract")
-)
-
-# The rule constants above are shared with combined_review.py's own prompt,
-# so it reuses this review's exact wording instead of a driftable copy.
-
-DIFF_SELF = prompt_templates.load("code_review.diff_self", ("base",))
-DIFF_INLINE = prompt_templates.load("code_review.diff_inline", ("diff",))
-PROMPT = prompt_templates.load(
-	"code_review",
-	("diff_instructions", "spec_text", "scope_rule", "severity_rule", "command_outcome_rule", "json_contract"),
-)
-
-
-def code_review_prompt(
-	spec_text: str, review_base_sha: str | None, diff: tuple[str, str] | None = None, instructions_block: str = "",
-) -> str:
-	"""Builds the reviewer's prompt. diff, when given, is (stat, diff_text)
-	from build_app.workspace_diff: the diff is inlined directly and the reviewer is
-	told not to re-fetch it, instead of being asked to run `git diff`
-	itself -- found live (example-app walk, 2026-09-28): asked to "diff the
-	workspace" itself, the reviewer explored with tools for ~13 turns at
-	~77k input tokens each before the relay's own sliding-window limiter
-	cut it off with four straight 429s and no findings at all. diff is
-	None when review_base_sha is unknown, or when the git read to build it
-	failed (run_code_review's own call site) -- the prompt then falls back
-	to asking the reviewer to diff for itself, exactly as before this
-	fix."""
-	if diff is None:
-		diff_instructions = DIFF_SELF.format(base=review_base_sha or "the commit this session started from")
-		diff_instructions = diff_instructions.removesuffix("\n") + instructions_block
-	else:
-		stat, diff_text = diff
-		diff_instructions = DIFF_INLINE.format(diff=build_app.format_diff_for_prompt(stat, diff_text, review_base_sha) + instructions_block)
-	return PROMPT.format(
-		diff_instructions=diff_instructions.removesuffix("\n"), spec_text=spec_text, scope_rule=SCOPE_RULE,
-		severity_rule=SEVERITY_RULE, command_outcome_rule=COMMAND_OUTCOME_RULE, json_contract=JSON_CONTRACT,
-	).removesuffix("\n")
+# The rule constants above are shared with combined_review.py's prompt, so it
+# reuses one wording instead of a driftable copy.
 
 
 def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
@@ -263,10 +201,8 @@ def code_review_evidence(
 ) -> dict:
 	"""Builds the CODE_REVIEW_EVIDENCE.json shape from an already-parsed
 	(available, findings) pair and the underlying turn's own error string
-	-- shared by run_code_review below (the standalone CLI) and
-	combined_review.py's own run_combined_review, so the two callers can
-	never diverge on how findings turn into a succeeded/stopped_reason
-	outcome. notes are the caps' notes (cap_reproductions), kept under
+	used by combined_review.py's run_combined_review, so the outcome
+	of findings (succeeded, stopped_reason) has one home. notes are the caps' notes (cap_reproductions), kept under
 	"notes" only when there are any."""
 	# A finding never fails the review (SC-022: it blocks only through a
 	# reproduction the factory runs); a review fails only by giving no verdict.
@@ -298,96 +234,7 @@ def code_review_evidence(
 	return evidence
 
 
-def run_code_review(
-	workspace: Path, *, spec_path: Path, review_policy: str = "required",
-	review_base_sha: str | None = None, thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
-	instructions_diff: Path | None = None,
-) -> dict:
-	"""Runs the code review and returns a JSON-serializable evidence dict
-	(the same shape write_code_review_evidence_json writes to disk), so
-	callers/tests can inspect the outcome without round-tripping through
-	a file."""
-	spec_text = spec_path.read_text()
-	diff = build_app.workspace_diff(workspace, review_base_sha) if review_base_sha else None
-	diff_fetch_failed = review_base_sha is not None and diff is None
-	prompt = code_review_prompt(
-		spec_text, review_base_sha, diff=diff, instructions_block=build_app.instructions_diff_block(instructions_diff),
-	)
-	turn = build_app.run_review_turn(
-		workspace, prompt=prompt, session_dir=workspace / ".pi-code-review-session",
-		review_base_sha=review_base_sha, thinking=thinking, adapter=adapter, prompt_name="review-code",
-	)
-	error = build_app.single_line(build_app.redact(turn.error, 100_000)) if turn.error else ""
-	available, findings = parse_code_review_findings(turn.text)
-	return code_review_evidence(
-		available, findings, error, review_policy=review_policy, thinking=thinking,
-		diff_fetch_failed=diff_fetch_failed,
-	)
-
-
-def crashed_review_evidence(review_policy: str, thinking: str | None, exc: BaseException) -> dict:
-	"""Evidence for a review that crashed before producing a result: the
-	same shape run_code_review returns, unavailable, with the exception
-	named in error/stopped_reason, so the gate and the run record say why
-	instead of the script dying with no evidence file at all."""
-	error = build_app.single_line(build_app.redact(f"{type(exc).__name__}: {exc}", 100_000))[:300]
-	return {
-		"schema_version": CODE_REVIEW_EVIDENCE_SCHEMA_VERSION,
-		"generated": datetime.now(timezone.utc).isoformat(),
-		"review_policy": review_policy,
-		"thinking": thinking,
-		"available": False,
-		"succeeded": review_policy == "advisory",
-		"stopped_reason": f"code review crashed before a result: {error}",
-		"error": error,
-		"findings": [],
-	}
-
-
 def write_code_review_evidence_json(workspace: Path, evidence: dict) -> Path:
 	path = workspace / "CODE_REVIEW_EVIDENCE.json"
 	path.write_text(json.dumps(evidence, indent=2) + "\n")
 	return path
-
-
-def main() -> int:
-	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-	parser.add_argument("--workspace", required=True, type=Path)
-	parser.add_argument("--spec", required=True, type=Path, help="The ticket's approved spec, given to the reviewer as context only.")
-	parser.add_argument("--review-policy", choices=("required", "advisory"), default="required")
-	parser.add_argument(
-		"--review-base-sha", default=None,
-		help="Commit the independent reviewer should diff against -- pass the same ticket-start boundary build_app.py's own phase 1 used.",
-	)
-	parser.add_argument(
-		"--harness", choices=sorted(harness_adapters.ADAPTERS), default="pi",
-		help="Coding agent to drive (see harness_adapters.py).",
-	)
-	parser.add_argument(
-		"--thinking", choices=build_app.THINKING_LEVELS, default=None,
-		help="Pi thinking level for this job; omitted inherits Pi's installed setting.",
-	)
-	parser.add_argument(
-		"--instructions-diff", type=Path, default=None,
-		help="Host file holding what the build did to the repository's instruction files; shown to the reviewer as data.",
-	)
-	args = parser.parse_args()
-	adapter = harness_adapters.get(args.harness)
-
-	try:
-		adapter.prepare()
-		evidence = run_code_review(
-			args.workspace.resolve(), spec_path=args.spec.resolve(),
-			review_policy=args.review_policy, review_base_sha=args.review_base_sha,
-			thinking=args.thinking, adapter=adapter, instructions_diff=args.instructions_diff,
-		)
-	except Exception as exc:  # noqa: BLE001 -- any crash must still leave evidence naming it
-		evidence = crashed_review_evidence(args.review_policy, args.thinking, exc)
-	evidence_path = write_code_review_evidence_json(args.workspace.resolve(), evidence)
-	print(f"Evidence written to {evidence_path}")
-	print(f"Outcome: {'SUCCEEDED' if evidence['succeeded'] else 'DID NOT SUCCEED'} -- {evidence['stopped_reason']}")
-	return 0 if evidence["succeeded"] else 1
-
-
-if __name__ == "__main__":
-	sys.exit(main())

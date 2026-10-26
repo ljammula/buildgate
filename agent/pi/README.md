@@ -20,7 +20,7 @@ and [`USAGE.md`](../../USAGE.md).
 | `plan_tickets.py` | Request driver's one-shot ticket plan; given the read-back answers approved with the spec (`--spec-answers-file`) after the spec | `worker -plan-tickets-script` |
 | `draft_agents.py` | Doctor's one-shot root `AGENTS.md` draft; the factory supplies the shared refusal instructions and copies the successful scratch output to the repository root | `doctor -target-repo <repo> -fix` |
 | `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`); given the read-back answers approved with the spec (`--spec-answers-file`) after the criteria | `worker -draft-oracles-script` |
-| `code_review.py` | The code review's finding parser and evidence writer, shared with `combined_review.py` (`spec_line` and `reproduction` per finding, at most 3 reproductions of 32 KiB each), plus a standalone code-review CLI (`-code-review-policy off\|advisory\|required`). A finding never fails the review: it fails only with no verdict | — |
+| `code_review.py` | The code review's finding parser and evidence writer, shared with `combined_review.py` (`spec_line` and `reproduction` per finding, at most 3 reproductions of 32 KiB each) and the evidence builder and writer. It has no command line. A finding never fails the review: it fails only with no verdict | — |
 | `combined_review.py` | The review step: one launch, one model turn, a code review of the diff with the approved spec shown numbered (`--approved-spec`, `L<n>: <line>`). A finding may cite one spec line and carry a reproduction the factory runs itself (SC-022); the reviewer writes no file. Writes `CODE_REVIEW_EVIDENCE.json` only. Exit 40 when the review gave a verdict under its policy, 42 when it did not; findings never change it. An answer with no parseable findings list is asked for once more with the same prompt, in `.pi-combined-review-session/retry`: the two turns share 20 minutes, the retry is skipped under 5, the first turn's evidence is written first and its transcript removed (no link followed). The evidence then carries a `retry` line, and the retry's prompt is saved as `review-combined-retry`. A turn that failed is not run again here (the host launches the review again when the spend meter's record shows its model served nothing) | — |
 
 `tests/` holds one `pytest`-compatible suite per script.
@@ -51,7 +51,6 @@ freely, headings only together with their validator.
 | `draft_acceptance_oracles.answers.prompt.md` | `draft_acceptance_oracles.py` (after the criteria, when `--spec-answers-file` is given) | `{answers}` |
 | `draft_acceptance_oracles.criterion_index.prompt.md` | `draft_acceptance_oracles.py` | `{index}`, `{total}`, `{oracle_filename}`, `{default_filename}` |
 
-| `code_review.prompt.md`, `.diff_self`, `.diff_inline` | `code_review.py` | `{diff_instructions}`, `{spec_text}`, the four rule texts; `{base}`; `{diff}` |
 | `combined_review.prompt.md`, `.diff_self`, `.diff_inline` | `combined_review.py` | `{diff_block}`, `{spec_text}`, `{approved_spec}`, four rule texts; `{base}`; `{diff}` |
 | `build_round_checklist.prompt.md` | `build_app.py` (the definition of done after the ticket in round 1) | `{verify}` |
 | `build_corrective.intro`, `.verify`, `.excerpt`, `.oracle`, `.reviewer` | `build_app.py` (`corrective_prompt`, one part each, joined by blank lines) | `{round_index}`, `{max_rounds}`, `{blockers}`; `{verify_command}`, `{verify_tail}`; `{verify_tail}`; `{oracle_command}`, `{oracle_tail}`; `{detail}` |
@@ -59,7 +58,7 @@ freely, headings only together with their validator.
 | `build_corrective.history`, `.agent`, `.log`, `.stuck` | `build_app.py` (`corrective_prompt`: the rounds so far, a failure of the agent process, where the failing command's whole output is, the diagnose-first steps) | `{history}`; `{agent_notes}`; `{failure_log}`, `{failing}`; `{streak}` |
 | `build_handoff_notes` | `build_app.py` (`run_notes_turn`: the one extra turn of a build that ends without passing) | none: literal text |
 | `build_passed_notes` | `build_app.py` (`run_notes_turn_after_pass`: the same turn for a build that passed after a round that did not; the worktree is recorded before and after it) | none: literal text |
-| `code_review.scope_rule`, `.severity_rule`, `.reproduction_rule`, `.command_outcome_rule`, `.json_contract` | the review prompts, shared | none: literal text (`load_text`), braces are plain characters |
+| `code_review.scope_rule`, `.severity_rule`, `.reproduction_rule`, `.command_outcome_rule` | the review prompt, via `code_review.py` | none: literal text (`load_text`), braces are plain characters |
 
 The review and build templates keep each paragraph on one line, as the
 prompts were sent before; rewrapping one changes the prompt. The
@@ -177,8 +176,8 @@ in `<home>/skills/<name>` each round (Codex's bundled skills are off). Parsers a
 ## The oracle drafter
 
 `draft_acceptance_oracles.py` reads an approved spec's acceptance
-criteria (`--criteria`, one per line, same file as `build_app.py
---spec-acceptance-criteria`), runs one headless `pi` pass that writes a
+criteria (`--criteria`, one per line, flat file, read by
+`build_app.read_acceptance_criteria`), runs one headless `pi` pass that writes a
 `MANIFEST.json` plus oracle test files, validates the manifest, copies
 everything to `--out-dir` and writes `--evidence`. Feedback from an
 `oracle_review` rejection arrives via `--feedback` as guidance only.

@@ -764,7 +764,7 @@ export interface RequestSummary {
    */
   readonly wait: RequestWait | null;
   /**
-   * Which check quarantined this request (e.g. "spec_conformity"); null
+   * Which check quarantined this request (e.g. "diff_scope"); null
    * unless currently quarantined for that reason.
    */
   readonly quarantineCheck: string | null;

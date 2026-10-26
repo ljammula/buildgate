@@ -68,6 +68,9 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	SandboxMemoryFailureType: unresolved.SandboxMemory,
 	// A step whose heartbeats got no answer for a whole heartbeat timeout.
 	TemporalUnreachableFailureType: unresolved.TemporalUnreachable,
+	// A retired review step pending in a history recorded before
+	// reviewReproductionChange: this Worker gives it no verdict.
+	ReviewStepRetiredFailureType: unresolved.NoVerdict,
 }
 
 // modelRouteFailureTypes is the failure type of each cause
@@ -166,6 +169,7 @@ var nonRetryableActivityFailureTypes = []string{
 	AmbiguousPriorAttemptType,
 	ActivitySupersededType,
 	TemporalUnreachableFailureType,
+	ReviewStepRetiredFailureType,
 }
 
 // retriedActivityOptions is options with the retrying policy: the second

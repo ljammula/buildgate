@@ -13,10 +13,12 @@ function exit(kind: string, exitCode: number): string {
 }
 
 describe("attemptExitText", () => {
-  test("decodes a combined review launch exit code", () => {
-    expect(exit("review", 40)).toBe("Exit code: 40 (spec conformity passed, code review passed)");
-    expect(exit("review", 41)).toBe("Exit code: 41 (spec conformity failed, code review passed)");
-    expect(exit("review", 43)).toBe("Exit code: 43 (spec conformity failed, code review failed)");
+  test("decodes a review launch exit code", () => {
+    expect(exit("review", 40)).toBe("Exit code: 40 (review passed)");
+    expect(exit("review", 42)).toBe("Exit code: 42 (review gave no verdict)");
+    // A retired combined launch's conformity bit (41, 43) is just an exit code.
+    expect(exit("review", 41)).toBe("Exit code: 41");
+    expect(exit("review", 43)).toBe("Exit code: 43");
   });
 
   test("leaves other exit codes alone", () => {

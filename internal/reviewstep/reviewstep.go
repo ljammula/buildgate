@@ -3,8 +3,8 @@
 // already passed and the workspace holds a real, already-committed result:
 // one launch of agent/pi/scripts/combined_review.py, a free-form code review
 // whose findings may cite a line of the approved spec and carry a
-// reproduction (SC-022). The Temporal workflow (internal/workflow) reads this
-// table for the step's name, progress-feed stage, halt/error label, harness
+// reproduction (SC-022). The Temporal workflow (internal/workflow) reads
+// CombinedStep for the step's name, progress-feed stage, halt/error label, harness
 // script, and evidence file, and decodes the launch's exit status through
 // ReviewExitCode.
 //
@@ -27,8 +27,7 @@ type Step struct {
 	// Stage is the progress-feed stage name (progressMark's own "stage"
 	// argument, and the corresponding withStage call in cmd/factoryd).
 	Stage string
-	// Label names this step in halt/error messages ("spec-conformity
-	// review", "code review").
+	// Label names this step in halt/error messages ("review").
 	Label string
 	// ScriptName is the harness script's own filename -- callers
 	// resolve its full path as a sibling of build_app.py, the same way
@@ -40,42 +39,17 @@ type Step struct {
 	EvidenceFile string
 }
 
-// The step names, also usable as ReviewStepInput.Step values. SpecConformity
-// is the retired spec-conformity review's name: it is in no table and no Plan,
-// kept only to read records and histories from before it was retired.
-// Combined is the review launch's name (never "code_review"), so a caller
-// keyed on Step.Name (attempt Kind, log basename, Temporal
-// checkpoint/journal "kind" tag) can tell it from the standalone code-review
-// script's launch.
+// The step names, also usable as ReviewStepInput.Step values. Combined is
+// the review launch's name (run.Attempt.Kind "review"); CodeReview is the
+// gate the launch decides ("code_review"). SpecConformity and CodeReview
+// are also the retired standalone steps' names: no plan returns them, and
+// they are kept only to read records and replay workflow histories from
+// before they were retired.
 const (
 	SpecConformity = "spec_conformity"
 	CodeReview     = "code_review"
 	Combined       = "review"
 )
-
-// Steps is the table of standalone steps: the standalone code-review script
-// (code_review.py), whose evidence file is the one CombinedStep writes too.
-var Steps = []Step{
-	{
-		Name:         CodeReview,
-		Stage:        "code_review",
-		Label:        "code review",
-		ScriptName:   codereview.ScriptName,
-		EvidenceFile: codereview.EvidenceFile,
-	},
-}
-
-// ByName returns the Step with the given Name, and whether one was found.
-// Combined is deliberately not in Steps and so is never found here -- get it
-// from Plan below instead.
-func ByName(name string) (Step, bool) {
-	for _, s := range Steps {
-		if s.Name == name {
-			return s, true
-		}
-	}
-	return Step{}, false
-}
 
 // CombinedScriptName is agent/pi/scripts/combined_review.py's own filename --
 // both execution paths resolve its full path as a sibling file in the
@@ -83,15 +57,14 @@ func ByName(name string) (Step, bool) {
 const CombinedScriptName = "combined_review.py"
 
 // CombinedStep is the single review launch Plan returns: one sandboxed
-// launch of combined_review.py, one model turn. It writes the same evidence
-// file the standalone step does (CODE_REVIEW_EVIDENCE.json), so its own
-// EvidenceFile is left "": a caller retaining or loading evidence uses the
-// CodeReview Step's (via ByName).
+// launch of combined_review.py, one model turn, writing
+// CODE_REVIEW_EVIDENCE.json.
 var CombinedStep = Step{
-	Name:       Combined,
-	Stage:      "review",
-	Label:      "review",
-	ScriptName: CombinedScriptName,
+	Name:         Combined,
+	Stage:        "review",
+	Label:        "review",
+	ScriptName:   CombinedScriptName,
+	EvidenceFile: codereview.EvidenceFile,
 }
 
 // Plan returns the review Steps to run: CombinedStep alone when the review

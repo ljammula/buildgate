@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
+	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 )
@@ -151,7 +152,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 	}, activity.RegisterOptions{Name: CollectEvidenceActivityName})
 	f.env.RegisterActivityWithOptions(func(_ context.Context, in ReviewStepInput) (VerifyActivityResult, error) {
 		reviewBase = in.effectiveDiffBase()
-		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "code_review.py"}, ExitCode: 0}}, nil
+		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "combined_review.py"}, ExitCode: reviewstep.CombinedExitBase}}, nil
 	}, activity.RegisterOptions{Name: RunReviewStepActivityName})
 
 	result, err := f.run(t, input)

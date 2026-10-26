@@ -243,33 +243,9 @@ describe("the halted/quarantined recovery callout", () => {
     await heading("T");
     expect(screen.getByRole("button", { name: "Send back to spec" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send back to planning" })).not.toBeInTheDocument();
-    // Retry leads for a quarantine that is not spec_conformity, so the
-    // copyable command is the retry, not a send-back.
+    // Retry leads, so the copyable command is the retry, not a send-back.
     expect(screen.getByText("factoryd retry req-1")).toBeInTheDocument();
     expect(screen.queryByText(/factoryd reject/)).not.toBeInTheDocument();
-  });
-
-  test("'Send back to spec' is the primary, first action for a spec_conformity quarantine", async () => {
-    openRequest(
-      requestWire({
-        state: "quarantined",
-        title: "T",
-        can_send_back: true,
-        can_send_back_to_plan: true,
-        quarantine_check: "spec_conformity",
-      }),
-    );
-    await heading("T");
-    const buttons = within(callout()).getAllByRole("button");
-    const names = buttons.map((b) => b.textContent);
-    // First among the callout's own actions, ahead of Retry.
-    expect(names.indexOf("Send back to spec")).toBeLessThan(names.indexOf("Retry request"));
-    expect(names.indexOf("Send back to spec")).toBe(0);
-    // Targets spec even though planning is allowed, and the CLI hint mirrors that action.
-    expect(screen.queryByRole("button", { name: "Send back to planning" })).not.toBeInTheDocument();
-    expect(
-      screen.getByText('factoryd reject -to spec -reason "<what to change>" req-1'),
-    ).toBeInTheDocument();
   });
 });
 

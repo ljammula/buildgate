@@ -21,7 +21,7 @@ one further turn (see run_combined_review). A turn that fails gets none: the
 host decides from the spend meter's record whether to launch the review
 again.
 
-Writes CODE_REVIEW_EVIDENCE.json in code_review.py's own schema (the only
+Writes CODE_REVIEW_EVIDENCE.json in code_review.py's schema (the only
 evidence file).
 
 Usage:

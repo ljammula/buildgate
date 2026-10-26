@@ -56,8 +56,8 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 	const fromBase = "This build starts again from the base commit: none of that attempt's changes are in the workspace"
 	const onBranch = "This build continues on that attempt's branch: what it committed is in the workspace."
 	flagged := func(rr *run.Run) {
-		rr.GateResults = []run.GateResult{{Check: "spec_conformity", Passed: false}}
-		rr.SpecConformityVerdicts = []run.ReviewVerdict{{Criterion: "2. rejects a negative amount", Verdict: "flagged", Detail: "no test covers it"}}
+		rr.GateResults = []run.GateResult{{Check: "code_review", Passed: false}}
+		rr.CodeReview = &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", File: "amount.go", Line: 3, Summary: "rejects a negative amount"}}}
 	}
 	for name, tc := range map[string]struct {
 		failed []string

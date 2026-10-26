@@ -1,58 +1,14 @@
-// Package conformity holds the pure logic behind the two-phase
-// spec-conformity-review design -- shared between cmd/factoryd's direct
-// path (run_ticket.go) and the Temporal path (internal/workflow) so the
-// two execution engines can never silently diverge on how
-// agent/pi/scripts/conformity_review.py is invoked or how its relay
-// budget is derived. See run_ticket.go's own "conformity review, phase
-// 2" doc comment for the full incident this design exists to fix: a
-// spec-drafted acceptance criterion can ask the reviewer to check
-// something about the commit itself, which can only be evaluated
-// meaningfully against an already-committed workspace, and .git is
-// mounted read-only inside the sandbox unconditionally -- so the review
-// has to run as its own, separate sandboxed launch, after the host-side
-// safety-net commit has already landed, not folded into build_app.py's
-// own single launch.
-package conformity
+package codereview
 
 import "buildgate/internal/sandbox"
 
-// ScriptName is agent/pi/scripts/conformity_review.py's own filename --
-// both execution paths resolve its full path the same way they resolve
-// build_app.py's (a sibling file in the same harness directory), so
-// there is nothing else to share here beyond the name itself.
-const ScriptName = "conformity_review.py"
-
-// Args constructs the argv passed to conformity_review.py.
-// criteriaHostPath is passed as this launch's own specPath by both
-// callers (not extraRunInput): the script has no separate --spec of its
-// own to share a staged directory with, so the criteria file is staged
-// the same way build_app.py's own --spec normally is -- see each
-// caller's own launch closure for the staging mechanism.
-// thinking is the review role's Pi reasoning-effort level (RoleConfig.
-// Thinking, resolved via internal/modelrole) -- empty when roles.review
-// is unset, which omits --thinking entirely and preserves today's
-// argv byte-for-byte.
-// harness is the review role's harness name (the script's --harness flag,
-// which selects the coding-agent binary), always passed.
-func Args(script, workspace, criteriaHostPath, conformityPolicy, baseSHA, thinking, harness string) []string {
-	args := []string{
-		script,
-		"--workspace", workspace,
-		"--spec-acceptance-criteria", criteriaHostPath,
-		"--conformity-policy", conformityPolicy,
-	}
-	if baseSHA != "" {
-		args = append(args, "--review-base-sha", baseSHA)
-	}
-	if thinking != "" {
-		args = append(args, "--thinking", thinking)
-	}
-	args = append(args, "--harness", harness)
-	return args
-}
+// This file holds the review's relay arithmetic: the review launches its own
+// relay after the build's, so its route and remaining budget are derived from
+// the build's spec here, the one place both the Temporal Worker and
+// cmd/factoryd read it.
 
 // ReviewRoute carries roles.review's fully resolved relay worker model
-// fields for the conformity phase's own, separate relay launch -- see
+// fields for the review's own, separate relay launch -- see
 // PhaseRelaySpec's own doc comment. A ReviewRoute built in cmd/factoryd
 // (ReviewRelayFromPolicy, in run_ticket.go) always resolves through
 // modelrole.SelectRoute and so always sets Upstream/AuthMode/credentials

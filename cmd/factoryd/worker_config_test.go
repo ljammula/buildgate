@@ -53,7 +53,7 @@ func TestBuildTicketRunArgsIsAcceptedByRunMainWithReadysOwnFlagSet(t *testing.T)
 	// Empty ID/Workspace/SpecPath, but Project, PreflightProfile and
 	// IssueRef set, so -project, -preflight-profile and -pr-closes-issue
 	// are all in the argv.
-	entry := &requestdriver.QueueEntry{Project: "payments", PreflightProfile: "brownfield", IssueRef: "acme/widgets#42", SpecAcceptanceCriteria: "/repo/tickets/001/criteria.md"}
+	entry := &requestdriver.QueueEntry{Project: "payments", PreflightProfile: "brownfield", IssueRef: "acme/widgets#42"}
 
 	err := runMainWithReady(dp, context.Background(), requestdriver.BuildTicketRunArgs("data", entry, cfg), nil)
 	if err == nil {
@@ -868,84 +868,20 @@ func TestDoctorChecksForAlwaysChecksDocker(t *testing.T) {
 	}
 }
 
-// TestWorkerConfigAcceptsConformityPolicyFlag mirrors
-// TestWorkerConfigAcceptsPlanTicketsFlags: passing this flag must reach
-// past flags.Parse to the -registry-proxy/-sandbox-image refusal, not
-// stop at "flag provided but not defined".
-func TestWorkerConfigAcceptsConformityPolicyFlag(t *testing.T) {
+// TestWorkerConfigRefusesTheRetiredConformityPolicyFlag: the
+// spec-conformity review is retired, so worker refuses its flag as unknown.
+func TestWorkerConfigRefusesTheRetiredConformityPolicyFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
-	_, _, err := loadTestWorkerConfig(dp, []string{
-		"-data-dir", t.TempDir(),
-		"-conformity-policy", "advisory",
-		"-registry-proxy", "-registry-proxy-image", "registry.example/org/rp@sha256:deadbeef",
-	})
-	if err == nil {
-		t.Fatal("loadTestWorkerConfig(-conformity-policy, -registry-proxy without -sandbox-image) = nil, want an error")
-	}
-	if strings.Contains(err.Error(), "not defined") {
-		t.Fatalf("workerMain rejected a real flag: %v", err)
-	}
-	if !strings.Contains(err.Error(), "-registry-proxy requires -sandbox-image") {
-		t.Fatalf("err = %v, want it to name the missing -sandbox-image (proving flag parsing got past -conformity-policy)", err)
+	_, _, err := loadTestWorkerConfig(dp, []string{"-data-dir", t.TempDir(), "-conformity-policy", "advisory"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -conformity-policy") {
+		t.Fatalf("loadTestWorkerConfig(-conformity-policy) = %v, want the unknown-flag refusal", err)
 	}
 }
 
-// TestWorkerConfigRejectsInvalidConformityPolicy covers -conformity-policy's
-// own validation, at worker's own startup rather than deep inside a
-// drained entry (acceptance criterion 3, issue #164): only "required" or
-// "advisory" are legal, mirroring build_app.py's own --conformity-policy
-// argparse choices.
-func TestWorkerConfigRejectsInvalidConformityPolicy(t *testing.T) {
-	dp := newTestDeps(t)
-	isolateSessionConfig(t)
-	_, _, err := loadTestWorkerConfig(dp, []string{
-		"-data-dir", t.TempDir(),
-		"-sandbox-image", "img@sha256:aaaa",
-		"-conformity-policy", "sometimes",
-	})
-	if err == nil || !strings.Contains(err.Error(), `-conformity-policy must be "required" or "advisory"`) {
-		t.Fatalf("loadTestWorkerConfig(-conformity-policy sometimes) = %v, want the invalid-value refusal", err)
-	}
-}
-
-// TestApplySessionConfigFillsConformityPolicy covers the session-config
-// key (conformity_policy) issue #164 also asks for, mirroring
-// TestApplySessionConfigFillsAdvanceOn.
-func TestApplySessionConfigFillsConformityPolicy(t *testing.T) {
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "conformity_policy: advisory\n")
-	fs := flag.NewFlagSet("t", flag.ContinueOnError)
-	fs.String("conformity-policy", "required", "")
-	if _, _, err := applySessionConfig(fs, ""); err != nil {
-		t.Fatalf("applySessionConfig: %v", err)
-	}
-	if got := fs.Lookup("conformity-policy").Value.String(); got != "advisory" {
-		t.Errorf("-conformity-policy = %q, want %q (session-config value silently dropped)", got, "advisory")
-	}
-}
-
-// TestApplySessionConfigLeavesConformityPolicyAtExplicitFlagValue mirrors
-// TestApplySessionConfigLeavesAdvanceOnAtExplicitFlagValue: an explicit
-// CLI flag always wins over the session-config value.
-func TestApplySessionConfigLeavesConformityPolicyAtExplicitFlagValue(t *testing.T) {
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "conformity_policy: advisory\n")
-	fs := flag.NewFlagSet("t", flag.ContinueOnError)
-	fs.String("conformity-policy", "required", "")
-	if err := fs.Parse([]string{"-conformity-policy", "required"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := applySessionConfig(fs, ""); err != nil {
-		t.Fatalf("applySessionConfig: %v", err)
-	}
-	if got := fs.Lookup("conformity-policy").Value.String(); got != "required" {
-		t.Errorf("-conformity-policy = %q, want the explicit flag value %q", got, "required")
-	}
-}
-
-// TestWorkerConfigRejectsInvalidCodeReviewPolicy mirrors
-// TestWorkerConfigRejectsInvalidConformityPolicy for -code-review-policy.
+// TestWorkerConfigRejectsInvalidCodeReviewPolicy: only off, advisory or
+// required are legal, refused at worker's own startup rather than deep
+// inside a drained entry.
 func TestWorkerConfigRejectsInvalidCodeReviewPolicy(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
@@ -959,9 +895,8 @@ func TestWorkerConfigRejectsInvalidCodeReviewPolicy(t *testing.T) {
 	}
 }
 
-// TestApplySessionConfigFillsCodeReviewPolicy mirrors
-// TestApplySessionConfigFillsConformityPolicy for the code_review_policy
-// session-config key.
+// TestApplySessionConfigFillsCodeReviewPolicy covers the code_review_policy
+// session-config key, mirroring TestApplySessionConfigFillsAdvanceOn.
 func TestApplySessionConfigFillsCodeReviewPolicy(t *testing.T) {
 	path := isolateSessionConfig(t)
 	writeSessionConfig(t, path, "code_review_policy: advisory\n")
@@ -976,7 +911,7 @@ func TestApplySessionConfigFillsCodeReviewPolicy(t *testing.T) {
 }
 
 // TestApplySessionConfigLeavesCodeReviewPolicyAtExplicitFlagValue mirrors
-// TestApplySessionConfigLeavesConformityPolicyAtExplicitFlagValue: an
+// TestApplySessionConfigLeavesAdvanceOnAtExplicitFlagValue: an
 // explicit CLI flag always wins over the session-config value.
 func TestApplySessionConfigLeavesCodeReviewPolicyAtExplicitFlagValue(t *testing.T) {
 	path := isolateSessionConfig(t)

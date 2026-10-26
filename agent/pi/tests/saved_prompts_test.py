@@ -111,7 +111,7 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 		subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
 
 	def _check(self, run, session_name, saved_name, retry_name=None):
-		import code_review, combined_review  # noqa: F401
+		import combined_review  # noqa: F401
 		with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as inputs:
 			root = Path(d)
 			self._init(root)
@@ -129,10 +129,6 @@ class ReviewScriptsSavePromptTests(unittest.TestCase):
 				self.assertEqual([call.kwargs["prompt"] for call in spy.call_args_list], [sent, sent])
 				want[retry_name + ".md"] = sent
 			self.assertEqual(read_saved(root / session_name), want)
-
-	def test_code_review(self):
-		import code_review
-		self._check(lambda root, spec, criteria: code_review.run_code_review(root, spec_path=spec), ".pi-code-review-session", "review-code")
 
 	def test_combined_review(self):
 		import combined_review

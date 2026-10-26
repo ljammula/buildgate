@@ -53,7 +53,7 @@ const (
 var ErrMalformedManifest = errors.New("oracle manifest is not a JSON array of objects")
 
 // Entry is one MANIFEST.json entry, decoded into oraclecommit's own struct
-// (internal/conformity reads the same file for coverage only).
+// (internal/oraclemanifest reads the same file for coverage only).
 type Entry struct {
 	Criterion      string
 	OracleFile     string

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"buildgate/internal/codereview"
-	"buildgate/internal/conformity"
 	"buildgate/internal/run"
 )
 
@@ -15,13 +14,12 @@ import (
 // fixture set every harness evidence file's schema lives and dies by:
 // agent/pi/tests/generate_evidence_goldens.py writes it from the REAL
 // Python writers (build_app.write_evidence_json,
-// conformity_review.write_conformity_evidence_json,
 // code_review.write_code_review_evidence_json, draft_spec.write_evidence,
 // plan_tickets.write_evidence, draft_acceptance_oracles.write_evidence),
 // and agent/pi/tests/test_evidence_goldens.py fails if a writer's current
 // output has drifted from what's committed here. This file is the other
-// half of that contract: every golden (and the two hand-recorded real-run
-// files) parsed by the REAL Go reader, asserting load-bearing fields, not
+// half of that contract: every golden (and the hand-recorded real-run
+// file) parsed by the REAL Go reader, asserting load-bearing fields, not
 // just "no error" -- plus one version-mismatch case per reader, proving
 // each one actually rejects (or, for BUILD_EVIDENCE.json's deliberately
 // best-effort loadAgentEvidence, tolerates) a schema_version it doesn't
@@ -134,43 +132,6 @@ func TestBuildEvidenceUnknownSchemaVersionIsToleratedNotRejected(t *testing.T) {
 	}
 	if out == "" {
 		t.Error("want a printed warning naming the schema_version mismatch")
-	}
-}
-
-func TestConformityEvidenceGoldenParsesWithParseVerdicts(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		wantLen  int
-		wantFlag bool
-	}{
-		{"conformity_evidence.json", 2, true},
-		{"conformity_evidence.recorded.json", 6, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			verdicts, err := conformity.ParseVerdicts(readGolden(t, tc.name))
-			if err != nil {
-				t.Fatalf("ParseVerdicts: %v", err)
-			}
-			if len(verdicts) != tc.wantLen {
-				t.Fatalf("len(verdicts) = %d, want %d", len(verdicts), tc.wantLen)
-			}
-			gotFlag := false
-			for _, v := range verdicts {
-				if v.Verdict == "flagged" {
-					gotFlag = true
-				}
-			}
-			if gotFlag != tc.wantFlag {
-				t.Errorf("has a flagged verdict = %v, want %v", gotFlag, tc.wantFlag)
-			}
-		})
-	}
-}
-
-func TestConformityEvidenceRejectsUnknownSchemaVersion(t *testing.T) {
-	_, err := conformity.ParseVerdicts([]byte(`{"schema_version":2,"review_verdicts":[]}`))
-	if err == nil {
-		t.Fatal("ParseVerdicts(schema_version 2): want an error, got nil")
 	}
 }
 

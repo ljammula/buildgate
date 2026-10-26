@@ -25,26 +25,14 @@ type Activities struct {
 	BuildAppInterpreter string
 	BuildAppScript      string
 	BuildMaxAttempts    int
-	// ConformityPolicy is this Worker's own static fallback for
-	// cmd/factoryd's -conformity-policy: gates the per-criterion
-	// spec-conformity review SpecAcceptanceCriteria enables.
-	ConformityPolicy  string
-	MaxRounds         int
-	TimeoutMinutes    int
-	VerifyCommand     string
-	VerifyMaxAttempts int
-	FastCheckCommand  string
-	// SpecAcceptanceCriteria is this Worker's own static fallback for
-	// cmd/factoryd's -spec-acceptance-criteria, same treatment as
-	// FastCheckCommand for every other Activity -- but
-	// RunSpecConformityReviewActivity itself is only ever invoked when
-	// RunWorkflowInput.SpecAcceptanceCriteria is set (see that field's own
-	// doc comment for why); this fallback is resolved by
-	// specAcceptanceCriteriaFor for other, non-gating uses only.
-	SpecAcceptanceCriteria string
-	SandboxImage           string
-	SandboxDocker          string
-	SandboxUser            string
+	MaxRounds           int
+	TimeoutMinutes      int
+	VerifyCommand       string
+	VerifyMaxAttempts   int
+	FastCheckCommand    string
+	SandboxImage        string
+	SandboxDocker       string
+	SandboxUser         string
 	// SandboxWorkerUID is this Worker's own -sandbox-worker-uid, used only
 	// when a run's resolved SandboxUser (sandboxUserFor) is empty -- see
 	// sandboxWorkerUID's own doc comment. Daemon-static, like
@@ -226,8 +214,8 @@ const (
 // checkAndResolveRoute is the check-then-resolve half of the routes:
 // binding sequence, shared by boundRelaySpec (the build's own
 // RoutePolicy, or a routed ReviewRelayPolicy's full launch) and
-// RunSpecConformityReviewActivity's own review-route branch (which
-// needs the raw RouteCredentials for conformity.ReviewRelayFromPolicy,
+// RunReviewStepActivity's own review-route branch (which
+// needs the raw RouteCredentials for codereview.ReviewRelayFromPolicy,
 // not a full sandbox.RouteSpec): a.CheckRoute refuses p unless it is an
 // exact match for this Worker's own routes:/models: config for role's
 // model and p.Route (a repo's own project config may only tighten
@@ -264,9 +252,9 @@ func (a *Activities) boundSkills(role string, skills []sandbox.SkillSource) ([]s
 // relayRoleReview): checkAndResolveRoute, then ValidateUpstreamScheme,
 // then Spec, then CABundlePath, then Validate. No other copy of this
 // sequence may exist: relaySpecFor calls this directly, and
-// RunSpecConformityReviewActivity's own review-route branch calls
+// RunReviewStepActivity's own review-route branch calls
 // checkAndResolveRoute plus the same remaining steps for the same
-// reason (it needs conformity.ReviewRelayFromPolicy's raw credentials,
+// reason (it needs codereview.ReviewRelayFromPolicy's raw credentials,
 // not a *sandbox.RouteSpec).
 func (a *Activities) boundRelaySpec(role string, p sandbox.RoutePolicy, thinking string, input RunWorkflowInput) (sandbox.RouteSpec, error) {
 	creds, err := a.checkAndResolveRoute(role, p, thinking)
@@ -457,13 +445,6 @@ func (a *Activities) buildAppScriptFor(input RunWorkflowInput) string {
 	return a.BuildAppScript
 }
 
-func (a *Activities) conformityPolicyFor(input RunWorkflowInput) string {
-	if input.ConformityPolicy != "" {
-		return input.ConformityPolicy
-	}
-	return a.ConformityPolicy
-}
-
 func (a *Activities) maxRoundsFor(input RunWorkflowInput) int {
 	if input.MaxRounds != 0 {
 		return input.MaxRounds
@@ -497,13 +478,6 @@ func (a *Activities) fastCheckCommandFor(input RunWorkflowInput) string {
 		return input.FastCheckCommand
 	}
 	return a.FastCheckCommand
-}
-
-func (a *Activities) specAcceptanceCriteriaFor(input RunWorkflowInput) string {
-	if input.SpecAcceptanceCriteria != "" {
-		return input.SpecAcceptanceCriteria
-	}
-	return a.SpecAcceptanceCriteria
 }
 
 func (a *Activities) verifyMaxAttemptsFor(input RunWorkflowInput) int {
@@ -768,7 +742,7 @@ const stepHeartbeatTimeout = 2 * time.Minute
 
 // HeartbeatDetails is the payload RunBuildActivity/RunVerifyActivity/
 // RunFullSuiteVerifyActivity/RunNamedGateActivity/
-// RunSpecConformityReviewActivity attach to each heartbeat (see
+// RunReviewStepActivity attach to each heartbeat (see
 // activityHeartbeatInterval's doc comment for why they heartbeat at all).
 // Previously these heartbeats carried no payload, so a pending Activity
 // showed nothing in Temporal's Web UI beyond "heartbeating" — Stage/Elapsed

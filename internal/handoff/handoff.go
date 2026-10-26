@@ -111,9 +111,6 @@ type Document struct {
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	Rounds       []Round  `json:"rounds,omitempty"`
 	Checks       []Check  `json:"checks,omitempty"`
-	// UnmetCriteria are the criteria the conformity reviewer flagged,
-	// present when spec_conformity failed.
-	UnmetCriteria []run.ReviewVerdict `json:"unmet_criteria,omitempty"`
 	// ReviewFindings are the code reviewer's, present when code_review
 	// failed.
 	ReviewFindings []run.CodeReviewFinding `json:"review_findings,omitempty"`
@@ -192,15 +189,6 @@ func Build(r *run.Run, dataDir string) Document {
 			NotJudged:   uncommitted && DiffChecks[finding.Check],
 		})
 	}
-	if failed["spec_conformity"] {
-		for _, v := range r.SpecConformityVerdicts {
-			if flaggedVerdict(v.Verdict) && len(doc.UnmetCriteria) < maxReviewItems {
-				doc.UnmetCriteria = append(doc.UnmetCriteria, run.ReviewVerdict{
-					Criterion: clean(v.Criterion, maxSentenceLen), Verdict: clean(v.Verdict, maxWordLen), Detail: clean(v.Detail, maxSentenceLen),
-				})
-			}
-		}
-	}
 	if failed["code_review"] && r.CodeReview != nil {
 		for _, f := range r.CodeReview.Findings {
 			if len(doc.ReviewFindings) == maxReviewItems {
@@ -271,8 +259,6 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 		return BinOperator
 	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
 		return BinNever
-	case finding.Check == "spec_conformity" && !hasActionableVerdict(r.SpecConformityVerdicts):
-		return BinNever
 	case policy.IsRepoGate(finding.Check) && finding.ExitCode == -1:
 		return BinOperator
 	case finding.Check == "canonical_verify" && setupNotRun(r):
@@ -304,25 +290,6 @@ func setupNotRun(r *run.Run) bool {
 		}
 	}
 	return false
-}
-
-// hasActionableVerdict reports whether the conformity reviewer flagged any
-// criterion, as opposed to saying nothing usable.
-func hasActionableVerdict(verdicts []run.ReviewVerdict) bool {
-	for _, v := range verdicts {
-		if flaggedVerdict(v.Verdict) {
-			return true
-		}
-	}
-	return false
-}
-
-// flaggedVerdict reports whether a conformity verdict says the criterion is
-// not met. The reviewer's words are "clean" (met), "unavailable" (it gave
-// no answer) and anything else, "flagged" in practice: the same reading
-// the review corrective round uses (requestdriver.flaggedConformityVerdicts).
-func flaggedVerdict(verdict string) bool {
-	return verdict != "clean" && verdict != "unavailable" && verdict != ""
 }
 
 // outputLines picks the lines of a command's output that report a failure
@@ -510,13 +477,6 @@ func (d Document) Markdown() string {
 				}
 				b.WriteString("\n")
 			}
-		}
-		b.WriteString("\n")
-	}
-	if len(d.UnmetCriteria) > 0 {
-		b.WriteString("## Acceptance criteria the reviewer did not find met\n\n")
-		for _, v := range d.UnmetCriteria {
-			fmt.Fprintf(&b, "- %s: %s%s\n", quote(v.Criterion), quote(v.Verdict), detail(v.Detail))
 		}
 		b.WriteString("\n")
 	}

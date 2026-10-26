@@ -9,52 +9,6 @@ import (
 	"buildgate/internal/run"
 )
 
-func TestArgsIncludesReviewBaseSHAAndThinking(t *testing.T) {
-	got := Args("/path/code_review.py", "/ws", "/ws/ticket.md", "required", "deadbeef", "max", "pi")
-
-	want := []string{
-		"/path/code_review.py",
-		"--workspace", "/ws",
-		"--spec", "/ws/ticket.md",
-		"--review-policy", "required",
-		"--review-base-sha", "deadbeef",
-		"--thinking", "max",
-		"--harness", "pi",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Args()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestArgsOmitsReviewBaseSHAAndThinkingWhenEmpty(t *testing.T) {
-	got := Args("/path/code_review.py", "/ws", "/ws/ticket.md", "advisory", "", "", "pi")
-	want := []string{
-		"/path/code_review.py",
-		"--workspace", "/ws",
-		"--spec", "/ws/ticket.md",
-		"--review-policy", "advisory",
-		"--harness", "pi",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Args()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-	for i, arg := range got {
-		if arg == "--review-base-sha" || arg == "--thinking" {
-			t.Fatalf("Args() included %q at index %d when its value was empty: %v", arg, i, got)
-		}
-	}
-}
-
 func TestValidPolicy(t *testing.T) {
 	for _, p := range []string{PolicyOff, PolicyAdvisory, PolicyRequired} {
 		if !ValidPolicy(p) {
@@ -210,17 +164,6 @@ func TestBlockingReturnsNilWhenNoneAreHigh(t *testing.T) {
 	}
 }
 
-func TestArgsPassesHarnessWhenSet(t *testing.T) {
-	got := Args("/path/code_review.py", "/ws", "/ws/ticket.md", "advisory", "", "", "pifork")
-	if n := len(got); n < 2 || got[n-2] != "--harness" || got[n-1] != "pifork" {
-		t.Fatalf("Args() = %v, want it to end with --harness pifork", got)
-	}
-}
-
-// TestParseResultKeepsNothingOfAnUnavailableReviewsError: the evidence of a
-// real review (gjson, 2026-10-08) whose model call the spend meter refused.
-// The result says the reviewer was unavailable and no more: why is the
-// meter's ledger's to say, never this file's.
 func TestParseResultKeepsNothingOfAnUnavailableReviewsError(t *testing.T) {
 	const meterError = `unexpected status 403 Forbidden: {"binary":"/usr/local/bin/codex","detail":"Request rejected by configured middleware","error":"middleware_denied","host":"chatgpt.com","layer":"l7","method":"POST","middleware":"meter","path":"/backend-api/codex/responses","policy":"model","port":443,"reason_code":"budget_exceeded"}, url: https://chatgpt.com/backend-api/codex/responses`
 	for _, errText := range []string{meterError, "You've hit your usage limit. try again at 3:11 AM.", "review timed out after 1200s"} {

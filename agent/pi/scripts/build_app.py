@@ -1606,8 +1606,7 @@ def corrective_prompt(
 	return "\n\n".join(part.removesuffix("\n") for part in parts)
 
 
-# Caps the diff text inlined into a reviewer's prompt (code_review.py's own
-# code_review_prompt and combined_review_prompt) -- large enough for a
+# Caps the diff text inlined into a reviewer's prompt (combined_review_prompt) -- large enough for a
 # real ticket-sized change, small enough to leave headroom in the relay's
 # hourly token budget. A diff past this length is truncated by
 # format_diff_for_prompt; the stat above it still lists every changed file
@@ -1942,7 +1941,7 @@ def run_review_turn(
 	prompt_name: str | None = None,
 ) -> ReviewTurn:
 	"""Runs one bounded, standalone, non-continued model turn (shared by
-	code_review.py's run_code_review and combined_review.py)
+	combined_review.py)
 	and returns a ReviewTurn (see its own doc comment) rather than a bare
 	string, so a caller can say why the turn produced nothing instead of
 	just that it did. Sets AI_REVIEW_BASE_SHA in the subprocess
@@ -2250,7 +2249,7 @@ def passed_notes_reserve_s(last_checks_s: float) -> int:
 
 
 def notes_turn_skip_reason(
-	*, result: "BuildResult", last_turn: dict | None, criteria_given: bool,
+	*, result: "BuildResult", last_turn: dict | None,
 	adapter, session_dir: Path, elapsed: float, reserve_s: int = 0,
 ) -> str:
 	"""Why the notes turn does not run, or "" when it does. It runs for a
@@ -2263,8 +2262,6 @@ def notes_turn_skip_reason(
 		return "build passed with no failed round"
 	if last_turn is None:
 		return "no round ran in this process"
-	if criteria_given:
-		return "spec acceptance criteria given"
 	if last_turn["timed_out"]:
 		return "last turn timed out"
 	if last_turn["returncode"] != 0:
@@ -2602,7 +2599,6 @@ def _run_build(
 	fast_check_command: str | None = None,
 	setup_commands: list[str] | None = None,
 	autofix_commands: list[str] | None = None,
-	spec_acceptance_criteria: Path | None = None,
 	oracle_command: str | None = None,
 	handoff: Path | None = None,
 	resume_from_state: Path | None = None,
@@ -3009,7 +3005,7 @@ def _run_build(
 	try:
 		skipped = notes_turn_skip_reason(
 			result=result, last_turn=last_turn,
-			criteria_given=spec_acceptance_criteria is not None, adapter=adapter, session_dir=session_dir,
+			adapter=adapter, session_dir=session_dir,
 			elapsed=_monotonic() - started_monotonic,
 			reserve_s=passed_notes_reserve_s(last_checks_s) if result.succeeded else 0,
 		)
@@ -3311,14 +3307,6 @@ def main() -> int:
 		"already changed; any other change is reverted. Omitted (the default) runs nothing extra.",
 	)
 	parser.add_argument(
-		"--spec-acceptance-criteria",
-		type=Path,
-		default=None,
-		help="Path to a file holding the approved spec's numbered acceptance criteria for "
-		"this ticket, one per line. When given, the notes turn does not run. No review "
-		"reads it: findings come from the separate review step (combined_review.py).",
-	)
-	parser.add_argument(
 		"--reference-oracle-command",
 		default=None,
 		help="Operator-authored check (same trust model as factoryd's own -reference-oracle-command: "
@@ -3379,7 +3367,6 @@ def main() -> int:
 			fast_check_command=args.fast_check_command,
 			setup_commands=args.setup_command,
 			autofix_commands=args.autofix_command,
-			spec_acceptance_criteria=args.spec_acceptance_criteria,
 			oracle_command=args.reference_oracle_command,
 			handoff=args.handoff,
 			resume_from_state=args.resume_from_state,

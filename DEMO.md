@@ -93,7 +93,7 @@ Ticket (one sentence, well specified so the spec drafts cleanly):
 | 5 | Click Approve (or `factoryd approve -data-dir "$DATA" <request-id>`). Wait 1-3 min for `plan_review`. | "Now it drafts ticket plans, and checks every criterion is claimed by a ticket." |
 | 6 | Review the plan (files to touch, steps, tests to add), Approve. | "Second gate. Approving the plan re-checks the spec hash first." |
 | 7 | `factoryd watch -data-dir "$DATA" <request-id>` (or the console Runs view) while it builds. | "Sandboxed build: a Docker container created by the OpenShell gateway, no network, model only through its supervisor and our meter. Then verify and the gates." |
-| 8 | When done: `factoryd status -data-dir "$DATA"`. Open the run in the console; show gate results and evidence. | "Accepted means the factory's own checks passed against durable evidence: canonical verify, diff scope, tests added, full suite, conformity." |
+| 8 | When done: `factoryd status -data-dir "$DATA"`. Open the run in the console; show gate results and evidence. | "Accepted means the factory's own checks passed against durable evidence: canonical verify, diff scope, tests added, full suite, and the code review." |
 | 9 | Point out: nothing was merged, and with no remote no PR was opened (the request reads "accepted, awaiting pull request"). | "On a real repo the factory opens a *draft* PR when the release policy allows, and marks it ready for review once checks pass and no review thread blocks it. Merge and deploy are permanently human, by design." |
 
 If the run's cost shows up on a ChatGPT or Copilot route, it's labelled

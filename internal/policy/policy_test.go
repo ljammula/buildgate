@@ -729,73 +729,8 @@ func TestEvaluateRunQuarantinesOnFullSuiteRegression(t *testing.T) {
 	}
 }
 
-func TestSpecConformityPassesOnZeroExit(t *testing.T) {
-	cmd := []string{"python3", "conformity_review.py"}
-	got := SpecConformity(cmd, 0, 1234, "abc123")
-
-	if got.Check != "spec_conformity" || !slices.Equal(got.Command, cmd) || !got.Passed || got.ExitCode != 0 || got.DurationMs != 1234 || got.LogSHA256 != "abc123" {
-		t.Errorf("SpecConformity() = %+v, want passing gate with supplied evidence", got)
-	}
-}
-
-func TestSpecConformityFailsOnNonzeroExit(t *testing.T) {
-	got := SpecConformity([]string{"python3", "conformity_review.py"}, 1, 10, "abc123")
-
-	if got.Passed {
-		t.Error("SpecConformity() Passed = true, want false on a nonzero exit")
-	}
-}
-
-func TestEvaluateRunSkipsSpecConformityWhenNotDeclared(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-	})
-	for _, g := range result.GateResults {
-		if g.Check == "spec_conformity" {
-			t.Errorf("GateResults = %+v, want no spec_conformity gate when SpecConformityCommand is nil", result.GateResults)
-		}
-	}
-}
-
-// TestEvaluateRunQuarantinesOnSpecConformityFailure covers the two-phase
-// design's own reason for existing: canonical_verify (and every other
-// gate) can pass cleanly while the separate, ticket-declared
-// spec-conformity review still fails -- that must still quarantine the
-// run.
-func TestEvaluateRunQuarantinesOnSpecConformityFailure(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:            []string{"sh", "-c", "true"},
-		BuildExitCode:            0,
-		VerifyExitCode:           0,
-		ChangedFiles:             []string{"a.go"},
-		AllowedFiles:             []string{"a.go"},
-		SpecConformityCommand:    []string{"python3", "conformity_review.py"},
-		SpecConformityExitCode:   1,
-		SpecConformityDurationMs: 42,
-		SpecConformityLogSHA256:  "abc123",
-		TestsRequiredOptOut:      "not exercising tests_added in this fixture",
-	})
-	if result.Accepted {
-		t.Error("Accepted = true, want false when spec_conformity fails")
-	}
-	if !slices.Equal(result.FailedChecks, []string{"spec_conformity"}) {
-		t.Errorf("FailedChecks = %v, want [spec_conformity]", result.FailedChecks)
-	}
-	wantChecks := []string{"canonical_verify", "diff_scope", "tests_added", "spec_conformity"}
-	if len(result.GateResults) != len(wantChecks) {
-		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
-	}
-	for i, want := range wantChecks {
-		if result.GateResults[i].Check != want {
-			t.Errorf("GateResults[%d].Check = %q, want %q", i, result.GateResults[i].Check, want)
-		}
-	}
-}
-
 func TestCodeReviewPassesOnZeroExit(t *testing.T) {
-	cmd := []string{"python3", "code_review.py"}
+	cmd := []string{"python3", "combined_review.py"}
 	got := CodeReview(cmd, 0, 1234, "abc123")
 
 	if got.Check != "code_review" || !slices.Equal(got.Command, cmd) || !got.Passed || got.ExitCode != 0 || got.DurationMs != 1234 || got.LogSHA256 != "abc123" {
@@ -804,7 +739,7 @@ func TestCodeReviewPassesOnZeroExit(t *testing.T) {
 }
 
 func TestCodeReviewFailsOnNonzeroExit(t *testing.T) {
-	got := CodeReview([]string{"python3", "code_review.py"}, 1, 10, "abc123")
+	got := CodeReview([]string{"python3", "combined_review.py"}, 1, 10, "abc123")
 
 	if got.Passed {
 		t.Error("CodeReview() Passed = true, want false on a nonzero exit")
@@ -824,12 +759,9 @@ func TestEvaluateRunSkipsCodeReviewWhenNotDeclared(t *testing.T) {
 	}
 }
 
-// TestEvaluateRunQuarantinesOnCodeReviewFailure mirrors
-// TestEvaluateRunQuarantinesOnSpecConformityFailure for the standalone
-// code-review gate: every other gate can pass cleanly while the
-// separate code-review pass still fails (a blocking high-severity
-// finding under -code-review-policy=required) -- that must still
-// quarantine the run.
+// TestEvaluateRunQuarantinesOnCodeReviewFailure: every other gate can pass
+// cleanly while the review gave no verdict under -code-review-policy
+// required -- that must still quarantine the run.
 func TestEvaluateRunQuarantinesOnCodeReviewFailure(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:        []string{"sh", "-c", "true"},
@@ -837,7 +769,7 @@ func TestEvaluateRunQuarantinesOnCodeReviewFailure(t *testing.T) {
 		VerifyExitCode:       0,
 		ChangedFiles:         []string{"a.go"},
 		AllowedFiles:         []string{"a.go"},
-		CodeReviewCommand:    []string{"python3", "code_review.py"},
+		CodeReviewCommand:    []string{"python3", "combined_review.py"},
 		CodeReviewExitCode:   1,
 		CodeReviewDurationMs: 42,
 		CodeReviewLogSHA256:  "abc123",

@@ -1379,3 +1379,50 @@ func TestCodeReviewFindingRecordsTheCitationAndReproductionWithoutContent(t *tes
 		t.Errorf("a finding's record has a content key: %s", data)
 	}
 }
+
+// TestPreP2RunRecordStillDecodes: a run recorded by v0.0.13, before the
+// spec-conformity review was retired, decodes with every conformity field it
+// holds, and marshals back with them unchanged.
+func TestPreP2RunRecordStillDecodes(t *testing.T) {
+	const record = `{"id":"req-1-001","ticket":"001","state":"quarantined",` +
+		`"agent_evidence":{"schema_version":2,"review_policy":"required","succeeded":false,"stopped_reason":"x","agents_md_used":false,` +
+		`"review_verdicts":[{"criterion":"1. It works.","verdict":"clean"}]},` +
+		`"attempts":[{"kind":"build","exit_code":0},{"kind":"review","exit_code":41,"role":"review"}],` +
+		`"gate_results":[{"check":"canonical_verify","passed":true,"exit_code":0},` +
+		`{"check":"spec_conformity","passed":false,"exit_code":1},{"check":"code_review","passed":true,"exit_code":0}],` +
+		`"spec_conformity_configured":true,` +
+		`"spec_conformity_verdicts":[{"criterion":"2. It rejects a negative amount.","verdict":"flagged","detail":"no test covers it"}],` +
+		`"code_review":{"policy":"required","available":true,"findings":[{"severity":"high","file":"a.go","line":3,"summary":"nil map","failure_scenario":"a write panics"}]}}`
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(Dir(dataDir, "req-1-001"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(Dir(dataDir, "req-1-001"), "run.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dataDir, "req-1-001")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !got.SpecConformityConfigured || len(got.SpecConformityVerdicts) != 1 || got.SpecConformityVerdicts[0].Verdict != "flagged" {
+		t.Errorf("conformity fields = %v %+v, want them decoded", got.SpecConformityConfigured, got.SpecConformityVerdicts)
+	}
+	if got.AgentEvidence == nil || len(got.AgentEvidence.ReviewVerdicts) != 1 {
+		t.Errorf("AgentEvidence.ReviewVerdicts = %+v, want the one verdict", got.AgentEvidence)
+	}
+	if len(got.GateResults) != 3 || got.GateResults[1].Check != "spec_conformity" || got.GateResults[1].Passed {
+		t.Errorf("GateResults = %+v, want the failed spec_conformity gate kept", got.GateResults)
+	}
+	if got.CodeReview == nil || len(got.CodeReview.Findings) != 1 || got.CodeReview.Findings[0].Disposition != "" {
+		t.Errorf("CodeReview = %+v, want the one pre-P2 finding with no disposition", got.CodeReview)
+	}
+	out, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"spec_conformity_configured":true`, `"spec_conformity_verdicts":[`, `"review_verdicts":[`} {
+		if !strings.Contains(string(out), key) {
+			t.Errorf("re-marshalled record lacks %s:\n%s", key, out)
+		}
+	}
+}

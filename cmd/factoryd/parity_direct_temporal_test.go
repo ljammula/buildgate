@@ -394,8 +394,7 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 	}
 
 	// Same configuration defaults newRunFlags() gives a bare run
-	// (-build-app-max-attempts 2, -conformity-policy required,
-	// -max-rounds 3, -timeout-minutes 45, -verify-max-attempts 2),
+	// (-build-app-max-attempts 2, -max-rounds 3, -timeout-minutes 45, -verify-max-attempts 2),
 	// threaded through runOptions.workflowInput --
 	// the exact same function runViaTemporal/runViaRepositoryOwner call
 	// in production (see its own doc comment, run_temporal.go) -- so a
@@ -433,7 +432,6 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 		BuildAppScript:       scriptPath,
 		Harness:              "pi",
 		ReviewHarness:        "pi",
-		ConformityPolicy:     "required",
 		CodeReviewPolicy:     "off",
 		VerifyCommand:        verifyCommand,
 		FullSuiteCommand:     fullSuiteCommand,
@@ -630,7 +628,6 @@ func TestOnBranchTemporalPathChecksOutPRBranchNotSharedHEAD(t *testing.T) {
 		BuildAppScript:      scriptPath,
 		Harness:             "pi",
 		ReviewHarness:       "pi",
-		ConformityPolicy:    "required",
 		CodeReviewPolicy:    "off",
 		VerifyCommand:       "true",
 		FullSuiteCommand:    "true",
@@ -804,7 +801,6 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 		BuildAppScript:       scriptPath,
 		Harness:              "pi",
 		ReviewHarness:        "pi",
-		ConformityPolicy:     "required",
 		CodeReviewPolicy:     "off",
 		VerifyCommand:        "true",
 		FullSuiteCommand:     "true",

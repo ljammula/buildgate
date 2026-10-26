@@ -288,7 +288,7 @@ func recapMaxRounds(dataDir, runID string) int {
 // self-report; see run.Attempt.RelayReasoningEffort's own doc comment).
 // One "<kind> <model>[ (effort <e>[, anomaly])][ (requested <t>, sent
 // <e>)]" fragment per kind, joined with " · ", e.g. "build gpt-5.6-luna
-// (effort medium) · spec_conformity gpt-5.6-luna (effort max)" -- exactly
+// (effort medium) · review gpt-5.6-luna (effort max)" -- exactly
 // the "different phases can ask for different effort" case this field
 // exists to surface. A " via <harness>" follows the model id when the attempt recorded its
 // harness (Attempt.Harness): "build gpt-5.6-luna via pifork (effort medium)". The ", anomaly" suffix appears when that Kind's last
@@ -506,8 +506,8 @@ func printRunRecap(w io.Writer, r *run.Run, dataDir string) {
 	owningRequest := findOwningRequest(dataDir, r.ID)
 	switch {
 	case r.State != run.StateAccepted && owningRequest != "":
-		// The owning request's own NextAction() (e.g. Follow-up B's
-		// spec_conformity-specific "reject -to spec" wording), not a
+		// The owning request's own NextAction() (e.g. a diff_scope
+		// quarantine's "amend-scope" wording), not a
 		// hardcoded "factoryd retry" -- watching a run this request owns
 		// must never advise something the request's own Detail line, right
 		// above, contradicts. Falls back to the plain retry hint when the

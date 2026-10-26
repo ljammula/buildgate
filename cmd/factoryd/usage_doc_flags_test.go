@@ -35,8 +35,8 @@ var usageDocPaths = []string{"../../USAGE.md", "../../USAGE_REFERENCE.md"}
 var usageCommandRowPattern = regexp.MustCompile("^\\|\\s*`factoryd ([a-zA-Z][a-zA-Z0-9-]*)")
 
 // usageFlagTokenPattern extracts a flag name from a backtick-quoted span
-// starting with "-", e.g. "`-conformity-policy`" or
-// "`-registry-proxy=false`" both yield "conformity-policy"/"registry-proxy"
+// starting with "-", e.g. "`-code-review-policy`" or
+// "`-registry-proxy=false`" both yield "code-review-policy"/"registry-proxy"
 // -- it does not require the span's closing backtick, only that the flag
 // name itself (letters/digits/hyphens) sits right after the opening one.
 var usageFlagTokenPattern = regexp.MustCompile("`-([a-zA-Z][a-zA-Z0-9-]*)")

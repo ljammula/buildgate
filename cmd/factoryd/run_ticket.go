@@ -54,15 +54,12 @@ var prClosesIssueRefPattern = regexp.MustCompile(`^[^/]+/[^/]+#[0-9]+$`)
 // here rather than resolved.
 var fullSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// -conformity-policy's own flag default ("required") is what governs
-// the per-criterion spec-conformity review when -spec-acceptance-criteria
-// is set. The factory no longer drives a separate legacy whole-diff
-// "reviewer" extension trace at all (that Pi extension was never present
-// in the sandbox image and always reported "unavailable"; correctness
-// rests on spec_conformity, the deterministic gates, and human review) --
-// build_app.py's own --review-policy option still exists for the frozen
-// intake bundle (ticket_runner.py/goal_pilot.py), but the factory never
-// passes it.
+// The factory does not drive a whole-diff "reviewer" extension trace inside
+// the build (that Pi extension was never present in the sandbox image and
+// always reported "unavailable"; correctness rests on the deterministic
+// gates, the review step and human review) -- build_app.py's own
+// --review-policy option still exists for the frozen intake bundle
+// (ticket_runner.py/goal_pilot.py), but the factory never passes it.
 
 // validateFollowUpRunInputs checks the two inputs only a run that follows
 // an earlier one is given: -diff-base, -instruction-base and -earlier-attempt.
@@ -199,25 +196,23 @@ func isolationBranchName(id, onBranch string) string {
 // Field names match the flag's own local variable name at every existing
 // call site.
 type runFlags struct {
-	ticket                 *string
-	executionHarness       *string
-	workspace              *string
-	spec                   *string
-	buildAppInterpreter    *string
-	buildAppScript         *string
-	buildAppMaxAttempts    *int
-	conformityPolicy       *string
-	codeReviewPolicy       *string
-	specAcceptanceCriteria *string
-	maxRounds              *int
-	timeoutMinutes         *int
-	timeout                *time.Duration
-	verifyCommand          *string
-	fastCheckCommand       *string
-	verifyMaxAttempts      *int
-	fullSuiteCommand       *string
-	fullSuiteSource        *string
-	fullSuiteCadence       *int
+	ticket              *string
+	executionHarness    *string
+	workspace           *string
+	spec                *string
+	buildAppInterpreter *string
+	buildAppScript      *string
+	buildAppMaxAttempts *int
+	codeReviewPolicy    *string
+	maxRounds           *int
+	timeoutMinutes      *int
+	timeout             *time.Duration
+	verifyCommand       *string
+	fastCheckCommand    *string
+	verifyMaxAttempts   *int
+	fullSuiteCommand    *string
+	fullSuiteSource     *string
+	fullSuiteCadence    *int
 	// gateCommands holds one flag per policy.CommandGate, keyed by its
 	// ID ("lint", "security_audit", "unit_tests", "integration_tests",
 	// "reference_oracle") -- see newRunFlags' own registration loop.
@@ -270,9 +265,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.buildAppInterpreter = flags.String("build-app-interpreter", "python3", "internal: the interpreter that runs -build-app-script; tests point it at a stand-in")
 	f.buildAppScript = flags.String("build-app-script", "", "build script to run instead of the one built into this binary")
 	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "launches the build gets in total when a launch fails for an infrastructure reason")
-	f.conformityPolicy = flags.String("conformity-policy", "required", "required or advisory: whether the spec-conformity review's verdict can fail the run. Only used with -spec-acceptance-criteria")
-	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after the other checks pass: off, advisory (findings recorded, never blocks) or required (a high-severity finding quarantines the run). Unset uses the session config's value")
-	f.specAcceptanceCriteria = flags.String("spec-acceptance-criteria", "", "file of the approved spec's numbered acceptance criteria for this ticket. A reviewer gives a verdict on each, recorded in the build evidence; empty skips that review")
+	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after the other checks pass: off, advisory (findings recorded, never blocks) or required (a review that gives no verdict quarantines the run). Unset uses the session config's value")
 	f.maxRounds = flags.Int("max-rounds", requestdriver.DefaultMaxRounds, "most build rounds the coding agent gets")
 	f.timeoutMinutes = flags.Int("timeout-minutes", 45, "minutes the coding agent may run in one build round")
 	f.timeout = flags.Duration("timeout", 0, "time limit for the whole run; 0 means -timeout-minutes plus 5 minutes")
@@ -354,8 +347,6 @@ type ticketRun struct {
 	buildAppInterpreter          *string
 	buildAppScript               *string
 	buildAppMaxAttempts          *int
-	conformityPolicy             *string
-	specAcceptanceCriteria       *string
 	codeReviewPolicy             *string
 	maxRounds                    *int
 	timeoutMinutes               *int
@@ -549,7 +540,7 @@ func (tr *ticketRun) parseFlags() error {
 
 	tr.flags, tr.rf = newRunFlags()
 	tr.ticket, tr.workspace, tr.spec, tr.buildAppInterpreter = tr.rf.ticket, tr.rf.workspace, tr.rf.spec, tr.rf.buildAppInterpreter
-	tr.buildAppScript, tr.buildAppMaxAttempts, tr.conformityPolicy, tr.specAcceptanceCriteria = tr.rf.buildAppScript, tr.rf.buildAppMaxAttempts, tr.rf.conformityPolicy, tr.rf.specAcceptanceCriteria
+	tr.buildAppScript, tr.buildAppMaxAttempts = tr.rf.buildAppScript, tr.rf.buildAppMaxAttempts
 	tr.codeReviewPolicy = tr.rf.codeReviewPolicy
 	tr.maxRounds, tr.timeoutMinutes, tr.timeout, tr.verifyCommand = tr.rf.maxRounds, tr.rf.timeoutMinutes, tr.rf.timeout, tr.rf.verifyCommand
 	tr.fastCheckCommand, tr.verifyMaxAttempts, tr.fullSuiteCommand, tr.fullSuiteCadence = tr.rf.fastCheckCommand, tr.rf.verifyMaxAttempts, tr.rf.fullSuiteCommand, tr.rf.fullSuiteCadence
@@ -689,7 +680,7 @@ func (tr *ticketRun) parseFlags() error {
 	// role (a configuration error validateRoles' own ValidateRouting call
 	// above cannot itself catch) refuses this run up front, the same
 	// fail-fast style as every other pre-launch refusal in this function,
-	// rather than surfacing deep inside the build or conformity launch
+	// rather than surfacing deep inside the build or review launch
 	// below. executionOK/reviewOK false with a nil error means
 	// roles.execution/roles.review is simply unset (an offline build with
 	// no model route needed at all) -- set below, once the credential
@@ -2592,7 +2583,7 @@ func (tr *ticketRun) dispatch() error {
 		relayOpts.CheckRoute = checkRouteFunc(tr.settings)
 		relayOpts.ResolveRouteCredentials = resolveRouteCredentialsFunc(tr.settings)
 		relayOpts.CheckSkills = checkSkillsFunc(tr.settings)
-		// reviewRelayPolicy carries the conformity phase's own relay
+		// reviewRelayPolicy carries the review step's own relay
 		// policy to the Temporal path -- see
 		// workflow.RunWorkflowInput.ReviewRelayPolicy's doc comment.
 		// reviewSelection's own policy (resolved once above alongside
@@ -2600,7 +2591,7 @@ func (tr *ticketRun) dispatch() error {
 		// route name -- the Temporal Worker resolves that route's
 		// credential itself via ResolveRouteCredentials, exactly as it
 		// does for the build's own RoutePolicy. nil (reviewOK false,
-		// or no relay configured at all) keeps the conformity phase on
+		// or no relay configured at all) keeps the review step on
 		// the build's own relay spec fields, unchanged; the Activity
 		// never re-derives or merges these itself.
 		var reviewRelayPolicy *sandbox.RoutePolicy
@@ -2634,7 +2625,6 @@ func (tr *ticketRun) dispatch() error {
 			BuildAppScript:           *tr.buildAppScript,
 			Harness:                  tr.executionHarnessName,
 			ReviewHarness:            tr.reviewHarnessName,
-			ConformityPolicy:         *tr.conformityPolicy,
 			CodeReviewPolicy:         *tr.codeReviewPolicy,
 			VerifyCommand:            tr.verifyCmd,
 			FastCheckCommand:         *tr.fastCheckCommand,
@@ -2674,7 +2664,6 @@ func (tr *ticketRun) dispatch() error {
 			RequiredContent:          tr.requiredContent,
 			TestPatterns:             tr.testPatterns,
 			TestsRequiredOptOut:      tr.r.TestsRequiredOptOut,
-			SpecAcceptanceCriteria:   *tr.specAcceptanceCriteria,
 			Slice:                    sliceOpts,
 			ReleasePolicy:            releasePolicy,
 			Thinking:                 tr.executionThinking,

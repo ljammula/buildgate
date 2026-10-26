@@ -121,9 +121,7 @@ const ReadBackStaleNote = "The read-back describes an earlier version of this sp
 // specContent that reads as a rule for the git commit's message
 // (isCommitMessageCriterion). The factory writes the commit, and a merge
 // rewrites its subject, so the human decides whether such a criterion
-// stays; the conformity review is told not to judge a requirement on that
-// text, and to judge the rest of the criterion as usual
-// (spec_conformity.command_outcome_rule). The criterion is never removed
+// stays. The criterion is never removed
 // or renumbered here: "the consumer commits the offset and logs the message
 // id" was once deleted from a spec by this reading. A spec whose criteria
 // carry IDs also gets one note for each criterion not in an EARS form

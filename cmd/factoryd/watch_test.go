@@ -204,9 +204,9 @@ func TestRelayModelEffortLine(t *testing.T) {
 			name: "two kinds, different efforts",
 			attempts: []run.Attempt{
 				{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "medium"},
-				{Kind: "spec_conformity", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "max"},
+				{Kind: "review", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "max"},
 			},
-			want: "build gpt-5.6-luna (effort medium) · spec_conformity gpt-5.6-luna (effort max)",
+			want: "build gpt-5.6-luna (effort medium) · review gpt-5.6-luna (effort max)",
 		},
 		{
 			name: "retried build keeps the LAST attempt's effort",
@@ -299,7 +299,7 @@ func TestRelayModelEffortLine(t *testing.T) {
 // can see, per attempt Kind, which relay worker model an attempt used and
 // the reasoning effort its relay actually observed on the wire
 // (relay.Server's own lastReasoningEffort -- factory-observed evidence,
-// not agent self-report) -- the "build ran at medium, conformity review
+// not agent self-report) -- the "build ran at medium, review
 // at max" case this field exists to surface.
 func TestPrintRunRecapShowsRelayModelAndReasoningEffort(t *testing.T) {
 	t.Parallel()
@@ -312,7 +312,7 @@ func TestPrintRunRecapShowsRelayModelAndReasoningEffort(t *testing.T) {
 		Attempts: []run.Attempt{
 			{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "medium"},
 			{Kind: "build", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "medium"},
-			{Kind: "spec_conformity", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "max"},
+			{Kind: "review", RelayWorkerModelID: "gpt-5.6-luna", RelayReasoningEffort: "max"},
 		},
 	}
 	if err := r.Save(dataDir); err != nil {
@@ -321,7 +321,7 @@ func TestPrintRunRecapShowsRelayModelAndReasoningEffort(t *testing.T) {
 	var buf bytes.Buffer
 	printRunRecap(&buf, r, dataDir)
 	out := buf.String()
-	want := "  model: build gpt-5.6-luna (effort medium) · spec_conformity gpt-5.6-luna (effort max)\n"
+	want := "  model: build gpt-5.6-luna (effort medium) · review gpt-5.6-luna (effort max)\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("recap missing %q; got:\n%s", want, out)
 	}
@@ -437,7 +437,7 @@ func TestPrintRunRecapHaltedWithOwningRequest(t *testing.T) {
 // regression test for Follow-up B's watch.go fix: printRunRecap used to
 // always print "next: factoryd retry <request>" for a run whose owning
 // request still waits on the operator, even when that request's own
-// NextAction() (e.g. a spec_conformity-only quarantine) says something
+// NextAction() (e.g. a diff_scope quarantine) says something
 // more specific -- the console/CLI must never show a "next" line that
 // contradicts what `factoryd watch`/status would say about the same
 // request.
@@ -449,7 +449,7 @@ func TestPrintRunRecapUsesOwningRequestsNextActionNotHardcodedRetry(t *testing.T
 		Ticket:    "T1",
 		State:     run.StateQuarantined,
 		CreatedAt: time.Now().Add(-30 * time.Second).Format(time.RFC3339),
-		HaltError: "gate failed: spec_conformity",
+		HaltError: "gate failed: diff_scope",
 		UpdatedAt: time.Now().Format(time.RFC3339),
 	}
 	if err := r.Save(dataDir); err != nil {
@@ -457,9 +457,9 @@ func TestPrintRunRecapUsesOwningRequestsNextActionNotHardcodedRetry(t *testing.T
 	}
 
 	req := &request.Request{
-		ID: "req-conformity", State: request.StateQuarantined, SubmittedAt: time.Now().Format(time.RFC3339),
-		Error:           "ticket 1/1: spec_conformity corrective rounds exhausted (1/1)",
-		QuarantineCheck: request.QuarantineCheckSpecConformity,
+		ID: "req-scope", State: request.StateQuarantined, SubmittedAt: time.Now().Format(time.RFC3339),
+		Error:           "ticket 1/1: diff_scope failed",
+		QuarantineCheck: request.QuarantineCheckDiffScope,
 		Tickets:         []request.Ticket{{Index: 1, RunID: "run-quarantined"}},
 	}
 	if err := req.Save(dataDir); err != nil {
@@ -473,7 +473,7 @@ func TestPrintRunRecapUsesOwningRequestsNextActionNotHardcodedRetry(t *testing.T
 	if !strings.Contains(out, "next: "+req.NextAction()) {
 		t.Errorf("recap = %q, want the owning request's own NextAction()", out)
 	}
-	if strings.Contains(out, "next: factoryd retry req-conformity\n") {
+	if strings.Contains(out, "next: factoryd retry req-scope\n") {
 		t.Errorf("recap = %q, must not fall back to the generic retry hint", out)
 	}
 }

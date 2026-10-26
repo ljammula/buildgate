@@ -24,18 +24,6 @@ func TestPlanReviewOffReturnsNoSteps(t *testing.T) {
 	}
 }
 
-func TestCombinedStepIsNotInStepsTable(t *testing.T) {
-	if len(Steps) != 1 || Steps[0].Name != CodeReview {
-		t.Fatalf("Steps = %v, want only the standalone code review (Combined must not be added here)", Steps)
-	}
-	if _, ok := ByName(Combined); ok {
-		t.Fatalf("ByName(Combined) found a step, want Combined to be absent from Steps")
-	}
-	if _, ok := ByName(SpecConformity); ok {
-		t.Fatalf("ByName(SpecConformity) found a step, want the retired step absent")
-	}
-}
-
 func TestReviewExitCodeDecodesAVerdictAndNothingElseAsAPass(t *testing.T) {
 	cases := []struct {
 		exit, want int

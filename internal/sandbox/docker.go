@@ -2119,7 +2119,7 @@ var HarnessSiblingModules = map[string]bool{
 	"plan_tickets.py":     true,
 	"ticket_runner.py":    true,
 	"goal_pilot.py":       true,
-	"code_review.py":      true, // imported by combined_review.py; also the standalone code review CLI
+	"code_review.py":      true, // imported by combined_review.py
 	"prompt_templates.py": true, // loads the *.prompt.md templates below
 	"round_feedback.py":   true, // imported by build_app.py
 	"saved_prompts.py":    true, // imported by build_app.py
@@ -2144,10 +2144,6 @@ var HarnessSiblingModules = map[string]bool{
 	"build_passed_notes.prompt.md":                       true,
 	"build_round_checklist.prompt.md":                    true,
 	"code_review.command_outcome_rule.prompt.md":         true,
-	"code_review.diff_inline.prompt.md":                  true,
-	"code_review.diff_self.prompt.md":                    true,
-	"code_review.json_contract.prompt.md":                true,
-	"code_review.prompt.md":                              true,
 	"code_review.reproduction_rule.prompt.md":            true,
 	"code_review.scope_rule.prompt.md":                   true,
 	"code_review.severity_rule.prompt.md":                true,
@@ -2187,12 +2183,11 @@ var HarnessSiblingModules = map[string]bool{
 // file alone. Found live on the direct-execution path: the first
 // sandboxed spec draft died on ModuleNotFoundError before the model ran
 // (draft_spec.py's own `import build_app`); found again on the Temporal
-// path, 2026-09-17, the first time the Temporal path's own conformity-
-// review Activity (RunReviewStepActivity since M4-K3, previously
-// RunSpecConformityReviewActivity) ran a real conformity_review.py
-// against a live sandbox -- that Activity's own script-staging block had
-// never called this at all, since no Temporal Activity before it had
-// ever staged a harness script with a sibling import. Shared by both
+// path, 2026-09-17, the first time a Temporal review Activity ran a real
+// review script against a live sandbox -- that Activity's own
+// script-staging block had never called this at all, since no Temporal
+// Activity before it had ever staged a harness script with a sibling
+// import. Shared by both
 // cmd/factoryd's own stageSandboxScript and
 // internal/workflow's runSandboxWithRetries so the two paths cannot drift
 // on this again.

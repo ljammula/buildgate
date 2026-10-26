@@ -96,7 +96,7 @@ func TestInspectBuiltTicketReadsTheCheckedCommitsFromTheRepository(t *testing.T)
 	if err := built.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(run.Dir(dataDir, "run-1"), "CONFORMITY_EVIDENCE.json"), []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(run.Dir(dataDir, "run-1"), "CODE_REVIEW_EVIDENCE.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r := &Request{ID: "req-1", State: StateQuarantined, Tickets: []Ticket{{Index: 1, RunID: "run-1"}, {Index: 2}}}
@@ -120,7 +120,7 @@ func TestInspectBuiltTicketReadsTheCheckedCommitsFromTheRepository(t *testing.T)
 	if c := command(t, ticket.Commands, "Your own copy, to try or change"); !strings.HasSuffix(c, "/review/run-1 "+result) {
 		t.Errorf("own copy = %q", c)
 	}
-	command(t, ticket.Commands, "The review's verdict on each criterion")
+	command(t, ticket.Commands, "The review's findings")
 	for _, absent := range []string{"The ticket it was judged against", "The build's report"} {
 		for _, l := range labels(ticket.Commands) {
 			if l == absent {

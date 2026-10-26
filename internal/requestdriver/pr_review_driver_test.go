@@ -2365,11 +2365,9 @@ func TestWriteRoundAddendumFencesTheGatesFindings(t *testing.T) {
 	}
 }
 
-// TestRunCorrectiveRoundPassesTheTicketsAcceptanceCriteria: a PR-review
-// round's review judges spec conformity as the first build's does, so it is
-// launched with the ticket's acceptance-criteria file; and it opens no pull
+// TestRunCorrectiveRoundOpensNoPullRequest: a PR-review round opens no pull
 // request, so it carries neither the issue to close nor a base to stack on.
-func TestRunCorrectiveRoundPassesTheTicketsAcceptanceCriteria(t *testing.T) {
+func TestRunCorrectiveRoundOpensNoPullRequest(t *testing.T) {
 	dp := newFakeDeps(t)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
@@ -2392,13 +2390,8 @@ func TestRunCorrectiveRoundPassesTheTicketsAcceptanceCriteria(t *testing.T) {
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	criteriaPath := requestdrivertest.ArgValue(got, "-spec-acceptance-criteria")
-	if criteriaPath == "" {
-		t.Fatalf("round launched without -spec-acceptance-criteria: %v", got)
-	}
-	criteria, err := os.ReadFile(criteriaPath)
-	if err != nil || !strings.Contains(string(criteria), "The thing is done.") {
-		t.Fatalf("criteria file = %q (err %v), want the ticket's criterion", criteria, err)
+	if len(got) == 0 {
+		t.Fatal("the round was not launched")
 	}
 	for _, flag := range []string{"-pr-closes-issue", "-pr-base", "-open-pull-request"} {
 		if requestdrivertest.HasFlag(got, flag) {

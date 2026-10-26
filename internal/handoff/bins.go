@@ -49,7 +49,6 @@ var bins = map[string]Bin{
 	"diff_scope":               BinCorrective,
 	"required_files_changed":   BinCorrective,
 	"required_content_present": BinCorrective,
-	"spec_conformity":          BinCorrective,
 	"code_review":              BinCorrective,
 
 	policy.ReferenceOracleGateID: BinCorrectiveIfOracleInLoop,

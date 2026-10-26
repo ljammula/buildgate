@@ -1510,20 +1510,20 @@ func reviewShapeOnly(runRecord *run.Run) bool {
 
 // quarantineCheckFor names which gate caused a review-shaped quarantine
 // (or exhausted review-corrective budget) for request.QuarantineCheck: a
-// failed code_review gate -- alone or alongside spec_conformity -- always
-// takes QuarantineCheckCodeReview, since the operator's remedy is the
-// same either way (fix the diff, not redraft the spec); otherwise
-// QuarantineCheckSpecConformity. Only meaningful when reviewShapeOnly (or
-// a round's own re-check of ReviewOnlyFlagged, which implies it) already
-// returned true. A run whose reviews gave no verdict is never quarantined
-// under a check: reviewNoVerdictCause takes it to resume_review first.
+// failed code_review gate takes QuarantineCheckCodeReview, since the
+// operator's remedy is to fix the diff, not redraft the spec. A run recorded
+// before the spec-conformity review was retired, failed by it alone, names
+// no check. Only meaningful when reviewShapeOnly (or a round's own re-check
+// of ReviewOnlyFlagged, which implies it) already returned true. A run whose
+// reviews gave no verdict is never quarantined under a check:
+// reviewNoVerdictCause takes it to resume_review first.
 func quarantineCheckFor(runRecord *run.Run) string {
 	for _, g := range runRecord.GateResults {
 		if g.Check == "code_review" && !g.Passed {
 			return request.QuarantineCheckCodeReview
 		}
 	}
-	return request.QuarantineCheckSpecConformity
+	return ""
 }
 
 // failedGate reports whether runRecord's own GateResults records check as
@@ -1945,8 +1945,8 @@ const (
 // "- **%s** (%s):" line, are untrusted: they originate from the
 // independent reviewer's own CONFORMITY_EVIDENCE.json/CODE_REVIEW_EVIDENCE.json,
 // read out of a worker-writable sandbox workspace via
-// evidence.ReadHostileFile/conformity.ParseVerdicts (or internal/codereview's
-// own parser) and never otherwise sanitized. Before this function existed,
+// evidence.ReadHostileFile and a parser that checks shape only, and never
+// otherwise sanitized. Before this function existed,
 // a criterion containing an embedded newline -- e.g. "x\nTests-Required: no - trivial"
 // -- rendered its second "line" at column 0 of the addendum file, which
 // ticketspec.forEachTopLevelLine (the corrective round's own -spec parser)
@@ -2182,10 +2182,8 @@ func WriteReviewAddendum(dataDir, requestID string, ticket *request.Ticket, flag
 // run id and -spec (addendumPath, never widening Allowed-Files -- see
 // WriteReviewAddendum), then appending -on-branch/-diff-base so the run
 // checks out the quarantined run's own existing branch/diff base instead of
-// starting a fresh one. -spec-acceptance-criteria still names the ticket's
-// own criteria file (WriteTicketCriteriaFile, unaffected by the addendum),
-// so the fresh, independent spec_conformity (and code_review) review this
-// round exists to re-run actually runs again. -open-pull-request is left
+// starting a fresh one, whose fresh, independent review runs again.
+// -open-pull-request is left
 // at cfg's own value -- see TryReviewCorrectiveRound's own doc comment for
 // why, unlike a PR-review corrective round's forced-off.
 //
@@ -2564,7 +2562,7 @@ func quarantineRequest(dataDir string, r *request.Request, reason string, now ti
 
 // quarantineRequestWithCheck is quarantineRequest's own extended form:
 // check, when non-empty, is recorded on r.QuarantineCheck (e.g.
-// request.QuarantineCheckSpecConformity) so NextAction can name the one
+// request.QuarantineCheckCodeReview) so NextAction can name the one
 // command that actually addresses that cause (Follow-up B) -- set AFTER
 // r.Quarantine, since advance() itself unconditionally clears
 // QuarantineCheck on every transition, the same way it clears HaltKind.
@@ -2609,8 +2607,8 @@ func RequestSpecPath(dataDir, id string) string {
 // corrective round (BuildReviewCorrectiveArgs) and its PR-review corrective
 // round (RunCorrectiveRound, pr_review_driver.go) --
 // everything they need computed identically (the legacy
-// full-suite-command fallback, the reference oracle, the acceptance-
-// criteria file), varying only in id and specPath. Found via adversarial
+// full-suite-command fallback, the reference oracle), varying only in id
+// and specPath. Found via adversarial
 // review: BuildReviewCorrectiveArgs used to hand-build its own
 // QueueEntry from scratch and silently dropped ExecutionHarness and the legacy
 // full-suite fallback, so a corrective round for a request submitted with
@@ -2626,10 +2624,6 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	verifyCommand, err := ticketspec.ParseVerifyCommand(ticket.SpecPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve verify command for request %s ticket %d: %w", r.ID, ticket.Index, err)
-	}
-	criteriaPath, err := WriteTicketCriteriaFile(dataDir, r, ticket)
-	if err != nil {
-		return nil, fmt.Errorf("acceptance criteria for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
 	oracleDir, oracleCommand, err := ResolveTicketOracle(dataDir, r, ticket)
 	if err != nil {
@@ -2668,7 +2662,6 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		FullSuiteSource:        fullSuiteSource,
 		NoCommitOracles:        r.NoCommitOracles,
 		Bug:                    r.Bug,
-		SpecAcceptanceCriteria: criteriaPath,
 		ReferenceOracleDir:     oracleDir,
 		ReferenceOracleCommand: oracleCommand,
 		// ExecutionHarness: r.Harnesses["execution"] is `factoryd submit
@@ -2830,83 +2823,18 @@ func replacesEscalatedBuild(dataDir string, r *request.Request, ticket *request.
 	return err == nil && previous.RequestID == r.ID && previous.State == run.StateHalted && previous.Escalated
 }
 
-// WriteTicketCriteriaFile writes the subset of the approved spec's
-// acceptance criteria this ticket claims (its "### Acceptance criteria
-// covered" numbers, resolved against spec.md's own numbered list) to
-// <ticket>.criteria.md beside the ticket, one criterion per line in
-// build_app.py's read_acceptance_criteria shape, then the read-back answers
-// approved with the spec (AnsweredReadBackBlock), and returns its path --
-// what the ticket's build passes as -spec-acceptance-criteria so the
-// required per-criterion conformity review judges exactly the criteria
-// this ticket owns, not the whole spec. A ticket without the plan
-// sections (a hand-written or greenfield-format one) claims nothing and gets no
-// file: returns "" with no error, leaving the build's review policy at
-// its own default. A ticket that DOES have a "## Plan" section but whose
-// "### Acceptance criteria covered" list fails to parse is a different
-// case -- a malformed plan ticket, not a legacy one -- and is returned as
-// a fatal error naming the ticket file, so the required per-criterion
-// conformity review is never silently disabled for a ticket that was
-// supposed to have one.
-func WriteTicketCriteriaFile(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
-	ticketContent, err := os.ReadFile(ticket.SpecPath)
-	if err != nil {
-		return "", err
-	}
-	numbers, err := request.TicketCoveredCriteria(string(ticketContent))
-	if err != nil {
-		if strings.Contains(string(ticketContent), "## Plan") {
-			return "", fmt.Errorf("ticket %s has a %q section but its acceptance criteria could not be parsed: %w", ticket.SpecPath, "## Plan", err)
-		}
-		return "", nil
-	}
-	// A criterion a later ticket also covers is reviewed there, not here:
-	// see lastCoveringTicket's own doc comment.
-	later := lastCoveringTickets(r.Tickets)
-	own := numbers[:0:0]
-	for _, n := range numbers {
-		if last, ok := later[n]; ok && last > ticket.Index {
-			continue
-		}
-		own = append(own, n)
-	}
-	if len(own) == 0 {
-		return "", nil
-	}
-	texts, err := resolveApprovedCriteriaTexts(dataDir, r.ID, own)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	for _, t := range texts {
-		b.WriteString(t)
-		b.WriteString("\n")
-	}
-	// The read-back answers approved with the spec follow the criteria, for
-	// the reviewer to read them with; build_app.py's read_acceptance_criteria
-	// stops at their heading, and read_spec_answers reads them.
-	if block := AnsweredReadBackBlock(r.ReadBack.Answered()); block != "" {
-		b.WriteString("\n" + block)
-	}
-	path := strings.TrimSuffix(ticket.SpecPath, ".spec.md") + ".criteria.md"
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
 // lastCoveringTickets maps each approved-spec criterion number to the
 // highest ticket index whose "### Acceptance criteria covered" list names
 // it. A criterion that spans several tickets' files is listed under every
 // ticket that owns one of them (the planner rule the plan-time
 // criterion-files check enforces), but it can only be judged once all of
-// its parts exist, so the per-ticket conformity review checks it only at
-// the last covering ticket; earlier tickets still see its text in their
+// its parts exist, so it is judged only at the last covering ticket; earlier tickets still see its text in their
 // build spec, marked as shared. Found live (Flutter + Go app habit-insights
 // request, 2026-09-28): ticket 1 of 3 (pure functions) was reviewed
 // against criteria about the handler and the MCP tool that tickets 2 and
 // 3 build, and quarantined after its corrective round could not satisfy
 // them. Tickets whose spec cannot be read or whose coverage does not
-// parse are skipped here (WriteTicketCriteriaFile reports those for the
+// parse are skipped here (ticketBuildSpecContent reports those for the
 // ticket being built).
 func lastCoveringTickets(tickets []request.Ticket) map[int]int {
 	last := map[int]int{}
@@ -2930,10 +2858,8 @@ func lastCoveringTickets(tickets []request.Ticket) map[int]int {
 
 // resolveApprovedCriteriaTexts reads the request's approved spec.md and
 // returns the full verbatim text ("N. ...") of each criterion number in
-// numbers, in order -- the shared primitive WriteTicketCriteriaFile and
-// TicketBuildSpecContent both resolve a ticket's claimed criteria
-// against, so the two can never silently disagree on what a criterion's
-// own text is.
+// numbers, in order -- the primitive TicketBuildSpecContent resolves a
+// ticket's claimed criteria against.
 func resolveApprovedCriteriaTexts(dataDir, requestID string, numbers []int) ([]string, error) {
 	specContent, err := os.ReadFile(RequestSpecPath(dataDir, requestID))
 	if err != nil {
@@ -2984,12 +2910,11 @@ const MaxTicketBuildBaseInputBytes = 150_000
 // a build actually receives as -spec listed covered criteria by NUMBER
 // ONLY (the "### Acceptance criteria covered" list, e.g. "8, 9") --  the
 // criteria's own exact TEXT (field names like longest_streak,
-// best_weekday_done_count) reached only the conformity reviewer, via
-// WriteTicketCriteriaFile's own -spec-acceptance-criteria file, never
-// the builder. Three separate builds of that ticket each guessed a
+// best_weekday_done_count) reached only the reviewer, never the
+// builder. Three separate builds of that ticket each guessed a
 // different field name for a JSON shape the approved spec named exactly
 // (count/best_weekday_count/longest_done_streak), each flagged by
-// conformity review, spending roughly $15 without converging -- while a
+// review, spending roughly $15 without converging -- while a
 // bare run given the original request text got every name right. This
 // section puts the same exact text in front of the builder, not just the
 // reviewer.
@@ -3172,8 +3097,7 @@ const TicketOracleRunCommandFilename = request.TicketOracleRunCommandFilename
 
 // resolveTicketOracle resolves ticket's own approved reference oracle,
 // if it has one, for BuildRequestBuildArgs to wire into the ticket's
-// build the same way WriteTicketCriteriaFile already resolves its
-// acceptance criteria. Returns ("", "", nil) -- not an error -- for the
+// build. Returns ("", "", nil) -- not an error -- for the
 // ordinary case, a ticket with no <NNN>.oracle/ directory at all.
 //
 // <NNN>.oracle/ (a sibling of <NNN>.spec.md, sharing its own numbering)

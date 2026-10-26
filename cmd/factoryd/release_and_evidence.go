@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"buildgate/internal/conformity"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
 	gatepolicy "buildgate/internal/policy"
@@ -940,19 +939,6 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	if r.TestsRequiredOptOut != "" {
 		fmt.Fprintf(&b, "`tests_added` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
 	}
-	// Per-criterion spec-conformity verdicts, when
-	// -spec-acceptance-criteria was given. Purely informational -- see
-	// run.AgentEvidence.ReviewVerdicts' own doc comment for why this is
-	// never itself a gate: the actual required/advisory/degraded
-	// enforcement already happened inside conformity_review.py, reflected
-	// here only through the run's own accept/quarantine outcome.
-	//
-	// Reads r.SpecConformityVerdicts, the independent phase-2 reviewer's
-	// output. AgentEvidence.ReviewVerdicts is only the fallback for a run
-	// recorded before that field existed: since the phase-2 split
-	// build_app.py no longer receives the criteria, so that legacy field is
-	// empty for every current run and this section never rendered at all.
-	writeSpecConformitySection(&b, r)
 	b.WriteString(renderCodeReviewMarkdown(r.CodeReview))
 	// Every policy.CommandGate always gets its own line, even when the
 	// project never configured one -- "not configured" is a real,
@@ -1001,57 +987,6 @@ func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
 			}
 		}
 	}
-}
-
-// writeSpecConformitySection lists each criterion's verdict and whether the
-// reference oracle agrees.
-func writeSpecConformitySection(b *strings.Builder, r *run.Run) {
-	verdicts := r.SpecConformityVerdicts
-	if len(verdicts) == 0 && r.AgentEvidence != nil {
-		verdicts = r.AgentEvidence.ReviewVerdicts
-	}
-	if len(verdicts) > 0 {
-		b.WriteString("## Spec conformity\n\n")
-		// Cross-check against the reference oracle: for criteria a
-		// deterministic oracle also covers, say whether the LLM reviewer and the oracle
-		// agree -- a disagreement is the drift signal a human should read.
-		// Still informational only; neither input is a gate here.
-		oraclePassed := conformity.OracleOutcome(r.GateResults)
-		disagreements := 0
-		for i, c := range conformity.CrossCheck(verdicts, r.OracleCoveredCriteria, oraclePassed) {
-			fmt.Fprintf(b, "- %s: **%s**", sanitizeMarkdownField(c.Criterion), sanitizeMarkdownField(c.Verdict))
-			writeRecheckNote(b, verdicts[i].Recheck)
-			switch c.Agreement {
-			case conformity.AgreementAgree:
-				b.WriteString(" (oracle-checked, agrees)")
-			case conformity.AgreementDisagree:
-				disagreements++
-				b.WriteString(" (oracle-checked, **DISAGREES with the reference oracle**)")
-			case conformity.AgreementOracleNotRun:
-				b.WriteString(" (oracle-covered, oracle did not run)")
-			case conformity.AgreementOracleFailed:
-				b.WriteString(" (oracle-covered, the reference oracle failed)")
-			case conformity.AgreementReviewerUnavailable:
-				b.WriteString(" (oracle-covered, reviewer produced no verdict)")
-			}
-			b.WriteString("\n")
-		}
-		if disagreements > 0 {
-			fmt.Fprintf(b, "\n%d criterion verdict(s) disagree with the reference oracle -- the reviewer and the deterministic check reached opposite conclusions, so the prose criterion and the oracle may have drifted apart. Read both before merging.\n", disagreements)
-		}
-		b.WriteString("\n")
-	}
-}
-
-// writeRecheckNote says, after a criterion's verdict, that the verdict came
-// from a second look: an earlier answer flagged the criterion for text a file
-// lacked, and the factory found that text in the result commit. Without it a
-// flag overturned to clean reads as an ordinary clean.
-func writeRecheckNote(b *strings.Builder, recheck *run.ReviewVerdictRecheck) {
-	if recheck == nil {
-		return
-	}
-	fmt.Fprintf(b, " (judged again: an earlier answer flagged it for text the factory then found in the result commit; %s)", sanitizeMarkdownField(recheck.Outcome))
 }
 
 // writeNamedGatesSection lists every command gate and the repository's own
@@ -1314,16 +1249,15 @@ func sanitizePRField(s string) string {
 const codeReviewFindingsMaxRendered = 20
 
 // renderCodeReviewMarkdown renders the "## Code review" PR-body section
-// for the standalone AI code-review pass (agent/pi/scripts/code_review.py,
+// for the review step (agent/pi/scripts/combined_review.py,
 // internal/codereview) -- nil (the ticket never ran this phase, i.e.
 // -code-review-policy was "off" or the run never reached it) renders
-// nothing at all, matching the "## Spec conformity" section's own
-// convention of only appearing when that phase actually ran.
+// nothing at all: the section appears only when the phase actually ran.
 //
 // Findings are rendered high severity first, then medium, then low,
 // stable within a severity (Go's sort.SliceStable equivalent -- see
 // sort.Stable below) so two findings of the same severity keep
-// code_review.py's own reported order. Capped at
+// the reviewer's own reported order. Capped at
 // codeReviewFindingsMaxRendered, with a final "… N more" line naming
 // exactly how many were left out, pointing at the full evidence file for
 // a reviewer who wants the rest.

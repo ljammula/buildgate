@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/codereview"
 	"bytes"
 	"errors"
 	"log"
@@ -930,39 +931,10 @@ func TestApplyRunWorkflowResultSkipsEvidenceWhenNotAttributable(t *testing.T) {
 	}
 }
 
-// TestApplyRunWorkflowResultCopiesSpecConformityConfigured is the regression
-// test for a Temporal-path parity gap: this function copied every other
-// RunWorkflowResult evidence field but not SpecConformityConfigured (a
-// pre-reproduction record field, read only).
-func TestApplyRunWorkflowResultCopiesSpecConformityConfigured(t *testing.T) {
-	dataDir := t.TempDir()
-	r := &run.Run{ID: "run-spec-conformity", Ticket: "fixture-ticket", CreatedAt: time.Now().Format(time.RFC3339Nano)}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-
-	// A non-accepted terminal state always returns an error here (see
-	// TestApplyRunWorkflowResultNotifiesHaltedNotQuarantined's own comment
-	// on this) -- this test cares about r.SpecConformityConfigured, not
-	// the error itself.
-	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
-	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, t.TempDir(), "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
-	if !r.SpecConformityConfigured {
-		t.Fatal("SpecConformityConfigured = false after applying a result with SpecConformityConfigured=true, want true")
-	}
-	reloaded, err := run.Load(dataDir, r.ID)
-	if err != nil {
-		t.Fatalf("load run: %v", err)
-	}
-	if !reloaded.SpecConformityConfigured {
-		t.Fatal("persisted SpecConformityConfigured = false, want true")
-	}
-}
-
 // TestApplyRunWorkflowResultLoadsOracleCoverageIntoTheRunRecord is a
 // Temporal-path regression: the oracle's MANIFEST.json coverage must be read
 // from the directory the run record names, so a Temporal-routed run's
-// evidence cross-checks the oracle exactly like any other run's.
+// record carries it exactly like any other run's.
 func TestApplyRunWorkflowResultLoadsOracleCoverageIntoTheRunRecord(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
@@ -976,7 +948,7 @@ func TestApplyRunWorkflowResultLoadsOracleCoverageIntoTheRunRecord(t *testing.T)
 		t.Fatal(err)
 	}
 
-	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
+	result := workflow.RunWorkflowResult{State: run.StateQuarantined}
 	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 
 	reloaded, err := run.Load(dataDir, r.ID)
@@ -989,13 +961,13 @@ func TestApplyRunWorkflowResultLoadsOracleCoverageIntoTheRunRecord(t *testing.T)
 }
 
 // A reclaimed run (attributeWorkspaceEvidence=false) must not attribute
-// workspace conformity evidence to itself -- but it still knows its own
-// oracle directory from the run record, so coverage is still recorded.
-func TestApplyRunWorkflowResultReclaimedRunLoadsCoverageButNotVerdicts(t *testing.T) {
+// workspace review evidence to itself -- but it still knows its own oracle
+// directory from the run record, so coverage is still recorded.
+func TestApplyRunWorkflowResultReclaimedRunLoadsCoverageButNotReviewEvidence(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, "CONFORMITY_EVIDENCE.json"),
-		[]byte(`{"review_verdicts":[{"criterion":"1. x","verdict":"clean"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, codereview.EvidenceFile),
+		[]byte(`{"schema_version":1,"review_policy":"required","available":true,"findings":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	oracleDir := t.TempDir()
@@ -1008,31 +980,34 @@ func TestApplyRunWorkflowResultReclaimedRunLoadsCoverageButNotVerdicts(t *testin
 		t.Fatal(err)
 	}
 
-	result := workflow.RunWorkflowResult{State: run.StateQuarantined, SpecConformityConfigured: true}
+	result := workflow.RunWorkflowResult{State: run.StateQuarantined, CodeReviewConfigured: true}
 	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, false, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
 
 	reloaded, err := run.Load(dataDir, r.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded.SpecConformityVerdicts) != 0 {
-		t.Errorf("reclaimed run attributed workspace verdicts to itself: %+v", reloaded.SpecConformityVerdicts)
+	if reloaded.CodeReview != nil {
+		t.Errorf("reclaimed run attributed workspace review evidence to itself: %+v", reloaded.CodeReview)
 	}
 	if len(reloaded.OracleCoveredCriteria) != 1 {
 		t.Errorf("reclaimed run OracleCoveredCriteria = %v, want its coverage from the run record's own oracle dir", reloaded.OracleCoveredCriteria)
 	}
 }
 
-// TestApplyRunWorkflowResultSkipsConformityEvidenceWhenNotConfigured
-// covers the common case, where SpecConformityConfigured is false because
-// the ticket never declared -spec-acceptance-criteria: no
-// CONFORMITY_EVIDENCE.json was ever written, and this must not log a
-// spurious "could not retain" warning for every such run.
+// TestApplyRunWorkflowResultSkipsReviewEvidenceWhenNotConfigured: a run
+// whose review was off never retains a CODE_REVIEW_EVIDENCE.json a
+// non-isolated workspace still holds from an earlier run, and logs no
+// "could not retain" warning for it.
 // not parallel-safe: redirects the global log package's output (log.SetOutput)
-func TestApplyRunWorkflowResultSkipsConformityEvidenceWhenNotConfigured(t *testing.T) {
+func TestApplyRunWorkflowResultSkipsReviewEvidenceWhenNotConfigured(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
-	r := &run.Run{ID: "run-no-conformity", Ticket: "fixture-ticket", CreatedAt: time.Now().Format(time.RFC3339Nano)}
+	if err := os.WriteFile(filepath.Join(workspace, codereview.EvidenceFile),
+		[]byte(`{"schema_version":1,"review_policy":"required","available":true,"findings":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &run.Run{ID: "run-no-review", Ticket: "fixture-ticket", CreatedAt: time.Now().Format(time.RFC3339Nano)}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
@@ -1044,11 +1019,11 @@ func TestApplyRunWorkflowResultSkipsConformityEvidenceWhenNotConfigured(t *testi
 
 	result := workflow.RunWorkflowResult{State: run.StateQuarantined}
 	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
-	if _, err := os.Stat(filepath.Join(run.Dir(dataDir, r.ID), "CONFORMITY_EVIDENCE.json")); !os.IsNotExist(err) {
-		t.Fatalf("CONFORMITY_EVIDENCE.json retained/stat err = %v, want it to not exist", err)
+	if _, err := os.Stat(filepath.Join(run.Dir(dataDir, r.ID), codereview.EvidenceFile)); !os.IsNotExist(err) {
+		t.Fatalf("%s retained/stat err = %v, want it to not exist", codereview.EvidenceFile, err)
 	}
-	if strings.Contains(logBuf.String(), "could not retain CONFORMITY_EVIDENCE.json") {
-		t.Errorf("logs = %q, want no retention warning when SpecConformityConfigured is false", logBuf.String())
+	if strings.Contains(logBuf.String(), "could not retain") {
+		t.Errorf("logs = %q, want no retention warning when the review was off", logBuf.String())
 	}
 }
 

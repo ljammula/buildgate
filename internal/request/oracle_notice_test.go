@@ -224,21 +224,13 @@ func TestNextActionCoversReviewStatesHaltsAndQuarantine(t *testing.T) {
 			r.Error = "boom"
 			return r
 		}, []string{"factoryd retry req-1"}, nil},
-		{"quarantined, spec_conformity only (Follow-up B)", func() *Request {
-			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
-			r.State = StateQuarantined
-			r.Error = "ticket 1/1: spec_conformity corrective rounds exhausted (1/1)"
-			r.QuarantineCheck = QuarantineCheckSpecConformity
-			return r
-		}, []string{"factoryd reject -to spec", "req-1", "factoryd retry req-1"}, []string{"fix the cause named above, then"}},
-		{"quarantined, spec_conformity but a ticket already accepted", func() *Request {
+		{"quarantined by a retired spec_conformity check", func() *Request {
 			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
 			r.State = StateQuarantined
 			r.Error = "boom"
-			r.QuarantineCheck = QuarantineCheckSpecConformity
-			r.Tickets = []Ticket{{Index: 1, RunID: "run-1", Branch: "factoryd/run-1"}}
+			r.QuarantineCheck = "spec_conformity"
 			return r
-		}, []string{"factoryd retry req-1"}, []string{"factoryd reject -to spec"}},
+		}, []string{"fix the cause named above", "factoryd retry req-1"}, []string{"spec_conformity quarantined"}},
 		{"quarantined, code_review", func() *Request {
 			r := New("req-1", "/w", "w", Source{Kind: SourceText}, fixedNow)
 			r.State = StateQuarantined

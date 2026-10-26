@@ -61,44 +61,21 @@ const (
 	// uses.
 	RunNamedGateActivityName    = "RunNamedGateActivity"
 	CollectEvidenceActivityName = "CollectEvidenceActivity"
-	// CommitOraclesActivityName is the Temporal counterpart of cmd/factoryd's host oracle commit (internal/oraclecommit). It runs after
-	// spec conformity has passed -- in this workflow that review can only run
-	// after CollectEvidenceActivity, so the commit cannot live inside it --
+	// CommitOraclesActivityName is the host oracle commit
+	// (internal/oraclecommit). It runs after the review -- which can only
+	// run after CollectEvidenceActivity, so the commit cannot live inside it --
 	// and it re-derives every piece of evidence CollectEvidenceActivity
 	// derived from ResultSHA (ChangedFiles, DiffStat, diff text) for the new
 	// result commit. Inert (Active=false, nothing touched) unless the approved
 	// oracle manifest declares a target_path.
 	CommitOraclesActivityName = "CommitOraclesActivity"
-	// RunReviewStepActivityName ports cmd/factoryd's two model-
-	// backed review phases -- the two-phase spec-conformity review
-	// (run_ticket.go's own "conformity review, phase 2") and the
-	// standalone AI code review (run_ticket.go's own "standalone AI code
-	// review" block, PR M2-B) -- to the Temporal path as ONE Activity
-	// implementation, called once per enabled step (reviewstep.Steps, each
-	// its own ActivityID, so their checkpoints/journals never collide)
-	// rather than two near-identical Activities (M4-K3; the prior two-copy
-	// design's own doc comment on RunCodeReviewActivity explained the
-	// tradeoff that made a second copy acceptable then -- extracting a
-	// shared helper without touching the first Activity's own already-
-	// covered body -- and named this as the eventual unification once room
-	// existed to touch both).
-	//
-	// A criterion asking the reviewer to check something about the commit
-	// itself can only be evaluated meaningfully against an already-
-	// committed workspace, and .git is mounted read-only inside the
-	// sandbox unconditionally, so both steps run as their OWN separate
-	// sandboxed launches, after CollectEvidenceActivity's own safety-net
-	// commit has already landed -- never folded into RunBuildActivity's
-	// single launch, the same reason cmd/factoryd's stopped
-	// threading -spec-acceptance-criteria to build_app.py's own round-loop
-	// launch. The code-review step runs REGARDLESS of the spec-conformity
-	// step's own outcome, mirroring run_ticket.go's own predicate (a
-	// code-review policy the operator explicitly opted into is not
-	// conditioned on whether the ticket separately declared acceptance
-	// criteria, or on whether that separate review passed). See
-	// reviewstep's own package doc, and internal/conformity/
-	// internal/codereview's own package docs, for the shared logic all
-	// three of these (this Activity, and cmd/factoryd) use.
+	// RunReviewStepActivityName is the model-backed review step
+	// (reviewstep.CombinedStep), called once per run whose review is on.
+	// It runs as its own sandboxed launch after CollectEvidenceActivity's
+	// own safety-net commit has landed, never folded into RunBuildActivity's
+	// single launch: .git is mounted read-only inside the sandbox
+	// unconditionally, so the reviewer needs a real commit to read. See
+	// reviewstep's and internal/codereview's own package docs.
 	RunReviewStepActivityName = "RunReviewStepActivity"
 	EvaluateGateActivityName  = "EvaluateGateActivity"
 	EvaluateRunActivityName   = "EvaluateRunActivity"

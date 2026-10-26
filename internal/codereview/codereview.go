@@ -1,19 +1,13 @@
-// Package codereview holds the pure logic behind the standalone AI
-// code-review pass (agent/pi/scripts/code_review.py) -- shared between
-// cmd/factoryd and internal/workflow the same way
-// internal/conformity shares conformity_review.py's own launch/parse
-// logic, so they can never silently diverge on how
-// code_review.py is invoked or how its evidence is parsed.
-//
-// Unlike conformity_review.py (checks the diff against declared
-// acceptance criteria), code_review.py asks for a free-form review of
-// the diff: concrete correctness/security/data-loss/concurrency defects,
-// each with a failure scenario -- never style/lint/formatting. This
-// package is Go-side defence in depth for that evidence: CODE_REVIEW_EVIDENCE.json
-// is agent-written (read via evidence.ReadHostileFile by the caller,
-// PR M2-B), so ParseResult re-applies the same per-finding validation
-// code_review.py's own parse_code_review_findings already does in
-// Python, rather than trusting the file's shape.
+// Package codereview holds the pure logic behind the review step's code
+// review (agent/pi/scripts/combined_review.py, whose finding parser is
+// code_review.py's): its policy values, the Go-side validation of its
+// agent-written evidence, and the review launch's relay arithmetic (relay.go).
+// The reviewer asks for concrete correctness, security, data-loss or
+// concurrency defects, each with a failure scenario -- never
+// style/lint/formatting. CODE_REVIEW_EVIDENCE.json is agent-written (read via
+// evidence.ReadHostileFile by the caller), so ParseResult re-applies the same
+// per-finding validation code_review.py's own parse_code_review_findings
+// already does in Python, rather than trusting the file's shape.
 package codereview
 
 import (
@@ -25,13 +19,8 @@ import (
 	"buildgate/internal/run"
 )
 
-// ScriptName is agent/pi/scripts/code_review.py's own filename -- both
-// execution paths resolve its full path the same way they resolve
-// conformity_review.py's (a sibling file in the same harness directory).
-const ScriptName = "code_review.py"
-
-// EvidenceFile is the file code_review.py writes its outcome to inside
-// the workspace.
+// EvidenceFile is the file the review writes its outcome to inside the
+// workspace, retained into the run directory under the same name.
 const EvidenceFile = "CODE_REVIEW_EVIDENCE.json"
 
 // Policy values for --review-policy / CodeReviewResult.Policy.
@@ -74,31 +63,6 @@ const (
 	refusedTooMany = "more than 3 reproductions in the review"
 	refusedTooBig  = "reproduction over 32768 bytes"
 )
-
-// Args constructs the argv passed to code_review.py. specHostPath is the
-// ticket's approved spec (context only, per code_review.py's own doc
-// comment) staged the same way build_app.py's own --spec normally is --
-// see each caller's own launch closure for the staging mechanism.
-// baseSHA and thinking are omitted from the argv entirely when empty,
-// same omission rules as conformity.Args, so an unset value never
-// appears as an empty flag. harness is the review role's harness name, always
-// passed (--harness selects the coding-agent binary).
-func Args(script, workspace, specHostPath, policy, baseSHA, thinking, harness string) []string {
-	args := []string{
-		script,
-		"--workspace", workspace,
-		"--spec", specHostPath,
-		"--review-policy", policy,
-	}
-	if baseSHA != "" {
-		args = append(args, "--review-base-sha", baseSHA)
-	}
-	if thinking != "" {
-		args = append(args, "--thinking", thinking)
-	}
-	args = append(args, "--harness", harness)
-	return args
-}
 
 // evidenceFile mirrors CODE_REVIEW_EVIDENCE.json's own top-level shape
 // for decoding. Findings is decoded as raw JSON values, not directly
@@ -336,11 +300,7 @@ func validateFinding(entry evidenceFindingRaw) (run.CodeReviewFinding, bool) {
 	}, true
 }
 
-// Blocking returns the subset of findings severe enough to block a
-// merge under review_policy=required (severity == "high") --
-// code_review.py's own run_code_review applies the identical rule
-// Python-side; this is the Go-side mirror for any caller that only has
-// the parsed findings, not the raw evidence file.
+// Blocking returns the high-severity subset of findings.
 func Blocking(findings []run.CodeReviewFinding) []run.CodeReviewFinding {
 	var blocking []run.CodeReviewFinding
 	for _, f := range findings {

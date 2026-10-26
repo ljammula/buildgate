@@ -230,11 +230,11 @@ func TestExcludeWorkspacePlaceholderRefusesLinkedWorktree(t *testing.T) {
 	}
 }
 
-// TestHarnessArtifactsCoverEveryReviewLaunch pins the session directory and
-// evidence file each separate review launch (conformity_review.py,
-// code_review.py) leaves in the workspace: run_ticket.go halts a run whose
-// workspace is dirty after a review, so a missing entry here halts every
-// run that reaches that review.
+// TestHarnessArtifactsCoverEveryReviewLaunch pins the session directories
+// and evidence files review launches leave in the workspace, those of the
+// retired spec-conformity and standalone code reviews included (a worktree
+// an older build left): a run whose workspace is dirty after a review
+// halts, so a missing entry here halts every run that reaches that review.
 func TestHarnessArtifactsCoverEveryReviewLaunch(t *testing.T) {
 	for _, want := range []string{".pi-build-round-state.json", ".pi-conformity-session/", "CONFORMITY_EVIDENCE.json", ".pi-code-review-session/", "CODE_REVIEW_EVIDENCE.json"} {
 		if !slices.Contains(HarnessArtifacts, want) {
@@ -245,7 +245,8 @@ func TestHarnessArtifactsCoverEveryReviewLaunch(t *testing.T) {
 
 // TestHarnessArtifactsCoverEveryScriptSessionDir: every Pi session
 // directory a harness script creates inside the workspace
-// (`session_dir=workspace / "<dir>"`) must be excluded, or the post-review
+// (`session_dir=workspace / "<dir>"`, or a `SESSION_DIR = "<dir>"` constant)
+// must be excluded, or the post-review
 // clean check halts the run. Found live (a Flutter + Go app repo M-E2 run, 2026-09-28):
 // combined_review.py's .pi-combined-review-session/ was missing and the
 // run halted "left the workspace dirty".
@@ -255,7 +256,7 @@ func TestHarnessArtifactsCoverEveryScriptSessionDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessionDir := regexp.MustCompile(`session_dir=workspace / "([^"]+)"`)
+	sessionDir := regexp.MustCompile(`(?m)session_dir=workspace / "([^"]+)"|^SESSION_DIR = "([^"]+)"`)
 	found := 0
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".py") {
@@ -267,12 +268,13 @@ func TestHarnessArtifactsCoverEveryScriptSessionDir(t *testing.T) {
 		}
 		for _, m := range sessionDir.FindAllStringSubmatch(string(data), -1) {
 			found++
-			if !slices.Contains(HarnessArtifacts, m[1]+"/") {
-				t.Errorf("%s creates %s/ in the workspace, but HarnessArtifacts lacks it", e.Name(), m[1])
+			name := m[1] + m[2]
+			if !slices.Contains(HarnessArtifacts, name+"/") {
+				t.Errorf("%s creates %s/ in the workspace, but HarnessArtifacts lacks it", e.Name(), name)
 			}
 		}
 	}
 	if found == 0 {
-		t.Fatal("no session_dir=workspace / \"...\" found in agent/pi/scripts: the pattern this test relies on changed")
+		t.Fatal("no session directory found in agent/pi/scripts: the pattern this test relies on changed")
 	}
 }

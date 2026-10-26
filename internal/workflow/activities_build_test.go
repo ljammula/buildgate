@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"buildgate/internal/daemonheartbeat"
-	"buildgate/internal/reviewstep"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/testfixture"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -866,7 +864,7 @@ func TestRunBuildActivityHeartbeatsDuringSubprocess(t *testing.T) {
 // any workspace whose auto-detected root command needs a toolchain the
 // sandbox doesn't have.
 func TestBuildActivityArgsIncludesVerifyCommand(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "cd backend && go test ./...", "", "", "", "", "pi")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "cd backend && go test ./...", "", "", "", "pi")
 
 	want := []string{
 		"/path/build_app.py",
@@ -894,7 +892,7 @@ func TestBuildActivityArgsIncludesVerifyCommand(t *testing.T) {
 // build_app.py's own argparse would consume the next flag as its value
 // instead of erroring.
 func TestBuildActivityArgsOmitsVerifyCommandWhenEmpty(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "", "pi")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "pi")
 	for i, arg := range got {
 		if arg == "--verify-command" {
 			t.Fatalf("buildActivityArgs() included --verify-command with an empty value at index %d: %v", i, got)
@@ -908,7 +906,7 @@ func TestBuildActivityArgsOmitsVerifyCommandWhenEmpty(t *testing.T) {
 // -repository silently ignored .factory.yml's fast_check_command and
 // always paid for the full verify command.
 func TestBuildActivityArgsIncludesFastCheckCommand(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "make verify", "make fast-check", "", "", "", "pi")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "make verify", "make fast-check", "", "", "pi")
 
 	want := []string{
 		"/path/build_app.py",
@@ -936,7 +934,7 @@ func TestBuildActivityArgsIncludesFastCheckCommand(t *testing.T) {
 // fastCheckCommand must not emit a bare "--fast-check-command" with
 // nothing after it.
 func TestBuildActivityArgsOmitsFastCheckCommandWhenEmpty(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "make verify", "", "", "", "", "pi")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "make verify", "", "", "", "pi")
 	for i, arg := range got {
 		if arg == "--fast-check-command" {
 			t.Fatalf("buildActivityArgs() included --fast-check-command with an empty value at index %d: %v", i, got)
@@ -950,7 +948,7 @@ func TestBuildActivityArgsOmitsFastCheckCommandWhenEmpty(t *testing.T) {
 // RunWorkflowInput.Thinking, see RunBuildActivity's own call site) must
 // reach build_app.py's argv on the Temporal path exactly like it does in cmd/factoryd.
 func TestBuildActivityArgsIncludesThinkingWhenSet(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "medium", "pi")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "medium", "pi")
 	want := []string{
 		"/path/build_app.py",
 		"--workspace", "/ws",
@@ -971,33 +969,8 @@ func TestBuildActivityArgsIncludesThinkingWhenSet(t *testing.T) {
 	}
 }
 
-// TestBuildActivityArgsForwardsSpecAcceptanceCriteriaOnlyWhenSet pins the
-// --spec-acceptance-criteria argv: carried with its value when set, absent
-// (never a bare flag) when empty.
-func TestBuildActivityArgsForwardsSpecAcceptanceCriteriaOnlyWhenSet(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "/ws/criteria.md", "", "pi")
-	want := []string{
-		"/path/build_app.py",
-		"--workspace", "/ws",
-		"--spec", "/ws/spec.md",
-		"--max-rounds", "3",
-		"--timeout-minutes", "45",
-		"--review-base-sha", "deadbeef",
-		"--spec-acceptance-criteria", "/ws/criteria.md",
-		"--harness", "pi",
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("buildActivityArgs() =\n  %v\nwant\n  %v", got, want)
-	}
-	for _, arg := range buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "", "pi") {
-		if arg == "--spec-acceptance-criteria" {
-			t.Fatalf("--spec-acceptance-criteria emitted with an empty value")
-		}
-	}
-}
-
 func TestBuildActivityArgsOmitsThinkingWhenEmpty(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "", "pi")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "pi")
 	for i, arg := range got {
 		if arg == "--thinking" {
 			t.Fatalf("buildActivityArgs() included --thinking with an empty value at index %d: %v", i, got)
@@ -1010,17 +983,14 @@ func TestBuildActivityArgsOmitsThinkingWhenEmpty(t *testing.T) {
 // carries the execution role's, every review step the review role's, and the
 // two can differ inside one execution.
 func TestBuildAndReviewArgsCarryTheirOwnRolesHarness(t *testing.T) {
-	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "", "pifork")
+	got := buildActivityArgs("/path/build_app.py", "/ws", "/ws/spec.md", 3, 45, "deadbeef", "", "", "", "", "pifork")
 	if n := len(got); n < 2 || got[n-2] != "--harness" || got[n-1] != "pifork" {
 		t.Fatalf("buildActivityArgs() = %v, want it to end with --harness pifork", got)
 	}
-	a := &Activities{}
-	in := ReviewStepInput{RunWorkflowInput: RunWorkflowInput{Harness: "pifork", ReviewHarness: "pi", SpecAcceptanceCriteria: "/ws/criteria.md"}}
-	for _, step := range append(append([]reviewstep.Step{}, reviewstep.Steps...), reviewstep.CombinedStep) {
-		args := reviewStepArgs(a, step, in, "/path/script.py")
-		if n := len(args); n < 2 || args[n-2] != "--harness" || args[n-1] != "pi" {
-			t.Errorf("reviewStepArgs(%s) = %v, want it to end with --harness pi (the review role's, not the execution role's)", step.Name, args)
-		}
+	in := ReviewStepInput{RunWorkflowInput: RunWorkflowInput{Harness: "pifork", ReviewHarness: "pi"}}
+	args := reviewStepArgs(in, "/path/script.py")
+	if n := len(args); n < 2 || args[n-2] != "--harness" || args[n-1] != "pi" {
+		t.Errorf("reviewStepArgs = %v, want it to end with --harness pi (the review role's, not the execution role's)", args)
 	}
 }
 

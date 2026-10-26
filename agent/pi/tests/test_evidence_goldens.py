@@ -34,13 +34,13 @@ class EvidenceGoldensDoNotDriftTest(unittest.TestCase):
 				)
 
 	def test_recorded_files_are_still_valid_json(self) -> None:
-		# The two hand-copied real-run files (build_evidence.recorded.json,
-		# conformity_evidence.recorded.json) aren't regenerated -- they're a
-		# real run's actual output, scrubbed of host-identifying content.
+		# The hand-copied real-run file (build_evidence.recorded.json) isn't
+		# regenerated -- it is a real run's actual output, scrubbed of
+		# host-identifying content.
 		# This only guards against an editing mistake corrupting them.
 		import json
 
-		for name, version in (("build_evidence.recorded.json", 2), ("conformity_evidence.recorded.json", 1)):
+		for name, version in (("build_evidence.recorded.json", 2),):
 			path = goldens.GOLDEN_DIR / name
 			with self.subTest(name=name):
 				data = json.loads(path.read_text())

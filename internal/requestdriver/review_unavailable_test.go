@@ -106,13 +106,13 @@ func TestAReviewThatJudgedSomethingHasNoCause(t *testing.T) {
 		wantCheck string
 		wantRound bool
 	}{
-		"one criterion flagged, another unanswered": {reviewRun([]run.ReviewVerdict{unavailable, flagged}, nil, "spec_conformity"), request.QuarantineCheckSpecConformity, true},
+		"one criterion flagged, another unanswered": {reviewRun([]run.ReviewVerdict{unavailable, flagged}, nil, "spec_conformity"), "", true},
 		"a blocking finding, criteria unanswered":   {reviewRun([]run.ReviewVerdict{unavailable}, blocking, "spec_conformity", "code_review"), request.QuarantineCheckCodeReview, true},
-		"a flagged criterion, reviewer available":   {reviewRun([]run.ReviewVerdict{flagged}, &run.CodeReviewResult{Policy: "required", Available: true}, "spec_conformity"), request.QuarantineCheckSpecConformity, true},
+		"a flagged criterion, reviewer available":   {reviewRun([]run.ReviewVerdict{flagged}, &run.CodeReviewResult{Policy: "required", Available: true}, "spec_conformity"), "", true},
 		// A real conformity failure is never hidden behind an unavailable
 		// advisory code reviewer: spec_conformity failed with every
 		// criterion answered, and code_review, advisory, passed without one.
-		"criteria answered, advisory reviewer silent": {reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "advisory"}, "spec_conformity"), request.QuarantineCheckSpecConformity, false},
+		"criteria answered, advisory reviewer silent": {reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "advisory"}, "spec_conformity"), "", false},
 		// Both gates failed, but only the code reviewer went unanswered.
 		"criteria answered, required reviewer silent": {reviewRun([]run.ReviewVerdict{clean}, &run.CodeReviewResult{Policy: "required"}, "spec_conformity", "code_review"), request.QuarantineCheckCodeReview, false},
 	} {

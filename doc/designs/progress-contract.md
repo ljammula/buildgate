@@ -56,10 +56,9 @@ the Activities in `internal/workflow/activities_*.go`, via the
 `detail` is the result: `passed`, or `failed` with the failing test named),
 `build` (one `start`/`end` per attempt,
 `detail` = `attempt N/M`), `post_build`, `verify`, `full_suite`, `gate`
-(`detail` = gate name, e.g. `diff_scope`), `evidence`, one of
-`conformity_review`/`code_review`/`review` (`internal/reviewstep.Plan`
-picks exactly one per run: standalone spec-conformity, standalone code
-review, or `review` when both are enabled in one combined launch),
+(`detail` = gate name, e.g. `diff_scope`), `evidence`, `review`
+(the one review launch, when `code_review` is enabled; the feeds of older
+runs may instead hold `conformity_review` or `code_review`),
 `commit_oracles`, `post_oracle_commit_verify`, `evaluate`, `finished`.
 
 A build attempt that resumes after a lost worker also writes one

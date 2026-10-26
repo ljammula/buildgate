@@ -428,13 +428,17 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 	return evidenceResult, nil
 }
 
-// reviewOutcome is which review steps ran and what each found.
+// reviewOutcome is which review steps ran and what each found. legacy marks
+// a history recorded before reviewReproductionChange, whose retired
+// spec-conformity review's result, when it ran, is legacyConformity.
 type reviewOutcome struct {
-	codeReview    VerifyActivityResult
-	ranCodeReview bool
+	codeReview       VerifyActivityResult
+	ranCodeReview    bool
+	legacy           bool
+	legacyConformity *VerifyActivityResult
 }
 
-// runReviewSteps runs the review step (reviewstep.Plan) once every earlier
+// runReviewSteps runs the review step (planReviewSteps) once every earlier
 // gate passed, chaining its relay spend from the build's.
 func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, worktreePath, branch string) (reviewOutcome, error) {
 	// The plan runs only once every earlier gate this run has already
@@ -451,27 +455,43 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	if !gatesPassed {
 		return outcome, nil
 	}
-	for _, step := range reviewstep.Plan(result.CodeReviewConfigured) {
-		stepInput := ReviewStepInput{
-			RunWorkflowInput:          input,
-			Step:                      step.Name,
-			PriorConsumedInputTokens:  result.Build.RelayConsumedInputTokens,
-			PriorConsumedOutputTokens: result.Build.RelayConsumedOutputTokens,
-			PriorConsumedCostMicroUSD: result.Build.RelayConsumedCostMicroUSD,
+	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
+	outcome.legacy = legacy
+	for _, step := range steps {
+		stepResult, err := runOneReviewStep(ctx, ids, buildVerifyCtx, input, current, result, step, worktreePath, branch)
+		if err != nil {
+			return reviewOutcome{}, err
 		}
-		current.Stage, current.StartedAt = step.Stage, temporalworkflow.Now(ctx)
-		var stepResult VerifyActivityResult
-		if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "review-"+step.Name), RunReviewStepActivityName, stepInput).Get(ctx, &stepResult); err != nil {
-			return reviewOutcome{}, wrapActivityFailure("run combined-review activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+		if legacy {
+			outcome = legacyReviewOutcome(outcome, step, stepResult)
+			continue
 		}
-		result.Attempts = append(result.Attempts, stepResult.Attempts...)
 		// The launch exits reviewstep.CombinedExitBase when it gave a verdict:
 		// the gate's exit code is derived from that (ReviewExitCode), the
 		// command, duration and log hash are the launch's own.
 		stepResult.Result.ExitCode = reviewstep.ReviewExitCode(stepResult.Result.ExitCode)
-		outcome = reviewOutcome{codeReview: stepResult, ranCodeReview: true}
+		outcome.codeReview, outcome.ranCodeReview = stepResult, true
 	}
 	return outcome, nil
+}
+
+// runOneReviewStep launches step (RunReviewStepActivity) with the build's
+// relay spend as its prior spend and records its attempts.
+func runOneReviewStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, step reviewstep.Step, worktreePath, branch string) (VerifyActivityResult, error) {
+	stepInput := ReviewStepInput{
+		RunWorkflowInput:          input,
+		Step:                      step.Name,
+		PriorConsumedInputTokens:  result.Build.RelayConsumedInputTokens,
+		PriorConsumedOutputTokens: result.Build.RelayConsumedOutputTokens,
+		PriorConsumedCostMicroUSD: result.Build.RelayConsumedCostMicroUSD,
+	}
+	current.Stage, current.StartedAt = step.Stage, temporalworkflow.Now(ctx)
+	var stepResult VerifyActivityResult
+	if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "review-"+step.Name), RunReviewStepActivityName, stepInput).Get(ctx, &stepResult); err != nil {
+		return VerifyActivityResult{}, wrapActivityFailure("run "+step.Label+" activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	result.Attempts = append(result.Attempts, stepResult.Attempts...)
+	return stepResult, nil
 }
 
 // oracleCommitPhase commits the verified reference-oracle bytes into the
@@ -479,15 +499,14 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 // the committed tree. It may replace verify, gates and evidence with the
 // committed tree's results.
 func oracleCommitPhase(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, gates *gateOutcome, evidenceResult *CollectedEvidence, verify *VerifyActivityResult, reviews reviewOutcome) error {
-	// Committed oracles, Temporal parity with cmd/factoryd:
-	// the factory host commits the verified oracle bytes into the result.
-	// It has to be here rather than in CollectEvidenceActivity because
-	// spec conformity (above) can only run after that Activity, and an
-	// oracle must never be committed for a run that fails conformity or
-	// code review. Same predicate as the verification safety-net commit
-	// plus "reference oracle passed" and "conformity/code-review passed
-	// if declared". The Activity itself is a no-op unless the manifest
-	// declares a target_path.
+	// Committed oracles: the factory host commits the verified oracle bytes
+	// into the result. It has to be here rather than in
+	// CollectEvidenceActivity because the review (above) can only run after
+	// that Activity, and an oracle must never be committed for a run whose
+	// declared review gave no verdict. Same predicate as the verification
+	// safety-net commit plus "reference oracle passed" and "the review gave
+	// a verdict if declared". The Activity itself is a no-op unless the
+	// manifest declares a target_path.
 	if oracleCommitWanted(input, result, gates, reviews) {
 		var committedOracles CommittedOracles
 		current.Stage, current.StartedAt = "commit_oracles", temporalworkflow.Now(ctx)
@@ -533,7 +552,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		RequiredContent:           input.RequiredContent,
 		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
 		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,
-		NamedGates:                gates.namedGateInputs,
+		NamedGates:                legacyConformityGates(gates.namedGateInputs, reviews),
 		TestPatterns:              input.TestPatterns,
 		TestsRequiredOptOut:       input.TestsRequiredOptOut,
 		Oracles:                   result.Oracles,
@@ -570,7 +589,8 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 func oracleCommitWanted(input RunWorkflowInput, result *RunWorkflowResult, gates *gateOutcome, reviews reviewOutcome) bool {
 	return gates.passedReferenceOracleSHA256 != "" && input.ReferenceOracleDir != "" &&
 		result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed &&
-		(!result.CodeReviewConfigured || (reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0))
+		(!result.CodeReviewConfigured || (reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0)) &&
+		!legacyConformityBlocksOracleCommit(input, reviews)
 }
 
 // The host commit changed HEAD after every gate ran, so canonical

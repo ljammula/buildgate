@@ -508,7 +508,7 @@ func compareBoundRelayPolicy(routeName string, p, expected sandbox.RoutePolicy) 
 // roleConfig(s, role).Thinking, or, when the bound model is
 // roles.execution.escalation's, that escalation's level
 // (RoleConfig.EscalationThinking). The submitted value is what reaches
-// build_app.py/conformity_review.py/code_review.py's --thinking, so it is
+// build_app.py/combined_review.py's --thinking, so it is
 // never one this Worker's config does not name for that model.
 func CheckRouteBinding(s sessionconfig.Settings, role Role, p sandbox.RoutePolicy, thinking string) error {
 	if p.Route == "" {

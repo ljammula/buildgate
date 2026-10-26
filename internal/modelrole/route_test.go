@@ -378,7 +378,7 @@ func TestCheckRouteBindingAllowsTightenedCeilingRefusesRaisedOne(t *testing.T) {
 // against this Worker's own roles.<role>.thinking, not the submitter's
 // own claimed value -- the two must never be allowed to silently
 // diverge, since roles.<role>.thinking is what actually reaches
-// build_app.py/conformity_review.py's --thinking.
+// build_app.py/combined_review.py's --thinking.
 func TestCheckRouteBindingRefusesThinkingMismatch(t *testing.T) {
 	s := routesModeSettings()
 	sel, err := SelectRoute(s, RoleExecution, "", "", "", alwaysOK)

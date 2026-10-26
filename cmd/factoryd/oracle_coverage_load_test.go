@@ -19,52 +19,6 @@ func writeRunFile(t *testing.T, dataDir, id, name, content string) {
 	}
 }
 
-func TestLoadSpecConformityVerdictsReadsTheRetainedEvidence(t *testing.T) {
-	t.Parallel()
-	dataDir := t.TempDir()
-	writeRunFile(t, dataDir, "run-1", "CONFORMITY_EVIDENCE.json",
-		`{"schema_version":1,"succeeded":true,"review_verdicts":[{"criterion":"1. It works.","verdict":"clean"}]}`)
-	r := &run.Run{ID: "run-1", SpecConformityConfigured: true}
-
-	loadSpecConformityVerdicts(r, dataDir, "run-1")
-
-	if len(r.SpecConformityVerdicts) != 1 || r.SpecConformityVerdicts[0].Verdict != "clean" {
-		t.Fatalf("SpecConformityVerdicts = %+v, want the one clean verdict", r.SpecConformityVerdicts)
-	}
-}
-
-// A ticket that declared no criteria must not pick up a stale or foreign
-// CONFORMITY_EVIDENCE.json that happens to sit in the run directory.
-func TestLoadSpecConformityVerdictsIgnoresARunThatNeverDeclaredCriteria(t *testing.T) {
-	t.Parallel()
-	dataDir := t.TempDir()
-	writeRunFile(t, dataDir, "run-1", "CONFORMITY_EVIDENCE.json",
-		`{"review_verdicts":[{"criterion":"1. x","verdict":"clean"}]}`)
-	r := &run.Run{ID: "run-1"}
-
-	loadSpecConformityVerdicts(r, dataDir, "run-1")
-
-	if len(r.SpecConformityVerdicts) != 0 {
-		t.Fatalf("SpecConformityVerdicts = %+v, want none when SpecConformityConfigured is false", r.SpecConformityVerdicts)
-	}
-}
-
-func TestLoadSpecConformityVerdictsToleratesMissingAndMalformedEvidence(t *testing.T) {
-	t.Parallel()
-	dataDir := t.TempDir()
-	r := &run.Run{ID: "run-1", SpecConformityConfigured: true}
-	loadSpecConformityVerdicts(r, dataDir, "run-1") // no file at all: not an event
-	if len(r.SpecConformityVerdicts) != 0 {
-		t.Fatalf("verdicts = %+v, want none", r.SpecConformityVerdicts)
-	}
-
-	writeRunFile(t, dataDir, "run-1", "CONFORMITY_EVIDENCE.json", "not json")
-	loadSpecConformityVerdicts(r, dataDir, "run-1") // malformed: a warning, never a panic or a state change
-	if len(r.SpecConformityVerdicts) != 0 {
-		t.Fatalf("verdicts = %+v, want none for malformed evidence", r.SpecConformityVerdicts)
-	}
-}
-
 func TestLoadOracleCoverageReadsTheManifest(t *testing.T) {
 	t.Parallel()
 	oracleDir := t.TempDir()
@@ -115,18 +69,12 @@ func TestLoadOracleCoverageRefusesASymlinkedManifest(t *testing.T) {
 }
 
 // A re-finalization whose evidence is now missing must not keep the prior
-// attempt's verdicts/coverage on the record (found via review).
+// attempt's coverage on the record (found via review).
 func TestLoadersClearStaleStateWhenEvidenceIsGone(t *testing.T) {
 	t.Parallel()
-	r := &run.Run{
-		ID:                       "run-1",
-		SpecConformityConfigured: true,
-		SpecConformityVerdicts:   []run.ReviewVerdict{{Criterion: "1. x", Verdict: "clean"}},
-		OracleCoveredCriteria:    []string{"1. x"},
-	}
-	loadSpecConformityVerdicts(r, t.TempDir(), "run-1")
+	r := &run.Run{ID: "run-1", OracleCoveredCriteria: []string{"1. x"}}
 	loadOracleCoverage(r, "run-1") // no ReferenceOracleDir
-	if r.SpecConformityVerdicts != nil || r.OracleCoveredCriteria != nil {
-		t.Fatalf("stale state survived: verdicts=%+v covered=%v", r.SpecConformityVerdicts, r.OracleCoveredCriteria)
+	if r.OracleCoveredCriteria != nil {
+		t.Fatalf("stale state survived: covered=%v", r.OracleCoveredCriteria)
 	}
 }

@@ -524,16 +524,11 @@ func TestAdvanceBuildingReviewCorrectiveRoundNotTriggeredWhenBudgetZero(t *testi
 	if loaded.State != request.StateQuarantined {
 		t.Fatalf("State = %q, want %q", loaded.State, request.StateQuarantined)
 	}
-	// Follow-up B: spec_conformity was the only gate that failed here
-	// (reviewQuarantinedBuildRunner's extraFailedGate is ""), so this
-	// quarantine is conformity-only even though the corrective round never
-	// ran (budget 0) -- QuarantineCheck must still be set, and NextAction
-	// must lead with the spec send-back, not a doomed retry.
-	if loaded.QuarantineCheck != request.QuarantineCheckSpecConformity {
-		t.Errorf("QuarantineCheck = %q, want %q", loaded.QuarantineCheck, request.QuarantineCheckSpecConformity)
-	}
-	if next := loaded.NextAction(); !strings.Contains(next, "factoryd reject -to spec") {
-		t.Errorf("NextAction() = %q, want it to lead with the spec send-back", next)
+	// The retired spec_conformity check was the only gate that failed here
+	// (reviewQuarantinedBuildRunner's extraFailedGate is ""): it names no
+	// check, so NextAction gives the generic advice.
+	if loaded.QuarantineCheck != "" {
+		t.Errorf("QuarantineCheck = %q, want none for the retired spec_conformity check", loaded.QuarantineCheck)
 	}
 }
 
@@ -628,11 +623,8 @@ func TestTryReviewCorrectiveRoundExhaustedBudgetSetsQuarantineCheck(t *testing.T
 	if loaded.State != request.StateQuarantined {
 		t.Fatalf("State = %q, want %q", loaded.State, request.StateQuarantined)
 	}
-	if loaded.QuarantineCheck != request.QuarantineCheckSpecConformity {
-		t.Errorf("QuarantineCheck = %q, want %q", loaded.QuarantineCheck, request.QuarantineCheckSpecConformity)
-	}
-	if next := loaded.NextAction(); !strings.Contains(next, "factoryd reject -to spec") {
-		t.Errorf("NextAction() = %q, want it to lead with the spec send-back", next)
+	if loaded.QuarantineCheck != "" {
+		t.Errorf("QuarantineCheck = %q, want none for the retired spec_conformity check", loaded.QuarantineCheck)
 	}
 }
 
@@ -1190,8 +1182,8 @@ func TestReviewCorrectiveRoundCodeReviewPlusAnotherGateNoRound(t *testing.T) {
 // TestReviewCorrectiveRoundBudgetExhaustedQuarantineCheckCodeReview covers
 // "budget exhausted -> quarantine check code_review": a code_review-only
 // eligible quarantine that keeps failing the same way through its whole
-// budget must quarantine with QuarantineCheckCodeReview, not
-// QuarantineCheckSpecConformity, once the budget runs out.
+// budget must quarantine with QuarantineCheckCodeReview once the budget
+// runs out.
 func TestReviewCorrectiveRoundBudgetExhaustedQuarantineCheckCodeReview(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)

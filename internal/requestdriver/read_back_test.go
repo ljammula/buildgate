@@ -492,37 +492,3 @@ func TestAnswersToAReplacedReadBackReachThisPassRedraft(t *testing.T) {
 		t.Fatalf("a later redraft's rejection feedback carries the answer of a replaced read-back:\n%s", feedback)
 	}
 }
-
-// The ticket's criteria file gives the in-build reviewer the answered
-// questions after the criteria, in the one rendering every reader gets.
-func TestTheTicketCriteriaFileCarriesTheAnsweredQuestionsAfterTheCriteria(t *testing.T) {
-	dataDir := t.TempDir()
-	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", BuildInput: request.BuildInputApprovedSpec}
-	r.ReadBack = draftedReadBack()
-	r.ReadBack.Questions[0].Answer = "24 hours."
-	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
-	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(requestdrivertest.CanonicalValidSpec), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(ticketsDir, "001.spec.md")
-	if err := os.WriteFile(path, []byte(requestdrivertest.ValidBrownfieldTicket("make verify", 1)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r.Tickets = []request.Ticket{{Index: 1, SpecPath: path}}
-	criteriaPath, err := requestdriver.WriteTicketCriteriaFile(dataDir, r, r.Tickets[0])
-	if err != nil || criteriaPath == "" {
-		t.Fatalf("WriteTicketCriteriaFile = %q, %v", criteriaPath, err)
-	}
-	content, err := os.ReadFile(criteriaPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	block := requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered())
-	criteria, answers, found := strings.Cut(string(content), requestdriver.AnsweredQuestionsHeading)
-	if !found || requestdriver.AnsweredQuestionsHeading+answers != block || strings.TrimSpace(criteria) == "" {
-		t.Fatalf("criteria file does not end with the answered questions block:\n%s", content)
-	}
-}

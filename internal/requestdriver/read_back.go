@@ -154,8 +154,7 @@ const AnsweredQuestionsHeading = "# Questions answered at spec review"
 
 // AnsweredReadBackBlock is the one rendering of the read-back questions the
 // operator answered at spec review, for every reader of the approved spec:
-// a ticket's build input, the planner, and the in-build spec-conformity
-// reviewer (beside the criteria file's criteria). It begins with
+// a ticket's build input and the planner. It begins with
 // AnsweredQuestionsHeading and quotes each question and answer in its own
 // ticketspec.FenceVerbatim fence, so neither can declare a header key or a
 // goal. Empty when no question was answered. A question's ID is checked to

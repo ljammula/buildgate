@@ -902,40 +902,14 @@ class BuildAppTests(unittest.TestCase):
 			self.assertIsNotNone(snapshot)
 			self.assertTrue(failed_once)
 
-	def test_acceptance_criteria_start_no_review_and_the_conformity_flag_is_gone(self):
-		real_sh = build_app.sh
-
-		calls = []
-
-		def git_only_sh(args, cwd=None, timeout=None, env=None):
-			calls.append(args)
-			return real_sh(args, cwd=cwd, timeout=timeout, env=env)
-
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Fix the cache")
-			criteria_path = Path(spec_dir) / "criteria.md"
-			criteria_path.write_text("1. Cache evicts by reference\n")
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
-				mock.patch.object(build_app, "run_agent_streaming", side_effect=scripted_pi_stream(
-					[subprocess.CompletedProcess([], 0, pi_output("clean"), "")], [lambda: (root / "cache.go").write_text("fixed\n")],
-				)),
-				mock.patch.object(build_app, "sh", side_effect=git_only_sh),
-			):
-				result = build_app.run_build(root, spec, max_rounds=1, timeout_minutes=1, spec_acceptance_criteria=criteria_path)
-			self.assertTrue(result.succeeded)
-			self.assertFalse([a for a in calls if any(".pi-conformity-session" in str(x) for x in a)], "no review turn may run")
-			self.assertFalse(hasattr(result, "review_verdicts"))
-			self.assertFalse(hasattr(build_app, "run_spec_conformity_review"))
-		argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/spec.md", "--conformity-policy", "advisory"]
-		with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
-			with self.assertRaises(SystemExit) as raised:
-				build_app.main()
-		self.assertEqual(raised.exception.code, 2)
+	def test_retired_review_flags_are_rejected(self):
+		for flag, value in (("--conformity-policy", "advisory"), ("--spec-acceptance-criteria", "/tmp/criteria.md")):
+			with self.subTest(flag=flag):
+				argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/spec.md", flag, value]
+				with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+					with self.assertRaises(SystemExit) as raised:
+						build_app.main()
+				self.assertEqual(raised.exception.code, 2)
 
 	def test_workspace_fingerprint_returns_none_on_a_non_repo(self):
 		with tempfile.TemporaryDirectory() as directory:
@@ -2803,7 +2777,7 @@ class GofmtChangedFilesTests(unittest.TestCase):
 class WorkspaceDiffTest(unittest.TestCase):
 	"""build_app.workspace_diff/format_diff_for_prompt used to be private
 	copies in code_review.py (_workspace_diff/_DIFF_TRUNCATE_LIMIT); moved
-	here so every review prompt can share
+	here so every review prompt shares
 	them (example-app run 3, 2026-09-28 -- see the review prompts' own
 	doc comment)."""
 
@@ -3244,14 +3218,12 @@ class NotesTurnTests(unittest.TestCase):
 	"""The one extra turn a build that ends without passing gets, in its own
 	session, for notes to whoever attempts the ticket next."""
 
-	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, criteria=False, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
+	def _run(self, *, round_result=None, passing=False, budget=3600, elapsed=0, notes_edit=None, reply=NOTES_REPLY, adapter=None, parse_raises=None, no_round=False):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			init_repo_with_commit(root)
 			spec = Path(spec_dir) / "spec.md"
 			spec.write_text("Fix the cache")
-			criteria_path = Path(spec_dir) / "criteria.txt"
-			criteria_path.write_text("1. it works\n")
 			if round_result is None:
 				round_result = (subprocess.CompletedProcess([], 0, pi_output("clean" if passing else "flagged", "x"), ""), False)
 			notes_result = (subprocess.CompletedProcess([], 0, assistant_stdout(reply), ""), False)
@@ -3296,7 +3268,7 @@ class NotesTurnTests(unittest.TestCase):
 			):
 				result = build_app.run_build(
 					root, spec, max_rounds=1, timeout_minutes=1,
-					spec_acceptance_criteria=criteria_path if criteria else None, **extra,
+					**extra,
 				)
 				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
 				return {
@@ -3428,7 +3400,6 @@ class NotesTurnTests(unittest.TestCase):
 			"no budget": (dict(budget=None), "no build time budget"),
 			"unparsable budget": (dict(budget="soon"), "no build time budget"),
 			"299 s left": (dict(budget=1000, elapsed=701), "under 300 s of the build time budget left"),
-			"spec acceptance criteria": (dict(criteria=True), "spec acceptance criteria given"),
 		}
 		for name, (kwargs, reason) in cases.items():
 			with self.subTest(name):

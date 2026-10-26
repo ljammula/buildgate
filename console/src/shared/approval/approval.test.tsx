@@ -479,16 +479,6 @@ test("Send back defaults to spec when the server disallows the plan target (can_
   });
 });
 
-test("a spec_conformity quarantine starts on spec even when plan is allowed", async () => {
-  const request = fixture("request-spec-review.json", {
-    can_send_back_to_plan: true,
-    quarantine_check: "spec_conformity",
-  });
-  renderApp(<Host request={request} render={(props) => <SendBackDialog {...props} />} />);
-  expect(await screen.findByRole("radio", { name: "To spec" })).toBeChecked();
-  expect(screen.getByRole("radio", { name: "To planning" })).toBeEnabled();
-});
-
 function lost(step: string): RequestSummary {
   return fixture("request-spec-review.json", {
     resume: { from_state: step, ticket: 1, refusals: [] },

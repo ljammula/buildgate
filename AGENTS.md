@@ -276,7 +276,7 @@ the *pipeline* works.
 
 **Before merging any change that touches the build loop, a policy gate,
 the sandbox runtime (`internal/openshell`, `internal/meter`, the launch
-path in `internal/sandbox`), or the request/conformity-review pipeline, run:**
+path in `internal/sandbox`), or the request/review pipeline, run:**
 
 ```sh
 make live-smoke

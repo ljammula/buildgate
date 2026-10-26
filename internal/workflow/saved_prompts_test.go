@@ -69,11 +69,9 @@ func TestRunBuildActivityCopiesTheSavedPromptsOutBeforeAnyLaterStep(t *testing.T
 	repo, logDir := runBuildLeavingNotes(t, func(session string) {
 		writeFile(t, filepath.Join(session, "prompts", "build-round-1.md"), "Fix it.\n"+promptMarker+"\n")
 		writeFile(t, filepath.Join(session, "prompts", "build-notes.md"), "Write your notes.\n")
-		// The conformity review a build may run in its own process.
-		writeFile(t, filepath.Join(repo0(session), conformitySessionDir, "prompts", "review-conformity.md"), "Review "+promptMarker+"\n")
 	})
 	dst := filepath.Join(logDir, evidence.PromptsDirName, "build-1")
-	for _, name := range []string{"build-round-1.md", "build-notes.md", "review-conformity.md"} {
+	for _, name := range []string{"build-round-1.md", "build-notes.md"} {
 		if _, err := os.Stat(filepath.Join(dst, name)); err != nil {
 			t.Errorf("%s was not kept for the operator: %v", name, err)
 		}
@@ -85,13 +83,10 @@ func TestRunBuildActivityCopiesTheSavedPromptsOutBeforeAnyLaterStep(t *testing.T
 	if found := holdingMarker(t, repo, promptMarker); len(found) != 0 {
 		t.Errorf("the worktree still holds the saved prompt: %v", found)
 	}
-	if got := evidence.ListSavedPrompts(logDir); len(got) != 3 {
-		t.Errorf("ListSavedPrompts = %+v, want the three prompts", got)
+	if got := evidence.ListSavedPrompts(logDir); len(got) != 2 {
+		t.Errorf("ListSavedPrompts = %+v, want the two prompts", got)
 	}
 }
-
-// repo0 is the worktree a session folder sits in.
-func repo0(session string) string { return filepath.Dir(session) }
 
 func TestRunBuildActivityKeepsNoPromptThroughALinkedSessionFolder(t *testing.T) {
 	repo := testfixture.NewGitRepo(t)
@@ -242,8 +237,7 @@ func TestRunBuildActivityRemovesPromptsFoundBeforeTheLaunch(t *testing.T) {
 	repo := testfixture.NewGitRepo(t)
 	logDir := t.TempDir()
 	writeFile(t, filepath.Join(repo, buildSessionDir, "prompts", "build-round-9.md"), promptMarker)
-	writeFile(t, filepath.Join(repo, conformitySessionDir, "prompts", "review-conformity.md"), promptMarker)
-	writeFile(t, filepath.Join(repo, ".git", "info", "exclude"), buildSessionDir+"/\n"+conformitySessionDir+"/\n")
+	writeFile(t, filepath.Join(repo, ".git", "info", "exclude"), buildSessionDir+"/\n")
 	activities := &Activities{
 		LogDir: logDir,
 		runWithRetries: func(_ context.Context, _ string, _ func(int) string, _ int, _ func(int, runner.Result, error), _ string, _ ...string) (runner.Result, error) {

@@ -21,17 +21,8 @@ import (
 	"buildgate/internal/testfixture"
 )
 
-// TestReviewStepsTableIsOnlyTheStandaloneCodeReview pins reviewstep.Steps:
-// the retired spec-conformity review is in no table.
-func TestReviewStepsTableIsOnlyTheStandaloneCodeReview(t *testing.T) {
-	if len(reviewstep.Steps) != 1 || reviewstep.Steps[0].Name != reviewstep.CodeReview {
-		t.Fatalf("reviewstep.Steps = %+v, want only %q", reviewstep.Steps, reviewstep.CodeReview)
-	}
-}
-
-// TestRunReviewStepActivityChecksInIndependentlyPerStep proves the two
-// launches RunReviewStepActivity serves (the standalone code review and the
-// review step) keep their own durable checkpoints: two separate
+// TestRunReviewStepActivityChecksInIndependentlyPerStep proves two launches
+// of the review step keep their own durable checkpoints: two separate
 // ExecuteActivity calls against the SAME run's checkpoint/log directories
 // must each get their own checkpoint file, keyed by their own distinct
 // ActivityID (Temporal assigns each ExecuteActivity call its own), not
@@ -69,7 +60,6 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	baseInput.DataDir = dataDir
 	baseInput.LogDir = logDir
 	baseInput.CheckpointDir = checkpointDir
-	baseInput.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	baseInput.CodeReviewPolicy = codereview.PolicyAdvisory
 	policy := *testRelayPolicy()
 	policy.AllowUnauthenticatedUpstream = true
@@ -82,7 +72,7 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(wrapper)
 
-	for _, name := range []string{reviewstep.CodeReview, reviewstep.Combined} {
+	for _, name := range []string{reviewstep.Combined, reviewstep.Combined} {
 		in := ReviewStepInput{RunWorkflowInput: baseInput, Step: name}
 		if _, err := env.ExecuteActivity(wrapper, in); err != nil {
 			t.Fatalf("execute %s review step: %v", name, err)
@@ -110,25 +100,23 @@ func TestRunReviewStepActivityChecksInIndependentlyPerStep(t *testing.T) {
 	}
 }
 
-// TestReviewStepArgsUsesDiffBaseNotBaseSHA proves both review steps'
+// TestReviewStepArgsUsesDiffBaseNotBaseSHA proves the review's
 // --review-base-sha comes from RunWorkflowInput.DiffBaseSHA (the
 // cumulative ticket diff a -diff-base override names) when it is set,
 // not from BaseSHA (a corrective round's own checkout point) -- see
 // DiffBaseSHA's own doc comment (workflow_types.go) for the incident this
 // guards against: before DiffBaseSHA existed, a Temporal-routed
-// corrective round's spec-conformity/code review always saw only the
+// corrective round's review always saw only the
 // round's own tiny delta.
 func TestReviewStepArgsUsesDiffBaseNotBaseSHA(t *testing.T) {
-	activities := &Activities{}
 	input := fixtureInput()
 	input.BaseSHA = "round-own-checkout-point"
 	input.DiffBaseSHA = "ticket-original-base"
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = "advisory"
 
-	for _, step := range reviewstep.Steps {
+	for _, step := range []reviewstep.Step{reviewstep.CombinedStep} {
 		stepInput := ReviewStepInput{RunWorkflowInput: input, Step: step.Name}
-		args := reviewStepArgs(activities, step, stepInput, "/fixture/"+step.ScriptName)
+		args := reviewStepArgs(stepInput, "/fixture/"+step.ScriptName)
 		found := false
 		for i, a := range args {
 			if a != "--review-base-sha" {
@@ -178,7 +166,6 @@ func TestRunReviewStepActivityRecordsSpendStartAndRefusesSupersededLaunch(t *tes
 	input.DataDir = dataDir
 	input.LogDir = logDir
 	input.CheckpointDir = checkpointDir
-	input.SpecAcceptanceCriteria = "/fixture/criteria.md"
 	input.CodeReviewPolicy = codereview.PolicyAdvisory
 	policy := *testRelayPolicy()
 	policy.AllowUnauthenticatedUpstream = true
@@ -190,7 +177,7 @@ func TestRunReviewStepActivityRecordsSpendStartAndRefusesSupersededLaunch(t *tes
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(wrapper)
-	_, err := env.ExecuteActivity(wrapper, ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Steps[0].Name})
+	_, err := env.ExecuteActivity(wrapper, ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined})
 	if err == nil || hookErr == nil {
 		t.Fatalf("err = %v, hookErr = %v; want the superseded refusal", err, hookErr)
 	}

@@ -1,4 +1,4 @@
-package conformity
+package codereview
 
 import (
 	"testing"
@@ -6,67 +6,6 @@ import (
 
 	"buildgate/internal/sandbox"
 )
-
-func TestArgsIncludesReviewBaseSHA(t *testing.T) {
-	got := Args("/path/conformity_review.py", "/ws", "/ws/criteria.md", "required", "deadbeef", "", "pi")
-
-	want := []string{
-		"/path/conformity_review.py",
-		"--workspace", "/ws",
-		"--spec-acceptance-criteria", "/ws/criteria.md",
-		"--conformity-policy", "required",
-		"--review-base-sha", "deadbeef",
-		"--harness", "pi",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Args()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestArgsOmitsReviewBaseSHAWhenEmpty(t *testing.T) {
-	got := Args("/path/conformity_review.py", "/ws", "/ws/criteria.md", "required", "", "", "pi")
-	for i, arg := range got {
-		if arg == "--review-base-sha" {
-			t.Fatalf("Args() included --review-base-sha with an empty value at index %d: %v", i, got)
-		}
-	}
-}
-
-func TestArgsIncludesThinkingWhenSet(t *testing.T) {
-	got := Args("/path/conformity_review.py", "/ws", "/ws/criteria.md", "required", "deadbeef", "max", "pi")
-
-	want := []string{
-		"/path/conformity_review.py",
-		"--workspace", "/ws",
-		"--spec-acceptance-criteria", "/ws/criteria.md",
-		"--conformity-policy", "required",
-		"--review-base-sha", "deadbeef",
-		"--thinking", "max",
-		"--harness", "pi",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Args()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestArgsOmitsThinkingWhenEmpty(t *testing.T) {
-	got := Args("/path/conformity_review.py", "/ws", "/ws/criteria.md", "required", "deadbeef", "", "pi")
-	for i, arg := range got {
-		if arg == "--thinking" {
-			t.Fatalf("Args() included --thinking with an empty value at index %d: %v", i, got)
-		}
-	}
-}
 
 func relaySpecFixture() sandbox.RouteSpec {
 	policy := sandbox.RoutePolicy{
@@ -352,12 +291,5 @@ func TestPhaseRelaySpecFloorsAtOneWhenCeilingFullyConsumed(t *testing.T) {
 	}
 	if err := got.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil (a minimal but still valid spec)", err)
-	}
-}
-
-func TestArgsPassesHarnessWhenSet(t *testing.T) {
-	got := Args("/path/conformity_review.py", "/ws", "/ws/criteria.md", "required", "", "", "pifork")
-	if n := len(got); n < 2 || got[n-2] != "--harness" || got[n-1] != "pifork" {
-		t.Fatalf("Args() = %v, want it to end with --harness pifork", got)
 	}
 }

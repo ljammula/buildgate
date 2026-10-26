@@ -186,25 +186,6 @@
       "description": "Selects the handoff-notes instruction for a failed build or the passed-build notes turn."
     },
     {
-      "id": "prompt-source:code-review",
-      "source_path": "agent/pi/scripts/code_review.py",
-      "fragment": "code_review_prompt",
-      "role": "review",
-      "stage": "code_review",
-      "kind": "inline-assembly",
-      "template_refs": [
-        "code_review.prompt.md",
-        "code_review.diff_self.prompt.md",
-        "code_review.diff_inline.prompt.md",
-        "code_review.scope_rule.prompt.md",
-        "code_review.severity_rule.prompt.md",
-        "code_review.command_outcome_rule.prompt.md",
-        "code_review.json_contract.prompt.md",
-        "review.instructions_diff.prompt.md"
-      ],
-      "description": "Assembles code review instructions with the spec, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
-    },
-    {
       "id": "prompt-source:combined-review",
       "source_path": "agent/pi/scripts/combined_review.py",
       "fragment": "combined_review_prompt",

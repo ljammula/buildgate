@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"buildgate/internal/codereview"
-	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
@@ -18,53 +17,35 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
-// reviewStepPassed reports whether a review step's launch passed, for its
-// progress feed's end outcome. The combined step exits
-// reviewstep.CombinedExitBase when it gave a verdict, so its pass is 40, not
-// 0; reading it as "exit != 0 fails" marked every passing combined review
-// failed on the console's Timeline (found in a 2026-09-29 walkthrough) while
-// the gate, which decodes it with ReviewExitCode, passed.
-func reviewStepPassed(stepName string, exitCode int) bool {
-	if stepName == reviewstep.Combined {
-		return reviewstep.ReviewExitCode(exitCode) == 0
-	}
-	return exitCode == 0
+// reviewStepPassed reports whether a review launch passed, for its progress
+// feed's end outcome. The launch exits reviewstep.CombinedExitBase when it
+// gave a verdict, so its pass is 40, not 0; reading it as "exit != 0 fails"
+// marked every passing review failed on the console's Timeline (found in a
+// 2026-09-29 walkthrough) while the gate, which decodes it with
+// ReviewExitCode, passed.
+func reviewStepPassed(exitCode int) bool {
+	return reviewstep.ReviewExitCode(exitCode) == 0
 }
 
-// RunReviewStepActivity invokes one of the two model-backed review-only
-// phases named by input.Step (reviewstep.Steps: the per-criterion
-// spec-conformity review, agent/pi/scripts/conformity_review.py, or the
-// free-form standalone code review, agent/pi/scripts/code_review.py)
-// through runner.RunWithRetries -- the Temporal path's own counterpart to
-// cmd/factoryd's runReviewPhase closure (run_ticket.go). ONE
-// Activity implementation for both steps (M4-K3): before this
-// unification, RunSpecConformityReviewActivity and RunCodeReviewActivity
-// were a second, near-identical copy of each other -- the exact "fixed
-// one copy, not the other" shape run_ticket.go's own runReviewPhase doc
-// comment already warns about, just on the Temporal side of the fence.
+// RunReviewStepActivity invokes the review step (reviewstep.CombinedStep,
+// agent/pi/scripts/combined_review.py) through runner.RunWithRetries.
+// A step a retired plan scheduled (input.Step "spec_conformity" or
+// "code_review", pending in a history recorded before
+// reviewReproductionChange) is refused with the non-retryable
+// ReviewStepRetiredFailureType: this Worker no longer runs it.
 //
 // RunWorkflow only calls this once CollectEvidenceActivity's own
-// safety-net commit has already landed, for either step, so the workspace
-// is guaranteed clean and the reviewer has a real commit to evaluate a
-// commit-related criterion against -- see RunReviewStepActivityName's own
-// doc comment for the full incident this exists to fix. Reuses
-// VerifyActivityResult (not a new result type): this Activity's own
-// output shape (a subprocess result, duration, log hash, attempts) is
-// identical to RunVerifyActivity's.
+// safety-net commit has already landed, so the workspace is guaranteed
+// clean and the reviewer has a real commit to evaluate -- see
+// RunReviewStepActivityName's own doc comment. Reuses VerifyActivityResult
+// (not a new result type): this Activity's own output shape (a subprocess
+// result, duration, log hash, attempts) is identical to RunVerifyActivity's.
 func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStepInput) (progressResult VerifyActivityResult, err error) {
 	ctx, endGuard := GuardStep(ctx)
 	defer endGuard()
-	// reviewstep.CombinedStep is deliberately not in reviewstep.Steps
-	// (ByName never finds it -- see that function's own doc comment), so
-	// it is checked for explicitly here before falling back to ByName for
-	// the two standalone steps.
 	step := reviewstep.CombinedStep
 	if input.Step != reviewstep.Combined {
-		var ok bool
-		step, ok = reviewstep.ByName(input.Step)
-		if !ok {
-			return VerifyActivityResult{}, temporal.NewApplicationError(fmt.Sprintf("unknown review step %q", input.Step), InfrastructureFailureType)
-		}
+		return VerifyActivityResult{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("review step %q is retired: this Worker runs only the %q review", input.Step, reviewstep.Combined), ReviewStepRetiredFailureType, nil)
 	}
 	// The stage "start" mark is deferred until past the checkpoint
 	// short-circuit below: a redispatch of an already-completed Activity
@@ -75,7 +56,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 			return
 		}
 		outcome := "pass"
-		if err != nil || !reviewStepPassed(step.Name, progressResult.Result.ExitCode) {
+		if err != nil || !reviewStepPassed(progressResult.Result.ExitCode) {
 			outcome = "fail"
 		}
 		progressMark(ctx, a.logDirFor(input.RunWorkflowInput), step.Stage, "end", outcome, reviewProgressDetail(err))
@@ -122,14 +103,13 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// routedReview: a routes:-configured ReviewRelayPolicy names its own
 	// route (Route != ""), which PhaseRelaySpec (below) then replaces
 	// EVERY route-derived field of baseRelaySpec with, credentials
-	// included, once review.Upstream != "" (see conformity.PhaseRelaySpec's
+	// included, once review.Upstream != "" (see codereview.PhaseRelaySpec's
 	// own doc comment) -- so this review's own success must never depend
 	// on resolving the BUILD's own route's credential at all: only
 	// a.CheckRoute (no ResolveRouteCredentials) confirms input.RoutePolicy
 	// still binds to this Worker's own config, and baseRelaySpec is built
 	// with NO credential (only its ceiling/budget fields are ever read
-	// from it once review.Upstream != ""). See
-	// TestConformityReviewDoesNotResolveBuildRouteCredential.
+	// from it once review.Upstream != "").
 	routedReview := input.RoutePolicy != nil && input.ReviewRelayPolicy != nil && input.ReviewRelayPolicy.Route != ""
 	var baseRelaySpec *sandbox.RouteSpec
 	if routedReview {
@@ -153,7 +133,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		baseRelaySpec = spec
 	}
 	if baseRelaySpec == nil {
-		return VerifyActivityResult{}, temporal.NewApplicationError(reviewStepNoRelayError(step, input), RelayConfigurationFailureType)
+		return VerifyActivityResult{}, temporal.NewApplicationError(reviewStepNoRelayError(input), RelayConfigurationFailureType)
 	}
 	// roles.review, when set, owns this step's relay policy -- carried as
 	// input.ReviewRelayPolicy, credential-free like input.RoutePolicy
@@ -164,7 +144,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// real credential, never one implied by the submitted policy. nil
 	// (roles.review unset) keeps PhaseRelaySpec on the build's own relay
 	// spec fields, unchanged.
-	var review *conformity.ReviewRoute
+	var review *codereview.ReviewRoute
 	if input.ReviewRelayPolicy != nil {
 		if a.CheckRoute == nil {
 			return VerifyActivityResult{}, temporal.NewApplicationError(
@@ -188,9 +168,9 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err := input.ReviewRelayPolicy.ValidateUpstreamScheme(); err != nil {
 			return VerifyActivityResult{}, temporal.NewApplicationError(fmt.Sprintf("review relay upstream: %v", err), RelayConfigurationFailureType)
 		}
-		review = conformity.ReviewRelayFromPolicy(*input.ReviewRelayPolicy, creds.APIKey, creds.GitHubToken, creds.ChatGPTToken, creds.ChatGPTAccountID)
+		review = codereview.ReviewRelayFromPolicy(*input.ReviewRelayPolicy, creds.APIKey, creds.GitHubToken, creds.ChatGPTToken, creds.ChatGPTAccountID)
 	}
-	relaySpec := conformity.PhaseRelaySpec(*baseRelaySpec, review, input.PriorConsumedInputTokens+input.PriorConsumedOutputTokens, input.PriorConsumedCostMicroUSD)
+	relaySpec := codereview.PhaseRelaySpec(*baseRelaySpec, review, input.PriorConsumedInputTokens+input.PriorConsumedOutputTokens, input.PriorConsumedCostMicroUSD)
 	if err := relaySpec.Validate(); err != nil {
 		return VerifyActivityResult{}, temporal.NewApplicationError(fmt.Sprintf("%s relay configuration: %v", step.Label, err), RelayConfigurationFailureType)
 	}
@@ -236,7 +216,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		return VerifyActivityResult{}, err
 	}
 	script := filepath.Join(filepath.Dir(a.buildAppScriptFor(input.RunWorkflowInput)), step.ScriptName)
-	args := prep.args(reviewStepArgs(a, step, input, script))
+	args := prep.args(reviewStepArgs(input, script))
 	buildAppInterpreter := a.buildAppInterpreterFor(input.RunWorkflowInput)
 	command := append([]string{buildAppInterpreter}, args...)
 	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), step.Name, command); err != nil {
@@ -288,8 +268,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	// the already-committed workspace and calls the model through relay,
 	// so relaunching this run's own compose services or attaching a
 	// registry proxy for it would just be wasted work with nothing to
-	// reach it -- see run_ticket.go's matching sandboxedForConformityReview
-	// comment.
+	// reach it.
 	heartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
 		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: step.Stage, Elapsed: time.Since(heartbeatStart)})
@@ -310,35 +289,21 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	return a.completeReviewStep(ctx, input, step, checkpoint, path, result, runErr, finishErr, withInherited(inherited, attempts))
 }
 
-// reviewStepArgs builds step's own harness-script argv, keyed on
-// step.Name -- the one place the two review steps' own flag/field
-// differences (spec-acceptance-criteria vs. spec, conformity policy vs.
-// code-review policy) live, now that RunReviewStepActivity's own body is
-// shared (M4-K3).
-func reviewStepArgs(a *Activities, step reviewstep.Step, input ReviewStepInput, script string) []string {
-	if step.Name == reviewstep.Combined {
-		// input.SpecPath is already unconditionally staged by
-		// a.runSandboxWithRetries (specPath) for every review-step launch.
-		// The approved spec is not passed yet: no run input carries it, so
-		// no spec line can be cited and every finding is advice.
-		// input.effectiveDiffBase(), not input.BaseSHA: see
-		// RunWorkflowInput.DiffBaseSHA's own doc comment -- a corrective
-		// round's own BaseSHA is just its checkout point, not the
-		// cumulative diff a -diff-base override names for this review to
-		// read.
-		return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, "", input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
-	}
-	// The standalone code-review script: input.SpecPath, the same host path
-	// build_app.py's own --spec already stages (buildActivityArgs), as its
-	// context-only --spec.
-	return codereview.Args(script, input.WorkspacePath, input.SpecPath, input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
+// reviewStepArgs builds the review launch's harness-script argv.
+// input.SpecPath is already unconditionally staged by
+// a.runSandboxWithRetries (specPath) for every review-step launch. The
+// approved spec is not passed yet: no run input carries it, so no spec line
+// can be cited and every finding is advice. input.effectiveDiffBase(), not
+// input.BaseSHA: see RunWorkflowInput.DiffBaseSHA's own doc comment -- a
+// corrective round's own BaseSHA is just its checkout point, not the
+// cumulative diff a -diff-base override names for this review to read.
+func reviewStepArgs(input ReviewStepInput, script string) []string {
+	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, "", input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
 }
 
-// reviewStepNoRelayError names step's own trigger condition for the
-// no-relay-configured halt -- each step names its own reason in this
-// halt's text, so it stays specific rather than a single shared string
-// (mirrors run_ticket.go's own runReviewPhase noRelayErr parameter).
-func reviewStepNoRelayError(step reviewstep.Step, input ReviewStepInput) string {
+// reviewStepNoRelayError names the review's trigger condition for the
+// no-relay-configured halt.
+func reviewStepNoRelayError(input ReviewStepInput) string {
 	return fmt.Sprintf("-code-review-policy is %q but no relay is configured for this run -- code review needs model access and cannot be silently skipped", input.CodeReviewPolicy)
 }
 

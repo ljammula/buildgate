@@ -52,7 +52,6 @@ type superviseConfig struct {
 	configPath          string
 	buildAppInterpreter string
 	buildAppScript      string
-	conformityPolicy    string
 	maxRounds           int
 	timeoutMinutes      int
 	verifyCommand       string
@@ -90,7 +89,6 @@ func newSuperviseFlags() (flags *flag.FlagSet, repositories *superviseRepositori
 	flags.StringVar(&config.configPath, "config", "", "session config path or profile name passed to every daemon as its -config; empty lets each daemon find its own")
 	flags.StringVar(&config.buildAppInterpreter, "build-app-interpreter", "python3", "internal: the interpreter that runs -build-app-script; tests point it at a stand-in")
 	flags.StringVar(&config.buildAppScript, "build-app-script", "", "path to a build_app.py to run in place of the built-in one")
-	flags.StringVar(&config.conformityPolicy, "conformity-policy", "required", "what a failed spec-conformity review does: required fails the build on any criterion flagged or not judged, advisory records the verdicts without failing")
 	flags.IntVar(&config.maxRounds, "max-rounds", 3, "most rounds the build loop may take on one ticket")
 	flags.IntVar(&config.timeoutMinutes, "timeout-minutes", 45, "minutes the coding agent may run in one build round")
 	flags.StringVar(&config.verifyCommand, "verify-command", "make verify", "canonical verification command, run in the workspace")
@@ -173,7 +171,6 @@ func (c superviseConfig) daemonArgs(repository string) []string {
 		"-data-dir", c.dataDir,
 		"-build-app-interpreter", c.buildAppInterpreter,
 		"-build-app-script", c.buildAppScript,
-		"-conformity-policy", c.conformityPolicy,
 		"-max-rounds", strconv.Itoa(c.maxRounds),
 		"-timeout-minutes", strconv.Itoa(c.timeoutMinutes),
 		"-verify-command", c.verifyCommand,

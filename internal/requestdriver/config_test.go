@@ -188,27 +188,6 @@ func TestBuildTicketRunArgsIncludesPRBaseOnlyWhenSet(t *testing.T) {
 	}
 }
 
-// TestBuildTicketRunArgsIncludesSpecAcceptanceCriteriaOnlyWhenSet is the
-// per-criterion conformity review's version of
-// TestBuildTicketRunArgsIncludesPRClosesIssueOnlyWhenSet above:
-// worker's own argv builder must forward a per-ticket criteria file the
-// same way it already forwards IssueRef.
-func TestBuildTicketRunArgsIncludesSpecAcceptanceCriteriaOnlyWhenSet(t *testing.T) {
-	withCriteria := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", SpecAcceptanceCriteria: "/repo/tickets/001/criteria.md"}
-	args := requestdriver.BuildTicketRunArgs("data", withCriteria, requestdriver.WorkerConfig{})
-	if !requestdrivertest.ContainsArg(args, "-spec-acceptance-criteria", "/repo/tickets/001/criteria.md") {
-		t.Errorf("args = %v, want -spec-acceptance-criteria /repo/tickets/001/criteria.md", args)
-	}
-
-	withoutCriteria := &requestdriver.QueueEntry{ID: "t2", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-	args = requestdriver.BuildTicketRunArgs("data", withoutCriteria, requestdriver.WorkerConfig{})
-	for _, a := range args {
-		if a == "-spec-acceptance-criteria" {
-			t.Errorf("args = %v, want no -spec-acceptance-criteria flag when unset", args)
-		}
-	}
-}
-
 // TestBuildTicketRunArgsIncludesOpenPullRequestOnlyWhenEnabled covers the
 // coordinator-flagged gap: worker's whole reason to exist is the
 // automated intake-to-PR flow, so buildTicketRunArgs must actually thread
@@ -323,53 +302,8 @@ func TestBuildTicketRunArgsThreadsRegistryProxyConfig(t *testing.T) {
 	})
 }
 
-// TestBuildTicketRunArgsForwardsConformityPolicy is issue #164's own
-// regression test for buildTicketRunArgs's argv-construction side: before
-// this change, grep -n "conformity" worker_config.go found zero matches --
-// worker never forwarded the flag to a drained entry's
-// runMainWithReady invocation at all, so every entry ran under
-// run_ticket.go's own hardcoded default regardless of what an operator
-// configured on worker itself.
-// TestBuildTicketRunArgsForwardsConformityPolicy covers the
-// operator-explicit case only (conformityPolicyExplicit true) -- see
-// buildTicketRunArgs's own doc comment for why an unexplicit value must
-// never be forwarded (PR #169 review: forwarding it unconditionally
-// defeats a target repo's own committed .factory.yml conformity_policy).
-func TestBuildTicketRunArgsForwardsConformityPolicy(t *testing.T) {
-	entry := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-
-	args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{
-		ConformityPolicy: "advisory", ConformityPolicyExplicit: true,
-	})
-	if !requestdrivertest.ContainsArg(args, "-conformity-policy", "advisory") {
-		t.Errorf("args = %v, want -conformity-policy advisory", args)
-	}
-}
-
-// TestBuildTicketRunArgsOmitsConformityPolicyForAZeroValueConfig covers a
-// workerConfig{} built directly (every existing test that predates
-// this field) and, more importantly, a real, unconfigured operator
-// invocation: buildTicketRunArgs must NOT forward the flag when
-// conformityPolicyExplicit is false (the Go zero value), so the child
-// `factoryd <run>` invocation's own flag default -- and, critically, its
-// own .factory.yml conformity_policy lookup -- resolves exactly as it
-// would for a direct, unconfigured invocation. Forwarding a placeholder
-// default here (this test's behavior before PR #169's review) silently
-// defeated that lookup for every worker operator who never touched
-// -conformity-policy at all -- see buildTicketRunArgs's own doc comment.
-func TestBuildTicketRunArgsOmitsConformityPolicyForAZeroValueConfig(t *testing.T) {
-	entry := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-
-	args := requestdriver.BuildTicketRunArgs("data", entry, requestdriver.WorkerConfig{})
-	for _, a := range args {
-		if a == "-conformity-policy" {
-			t.Errorf("args = %v, want -conformity-policy omitted entirely for a non-explicit zero-value config", args)
-		}
-	}
-}
-
-// TestBuildTicketRunArgsForwardsCodeReviewPolicy mirrors
-// TestBuildTicketRunArgsForwardsConformityPolicy for -code-review-policy.
+// TestBuildTicketRunArgsForwardsCodeReviewPolicy: an operator-explicit
+// -code-review-policy reaches the drained entry's run.
 func TestBuildTicketRunArgsForwardsCodeReviewPolicy(t *testing.T) {
 	entry := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
 
@@ -381,9 +315,9 @@ func TestBuildTicketRunArgsForwardsCodeReviewPolicy(t *testing.T) {
 	}
 }
 
-// TestBuildTicketRunArgsOmitsCodeReviewPolicyForAZeroValueConfig mirrors
-// TestBuildTicketRunArgsOmitsConformityPolicyForAZeroValueConfig for
-// -code-review-policy.
+// TestBuildTicketRunArgsOmitsCodeReviewPolicyForAZeroValueConfig: a
+// non-explicit -code-review-policy is never forwarded, so the child run's
+// own default resolves as for a direct, unconfigured invocation.
 func TestBuildTicketRunArgsOmitsCodeReviewPolicyForAZeroValueConfig(t *testing.T) {
 	entry := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
 

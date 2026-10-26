@@ -193,7 +193,7 @@ func inspectRunFrom(dataDir string, r *run.Run, base string) InspectTicket {
 	runDir := run.Dir(dataDir, r.ID)
 	for _, f := range []struct{ label, name string }{
 		{"The ticket it was judged against", "spec.snapshot.md"},
-		{"The review's verdict on each criterion", "CONFORMITY_EVIDENCE.json"},
+		{"The review's findings", "CODE_REVIEW_EVIDENCE.json"},
 		{"The build's report", "BUILD_REPORT.md"},
 	} {
 		if _, err := os.Stat(filepath.Join(runDir, f.name)); err == nil {

@@ -22,7 +22,6 @@
   "compose_services_ready_timeout": 150000000000,
   "compose_services_require_digest": true,
   "configured_sandbox_image": "example.test/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "conformity_policy": "advisory",
   "data_dir": "<DATA_DIR>",
   "earlier_attempt_path": "<INPUTS>/earlier-attempt.md",
   "fast_check_command": "echo fast",
@@ -161,7 +160,6 @@
     "npm ci",
     "make generate"
   ],
-  "spec_acceptance_criteria": "<INPUTS>/criteria.md",
   "spec_path": "<DATA_DIR>/runs/<RUN_ID>/spec.snapshot.md",
   "task_queue": "factoryd-repo-<OWNER_ID>-run-<RUN_ID>",
   "tests_required_opt_out": "integration fixture doesn't exercise tests_added",

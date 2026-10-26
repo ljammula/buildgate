@@ -46,8 +46,7 @@ func harnessArg(name string) string {
 }
 
 // executionHarnessEnv and reviewHarnessEnv are harnessEnv for the execution
-// (build, corrective rounds) and review (conformity, code review, combined
-// review) jobs of one execution.
+// (build, corrective rounds) and review jobs of one execution.
 func executionHarnessEnv(input RunWorkflowInput) []string { return harnessEnv(input.Harness) }
 
 func reviewHarnessEnv(input RunWorkflowInput) []string { return harnessEnv(input.ReviewHarness) }
@@ -83,7 +82,7 @@ func autofixArgs(commands []string) []string {
 // by the submitting process -- see cmd/factoryd/run_temporal.go) -- empty
 // when roles.execution is unset, which omits --thinking entirely and
 // preserves today's argv byte-for-byte.
-func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, specAcceptanceCriteria, thinking, harness string, setup ...string) []string {
+func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, thinking, harness string, setup ...string) []string {
 	args := []string{
 		buildAppScript,
 		"--workspace", workspace,
@@ -113,25 +112,6 @@ func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeou
 		// post-build named gate, which every existing user of it relies on
 		// staying the only place oracle content is exposed).
 		args = append(args, "--reference-oracle-command", referenceOracleCommand)
-	}
-	if specAcceptanceCriteria != "" {
-		// build_app.py's own --spec-acceptance-criteria. RunBuildActivity's
-		// own call site below now always passes "" here, matching
-		// cmd/factoryd: a commit-related criterion can only
-		// be evaluated meaningfully against an already-committed
-		// workspace, and .git is mounted read-only inside the sandbox
-		// unconditionally, so build_app.py's own (round-loop) launch can
-		// never satisfy one on its own. The spec-conformity review now
-		// runs as a SEPARATE, later sandboxed launch
-		// (RunSpecConformityReviewActivity, agent/pi/scripts/
-		// conformity_review.py), after CollectEvidenceActivity's own
-		// safety-net commit lands -- see run_ticket.go's "conformity
-		// review, phase 2" doc comment for the full incident. This
-		// branch (and the specAcceptanceCriteria parameter) stay general
-		// rather than being deleted outright, matching cmd/factoryd's own
-		// buildAppArgs, in case a future standalone caller with a
-		// genuinely writable .git ever wants both in one pass.
-		args = append(args, "--spec-acceptance-criteria", specAcceptanceCriteria)
 	}
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
@@ -311,9 +291,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 		buildOracleCommand = input.GateCommands[policy.ReferenceOracleGateID]
 	}
 
-	// "" for specAcceptanceCriteria, not a.specAcceptanceCriteriaFor(input):
-	// see buildActivityArgs' own doc comment on that parameter for why.
-	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, "", input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
+	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
 	// The build script is the only reader of the autofix list (see
 	// TestOnlyTheBuildReadsAutofix): it runs the commands inside each round.
 	args = append(args, autofixArgs(input.AutofixCommands)...)

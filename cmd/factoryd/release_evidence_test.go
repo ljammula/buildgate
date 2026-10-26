@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"buildgate/internal/api"
-	"buildgate/internal/conformity"
 	"buildgate/internal/evidence"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
@@ -181,149 +180,18 @@ func TestRenderEvidenceMarkdownShowsTestsAddedOptOutReason(t *testing.T) {
 	}
 }
 
-// TestRenderEvidenceMarkdownRendersSpecConformityVerdicts is the
-// per-criterion conformity review's PR-body requirement: each declared
-// acceptance criterion's independent-reviewer verdict is rendered,
-// informational only (see
-// run.AgentEvidence.ReviewVerdicts' own doc comment for why this never
-// itself decides accept/quarantine).
-func TestRenderEvidenceMarkdownRendersSpecConformityVerdicts(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		AgentEvidence: &run.AgentEvidence{
-			ReviewVerdicts: []run.ReviewVerdict{
-				{Criterion: "1. Foo does X", Verdict: "clean"},
-				{Criterion: "2. Bar does Y", Verdict: "flagged", Detail: "missing null check"},
-			},
-		},
-	}
+// TestRenderEvidenceMarkdownIgnoresPreP2ConformityVerdicts: a run recorded
+// before the spec-conformity review was retired keeps its verdicts on the
+// record, read only; the PR body renders no section for them.
+func TestRenderEvidenceMarkdownIgnoresPreP2ConformityVerdicts(t *testing.T) {
+	r := &run.Run{ID: "run-1", SpecConformityConfigured: true,
+		SpecConformityVerdicts: []run.ReviewVerdict{{Criterion: "1. Foo does X", Verdict: "flagged", Detail: "missing"}},
+		AgentEvidence:          &run.AgentEvidence{ReviewVerdicts: []run.ReviewVerdict{{Criterion: "2. Bar", Verdict: "clean"}}}}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	for _, want := range []string{
-		"## Spec conformity",
-		"1. Foo does X: **clean**",
-		"2. Bar does Y: **flagged**",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("evidence body does not contain %q:\n%s", want, body)
+	for _, gone := range []string{"Spec conformity", "Foo does X", "Bar"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("evidence body renders the retired conformity verdicts (%q):\n%s", gone, body)
 		}
-	}
-
-	withoutCriteria := &run.Run{ID: "run-2"}
-	body = renderEvidenceMarkdown(withoutCriteria, &release.MergePolicy{})
-	if strings.Contains(body, "## Spec conformity") {
-		t.Errorf("evidence body should not render a Spec conformity section with no review verdicts:\n%s", body)
-	}
-}
-
-// TestSpecConformityVerdictJudgedAgainSaysSo: a flag overturned on a recheck
-// must not read as an ordinary clean in the pull request.
-func TestSpecConformityVerdictJudgedAgainSaysSo(t *testing.T) {
-	t.Parallel()
-	evidence := []byte(`{"schema_version":1,"review_verdicts":[
-		{"criterion":"1. Foo does X","verdict":"clean"},
-		{"criterion":"2. Docs name RFC 7386","verdict":"clean","recheck":{"fact":"\"merge.go\":\n    line 3: \"x\"","first_detail":"lacks RFC 7386","first_missing":{"file":"merge.go","text":"RFC 7386"},"outcome":"answered clean"}}]}`)
-	verdicts, err := conformity.ParseVerdicts(evidence)
-	if err != nil {
-		t.Fatalf("ParseVerdicts: %v", err)
-	}
-	if verdicts[1].Recheck == nil || verdicts[1].Recheck.Outcome != "answered clean" || verdicts[1].Recheck.FirstDetail != "lacks RFC 7386" {
-		t.Fatalf("recheck not decoded: %+v", verdicts[1].Recheck)
-	}
-	body := renderEvidenceMarkdown(&run.Run{ID: "run-1", SpecConformityVerdicts: verdicts}, &release.MergePolicy{})
-	if !strings.Contains(body, "2. Docs name RFC 7386: **clean** (judged again: an earlier answer flagged it for text the factory then found in the result commit; answered clean)") {
-		t.Errorf("evidence body does not say the verdict was judged again:\n%s", body)
-	}
-	if strings.Contains(body, "1. Foo does X: **clean** (judged again") {
-		t.Errorf("a verdict with no recheck is marked as judged again:\n%s", body)
-	}
-}
-
-// TestRenderEvidenceMarkdownRendersSpecConformityFromTheRunField is the
-// regression test for a real, long-standing gap (found while building Phase
-// 3): since the phase-2 conformity split, build_app.py no longer receives
-// the criteria, so AgentEvidence.ReviewVerdicts -- the only field this
-// section used to read -- was empty for every current run and the section
-// never rendered. The verdicts now live on r.SpecConformityVerdicts, loaded
-// from CONFORMITY_EVIDENCE.json, and that field must render even with no
-// AgentEvidence at all.
-func TestRenderEvidenceMarkdownRendersSpecConformityFromTheRunField(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		SpecConformityVerdicts: []run.ReviewVerdict{
-			{Criterion: "1. Foo does X", Verdict: "clean"},
-		},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if !strings.Contains(body, "## Spec conformity") || !strings.Contains(body, "1. Foo does X: **clean**") {
-		t.Errorf("evidence body does not render r.SpecConformityVerdicts without AgentEvidence:\n%s", body)
-	}
-}
-
-// TestRenderEvidenceMarkdownCrossChecksOracleCoveredCriteria pins the
-// oracle-cross-check rendering contract: an oracle-covered criterion
-// states whether the reviewer and the reference oracle agree, a
-// disagreement is called out loudly and counted, and a prose-only
-// criterion gets no annotation at all.
-func TestRenderEvidenceMarkdownCrossChecksOracleCoveredCriteria(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		SpecConformityVerdicts: []run.ReviewVerdict{
-			{Criterion: "1. Returns 200.", Verdict: "clean"},
-			{Criterion: "2. Handles empty input.", Verdict: "flagged"},
-			{Criterion: "3. Code is clean.", Verdict: "clean"},
-		},
-		OracleCoveredCriteria: []string{"1. Returns 200.", "2. Handles empty input."},
-		GateResults:           []run.GateResult{{Check: "reference_oracle", Passed: true}},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	for _, want := range []string{
-		"1. Returns 200.: **clean** (oracle-checked, agrees)",
-		"2. Handles empty input.: **flagged** (oracle-checked, **DISAGREES with the reference oracle**)",
-		"1 criterion verdict(s) disagree with the reference oracle",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("evidence body does not contain %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "3. Code is clean.: **clean** (") {
-		t.Errorf("a prose-only criterion must carry no oracle annotation:\n%s", body)
-	}
-}
-
-func TestRenderEvidenceMarkdownSaysWhenTheOracleDidNotRun(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID:                     "run-1",
-		SpecConformityVerdicts: []run.ReviewVerdict{{Criterion: "1. Returns 200.", Verdict: "clean"}},
-		OracleCoveredCriteria:  []string{"1. Returns 200."},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if !strings.Contains(body, "(oracle-covered, oracle did not run)") {
-		t.Errorf("evidence body does not say the oracle did not run:\n%s", body)
-	}
-}
-
-func TestRenderEvidenceMarkdownIsNeutralForFailedOracleAndUnavailableReviewer(t *testing.T) {
-	t.Parallel()
-	verdicts := []run.ReviewVerdict{{Criterion: "1. Returns 200.", Verdict: "clean"}}
-	covered := []string{"1. Returns 200."}
-
-	failed := &run.Run{ID: "r", SpecConformityVerdicts: verdicts, OracleCoveredCriteria: covered,
-		GateResults: []run.GateResult{{Check: "reference_oracle", Passed: false}}}
-	body := renderEvidenceMarkdown(failed, &release.MergePolicy{})
-	if !strings.Contains(body, "the reference oracle failed") || strings.Contains(body, "DISAGREES") {
-		t.Errorf("a failed oracle must be reported neutrally, not as per-criterion drift:\n%s", body)
-	}
-
-	unavailable := &run.Run{ID: "r", OracleCoveredCriteria: covered,
-		SpecConformityVerdicts: []run.ReviewVerdict{{Criterion: "1. Returns 200.", Verdict: "unavailable"}},
-		GateResults:            []run.GateResult{{Check: "reference_oracle", Passed: true}}}
-	body = renderEvidenceMarkdown(unavailable, &release.MergePolicy{})
-	if !strings.Contains(body, "reviewer produced no verdict") || strings.Contains(body, "DISAGREES") {
-		t.Errorf("an unavailable reviewer must not read as drift:\n%s", body)
 	}
 }
 
@@ -1295,7 +1163,7 @@ func TestRenderEvidenceMarkdownOracleOptOutSaysPlainlyWhenOraclesWereCommitted(t
 }
 
 // TestRenderEvidenceMarkdownOmitsCodeReviewWhenNil pins the "## Code
-// review" section's own convention, matching "## Spec conformity": a run
+// review" section's own convention: a run
 // whose code-review phase never ran (r.CodeReview == nil, e.g.
 // -code-review-policy was "off") gets no section at all, not an empty one.
 func TestRenderEvidenceMarkdownOmitsCodeReviewWhenNil(t *testing.T) {

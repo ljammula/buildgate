@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"buildgate/internal/codereview"
@@ -16,6 +18,7 @@ import (
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/testfixture"
+	"buildgate/internal/unresolved"
 )
 
 // codeReviewFixtureInput is fixtureInput() plus the relay policy and
@@ -33,17 +36,15 @@ func codeReviewFixtureInput(t *testing.T, workspacePath string) ReviewStepInput 
 	policy := *testRelayPolicy()
 	policy.AllowUnauthenticatedUpstream = true
 	input.RoutePolicy = &policy
-	return ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.CodeReview}
+	return ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}
 }
 
-// TestRunCodeReviewActivityHaltsWhenNoRelayConfigured is
-// TestRunSpecConformityReviewActivityHaltsWhenNoRelayConfigured's
-// counterpart: an operator who explicitly set -code-review-policy to
+// TestRunReviewStepActivityHaltsWhenNoRelayConfigured: an operator who explicitly set -code-review-policy to
 // advisory/required is asking for a real review, not an optional one --
 // silently skipping this Activity because no relay is configured would
 // leave that declared policy never checked while the run could still be
 // accepted. This must halt explicitly instead.
-func TestRunCodeReviewActivityHaltsWhenNoRelayConfigured(t *testing.T) {
+func TestRunReviewStepActivityHaltsWhenNoRelayConfigured(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	activities := &Activities{LogDir: t.TempDir()}
 	input := codeReviewFixtureInput(t, workspacePath)
@@ -57,18 +58,18 @@ func TestRunCodeReviewActivityHaltsWhenNoRelayConfigured(t *testing.T) {
 	env.RegisterActivity(wrapper)
 	_, err := env.ExecuteActivity(wrapper, input)
 	if err == nil {
-		t.Fatal("RunCodeReviewActivity with no relay configured: want error, got nil")
+		t.Fatal("RunReviewStepActivity with no relay configured: want error, got nil")
 	}
 	if !hasApplicationErrorType(err, RelayConfigurationFailureType) {
 		t.Fatalf("error does not carry application error type %q: %v", RelayConfigurationFailureType, err)
 	}
 }
 
-// TestRunCodeReviewActivitySucceeds is the common case: the subprocess
+// TestRunReviewStepActivitySucceeds is the common case: the subprocess
 // runs (through the runWithRetriesChecked fake seam, no real Docker
 // needed) and leaves the workspace clean, so the Activity returns a
 // populated VerifyActivityResult with no error.
-func TestRunCodeReviewActivitySucceeds(t *testing.T) {
+func TestRunReviewStepActivitySucceeds(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	logDir := t.TempDir()
 	activities := testRoutedActivities(sandbox.NewRouteSecret("worker-static-upstream-key"))
@@ -85,7 +86,7 @@ func TestRunCodeReviewActivitySucceeds(t *testing.T) {
 		if err := os.WriteFile(log, []byte("clean\n"), 0o600); err != nil {
 			return runner.Result{}, err
 		}
-		result := runner.Result{Command: []string{"python3", "code_review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: 0, LogPath: log}
+		result := runner.Result{Command: []string{"python3", "combined_review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: 0, LogPath: log}
 		if err := after(1, result, nil); err != nil {
 			return result, err
 		}
@@ -101,30 +102,29 @@ func TestRunCodeReviewActivitySucceeds(t *testing.T) {
 	env.RegisterActivity(wrapper)
 	raw, err := env.ExecuteActivity(wrapper, input)
 	if err != nil {
-		t.Fatalf("execute code-review Activity: %v", err)
+		t.Fatalf("execute review Activity: %v", err)
 	}
 	var result VerifyActivityResult
 	if err := raw.Get(&result); err != nil {
-		t.Fatalf("decode code-review Activity result: %v", err)
+		t.Fatalf("decode review Activity result: %v", err)
 	}
 	if result.Result.ExitCode != 0 {
 		t.Errorf("Result.ExitCode = %d, want 0", result.Result.ExitCode)
 	}
 	if result.LogSHA256 == "" {
-		t.Error("LogSHA256 is empty, want a real hash of the code-review log")
+		t.Error("LogSHA256 is empty, want a real hash of the review log")
 	}
-	if len(result.Attempts) != 1 || result.Attempts[0].Kind != "code_review" {
-		t.Fatalf("Attempts = %+v, want exactly one code_review attempt", result.Attempts)
+	if len(result.Attempts) != 1 || result.Attempts[0].Kind != reviewstep.Combined {
+		t.Fatalf("Attempts = %+v, want exactly one %q attempt", result.Attempts, reviewstep.Combined)
 	}
 }
 
-// TestRunCodeReviewActivityHaltsWhenWorkspaceLeftDirty mirrors
-// TestRunSpecConformityReviewActivityHaltsWhenWorkspaceLeftDirty:
-// code_review.py's job is to read and report, never to edit -- if it
+// TestRunReviewStepActivityHaltsWhenWorkspaceLeftDirty: the review's job
+// is to read and report, never to edit -- if it
 // somehow wrote something, silently folding that into a further
 // safety-net commit would accept unreviewed, unknown output onto this
 // run's own result_sha. This must halt instead.
-func TestRunCodeReviewActivityHaltsWhenWorkspaceLeftDirty(t *testing.T) {
+func TestRunReviewStepActivityHaltsWhenWorkspaceLeftDirty(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	logDir := t.TempDir()
 	activities := testRoutedActivities(sandbox.NewRouteSecret("worker-static-upstream-key"))
@@ -144,7 +144,7 @@ func TestRunCodeReviewActivityHaltsWhenWorkspaceLeftDirty(t *testing.T) {
 		if err := os.WriteFile(log, []byte("dirty\n"), 0o600); err != nil {
 			return runner.Result{}, err
 		}
-		result := runner.Result{Command: []string{"python3", "code_review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: 0, LogPath: log}
+		result := runner.Result{Command: []string{"python3", "combined_review.py"}, StartedAt: started, FinishedAt: started.Add(time.Second), ExitCode: 0, LogPath: log}
 		if err := after(1, result, nil); err != nil {
 			return result, err
 		}
@@ -160,7 +160,7 @@ func TestRunCodeReviewActivityHaltsWhenWorkspaceLeftDirty(t *testing.T) {
 	env.RegisterActivity(wrapper)
 	_, err := env.ExecuteActivity(wrapper, input)
 	if err == nil {
-		t.Fatal("RunCodeReviewActivity with a dirty workspace afterward: want error, got nil")
+		t.Fatal("RunReviewStepActivity with a dirty workspace afterward: want error, got nil")
 	}
 	if !hasApplicationErrorType(err, InfrastructureFailureType) {
 		t.Fatalf("error does not carry application error type %q: %v", InfrastructureFailureType, err)
@@ -174,13 +174,12 @@ func TestRunCodeReviewActivityHaltsWhenWorkspaceLeftDirty(t *testing.T) {
 	}
 }
 
-// TestRunCodeReviewActivityStagesBuildAppSiblingAndArgv is
-// TestRunSpecConformityReviewActivityStagesBuildAppSibling's counterpart,
-// plus the argv assertion M2-C's own checklist asks for: code_review.py's
-// argv must carry --review-policy and --thinking.
-func TestRunCodeReviewActivityStagesBuildAppSiblingAndArgv(t *testing.T) {
+// TestRunReviewStepActivityStagesBuildAppSiblingAndArgv: combined_review.py
+// imports build_app.py, so it is staged beside the script, and the argv
+// carries --review-policy and --thinking.
+func TestRunReviewStepActivityStagesBuildAppSiblingAndArgv(t *testing.T) {
 	harnessDir := t.TempDir()
-	for _, name := range []string{"build_app.py", codereview.ScriptName} {
+	for _, name := range []string{"build_app.py", reviewstep.CombinedScriptName} {
 		if err := os.WriteFile(filepath.Join(harnessDir, name), []byte("# "+name+"\n"), 0o644); err != nil {
 			t.Fatalf("write fixture harness file %s: %v", name, err)
 		}
@@ -234,14 +233,14 @@ exit 0
 	env.RegisterActivity(wrapper)
 	raw, err := env.ExecuteActivity(wrapper, input)
 	if err != nil {
-		t.Fatalf("RunCodeReviewActivity: %v", err)
+		t.Fatalf("RunReviewStepActivity: %v", err)
 	}
 	var result VerifyActivityResult
 	if err := raw.Get(&result); err != nil {
-		t.Fatalf("decode code-review Activity result: %v", err)
+		t.Fatalf("decode review Activity result: %v", err)
 	}
 	if len(result.Attempts) != 1 {
-		t.Fatalf("Attempts = %+v, want exactly one code_review attempt", result.Attempts)
+		t.Fatalf("Attempts = %+v, want exactly one review attempt", result.Attempts)
 	}
 
 	marker, err := os.ReadFile(markerPath)
@@ -249,7 +248,7 @@ exit 0
 		t.Fatalf("read sibling-staging marker (fake docker never saw the /inputs/script mount?): %v", err)
 	}
 	if got := string(marker); got != "present\n" {
-		t.Fatalf("build_app.py beside the staged code_review.py = %q, want \"present\\n\" -- code_review.py's own `import build_app` would die with ModuleNotFoundError inside the real sandbox", got)
+		t.Fatalf("build_app.py beside the staged combined_review.py = %q, want \"present\\n\" -- combined_review.py's own `import build_app` would die with ModuleNotFoundError inside the real sandbox", got)
 	}
 
 	argv, err := os.ReadFile(argvPath)
@@ -261,5 +260,36 @@ exit 0
 	}
 	if !strings.Contains(string(argv), "--thinking high") {
 		t.Fatalf("argv = %q, want it to contain %q", string(argv), "--thinking high")
+	}
+}
+
+// TestRunReviewStepActivityRefusesARetiredStep: a retired step pending in a
+// history recorded before reviewReproductionChange reaches this Worker. It is
+// refused, non-retryably, as no verdict on the work, before any launch.
+func TestRunReviewStepActivityRefusesARetiredStep(t *testing.T) {
+	for _, step := range []string{reviewstep.SpecConformity, reviewstep.CodeReview} {
+		t.Run(step, func(t *testing.T) {
+			activities := testRoutedActivities(sandbox.NewRouteSecret("worker-static-upstream-key"))
+			activities.runWithRetriesChecked = func(context.Context, string, func(int) string, int, func(int) error, func(int, runner.Result, error) error, string, ...string) (runner.Result, error) {
+				t.Fatal("a retired review step launched")
+				return runner.Result{}, nil
+			}
+			input := codeReviewFixtureInput(t, testfixture.NewGitRepo(t))
+			input.Step = step
+			wrapper := func(ctx context.Context, in ReviewStepInput) (VerifyActivityResult, error) {
+				return activities.RunReviewStepActivity(ctx, in)
+			}
+			var suite testsuite.WorkflowTestSuite
+			env := suite.NewTestActivityEnvironment()
+			env.RegisterActivity(wrapper)
+			_, err := env.ExecuteActivity(wrapper, input)
+			var appErr *temporal.ApplicationError
+			if !errors.As(err, &appErr) || appErr.Type() != ReviewStepRetiredFailureType || !appErr.NonRetryable() {
+				t.Fatalf("error = %v, want a non-retryable %s", err, ReviewStepRetiredFailureType)
+			}
+			if got := UnresolvedCauseFromError(err); got != unresolved.NoVerdict {
+				t.Errorf("UnresolvedCauseFromError = %q, want %q", got, unresolved.NoVerdict)
+			}
+		})
 	}
 }

@@ -219,9 +219,6 @@ func (a *Activities) prepareBuildHandoff(ctx context.Context, input RunWorkflowI
 	// The prompts the interrupted attempt sent sit in the same session; they
 	// are copied to the run's own directory for the operator before it goes.
 	a.retainLaunchPrompts(ctx, input, "build", interrupted, buildPromptSessions)
-	if err := evidence.DropSavedPrompts(input.WorkspacePath, []string{conformitySessionDir}); err != nil {
-		return fail("remove the interrupted build's saved prompts", err)
-	}
 	if err := os.RemoveAll(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
 		return fail("remove the interrupted build's harness session", err)
 	}
@@ -311,14 +308,9 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 		}
 	}
 	// The build's saved prompts hold the record of an earlier attempt too
-	// (SC-018): copied for the operator before the session goes. A prompt
-	// the in-process conformity review saved is copied and removed with them,
-	// so no review launch finds a prompt in the worktree.
+	// (SC-018): copied for the operator before the session goes.
 	if info, err := os.Lstat(filepath.Join(input.WorkspacePath, buildSessionDir)); err == nil && info.IsDir() {
 		a.retainLaunchPrompts(ctx, input, "build", activity.GetInfo(ctx).Attempt, buildPromptSessions)
-	}
-	if err := evidence.DropSavedPrompts(input.WorkspacePath, []string{conformitySessionDir}); err != nil {
-		return fmt.Errorf("remove the finished build's saved prompts before any later step: %w", err)
 	}
 	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
 		return fmt.Errorf("remove the finished build's harness session before any later step: %w", err)
