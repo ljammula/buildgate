@@ -6,7 +6,7 @@ that alters either table updates this file in the same PR. The summary is in
 
 ## What works
 
-Latest release tag: **`v0.0.13`**. Release tags are `vX.Y.Z`; a tag is cut
+Latest release tag: **`v0.0.14`**. Release tags are `vX.Y.Z`; a tag is cut
 only after `make live-smoke` passes on that commit, and other machines
 upgrade by tag, not from `main`.
 
