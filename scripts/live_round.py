@@ -42,6 +42,9 @@ the handed-over plan has two tickets, so ticket 2's pull request stacks on
 ticket 1's branch, and ticket 2 changes the doc-comment line of the handler
 ticket 1 adds, one line above where the review comment asks ticket 1's
 round to add a line: the restack replays a change beside one made under it.
+Ticket 2 requires only its README.md row: each ticket's build sees the whole
+spec, so ticket 1 may write that doc-comment line itself, and ticket 2 then
+has nothing to change in main.go.
 Before the comments are posted, the reviewer account marks ticket 2's pull
 request ready for review. The comments go on ticket 1's pull request; once
 its round is pushed, the factory must restack ticket 2. The run passes when

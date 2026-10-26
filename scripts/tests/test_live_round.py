@@ -143,7 +143,10 @@ class StackedFixture(unittest.TestCase):
 		self.assertEqual([c["anchor"] for c in fixture["comments"]], ["func handleVersion"])
 		self.assertIn("directly under its `func` line", fixture["comments"][0]["body"])
 		second = (d / "plan" / "002.spec.md").read_text()
-		self.assertIn("Required-Changed-Files: README.md, main.go", second)
+		self.assertIn("Allowed-Files: README.md, main.go", second)
+		# Only the README row is required: ticket 1 sees the whole spec and
+		# may write the doc-comment line itself.
+		self.assertIn("Required-Changed-Files: README.md\n", second)
 		self.assertIn("directly above `func handleVersion`", second)
 
 
