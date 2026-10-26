@@ -872,8 +872,13 @@ func watchRequestTicketStep(out *os.File, dataDir string, r *request.Request, no
 	// pr_review waits on a human reviewer, possibly for days: say so and
 	// return, like spec_review/plan_review, rather than polling silently
 	// ("silence is a bug"). Attach to the ticket's run first if it hasn't
-	// been shown yet, so a corrective round in flight is still followed.
+	// been shown yet, so a corrective round in flight is still followed. A
+	// pull request held because whether it needs a restack cannot be told
+	// is named, with what to do.
 	if r.State == request.StatePRReview && (ticket.RunID == "" || ticket.RunID == *lastRunID) {
+		if held := r.RestackHeld(); held != nil {
+			fmt.Fprintf(out, "%s\n", held.RestackHold.On)
+		}
 		fmt.Fprintf(out, "waiting on PR review/merge for ticket %d/%d: %s\n", r.TicketIndex, r.TicketCount, ticket.PRURL)
 		return true, nil
 	}

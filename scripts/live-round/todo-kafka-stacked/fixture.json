@@ -5,8 +5,8 @@
   "comments": [
     {
       "path": "main.go",
-      "anchor": "\"/version\"",
-      "body": "Set a `Cache-Control: no-store` header on the 200 response of `/version`, and assert it in the handler test."
+      "anchor": "func handleVersion",
+      "body": "Make the first statement of `handleVersion`, directly under its `func` line and before the method check, set a `Cache-Control: no-store` header, and assert the header in the handler test."
     }
   ]
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 
 	"buildgate/internal/release"
 	"buildgate/internal/run"
+	"buildgate/internal/runner"
 )
 
 // replaySpec is the ticket of the replay integration tests: content.txt is
@@ -49,25 +51,15 @@ func commitOnMain(t *testing.T, ws, path, content string) string {
 	return gitOut(t, ws, "rev-parse", "HEAD")
 }
 
-// patchID is `git patch-id --stable` of commit in dir.
+// patchID is runner.GitPatchID of commit in dir, the patch id the replay
+// run computes.
 func patchID(t *testing.T, dir, commit string) string {
 	t.Helper()
-	show := exec.Command("git", "-C", dir, "show", commit)
-	ids := exec.Command("git", "-C", dir, "patch-id", "--stable")
-	pipe, err := show.StdoutPipe()
+	id, err := runner.GitPatchID(context.Background(), dir, commit)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("patch id of %s: %v", commit, err)
 	}
-	ids.Stdin = pipe
-	if err := show.Start(); err != nil {
-		t.Fatal(err)
-	}
-	out, err := ids.Output()
-	if err != nil {
-		t.Fatalf("git patch-id: %v", err)
-	}
-	_ = show.Wait()
-	return strings.Fields(string(out))[0]
+	return id
 }
 
 // replayOnto cherry-picks source's commits (source.BaseSHA..source.ResultSHA)

@@ -92,6 +92,61 @@ class Stacked(unittest.TestCase):
 		self.assertEqual([r["run_id"] for r in live_round.restack_rounds(ticket)], ["r1"])
 
 
+class Origin(unittest.TestCase):
+	def test_reads_owner_and_name_from_any_github_remote_form(self):
+		for url in ("https://github.com/acme/todo-scratch.git", "https://github.com/acme/todo-scratch", "git@github.com:acme/todo-scratch.git", "ssh://git@github.com/acme/todo-scratch.git\n"):
+			self.assertEqual(live_round.origin_slug(url), "acme/todo-scratch", url)
+
+	def test_a_remote_that_is_not_github_has_none(self):
+		self.assertIsNone(live_round.origin_slug("https://gitlab.com/acme/todo.git"))
+		self.assertIsNone(live_round.origin_slug("/srv/git/todo.git"))
+
+
+class StackedChecks(unittest.TestCase):
+	def test_every_gate_must_have_passed(self):
+		self.assertTrue(live_round.all_gates_passed({"gate_results": [{"check": "verify", "passed": True}, {"check": "code_review", "passed": True}]}))
+		self.assertFalse(live_round.all_gates_passed({"gate_results": [{"check": "verify", "passed": True}, {"check": "code_review", "passed": False}]}))
+		self.assertFalse(live_round.all_gates_passed({"gate_results": [{"check": "verify"}]}))
+		self.assertFalse(live_round.all_gates_passed({"gate_results": []}))
+
+	def test_the_factory_drafts_before_the_head_is_replaced(self):
+		events = [
+			{"event": "ready_for_review", "actor": {"login": "reviewer"}},
+			{"event": "convert_to_draft", "actor": {"login": "factory"}},
+			{"event": "head_ref_force_pushed", "actor": {"login": "factory"}},
+		]
+		self.assertTrue(live_round.drafted_before_push(events, "reviewer"))
+
+	def test_a_draft_after_the_push_or_by_the_reviewer_does_not_count(self):
+		late = [
+			{"event": "ready_for_review", "actor": {"login": "reviewer"}},
+			{"event": "head_ref_force_pushed", "actor": {"login": "factory"}},
+			{"event": "convert_to_draft", "actor": {"login": "factory"}},
+		]
+		self.assertFalse(live_round.drafted_before_push(late, "reviewer"))
+		by_reviewer = [
+			{"event": "convert_to_draft", "actor": {"login": "reviewer"}},
+			{"event": "head_ref_force_pushed", "actor": {"login": "factory"}},
+		]
+		self.assertFalse(live_round.drafted_before_push(by_reviewer, "reviewer"))
+
+	def test_only_a_recorded_retarget_onto_the_base_is_the_factorys(self):
+		self.assertIsNotNone(live_round.factory_retarget({"retarget": {"from": "factoryd/req-1-001-x", "to": "main", "at": "t"}}, "main"))
+		self.assertIsNone(live_round.factory_retarget({}, "main"))
+		self.assertIsNone(live_round.factory_retarget({"retarget": {"to": "develop"}}, "main"))
+
+
+class StackedFixture(unittest.TestCase):
+	def test_ticket_two_edits_the_line_above_where_the_comment_asks_for_one(self):
+		d = live_round.FIXTURES / "todo-kafka-stacked"
+		fixture = __import__("json").loads((d / "fixture.json").read_text())
+		self.assertEqual([c["anchor"] for c in fixture["comments"]], ["func handleVersion"])
+		self.assertIn("directly under its `func` line", fixture["comments"][0]["body"])
+		second = (d / "plan" / "002.spec.md").read_text()
+		self.assertIn("Required-Changed-Files: README.md, main.go", second)
+		self.assertIn("directly above `func handleVersion`", second)
+
+
 class Summary(unittest.TestCase):
 	def test_share_counts_comments_over_all_recorded_runs(self):
 		total = live_round.summarize([

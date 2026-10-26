@@ -18,7 +18,6 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
-	"buildgate/internal/unresolved"
 	"buildgate/internal/workspace"
 )
 
@@ -379,15 +378,21 @@ func TestRestackParksBeforeReplaying(t *testing.T) {
 }
 
 // TestRestackConflictParksAndResumeReplaysAgain: a replay that conflicts
-// parks the request in resume_review with cause restack_conflict, nothing
-// built; `factoryd resume` returns it to pr_review, and the next pass
-// replays again.
+// parks the request in resume_review with a reason that says what resolves
+// it (the branch under the ticket moving, or cancel) and that a fix pushed
+// by hand is refused, nothing built; `factoryd resume` returns it to
+// pr_review, and the next pass replays again.
 func TestRestackConflictParksAndResumeReplaysAgain(t *testing.T) {
 	f := newRestackFixture(t, 2)
 	f.replayErr = fmt.Errorf("%w: CONFLICT (content): b.txt", workspace.ErrReplayConflict)
 	f.pass()
-	if f.r.State != request.StateResumeReview || f.r.Resume.Cause != unresolved.RestackConflict || f.r.Tickets[1].Restack != nil || len(f.runArgs) != 0 {
-		t.Fatalf("state %s, resume %+v, restack %+v, runs %d: want resume_review with restack_conflict and no run", f.r.State, f.r.Resume, f.r.Tickets[1].Restack, len(f.runArgs))
+	if f.r.State != request.StateResumeReview || !f.r.Resume.Parked() || f.r.Resume.Cause != "" || f.r.Tickets[1].Restack != nil || len(f.runArgs) != 0 {
+		t.Fatalf("state %s, resume %+v, restack %+v, runs %d: want parked with no cause and no run", f.r.State, f.r.Resume, f.r.Tickets[1].Restack, len(f.runArgs))
+	}
+	for _, want := range []string{"do not apply cleanly", "once factoryd/run-1 has moved", "refused as a commit the factory did not make", "factoryd cancel req-1"} {
+		if !strings.Contains(f.r.Resume.Reason, want) {
+			t.Errorf("reason %q does not say %q", f.r.Resume.Reason, want)
+		}
 	}
 	if !strings.Contains(f.r.NextAction(), "factoryd resume req-1") {
 		t.Errorf("next action %q does not offer the resume", f.r.NextAction())
@@ -594,5 +599,221 @@ func TestARetryOfAStackedTicketOnTheOldHeadChainsFromTheCurrentHead(t *testing.T
 				t.Fatalf("retry args %v: with ticket 1 unmoved the retry continues on the attempt's branch", last)
 			}
 		})
+	}
+}
+
+// TestRestackRefusesAReplayThatIsNotTheSameChange: a replayed commit whose
+// patch id differs from its original's (a whitespace change, say), or an
+// original that changed something replayed as a commit that changes
+// nothing, parks the request with the reason before any replay run;
+// nothing is pushed.
+func TestRestackRefusesAReplayThatIsNotTheSameChange(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ids    map[string]string
+		reason string
+	}{
+		"a changed patch":   {map[string]string{c1: hexSHA('d'), r1: hexSHA('f'), head: hexSHA('e'), r2: hexSHA('e')}, "are not the same change"},
+		"an emptied commit": {map[string]string{c1: hexSHA('d'), r1: "", head: hexSHA('e'), r2: hexSHA('e')}, "the new base already holds the change"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRestackFixture(t, 2)
+			f.dp.patchIDFn = func(_, sha string) (string, error) { return tc.ids[sha], nil }
+			f.pass()
+			if f.r.State != request.StateResumeReview || !f.r.Resume.Parked() || !strings.Contains(f.r.Resume.Reason, tc.reason) || !strings.Contains(f.r.Resume.Reason, shortOf(c1)) {
+				t.Fatalf("state %s, resume %+v: want parked because %q", f.r.State, f.r.Resume, tc.reason)
+			}
+			if len(f.runArgs) != 0 || f.did("push") || f.r.Tickets[1].Restack != nil {
+				t.Errorf("runs %d, events %v, restack %+v: want no replay run and nothing pushed", len(f.runArgs), f.events, f.r.Tickets[1].Restack)
+			}
+		})
+	}
+}
+
+// shortOf is a commit id as the operator's sentences shorten it.
+func shortOf(sha string) string { return sha[:12] }
+
+// TestRestackPushThatLandedButReportedAnErrorIsConfirmed: the leased push
+// landed and then reported an error (a timeout): origin reads the replay
+// run's result back, so the restack is confirmed, not taken for a human
+// commit.
+func TestRestackPushThatLandedButReportedAnErrorIsConfirmed(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	push := f.dp.pushWithLeaseFn
+	f.dp.pushWithLeaseFn = func(ctx context.Context, dir, sha, branch, expected string) error {
+		if err := push(ctx, dir, sha, branch, expected); err != nil {
+			return err
+		}
+		return context.DeadlineExceeded
+	}
+	f.pass()
+	t2 := f.r.Tickets[1]
+	if f.r.State != request.StatePRReview || t2.PRHeadRunID() != "req-1-002-restack1-x" || !t2.Rounds[0].Pushed || !f.did("move factoryd/run-2 to "+r2) {
+		t.Fatalf("state %s (%s), ticket 2 head %s, rounds %+v, events %v: want the landed push confirmed", f.r.State, f.r.Error, t2.PRHeadRunID(), t2.Rounds, f.events)
+	}
+}
+
+// TestRestackReadBackFailureIsConfirmedAfterTheRetry: origin could not be
+// read back after the push: the request halts with the restack unconfirmed
+// and the old head kept; after `factoryd retry` the next pass reads origin
+// at the replay run's result and records the push, without replaying again.
+func TestRestackReadBackFailureIsConfirmedAfterTheRetry(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	push, read := f.dp.pushWithLeaseFn, f.dp.remoteBranchHeadSHAFn
+	failNextRead := false
+	f.dp.pushWithLeaseFn = func(ctx context.Context, dir, sha, branch, expected string) error {
+		failNextRead = true
+		return push(ctx, dir, sha, branch, expected)
+	}
+	f.dp.remoteBranchHeadSHAFn = func(ctx context.Context, dir, branch string) (string, error) {
+		if failNextRead && branch == "factoryd/run-2" {
+			failNextRead = false
+			return "", errors.New("network down")
+		}
+		return read(ctx, dir, branch)
+	}
+	f.pass()
+	if f.r.State != request.StateHalted || !strings.Contains(f.r.Error, "could not be read back") || f.r.Tickets[1].PRHeadRunID() != "run-2" || f.did("move") {
+		t.Fatalf("state %s, error %q, head %s, events %v: want halted with the old head kept", f.r.State, f.r.Error, f.r.Tickets[1].PRHeadRunID(), f.events)
+	}
+	retried, err := request.Retry(f.dataDir, "req-1", "alice", "origin is reachable again", f.now, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.r = retried
+	f.pass()
+	t2 := f.r.Tickets[1]
+	if f.r.State != request.StatePRReview || t2.PRHeadRunID() != "req-1-002-restack1-x" || !f.did("move factoryd/run-2 to "+r2) {
+		t.Fatalf("state %s (%s), head %s, events %v: want the push recorded after the retry", f.r.State, f.r.Error, t2.PRHeadRunID(), f.events)
+	}
+	if strings.Count(strings.Join(f.events, "\n"), "replay ") != 1 || len(f.runArgs) != 1 {
+		t.Errorf("events %v: the restack was replayed or judged again", f.events)
+	}
+}
+
+// TestAReplayRunStillRunningIsAdoptedNotStartedAgain: a pass finds a
+// restack in flight whose replay run has not ended (the worker that started
+// it stopped): no other replay starts and nothing is pushed while it runs;
+// once it ends accepted, with origin still at the old head, the next pass
+// pushes it.
+func TestAReplayRunStillRunningIsAdoptedNotStartedAgain(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	id := "req-1-002-restack1-x"
+	replay := &run.Replay{RequestID: "req-1", TicketIndex: 2, OfRunID: "run-2", SourceRunIDs: []string{"run-2"}, UpstreamSHA: oldTip, SourceHeadSHA: head, OntoSHA: newTip, HeadSHA: r2}
+	f.saveRun(&run.Run{ID: id, TicketIndex: 2, BaseSHA: r2, ResultSHA: r2, DiffBaseSHA: newTip, Branch: "buildgate/req-1/t2-restack1", Replay: replay, Attempts: []run.Attempt{{Kind: "build", ReplayOf: "run-2"}}})
+	rec, err := run.Load(f.dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.State = run.StateVerifying
+	if err := rec.Save(f.dataDir); err != nil {
+		t.Fatal(err)
+	}
+	f.r.Tickets[1].Restack = &request.TicketRestack{N: 1, Branch: "buildgate/req-1/t2-restack1", OntoSHA: newTip, RunID: id}
+	f.save()
+	f.pass()
+	if f.did("replay") || len(f.runArgs) != 0 || f.did("push") || f.r.Tickets[1].Restack == nil {
+		t.Fatalf("events %v, runs %d, restack %+v: want the running replay run adopted, nothing else", f.events, len(f.runArgs), f.r.Tickets[1].Restack)
+	}
+	rec.State = run.StateAccepted
+	if err := rec.Save(f.dataDir); err != nil {
+		t.Fatal(err)
+	}
+	f.pass()
+	t2 := f.r.Tickets[1]
+	if f.did("replay") || len(f.runArgs) != 0 || !f.did("push "+r2+" to factoryd/run-2 leased on "+head) || t2.PRHeadRunID() != id || t2.Restack != nil {
+		t.Fatalf("events %v, runs %d, ticket 2 %+v: want the adopted run pushed, not replayed again", f.events, len(f.runArgs), t2)
+	}
+}
+
+// TestARestackThatCannotBeToldIsShownAndReminded: whether ticket 2 needs a
+// restack cannot be told (ticket 1's branch cannot be fetched): the hold is
+// recorded on the ticket, named in the request's next action, and reminded
+// once the reminder interval has passed; it clears once a poll can tell.
+func TestARestackThatCannotBeToldIsShownAndReminded(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	f.cfg.HitlReminderInterval = time.Hour
+	f.dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return errors.New("network down") }
+	f.pass()
+	hold := f.r.Tickets[1].RestackHold
+	if hold == nil || !strings.Contains(hold.On, "network down") || !strings.Contains(f.r.NextAction(), "whether it needs a restack cannot be told") || f.did("replay") || f.did("ready "+f.r.Tickets[1].PRURL) {
+		t.Fatalf("hold %+v, next action %q, events %v: want the hold shown and nothing done", hold, f.r.NextAction(), f.events)
+	}
+	if hold.RemindedAt != "" {
+		t.Errorf("reminded at %s, before the interval", hold.RemindedAt)
+	}
+	f.now = f.now.Add(2 * time.Hour)
+	f.pass()
+	if f.r.Tickets[1].RestackHold.RemindedAt == "" {
+		t.Fatal("no reminder once the hold outlasted the interval")
+	}
+	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(f.dataDir, f.r.ID))
+	if err != nil || !strings.Contains(string(log), "whether it needs a restack cannot be told") {
+		t.Errorf("notifications %s (%v): want the hold's reminder", log, err)
+	}
+	f.dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return nil }
+	f.pass()
+	if f.r.Tickets[1].RestackHold != nil || !f.did("push "+r2) {
+		t.Fatalf("hold %+v, events %v: want the hold cleared and the restack run", f.r.Tickets[1].RestackHold, f.events)
+	}
+}
+
+// TestAStackedPullRequestWithNoStackBaseIsHeld: ticket 2's pull request is
+// on ticket 1's branch, and its PR-head run records no stack base: whether
+// it needs a restack cannot be told, so it is held, never read as needing
+// none; a ticket 2 not built stacked (its pull request on main) is not.
+func TestAStackedPullRequestWithNoStackBaseIsHeld(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	f.saveRun(&run.Run{ID: "run-2", BaseSHA: oldTip, ResultSHA: head, Branch: "factoryd/run-2"})
+	f.mergedTicket1()
+	f.pass()
+	if hold := f.r.Tickets[1].RestackHold; hold == nil || !strings.Contains(hold.On, "records no stack base") || f.did("retarget") || f.did("replay") {
+		t.Fatalf("hold %+v, events %v: want ticket 2 held, not retargeted", hold, f.events)
+	}
+
+	g := newRestackFixture(t, 2)
+	g.saveRun(&run.Run{ID: "run-2", BaseSHA: mainTip, ResultSHA: head, Branch: "factoryd/run-2"})
+	g.r.Tickets[1].PRState, g.r.Tickets[1].PRBase = "draft", "main"
+	g.prs[g.r.Tickets[1].PRURL] = forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, BaseRefName: "main", HeadSHA: head}
+	g.save()
+	g.pass()
+	if g.r.Tickets[1].RestackHold != nil || g.did("replay") {
+		t.Fatalf("hold %+v, events %v: a ticket not built stacked is neither held nor restacked", g.r.Tickets[1].RestackHold, g.events)
+	}
+}
+
+// TestRestackNamesAnOldSourceRunsTicketUnderItsLock: a source run recorded
+// before runs named their ticket is given the ticket's index, and a write
+// made to its record after it was read (here, while its range was listed)
+// is kept: the record is reloaded under its lock and only TicketIndex set.
+func TestRestackNamesAnOldSourceRunsTicketUnderItsLock(t *testing.T) {
+	f := newRestackFixture(t, 2)
+	rec, err := run.Load(f.dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.TicketIndex = 0
+	if err := rec.Save(f.dataDir); err != nil {
+		t.Fatal(err)
+	}
+	list := f.dp.revListRangeFn
+	f.dp.revListRangeFn = func(dir, from, to string) ([]string, []string, error) {
+		if cur, err := run.Load(f.dataDir, "run-2"); err == nil && cur.TicketIndex == 0 && cur.PullRequestURL == "" {
+			cur.PullRequestURL = "https://github.com/acme/widget/pull/102"
+			if err := cur.Save(f.dataDir); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return list(dir, from, to)
+	}
+	f.pass()
+	got, err := run.Load(f.dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TicketIndex != 2 || got.PullRequestURL != "https://github.com/acme/widget/pull/102" {
+		t.Fatalf("run-2 ticket %d, pull request %q: want its ticket named and the later write kept", got.TicketIndex, got.PullRequestURL)
+	}
+	if !f.did("push " + r2) {
+		t.Errorf("events %v: want the restack to go on", f.events)
 	}
 }

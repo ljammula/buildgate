@@ -333,10 +333,13 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			wantRequest: request.StatePRReview,
 		},
 		{
+			// The pull request is ready: it goes back to draft before the
+			// round's push (draftBeforeFactoryPush).
 			name: "open unresolved thread: corrective round runs",
 			state: forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal,
 				BlocksReadyThreads: []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}},
 				ActionableThreads:  []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}},
+			wantPRState:   "draft",
 			wantRoundRuns: 1,
 			wantRequest:   request.StatePRReview,
 		},
@@ -929,6 +932,7 @@ func TestRunCorrectiveRoundRecordsRunnerErrorWhenHaltErrorIsEmpty(t *testing.T) 
 // it.
 func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 	dp := newFakeDeps(t)
+	draftPullRequest(dp)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	ticket := &r.Tickets[0]
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
@@ -997,6 +1001,7 @@ func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 // 1 and the ticket's only OTHER round is Kind == request.ConformityRoundKind.
 func TestRunCorrectiveRoundDoesNotCountConformityRoundsTowardMaxReviewRounds(t *testing.T) {
 	dp := newFakeDeps(t)
+	draftPullRequest(dp)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	ticket := &r.Tickets[0]
 	ticket.Rounds = append(ticket.Rounds, request.Round{
@@ -1260,11 +1265,35 @@ func stackedRetargetFixture(dp *fakeDeps, t *testing.T) (r *request.Request, dat
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
+	// Ticket 2 was built stacked on ticket 1's result, and ticket 1 merged
+	// with a merge commit: main's tip has that result under it, so ticket 2
+	// needs no restack.
+	stacked, err := run.Load(dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stacked.StackBaseSHA = requestdrivertest.TicketRunResultSHA(1)
+	if err := stacked.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	mainTip := strings.Repeat("7", 40)
 	ticket2URL := r.Tickets[1].PRURL
 	origRead, origEdit, origReady := dp.readReviewStateFn, dp.retargetPullRequestBaseFn, dp.markPullRequestReadyFn
+	origRemote, origFetch, origUnder := dp.remoteBranchHeadSHAFn, dp.fetchBranchCommitFn, dp.roundResultDescendsFromHeadFn
 	t.Cleanup(func() {
 		dp.readReviewStateFn, dp.retargetPullRequestBaseFn, dp.markPullRequestReadyFn = origRead, origEdit, origReady
+		dp.remoteBranchHeadSHAFn, dp.fetchBranchCommitFn, dp.roundResultDescendsFromHeadFn = origRemote, origFetch, origUnder
 	})
+	dp.remoteBranchHeadSHAFn = func(_ context.Context, _, branch string) (string, error) {
+		if branch != "main" {
+			t.Fatalf("read branch %q, want main", branch)
+		}
+		return mainTip, nil
+	}
+	dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return nil }
+	dp.roundResultDescendsFromHeadFn = func(_, ancestor, descendant string) (bool, error) {
+		return ancestor == requestdrivertest.TicketRunResultSHA(1) && descendant == mainTip, nil
+	}
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 		if prURL != ticket2URL {
 			t.Fatalf("read unexpected PR %q (ticket 1 is merged and must not be polled)", prURL)
@@ -1386,8 +1415,12 @@ func TestPRPollDoesNotRetargetWhenThePRHeadIsNotTheEvaluatedRun(t *testing.T) {
 // recorded (and it still isn't flipped ready, per the fixture).
 func TestPRPollStillRecordsApprovalWhenTheRetargetCannotHappen(t *testing.T) {
 	dp := newFakeDeps(t)
-	r, dataDir, edits := stackedRetargetFixture(dp, t)
-	r.Tickets[0].PRBase = "" // pre-upgrade merge: nothing to retarget onto
+	r, dataDir, _ := stackedRetargetFixture(dp, t)
+	var edits []string
+	dp.retargetPullRequestBaseFn = func(_ context.Context, prURL, base string) error {
+		edits = append(edits, prURL+" -> "+base)
+		return errors.New("gh: HTTP 502")
+	}
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 		state := approvedOnHeadState(requestdrivertest.TicketRunResultSHA(2), nil)
 		state.IsDraft = true
@@ -1398,8 +1431,8 @@ func TestPRPollStillRecordsApprovalWhenTheRetargetCannotHappen(t *testing.T) {
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
-	if len(*edits) != 0 {
-		t.Errorf("gh pr edit calls = %v, want none", *edits)
+	if len(edits) != 1 || r.Tickets[1].Retarget != nil {
+		t.Errorf("gh pr edit calls = %v, retarget %+v: want one that failed, none recorded", edits, r.Tickets[1].Retarget)
 	}
 	if r.Tickets[1].PRState != "approved" {
 		t.Errorf("ticket 2 PRState = %q, want approved even though the retarget could not run", r.Tickets[1].PRState)
@@ -2085,6 +2118,17 @@ func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 2)
 	r.Tickets[0].Branch = "factoryd/run-1"
+	// Ticket 2 was built on ticket 1's result, which is still its branch's
+	// tip (StubPRReviewHooks' ancestry answers yes): no restack.
+	stacked, err := run.Load(dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stacked.StackBaseSHA = requestdrivertest.TicketRunResultSHA(1)
+	if err := stacked.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return nil }
 
 	trueVal := true
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1), BaseRefName: "factoryd/run-1"}, nil)
@@ -2914,5 +2958,49 @@ func TestPollTicketPRCancelledDuringPollDoesNotResurrectRequest(t *testing.T) {
 	}
 	if loaded.State != request.StateCancelled {
 		t.Fatalf("State = %q, want %q (a cancel mid-poll must survive pollTicketPR's own save)", loaded.State, request.StateCancelled)
+	}
+}
+
+// draftPullRequest makes dp read every pull request as an open draft: the
+// state draftBeforeFactoryPush reads before a round's push.
+func draftPullRequest(dp *fakeDeps) {
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil
+	}
+}
+
+// TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush: a review
+// round's push to a ready pull request is preceded by turning it back to
+// draft, so no ready state crosses a head the factory changed; the next
+// pass polls it at once, so the ready flip runs again on the new head.
+func TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	trueVal := true
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: false, ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	var events []string
+	dp.undoMarkPullRequestReadyFn = func(_ context.Context, prURL string) error {
+		events = append(events, "draft "+prURL)
+		return nil
+	}
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		return saveAcceptedRoundRun(t, dataDir, &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: strings.Repeat("d", 40), Branch: requestdrivertest.ArgValue(args, "-on-branch")})
+	}
+	dp.pushExistingBranchFn = func(_ context.Context, _, sha, branch string) error {
+		events = append(events, "push "+branch)
+		requestdrivertest.LastPushedSHA[branch] = sha
+		return nil
+	}
+	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	if len(events) != 2 || events[0] != "draft "+r.Tickets[0].PRURL || !strings.HasPrefix(events[1], "push ") {
+		t.Fatalf("events %v (state %s, %s): want the draft, then the push", events, r.State, r.Error)
+	}
+	if t1 := r.Tickets[0]; t1.PRState != "draft" || t1.LastPolledAt != "" || !t1.Rounds[0].Pushed {
+		t.Errorf("ticket %+v: want it draft, pushed, and due for a poll", t1)
 	}
 }

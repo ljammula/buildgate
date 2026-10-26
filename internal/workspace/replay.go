@@ -20,11 +20,14 @@ var replayIdentity = []string{"-c", "user.name=buildgate", "-c", "user.email=bui
 // ReplayCommits replays commits, oldest first, onto onto on the new local
 // branch branch, in a scratch worktree at worktreePath, and returns the
 // replayed commits in order. It holds the git metadata lock throughout. The
-// cherry-pick runs with nothing from configuration that runs a program or
-// changes the result (scratchGit's HardenedGitArgs and HardenedGitEnv),
-// rerere off and no signing: `git cherry-pick --allow-empty --empty=keep`,
-// which applies each named commit, an already-applied one included, keeps a
-// commit that becomes empty, squashes nothing and moves no other ref.
+// checkout and the cherry-pick run with nothing from configuration that runs
+// a program or changes the result, and no attribute from the commits
+// (ReplayGitArgs, HardenedGitEnv), rerere off and no signing: `git
+// cherry-pick --allow-empty --empty=keep`, which applies each named commit,
+// an already-applied one included, squashes nothing and moves no other ref.
+// A commit that becomes empty is kept, so the replay stays one for one; the
+// caller refuses a replay in which a commit that changed something became
+// empty.
 //
 // The worktree is removed on every outcome; the branch is kept only when the
 // replay produced exactly one commit per original. A conflict aborts the
@@ -46,17 +49,17 @@ func ReplayCommits(ctx context.Context, repoDir, worktreePath, branch, onto stri
 	}
 	defer unlock()
 	removeScratchWorktreeLocked(ctx, repoDir, worktreePath)
-	if out, err := scratchGit(ctx, repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil && len(out) > 0 {
+	if out, err := replayGit(ctx, repoDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil && len(out) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrBranchExists, branch)
 	}
-	if out, err := scratchGit(ctx, repoDir, "worktree", "add", "-q", "-b", branch, worktreePath, onto); err != nil {
+	if out, err := replayGit(ctx, repoDir, "worktree", "add", "-q", "-b", branch, worktreePath, onto); err != nil {
 		return nil, fmt.Errorf("git worktree add -b %s: %w: %s", branch, err, strings.TrimSpace(string(out)))
 	}
 	// Deferred in this order so the worktree is gone before a failed
 	// replay's branch is deleted: git keeps a checked-out branch.
 	defer func() {
 		if err != nil {
-			_, _ = scratchGit(ctx, repoDir, "branch", "-D", branch)
+			_, _ = replayGit(ctx, repoDir, "branch", "-D", branch)
 		}
 	}()
 	defer removeScratchWorktreeLocked(ctx, repoDir, worktreePath)
@@ -80,24 +83,24 @@ func ReplayCommits(ctx context.Context, repoDir, worktreePath, branch, onto stri
 	return replayed, nil
 }
 
-// worktreeGit is scratchGit run in a worktree rather than the repository.
+// worktreeGit is replayGit run in a worktree rather than the repository.
 func worktreeGit(ctx context.Context, worktreePath string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", HardenedGitArgs(worktreePath, args...)...)
+	cmd := exec.CommandContext(ctx, "git", ReplayGitArgs(worktreePath, args...)...)
 	cmd.Env = HardenedGitEnv()
 	return cmd.CombinedOutput()
 }
 
-// removeScratchWorktreeLocked is RemoveScratchWorktree for a caller that
-// holds the git metadata lock: a worktree at worktreePath is removed, and a
-// registration for one that is gone is pruned. Failures are left for the
-// next prune.
+// removeScratchWorktreeLocked is RemoveScratchWorktree for a restack's
+// scratch worktree (replayGit), by a caller that holds the git metadata
+// lock: a worktree at worktreePath is removed, and a registration for one
+// that is gone is pruned. Failures are left for the next prune.
 func removeScratchWorktreeLocked(ctx context.Context, repoDir, worktreePath string) {
 	if _, err := os.Lstat(worktreePath); err == nil {
-		if _, err := scratchGit(ctx, repoDir, "worktree", "remove", "--force", worktreePath); err != nil {
+		if _, err := replayGit(ctx, repoDir, "worktree", "remove", "--force", worktreePath); err != nil {
 			_ = os.RemoveAll(worktreePath)
 		}
 	}
-	_, _ = scratchGit(ctx, repoDir, "worktree", "prune")
+	_, _ = replayGit(ctx, repoDir, "worktree", "prune")
 }
 
 // MoveBranch points the local branch at sha in repoDir under the git

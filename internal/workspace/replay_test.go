@@ -110,3 +110,62 @@ func TestMoveBranchMovesOrCreatesABranch(t *testing.T) {
 		t.Error("MoveBranch accepted HEAD")
 	}
 }
+
+// TestReplayCommitsRunsNoDriverAnAttributeSelects: the replayed commits
+// carry a .gitattributes that selects a filter and a merge driver the
+// repository's configuration defines, and asks for CRLF line endings: the
+// checkout and the cherry-pick run neither driver, and the replayed files
+// hold the commits' own bytes.
+func TestReplayCommitsRunsNoDriverAnAttributeSelects(t *testing.T) {
+	repo := newFixtureRepo(t)
+	base := headOf(t, repo)
+	marker := filepath.Join(t.TempDir(), "driver-ran")
+	gitT(t, repo, "config", "filter.planted.smudge", "touch "+marker+"; cat")
+	gitT(t, repo, "config", "filter.planted.clean", "touch "+marker+"; cat")
+	gitT(t, repo, "config", "merge.planted.driver", "touch "+marker+"; false")
+	gitT(t, repo, "checkout", "-q", "-b", "ticket")
+	attrs := commitFile(t, repo, ".gitattributes", "* filter=planted merge=planted text eol=crlf\n")
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	change := commitFile(t, repo, "a.txt", "a\n")
+	gitT(t, repo, "checkout", "-q", "-b", "newbase", base)
+	onto := commitFile(t, repo, "other.txt", "o\n")
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	replayed, err := ReplayCommits(context.Background(), repo, scratch, "buildgate/req-1/t2-restack1", onto, []string{attrs, change})
+	if err != nil {
+		t.Fatalf("ReplayCommits: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("a driver the replayed .gitattributes selects ran (%v)", err)
+	}
+	if got := gitT(t, repo, "cat-file", "-p", replayed[1]+":a.txt"); got != "a" {
+		t.Errorf("replayed a.txt = %q, want the commit's own bytes", got)
+	}
+	if blob, orig := gitT(t, repo, "rev-parse", replayed[1]+":a.txt"), gitT(t, repo, "rev-parse", change+":a.txt"); blob != orig {
+		t.Errorf("replayed a.txt is blob %s, not the original's %s", blob, orig)
+	}
+}
+
+// TestReplayCommitsReplaysAHunkBesideAChangeUnderIt: ticket 2 changed line
+// 5, and the new base changed line 3: the cherry-pick applies cleanly, one
+// for one.
+func TestReplayCommitsReplaysAHunkBesideAChangeUnderIt(t *testing.T) {
+	repo := newFixtureRepo(t)
+	lines := "1\n2\n3\n4\n5\n6\n7\n8\n"
+	base := commitFile(t, repo, "lines.txt", lines)
+	gitT(t, repo, "checkout", "-q", "-b", "ticket")
+	edit := commitFile(t, repo, "lines.txt", strings.Replace(lines, "5\n", "five\n", 1))
+	gitT(t, repo, "checkout", "-q", "-b", "newbase", base)
+	onto := commitFile(t, repo, "lines.txt", strings.Replace(lines, "3\n", "three\n", 1))
+	replayed, err := ReplayCommits(context.Background(), repo, filepath.Join(t.TempDir(), "scratch"), "buildgate/req-1/t2-restack1", onto, []string{edit})
+	if err != nil {
+		t.Fatalf("ReplayCommits: %v", err)
+	}
+	if got := gitT(t, repo, "cat-file", "-p", replayed[0]+":lines.txt"); got != strings.TrimSpace(strings.NewReplacer("3\n", "three\n", "5\n", "five\n").Replace(lines)) {
+		t.Errorf("replayed lines.txt = %q", got)
+	}
+}

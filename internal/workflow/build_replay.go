@@ -78,7 +78,7 @@ func checkReplay(ctx context.Context, dataDir string, input RunWorkflowInput) (*
 	if err := checkReplayRecord(self, input.Replay); err != nil {
 		return nil, nil, err
 	}
-	if err := checkReplayedWorktree(input.WorkspacePath, rp); err != nil {
+	if err := checkReplayedWorktree(ctx, input.WorkspacePath, rp); err != nil {
 		return nil, nil, err
 	}
 	sources := make([]*run.Run, 0, len(rp.SourceRunIDs))
@@ -133,23 +133,24 @@ func checkReplayRecord(self *run.Run, in *ReplayInput) error {
 }
 
 // checkReplayedWorktree checks that dir is clean, at rp.HeadSHA, with
-// rp.OntoSHA under it.
-func checkReplayedWorktree(dir string, rp *run.Replay) error {
-	clean, err := runner.GitIsClean(dir)
+// rp.OntoSHA under it, read with a restack's git calls (no attribute from
+// the worktree, runner.GitReplayIsClean).
+func checkReplayedWorktree(ctx context.Context, dir string, rp *run.Replay) error {
+	clean, err := runner.GitReplayIsClean(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("read the worktree's state: %w", err)
 	}
 	if !clean {
 		return errors.New("the worktree has changes the replay did not make")
 	}
-	head, err := runner.GitRevParseRef(dir, "HEAD")
+	head, err := runner.GitReplayHead(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("read the worktree's HEAD: %w", err)
 	}
 	if head != rp.HeadSHA {
 		return fmt.Errorf("the worktree is at %s, not at the replayed head %s", shortSHA(head), shortSHA(rp.HeadSHA))
 	}
-	onto, err := runner.GitIsAncestor(dir, rp.OntoSHA, head)
+	onto, err := runner.GitReplayIsAncestor(ctx, dir, rp.OntoSHA, head)
 	if err != nil {
 		return fmt.Errorf("check %s is under the replayed head: %w", shortSHA(rp.OntoSHA), err)
 	}
@@ -197,9 +198,11 @@ func checkReplaySource(dataDir, id, repoDir string, self *run.Run) (*run.Run, er
 // checkReplayedCommits checks rp.Commits against git in dir: the originals
 // are exactly UpstreamSHA..SourceHeadSHA and the replays exactly
 // OntoSHA..HeadSHA, oldest first, the same count, with no merge commit on
-// either side; and each pair's `git patch-id --stable`, computed here, is
-// equal, and is what the record says. A pair may have no patch id only when
-// git yields none for both commits (each changes nothing).
+// either side; and each pair's patch id (runner.GitPatchID: no context
+// lines, every whitespace change counted), computed here, is equal, and is
+// what the record says. A pair may have no patch id only when git yields
+// none for both commits (each changes nothing): an original that changes
+// something whose replay is empty is refused.
 func checkReplayedCommits(ctx context.Context, dir string, rp *run.Replay) error {
 	originals, err := replayRange(ctx, dir, "original", rp.UpstreamSHA, rp.SourceHeadSHA)
 	if err != nil {
@@ -246,6 +249,9 @@ func checkReplayedPatch(ctx context.Context, dir string, n int, pair run.Replaye
 	replayed, err := runner.GitPatchID(ctx, dir, pair.Replayed)
 	if err != nil {
 		return fmt.Errorf("patch id of %s: %w", shortSHA(pair.Replayed), err)
+	}
+	if original != "" && replayed == "" {
+		return fmt.Errorf("commit pair %d: %s changes something and its replay %s changes nothing: the new base already holds the change", n, shortSHA(pair.Original), shortSHA(pair.Replayed))
 	}
 	if original != replayed {
 		return fmt.Errorf("commit pair %d changes something else: %s and its replay %s have patch ids %q and %q", n, shortSHA(pair.Original), shortSHA(pair.Replayed), original, replayed)

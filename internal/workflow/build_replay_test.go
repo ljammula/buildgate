@@ -100,15 +100,17 @@ func (f *replayActivityFixture) replayOf(of string, sources []string, upstream, 
 	return rp
 }
 
-// testPatchID is `git show <sha> | git patch-id --stable`.
+// testPatchID is `git diff-tree -p -U0 --binary --full-index <sha> | git
+// patch-id --verbatim`, computed apart from the code under test: no context
+// lines, every whitespace change counted.
 func testPatchID(t *testing.T, dir, sha string) string {
 	t.Helper()
-	show, err := exec.Command("git", "-C", dir, "show", "--format=", sha).Output()
+	diff, err := exec.Command("git", "-C", dir, "diff-tree", "-p", "-U0", "--binary", "--full-index", "--no-renames", sha, "--").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "-C", dir, "patch-id", "--stable")
-	cmd.Stdin = strings.NewReader(string(show))
+	cmd := exec.Command("git", "-C", dir, "patch-id", "--verbatim")
+	cmd.Stdin = strings.NewReader(string(diff))
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +259,51 @@ func TestApplyReplayAcceptsEmptyPairs(t *testing.T) {
 	}
 }
 
+// TestApplyReplayAcceptsAHunkBesideAChangeUnderIt: ticket 2 changed line 5
+// of a file, and a review round of ticket 1 then changed line 3 of it: the
+// replay of ticket 2's commit onto the round has the same patch id (no
+// context lines), though with three lines of context it would not, and the
+// replay is accepted.
+func TestApplyReplayAcceptsAHunkBesideAChangeUnderIt(t *testing.T) {
+	f := newReplayActivityFixture(t)
+	lines := "1\n2\n3\n4\n5\n6\n7\n8\n"
+	f.git("checkout", "-q", "-b", "stack-base", f.upstream)
+	base := f.commit("lines.txt", lines, "ticket 1: lines")
+	f.git("checkout", "-q", "-b", "ticket-2-adjacent")
+	edit := f.commit("lines.txt", strings.Replace(lines, "5\n", "five\n", 1), "ticket 2: line 5")
+	f.git("checkout", "-q", "-b", "ticket-1-round", base)
+	onto := f.commit("lines.txt", strings.Replace(lines, "3\n", "three\n", 1), "ticket 1: review fix on line 3")
+	f.git("checkout", "-q", "-b", "buildgate/req-1/t2-restack2")
+	f.git("-c", "user.name=t", "-c", "user.email=t@example.com", "cherry-pick", edit)
+	head := f.git("rev-parse", "HEAD")
+	if contextPatchID(t, f.dir, edit) == contextPatchID(t, f.dir, head) {
+		t.Fatal("fixture: with context lines the two patch ids already agree, so the case is not exercised")
+	}
+	f.saveSource(&run.Run{BaseSHA: base, StackBaseSHA: base, ResultSHA: edit})
+	f.replay = f.replayOf("source", []string{"source"}, base, edit, onto, head)
+	f.input.DiffBaseSHA = onto
+	if _, err := f.apply(); err != nil {
+		t.Fatalf("ApplyReplayActivity: %v", err)
+	}
+}
+
+// contextPatchID is `git show <sha> | git patch-id --stable`: a patch id
+// over three lines of context.
+func contextPatchID(t *testing.T, dir, sha string) string {
+	t.Helper()
+	show, err := exec.Command("git", "-C", dir, "show", "--format=", sha).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", dir, "patch-id", "--stable")
+	cmd.Stdin = strings.NewReader(string(show))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // TestApplyReplayRefuses: each check the host makes, missed, refuses the
 // replay with ReplayFailureType and launches nothing; a source run that
 // lacks what the check reads never passes.
@@ -403,6 +450,22 @@ func replayCommitRefusals(t *testing.T) map[string]func(f *replayActivityFixture
 			head := f.commit("b.txt", "not two\n", "ticket 2: b")
 			f.replay = f.replayOf("source", []string{"source"}, f.upstream, f.c2, f.onto, head)
 			return "changes something else"
+		},
+		"a replayed commit that differs only in whitespace": func(f *replayActivityFixture) string {
+			f.git("reset", "-q", "--hard", f.r1)
+			head := f.commit("b.txt", "two \n", "ticket 2: b")
+			f.replay = f.replayOf("source", []string{"source"}, f.upstream, f.c2, f.onto, head)
+			return "changes something else"
+		},
+		"a replayed commit that changes nothing": func(f *replayActivityFixture) string {
+			f.git("reset", "-q", "--hard", f.r1)
+			f.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "ticket 2: b")
+			head := f.git("rev-parse", "HEAD")
+			f.replay = f.replayOf("source", []string{"source"}, f.upstream, f.c2, f.onto, head)
+			// A record that claims the replay is the same change; one that
+			// says it changes nothing is refused as malformed already.
+			f.replay.Commits[1].ReplayedPatchID = f.replay.Commits[1].OriginalPatchID
+			return "its replay " + shortSHA(head) + " changes nothing"
 		},
 		"a merge commit among the originals": func(f *replayActivityFixture) string {
 			f.git("checkout", "-q", "-b", "side", f.upstream)

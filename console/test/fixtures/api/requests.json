@@ -312,6 +312,16 @@
           "onto_sha": "every-field onto_sha",
           "run_id": "every-field run_id",
           "since": "every-field since"
+        },
+        "restack_hold": {
+          "since": "every-field since",
+          "on": "every-field on",
+          "reminded_at": "2026-09-10T09:00:00Z"
+        },
+        "retarget": {
+          "from": "every-field from",
+          "to": "every-field to",
+          "at": "2026-09-10T09:00:00Z"
         }
       }
     ],

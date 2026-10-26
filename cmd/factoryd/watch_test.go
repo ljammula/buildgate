@@ -864,3 +864,35 @@ func TestWatchRunFollowExitsOnFinished(t *testing.T) {
 		t.Fatal("watchRun did not exit within 5s of the finished progress line arriving")
 	}
 }
+
+// TestWatchNamesAPullRequestHeldForItsRestack: a request in pr_review whose
+// ticket 2 is held, because whether it needs a restack cannot be told, says
+// so, with what to do, before it says it waits on review.
+func TestWatchNamesAPullRequestHeldForItsRestack(t *testing.T) {
+	t.Parallel()
+	dataDir := t.TempDir()
+	hold := "ticket 2/2 (https://github.com/acme/app/pull/2) is held: whether it needs a restack cannot be told (network down)"
+	req := &request.Request{ID: "req-held", Project: "proj", State: request.StatePRReview, TicketIndex: 2, TicketCount: 2, SubmittedAt: time.Now().Format(time.RFC3339),
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: "https://github.com/acme/app/pull/1", PRState: "draft"},
+			{Index: 2, PRURL: "https://github.com/acme/app/pull/2", PRState: "stacked", RestackHold: &request.TicketRestackHold{Since: time.Now().UTC().Format(time.RFC3339Nano), On: hold}},
+		}}
+	if err := req.Save(dataDir); err != nil {
+		t.Fatalf("save request: %v", err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "watch-out")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	defer f.Close()
+	if err := watchRequest(f, dataDir, "req-held", true); err != nil {
+		t.Fatalf("watchRequest: %v", err)
+	}
+	out, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), hold+"\n") {
+		t.Errorf("output = %q, want the hold named", out)
+	}
+}

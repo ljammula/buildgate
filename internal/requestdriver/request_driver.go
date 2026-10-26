@@ -63,7 +63,7 @@ type Deps interface {
 	// The git calls of a restack (restack.go). FetchBranchCommit makes
 	// origin's tip sha of branch present in dir. RevListRange lists
 	// from..to oldest first, and the merge commits among them. PatchID is a
-	// commit's `git patch-id --stable`, "" for one that changes nothing.
+	// commit's patch id (runner.GitPatchID), "" for one that changes nothing.
 	// ReplayCommits cherry-picks commits onto onto on a new local branch in
 	// a scratch worktree (workspace.ReplayCommits). PushWithLease pushes sha
 	// to branch only while origin has it at expected. MoveBranch points a

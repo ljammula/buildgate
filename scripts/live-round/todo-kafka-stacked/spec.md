@@ -8,7 +8,7 @@ The root HTTP API cannot say which service is answering. An operator or a platfo
 
 Add `/version` to the root HTTP API. `main.go` must register it beside the existing routes. A GET request must synchronously return HTTP 200 with the JSON object `{"service":"todo-kafka-service"}` and `Content-Type: application/json`; every method other than GET must return HTTP 405 with an `Allow: GET` header, as the existing `/healthz` endpoint does.
 
-This is a local, bounded response whose result is needed immediately by the caller, so it uses the synchronous delivery choice and performs no asynchronous or Kafka-backed work. The response is constant and needs no cache. The only new infrastructure is the HTTP endpoint itself: no consumer, topic, table, column, cache key, configuration variable, or external dependency is added. The endpoint makes no upstream calls, so there are no dependency timeouts, fallback responses, or partial results to define. It does not alter stored data, events, migrations, or compatibility with older rows, events, or service versions. Handler coverage for this behavior belongs in `main_test.go`. The README's `## Endpoints` table documents the new endpoint beside the existing ones.
+This is a local, bounded response whose result is needed immediately by the caller, so it uses the synchronous delivery choice and performs no asynchronous or Kafka-backed work. The response is constant and needs no cache. The only new infrastructure is the HTTP endpoint itself: no consumer, topic, table, column, cache key, configuration variable, or external dependency is added. The endpoint makes no upstream calls, so there are no dependency timeouts, fallback responses, or partial results to define. It does not alter stored data, events, migrations, or compatibility with older rows, events, or service versions. Handler coverage for this behavior belongs in `main_test.go`. The README's `## Endpoints` table documents the new endpoint beside the existing ones, and the handler's one-line doc comment points at that row.
 
 ## Non-goals
 
@@ -21,7 +21,7 @@ This is a local, bounded response whose result is needed immediately by the call
 
 - The API process in package `main`, including the root HTTP route registration in `main.go` and its handler behavior.
 - The handler tests in `main_test.go`.
-- The `## Endpoints` table of `README.md`.
+- The `## Endpoints` table of `README.md`, and the doc comment of the `/version` handler.
 - No behavior or data changes to `cmd/consumer`, `pgstore`, `cache`, `event`, Kafka, Postgres, or Redis.
 
 ## Acceptance criteria
@@ -32,6 +32,7 @@ This is a local, bounded response whose result is needed immediately by the call
 4. `GET /version` returns the specified 200 response when Postgres, Kafka, and Redis are unavailable or unconfigured, and handling the request makes no connection, query, publish, cache, or other call to any of those services.
 5. Running the handler tests in `main_test.go` without Postgres, Kafka, or Redis available observes the successful GET status/body/content type and the 405 result with its `Allow` header for a non-GET method, so those endpoint behaviors are detected independently of the external services.
 6. The `## Endpoints` table of `README.md` has a row for `GET /version` saying it returns `{"service":"todo-kafka-service"}` and needs no Postgres, Kafka or Redis, and no other row of the table changes.
+7. The line directly above `func handleVersion` in `main.go` is the doc comment `// handleVersion serves GET /version; README.md's Endpoints table documents it.`
 
 ## Risks
 

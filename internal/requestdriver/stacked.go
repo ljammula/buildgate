@@ -85,8 +85,10 @@ func checkEarlierPR(dp Deps, ctx context.Context, dataDir string, r *request.Req
 // checkEarlierTicketBranch checks prev's open pull-request branch on origin.
 // A branch origin no longer has, under a pull request that is not merged,
 // parks. For the ticket just before idx, the branch must be at the commit of
-// prev's current PR-head run: at another commit (one the factory did not
-// push) idx waits, and the sentence says what the operator does about it.
+// prev's current PR-head run, or of a restack of prev whose push landed
+// unconfirmed (which is then recorded): at another commit (one the factory
+// did not push) idx waits, and the sentence says what the operator does
+// about it.
 func checkEarlierTicketBranch(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, prev *request.Ticket) (stackHold, error) {
 	head, err := loadPRHead(dataDir, prev)
 	if err != nil {
@@ -96,6 +98,13 @@ func checkEarlierTicketBranch(dp Deps, ctx context.Context, dataDir string, r *r
 		return stackHold{}, fmt.Errorf("ticket %d's current PR-head run %s records no result commit", prev.Index, head.Run.ID)
 	}
 	remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, head.Branch)
+	if err == nil && remote != head.Run.ResultSHA {
+		// A restack of prev whose push landed unconfirmed is its head,
+		// not a human commit (confirmLandedRestack); idx then builds on it.
+		if confirmed, err := confirmLandedRestack(dp, dataDir, r, prev, remote, time.Now()); confirmed || err != nil {
+			return stackHold{}, err
+		}
+	}
 	switch {
 	case errors.Is(err, ErrRemoteBranchNotFound):
 		return stackHold{park: fmt.Sprintf("ticket %d/%d's branch %s is gone from origin while its pull request %s is not merged, and ticket %d builds on it: restore the branch", prev.Index, r.TicketCount, head.Branch, prev.PRURL, idx)}, nil

@@ -181,6 +181,35 @@ func (rs *TicketRestack) nextAction(index, count int, prURL string) string {
 	return what + "; the pull request is updated once every gate passes, and nothing is asked of you"
 }
 
+// TicketRestackHold is Ticket.RestackHold: since when whether the ticket
+// needs a restack could not be told, the operator sentence (what could not
+// be read, what holds, and what to do), and when the operator was last
+// reminded of it.
+type TicketRestackHold struct {
+	Since      string `json:"since"`
+	On         string `json:"on"`
+	RemindedAt string `json:"reminded_at,omitempty"`
+}
+
+// TicketRetarget is Ticket.Retarget: the factory moved the ticket's pull
+// request from base From to base To at At.
+type TicketRetarget struct {
+	From string `json:"from,omitempty"`
+	To   string `json:"to"`
+	At   string `json:"at"`
+}
+
+// RestackHeld is the first ticket of r whose restack need cannot be told
+// (Ticket.RestackHold), nil when none.
+func (r *Request) RestackHeld() *Ticket {
+	for i := range r.Tickets {
+		if r.Tickets[i].RestackHold != nil {
+			return &r.Tickets[i]
+		}
+	}
+	return nil
+}
+
 // RestackInFlight is the first ticket of r with a restack under way
 // (Ticket.Restack), nil when none has one.
 func (r *Request) RestackInFlight() *Ticket {

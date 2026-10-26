@@ -138,9 +138,10 @@ host replays its commits onto ticket N's new tip (or the branch ticket N
 merged into) on a local branch `buildgate/<id>/t<n>-restack<k>`, a replay run
 judges them with every gate and review and no build, and the result replaces
 ticket N+1's pull-request branch through a push leased on the commit the
-factory last pushed. A ready pull request is turned back to draft first, and
-until the restack is pushed and confirmed the pull request is neither
-retargeted nor marked ready. Tickets are restacked in order. The restack in
+factory last pushed. A ready pull request is turned back to draft first (as
+before a review round's push), and until the restack is pushed and confirmed
+the pull request is neither retargeted nor marked ready; the factory marks it
+ready again by its usual rule once it is. Tickets are restacked in order. The restack in
 progress is on the ticket in the console, in `factoryd watch` and in the
 request's next action. What can stop it:
 
@@ -148,8 +149,10 @@ request's next action. What can stop it:
 |---|---|---|
 | A commit the factory did not make is on ticket N+1's branch (or its leased push lost to one) | Parks in `resume_review` | Move the branch back to the commit the reason names, then `factoryd resume <id>`; or `factoryd cancel <id>` |
 | A merge commit, or a commit none of the ticket's runs made, is in ticket N+1's commits | Parks in `resume_review` | Take it out of the branch, then `factoryd resume <id>`; or cancel |
-| The commits conflict on the new tip | `resume_review`, cause `restack_conflict` | `factoryd resume <id>` replays again; or cancel |
+| The commits conflict on the new tip, or a replayed commit is not the same change as its original (its patch id differs, or it changes nothing where the original changed something) | Parks in `resume_review`, before any replay run | `factoryd resume <id>` replays again, which succeeds once the branch under the ticket has moved so the commits replay cleanly; or cancel. A fix pushed by hand to the ticket's branch is refused as a commit the factory did not make |
 | The replay run is quarantined or halted | `halted`, nothing pushed | Read the run, fix the cause, `factoryd retry <id>` restacks again; or cancel |
+| Whether a restack is needed cannot be told (origin cannot be read, or the ticket's run records no stack base) | Stays in `pr_review`; the pull request is neither retargeted nor marked ready; the request's next action and `factoryd watch` name it, and you are reminded every `-hitl-reminder-interval` | Fix what it names; the worker checks again every PR poll |
+| Origin could not be read back after the push | `halted` | `factoryd retry <id>`: a poll that finds the branch at the replay run's commit records the push |
 
 A park is not a lost step: `resume.reason` says which ticket and what to
 repair, and `resume.cause` is empty. Reopen the pull request or restore the
@@ -175,7 +178,6 @@ requests, never from what the worker printed:
 | "the spend meter refused the model requests ..." | `meter_denied` | Raise the ceiling, window budget or request rate in the session config (or wait out a budget's window; `factoryd cost` shows the spend), then `factoryd restart` |
 | "the model route served none of the last requests ..." | `model_unavailable` | Check the route (`factoryd doctor`). A review whose model served nothing was already launched once more by the factory |
 | "the review of the ... step gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
-| "a stacked ticket's commits did not apply cleanly onto the new tip ..." | `restack_conflict` | The ticket's commits conflict with what changed under them (see the restack below). `factoryd resume <id>` replays them again, which helps once the earlier ticket's branch changed; the factory never rebuilds the ticket to resolve it |
 
 `done`, `closed` and `cancelled` are terminal; `cancel` (`factoryd cancel <id>`) refuses the first two. Full mechanics
 (reminders, ticket sequencing, PR review loop): [USAGE_REFERENCE.md § Request lifecycle](USAGE_REFERENCE.md#request-lifecycle).

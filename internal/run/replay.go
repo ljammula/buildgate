@@ -44,7 +44,8 @@ type Replay struct {
 	OntoSHA string `json:"onto_sha"`
 	HeadSHA string `json:"head_sha"`
 	// Commits pairs each original commit with its replay, in order, with
-	// both commits' `git patch-id --stable`.
+	// both commits' patch ids (runner.GitPatchID: no context lines, every
+	// whitespace change counted).
 	Commits []ReplayedCommit `json:"commits"`
 }
 

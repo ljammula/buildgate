@@ -471,6 +471,41 @@ func HardenedGitArgs(dir string, args ...string) []string {
 	}, args...)
 }
 
+// EmptyTree is the id of git's empty tree (SHA-1 object format), the
+// attribute source of ReplayGitArgs. A repository of another object format
+// has no object by that id, and git refuses every replay git call in it.
+const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// ReplayGitArgs is HardenedGitArgs for a git call of a restack: the replay's
+// scratch worktree and cherry-pick, and every read of the replayed commits
+// (their patch ids, ranges and worktree). Git reads attributes from the
+// empty tree (`--attr-source`), never from a `.gitattributes` in the commits
+// replayed or in the worktree, so no attribute in them can select a filter,
+// merge or diff driver, an end-of-line or encoding conversion, or a binary
+// diff; with core.attributesFile=/dev/null and GIT_ATTR_NOSYSTEM
+// (HardenedGitEnv) the one attributes file left is the repository's own
+// info/attributes, the operator's, outside every sandbox's reach. It also
+// sets core.autocrlf=false, core.eol=lf, core.safecrlf=false and
+// merge.renormalize=false, so no configuration converts line endings during
+// the checkout or the cherry-pick's merge. Use it with HardenedGitEnv.
+func ReplayGitArgs(dir string, args ...string) []string {
+	return append([]string{
+		"--attr-source=" + EmptyTree,
+		"-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.safecrlf=false",
+		"-c", "merge.renormalize=false",
+	}, HardenedGitArgs(dir, args...)...)
+}
+
+// replayGit is scratchGit with ReplayGitArgs: a git call on repoDir for a
+// restack's scratch worktree.
+func replayGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return retryOnGitLock(func() ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "git", ReplayGitArgs(dir, args...)...)
+		cmd.Env = HardenedGitEnv()
+		return cmd.CombinedOutput()
+	})
+}
+
 // AddScratchWorktree is AddDetachedWorktree for a checkout made while a run's
 // sandboxes have had the repository's worktree, by a caller with a deadline:
 // the wait for the git metadata lock and the checkout end when ctx does, and

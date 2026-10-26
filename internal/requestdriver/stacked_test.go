@@ -440,6 +440,7 @@ func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRound
 		return nil
 	}
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
+	dp.undoMarkPullRequestReadyFn = func(context.Context, string) error { return nil }
 	origRunner := requestdriver.PrReviewCorrectiveRunner
 	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {

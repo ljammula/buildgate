@@ -637,6 +637,7 @@ func retargetOffMergedTicket(dp Deps, ctx context.Context, dataDir string, r *re
 		log.Printf("request %s: ticket %d: gh pr edit --base %s (off merged ticket %d): %v", r.ID, ticket.Index, merged.PRBase, merged.Index, err)
 		return false
 	}
+	ticket.Retarget = &request.TicketRetarget{From: state.BaseRefName, To: merged.PRBase, At: time.Now().UTC().Format(time.RFC3339Nano)}
 	ticket.PRBase = merged.PRBase
 	log.Printf("request %s: ticket %d: retargeted pull request %s to %s now that ticket %d merged", r.ID, ticket.Index, ticket.PRURL, merged.PRBase, merged.Index)
 	return true
@@ -1359,6 +1360,13 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s: PR branch %q's current head %s is not an ancestor of round result %s -- refusing to push", ticket.Index, r.TicketCount, roundRunID, branch, prHeadSHA, roundRun.ResultSHA), now)
 	}
 
+	// No ready state crosses a head the factory changed: a ready pull
+	// request goes back to draft before the push, and the ready flip runs
+	// again on the new head (draftBeforeFactoryPush, as for a restack).
+	if err := draftBeforeFactoryPush(dp, ctx, ticket); err != nil {
+		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: turn pull request %s back to draft before pushing accepted review round %s: %v; nothing was pushed", ticket.Index, r.TicketCount, ticket.PRURL, roundRunID, err), now)
+	}
+
 	pushCtx, cancelPush := context.WithTimeout(ctx, 2*time.Minute)
 	pushErr := dp.PushExistingBranch(pushCtx, roundRun.WorkspacePath, roundRun.ResultSHA, branch)
 	cancelPush()
@@ -1391,6 +1399,9 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	// Outcome == RoundAccepted alone (already true on this entry, set
 	// before this function was ever called) is not sufficient.
 	ticket.Rounds[roundSliceIndex].Pushed = true
+	// The next pass polls the pull request at once, so the ready flip on
+	// the new head is not left a full poll interval behind.
+	ticket.LastPolledAt = ""
 
 	// The isolated worktree is no longer needed once its commit is pushed
 	// -- removed here (worktree only; branch untouched, see
