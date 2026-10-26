@@ -38,6 +38,7 @@ export function RequestDialogs({
         open={kind === "approve"}
         costSummary={request.costSummary}
         expectedSha256={dialogs.active?.expected ?? null}
+        unsavedAnswers={dialogs.unsavedAnswers}
       />
       <RejectDialog {...stageBound} open={kind === "reject"} />
       <RetryDialog {...shared} open={kind === "retry"} />

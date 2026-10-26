@@ -1,0 +1,1 @@
+{"summary": "Adds a --json flag to the list command that prints one JSON object per item.", "questions": [{"id": "Q1", "text": "Should an empty list print [] or nothing?"}, {"id": "Q2", "text": "Is the --json output sorted by name or by creation time?"}]}

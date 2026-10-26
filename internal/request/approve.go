@@ -104,7 +104,9 @@ var ErrOracleNotShown = errors.New("approval has oracle files this client did no
 // ApproveShown is Approve for clients that approve what they displayed (the
 // HTTP API): identical, except a plan approval whose oracle files are not all
 // present in expectedSHA256 is refused with ErrOracleNotShown instead of
-// silently pinning files the operator never saw. The console cannot show or
+// silently pinning files the operator never saw, and a spec approval with
+// answered read-back questions must carry the digest of the answers shown
+// under ReadBackAnswersKey (ErrReadBackNotShown otherwise). The console cannot show or
 // hash oracle files, so those approvals must come from the CLI (which calls
 // Approve, unconditional by design) or a client that lists oracle hashes.
 // The check runs under the same lock and hashing as Approve, so no file can
@@ -186,10 +188,19 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 			return nil, fmt.Errorf("request %s: %w", id, err)
 		}
 	}
-	if err := checkApprovalAgainstExpected(id, hashes, expectedSHA256, requireOracleShown); err != nil {
+	expectedFiles, err := takeReadBackShown(id, r, expectedSHA256, requireOracleShown)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkApprovalAgainstExpected(id, hashes, expectedFiles, requireOracleShown); err != nil {
 		return nil, err
 	}
 
+	// The answered read-back questions are approved with the spec they
+	// read: pinned here, beside spec.md's hash, before the state moves on.
+	if r.State == StateSpecReview {
+		r.ApprovedReadBackSHA256 = ReadBackAnswersSHA256(r.ReadBack)
+	}
 	if err := r.approveTransition(by, now, relPaths); err != nil {
 		return nil, err
 	}
@@ -223,6 +234,9 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 	case StateSpecReview:
 		relPaths = []string{specFileName}
 		if err := refuseOpenDecisions(dataDir, id); err != nil {
+			return nil, nil, err
+		}
+		if err := refuseOversizedApproval(dataDir, id, r); err != nil {
 			return nil, nil, err
 		}
 	case StatePlanReview:
@@ -482,6 +496,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	}
 	fromState := r.State
 	var relPaths []string
+	var readBackAnswers []ReadBackQuestion
 	switch r.State {
 	case StateOracleReview:
 		// Snapshot whatever oracle/ holds now, tolerant like the plan case: a
@@ -498,6 +513,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 		if err := r.RejectSpec(by, reason, now); err != nil {
 			return nil, err
 		}
+		readBackAnswers = r.ReplaceReadBack(nil)
 	case StatePlanReview:
 		// ticketSpecRelPaths is Approve's precondition check -- it hard-fails
 		// when tickets/*.spec.md is missing or empty, which is right for
@@ -532,6 +548,7 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	if len(anchors) > 0 {
 		rejection.Anchors, rejection.Note = anchors, note
 	}
+	rejection.ReadBackAnswers = readBackAnswers
 	r.Rejections = append(r.Rejections, rejection)
 	if err := r.Save(dataDir); err != nil {
 		return nil, err
@@ -543,6 +560,9 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 // r.ApprovedSHA256 whose current content no longer hashes to the value
 // recorded there -- an edit made after the operator approved that file.
 // A request with no recorded hashes yet (never approved) always passes.
+// While the spec approval is in force it also refuses answered read-back
+// questions that differ from what that approval pinned
+// (ApprovedReadBackSHA256).
 //
 // This is the one function both Approve (re-checking an earlier stage's
 // approval before recording a later one) and the request driver (before
@@ -553,6 +573,9 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 func VerifyApprovedHashes(dataDir string, r *Request) error {
 	if len(r.ApprovedSHA256) == 0 {
 		return nil
+	}
+	if err := verifyApprovedReadBack(r); err != nil {
+		return err
 	}
 	relPaths := make([]string, 0, len(r.ApprovedSHA256))
 	for relPath := range r.ApprovedSHA256 {
@@ -1006,6 +1029,7 @@ func stageFeedback(r *Request, stage State, label string) string {
 			continue
 		}
 		fmt.Fprintf(&b, "## %s rejected %s by %s\n\n%s\n\n", label, rej.At, sanitizeFeedbackBy(rej.By), rej.Reason)
+		b.WriteString(readBackAnswersFeedback(rej.ReadBackAnswers))
 		// The operator's own edits to the draft this rejection sends back
 		// ride in its section, so a redraft that rewrites the file is told
 		// to keep them.

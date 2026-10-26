@@ -15,7 +15,7 @@ import (
 func TestAdvanceSpecDraftingTakesAHandedOverSpecWithoutTheDraftingJob(t *testing.T) {
 	dataDir := t.TempDir()
 	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if r.State != request.StateSpecReview {
@@ -43,7 +43,7 @@ func TestAdvanceSpecDraftingHaltsOnAnInvalidOrMissingHandedOverSpec(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			r := requestdrivertest.HandedOverRequest(t, dataDir, spec)
-			if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
+			if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			if r.State != request.StateHalted {
@@ -61,7 +61,7 @@ func TestAdvanceSpecDraftingHaltsOnAnOversizedImportedRedraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	revised := requestdrivertest.CanonicalValidSpec + strings.Repeat("x", request.MaxHandedOverSpecBytes+1)
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, func(context.Context, string, *request.Request, requestdriver.WorkerConfig) (string, *request.SpecEvidence, error) {
 		return revised, &request.SpecEvidence{}, nil
 	}, time.Now()); err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestAdvanceSpecDraftingRunsTheDraftingJobAfterARejection(t *testing.T) {
 		calls++
 		return revised, &request.SpecEvidence{}, nil
 	}
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(requestdriver.RequestSpecPath(dataDir, r.ID))

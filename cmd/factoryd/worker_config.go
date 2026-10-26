@@ -110,7 +110,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// for why. `factoryd worker -help` and `factoryd -help` should read
 	// identically for each of these.
 	f.buildAppScript = flags.String("build-app-script", "", "path to a build_app.py to run in place of the built-in one")
-	f.draftSpecScript = flags.String("draft-spec-script", "", "path to a draft_spec.py to run for spec drafting in place of the built-in one")
+	f.draftSpecScript = flags.String("draft-spec-script", "", "path to a draft_spec.py to run for spec drafting in place of the built-in one; the read_back.py beside it reads back handed-over specs")
 	f.specDraftTimeoutMinutes = flags.Int("spec-draft-timeout-minutes", defaultSpecDraftTimeoutMinutes, "minutes allowed for drafting a request's spec")
 	f.planTicketsScript = flags.String("plan-tickets-script", "", "path to a plan_tickets.py to run for plan drafting in place of the built-in one")
 	f.planTicketsTimeoutMinutes = flags.Int("plan-tickets-timeout-minutes", defaultPlanTicketsTimeoutMinutes, "minutes allowed for drafting a request's plan")
@@ -349,6 +349,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 		DraftSpecScript:           *draftSpecScript,
 		DraftSpecInterpreter:      "python3",
 		SpecDraftTimeoutMinutes:   *specDraftTimeoutMinutes,
+		ReadBack:                  runReadBackJob,
 		PlanTicketsScript:         *planTicketsScript,
 		PlanTicketsInterpreter:    "python3",
 		PlanTicketsTimeoutMinutes: *planTicketsTimeoutMinutes,

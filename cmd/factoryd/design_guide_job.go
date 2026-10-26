@@ -32,7 +32,8 @@ type draftInputFiles struct {
 	// previous draft a review commented on, the only ones the redraft is
 	// taken from.
 	rewriteSections string
-	keepStructure   bool // --keep-structure: revise an imported document in its own shape
+	keepStructure   bool   // --keep-structure: revise an imported document in its own shape
+	specAnswers     string // --spec-answers-file: the read-back answers approved with the spec
 }
 
 func (f draftInputFiles) args() []string {
@@ -55,6 +56,9 @@ func (f draftInputFiles) args() []string {
 	if f.keepStructure {
 		args = append(args, "--keep-structure")
 	}
+	if f.specAnswers != "" {
+		args = append(args, "--spec-answers-file", f.specAnswers)
+	}
 	return args
 }
 
@@ -67,7 +71,7 @@ func (f draftInputFiles) inContainer(containerScratchDir string) draftInputFiles
 		}
 		return containerScratchDir + "/" + filepath.Base(hostPath)
 	}
-	return draftInputFiles{feedback: at(f.feedback), designGuide: at(f.designGuide), specGuidance: at(f.specGuidance), previousDraft: at(f.previousDraft), rewriteSections: at(f.rewriteSections), keepStructure: f.keepStructure}
+	return draftInputFiles{feedback: at(f.feedback), designGuide: at(f.designGuide), specGuidance: at(f.specGuidance), previousDraft: at(f.previousDraft), rewriteSections: at(f.rewriteSections), keepStructure: f.keepStructure, specAnswers: at(f.specAnswers)}
 }
 
 // Which part of the guide a drafting job is given: spec drafting gets the

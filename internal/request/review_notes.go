@@ -43,7 +43,8 @@ type PlanTicket struct {
 
 // RefreshReviewNotes sets r.ReviewNotes to the notes on what r's current
 // review gate shows, read from the request's files: SpecReviewNotes in
-// spec_review, PlanReviewNotes in plan_review, none in any other state. A
+// spec_review (after the read-back's note, readBackNote), PlanReviewNotes in
+// plan_review, none in any other state. A
 // file that cannot be read gives no note. The caller saves r, or does not:
 // reading is cheap (the spec, the tickets, a few directory listings), so
 // every place that shows the notes (the API's request view, `factoryd
@@ -63,6 +64,9 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 	}
 	if r.State == StateSpecReview {
 		r.ReviewNotes = SpecReviewNotes(string(spec))
+		if note := readBackNote(r.ReadBack, spec); note != "" {
+			r.ReviewNotes = append([]string{note}, r.ReviewNotes...)
+		}
 		return
 	}
 	parsed := parseSpecAcceptanceCriteria(strings.Split(string(spec), "\n"))
@@ -92,6 +96,26 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 	}
 	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r), idNotes, r.PlanBudgetLines)
 }
+
+// readBackNote is the spec review's note on rb against the spec.md bytes
+// under review: ReadBackUnavailableNote for a read-back that could not be
+// drafted, ReadBackStaleNote for one drafted from other spec bytes (the spec
+// was edited after it), "" otherwise. It compares hashes only.
+func readBackNote(rb *ReadBack, spec []byte) string {
+	switch {
+	case rb == nil:
+		return ""
+	case rb.Unavailable != "":
+		return ReadBackUnavailableNote(rb.Unavailable)
+	case rb.SpecSHA256 != "" && rb.SpecSHA256 != SpecTextSHA256(string(spec)):
+		return ReadBackStaleNote
+	}
+	return ""
+}
+
+// ReadBackStaleNote is the spec review's note when spec.md is no longer the
+// text its read-back was drafted from.
+const ReadBackStaleNote = "The read-back describes an earlier version of this spec; its questions may not match the text."
 
 // SpecReviewNotes returns one note for each acceptance criterion of
 // specContent that reads as a rule for the git commit's message

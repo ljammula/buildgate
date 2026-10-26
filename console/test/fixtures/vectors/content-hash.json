@@ -53,7 +53,8 @@
       "spec": "# Spec\n",
       "tickets": [],
       "want": {
-        "spec.md": "603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b"
+        "spec.md": "603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b",
+        "read-back/answers": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
     },
     {
@@ -62,7 +63,8 @@
       "spec": "# Spec\r\n\r\nRésumé upload — ✓\r\n",
       "tickets": [],
       "want": {
-        "spec.md": "5fe81a9bb3bd7649fe46704d69f03072b64e46decff4934764ea8e84ea8fe604"
+        "spec.md": "5fe81a9bb3bd7649fe46704d69f03072b64e46decff4934764ea8e84ea8fe604",
+        "read-back/answers": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
     },
     {
@@ -161,6 +163,34 @@
       "name": "nothing shown binds nothing",
       "shown": {},
       "want": {}
+    }
+  ],
+  "read_back_answers": [
+    {
+      "name": "no read-back",
+      "questions": [],
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "only answered questions, UTF-8 byte lengths",
+      "questions": [
+        {
+          "id": "Q1",
+          "text": "How long is a key kept?",
+          "answer": "24 hours — not a day."
+        },
+        {
+          "id": "Q2",
+          "text": "Unanswered?",
+          "answer": ""
+        },
+        {
+          "id": "Q3",
+          "text": "Per merchant?",
+          "answer": "Yes.\nAlways."
+        }
+      ],
+      "sha256": "00af237dffe073b1433cdb3d2123c467dd4958ce1d540bf434feba651d471ce7"
     }
   ]
 }

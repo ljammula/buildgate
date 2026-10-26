@@ -58,8 +58,10 @@ const (
 
 // oracleLaunch is everything the script launch is given. It is the job's
 // complete model-facing input surface: the criteria file and the optional
-// operator-feedback file (the only two host files staged into the sandbox),
-// plus the workspace the script reads AGENTS.md and the file inventory from.
+// operator-feedback file (the two host files staged into the sandbox's run
+// inputs), the optional read-back answers approved with the spec (staged in
+// the job's scratch directory), plus the workspace the script reads
+// AGENTS.md and the file inventory from.
 // request.md is deliberately not representable here.
 type oracleLaunch struct {
 	DataDir      string
@@ -67,8 +69,11 @@ type oracleLaunch struct {
 	Workspace    string
 	CriteriaPath string
 	FeedbackPath string
-	OutDir       string // host path of the script's output directory
-	EvidencePath string // host path of the script's evidence JSON
+	// SpecAnswersPath is the host path of the answered read-back questions
+	// (stageSpecAnswers, in the job's scratch directory), "" when none.
+	SpecAnswersPath string
+	OutDir          string // host path of the script's output directory
+	EvidencePath    string // host path of the script's evidence JSON
 	// Ecosystem is which language's drafting instructions the script sends
 	// the model (--ecosystem): the host classifies the workspace once
 	// (classifyDraftEcosystem) and always passes its answer explicitly, so
@@ -222,7 +227,13 @@ func runOracleDraftJobIn(ctx context.Context, in requestdriver.OracleDraftInput,
 			return filepath.Join(logDir, fmt.Sprintf("oracle_draft.attempt%d.log", attempt))
 		},
 	}
-	if err := refuseRequestText(in.DataDir, job.ID, launch.CriteriaPath, launch.FeedbackPath); err != nil {
+	sandboxUser, _ := requestJobSandboxIdentity(cfg)
+	answersPath, stageErr := stageSpecAnswers(job, scratchDir, sandboxUser)
+	if stageErr != nil {
+		return request.OracleDraft{}, stageErr
+	}
+	launch.SpecAnswersPath = answersPath
+	if err := refuseRequestText(in.DataDir, job.ID, launch.CriteriaPath, launch.FeedbackPath, launch.SpecAnswersPath); err != nil {
 		return request.OracleDraft{}, err
 	}
 
@@ -670,7 +681,8 @@ func refuseRequestText(dataDir, id string, inputs ...string) error {
 }
 
 // oracleDraftArgs is the pure argv builder for draft_acceptance_oracles.py
-// (index 0 is the script, like planTicketsArgs). feedback may be "".
+// (index 0 is the script, like planTicketsArgs). feedback and specAnswers
+// (the staged read-back answers, --spec-answers-file) may be "".
 // criterionTimeoutMinutes is always passed explicitly (--criterion-timeout-minutes),
 // so the script's own per-criterion split (draft_acceptance_oracles.per_criterion_minutes,
 // its fallback for a standalone/manual run) never has to agree independently
@@ -679,7 +691,7 @@ func refuseRequestText(dataDir, id string, inputs ...string) error {
 // thinking is the review role's Pi reasoning-effort level (mirroring
 // draftSpecArgs/planTicketsArgs' own parameter): "" omits --thinking
 // entirely.
-func oracleDraftArgs(script, workspace, criteria, feedback, outDir, evidencePath string, timeoutMinutes, criterionTimeoutMinutes int, eco draftEcosystem, thinking, harness string) []string {
+func oracleDraftArgs(script, workspace, criteria, feedback, specAnswers, outDir, evidencePath string, timeoutMinutes, criterionTimeoutMinutes int, eco draftEcosystem, thinking, harness string) []string {
 	args := []string{
 		script,
 		"--workspace", workspace,
@@ -694,6 +706,9 @@ func oracleDraftArgs(script, workspace, criteria, feedback, outDir, evidencePath
 	}
 	if feedback != "" {
 		args = append(args, "--feedback", feedback)
+	}
+	if specAnswers != "" {
+		args = append(args, "--spec-answers-file", specAnswers)
 	}
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
@@ -767,7 +782,9 @@ func oracleScriptBudgetMinutes(criterionTimeoutMinutes, nCriteria int) int {
 // launchOracleDraftScript is the real launch: sandboxed through
 // runSandboxWithRetries with its own relay label, exactly like the plan job.
 // The criteria file is the staged "spec" input and the feedback file (when
-// present) the second run input; nothing else is mounted at /inputs/run.
+// present) the second run input; nothing else is mounted at /inputs/run. The
+// read-back answers, when staged, are read from the job's scratch directory
+// under the workspace mount.
 func launchOracleDraftScript(ctx context.Context, cfg requestdriver.WorkerConfig, job *request.Request, l oracleLaunch) (runner.Result, error) {
 	interpreter := cfg.OracleDraftInterpreter
 	if interpreter == "" {
@@ -783,7 +800,7 @@ func launchOracleDraftScript(ctx context.Context, cfg requestdriver.WorkerConfig
 	}
 	if sandboxImage == "" {
 		// Unsandboxed: only reachable under allowUnsandboxedSpecDraft (tests).
-		args := oracleDraftArgs(l.Script, l.Workspace, l.CriteriaPath, l.FeedbackPath, l.OutDir, l.EvidencePath, l.TimeoutMinutes, criterionMinutes, l.Ecosystem, l.RoleOverride.Thinking, l.RoleOverride.Harness)
+		args := oracleDraftArgs(l.Script, l.Workspace, l.CriteriaPath, l.FeedbackPath, l.SpecAnswersPath, l.OutDir, l.EvidencePath, l.TimeoutMinutes, criterionMinutes, l.Ecosystem, l.RoleOverride.Thinking, l.RoleOverride.Harness)
 		return runner.RunWithRetries(ctx, l.Workspace, l.LogPath, 1, nil, interpreter, args[1:]...)
 	}
 	sandboxDataDir, err := requestdriver.SandboxDataDirFor(l.DataDir)
@@ -794,7 +811,7 @@ func launchOracleDraftScript(ctx context.Context, cfg requestdriver.WorkerConfig
 	if err != nil {
 		return runner.Result{}, err
 	}
-	args := oracleDraftArgs(l.Script, l.Workspace, l.CriteriaPath, l.FeedbackPath, oracleDraftContainerOutDir, oracleDraftContainerEvidencePath, l.TimeoutMinutes, criterionMinutes, l.Ecosystem, l.RoleOverride.Thinking, l.RoleOverride.Harness)
+	args := oracleDraftArgs(l.Script, l.Workspace, l.CriteriaPath, l.FeedbackPath, oracleContainerSpecAnswers(l.SpecAnswersPath), oracleDraftContainerOutDir, oracleDraftContainerEvidencePath, l.TimeoutMinutes, criterionMinutes, l.Ecosystem, l.RoleOverride.Thinking, l.RoleOverride.Harness)
 	sandboxCtx, cancel := context.WithTimeout(ctx, oracleSandboxDeadline(criterionMinutes, l.NCriteria))
 	defer cancel()
 	sandboxUser, workerUID := requestJobSandboxIdentity(cfg)
@@ -805,6 +822,16 @@ func launchOracleDraftScript(ctx context.Context, cfg requestdriver.WorkerConfig
 		nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
 		"", "", l.RoleOverride.WorkerEnv, l.RoleOverride.Skills, interpreter, args[1:]...,
 	)
+}
+
+// oracleContainerSpecAnswers is where the sandbox sees the answers staged at
+// hostPath in the job's scratch directory: the same file under the
+// workspace mount. "" stays "".
+func oracleContainerSpecAnswers(hostPath string) string {
+	if hostPath == "" {
+		return ""
+	}
+	return specDraftContainerWorkDir + "/" + oracleDraftScratchDirName + "/" + filepath.Base(hostPath)
 }
 
 // oracleDraftEvidenceSchemaVersion is the schema_version

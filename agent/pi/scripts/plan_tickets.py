@@ -92,13 +92,16 @@ PREVIOUS_DRAFT_SECTION = prompt_templates.load("plan_tickets.previous_draft", ("
 SCOPED_SECTIONS_SECTION = prompt_templates.load("plan_tickets.scoped_sections", ("sections",))
 
 
-def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None, criteria_text: str | None = None, pr_budget_lines: int = 0) -> tuple[str, bool]:
+def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_command: str, draft_dir: Path, feedback: str | None = None, design_guide: str | None = None, previous_draft: str | None = None, rewrite_sections: list[tuple[str, str]] | None = None, criteria_text: str | None = None, pr_budget_lines: int = 0, spec_answers: str | None = None) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- see draft_spec.py's own build_prompt for
 	why agents_md_used is threaded straight into the evidence payload.
 	feedback, when given, is a plan_review rejection note the request
 	driver wrote via --feedback-file -- see draft_spec.build_prompt's
-	identical handling."""
+	identical handling. spec_answers, when given, is the read-back questions
+	the operator answered and approved with the spec, as factoryd renders
+	them for every reader of the approved spec (--spec-answers-file): it
+	follows the spec, before the criteria."""
 	agents_md_used = build_app.committed_agents_md_blob(workspace) is not None
 	sections = [
 		f"## Approved spec\n\n{spec_text.strip()}\n",
@@ -106,6 +109,8 @@ def build_prompt(spec_text: str, request_text: str, workspace: Path, verify_comm
 	]
 	if criteria_text and criteria_text.strip():
 		sections.insert(1, f"## Acceptance criteria, as the factory numbers them\n\n{criteria_text.strip()}\n")
+	if spec_answers and spec_answers.strip():
+		sections.insert(1, f"{spec_answers.strip()}\n")
 	architecture = draft_spec.read_capped_text_file(workspace / "ARCHITECTURE.md", CONTEXT_FILE_MAX_BYTES)
 	if architecture:
 		sections.append(f"## Repository architecture (ARCHITECTURE.md)\n\n{architecture}")
@@ -150,6 +155,7 @@ def run_plan(
 	timeout_minutes: int, feedback_path: Path | None = None, thinking: str | None = None,
 	adapter=build_app.DEFAULT_ADAPTER, design_guide_path: Path | None = None, previous_draft_path: Path | None = None,
 	rewrite_sections_path: Path | None = None, criteria_path: Path | None = None, pr_budget_lines: int = 0,
+	spec_answers_path: Path | None = None,
 ) -> int:
 	spec_text = spec_path.read_text()
 	criteria_text = criteria_path.read_text() if criteria_path is not None else None
@@ -162,6 +168,7 @@ def run_plan(
 		spec_text, request_text, workspace, verify_command, DRAFT_RELATIVE_DIR, feedback, design_guide, previous_draft,
 		draft_spec.read_rewrite_sections(rewrite_sections_path),
 		criteria_text=criteria_text, pr_budget_lines=pr_budget_lines,
+		spec_answers=spec_answers_path.read_text(encoding="utf-8") if spec_answers_path else None,
 	)
 
 	session_dir = workspace / ".factory-plan-draft" / "session"
@@ -262,6 +269,7 @@ def main() -> int:
 	parser.add_argument("--previous-draft-file", type=Path, default=None, help="optional tickets the operator handed over, in one file, to be revised with the feedback instead of planned afresh; staged by factoryd")
 	parser.add_argument("--rewrite-sections-file", type=Path, default=None, help="optional JSON list of {path, section} naming the tickets and sections of --previous-draft-file the feedback commented on; only those are taken from the redraft (buildgate keeps the rest); staged by factoryd")
 	parser.add_argument("--design-guide-file", type=Path, default=None, help="optional plan-rules part of the team design guide, staged by factoryd")
+	parser.add_argument("--spec-answers-file", type=Path, default=None, help="optional read-back questions the operator answered and approved with the spec, staged by factoryd; part of the spec's contract")
 	parser.add_argument("--pr-budget-lines", type=int, default=0, help="target changed lines per ticket (insertions plus deletions): a spec estimated within it is one ticket, a larger one is split into the fewest tickets that each fit; 0 is no budget")
 	args = parser.parse_args()
 	if args.pr_budget_lines < 0:
@@ -275,6 +283,7 @@ def main() -> int:
 		args.timeout_minutes, args.feedback_file, thinking=args.thinking, adapter=adapter,
 		design_guide_path=args.design_guide_file, previous_draft_path=args.previous_draft_file, rewrite_sections_path=args.rewrite_sections_file,
 		criteria_path=args.criteria_file.resolve(), pr_budget_lines=args.pr_budget_lines,
+		spec_answers_path=args.spec_answers_file,
 	)
 
 

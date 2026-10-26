@@ -69,7 +69,7 @@ const maxJobFailureDetailBytes = 300
 // cancels, and nothing reruns on its own. The previous pass's draft record is
 // kept, with this pass's spend added, so a re-draft still replaces exactly
 // the files that pass installed.
-func unresolvedOracleDrafting(dataDir string, r *request.Request, failure *OracleDraftJobFailure, now time.Time) error {
+func unresolvedOracleDrafting(dp Deps, dataDir string, r *request.Request, failure *OracleDraftJobFailure, now time.Time) error {
 	cause := failure.Cause
 	if !cause.Known() {
 		cause = unresolved.DraftingJob
@@ -81,14 +81,7 @@ func unresolvedOracleDrafting(dataDir string, r *request.Request, failure *Oracl
 		}
 		r.OracleDraft.Spend = r.OracleDraft.Spend.Add(failure.Spend)
 	}
-	if err := EnterResumeReview(dataDir, r, request.LostStep{Cause: cause}, now); err != nil {
-		return err
-	}
-	if detail := jobFailureDetail(failure.Err); detail != "" {
-		r.Error += "; the job reported: " + detail
-		return r.Save(dataDir)
-	}
-	return nil
+	return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: cause, Detail: jobFailureDetail(failure.Err)}, now)
 }
 
 // jobFailureDetail is err as one sanitised line of at most

@@ -370,7 +370,7 @@ func (a *requestActivities) HaltLostRequestStep(_ context.Context, in workflow.H
 		log.Printf("request %s: its step's heartbeat timed out, but the ticket's run is still live (%s); not moving it to resume_review", r.ID, why)
 		return nil
 	}
-	return requestdriver.EnterResumeReview(a.dataDir, r, request.LostStep{RunID: lostRunOf(a.dataDir, r), Cause: unresolved.WorkerLost}, time.Now())
+	return requestdriver.EnterResumeReviewHoldingLock(a.dataDir, r, request.LostStep{RunID: lostRunOf(a.dataDir, r), Cause: unresolved.WorkerLost}, time.Now())
 }
 
 // countOf is how many entries of ids are id.

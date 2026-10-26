@@ -535,6 +535,7 @@ func TestEveryGateTokenWriteCarriesTheSuffixAndNoOtherWriteDoes(t *testing.T) {
 		{"cancel", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPost, "/requests/req-1/cancel", `{"by":"alice","reason":"not needed"}`, lastHistory},
 		{"spec edit", func(t *testing.T, d string) { seedApprovableRequest(t, d, "req-1", request.StateSpecReview, false) }, http.MethodPut, "/requests/req-1/spec", content(validSpecMD), lastEdit},
 		{"ticket edit", func(t *testing.T, d string) { seedPlanReviewRequestWithTicket(t, d, "req-1") }, http.MethodPut, "/requests/req-1/tickets/1", content(validTicketMD), lastEdit},
+		{"read-back answer", seedReadBackRequest, http.MethodPut, "/requests/req-1/read-back/answers/Q1", `{"by":"alice","answer":"24 hours.","question_sha256":"` + q1Hash + `"}`, firstAnswerBy},
 	}
 	for _, tc := range cases {
 		for _, via := range []struct{ token, want string }{{gateTestToken, "alice (gate token)"}, {gateTestOverride, "alice"}} {

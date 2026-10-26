@@ -236,6 +236,7 @@ func TestMCPCallerMarkOpensNoGateRoute(t *testing.T) {
 		{http.MethodPost, "/requests/req-1/resume"},
 		{http.MethodPost, "/requests/req-1/cancel"},
 		{http.MethodPut, "/requests/req-1/spec"},
+		{http.MethodPut, "/requests/req-1/read-back/answers/Q1"},
 		{http.MethodPut, "/requests/req-1/tickets/1"},
 		{http.MethodPut, "/requests/req-1/oracle/a_test.go"},
 		{http.MethodPost, "/runs/run-1/override"},

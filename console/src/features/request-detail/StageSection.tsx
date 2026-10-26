@@ -4,6 +4,7 @@ import type { RequestSummary } from "@/domain/request";
 import { OracleDraftingSection } from "@/shared/oracle/OracleDraftingSection";
 
 import { Panel } from "./Panel";
+import { ReadBackPanel } from "./ReadBackPanel";
 import { RecoveryCallout } from "./RecoveryCallout";
 import { ResumeCallout } from "./ResumeCallout";
 import { ReviewSection } from "./ReviewSection";
@@ -27,7 +28,7 @@ function WorkingNotice() {
 
 /**
  * What the request's state puts above its documents: a recovery callout, the
- * review controls, the drafting notice. The one place that selects by state;
+ * review controls (and a handed-over spec's read-back), the drafting notice. The one place that selects by state;
  * building, pr_review, done and cancelled have no section of their own (their
  * tickets and the pipeline are the content).
  */
@@ -44,6 +45,17 @@ export function StageSection({ request, dialogs, detailLoaded, anyEditorOpen }: 
         </Panel>
       );
     case "spec_review":
+      return (
+        <>
+          <ReviewSection
+            request={request}
+            dialogs={dialogs}
+            detailLoaded={detailLoaded}
+            anyEditorOpen={anyEditorOpen}
+          />
+          <ReadBackPanel request={request} onDraftChanged={dialogs.onAnswerDraftChanged} />
+        </>
+      );
     case "oracle_review":
     case "plan_review":
       return (

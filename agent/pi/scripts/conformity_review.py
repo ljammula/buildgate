@@ -197,14 +197,15 @@ def criterion_label(criterion: str) -> str:
 
 def recheck_prompt(
 	criteria: list[str], facts: list[str], review_base_sha: str | None, diff: tuple[str, str] | None,
-	instructions_block: str,
+	instructions_block: str, answers: str = "",
 ) -> str:
 	"""The standalone conformity prompt over the same diff, for the flagged
-	criteria alone, with the factory's findings after the diff."""
+	criteria alone, with the factory's findings after the diff and the
+	read-back answers (build_app.read_spec_answers) after the criteria."""
 	lines = "\n".join(f"- Criterion: {criterion}\n  The factory read {fact}" for criterion, fact in zip(criteria, facts))
 	block = RECHECK.format(facts=lines).removesuffix("\n")
 	return build_app.spec_conformity_prompt(
-		criteria, review_base_sha, diff=diff, instructions_block=f"{instructions_block}\n\n{block}",
+		criteria, review_base_sha, diff=diff, instructions_block=f"{instructions_block}\n\n{block}", answers=answers,
 	)
 
 
@@ -242,6 +243,7 @@ def run_recheck(
 	workspace: Path, verdicts: list[dict], *, review_base_sha: str | None, diff: tuple[str, str] | None,
 	instructions_block: str, thinking: str | None, adapter, timeout_minutes: int,
 	prompt_session: Path, fresh_session: Callable[[], Path | None], conformity_policy: str = "required",
+	answers: str = "",
 ) -> tuple[list[dict], str]:
 	"""Checks every flag's "missing" against the result commit and, when the
 	commit holds the text, asks one fresh turn about those criteria alone
@@ -269,7 +271,7 @@ def run_recheck(
 	indexes = sorted(facts)
 	prompt = recheck_prompt(
 		[verdicts[i]["criterion"] for i in indexes], [facts[i] for i in indexes],
-		review_base_sha, diff, instructions_block,
+		review_base_sha, diff, instructions_block, answers,
 	)
 	build_app.saved_prompts.save_prompt(prompt_session, RECHECK_PROMPT_NAME, prompt)
 	build_app.print_progress({"stage": "agent", "event": "note", "detail": f"review: asking once more about criteria {numbers}"})
@@ -346,12 +348,13 @@ def run_conformity_review(
 	through a file."""
 	started = clock()
 	criteria = build_app.read_acceptance_criteria(criteria_path)
+	answers = build_app.read_spec_answers(criteria_path)
 	diff = build_app.workspace_diff(workspace, review_base_sha) if review_base_sha else None
 	instructions_block = build_app.instructions_diff_block(instructions_diff)
 	verdicts, turn_error = build_app.run_spec_conformity_turn(
 		workspace, criteria=criteria, review_base_sha=review_base_sha, diff=diff,
 		instructions_block=instructions_block, thinking=thinking,
-		timeout_minutes=STANDALONE_TURN_MINUTES, adapter=adapter,
+		timeout_minutes=STANDALONE_TURN_MINUTES, adapter=adapter, answers=answers,
 	)
 	error = build_app.single_line(build_app.redact(turn_error, 100_000)) if turn_error else ""
 	session = workspace / SESSION_DIR
@@ -359,7 +362,7 @@ def run_conformity_review(
 		workspace, verdicts, review_base_sha=review_base_sha, diff=diff, instructions_block=instructions_block,
 		thinking=thinking, adapter=adapter, timeout_minutes=recheck_timeout_minutes(started),
 		prompt_session=session, fresh_session=lambda: build_app.fresh_session_subdir(session, RECHECK_SESSION_SUBDIR),
-		conformity_policy=conformity_policy,
+		conformity_policy=conformity_policy, answers=answers,
 	)
 	evidence = conformity_evidence(verdicts, error, conformity_policy=conformity_policy, thinking=thinking)
 	if note:

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 
 import { type RequestSummary, decodeRequestSummary } from "@/domain/request";
-import { sha256Hex } from "@/domain/contentHash";
+import { readBackAnswersKey, readBackAnswersSha256, sha256Hex } from "@/domain/contentHash";
 import { getOperatorName, setOperatorName } from "@/platform/operatorIdentity";
 import {
   addPendingComment,
@@ -138,7 +138,10 @@ test("approve sends the hashes of the displayed spec, by, and closes", async () 
   });
   expect(server.sent("POST /requests/req-spec-review/approve")[0]?.body).toEqual({
     by: "operator",
-    expected_sha256: { "spec.md": sha256Hex("# the displayed spec\n") },
+    expected_sha256: {
+      "spec.md": sha256Hex("# the displayed spec\n"),
+      [readBackAnswersKey]: readBackAnswersSha256(null),
+    },
   });
   expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(0);
   expect(done).toHaveBeenCalledTimes(1);
@@ -182,7 +185,10 @@ test("a record that changes while the dialog is open is not what gets approved",
   });
   expect(server.sent("POST /requests/req-spec-review/approve")[0]?.body).toEqual({
     by: "operator",
-    expected_sha256: { "spec.md": sha256Hex("# the spec the operator read\n") },
+    expected_sha256: {
+      "spec.md": sha256Hex("# the spec the operator read\n"),
+      [readBackAnswersKey]: readBackAnswersSha256(null),
+    },
   });
   expect(await screen.findByText(/spec.md changed since it was shown/)).toBeInTheDocument();
 });

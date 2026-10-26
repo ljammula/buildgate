@@ -66,7 +66,7 @@ func TestStagePreviousPlanAfterPlanReviewRejectUsesHandedOverTickets(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newTestDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := request.Reject(dataDir, id, "operator", "revise the tickets", time.Now()); err != nil {
@@ -103,7 +103,7 @@ func TestStagePreviousPlanAfterCriteriaChangeSendBackUsesHandedOverTickets(t *te
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newTestDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	halted, err := request.Load(dataDir, id)

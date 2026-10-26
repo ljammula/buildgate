@@ -160,7 +160,7 @@ func TestAnUnjudgedTicketRunWaitsInResumeReviewWithItsBuildKept(t *testing.T) {
 			if err := runRecord.Save(dataDir); err != nil {
 				t.Fatal(err)
 			}
-			handled, err := afterUnjudgedTicketRun(dataDir, r, runRecord, time.Now())
+			handled, err := afterUnjudgedTicketRun(ReviewSaveDeps{}, dataDir, r, runRecord, time.Now())
 			if err != nil || !handled {
 				t.Fatalf("handled %v, err %v", handled, err)
 			}
@@ -196,7 +196,7 @@ func TestAnUnjudgedTicketRunOnlyTakesARunThatWasNotJudged(t *testing.T) {
 	// its quarantine.
 	dataDir, r := buildingRequest(t)
 	flagged := reviewRun([]run.ReviewVerdict{{Criterion: "1. a", Verdict: "flagged", Detail: "wrong status"}}, nil, "spec_conformity")
-	if handled, err := afterUnjudgedTicketRun(dataDir, r, flagged, time.Now()); handled || err != nil || r.State != request.StateBuilding {
+	if handled, err := afterUnjudgedTicketRun(ReviewSaveDeps{}, dataDir, r, flagged, time.Now()); handled || err != nil || r.State != request.StateBuilding {
 		t.Errorf("a flagged criterion: handled %v, err %v, state %s", handled, err, r.State)
 	}
 
@@ -208,7 +208,7 @@ func TestAnUnjudgedTicketRunOnlyTakesARunThatWasNotJudged(t *testing.T) {
 	if err := onBranch.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if handled, err := afterUnjudgedTicketRun(dataDir, r, onBranch, time.Now()); !handled || err != nil {
+	if handled, err := afterUnjudgedTicketRun(ReviewSaveDeps{}, dataDir, r, onBranch, time.Now()); !handled || err != nil {
 		t.Fatalf("handled %v, err %v", handled, err)
 	}
 	if r.State != request.StateResumeReview || r.Resume.LostRunID != "" || !strings.Contains(r.Error, "factoryd resume -from scratch "+r.ID) {

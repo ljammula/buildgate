@@ -33,8 +33,8 @@ const planTicketsScratchDirName = ".factory-plan-draft"
 
 // planTicketsContainerOutDir/planTicketsContainerEvidencePath are the
 // fixed container-side paths planTicketsArgs passes to plan_tickets.py
-// for a sandboxed invocation -- see specDraftContainerOutPath's own doc
-// comment for why specDraftContainerWorkDir ("/workspace") is safe to
+// for a sandboxed invocation -- see specDraftContainerWorkDir's own doc
+// comment for why it ("/workspace") is safe to
 // hardcode here.
 const (
 	planTicketsContainerOutDir       = specDraftContainerWorkDir + "/" + planTicketsScratchDirName + "/tickets"
@@ -149,7 +149,11 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	if err != nil {
 		return nil, nil, err
 	}
-	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath}
+	hostAnswersPath, err := stageSpecAnswers(r, scratchDir, sandboxUser)
+	if err != nil {
+		return nil, nil, err
+	}
+	hostFiles := draftInputFiles{feedback: hostFeedbackPath, designGuide: hostGuidePath, previousDraft: hostPreviousPath, rewriteSections: hostRewritePath, specAnswers: hostAnswersPath}
 
 	timeoutMinutes := cfg.PlanTicketsTimeoutMinutes
 	if timeoutMinutes <= 0 {
@@ -430,6 +434,30 @@ func stagePreviousPlan(dataDir string, r *request.Request, scratchDir, sandboxUs
 	path := filepath.Join(scratchDir, previousDraftFileName)
 	if err := writeRequestJobFeedbackFile(path, []byte(current.String()), sandboxUser); err != nil {
 		return "", fmt.Errorf("stage the tickets to revise: %w", err)
+	}
+	return path, nil
+}
+
+// specAnswersFileName is a drafting job's copy of the read-back answers
+// approved with the spec, in its scratch directory.
+const specAnswersFileName = "spec-answers.md"
+
+// stageSpecAnswers writes the read-back questions the operator answered and
+// approved with the spec (requestdriver.AnsweredReadBackBlock, the rendering
+// every reader of the approved spec gets) into scratchDir for the
+// --spec-answers-file of plan_tickets.py and draft_acceptance_oracles.py,
+// and returns its path; "" when no question was answered.
+func stageSpecAnswers(r *request.Request, scratchDir, sandboxUser string) (string, error) {
+	block := requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered())
+	if block == "" {
+		return "", nil
+	}
+	if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
+		return "", fmt.Errorf("create the job's scratch dir: %w", err)
+	}
+	path := filepath.Join(scratchDir, specAnswersFileName)
+	if err := writeRequestJobFeedbackFile(path, []byte(block), sandboxUser); err != nil {
+		return "", fmt.Errorf("stage the spec's read-back answers: %w", err)
 	}
 	return path, nil
 }

@@ -39,13 +39,19 @@ drift from it.
 Usage:
     python3 draft_acceptance_oracles.py --criteria criteria.md \\
         --workspace /path/to/repo --out-dir oracles --evidence evidence.json \\
-        [--timeout-minutes 15] [--feedback feedback.md]
+        [--timeout-minutes 15] [--feedback feedback.md] \\
+        [--spec-answers-file spec-answers.md]
 
 --feedback (optional) is a text file of operator feedback on a previous
 draft (the request driver writes oracle-feedback.md from oracle_review
 rejections). Its text is appended to the prompt under a delimited
 "Operator feedback on the previous draft" section as guidance only. A
 missing or empty file is the same as no flag.
+
+--spec-answers-file (optional) is the read-back questions the operator
+answered and approved with the spec, as factoryd renders them for every
+reader of the approved spec. It follows the criteria in every criterion's
+prompt, labelled as answers, never as criteria.
 
 --criteria is the same flat, one-criterion-per-line file
 build_app.py's own --spec-acceptance-criteria takes (e.g. what
@@ -198,6 +204,19 @@ FEEDBACK_HEADER = prompt_templates.load("draft_acceptance_oracles.feedback", ("d
 PRIOR_IMPORTS_HEADER = prompt_templates.load("draft_acceptance_oracles.prior_imports", ("imports",))
 
 
+SPEC_ANSWERS_HEADER = prompt_templates.load("draft_acceptance_oracles.answers", ("answers",))
+
+
+def read_spec_answers(path: Path | None) -> str | None:
+	"""The answered read-back questions factoryd staged (--spec-answers-file),
+	or None when there is no file. factoryd stages the file only when an
+	answer exists, so one it names that cannot be read fails the job."""
+	if path is None:
+		return None
+	text = path.read_text(encoding="utf-8")
+	return text if text.strip() else None
+
+
 def extract_python_imports(path: Path) -> list[str]:
 	"""Returns every top-level `from X import Y`/`import X` line a drafted
 	Python oracle file uses, rendered back in that exact form (so it can be
@@ -261,7 +280,7 @@ DRAFT_INSTRUCTIONS_BY_ECOSYSTEM = {"go": GO_DRAFT_INSTRUCTIONS, "python": PYTHON
 def build_prompt(
 	criteria: list[str], workspace: Path, draft_dir: Path, feedback: str | None = None,
 	context_criteria: list[str] | None = None, ecosystem: str = "go",
-	prior_imports: list[str] | None = None,
+	prior_imports: list[str] | None = None, spec_answers: str | None = None,
 ) -> tuple[str, bool]:
 	"""Assembles the single prompt passed to pi_invocation. Returns
 	(prompt, agents_md_used) -- same convention every sibling script in
@@ -286,7 +305,10 @@ def build_prompt(
 	criterion is drafted in its own isolated pi invocation that cannot see
 	another's output, so without this, two criteria naming the same
 	function could each guess a different module for it (live defect,
-	2026-09-24: see this module's own doc comment)."""
+	2026-09-24: see this module's own doc comment).
+	spec_answers, when given, is the read-back questions the operator
+	answered and approved with the spec (read_spec_answers): it follows the
+	criteria, labelled as answers."""
 	agents_md_used = build_app.committed_agents_md_blob(workspace) is not None
 	numbered = "\n".join(criteria)
 	sections = []
@@ -300,6 +322,8 @@ def build_prompt(
 			f"{others}\n"
 		)
 	sections.append(f"## Acceptance criteria\n\n{numbered}\n")
+	if spec_answers and spec_answers.strip():
+		sections.append(SPEC_ANSWERS_HEADER.format(answers=spec_answers.strip()))
 	# Reused directly from draft_spec.py (found via review: an earlier
 	# version copy-pasted this instead of importing it, on the mistaken
 	# assumption draft_spec wasn't reusably on sys.path -- it already is,
@@ -961,7 +985,7 @@ CRITERION_INDEX_ADDENDUM = prompt_templates.load("draft_acceptance_oracles.crite
 def draft_one_criterion(
 	index: int, criterion: str, workspace: Path, timeout_minutes: int, feedback: str | None, all_criteria: list[str],
 	ecosystem: str = "go", prior_imports: list[str] | None = None, thinking: str | None = None,
-	adapter=build_app.DEFAULT_ADAPTER,
+	adapter=build_app.DEFAULT_ADAPTER, spec_answers: str | None = None,
 ) -> CriterionResult:
 	"""Runs ONE bounded pi invocation to draft a single acceptance
 	criterion, in its own scratch directory (so a slow or misbehaving
@@ -978,7 +1002,7 @@ def draft_one_criterion(
 	others = [c for i, c in enumerate(all_criteria, start=1) if i != index]
 	prompt, _agents_md_used = build_prompt(
 		[criterion], workspace, rel_draft_dir, feedback=feedback, context_criteria=others, ecosystem=ecosystem,
-		prior_imports=prior_imports,
+		prior_imports=prior_imports, spec_answers=spec_answers,
 	)
 	prompt += "\n\n" + CRITERION_INDEX_ADDENDUM.format(
 		index=index, total=len(all_criteria),
@@ -1102,12 +1126,13 @@ def assemble_manifest(results: list[CriterionResult], workspace: Path, ecosystem
 def run_draft_oracles(
 	workspace: Path, criteria_path: Path, out_dir: Path, evidence_path: Path, timeout_minutes: int,
 	feedback_path: Path | None = None, criterion_timeout_minutes: int | None = None, ecosystem: str = "go",
-	thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER,
+	thinking: str | None = None, adapter=build_app.DEFAULT_ADAPTER, spec_answers_path: Path | None = None,
 ) -> int:
 	criteria = build_app.read_acceptance_criteria(criteria_path)
 	if not criteria:
 		raise ValueError(f"{criteria_path} has no criteria")
 	feedback_text, feedback_truncated = read_feedback_ex(feedback_path)
+	spec_answers = read_spec_answers(spec_answers_path)
 	agents_md_used = build_app.committed_agents_md_blob(workspace) is not None
 
 	per_minutes = criterion_timeout_minutes if criterion_timeout_minutes and criterion_timeout_minutes > 0 else per_criterion_minutes(timeout_minutes, len(criteria))
@@ -1129,7 +1154,7 @@ def run_draft_oracles(
 	for i, c in enumerate(criteria, start=1):
 		r = draft_one_criterion(
 			i, c, workspace, per_minutes, feedback_text, criteria, ecosystem,
-			prior_imports=list(prior_imports), thinking=thinking, adapter=adapter,
+			prior_imports=list(prior_imports), thinking=thinking, adapter=adapter, spec_answers=spec_answers,
 		)
 		results.append(r)
 		if ecosystem == "python":
@@ -1229,6 +1254,7 @@ def main() -> int:
 		help="Coding agent to drive (see harness_adapters.py).",
 	)
 	parser.add_argument("--feedback", type=Path, default=None, help="optional operator-feedback text file on a previous draft; appended to the prompt as guidance only (a missing or empty file is ignored)")
+	parser.add_argument("--spec-answers-file", type=Path, default=None, help="optional read-back questions the operator answered and approved with the spec, staged by factoryd; given after the criteria")
 	parser.add_argument("--ecosystem", choices=sorted(DRAFT_INSTRUCTIONS_BY_ECOSYSTEM), default="go", help="which language's drafting instructions to send the model; cmd/factoryd's own oracle-drafting job always passes this explicitly (classifyDraftEcosystem), so a human running this script by hand gets the historic Go default")
 	args = parser.parse_args()
 
@@ -1239,6 +1265,7 @@ def main() -> int:
 		workspace, args.criteria.resolve(), args.out_dir, args.evidence, args.timeout_minutes,
 		feedback_path=args.feedback, criterion_timeout_minutes=args.criterion_timeout_minutes,
 		ecosystem=args.ecosystem, thinking=args.thinking, adapter=adapter,
+		spec_answers_path=args.spec_answers_file,
 	)
 
 

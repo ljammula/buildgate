@@ -93,8 +93,9 @@ DNS-rebinding attacker reaching the loopback port through XHR, fetch, or a
 the same user can already forge these headers, or run `factoryd approve`/
 `cancel` directly against the data directory.
 
-Request writes (approve, reject, spec/ticket/oracle edits, retry, resume,
-cancel, create; `internal/api.Server.authorizeRequestWrite`):
+Request writes (approve, reject, spec/ticket/oracle edits, read-back
+answers, retry, resume, cancel, create;
+`internal/api.Server.authorizeRequestWrite`):
 
 - Without a token, a request is accepted only when all of these hold:
   - The request is local (`Server.local`): the server is bound to loopback,
@@ -276,7 +277,7 @@ The credential of a console that is not on the machine (`internal/api`'s
 
 | Property | Rule |
 |---|---|
-| What it opens | The read routes (`authorizeRead`) and the request writes (`authorizeRequestWrite`): create, approve, reject, retry, resume, cancel, and the spec, ticket and oracle-file edits. A request created with it may carry every field `POST /requests` accepts, a verify command included: it is the operator's credential, and the same holder approves the plan |
+| What it opens | The read routes (`authorizeRead`) and the request writes (`authorizeRequestWrite`): create, approve, reject, retry, resume, cancel, the spec, ticket and oracle-file edits, and the read-back answers. A request created with it may carry every field `POST /requests` accepts, a verify command included: it is the operator's credential, and the same holder approves the plan |
 | What it never opens | `POST /runs/{id}/override` (`authorizeOverride` compares against the override token only), the start-class routes (`authorizeStart`), and `POST /mcp` (`serveMCP` compares against the MCP token only). The MCP token and the start token open no gate route |
 | Who needs it | While the gate is on, a request that is not local (`Server.local`, above), or any request once a read token is set, reads only with the gate token or the read token (`gateRequired`), and `/console-config.json` asks the console for the gate token. The console's own files, `/console-config.json` and `/healthz` stay open: the page has to load before it can be given the token |
 | Local use | The gate decides nothing for a local request: it reads and writes as [Console loopback writes](#console-loopback-writes) says |

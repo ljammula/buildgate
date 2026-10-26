@@ -129,6 +129,19 @@ file's raw view and comments on it; the comments are sent together by
 | The pending batch | `platform/pendingComments.ts`, `features/request-detail/usePendingComments.ts`, `PendingComments.tsx` | Per browser, keyed by request id and the time it entered the stage, so a redraft starts with none; listed under the oracle warning, removable one by one                                                 |
 | Sending it        | `shared/approval/RejectDialog.tsx`                                                                    | "Request changes (N)" opens the dialog with the batch as its notes. A reason written too asks the server for a whole redraft; the server refuses (409) a comment whose quote is no longer in its section |
 
+## Read-back at spec review
+
+A spec the operator handed over (`submit -spec-file`) reaches `spec_review`
+with the factory's read-back: what it will build and the questions it would
+otherwise guess at. The page shows it beside the spec as model-written text.
+
+| Part         | Source                                                                                      | Rule                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The panel    | `features/request-detail/ReadBackPanel.tsx`, from `StageSection`                            | Only at `spec_review` with a drafted read-back; the summary and each question as text, never HTML. A read-back that could not be drafted is a review note instead                                                                                                                                                                                                      |
+| An answer    | `useAnswerReadBack` (`api/requestQueries.ts`), `answerReadBackQuestion` (`api/requests.ts`) | One answer box and Save per question: `PUT /requests/{id}/read-back/answers/{qid}` with the SHA-256 of the question text shown; empty clears it. Disabled without write access; at most 2000 bytes. When its stored answer changes underneath it, a box with no unsaved text starts over from it; one with unsaved text keeps the text and shows the stored answer now |
+| Approval     | `expectedSha256For` (`domain/contentHash.ts`), `useRequestDialogs`, `ApproveDialog`         | A spec approval sends `readBackAnswersSha256` of the answers shown under `read-back/answers`; Approve warns about a box with unsaved text. The answer log is in the Audit panel                                                                                                                                                                                        |
+| What it does | The server                                                                                  | Answers are frozen at approval and go to every ticket's build; approval never waits on them                                                                                                                                                                                                                                                                            |
+
 ## Module layout
 
 ```text

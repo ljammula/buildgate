@@ -10,7 +10,7 @@ Independent combined review: two separate tasks over the SAME diff, in one turn 
 
 Check the diff above against each of the following approved acceptance criteria, in order.
 
-{criteria}
+{criteria}{answers}
 
 {conformity_command_outcome_rule}
 

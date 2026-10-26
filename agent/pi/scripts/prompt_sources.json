@@ -30,6 +30,16 @@
       "description": "Combines the shared missing-AGENTS.md instructions, the repository workspace, and bounded repository context for the planning-role draft job."
     },
     {
+      "id": "prompt-source:read-back.context",
+      "source_path": "agent/pi/scripts/read_back.py",
+      "fragment": "READ_BACK_INSTRUCTIONS / build_prompt",
+      "role": "planning",
+      "stage": "spec_drafting",
+      "kind": "inline-assembly",
+      "template_refs": ["read_back.prompt.md"],
+      "description": "Quotes a handed-over spec between delimiters and asks for the read-back shown at spec review: a summary and the questions the spec leaves open."
+    },
+    {
       "id": "prompt-source:draft-feedback.section",
       "source_path": "agent/pi/scripts/draft_spec.py",
       "fragment": "FEEDBACK_HEADER / build_prompt",
@@ -79,9 +89,10 @@
         "draft_acceptance_oracles.go.prompt.md",
         "draft_acceptance_oracles.python.prompt.md",
         "draft_acceptance_oracles.feedback.prompt.md",
-        "draft_acceptance_oracles.prior_imports.prompt.md"
+        "draft_acceptance_oracles.prior_imports.prompt.md",
+        "draft_acceptance_oracles.answers.prompt.md"
       ],
-      "description": "Combines acceptance criteria, other-criterion context, repository file inventory, optional feedback and prior Python imports, and the selected ecosystem's oracle-writing instructions."
+      "description": "Combines acceptance criteria, other-criterion context, the read-back answers approved with the spec, repository file inventory, optional feedback and prior Python imports, and the selected ecosystem's oracle-writing instructions."
     },
     {
       "id": "prompt-source:draft-oracles.feedback",
@@ -204,12 +215,13 @@
         "spec_conformity.prompt.md",
         "spec_conformity.diff_self.prompt.md",
         "spec_conformity.diff_inline.prompt.md",
+        "spec_conformity.answers.prompt.md",
         "spec_conformity.command_outcome_rule.prompt.md",
         "spec_conformity.formatting_rule.prompt.md",
         "spec_conformity.json_contract.prompt.md",
         "review.instructions_diff.prompt.md"
       ],
-      "description": "Assembles spec-conformity review instructions with criteria, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
+      "description": "Assembles spec-conformity review instructions with criteria and the read-back answers approved with the spec, inline or self-fetched diff instructions, review rules, output contract, and optional repository-instruction diff."
     },
     {
       "id": "prompt-source:combined-review",
@@ -225,6 +237,7 @@
         "code_review.scope_rule.prompt.md",
         "code_review.severity_rule.prompt.md",
         "code_review.command_outcome_rule.prompt.md",
+        "spec_conformity.answers.prompt.md",
         "spec_conformity.command_outcome_rule.prompt.md",
         "spec_conformity.formatting_rule.prompt.md",
         "review.instructions_diff.prompt.md"

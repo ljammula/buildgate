@@ -17,20 +17,41 @@ import (
 
 // EnterResumeReview moves r, in the state of the step that ended with no
 // verdict on the work (step says which run and why), to resume_review and
-// saves it. The
-// first reminder goes out at once, as for every review wait: the operator is
-// needed from this moment.
-func EnterResumeReview(dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
-	from := r.State
-	if err := r.EnterResumeReview(from, step, now); err != nil {
+// saves it. The first reminder goes out at once, as for every review wait:
+// the operator is needed from this moment, and may decide before it is
+// recorded, so it is recorded on the request as it is on disk
+// (saveAndRemind). The caller must not hold the request's lock; one that
+// does calls EnterResumeReviewHoldingLock.
+func EnterResumeReview(dp Deps, dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
+	if err := enterResumeReview(r, step, now); err != nil {
 		return err
 	}
-	log.Printf("request %s: %s -> resume_review (%s)", r.ID, from, r.Error)
+	return saveAndRemind(dp, dataDir, r, now)
+}
+
+// EnterResumeReviewHoldingLock is EnterResumeReview for a caller that holds
+// the request's lock and loaded r under it (the worker's reclaim, the halt
+// of a lost step): no operator can write between its saves, and the locked
+// reload of saveAndRemind would wait on that lock forever.
+func EnterResumeReviewHoldingLock(dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
+	if err := enterResumeReview(r, step, now); err != nil {
+		return err
+	}
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
 	RemindRequest(dataDir, r, now)
 	return r.Save(dataDir)
+}
+
+// enterResumeReview is the transition both entries make, without a save.
+func enterResumeReview(r *request.Request, step request.LostStep, now time.Time) error {
+	from := r.State
+	if err := r.EnterResumeReview(from, step, now); err != nil {
+		return err
+	}
+	log.Printf("request %s: %s -> resume_review (%s)", r.ID, from, r.Error)
+	return nil
 }
 
 // ValidateResumeWorktreeFlags rejects a -resume-worktree-of combined with

@@ -35,6 +35,7 @@ import {
   type RetryRequestOptions,
   type ResumeRequestOptions,
   type UpdateRequestContentOptions,
+  answerReadBackQuestion,
   approveRequest,
   cancelRequest,
   createRequest,
@@ -457,6 +458,21 @@ export function useUpdateRequestSpec(id: string) {
   const { http } = useApi();
   return useRequestWrite(({ content, ...options }: UpdateContentInput) =>
     updateRequestSpec(http, id, content, options),
+  );
+}
+
+export interface AnswerReadBackInput {
+  readonly questionId: string;
+  /** SHA-256 of the question text shown (sha256Hex). */
+  readonly questionSha256: string;
+  readonly answer: string;
+  readonly by?: string | null;
+}
+
+export function useAnswerReadBack(id: string) {
+  const { http } = useApi();
+  return useRequestWrite(({ questionId, questionSha256, answer, by }: AnswerReadBackInput) =>
+    answerReadBackQuestion(http, id, questionId, questionSha256, answer, { by: by ?? null }),
   );
 }
 

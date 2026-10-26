@@ -153,13 +153,19 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	if _, err := SnapshotRevision(dataDir, id, by, reason, stage, relPaths, now); err != nil {
 		return nil, err
 	}
-	r.Rejections = append(r.Rejections, Rejection{
+	rejection := Rejection{
 		By:        by,
 		At:        now.UTC().Format(time.RFC3339Nano),
 		Reason:    reason,
 		FromState: leftState,
 		ForStage:  stage,
-	})
+	}
+	if target == SendBackToSpec {
+		// The redraft drafts a new read-back; the answers given to the old
+		// one reach it through this rejection's feedback.
+		rejection.ReadBackAnswers = r.ReplaceReadBack(nil)
+	}
+	r.Rejections = append(r.Rejections, rejection)
 	r.DraftHalt = nil
 	r.Tickets = nil
 	r.TicketIndex = 0
@@ -171,30 +177,9 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 		endPlanImport(r)
 	}
 	if target == SendBackToSpec {
-		// Every downstream pin goes with the spec: tickets/* and the
-		// request-level oracle/* (a redrafted spec redrafts the oracle,
-		// replacing oracle/, so a surviving oracle pin would fail every
-		// later VerifyApprovedHashes and leave cancel as the only exit --
-		// adversarial review of this change, 2026-09-26), exactly as
-		// ReturnToOracleReview drops the oracle pins.
-		delete(r.ApprovedSHA256, specFileName)
-		r.pruneTicketApprovals()
-		for rel := range r.ApprovedSHA256 {
-			if strings.HasPrefix(rel, requestOracleRelPrefix) {
-				delete(r.ApprovedSHA256, rel)
-			}
-		}
-		r.OracleSkipWarning = ""
-		// The oracle files drafted against the old spec move aside too:
-		// only their pins went above, and OracleFeedback is empty after a
-		// send-back to spec by design, so a failed redraft would never
-		// quarantine them itself, leaving them in oracle/ to be approved
-		// and pinned as if drafted from the new spec (adversarial review,
-		// round 2). Same destination a rejected draft uses.
-		if err := supersedeRequestOracle(dataDir, id); err != nil {
+		if err := r.dropSpecApproval(dataDir, id); err != nil {
 			return nil, err
 		}
-		r.OracleDraft = nil
 	}
 	if err := r.ResumeDrafting(targetState, by, reason, now); err != nil {
 		return nil, err
@@ -207,6 +192,38 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 		return nil, err
 	}
 	return r, nil
+}
+
+// dropSpecApproval drops what a spec approval pinned, for a send-back to
+// spec: the spec's own pin, every downstream pin and the read-back answers'
+// pin, and moves the oracle files drafted against the old spec aside.
+func (r *Request) dropSpecApproval(dataDir, id string) error {
+	// Every downstream pin goes with the spec: tickets/* and the
+	// request-level oracle/* (a redrafted spec redrafts the oracle,
+	// replacing oracle/, so a surviving oracle pin would fail every
+	// later VerifyApprovedHashes and leave cancel as the only exit --
+	// adversarial review of this change, 2026-09-26), exactly as
+	// ReturnToOracleReview drops the oracle pins.
+	delete(r.ApprovedSHA256, specFileName)
+	r.pruneTicketApprovals()
+	for rel := range r.ApprovedSHA256 {
+		if strings.HasPrefix(rel, requestOracleRelPrefix) {
+			delete(r.ApprovedSHA256, rel)
+		}
+	}
+	r.OracleSkipWarning = ""
+	// The oracle files drafted against the old spec move aside too:
+	// only their pins went above, and OracleFeedback is empty after a
+	// send-back to spec by design, so a failed redraft would never
+	// quarantine them itself, leaving them in oracle/ to be approved
+	// and pinned as if drafted from the new spec (adversarial review,
+	// round 2). Same destination a rejected draft uses.
+	if err := supersedeRequestOracle(dataDir, id); err != nil {
+		return err
+	}
+	r.OracleDraft = nil
+	r.ApprovedReadBackSHA256 = ""
+	return nil
 }
 
 func endPlanImport(r *Request) {

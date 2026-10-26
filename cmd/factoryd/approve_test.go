@@ -160,7 +160,7 @@ func TestRejectMainCriteriaChangeHaltFeedsPlanningFeedback(t *testing.T) {
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1)},
 		{Filename: "002.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 2)},
 	}, &request.PlanEvidence{}, nil)
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, planning, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newTestDeps(t), context.Background(), dataDir, planning, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
 		t.Fatalf("planning after reject: %v", err)
 	}
 	planned := requestdrivertest.LoadRequest(t, dataDir, id)

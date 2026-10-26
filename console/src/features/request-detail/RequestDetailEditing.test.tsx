@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { sha256Hex } from "@/domain/contentHash";
+import { readBackAnswersKey, readBackAnswersSha256, sha256Hex } from "@/domain/contentHash";
 import { apiErrorResponse, json } from "@/test/render";
 
 import { openRequest, seedOperator } from "./testHarness";
@@ -132,7 +132,10 @@ test("Approve still calls the approve route with the Edit control present", asyn
   // What was shown is what is pinned.
   expect(server.sent("POST /requests/req-1/approve")[0]?.body).toEqual({
     by: "operator",
-    expected_sha256: { "spec.md": sha256Hex("# Spec\n\nOriginal detail.") },
+    expected_sha256: {
+      "spec.md": sha256Hex("# Spec\n\nOriginal detail."),
+      [readBackAnswersKey]: readBackAnswersSha256(null),
+    },
   });
 });
 

@@ -16,9 +16,10 @@ and [`USAGE.md`](../../USAGE.md).
 | `goal_pilot.py` | Spec/contract/ticket drafting | `-goal-pilot-script` |
 | `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |
 | `draft_spec.py` | Request driver's one-shot spec draft | `worker -draft-spec-script` |
-| `plan_tickets.py` | Request driver's one-shot ticket plan | `worker -plan-tickets-script` |
+| `read_back.py` | Request driver's one-shot read-back of a handed-over spec, shown at spec review: a summary and up to 7 questions as JSON, refused whole (exit 3) when not that shape or over its byte limits | read from beside `worker -draft-spec-script` |
+| `plan_tickets.py` | Request driver's one-shot ticket plan; given the read-back answers approved with the spec (`--spec-answers-file`) after the spec | `worker -plan-tickets-script` |
 | `draft_agents.py` | Doctor's one-shot root `AGENTS.md` draft; the factory supplies the shared refusal instructions and copies the successful scratch output to the repository root | `doctor -target-repo <repo> -fix` |
-| `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`) | `worker -draft-oracles-script` |
+| `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`); given the read-back answers approved with the spec (`--spec-answers-file`) after the criteria | `worker -draft-oracles-script` |
 | `conformity_review.py` | Bounded per-criterion spec-conformity review. A flag may name a file and the exact text it lacks (`missing`). When the result commit holds that text (read with `git cat-file`, and only where the worktree's copy is the same bytes, so a masked instruction file or a file a review turn rewrote is never read), those criteria are judged once more, alone, by a fresh turn in `.pi-conformity-session/recheck`, shown the commit's lines that hold the text (each with its neighbours) and nothing the earlier answer said. Its verdict replaces the flag; no answer leaves it, with the turn's error in the outcome. Text under 4 characters or cut to its cap is never looked up, and nothing is asked again under the advisory policy. The two turns share 20 minutes and the recheck is skipped under 5. This trades quarantines on a false flag for the chance that a second turn passes a criterion the first rightly flagged; the PR's Spec conformity section marks every criterion judged again. The evidence carries a `recheck` line, and each criterion asked about a `recheck` record; the prompt is saved as `review-conformity-recheck` | — |
 | `code_review.py` | Standalone AI code review (`-code-review-policy off\|advisory\|required`) | — |
 | `combined_review.py` | Runs conformity review and code review in one pass when both are enabled for a run. An answer that lacks one review is asked for that review alone, and an answer with neither is asked for both again: one further turn at most, told nothing of the first. A turn that failed is not run again here (the host launches the review again when the spend meter's record shows its model served nothing). The two turns share the one turn's 20 minutes: the retry gets what is left and is skipped under 5 minutes. Before the retry, the first turn's evidence is written and everything in `.pi-combined-review-session` but its `prompts` folder is removed (no link followed), so the retry, in `.pi-combined-review-session/retry`, cannot read the first transcript. Both evidence files then carry a `retry` line saying what was asked again and why, or why nothing was, and the retry's prompt is saved beside the first as `review-code-retry`, `review-conformity-retry` or `review-combined-retry`. After that, a conformity flag whose `missing` text the result commit holds is judged once more as `conformity_review.py` does, in `.pi-combined-review-session/recheck`, within what is left of the same 20 minutes; the code review half is never asked again | — |
@@ -35,6 +36,7 @@ freely, headings only together with their validator.
 |---|---|---|
 | `draft_spec.prompt.md` | `draft_spec.py` | `{draft_path}` |
 | `draft_agents.prompt.md` | `draft_agents.py` | `{instructions}`, `{draft_path}`, `{context}` |
+| `read_back.prompt.md` | `read_back.py` | `{spec}`, `{draft_path}`, `{max_summary_bytes}`, `{max_questions}`, `{max_question_bytes}` |
 | `draft_spec.example_check.prompt.md` | `draft_spec.py` (worked-example check) | `{listing}`, `{out_path}` |
 | `draft_feedback.prompt.md` | `draft_spec.py`, `plan_tickets.py` (operator feedback on a rejected draft) | `{kind}`, `{feedback}` |
 | `plan_tickets.prompt.md` | `plan_tickets.py` | `{decomposition_rule}`, `{draft_dir}`, `{verify_command}` |
@@ -47,11 +49,13 @@ freely, headings only together with their validator.
 | `draft_acceptance_oracles.go.prompt.md`, `.python.prompt.md` | `draft_acceptance_oracles.py` | `{draft_dir}`, `{max_files}`, `{manifest_name}` |
 | `draft_acceptance_oracles.feedback.prompt.md` | `draft_acceptance_oracles.py` | `{draft_dir}`, `{feedback}` |
 | `draft_acceptance_oracles.prior_imports.prompt.md` | `draft_acceptance_oracles.py` | `{imports}` |
+| `draft_acceptance_oracles.answers.prompt.md` | `draft_acceptance_oracles.py` (after the criteria, when `--spec-answers-file` is given) | `{answers}` |
 | `draft_acceptance_oracles.criterion_index.prompt.md` | `draft_acceptance_oracles.py` | `{index}`, `{total}`, `{oracle_filename}`, `{default_filename}` |
 
-| `spec_conformity.prompt.md`, `.diff_self`, `.diff_inline` | `build_app.py` (`spec_conformity_prompt`) | `{diff_instructions}`, `{criteria}`, the three rule texts; `{base}`; `{diff}` |
+| `spec_conformity.prompt.md`, `.diff_self`, `.diff_inline` | `build_app.py` (`spec_conformity_prompt`) | `{diff_instructions}`, `{criteria}`, `{answers}`, the three rule texts; `{base}`; `{diff}` |
+| `spec_conformity.answers.prompt.md` | `build_app.py` (`spec_answers_section`, in the conformity and combined prompts: the read-back answers the operator approved with the spec, which factoryd writes after the criteria in the `--spec-acceptance-criteria` file; `read_acceptance_criteria` stops at their `# Questions answered at spec review` heading) | `{answers}` |
 | `code_review.prompt.md`, `.diff_self`, `.diff_inline` | `code_review.py` | `{diff_instructions}`, `{spec_text}`, the four rule texts; `{base}`; `{diff}` |
-| `combined_review.prompt.md`, `.diff_self`, `.diff_inline` | `combined_review.py` | `{diff_block}`, `{spec_text}`, `{criteria}`, five rule texts; `{base}`; `{diff}` |
+| `combined_review.prompt.md`, `.diff_self`, `.diff_inline` | `combined_review.py` | `{diff_block}`, `{spec_text}`, `{criteria}`, `{answers}`, five rule texts; `{base}`; `{diff}` |
 | `build_round_checklist.prompt.md` | `build_app.py` (the definition of done after the ticket in round 1) | `{verify}` |
 | `build_corrective.intro`, `.verify`, `.excerpt`, `.oracle`, `.reviewer` | `build_app.py` (`corrective_prompt`, one part each, joined by blank lines) | `{round_index}`, `{max_rounds}`, `{blockers}`; `{verify_command}`, `{verify_tail}`; `{verify_tail}`; `{oracle_command}`, `{oracle_tail}`; `{detail}` |
 | `build_corrective.closing` | `build_app.py` (last part of the corrective prompt) | none: literal text |

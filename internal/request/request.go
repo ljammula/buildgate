@@ -463,6 +463,11 @@ type Request struct {
 	ApprovedBy     string            `json:"approved_by,omitempty"`
 	ApprovedAt     string            `json:"approved_at,omitempty"`
 	ApprovedSHA256 map[string]string `json:"approved_sha256,omitempty"`
+	// ApprovedReadBackSHA256 is what the spec approval pinned of the
+	// read-back's answered questions (ReadBackAnswersSHA256; empty when none
+	// was answered). VerifyApprovedHashes refuses a request whose answers
+	// changed after it, while the spec approval is in force.
+	ApprovedReadBackSHA256 string `json:"approved_read_back_sha256,omitempty"`
 	// SpecEvidence is best-effort cost/token evidence from the
 	// spec-drafting job (agent/pi/scripts/draft_spec.py's own evidence
 	// JSON), recorded once spec_drafting completes successfully -- never
@@ -559,6 +564,15 @@ type Request struct {
 	// legacy compatibility: old request records load and re-marshal without a
 	// new field, and their in-flight builds keep the old input.
 	BuildInput string `json:"build_input,omitempty"`
+	// ReadBack is the read-back of a handed-over spec shown at spec_review
+	// (read_back.go): drafted on a spec_drafting pass of a SpecImported
+	// request, replaced only through ReplaceReadBack, nil for every other
+	// request.
+	ReadBack *ReadBack `json:"read_back,omitempty"`
+	// ReadBackAnswerLog is every answer the operator set, changed or cleared
+	// on a read-back question (AnswerReadBack), oldest first: who, when and
+	// which question, never the text.
+	ReadBackAnswerLog []ReadBackAnswerEvent `json:"read_back_answer_log,omitempty"`
 	// PlanImported is `factoryd submit -spec-file ... -plan-dir`: the
 	// operator also handed over the tickets (ImportedTicketsDir). The first
 	// planning pass takes them in place of the planning job, through the
@@ -772,6 +786,10 @@ type Rejection struct {
 	// each note against the document, never for building feedback.
 	Anchors []RejectionAnchor `json:"anchors,omitempty"`
 	Note    string            `json:"note,omitempty"`
+	// ReadBackAnswers are the read-back questions the operator had answered
+	// when this rejection sent the spec back: the redraft drafts a new
+	// read-back, so the answers ride in this rejection's feedback instead.
+	ReadBackAnswers []ReadBackQuestion `json:"read_back_answers,omitempty"`
 }
 
 // FactoryActor is the By of a Rejection the factory recorded itself: a
@@ -970,6 +988,40 @@ type SpecEvidence struct {
 	// spend would simply vanish from the record the moment a retry
 	// succeeded. Nil when the job had no relay at all.
 	Spend *JobSpend `json:"spend,omitempty"`
+	// Job names the job this record is the evidence of when it is not the
+	// spec-drafting job's: SpecEvidenceJobReadBack for a handed-over spec's
+	// first pass, which runs only the read-back. Empty is spec drafting
+	// (with any read-back of the same pass added to it).
+	Job string `json:"job,omitempty"`
+}
+
+// SpecEvidenceJobReadBack is SpecEvidence.Job for the read-back job's
+// evidence.
+const SpecEvidenceJobReadBack = "read_back"
+
+// AddUsage returns the token usage of two jobs together: a field both carry
+// as a number is summed, a field only one carries as a number keeps that
+// number, and any other field keeps a's value (b's when a lacks it). Nil
+// when both are nil.
+func AddUsage(a, b map[string]any) map[string]any {
+	if a == nil && b == nil {
+		return nil
+	}
+	sum := make(map[string]any, len(a)+len(b))
+	for k, v := range b {
+		sum[k] = v
+	}
+	for k, v := range a {
+		x, aNum := v.(float64)
+		y, bNum := sum[k].(float64)
+		switch {
+		case aNum && bNum:
+			sum[k] = x + y
+		case !bNum:
+			sum[k] = v
+		}
+	}
+	return sum
 }
 
 // PlanEvidence records how the plan-drafting job's single pi invocation

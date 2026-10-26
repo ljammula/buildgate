@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { expectedSha256For } from "@/domain/contentHash";
 import type { RequestSummary } from "@/domain/request";
@@ -37,6 +37,10 @@ export interface RequestDialogs {
   readonly onTicketOracleChanged: (shown: TicketOracleShown) => void;
   /** Changes whenever the panel must start over, which remounts it. */
   readonly ticketOracleNonce: number;
+  /** The read-back questions whose answer box holds text not yet saved, in id order. */
+  readonly unsavedAnswers: readonly string[];
+  /** The read-back panel's report of one answer box (stable across renders). */
+  readonly onAnswerDraftChanged: (questionId: string, unsaved: boolean) => void;
 }
 
 /** Whether a plan_review approval must wait for the ticket-oracle panel. */
@@ -57,7 +61,17 @@ export function useRequestDialogs(request: RequestSummary): RequestDialogs {
   const [active, setActive] = useState<ActiveDialog | null>(null);
   const [ticketOracle, setTicketOracle] = useState<TicketOracleShown | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [unsaved, setUnsaved] = useState<ReadonlySet<string>>(new Set());
   const finished = useRef(false);
+  const onAnswerDraftChanged = useCallback((questionId: string, isUnsaved: boolean) => {
+    setUnsaved((current) => {
+      if (current.has(questionId) === isUnsaved) return current;
+      const next = new Set(current);
+      if (isUnsaved) next.add(questionId);
+      else next.delete(questionId);
+      return next;
+    });
+  }, []);
 
   function openApprove() {
     finished.current = false;
@@ -110,5 +124,7 @@ export function useRequestDialogs(request: RequestSummary): RequestDialogs {
     ticketOracle,
     onTicketOracleChanged: setTicketOracle,
     ticketOracleNonce: nonce,
+    unsavedAnswers: [...unsaved].sort(),
+    onAnswerDraftChanged,
   };
 }

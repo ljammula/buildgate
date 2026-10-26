@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,6 +39,11 @@ type contentHashVectors struct {
 		Shown map[string]string `json:"shown"`
 		Want  map[string]string `json:"want"`
 	} `json:"oracle_approvals"`
+	ReadBackAnswers []struct {
+		Name      string             `json:"name"`
+		Questions []ReadBackQuestion `json:"questions"`
+		SHA256    string             `json:"sha256"`
+	} `json:"read_back_answers"`
 }
 
 func loadContentHashVectors(t *testing.T) contentHashVectors {
@@ -50,8 +56,8 @@ func loadContentHashVectors(t *testing.T) contentHashVectors {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatalf("decode golden vectors: %v", err)
 	}
-	if len(v.Digests) == 0 || len(v.Approvals) == 0 || len(v.OracleApprovals) == 0 {
-		t.Fatalf("golden vectors are missing a section: %d digests, %d approvals, %d oracle approvals", len(v.Digests), len(v.Approvals), len(v.OracleApprovals))
+	if len(v.Digests) == 0 || len(v.Approvals) == 0 || len(v.OracleApprovals) == 0 || len(v.ReadBackAnswers) == 0 {
+		t.Fatalf("golden vectors are missing a section: %d digests, %d approvals, %d oracle approvals, %d read-back answers", len(v.Digests), len(v.Approvals), len(v.OracleApprovals), len(v.ReadBackAnswers))
 	}
 	return v
 }
@@ -136,15 +142,33 @@ func TestContentHashGoldenVectorApprovals(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ApproveShown with the vector's expected map: %v", err)
 			}
-			if len(approved.ApprovedSHA256) != len(a.Want) {
-				t.Errorf("ApprovedSHA256 = %v, want exactly the vector's %v", approved.ApprovedSHA256, a.Want)
+			files := maps.Clone(a.Want)
+			delete(files, ReadBackAnswersKey)
+			if len(approved.ApprovedSHA256) != len(files) {
+				t.Errorf("ApprovedSHA256 = %v, want exactly the vector's files %v", approved.ApprovedSHA256, files)
 			}
-			for relPath, want := range a.Want {
+			for relPath, want := range files {
 				if got := approved.ApprovedSHA256[relPath]; got != want {
 					t.Errorf("ApprovedSHA256[%q] = %q, want %q", relPath, got, want)
 				}
 			}
 		})
+	}
+}
+
+// TestContentHashGoldenVectorReadBackAnswers pins the digest of the read-back
+// answers a console showed (ReadBackShownSHA256), which a spec approval sends
+// under ReadBackAnswersKey.
+func TestContentHashGoldenVectorReadBackAnswers(t *testing.T) {
+	for _, v := range loadContentHashVectors(t).ReadBackAnswers {
+		t.Run(v.Name, func(t *testing.T) {
+			if got := ReadBackShownSHA256(&ReadBack{Questions: v.Questions}); got != v.SHA256 {
+				t.Errorf("ReadBackShownSHA256 = %s, want %s", got, v.SHA256)
+			}
+		})
+	}
+	if got := ReadBackShownSHA256(nil); got != sha256Hex(nil) {
+		t.Errorf("ReadBackShownSHA256(nil) = %s, want the digest of no bytes", got)
 	}
 }
 

@@ -271,7 +271,7 @@ func TestInfeasibleImportedPlanEndsImportBeforeSpecSendBack(t *testing.T) {
 		return changedSpec, &request.SpecEvidence{}, nil
 	}
 	r := requestdrivertest.LoadRequest(t, dataDir, id)
-	if err := requestdriver.AdvanceSpecDrafting(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, specRunner, time.Now()); err != nil {
+	if err := requestdriver.AdvanceSpecDrafting(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, specRunner, time.Now()); err != nil {
 		t.Fatalf("redraft spec: %v", err)
 	}
 	if _, err := request.Approve(dataDir, id, "op", time.Now(), nil); err != nil {
@@ -283,7 +283,7 @@ func TestInfeasibleImportedPlanEndsImportBeforeSpecSendBack(t *testing.T) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)}}, &request.PlanEvidence{}, nil
 	}
 	r = requestdrivertest.LoadRequest(t, dataDir, id)
-	if err := requestdriver.AdvancePlanning(context.Background(), dataDir, r, requestdriver.WorkerConfig{}, planRunner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, planRunner, time.Now()); err != nil {
 		t.Fatalf("plan after spec approval: %v", err)
 	}
 	final := requestdrivertest.LoadRequest(t, dataDir, id)

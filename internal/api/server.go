@@ -741,6 +741,7 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("POST /requests/{id}/resume", s.resumeRequest)
 	s.mux.HandleFunc("POST /requests/{id}/cancel", s.cancelRequest)
 	s.mux.HandleFunc("PUT /requests/{id}/spec", s.updateRequestSpec)
+	s.mux.HandleFunc("PUT /requests/{id}/read-back/answers/{qid}", s.answerRequestReadBack)
 	s.mux.HandleFunc("PUT /requests/{id}/tickets/{n}", s.updateRequestTicket)
 	s.mux.HandleFunc("GET /requests/{id}/oracle", s.listRequestOracle)
 	s.mux.HandleFunc("GET /requests/{id}/oracle/{name}", s.getRequestOracleFile)
@@ -3987,7 +3988,7 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}
-	if errors.Is(err, request.ErrOracleNotShown) {
+	if errors.Is(err, request.ErrOracleNotShown) || errors.Is(err, request.ErrReadBackNotShown) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
