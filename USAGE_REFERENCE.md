@@ -59,7 +59,7 @@ keeps the earlier shape through every remaining ticket and corrective round.
 | Field a later release added | A request written before it |
 |---|---|
 | `build_input` | Absent: ticket-first build input, no `# Approved spec`, no read-back block |
-| `read_back`, `approved_read_back_sha256`, `read_back_answer_log` | Absent. Approval needs none and its hashes verify at build. A handed-over spec sent back from `spec_review` gets a read-back with its redraft; the answers reach the planner, the oracle drafter and the spec-conformity reviewer, not the ticket's build input |
+| `read_back`, `approved_read_back_sha256`, `read_back_answer_log` | Absent, and no read-back is drafted for it, its redrafts included: its answers would never reach a build. Approval needs none and its hashes verify at build |
 | `imported_plan_criteria`, `plan_import_ended` | Absent: a plan handed over before the upgrade is taken without the criteria comparison, so a changed spec does not stop planning |
 | `plan_budget_lines`, a ticket's `Estimated-Changed-Lines:` | Absent at `plan_review`: no budget and no note. Planning that runs after the upgrade reads `pr_budget_lines` from the session config then in force |
 

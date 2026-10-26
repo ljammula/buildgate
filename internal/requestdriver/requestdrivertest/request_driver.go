@@ -644,6 +644,7 @@ func HandedOverRequest(t *testing.T, dataDir, spec string) *request.Request {
 	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
 	r.State = request.StateSpecDrafting
 	r.SpecImported = true
+	r.BuildInput = request.BuildInputApprovedSpec
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,10 @@ type ReadBackRunner func(ctx context.Context, dataDir string, r *request.Request
 
 // recordReadBack drafts the read-back of a handed-over spec on the spec
 // drafting pass that drafted or took spec, and records it on r. Any other
-// request is left as it is, and so is a read-back that already reads these
+// request is left as it is, including a handed-over one whose ticket builds
+// keep the earlier input shape (its BuildInput is not
+// request.BuildInputApprovedSpec), since its answers would never reach a
+// build, and so is a read-back that already reads these
 // exact spec bytes (request.Request.ReplaceReadBack keeps its answers). The
 // read-back never stops the request: a job that is missing, over the spend
 // ceiling, failed, or wrote a refused read-back leaves a read-back with only
@@ -30,7 +33,7 @@ type ReadBackRunner func(ctx context.Context, dataDir string, r *request.Request
 // with r left as it is, when the request left spec_drafting while the job
 // ran; err is the context's when the step itself was stopped.
 func recordReadBack(ctx context.Context, dataDir string, r *request.Request, spec string, cfg WorkerConfig) (ok bool, err error) {
-	if !r.SpecImported {
+	if !r.SpecImported || r.BuildInput != request.BuildInputApprovedSpec {
 		return true, nil
 	}
 	specSHA := request.SpecTextSHA256(spec)
