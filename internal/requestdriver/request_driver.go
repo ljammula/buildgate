@@ -2316,8 +2316,9 @@ func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
 
 // changedByEarlierTickets is the files among the ticket's
 // Required-Changed-Files (read from specPath, the spec the build is given)
-// that an earlier ticket of r changed, as each earlier ticket's current
-// pull-request-head run recorded them: the run's required_files_changed gate
+// that an earlier ticket of r changed, as of each earlier ticket's PR head
+// (its last accepted and pushed round's run, else its build's run,
+// Ticket.PRHeadRunID), as that run recorded them: the run's required_files_changed gate
 // may count such a file when this build leaves it untouched
 // (policy.RequiredFilesChanged). nil for ticket 1, for a ticket that declares
 // no required files, and when no earlier ticket changed one of them. An

@@ -1164,8 +1164,14 @@ func TestIntegrationRequiredFilesChangedCountsAnEarlierTicketsFile(t *testing.T)
 		t.Fatalf("expected a required_files_changed gate result, got %v", r.GateResults)
 		return nil
 	}
-	both := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt, other.txt\n"
-	earlier := []string{"-changed-by-earlier-tickets", "content.txt"}
+	// A request's ticket: -changed-by-earlier-tickets is refused without
+	// -request-ticket.
+	requestTicket := func(required string) string {
+		spec := strings.Replace(wellFormedRequestTicketspec, "Allowed-Files: content.txt\n", "Allowed-Files: content.txt, other.txt\n", 1)
+		return strings.Replace(spec, "Required-Changed-Files: content.txt\n", "Required-Changed-Files: "+required+"\n", 1)
+	}
+	both := requestTicket("content.txt, other.txt")
+	earlier := []string{"-request-ticket", "-changed-by-earlier-tickets", "content.txt"}
 
 	r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, earlier)
 	if r.State != run.StateAccepted {
@@ -1178,10 +1184,10 @@ func TestIntegrationRequiredFilesChangedCountsAnEarlierTicketsFile(t *testing.T)
 		t.Errorf("run ChangedByEarlierTickets = %v, want [content.txt]", r.ChangedByEarlierTickets)
 	}
 
-	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, nil); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
+	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, []string{"-request-ticket"}); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
 		t.Errorf("without the earlier ticket's file: state = %q, want quarantined on required_files_changed", r.State)
 	}
-	onlyEarlier := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
+	onlyEarlier := requestTicket("content.txt")
 	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", onlyEarlier, "30s", nil, earlier); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
 		t.Errorf("a ticket that changed none of its required files: state = %q, want quarantined on required_files_changed", r.State)
 	}

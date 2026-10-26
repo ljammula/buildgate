@@ -69,6 +69,20 @@ func TestLaterTicketsCarryTheRequiredFilesEarlierTicketsChanged(t *testing.T) {
 	saveRun(2, required)
 	wantFlag(r.Tickets[2], required)
 
+	// The list is as of the earlier ticket's PR head: an accepted and pushed
+	// review round's run counts, not the ticket's first build.
+	saveRun(1, "internal/payments/refunds_test.go")
+	saveRun(2, "internal/payments/refunds_test.go")
+	round := &run.Run{ID: requestdrivertest.TicketRunID(id, 2) + "-review1", BaseSHA: base, InstructionBaseSHA: base, ChangedFiles: []string{required, "internal/payments/refunds_test.go"}}
+	if err := round.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets[1].Rounds = []request.Round{{RunID: round.ID, Outcome: request.RoundAccepted, Pushed: false}}
+	wantFlag(r.Tickets[2], "")
+	r.Tickets[1].Rounds[0].Pushed = true
+	wantFlag(r.Tickets[2], required)
+	r.Tickets[1].Rounds = nil
+
 	// An earlier ticket's run that cannot be loaded refuses the build.
 	r.Tickets[1].RunID = "no-such-run"
 	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, r.Tickets[2], cfg); err == nil || !strings.Contains(err.Error(), "load ticket 2's run no-such-run") {

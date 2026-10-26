@@ -49,8 +49,10 @@ import (
 var prClosesIssueRefPattern = regexp.MustCompile(`^[^/]+/[^/]+#[0-9]+$`)
 
 // parseChangedByEarlierTickets reads -changed-by-earlier-tickets: a
-// comma-separated list of workspace-relative paths, nil when empty.
-func parseChangedByEarlierTickets(value string) ([]string, error) {
+// comma-separated list of workspace-relative paths, nil when empty. Only a
+// request's ticket build has earlier tickets, so a list without
+// -request-ticket is refused.
+func parseChangedByEarlierTickets(value string, requestTicket bool) ([]string, error) {
 	var files []string
 	for _, f := range strings.Split(value, ",") {
 		if f = strings.TrimSpace(f); f == "" {
@@ -60,6 +62,9 @@ func parseChangedByEarlierTickets(value string) ([]string, error) {
 			return nil, fmt.Errorf("-changed-by-earlier-tickets: %q is not a workspace-relative path", f)
 		}
 		files = append(files, f)
+	}
+	if len(files) > 0 && !requestTicket {
+		return nil, errors.New("-changed-by-earlier-tickets is only for a request's ticket build: pass -request-ticket, or leave it out")
 	}
 	return files, nil
 }
@@ -1049,7 +1054,7 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 		return err
 	}
 	var err error
-	if tr.changedByEarlierTickets, err = parseChangedByEarlierTickets(*tr.rf.changedByEarlierTickets); err != nil {
+	if tr.changedByEarlierTickets, err = parseChangedByEarlierTickets(*tr.rf.changedByEarlierTickets, *tr.rf.requestTicket); err != nil {
 		return err
 	}
 	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, replayConflicts(tr.rf))
