@@ -2184,7 +2184,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	reviewSpec, recheck, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce)
+	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, !cfg.Settings.ReviewReproductionsOff)
 	if err != nil {
 		return nil, err
 	}
@@ -2193,8 +2193,9 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		Workspace:              r.Workspace,
 		Project:                r.Project,
 		SpecPath:               specPath,
-		ReviewSpecPath:         reviewSpec,
-		RecheckReproductions:   recheck,
+		ReviewSpecPath:         review.SpecPath,
+		ReviewReproduction:     review.Reproduce,
+		RecheckReproductions:   review.Recheck,
 		VerifyCommand:          verifyCommand,
 		FullSuiteCommand:       fullSuiteCommand,
 		FullSuiteSource:        fullSuiteSource,
@@ -2243,32 +2244,45 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	}, nil
 }
 
-// reproductionInputs are a ticket build's -review-spec (approvedSpecPath)
-// and -recheck-reproductions manifest (ticketRecheck) when the build holds
-// and runs reviewer reproductions (reproduce), "" for both otherwise: a
-// restack's replay run, which cannot take a corrective build, holds and runs
-// none and leaves the ticket's list as it is. A ticket whose list is not
+// reviewInputs are a ticket build's review inputs: SpecPath, the approved
+// spec its review cites (-review-spec); Reproduce, whether it holds and runs
+// the review's reproductions (-review-reproduction, SC-022); and Recheck,
+// its -recheck-reproductions manifest.
+type reviewInputs struct {
+	SpecPath  string
+	Reproduce bool
+	Recheck   string
+}
+
+// reproductionInputs are a ticket build's review inputs. review is false for
+// a restack's replay run, which cannot take a corrective build: it gets none,
+// and the ticket's list stays as it is. hold is the session config's
+// review_reproductions: false keeps the approved spec but holds no new
+// reproduction, so every finding of the build's review is advice; a ticket
+// whose list is not empty (a refusal recorded while it was on) is still
+// rechecked against that list, and so still holds. A ticket whose list is not
 // empty is never built without it: with no approved spec to run them under,
 // the build is refused (errNoRecheck).
-func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, reproduce bool) (reviewSpec, recheck string, err error) {
-	if !reproduce {
-		return "", "", nil
+func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
+	if !review {
+		return reviewInputs{}, nil
 	}
-	if reviewSpec, err = approvedSpecPath(dataDir, r); err != nil {
-		return "", "", err
+	reviewSpec, err := approvedSpecPath(dataDir, r)
+	if err != nil {
+		return reviewInputs{}, err
 	}
 	if index < 1 || index > len(r.Tickets) {
-		return reviewSpec, "", nil
+		return reviewInputs{SpecPath: reviewSpec, Reproduce: hold && reviewSpec != ""}, nil
 	}
 	ticket := &r.Tickets[index-1]
 	if reviewSpec == "" {
 		if len(ticket.Reproductions) > 0 {
-			return "", "", fmt.Errorf("ticket %d: %w: the request has no approved spec to run them under", index, errNoRecheck)
+			return reviewInputs{}, fmt.Errorf("ticket %d: %w: the request has no approved spec to run them under", index, errNoRecheck)
 		}
-		return "", "", nil
+		return reviewInputs{}, nil
 	}
-	recheck, err = ticketRecheck(dataDir, r, ticket, buildID)
-	return reviewSpec, recheck, err
+	recheck, err := ticketRecheck(dataDir, r, ticket, buildID)
+	return reviewInputs{SpecPath: reviewSpec, Reproduce: hold || recheck != "", Recheck: recheck}, err
 }
 
 // requestSpecFile is the request's spec, relative to its directory.

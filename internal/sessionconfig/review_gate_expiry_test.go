@@ -64,3 +64,22 @@ func TestPRBudgetLinesDefaultsAndValidates(t *testing.T) {
 		t.Errorf("negative: ApplySettings = %v, want a refusal naming pr_budget_lines", err)
 	}
 }
+
+func TestReviewReproductionsDefaultsOnAndTurnsOff(t *testing.T) {
+	if DefaultSettings().ReviewReproductionsOff || (Settings{}).ReviewReproductionsOff {
+		t.Error("reproductions off by default, want on")
+	}
+	for body, wantOff := range map[string]bool{"review_reproductions: false\n": true, "review_reproductions: true\n": false, "pr_budget_lines: 250\n": false} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.ReviewReproductionsOff != wantOff {
+			t.Errorf("%q: ReviewReproductionsOff = %t err %v, want %t", body, s.ReviewReproductionsOff, err, wantOff)
+		}
+	}
+	if _, err := Load(writeConfig(t, "review_reproductions: sometimes\n")); err == nil {
+		t.Error("review_reproductions: sometimes loaded, want a refusal")
+	}
+}
