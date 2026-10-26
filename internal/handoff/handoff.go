@@ -111,9 +111,6 @@ type Document struct {
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	Rounds       []Round  `json:"rounds,omitempty"`
 	Checks       []Check  `json:"checks,omitempty"`
-	// ReviewFindings are the code reviewer's, present when code_review
-	// failed.
-	ReviewFindings []run.CodeReviewFinding `json:"review_findings,omitempty"`
 	// ReproducedFindings are the review findings whose reproduction the
 	// factory ran and saw block the run (SC-022), present when
 	// review_reproduction failed: each one line, never the reproduction's
@@ -194,17 +191,6 @@ func Build(r *run.Run, dataDir string) Document {
 			NotJudged:   uncommitted && DiffChecks[finding.Check],
 		})
 	}
-	if failed["code_review"] && r.CodeReview != nil {
-		for _, f := range r.CodeReview.Findings {
-			if len(doc.ReviewFindings) == maxReviewItems {
-				break
-			}
-			doc.ReviewFindings = append(doc.ReviewFindings, run.CodeReviewFinding{
-				Severity: clean(f.Severity, maxWordLen), File: clean(f.File, maxNameLen), Line: f.Line,
-				Summary: clean(f.Summary, maxSentenceLen), FailureScenario: clean(f.FailureScenario, maxSentenceLen),
-			})
-		}
-	}
 	if failed[policy.ReviewReproductionCheck] {
 		doc.ReproducedFindings = reproducedFindings(r)
 	}
@@ -275,9 +261,6 @@ func environmentSentence(r *run.Run, check string) string {
 
 // binFor is BinOf with what only the run record shows:
 //
-//   - a review check that failed without a verdict to act on (the reviewer
-//     did not answer) is BinNever: there is nothing to tell a build. When
-//     no other check failed, the run's request waits in resume_review;
 //   - a repository gate recorded with exit -1 never ran (the worker did not
 //     know it), which no build can fix: BinOperator;
 //   - a canonical_verify recorded because the verify did not run the
@@ -300,8 +283,6 @@ func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case failsOnBase(r, finding.Check):
 		return BinOperator
-	case finding.Check == "code_review" && (r.CodeReview == nil || !r.CodeReview.Available):
-		return BinNever
 	case policy.IsRepoGate(finding.Check) && finding.ExitCode == -1:
 		return BinOperator
 	case finding.Check == "canonical_verify" && setupNotRun(r):
@@ -523,21 +504,6 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
-	if len(d.ReviewFindings) > 0 {
-		b.WriteString("## Code review findings\n\n")
-		for _, f := range d.ReviewFindings {
-			where := ""
-			if f.File != "" {
-				where = fmt.Sprintf(" (`%s`", f.File)
-				if f.Line > 0 {
-					where += fmt.Sprintf(", line %d", f.Line)
-				}
-				where += ")"
-			}
-			fmt.Fprintf(&b, "- %s%s: %s%s\n", quote(f.Severity), where, quote(f.Summary), detail(f.FailureScenario))
-		}
-		b.WriteString("\n")
-	}
 	if len(d.ReproducedFindings) > 0 {
 		b.WriteString("## Reproduced review findings\n\n")
 		for _, f := range d.ReproducedFindings {
@@ -588,6 +554,26 @@ func (d Document) Markdown() string {
 	return out
 }
 
+// ReproducedFindingLines is each blocking finding of r (at most
+// maxReviewItems) as the one list line a later build is told of it, for a
+// build input other than the Document: a pull-request review round's
+// addendum. Never the reproduction's content or the failure scenario.
+func ReproducedFindingLines(r *run.Run) []string {
+	var lines []string
+	for _, f := range reproducedFindings(r) {
+		lines = append(lines, f.line())
+	}
+	return lines
+}
+
+// CleanSentence is s as this package makes a sentence someone else wrote
+// safe to show: one line, cut to a fixed length, with no backtick, escape or
+// recognisable secret. CleanWord is the same for a single word.
+func CleanSentence(s string) string { return clean(s, maxSentenceLen) }
+
+// CleanWord: see CleanSentence.
+func CleanWord(s string) string { return clean(s, maxWordLen) }
+
 // line is the finding's one list line: the reviewer's words quoted, the
 // factory's in the sentence.
 func (f ReproducedFinding) line() string {
@@ -623,11 +609,4 @@ func fileList(files []string) string {
 // value cannot close its own quotation.
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, "'") + `"`
-}
-
-func detail(s string) string {
-	if s != "" {
-		return " — " + quote(s)
-	}
-	return ""
 }

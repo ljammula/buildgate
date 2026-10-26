@@ -197,7 +197,7 @@ func withRoundBranch(dp Deps, dataDir string, r *request.Request, ticket *reques
 	if previous != nil {
 		if doc, ok := recordableHandoff(dataDir, previous, args); ok {
 			if path, ok := writeEarlierRecord(dataDir, r, ticket, previous, doc, "retry", startsOnItsBranch); ok {
-				args = append(args, "-earlier-attempt", path)
+				args = recheckBeside(dataDir, r, ticket, previous, path, append(args, "-earlier-attempt", path))
 				recordOf = previous.ID
 			}
 		}

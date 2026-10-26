@@ -99,7 +99,7 @@ func TestEscalationWithoutAThinkingLevelRunsAtTheRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := requestdriver.WorkerConfig{Settings: escalationSettings(&sessionconfig.Escalation{Model: "sol"})}
-	args, err := requestdriver.BuildReviewCorrectiveArgs(dataDir, r, r.Tickets[0], cfg, r.Tickets[0].SpecPath, "round-1", "some-branch", strings.Repeat("0", 40))
+	args, err := requestdriver.BuildCorrectiveArgs(dataDir, r, r.Tickets[0], cfg, r.Tickets[0].SpecPath, "round-1", "some-branch", strings.Repeat("0", 40))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestNoEscalationLeavesACorrectiveRoundsArgvUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	build := func(cfg requestdriver.WorkerConfig) []string {
-		args, err := requestdriver.BuildReviewCorrectiveArgs(dataDir, r, r.Tickets[0], cfg, r.Tickets[0].SpecPath, "round-1", "some-branch", strings.Repeat("0", 40))
+		args, err := requestdriver.BuildCorrectiveArgs(dataDir, r, r.Tickets[0], cfg, r.Tickets[0].SpecPath, "round-1", "some-branch", strings.Repeat("0", 40))
 		if err != nil {
 			t.Fatal(err)
 		}

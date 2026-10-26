@@ -71,9 +71,11 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 		// "" for one that starts from the base.
 		wantOpens, wantDiffBase string
 	}{
-		"a gate a build can fix":                            {failed: []string{"lint"}, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: base},
-		"only a review failed, with a verdict":              {shape: flagged, wantRecord: "rejects a negative amount", wantOpens: onBranch, wantDiffBase: base},
-		"the attempt ran on a branch with an earlier base":  {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.DiffBaseSHA = fmt.Sprintf("%040d", 9) }, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: fmt.Sprintf("%040d", 9)},
+		"a gate a build can fix": {failed: []string{"lint"}, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: base},
+		// SC-022: a finding refuses only through its reproduction, so a
+		// failed code_review is never handed to a build.
+		"only a review failed, with a high finding":        {shape: flagged},
+		"the attempt ran on a branch with an earlier base": {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.DiffBaseSHA = fmt.Sprintf("%040d", 9) }, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: fmt.Sprintf("%040d", 9)},
 		"-from scratch":                                     {failed: []string{"lint"}, fromScratch: true, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
 		"the attempt committed nothing":                     {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.ResultSHA = rr.BaseSHA }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
 		"the attempt recorded no branch":                    {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.Branch = "" }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},

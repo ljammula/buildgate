@@ -82,12 +82,13 @@ type WorkerConfig struct {
 	// PR may go through before its request is halted with "review rounds
 	// exhausted for ticket i/n". See -max-review-rounds' own help text.
 	MaxReviewRounds int
-	// reviewCorrectiveRounds caps how many automatic corrective builds a
-	// ticket gets when its run quarantines with code_review its only
-	// failed gate, before the request quarantines as
-	// it does today. See -review-corrective-rounds' own help text and
-	// TryReviewCorrectiveRound (request_driver.go). 0 disables the
-	// corrective round entirely.
+	// ReviewCorrectiveRounds caps how many automatic corrective builds a
+	// ticket gets when its run quarantines with checks a build can fix
+	// when told about them (a reviewer's reproduction that refused it
+	// included), before the request quarantines. The same number caps a
+	// PR-review round's fix attempts. See -review-corrective-rounds' own
+	// help text and TryCheckCorrectiveRound. 0 disables the corrective
+	// round entirely.
 	ReviewCorrectiveRounds int
 	// hitlReminderInterval is how often the worker's reminder ticker
 	// (RemindIfDue) re-reminds a request waiting in spec_review,

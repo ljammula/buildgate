@@ -14,7 +14,6 @@ func TestRenderBoundedAddendumSectionsKeepsOmissionNotesAtMinimumSize(t *testing
 			maxEntries:   20,
 		},
 		{
-			prefix:       priorRoundFindingsNote,
 			heading:      "\n## Findings",
 			entries:      []string{"a finding that is too large for the remaining budget\n"},
 			omittedLabel: "findings",
@@ -22,11 +21,10 @@ func TestRenderBoundedAddendumSectionsKeepsOmissionNotesAtMinimumSize(t *testing
 		},
 	}
 	maxBytes := boundedAddendumSectionMinimumBytes(sections[0]) + boundedAddendumSectionMinimumBytes(sections[1])
-	got := renderBoundedAddendumSections(sections, maxBytes)
+	got, _ := renderBoundedAddendumSectionsWithCounts(sections, maxBytes)
 	for _, want := range []string{
 		"## Reviewer comments to address",
 		"_1 more reviewer comments omitted._",
-		priorRoundFindingsNote,
 		"## Findings",
 		"_1 more findings omitted._",
 	} {

@@ -375,13 +375,12 @@ func TestAdvanceBuildingLaunchesWhenUnderBudget(t *testing.T) {
 	}
 }
 
-// TestTryReviewCorrectiveRoundQuarantinesWhenRequestBudgetExhausted
-// covers the automatic spec_conformity corrective-round launch point
-// (request_driver.go): a request already at its own budget must
-// quarantine on the very first round attempt, before the corrective
-// runner is ever called -- even though reviewCorrectiveRounds has budget
-// left.
-func TestTryReviewCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
+// TestCorrectiveRoundQuarantinesWhenRequestBudgetExhausted covers the
+// automatic corrective-round launch point (request_driver.go): a request
+// already at its own budget must quarantine on the very first round
+// attempt, before the corrective runner is ever called -- even though
+// reviewCorrectiveRounds has budget left.
+func TestCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	branch := "factoryd/" + id + "-001"
@@ -394,26 +393,19 @@ func TestTryReviewCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testin
 		t.Fatal(err)
 	}
 	ticket := &r.Tickets[0]
-	runRecord := &run.Run{
-		ID: "run-under-test", State: run.StateQuarantined, Branch: branch, BaseSHA: baseSHA,
-		GateResults: []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "spec_conformity", Passed: false},
-		},
-		SpecConformityVerdicts: []run.ReviewVerdict{{Criterion: "1. x", Verdict: "flagged", Detail: "still not fixed"}},
-	}
+	runRecord := requestdrivertest.ReproductionRefusedOn(t, dataDir, "run-under-test", branch, baseSHA, fmt.Sprintf("%040d", 2))
 
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}
 	})
 
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, Settings: sessionconfig.Settings{RequestTokenBudget: 1000}}
-	handled, err := requestdriver.TryReviewCorrectiveRound(dp, context.Background(), dataDir, r, ticket, runRecord, cfg, time.Now())
+	handled, err := requestdriver.TryCheckCorrectiveRound(dp, context.Background(), dataDir, r, ticket, runRecord, cfg, time.Now())
 	if !handled {
-		t.Fatal("tryReviewCorrectiveRound: handled = false, want true (budget exhausted quarantines)")
+		t.Fatal("TryCheckCorrectiveRound: handled = false, want true (budget exhausted quarantines)")
 	}
 	if err != nil {
-		t.Fatalf("tryReviewCorrectiveRound: %v", err)
+		t.Fatalf("TryCheckCorrectiveRound: %v", err)
 	}
 	if *calls != 0 {
 		t.Fatalf("reviewCorrectiveRunner calls = %d, want 0", *calls)

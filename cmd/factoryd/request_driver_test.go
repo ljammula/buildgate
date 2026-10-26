@@ -58,10 +58,10 @@ func TestBuildRequestBuildArgsIsAcceptedByRunMainWithReadysOwnFlagSet(t *testing
 	}
 }
 
-// TestBuildReviewCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet: the
+// TestBuildCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet: the
 // argv of an automatic corrective round on roles.execution.escalation,
 // -execution-thinking included, parses through the run's real flag set.
-func TestBuildReviewCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet(t *testing.T) {
+func TestBuildCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	specPath := filepath.Join(t.TempDir(), "001.spec.md")
@@ -75,9 +75,9 @@ func TestBuildReviewCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet(t *te
 		Model: "luna", Allowed: []string{"luna", "sol"}, Escalation: &sessionconfig.Escalation{Model: "sol", Thinking: "high"},
 	}}
 
-	args, err := requestdriver.BuildReviewCorrectiveArgs(t.TempDir(), r, ticket, cfg, specPath, "req-1-001-conformity1", "some-branch", strings.Repeat("0", 40))
+	args, err := requestdriver.BuildCorrectiveArgs(t.TempDir(), r, ticket, cfg, specPath, "req-1-001-conformity1", "some-branch", strings.Repeat("0", 40))
 	if err != nil {
-		t.Fatalf("BuildReviewCorrectiveArgs: %v", err)
+		t.Fatalf("BuildCorrectiveArgs: %v", err)
 	}
 	if requestdrivertest.ArgValue(args, "-execution-model") != "sol" || requestdrivertest.ArgValue(args, "-execution-thinking") != "high" {
 		t.Fatalf("argv = %v, want -execution-model sol -execution-thinking high", args)
@@ -87,7 +87,7 @@ func TestBuildReviewCorrectiveArgsOnTheEscalationIsAcceptedByTheRunFlagSet(t *te
 		t.Fatal("runMainWithReady = nil, want the error it stops at")
 	}
 	if strings.Contains(err.Error(), "not defined") {
-		t.Fatalf("runMainWithReady rejected an argv BuildReviewCorrectiveArgs produced: %v", err)
+		t.Fatalf("runMainWithReady rejected an argv BuildCorrectiveArgs produced: %v", err)
 	}
 }
 

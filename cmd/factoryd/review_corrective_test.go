@@ -14,8 +14,8 @@ import (
 )
 
 // TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines
-// covers the corrective round's own "quarantined/halted again -> the request quarantines as
-// today" done-when item, and that Retry/SendBack keep working: ticket.
+// covers a corrective round after a reviewer's reproduction refused the
+// ticket: "quarantined again -> the request quarantines", and that Retry/SendBack keep working: ticket.
 // Branch/PRURL stay empty (AnyTicketAccepted must stay false), and exactly
 // one corrective round runs (the budget is consumed, not retried again in
 // the same pass).
@@ -27,13 +27,8 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, baseSHA, "")
 
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
-		return &run.Run{ID: roundRunID, State: run.StateQuarantined, HaltError: "gate failed: spec_conformity", Branch: branch, BaseSHA: baseSHA,
-			GateResults: []run.GateResult{
-				{Check: "canonical_verify", Passed: true},
-				{Check: "spec_conformity", Passed: false},
-			},
-			SpecConformityVerdicts: []run.ReviewVerdict{{Criterion: "2. rejects a negative amount", Verdict: "flagged", Detail: "still not fixed"}},
-		}
+		// The round's own review refused it through a new reproduction.
+		return requestdrivertest.ReproductionRefusedOn(t, dataDir, roundRunID, branch, baseSHA, fmt.Sprintf("%040d", 3))
 	})
 
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -53,8 +48,11 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 	}
 	// The exhausted-rounds message quotes the last round's own reason, so
 	// the operator sees why without opening each run.
-	if !strings.Contains(loaded.Error, "rounds exhausted") || !strings.Contains(loaded.Error, "gate failed: spec_conformity") {
+	if !strings.Contains(loaded.Error, "rounds exhausted") || !strings.Contains(loaded.Error, "review_reproduction: the factory's run of the reviewer's reproduction") {
 		t.Errorf("Error = %q, want the exhausted message quoting the last round's reason", loaded.Error)
+	}
+	if loaded.QuarantineCheck != request.QuarantineCheckReviewReproduction {
+		t.Errorf("QuarantineCheck = %q, want %q", loaded.QuarantineCheck, request.QuarantineCheckReviewReproduction)
 	}
 	tk := loaded.Tickets[0]
 	if tk.Branch != "" || tk.PRURL != "" {
@@ -63,8 +61,8 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 	if loaded.AnyTicketAccepted() {
 		t.Error("AnyTicketAccepted() = true, want false after a quarantined corrective round")
 	}
-	if len(tk.Rounds) != 1 || tk.Rounds[0].Kind != request.ConformityRoundKind || tk.Rounds[0].Outcome != request.RoundQuarantined {
-		t.Fatalf("Tickets[0].Rounds = %+v, want one quarantined conformity round", tk.Rounds)
+	if len(tk.Rounds) != 1 || tk.Rounds[0].Kind != request.CorrectiveRoundKind || tk.Rounds[0].Outcome != request.RoundQuarantined {
+		t.Fatalf("Tickets[0].Rounds = %+v, want one quarantined corrective round", tk.Rounds)
 	}
 	if tk.RunID != tk.Rounds[0].RunID {
 		t.Errorf("Tickets[0].RunID = %q, want it repointed at the corrective round's own run %q", tk.RunID, tk.Rounds[0].RunID)
@@ -77,5 +75,3 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 		t.Fatalf("retryRequest: handled=%v err=%v, want handled=true err=nil", handled, err)
 	}
 }
-
-// ---- code_review coverage (M2-D) ----------------------------------------

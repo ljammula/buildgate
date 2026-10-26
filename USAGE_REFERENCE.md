@@ -322,44 +322,26 @@ meanwhile; the factory marks it ready again by its usual rule (checks pass,
 no thread open, the release decision allows the new head), so no ready state
 crosses a head the factory changed.
 
-A ticket that quarantines with only the `code_review` gate failed (every
-other gate passed) and something to fix named in its record first gets up
-to `-review-corrective-rounds` (default `1`, `0` disables; key
-`review_corrective_rounds`)
-automatic corrective builds on its own branch before the request
-quarantines: each round's addendum spec is the ticket spec plus a "Code
-review findings to address" section (each finding's file:line,
-severity, summary and failure scenario),
-rebuilt via `-on-branch`/`-diff-base` against the quarantined run's own
-branch/base SHA, through every gate again including a fresh, independent
-review. A review that gave no verdict (the reviewer timed out, returned
-nothing parseable, or had its model calls refused by the spend meter or by
-the model provider's own limit) is not actionable, gets no round and is no
-quarantine: the request waits in `resume_review` with the cause, read from
-the spend meter's record of the review's model requests (`provider_quota`,
-`meter_denied`, `model_unavailable`, or `no_verdict` when the model was
-served), and `factoryd resume <id>` reviews the kept build again without
-building it. A corrective round whose own review gave no verdict is not
-counted and leaves the request there too, with only
+A finding of the review never quarantines a ticket by its severity: it
+refuses the run only through a reproduction the factory ran
+(`review_reproduction`, below), and a run that check refused gets the same
+corrective build as any other check a build can fix (below), with its
+reproductions rechecked. A review that gave no verdict (the reviewer timed
+out, returned nothing parseable, or had its model calls refused by the spend
+meter or by the model provider's own limit) is not actionable, gets no round
+and is no quarantine: the request waits in `resume_review` with the cause,
+read from the spend meter's record of the review's model requests
+(`provider_quota`, `meter_denied`, `model_unavailable`, or `no_verdict` when
+the model was served), and `factoryd resume <id>` reviews the kept build
+again without building it. A corrective round whose own review gave no
+verdict is not counted and leaves the request there too, with only
 `factoryd resume -from scratch <id>` to choose (a round keeps no worktree).
-Accepted opens the PR and advances exactly like an ordinary
-first-build acceptance; quarantined or halted again quarantines the
-request as usual. A budget greater than `1` runs up to that many
-*consecutive* rounds, not just one: a round that itself quarantines again
-with the identical review-eligible shape starts another round from its own
-flagged content, until one accepts, a round's own outcome stops being
-review-eligible, or the budget runs out. Never triggered when any other
-gate also failed, or the run halted rather than quarantined. Counted
-separately from `-max-review-rounds`' own PR-review-round cap, so neither
-budget can consume the other's rounds. The budget is per ticket and is not
-reset by `factoryd retry`: a ticket that already used its rounds gets none
-on a rebuild, because a human chose that retry. With
-`roles.execution.escalation` configured, every automatic corrective build
-(this one and the one for other checks below) runs on the escalation's
-model and level instead of the first build's; see "Model routes".
+With `roles.execution.escalation` configured, every automatic corrective
+build runs on the escalation's model and level instead of the first build's;
+see "Model routes".
 
-**Corrective builds for other checks.** A ticket run quarantined by checks
-other than the review alone is followed by a corrective build when its
+**Corrective builds.** A ticket run quarantined is followed by a corrective
+build when its
 handoff sorts every judged failed check as `corrective` (see "What a stopped
 run left behind" in USAGE.md for the bins). A named or repository gate that
 fails the same way on the base commit is sorted `operator`, so no corrective
@@ -370,9 +352,12 @@ build spec, unchanged, and the handoff rendered as text as
 build's first prompt receives, never a review. The file is kept in the
 request's directory (`rounds/<ticket>-corrective<n>/earlier-attempt.md`), the
 round's run is `<request>-<ticket>-corrective<n>`, and the round is recorded
-on the ticket with kind `corrective`. `-review-corrective-rounds` is one
-budget per ticket build for this round and the review round together; `0`
-disables both. Not eligible: `tests_added` on a committed diff, a review that
+on the ticket with kind `corrective`. `-review-corrective-rounds` (default
+`1`; key `review_corrective_rounds`) is one budget per ticket build, `0`
+disables it, and it is counted separately from `max_review_rounds`. An
+accepted round opens the PR and advances exactly like a first build's
+acceptance. A budget greater than `1` runs up to that many consecutive
+rounds while each round's own outcome is still eligible. Not eligible: `tests_added` on a committed diff, a review that
 gave no verdict, an unknown check, a repository gate the worker never ran, a
 build a `setup:` command stopped before its first agent turn (decided only by
 the factory's own records: the meter counted no token for the build and the
@@ -381,6 +366,20 @@ in the verify or a gate, are sorted as the failed check they are), a
 halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
+
+A run a reviewer's reproduction refused (`review_reproduction`, SC-022) gets
+this corrective build too, with what the factory ran and nothing else:
+
+| | |
+|---|---|
+| Told | Each blocking finding as one line of the record (`## Reproduced review findings`: severity, summary, the cited spec line, the reproduction's path, one failing test and its kind). Never the reproduction, the reviewer's failure scenario, a finding that is advice, or a high finding with no reproduction the factory ran |
+| Mounted | Nothing more: the build does not see the reproduction |
+| Rechecked | A manifest in `rounds/<ticket>-corrective<n>/recheck.json`: the quarantined run's id and each held copy (path, SHA-256, runner, test IDs, the host copy under that run's `review-repro/`), checked again by `factoryd` before the build starts. The build's workflow runs each copy once on its result, after the gates and before its own review; anything but a pass on every test refuses the build |
+| Still failing | The recheck runs once: a round whose recheck still fails is not followed by another, whatever the budget, and the request is quarantined with check `review_reproduction`, its reason the run's triage sentence (``review_reproduction: "<path>" still fails on the result commit after the corrective build ("<test>" <kind>); …``). A new blocking finding in the round's own review is a new refusal: it gets the next round while the budget lasts |
+| No round | A held copy that is gone or no longer matches its hash: no corrective build, the request quarantined with check `review_reproduction` |
+
+A retry, a `retry -from <N>` and a resume given the record of a run a
+reproduction refused recheck its held copies the same way.
 
 The build agent's own notes for the next attempt (the last section of
 `earlier-attempt.md`, labelled as the agent's unverified view):
@@ -414,7 +413,7 @@ as a fresh run with every gate again. Where it starts and what it is told:
 |---|---|---|
 | Quarantined, with a handoff a build may be given (the corrective round's rule), built from the ticket's own spec as it is now, and it committed something | On that run's branch, from its commit (`-on-branch`, with the run's diff base); given the record (`rounds/<ticket>-retry/earlier-attempt.md`), which opens by saying the attempt's commit is in the workspace | From the base commit; given the record, which opens by saying the workspace starts from the base |
 | The same, but it committed nothing (verification never passed) or recorded no branch | From the base commit; given the record | The same |
-| Anything else: a failure a build is never told about (`tests_added`, a review with no verdict), a spec changed since (`amend-scope`, an edit), a review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
+| Anything else: a failure a build is never told about (`tests_added`, a review with no verdict, a failed `code_review`), a spec changed since (`amend-scope`, an edit), an older record's review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
 
 The gates and the release decision of a rebuild that continues judge the
 ticket's whole change, measured from the diff base, so nothing in the commit
@@ -456,7 +455,7 @@ under the same checks:
 | Lost, worktree kept (a retry's rebuild from the base; the worktree of a corrective round, which runs on an existing branch, is never kept) | `factoryd resume` in that worktree | `rounds/<ticket>-resume/earlier-attempt.md`; opens by saying the record is of the attempt before the interrupted build, and whether the interrupted build ran on that attempt's branch |
 | Lost or halted | `factoryd resume -from scratch` or `factoryd retry` | `rounds/<ticket>-retry/earlier-attempt.md`, as for any retry |
 
-**`-on-branch`/`-diff-base`.** A corrective round (review or PR-review)
+**`-on-branch`/`-diff-base`.** A corrective round (pre-PR or PR-review)
 checks out the quarantined run's own existing branch and gates the
 cumulative diff from `-diff-base`, for every ticket in a multi-ticket
 request.
@@ -496,22 +495,27 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
 - A round passes every gate the ticket's first build passes, judged on the
   whole pull request diff: verify, the full suite, the diff-shape gates,
   and the code review.
-- A round the review gate alone quarantines (only `code_review` failed, and
-  named something to fix) gets up
-  to `review_corrective_rounds` fix attempts (default `1`, `0` disables) on
-  the same branch before it ends, each told what the gate flagged in the
-  attempt before it. The last attempt decides the round, and the round uses
+- A round a reviewer's reproduction alone refused (only `review_reproduction`
+  failed, SC-022) gets up to `review_corrective_rounds` fix attempts
+  (default `1`, `0` disables) on the same branch before it ends, each given
+  the record of the attempt before it (`-earlier-attempt`, the reproduced
+  findings one line each) and rechecking its held copies; an attempt whose recheck still fails gets no
+  further one. A high finding with no
+  reproduction the factory ran starts no fix attempt and is told to no later
+  build. The last attempt decides the round, and the round uses
   one slot of `max_review_rounds` however many attempts it took. The request
   page links each earlier attempt's run under the round.
 - A quarantined attempt's commits stay on the local branch, unpushed, and
   the next attempt or round builds on them. Each one's ticket is the
-  ticket's own spec plus:
-
-  | Section | Content |
-  |---|---|
-  | `## Reviewer comments to address` | Each open trusted thread: path, line, author, body |
-  | `## Why the previous attempt was not pushed` | Only after an attempt the review gate quarantined: that the earlier attempt is on the branch and was refused |
-  | `## Code review findings to address` | That attempt's findings: location, summary, failure scenario |
+  ticket's own spec plus `## Reviewer comments to address` (each open
+  trusted thread: path, line, author, body). After an attempt a reviewer's
+  reproduction refused, the next attempt or round is also given that
+  attempt's record as `-earlier-attempt` (opening by saying the attempt's
+  commit is in the workspace; its blocking findings one line each under
+  `## Reproduced review findings`: severity, summary, cited spec line, the
+  reproduction's path, one failing test and its kind; never the failure
+  scenario or the reproduction) and rechecks its held copies. The reply posted on the thread quotes the
+  same lines.
 - No new threads, still a draft, checks passing, no unresolved thread
   from any non-bot/non-self author (trusted or not — an untrusted human's
   open comment still blocks readiness, it just can't trigger a round),
@@ -1167,11 +1171,21 @@ body. A finding never fails the `code_review` gate, whatever its severity:
 under `required` the gate fails only when the reviewer gave no verdict (the
 attempt's `exit_code` is 40 for a verdict; any other value is no verdict),
 which sends the request to `resume_review` rather than quarantining it.
-Findings reach the PR body under a `## Code review` section, sanitized, `high`
-first and capped at 20. A finding blocks a run only through a reproduction
-the factory runs itself (SC-022 in `safety-contract.md`), and only on a
-request's ticket build: a bare `factoryd -ticket` run's review is advice
-only, whatever it finds. An answer without a parseable verdict is asked for
+Every finding that is advice reaches the PR body under `## Reviewer advice`,
+one line each (`- **<severity>** <summary>`, made one line, cut to 300
+characters and stripped of backticks, escapes and recognisable credentials),
+`high` first and capped at 20; never its file, failure scenario or
+reproduction. A finding blocks a run only through a reproduction the factory
+runs itself (SC-022 in `safety-contract.md`), and only on a request's ticket
+build:
+
+| Run | Review |
+|---|---|
+| A request's ticket build, its corrective rounds and its PR-review rounds | Findings are advice; a reproduction can refuse the run (`review_reproduction`), and a refused run gets one corrective build that rechecks it |
+| A bare `factoryd -ticket` run | Advice only: no reproduction is held or run, no `review_reproduction` check, no corrective round |
+| A restack's replay run | Advice only, the same |
+
+Severity orders the advice and nothing else. An answer without a parseable verdict is asked for
 again once at most, in the same sandbox, told nothing of the first and
 unable to read its transcript; the two calls share the 20 minutes one call
 gets, and the second is skipped when under 5 minutes are left. The evidence
@@ -1200,10 +1214,13 @@ evidence``. The handoff a later build reads lists each blocking finding as
 one line under `## Reproduced review findings` (severity, summary, the cited
 spec line, the path, the test and its kind), never the reproduction's
 content or the reviewer's failure scenario. A corrective build handed an
-earlier run's held copies runs each once on its own result, after
-the gates and before its review: anything but a pass on every test, a result
-commit that holds the path included, is still failing and fails
-`review_reproduction`. A copy that cannot be held, no longer matches its hash
+earlier run's held copies (see "Corrective builds") runs each once on its
+own result, after the gates and before its review: anything but a pass on every test, a result commit that holds the path
+included, is still failing and fails `review_reproduction`. Known limits: no
+runner for Gradle, jest, cargo, .NET or PHP (their reproductions are advice);
+a vitest reproduction can set its own per-test timeout; a ticket of a
+multi-ticket request may cite any line of the approved spec; the recheck runs
+once. A copy that cannot be held, no longer matches its hash
 before a launch, or whose mount is refused halts the run with the unresolved
 cause `reproduction_unheld`. A bare `factoryd -ticket` run, a restack's replay
 run and a run with code review off hold and run no reproduction and record no
@@ -1533,7 +1550,7 @@ roles:
   | Build | Model and level |
   |---|---|
   | A ticket's first build | `roles.execution.model` (or the request's `submit -model execution=...`) at `roles.execution.thinking` |
-  | An automatic corrective build, after a review or after another check (see "review_corrective_rounds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
+  | An automatic corrective build, after a check a build can fix, a reviewer's reproduction included (see "Corrective builds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
   | The build that takes the place of an automatic corrective build that never finished (`factoryd resume`, `resume -from scratch`, `retry` after a halt) | `escalation.model` at `escalation.thinking`, as configured when it starts |
   | A rebuild after `factoryd retry` of a ticket whose corrective round finished quarantined | As a first build: the retry is the operator's, not an automatic corrective build |
   | A PR-review round (a reviewer's comments) | As a first build |

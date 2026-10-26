@@ -15,41 +15,54 @@ import (
 	"buildgate/internal/run"
 )
 
-// TryCheckCorrectiveRound is the counterpart of TryReviewCorrectiveRound for
-// a ticket run quarantined by checks other than the two reviews alone: when
-// every check it failed is one a build can fix when told about it (the
-// run's handoff says so, internal/handoff), it runs one more build of the
-// same ticket on the quarantined run's branch and gives that build the
-// factory's record of the failed attempt.
+// TryCheckCorrectiveRound follows a quarantined ticket run with a
+// corrective round when every check it failed is one a build can fix when
+// told about it (the run's handoff says so, internal/handoff): it runs one
+// more build of the same ticket on the quarantined run's branch and gives
+// that build the factory's record of the failed attempt.
 //
-// What makes a round eligible is correctableByABuild. What the round is
+// What makes a round eligible is handoffForABuild. What the round is
 // given: the ticket's own build spec, unchanged, as -spec, and the handoff
 // rendered as text as -earlier-attempt, which only the build's first prompt
-// receives. The record is never part of the spec, so the round's own
-// reviews judge the result against the same spec and criteria as the first
-// build's, and see nothing the earlier build or its checks wrote.
+// receives. The record is never part of the spec, so the round's own review
+// judges the result against the same spec as the first build's, and sees
+// nothing the earlier build or its checks wrote.
 //
-// Budget, launch, recording and outcomes are runCorrectiveRounds', shared
-// with the review round: -review-corrective-rounds is one budget per
-// ticket build for both kinds, the launch budget is checked before each
-// round, an accepted round is the ticket's accepted run, and a round that
-// quarantines again runs again only while the budget lasts and only when
-// this same kind of round still applies to it. A round of one kind is
-// never followed by a round of the other: a check round whose result only
-// the reviews fail quarantines the request.
+// A run a reviewer's reproduction refused (review_reproduction, SC-022) is
+// one of these: the record tells the build each blocking finding in one
+// cleaned line (handoff.ReproducedFinding: severity, summary, cited spec
+// line, the reproduction's path, one failing test and its kind), never the
+// reproduction or the reviewer's failure scenario, and the build mounts no
+// copy of the reproduction. The build is also given -recheck-reproductions
+// (withRecheck): its workflow runs each held copy once on its result, and
+// anything but a pass refuses it again, whatever its own review says.
+//
+// Budget, launch, recording and outcomes are runCorrectiveRounds':
+// -review-corrective-rounds is one budget per ticket build, the launch
+// budget is checked before each round, an accepted round is the ticket's
+// accepted run, and a round that quarantines again runs again only while
+// the budget lasts and only when a round still applies to it; one whose
+// recheck is still failing never does.
 func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
 	plan := correctivePlan{
 		kind: request.CorrectiveRoundKind, suffix: "corrective", label: "corrective round",
 		eligible: func(quarantined *run.Run) bool {
-			_, ok := correctableByABuild(dataDir, quarantined)
-			return ok
+			if _, ok := handoffForABuild(dataDir, quarantined); !ok {
+				return false
+			}
+			if refusedByAReproduction(quarantined) {
+				_, ok := recheckManifestFor(dataDir, quarantined)
+				return ok
+			}
+			return true
 		},
 		args: func(current *run.Run, roundIndex int, roundRunID, diffBase string) ([]string, string, error) {
-			doc, ok := correctableByABuild(dataDir, current)
+			doc, ok := handoffForABuild(dataDir, current)
 			if !ok {
 				return nil, "", fmt.Errorf("run %s has no handoff a build may be given", current.ID)
 			}
-			recordPath, err := writeEarlierAttemptRecord(dataDir, r.ID, ticket, doc, roundIndex)
+			roundDir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-corrective%d", ticket.Index, roundIndex))
+			recordPath, err := writeRecordFile(roundDir, doc, startsOnItsBranch)
 			if err != nil {
 				return nil, "", err
 			}
@@ -57,9 +70,13 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 			if err != nil {
 				return nil, "", fmt.Errorf("build spec: %w", err)
 			}
-			argv, err := BuildReviewCorrectiveArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, diffBase)
+			argv, err := BuildCorrectiveArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, diffBase)
 			if err != nil {
 				return nil, "", err
+			}
+			argv, ok, err = withRecheck(dataDir, roundDir, current, argv)
+			if err != nil || !ok {
+				return nil, "", fmt.Errorf("run %s: no recheck of its reviewer's reproductions: %v", current.ID, err)
 			}
 			return append(argv, "-earlier-attempt", recordPath), "failed " + failedCheckNames(doc), nil
 		},
@@ -67,34 +84,19 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 	return runCorrectiveRounds(dp, ctx, dataDir, r, ticket, runRecord, cfg, now, plan)
 }
 
-// correctableByABuild loads a quarantined run's handoff and reports whether
-// a build may be given it: the run recorded one, the file is the one it
-// recorded and describes the state the run is in (handoff.Load), and what
-// its failed checks allow is "corrective".
+// handoffForABuild loads a quarantined run's handoff when a build may be
+// given it: the run recorded one, the file is the one it recorded and
+// describes the state the run is in (handoff.Load), and what its failed
+// checks allow is "corrective".
 //
 // A failed reference oracle (handoff.BinCorrectiveIfOracleInLoop) counts as
 // corrective here: a request's ticket only has an oracle when it was
 // approved at plan review, and every such ticket's build is already run
 // with the oracle mounted and -reference-oracle-in-loop-retry
-// (BuildTicketRunArgs), so the build this round starts sees nothing the
-// first one did not. Everything else is not eligible: a check a build is
-// never told about (tests_added, a review with no verdict, an unknown
-// check), a halt, a run with no handoff, and a run only the reviews
-// failed (TryReviewCorrectiveRound's case).
-func correctableByABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
-	// A quarantine by the two reviews alone is the review round's: when
-	// that round found nothing to address, neither is there here.
-	if reviewShapeOnly(quarantined) {
-		return handoff.Document{}, false
-	}
-	return handoffForABuild(dataDir, quarantined)
-}
-
-// handoffForABuild loads a quarantined run's handoff when a build may be
-// given it: the run recorded one, the file is the one it recorded and
-// describes the state the run is in (handoff.Load), and what its failed
-// checks allow is "corrective" (see correctableByABuild for the reference
-// oracle).
+// (BuildTicketRunArgs), so the build given the record sees nothing the
+// first one did not. Everything else is not: a check a build is never told
+// about (tests_added, a review with no verdict, an unknown check), a halt,
+// and a run with no handoff.
 func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
 	if quarantined.State != run.StateQuarantined || quarantined.HandoffSHA256 == "" {
 		return handoff.Document{}, false
@@ -200,11 +202,25 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	if !ok {
 		return args, "", false
 	}
-	args = append(args, "-earlier-attempt", path)
+	args = recheckBeside(dataDir, r, ticket, previous, path, append(args, "-earlier-attempt", path))
 	if continues {
 		args = append(args, "-on-branch", previous.Branch, "-diff-base", diffBase)
 	}
 	return args, previous.ID, continues
+}
+
+// recheckBeside gives a build that is told of previous (its record at
+// recordPath) the reproductions that refused previous to run again on its
+// own result (withRecheck, SC-022), as a corrective round is, from a
+// manifest beside the record. When none can be made the build goes ahead
+// without, which is logged: its own review runs as for any build.
+func recheckBeside(dataDir string, r *request.Request, ticket *request.Ticket, previous *run.Run, recordPath string, args []string) []string {
+	withCheck, ok, err := withRecheck(dataDir, filepath.Dir(recordPath), previous, args)
+	if !ok || err != nil {
+		log.Printf("request %s: ticket %d: the build goes ahead without a recheck of run %s's reviewer reproductions: %v", r.ID, ticket.Index, previous.ID, err)
+		return args
+	}
+	return withCheck
 }
 
 // recordableHandoff is previous's handoff when a build about to run with args
@@ -277,14 +293,6 @@ func failedCheckNames(doc handoff.Document) string {
 		}
 	}
 	return strings.Join(names, ", ")
-}
-
-// writeEarlierAttemptRecord writes the handoff as the text a corrective
-// build is given, beside the request's other round files, and returns its
-// path. The file is the factory's: it is written outside any workspace, and
-// the build receives a read-only copy.
-func writeEarlierAttemptRecord(dataDir, requestID string, ticket *request.Ticket, doc handoff.Document, roundIndex int) (string, error) {
-	return writeRecordFile(filepath.Join(request.Dir(dataDir, requestID), "rounds", fmt.Sprintf("%03d-corrective%d", ticket.Index, roundIndex)), doc, startsOnItsBranch)
 }
 
 // writeRecordFile writes start, then doc, as earlier-attempt.md in dir.

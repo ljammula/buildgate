@@ -266,7 +266,7 @@ func TestV0_0_13PRReviewRequestRunsItsRoundOnTheOldInput(t *testing.T) {
 			t.Errorf("read the round's -spec: %v", err)
 		}
 		inputs = append(inputs, string(b))
-		return reviewFlaggedRoundRun(requestdrivertest.ArgValue(args, "-ticket"), "x").Save(dataDir)
+		return reviewFlaggedRoundRun(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "x").Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 2}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {

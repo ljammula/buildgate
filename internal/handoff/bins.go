@@ -49,7 +49,11 @@ var bins = map[string]Bin{
 	"diff_scope":               BinCorrective,
 	"required_files_changed":   BinCorrective,
 	"required_content_present": BinCorrective,
-	"code_review":              BinCorrective,
+	// The review fails only when the reviewer gave no verdict: there is
+	// nothing to tell a build, and the run's request waits in
+	// resume_review. A finding reaches a build only through
+	// review_reproduction (SC-022).
+	"code_review": BinNever,
 	// A reviewer's finding whose reproduction the factory ran and saw
 	// fail (SC-022): one corrective build is told the finding in one line.
 	policy.ReviewReproductionCheck: BinCorrective,

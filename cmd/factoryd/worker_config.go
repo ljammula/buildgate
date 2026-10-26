@@ -124,7 +124,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	// reviewCorrectiveRounds: counted
 	// separately from maxReviewRounds above -- see request.Round.Kind's
 	// own doc comment for why the two budgets never share one counter.
-	f.reviewCorrectiveRounds = flags.Int("review-corrective-rounds", defaultReviewCorrectiveRounds, "most automatic fix builds a ticket gets when only the code-review gate failed and named something to fix; 0 disables them, and a negative value is refused")
+	f.reviewCorrectiveRounds = flags.Int("review-corrective-rounds", defaultReviewCorrectiveRounds, "most automatic fix builds a ticket gets after a check a build can fix, such as a reviewer's reproduction, failed; 0 disables them, and a negative value is refused")
 
 	// hitlReminderInterval: the request driver's own reminder ticker. A
 	// request that enters spec_review or plan_review is reminded

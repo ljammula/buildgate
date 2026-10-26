@@ -1162,21 +1162,21 @@ func TestRenderEvidenceMarkdownOracleOptOutSaysPlainlyWhenOraclesWereCommitted(t
 	}
 }
 
-// TestRenderEvidenceMarkdownOmitsCodeReviewWhenNil pins the "## Code
-// review" section's own convention: a run
-// whose code-review phase never ran (r.CodeReview == nil, e.g.
-// -code-review-policy was "off") gets no section at all, not an empty one.
+// TestRenderEvidenceMarkdownOmitsCodeReviewWhenNil pins the "## Reviewer
+// advice" section's own convention: a run whose review never ran
+// (r.CodeReview == nil, e.g. -code-review-policy was "off") gets no section
+// at all, not an empty one.
 func TestRenderEvidenceMarkdownOmitsCodeReviewWhenNil(t *testing.T) {
 	r := &run.Run{ID: "r1"}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); strings.Contains(body, "## Code review") {
-		t.Errorf("evidence body renders a Code review section with r.CodeReview == nil:\n%s", body)
+	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); strings.Contains(body, "## Reviewer advice") {
+		t.Errorf("evidence body renders a Reviewer advice section with r.CodeReview == nil:\n%s", body)
 	}
 }
 
 func TestRenderEvidenceMarkdownCodeReviewNoFindings(t *testing.T) {
 	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{Policy: "advisory", Available: true}}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	for _, want := range []string{"## Code review", "Policy: advisory.", "No findings."} {
+	for _, want := range []string{"## Reviewer advice", "Policy: advisory.", "No findings."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("evidence body does not contain %q:\n%s", want, body)
 		}
@@ -1191,61 +1191,33 @@ func TestRenderEvidenceMarkdownCodeReviewUnavailable(t *testing.T) {
 	}
 }
 
-// TestRenderEvidenceMarkdownCodeReviewOrdersHighFirst pins the rendering
-// order contract: high severity first, then medium, then low, stable
-// within a severity (two same-severity findings keep code_review.py's own
-// reported order).
-func TestRenderEvidenceMarkdownCodeReviewOrdersHighFirst(t *testing.T) {
+// P2.5: the PR body lists every finding that is advice (Disposition
+// "advice", or none on an older record) as one line, "- **<severity>**
+// <summary>", high severity first, stable within a severity; never the
+// file, the failure scenario, the cited spec line or the reproduction, and
+// never a finding that blocked.
+func TestPRBodyListsReviewerAdviceOneLineEach(t *testing.T) {
 	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{
 		Policy: "required", Available: true,
 		Findings: []run.CodeReviewFinding{
-			{Severity: "low", Summary: "low one"},
-			{Severity: "high", Summary: "high one", File: "a.go", Line: 12, FailureScenario: "crashes on nil"},
+			{Severity: "low", Summary: "low one", Disposition: run.DispositionAdvice},
+			{Severity: "high", Summary: "high one", File: "a.go", Line: 12, FailureScenario: "SCENARIO crashes on nil", Disposition: run.DispositionAdvice,
+				SpecLine:     &run.SpecCitation{Number: 3, Text: "SPECTEXT"},
+				Reproduction: &run.ReviewReproduction{Path: "REPROPATH_test.go", Verdict: "advice", Reason: "REASON passes on the result"}},
 			{Severity: "medium", Summary: "medium one"},
-			{Severity: "high", Summary: "high two"},
+			{Severity: "high", Summary: "BLOCKING one", Disposition: run.DispositionBlocks},
+			{Severity: "high", Summary: "high two", Disposition: run.DispositionAdvice},
 		},
 	}}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	wantOrder := []string{"high one", "high two", "medium one", "low one"}
-	lastIdx := -1
-	for _, want := range wantOrder {
-		idx := strings.Index(body, want)
-		if idx < 0 {
-			t.Fatalf("evidence body missing finding %q:\n%s", want, body)
-		}
-		if idx < lastIdx {
-			t.Errorf("finding %q rendered out of order:\n%s", want, body)
-		}
-		lastIdx = idx
+	want := "## Reviewer advice\n\nPolicy: required.\n\n- **high** high one\n- **high** high two\n- **medium** medium one\n- **low** low one\n\n"
+	if !strings.Contains(body, want) {
+		t.Errorf("evidence body lacks\n%s\n---\n%s", want, body)
 	}
-	for _, want := range []string{"**high** `a.go:12` high one — crashes on nil"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("evidence body does not contain %q:\n%s", want, body)
+	for _, leaked := range []string{"a.go", "SCENARIO", "SPECTEXT", "REPROPATH", "REASON", "BLOCKING"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("evidence body carries %q:\n%s", leaked, body)
 		}
-	}
-}
-
-// TestRenderEvidenceMarkdownCodeReviewOmitsFileAndScenarioWhenEmpty pins
-// the omission rules: no file span at all when File is empty (even with
-// a nonzero Line, which can't happen from ParseResult but is still worth
-// a defensive rule), no ":line" when Line is 0, and no " — …" trailer
-// when FailureScenario is empty.
-func TestRenderEvidenceMarkdownCodeReviewOmitsFileAndScenarioWhenEmpty(t *testing.T) {
-	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{
-		Policy: "required", Available: true,
-		Findings: []run.CodeReviewFinding{
-			{Severity: "high", Summary: "no file or scenario"},
-			{Severity: "high", Summary: "file no line", File: "b.go"},
-		},
-	}}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	for _, want := range []string{"**high** no file or scenario", "**high** `b.go` file no line"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("evidence body does not contain %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "b.go:0") {
-		t.Errorf("evidence body renders a zero line number:\n%s", body)
 	}
 }
 
@@ -1267,9 +1239,9 @@ func TestRenderEvidenceMarkdownCodeReviewCapsAt20(t *testing.T) {
 	}
 }
 
-// TestRenderEvidenceMarkdownCodeReviewTruncatesLongFields pins the
-// 400-rune, rune-safe truncation rule with a multi-byte rune straddling
-// the cutoff.
+// TestRenderEvidenceMarkdownCodeReviewTruncatesLongFields pins handoff's
+// cut of a sentence someone else wrote (300 runes, rune-safe) with a
+// multi-byte rune throughout.
 func TestRenderEvidenceMarkdownCodeReviewTruncatesLongFields(t *testing.T) {
 	long := strings.Repeat("é", 450) // multi-byte rune throughout
 	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{
@@ -1280,33 +1252,24 @@ func TestRenderEvidenceMarkdownCodeReviewTruncatesLongFields(t *testing.T) {
 	if !utf8.ValidString(body) {
 		t.Fatal("evidence body is not valid UTF-8 after truncating a multi-byte-rune field")
 	}
-	wantPrefix := strings.Repeat("é", 400) + "…"
-	if !strings.Contains(body, wantPrefix) {
-		t.Errorf("evidence body does not contain the truncated 400-rune summary:\n%s", body)
-	}
-	if strings.Contains(body, strings.Repeat("é", 401)) {
-		t.Errorf("evidence body contains more than 400 runes of the long summary:\n%s", body)
+	if !strings.Contains(body, strings.Repeat("é", 300)+"…") || strings.Contains(body, strings.Repeat("é", 301)) {
+		t.Errorf("evidence body does not hold the summary cut to 300 runes:\n%s", body)
 	}
 }
 
 // TestRenderEvidenceMarkdownCodeReviewSanitizesInjection pins the
-// injection-defence contract: a finding field carrying a backtick,
-// embedded newline, ANSI escape sequence, or an obvious credential must
-// never reach the PR body unsanitized.
+// injection-defence contract: a finding's summary carrying a backtick,
+// embedded newline, ANSI escape sequence, or an obvious credential never
+// reaches the PR body unsanitized.
 func TestRenderEvidenceMarkdownCodeReviewSanitizesInjection(t *testing.T) {
 	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{
 		Policy: "required", Available: true,
 		Findings: []run.CodeReviewFinding{
-			{
-				Severity:        "high",
-				File:            "a`b.go",
-				Summary:         "line one\nline two `injected` \x1b[31mred\x1b[0m",
-				FailureScenario: "uses ghp_abcdefghijklmnopqrstuvwxyz1234",
-			},
+			{Severity: "high`**", File: "a`b.go", Summary: "line one\nline two `injected` \x1b[31mred\x1b[0m uses ghp_abcdefghijklmnopqrstuvwxyz1234"},
 		},
 	}}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	for _, bad := range []string{"\n\nline two", "`injected`", "\x1b[31m", "ghp_abcdefghijklmnopqrstuvwxyz1234"} {
+	for _, bad := range []string{"\n\nline two", "`injected`", "\x1b[31m", "ghp_abcdefghijklmnopqrstuvwxyz1234", "high`"} {
 		if strings.Contains(body, bad) {
 			t.Errorf("evidence body contains unsanitized injected content %q:\n%s", bad, body)
 		}
@@ -1315,8 +1278,6 @@ func TestRenderEvidenceMarkdownCodeReviewSanitizesInjection(t *testing.T) {
 		t.Errorf("evidence body does not redact the GitHub-token-shaped secret:\n%s", body)
 	}
 	if !strings.Contains(body, "line one line two") {
-		// The embedded newline must have folded to a space, not vanished
-		// with the words glued together or split across markdown lines.
 		t.Errorf("evidence body does not fold the embedded newline into one line:\n%s", body)
 	}
 }
