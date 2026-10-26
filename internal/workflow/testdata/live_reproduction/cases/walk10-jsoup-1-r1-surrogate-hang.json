@@ -1,0 +1,81 @@
+{
+  "name": "walk10-jsoup-1-r1-surrogate-hang",
+  "source": "~/buildgate/walk10/ws/jsoup-1-r1",
+  "recorded_run": "jsoup-1-r1-20261025-101507-8018",
+  "base_sha": "3eebe732774c6347ce993eaf45fb5b7871693d98",
+  "result_sha": "9675126816ee2c1b479931c07ba945802389e06f",
+  "spec": "specs/walk10-jsoup-1.spec.md",
+  "spec_line": 22,
+  "reproduction_path": "src/test/java/org/jsoup/parser/ReproSurrogateHangTest.java",
+  "reproduction": "repro/walk10-jsoup-1-r1-surrogate-hang/ReproSurrogateHangTest.java",
+  "finding": {
+    "severity": "high",
+    "file": "src/main/java/org/jsoup/parser/MaxInputReader.java",
+    "line": 35,
+    "summary": "Lookahead can spin forever on supplementary Unicode characters",
+    "failure_scenario": "With maxInputSize(1), parsing an InputStream containing `a😀` reaches the limit after `a`. The lookahead calls SimpleStreamReader.read() with a one-character buffer; its decoder returns 0 without consuming the two-character surrogate pair, so this loop repeats forever and parsing never returns."
+  },
+  "input": {
+    "sandbox_image": "localhost:5050/buildgate-toolchain@sha256:6cb41b1ca3e82c08445f4d72e467ebb3446c6afbf629f9ff1f0b5d84529f2121",
+    "test_patterns": [
+      "*Test.java"
+    ],
+    "registry_proxy_policy": {
+      "image": "localhost:5050/factoryd-registry-proxy@sha256:899f457b54ab3fd90f22b7770f2f5c95d925f6acae5dbe367c708e588377784f",
+      "routes": [
+        {
+          "prefix": "/npm/",
+          "upstream": "https://registry.npmjs.org"
+        },
+        {
+          "prefix": "/pypi/",
+          "upstream": "https://pypi.org/simple",
+          "allowed_hosts": [
+            "files.pythonhosted.org->/pypi-files/"
+          ]
+        },
+        {
+          "prefix": "/pypi-files/",
+          "upstream": "https://files.pythonhosted.org"
+        },
+        {
+          "prefix": "/gomodproxy/sumdb/sum.golang.org/",
+          "upstream": "https://sum.golang.org"
+        },
+        {
+          "prefix": "/gomodproxy/",
+          "upstream": "https://proxy.golang.org",
+          "allowed_hosts": [
+            "storage.googleapis.com"
+          ]
+        },
+        {
+          "prefix": "/maven/",
+          "upstream": "https://repo.maven.apache.org/maven2"
+        },
+        {
+          "prefix": "/rubygems/",
+          "upstream": "https://rubygems.org"
+        }
+      ],
+      "cache_bytes": 1073741824,
+      "max_object_bytes": 268435456,
+      "max_concurrent_upstream": 16,
+      "upstream_timeout": 60000000000
+    },
+    "verify_max_attempts": 2,
+    "compose_services_enabled": true,
+    "compose_services_memory": "2g",
+    "compose_services_cpus": "1",
+    "compose_services_max_services": 8,
+    "compose_services_ready_timeout": 180000000000,
+    "compose_services_allowed_registries": [
+      "docker.io/library/"
+    ],
+    "sandbox_docker": "docker"
+  },
+  "plan_expected": "blocks",
+  "spec_text": "stops soon after the limit: an input that never ends still finishes parsing. The",
+  "want_verdict": "",
+  "note": "No verdict: the head1 launch never ends. JUnit Jupiter's default timeout runs on the test thread and only interrupts it; the decoder spin ignores the interrupt, so the launch hits its context deadline and the Activity fails with InfrastructureFailure."
+}
