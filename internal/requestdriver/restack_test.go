@@ -855,10 +855,16 @@ func TestAnInterruptedRestackIsKeptWhileOriginCannotBeRead(t *testing.T) {
 	if f.r.Tickets[1].Restack == nil || f.r.State != request.StatePRReview || f.did("replay") || f.did("move") {
 		t.Fatalf("state %s (%v), restack %+v, events %v: want the restack kept and nothing decided", f.r.State, f.r.Resume, f.r.Tickets[1].Restack, f.events)
 	}
+	if hold := f.r.Tickets[1].RestackHold; hold == nil || !strings.Contains(hold.On, "network down") || !strings.Contains(f.r.NextAction(), "interrupted restack 1 cannot be settled") {
+		t.Fatalf("hold %+v, next %q: want the kept restack recorded as a hold the operator sees", hold, f.r.NextAction())
+	}
 	f.pass()
 	t2 := f.r.Tickets[1]
 	if f.r.State != request.StatePRReview || t2.Restack != nil || t2.PRHeadRunID() != id || !f.did("move factoryd/run-2 to "+r2) || f.did("replay") {
 		t.Fatalf("state %s (%v), ticket 2 head %s, events %v: want the landed push confirmed, not parked", f.r.State, f.r.Resume, t2.PRHeadRunID(), f.events)
+	}
+	if t2.RestackHold != nil {
+		t.Errorf("hold %+v: want it cleared once the restack is settled", t2.RestackHold)
 	}
 }
 

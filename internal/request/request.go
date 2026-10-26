@@ -201,8 +201,9 @@ type Ticket struct {
 	Restack *TicketRestack `json:"restack,omitempty"`
 	// RestackHold is set while whether the ticket needs a restack cannot be
 	// told (a fact could not be read, or its PR-head run records no stack
-	// base): its pull request is then neither retargeted nor marked ready.
-	// Cleared once a poll can tell.
+	// base), or an interrupted restack (Restack) cannot be settled: its pull
+	// request is then neither retargeted nor marked ready. Cleared once a
+	// poll can tell.
 	RestackHold *TicketRestackHold `json:"restack_hold,omitempty"`
 	// Retarget is the last retarget of the ticket's pull request the factory
 	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
@@ -1649,12 +1650,12 @@ func (r *Request) prReviewNextAction() string {
 		if t.PRURL == "" {
 			continue
 		}
-		if t.Restack != nil {
-			parts = append(parts, t.Restack.nextAction(t.Index, r.TicketCount, t.PRURL))
-			continue
-		}
 		if t.RestackHold != nil {
 			parts = append(parts, t.RestackHold.On)
+			continue
+		}
+		if t.Restack != nil {
+			parts = append(parts, t.Restack.nextAction(t.Index, r.TicketCount, t.PRURL))
 			continue
 		}
 		if failed := t.lastFailedReviewRound(); failed != nil && t.PRState == "ready" {

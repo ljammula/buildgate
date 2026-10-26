@@ -298,7 +298,9 @@ The host's git must be 2.41 or later (the replay reads attributes with `git
 `factoryd resume` restacks once git is upgraded; `factoryd doctor` warns
 about it. While whether a
 restack is needed cannot be told (origin cannot be read, or the pull request
-is on ticket N's branch and its run records no `stack_base_sha`), the ticket's
+is on ticket N's branch and its run records no `stack_base_sha`), or while an
+interrupted restack cannot be settled (origin or its replay run cannot be
+read), the ticket's
 `restack_hold` names it, the request's next action and `factoryd watch`
 show it, it is reminded every `-hitl-reminder-interval`, and the pull request
 is neither retargeted nor marked ready. The ticket's `restack` field holds a

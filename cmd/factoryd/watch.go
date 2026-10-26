@@ -865,8 +865,9 @@ func watchRequestTicketStep(out *os.File, dataDir string, r *request.Request, no
 	}
 	ticket := r.Tickets[r.TicketIndex-1]
 	// A restack under way in pr_review is followed like a build: its replay
-	// run judges the ticket's commits on the new base.
-	if restacking := r.RestackInFlight(); r.State == request.StatePRReview && restacking != nil {
+	// run judges the ticket's commits on the new base. One held because it
+	// cannot be settled is named below instead.
+	if restacking := r.RestackInFlight(); r.State == request.StatePRReview && restacking != nil && restacking.RestackHold == nil {
 		return watchRestack(out, dataDir, r, restacking.Restack, noFollow, lastRunID, pollAgain, stopSpinner)
 	}
 	// pr_review waits on a human reviewer, possibly for days: say so and

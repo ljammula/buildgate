@@ -145,7 +145,12 @@ func earlierRestackPending(dp Deps, ctx context.Context, dataDir string, r *requ
 // until a poll can tell.
 func restackIfNeeded(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, prHeadSHA string, cfg WorkerConfig, now time.Time) (ran, held bool, err error) {
 	if ticket.Restack != nil {
-		return reconcileRestack(dp, ctx, dataDir, r, ticket, now)
+		ran, held, err := reconcileRestack(dp, ctx, dataDir, r, ticket, cfg.HitlReminderInterval, now)
+		if !held && err == nil && ticket.RestackHold != nil {
+			ticket.RestackHold = nil
+			err = r.Save(dataDir)
+		}
+		return ran, held, err
 	}
 	if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, prHeadSHA, now); confirmed || err != nil {
 		return true, false, err
@@ -204,7 +209,7 @@ func holdRestack(dataDir string, r *request.Request, ticket *request.Ticket, on 
 		return
 	}
 	n := prepareRequestNotification(dataDir, r, requestNotice{
-		Ask:    "A stacked pull request is held: whether it needs a restack cannot be told",
+		Ask:    "A stacked pull request is held",
 		Detail: on,
 		Next:   fmt.Sprintf("fix what it names; the worker checks again every PR poll (or `factoryd cancel %s`)", r.ID),
 	}, now)
@@ -827,7 +832,7 @@ func markTicketDraft(ticket *request.Ticket) {
 // origin branch that cannot be read decides nothing: the restack is kept,
 // and the ticket is held with its poll ended this pass (as for a need that
 // cannot be told), so a push that landed is never taken for a human commit.
-func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) (ran, held bool, err error) {
+func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, interval time.Duration, now time.Time) (ran, held bool, err error) {
 	rs := ticket.Restack
 	if rs.RunID != "" {
 		rec, loadErr := run.Load(dataDir, rs.RunID)
@@ -836,12 +841,12 @@ func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.R
 			log.Printf("request %s: ticket %d: restack %d's replay run %s is still %s; no other replay or round of the ticket starts until it ends", r.ID, ticket.Index, rs.N, rec.ID, rec.State)
 			return true, false, r.Save(dataDir)
 		case loadErr != nil && !errors.Is(loadErr, os.ErrNotExist):
-			return holdInterruptedRestack(dataDir, r, ticket, fmt.Errorf("its replay run %s cannot be read: %w", rs.RunID, loadErr))
+			return holdInterruptedRestack(dataDir, r, ticket, interval, now, fmt.Errorf("its replay run %s cannot be read: %w", rs.RunID, loadErr))
 		case loadErr == nil:
 			branch := ticketPRBranch(dataDir, ticket)
 			remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch)
 			if err != nil {
-				return holdInterruptedRestack(dataDir, r, ticket, fmt.Errorf("its branch %s cannot be read on origin: %w", branch, err))
+				return holdInterruptedRestack(dataDir, r, ticket, interval, now, fmt.Errorf("its branch %s cannot be read on origin: %w", branch, err))
 			}
 			if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, remote, now); confirmed || err != nil {
 				return true, false, err
@@ -859,9 +864,11 @@ func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.R
 
 // holdInterruptedRestack keeps ticket's interrupted restack for the next
 // pass because why: what it needs to settle it could not be read. The
-// ticket's poll ends this pass.
-func holdInterruptedRestack(dataDir string, r *request.Request, ticket *request.Ticket, why error) (ran, held bool, err error) {
-	log.Printf("request %s: ticket %d: the interrupted restack %d is kept for the next poll: %v", r.ID, ticket.Index, ticket.Restack.N, why)
+// ticket's poll ends this pass, and the hold is recorded and reminded as a
+// need that cannot be told is (holdRestack).
+func holdInterruptedRestack(dataDir string, r *request.Request, ticket *request.Ticket, interval time.Duration, now time.Time, why error) (ran, held bool, err error) {
+	on := fmt.Sprintf("ticket %d/%d (%s) is held: its interrupted restack %d cannot be settled (%v), so its pull request is neither retargeted nor marked ready, and no round starts. If git cannot reach origin, fix its access (`git ls-remote origin` in %s); the worker reads it again every PR poll (or `factoryd cancel %s`)", ticket.Index, r.TicketCount, ticket.PRURL, ticket.Restack.N, why, r.Workspace, r.ID)
+	holdRestack(dataDir, r, ticket, on, interval, now)
 	return true, true, r.Save(dataDir)
 }
 

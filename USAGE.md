@@ -153,7 +153,7 @@ request's next action. What can stop it:
 | The replay run is quarantined or halted | `halted`, nothing pushed | Read the run, fix the cause, `factoryd retry <id>` restacks again; or cancel |
 | The replay run did not start three times in a row | `halted`, nothing pushed; the reason names the last error | Fix it (often Temporal or the sandbox gateway), then `factoryd retry <id>` |
 | The host's git is older than 2.41 | Parks in `resume_review`, before anything is replayed | Upgrade git, then `factoryd resume <id>` |
-| Whether a restack is needed cannot be told (origin cannot be read, or the ticket's run records no stack base) | Stays in `pr_review`; the pull request is neither retargeted nor marked ready; the request's next action and `factoryd watch` name it, and you are reminded every `-hitl-reminder-interval` | Fix what it names; the worker checks again every PR poll |
+| Whether a restack is needed cannot be told (origin cannot be read, or the ticket's run records no stack base), or an interrupted restack cannot be settled (origin or its replay run cannot be read) | Stays in `pr_review`; the pull request is neither retargeted nor marked ready; the request's next action and `factoryd watch` name it, and you are reminded every `-hitl-reminder-interval` | Fix what it names; the worker checks again every PR poll |
 | Origin could not be read back after the push | `halted` | `factoryd retry <id>`: a poll that finds the branch at the replay run's commit records the push |
 
 A park is not a lost step: `resume.reason` says which ticket and what to
