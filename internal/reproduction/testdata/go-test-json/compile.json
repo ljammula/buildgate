@@ -1,0 +1,8 @@
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-output","Output":"# example.com/repro/p [example.com/repro/p.test]\n"}
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-output","Output":"p/repro_test.go:9:15: too many arguments in call to Add\n"}
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-output","Output":"\thave (number, number, number)\n"}
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-output","Output":"\twant (int, int)\n"}
+{"ImportPath":"example.com/repro/p [example.com/repro/p.test]","Action":"build-fail"}
+{"Time":"2026-10-25T23:07:12.721231-05:00","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-25T23:07:12.721347-05:00","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p [build failed]\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:12.721365-05:00","Action":"fail","Package":"example.com/repro/p","Elapsed":0,"FailedBuild":"example.com/repro/p [example.com/repro/p.test]"}

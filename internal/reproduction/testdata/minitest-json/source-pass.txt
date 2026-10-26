@@ -1,0 +1,8 @@
+require "minitest/autorun"
+require "add"
+
+class AddTest < Minitest::Test
+  def test_sums
+    assert_equal 3, add(1, 2)
+  end
+end

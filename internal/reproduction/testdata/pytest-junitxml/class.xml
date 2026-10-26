@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="0.025" timestamp="2026-10-25T23:07:59.488525-05:00" hostname="sandbox"><testcase classname="tests.test_repro.TestGroup" name="test_method_fails" time="0.000"><failure message="assert 4 == 5&#10; +  where 4 = add(2, 2)">self = &lt;test_repro.TestGroup object at 0x106126a60&gt;
+
+    def test_method_fails(self):
+&gt;       assert add(2, 2) == 5
+E       assert 4 == 5
+E        +  where 4 = add(2, 2)
+
+tests/test_repro.py:32: AssertionError</failure></testcase></testsuite></testsuites>

@@ -1,0 +1,22 @@
+{"Time":"2026-10-25T23:07:08.796701-05:00","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-25T23:07:09.013553-05:00","Action":"run","Package":"example.com/repro/p","Test":"TestPanic"}
+{"Time":"2026-10-25T23:07:09.013615-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"=== RUN   TestPanic\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:09.013664-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"--- FAIL: TestPanic (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:09.016632-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"panic: assignment to entry in nil map [recovered, repanicked]\n"}
+{"Time":"2026-10-25T23:07:09.016663-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\n"}
+{"Time":"2026-10-25T23:07:09.016672-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"goroutine 5 [running]:\n"}
+{"Time":"2026-10-25T23:07:09.016682-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"testing.tRunner.func1.2({0x10468e588, 0x1046c50e0})\n"}
+{"Time":"2026-10-25T23:07:09.016687-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2123 +0x1a0\n"}
+{"Time":"2026-10-25T23:07:09.016694-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"testing.tRunner.func1()\n"}
+{"Time":"2026-10-25T23:07:09.016698-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2126 +0x2c8\n"}
+{"Time":"2026-10-25T23:07:09.016701-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"panic({0x10468e588?, 0x1046c50e0?})\n"}
+{"Time":"2026-10-25T23:07:09.016705-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\t/usr/local/go/src/runtime/panic.go:859 +0x120\n"}
+{"Time":"2026-10-25T23:07:09.016708-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"example.com/repro/p.TestPanic(0x58c5aa2a2248?)\n"}
+{"Time":"2026-10-25T23:07:09.016712-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\t/workspace/p/repro_test.go:22 +0x34\n"}
+{"Time":"2026-10-25T23:07:09.016721-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"testing.tRunner(0x58c5aa2a2248, 0x1046ab438)\n"}
+{"Time":"2026-10-25T23:07:09.016727-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2193 +0xc4\n"}
+{"Time":"2026-10-25T23:07:09.016731-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"created by testing.(*T).Run in goroutine 1\n"}
+{"Time":"2026-10-25T23:07:09.016734-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestPanic","Output":"\t/usr/local/go/src/testing/testing.go:2258 +0x3b8\n"}
+{"Time":"2026-10-25T23:07:09.017097-05:00","Action":"fail","Package":"example.com/repro/p","Test":"TestPanic","Elapsed":0}
+{"Time":"2026-10-25T23:07:09.017112-05:00","Action":"output","Package":"example.com/repro/p","Output":"FAIL\texample.com/repro/p\t0.220s\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:09.017127-05:00","Action":"fail","Package":"example.com/repro/p","Elapsed":0.22}

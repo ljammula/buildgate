@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0" name="com.example.AddTest" time="0.040" tests="2" errors="0" skipped="0" failures="1">
+  <properties>
+    <property name="java.version" value="21.0.4"/>
+    <property name="junit.jupiter.execution.timeout.default" value="60s"/>
+  </properties>
+  <testcase name="sums(int)[1]" classname="com.example.AddTest" time="0.006"/>
+  <testcase name="sums(int)[2]" classname="com.example.AddTest" time="0.002">
+    <failure message="expected: &lt;true&gt; but was: &lt;false&gt;" type="org.opentest4j.AssertionFailedError"><![CDATA[org.opentest4j.AssertionFailedError: expected: <true> but was: <false>
+	at com.example.AddTest.sums(AddTest.java:22)
+]]></failure>
+  </testcase>
+</testsuite>

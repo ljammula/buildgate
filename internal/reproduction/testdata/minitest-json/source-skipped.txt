@@ -1,0 +1,8 @@
+require "minitest/autorun"
+require "add"
+
+class AddTest < Minitest::Test
+  def test_later
+    skip "not here"
+  end
+end

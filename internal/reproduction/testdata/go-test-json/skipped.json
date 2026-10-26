@@ -1,0 +1,9 @@
+{"Time":"2026-10-25T23:07:09.16049-05:00","Action":"start","Package":"example.com/repro/p"}
+{"Time":"2026-10-25T23:07:09.303239-05:00","Action":"run","Package":"example.com/repro/p","Test":"TestSkip"}
+{"Time":"2026-10-25T23:07:09.303324-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestSkip","Output":"=== RUN   TestSkip\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:09.303392-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestSkip","Output":"    repro_test.go:26: not here\n"}
+{"Time":"2026-10-25T23:07:09.303419-05:00","Action":"output","Package":"example.com/repro/p","Test":"TestSkip","Output":"--- SKIP: TestSkip (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:09.303424-05:00","Action":"skip","Package":"example.com/repro/p","Test":"TestSkip","Elapsed":0}
+{"Time":"2026-10-25T23:07:09.303432-05:00","Action":"output","Package":"example.com/repro/p","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-25T23:07:09.303849-05:00","Action":"output","Package":"example.com/repro/p","Output":"ok  \texample.com/repro/p\t0.143s\n"}
+{"Time":"2026-10-25T23:07:09.303885-05:00","Action":"pass","Package":"example.com/repro/p","Elapsed":0.143}

@@ -1,0 +1,37 @@
+import time
+
+import pytest
+
+
+def add(a, b):
+    return a + b
+
+
+def test_pass():
+    assert add(1, 2) == 3
+
+
+def test_fail():
+    assert add(1, 2) == 4
+
+
+def test_error():
+    raise ValueError("boom")
+
+
+def test_skipped():
+    pytest.skip("not here")
+
+
+def test_hang():
+    time.sleep(3600)
+
+
+class TestGroup:
+    def test_method_fails(self):
+        assert add(2, 2) == 5
+
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_param(n):
+    assert n == 1

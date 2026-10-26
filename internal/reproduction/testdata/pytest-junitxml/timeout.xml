@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.023" timestamp="2026-10-25T23:07:57.130244-05:00" hostname="sandbox"><testcase classname="tests.test_repro" name="test_hang" time="2.002"><failure message="bg_repro_timeout.BgReproTimeout: BgReproTimeout: the test ran past 2 seconds">def test_hang():
+&gt;       time.sleep(3600)
+
+tests/test_repro.py:27: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+signum = 14
+frame = &lt;frame at 0x108235380, file '/workspace/tests/test_repro.py', line 27, code test_hang&gt;
+
+    def _on_alarm(signum, frame):
+&gt;       raise BgReproTimeout("BgReproTimeout: the test ran past %d seconds" % _seconds())
+E       bg_repro_timeout.BgReproTimeout: BgReproTimeout: the test ran past 2 seconds
+
+/inputs/reproduction/bg_repro_timeout.py:29: BgReproTimeout</failure></testcase></testsuite></testsuites>

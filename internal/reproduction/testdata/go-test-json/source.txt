@@ -1,0 +1,31 @@
+package p
+
+import (
+	"testing"
+	"time"
+)
+
+func TestPass(t *testing.T) {
+	if Add(1, 2) != 3 {
+		t.Fatal("bad")
+	}
+}
+
+func TestFail(t *testing.T) {
+	if Add(1, 2) != 4 {
+		t.Fatalf("Add(1, 2) = %d, want 4", Add(1, 2))
+	}
+}
+
+func TestPanic(t *testing.T) {
+	var m map[string]int
+	m["x"] = 1
+}
+
+func TestSkip(t *testing.T) {
+	t.Skip("not here")
+}
+
+func TestHang(t *testing.T) {
+	time.Sleep(time.Hour)
+}

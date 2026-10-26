@@ -1,0 +1,8 @@
+require "minitest/autorun"
+require "add"
+
+class AddTest < Minitest::Test
+  def test_hangs
+    sleep 3600
+  end
+end

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="0.018" timestamp="2026-10-25T23:07:59.664928-05:00" hostname="sandbox"><testcase classname="tests.test_repro" name="test_param[1]" time="0.000" /><testcase classname="tests.test_repro" name="test_param[2]" time="0.000"><failure message="assert 2 == 1">n = 2
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param(n):
+&gt;       assert n == 1
+E       assert 2 == 1
+
+tests/test_repro.py:37: AssertionError</failure></testcase></testsuite></testsuites>

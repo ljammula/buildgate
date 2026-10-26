@@ -383,6 +383,32 @@ func TestPackageBoundaryRules(t *testing.T) {
 	})
 }
 
+// TestReproductionImportsOnlyItsAllowList keeps internal/reproduction the
+// pure decision over a reviewer's reproduction (SC-022): shape rules, runner
+// commands and report classifiers, and the verdict. It reads the test
+// patterns (policy) and the instruction-path table and fold (sandbox); the
+// workflow launches every run, so it never starts a process or reads a file.
+func TestReproductionImportsOnlyItsAllowList(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const pkg = "buildgate/internal/reproduction"
+	requirePackage(t, g, pkg)
+	allowed := map[string]bool{
+		"buildgate/internal/policy":  true,
+		"buildgate/internal/sandbox": true,
+	}
+	for imp := range buildgateImports(g, pkg) {
+		if !allowed[imp] {
+			t.Errorf("reproduction directly imports only policy and sandbox: %s imports %s", pkg, imp)
+		}
+	}
+	for _, forbidden := range []string{"os", "os/exec", "net", "net/http", "syscall"} {
+		if g[pkg][forbidden] {
+			t.Errorf("reproduction runs no process and reads no file: %s imports %s", pkg, forbidden)
+		}
+	}
+}
+
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
