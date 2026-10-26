@@ -12,7 +12,6 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
 	"buildgate/internal/unresolved"
-	"buildgate/internal/workflow"
 )
 
 // lostRunOf is the run a request's lost step was running: the current
@@ -118,7 +117,7 @@ type requestWorkflowTerminator interface {
 // are logged.
 func terminateRequestWorkflows(ctx context.Context, c requestWorkflowTerminator, queueID string, ids []string) {
 	for _, id := range ids {
-		err := c.TerminateWorkflow(ctx, workflow.RequestWorkflowID(queueID, id), "", "request halted at worker start: its step was lost")
+		err := c.TerminateWorkflow(ctx, requestWorkflowIDIn(queueID, id), "", "request halted at worker start: its step was lost")
 		var notFound *serviceerror.NotFound
 		if err != nil && !errors.As(err, &notFound) {
 			log.Printf("factoryd worker: end workflow of halted request %s: %v", id, err)

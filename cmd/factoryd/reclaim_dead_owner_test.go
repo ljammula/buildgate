@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	workflowpb "go.temporal.io/api/workflow/v1"
@@ -18,17 +19,23 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
+	"buildgate/internal/workflow"
 )
 
 // stubWorkflowTerminator records TerminateWorkflow calls and reports every
 // workflow in running as Running.
 type stubWorkflowTerminator struct {
-	running    map[string]bool
-	queues     map[string]string // task queue per workflow id; empty when absent
-	terminated []string
+	running     map[string]bool
+	queues      map[string]string // task queue per workflow id; empty when absent
+	started     map[string]bool   // workflows with an AdvanceRequest step in flight
+	describeErr map[string]error  // Describe fails with this for the workflow id
+	terminated  []string
 }
 
 func (s *stubWorkflowTerminator) DescribeWorkflowExecution(_ context.Context, workflowID, _ string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
+	if err := s.describeErr[workflowID]; err != nil {
+		return nil, err
+	}
 	if _, ok := s.running[workflowID]; !ok {
 		return nil, serviceerror.NewNotFound("no such workflow")
 	}
@@ -36,9 +43,16 @@ func (s *stubWorkflowTerminator) DescribeWorkflowExecution(_ context.Context, wo
 	if s.running[workflowID] {
 		status = enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING
 	}
-	return &workflowservice.DescribeWorkflowExecutionResponse{
+	resp := &workflowservice.DescribeWorkflowExecutionResponse{
 		WorkflowExecutionInfo: &workflowpb.WorkflowExecutionInfo{Status: status, TaskQueue: s.queues[workflowID]},
-	}, nil
+	}
+	if s.started[workflowID] {
+		resp.PendingActivities = []*workflowpb.PendingActivityInfo{{
+			ActivityType: &commonpb.ActivityType{Name: workflow.AdvanceRequestActivityName},
+			State:        enumspb.PENDING_ACTIVITY_STATE_STARTED,
+		}}
+	}
+	return resp, nil
 }
 
 func (s *stubWorkflowTerminator) TerminateWorkflow(_ context.Context, workflowID, _, _ string, _ ...interface{}) error {

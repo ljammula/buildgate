@@ -61,10 +61,17 @@ func TestRequestTaskQueuesRejectsEmptyID(t *testing.T) {
 }
 
 type recordingStarter struct {
-	ids     []string
-	options []client.StartWorkflowOptions
-	inputs  []workflow.RequestWorkflowInput
-	signals []string
+	stubWorkflowTerminator // Describe: the legacy workflows that run
+	signaled               []string
+	ids                    []string
+	options                []client.StartWorkflowOptions
+	inputs                 []workflow.RequestWorkflowInput
+	signals                []string
+}
+
+func (s *recordingStarter) SignalWorkflow(_ context.Context, workflowID, _, _ string, _ interface{}) error {
+	s.signaled = append(s.signaled, workflowID)
+	return nil
 }
 
 func (s *recordingStarter) SignalWithStartWorkflow(_ context.Context, workflowID, signalName string, _ interface{}, options client.StartWorkflowOptions, _ interface{}, workflowArgs ...interface{}) (client.WorkflowRun, error) {
@@ -79,11 +86,12 @@ func TestStartRequestWorkflowsSkipsFinishedRequests(t *testing.T) {
 	dataDir := t.TempDir()
 	saveRequestInState(t, dataDir, "req-review", request.StateSpecReview)
 	saveRequestInState(t, dataDir, "req-halted", request.StateHalted)
+	saveRequestInState(t, dataDir, "req-skipped", request.StateSpecReview)
 	saveRequestInState(t, dataDir, "req-done", request.StateDone)
 	saveRequestInState(t, dataDir, "req-cancelled", request.StateCancelled)
 	saveRequestInState(t, dataDir, "req-closed", request.StateClosed)
 	starter := &recordingStarter{}
-	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q"); err != nil {
+	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q", map[string]bool{"req-skipped": true}); err != nil {
 		t.Fatal(err)
 	}
 	got := slices.Clone(starter.ids)
@@ -123,28 +131,5 @@ func TestRequestWorkflowIDsDifferPerDataDir(t *testing.T) {
 	}
 	if workflow.RequestWorkflowID(qa, "req-1") == workflow.LegacyRequestWorkflowID("req-1") {
 		t.Fatal("the new id equals the legacy id")
-	}
-}
-
-// A request in flight at an upgrade is still running under its legacy id on
-// this data dir's light queue; the worker ends it. The same legacy id on
-// another data dir's queue, a finished request and a closed workflow are left.
-func TestRetireLegacyRequestWorkflowsEndsOnlyThisDataDirsRunningOnes(t *testing.T) {
-	dataDir := t.TempDir()
-	saveRequestInState(t, dataDir, "mine", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "theirs", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "closed-wf", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "fresh", request.StateSpecReview)
-	saveRequestInState(t, dataDir, "finished", request.StateDone)
-	id := workflow.LegacyRequestWorkflowID
-	stub := &stubWorkflowTerminator{
-		running: map[string]bool{id("mine"): true, id("theirs"): true, id("closed-wf"): false, id("finished"): true},
-		queues:  map[string]string{id("mine"): "light-q", id("theirs"): "light-other", id("closed-wf"): "light-q", id("finished"): "light-q"},
-	}
-	if err := retireLegacyRequestWorkflows(context.Background(), stub, dataDir, "light-q"); err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{id("mine")}; !slices.Equal(stub.terminated, want) {
-		t.Fatalf("terminated %v, want %v", stub.terminated, want)
 	}
 }

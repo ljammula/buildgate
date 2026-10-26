@@ -10,6 +10,7 @@ import (
 
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/workflow"
 )
 
 // requestWorkflowDialer opens the Temporal client a wake signals through, so
@@ -55,13 +56,31 @@ func wakeRequestWorkflowWith(dp *deps, ctx context.Context, dialer requestWorkfl
 	if err != nil {
 		return err
 	}
-	jobs, light := "factoryd-jobs-"+queueID, "factoryd-light-"+queueID
+	jobs, light, err := requestTaskQueues(dataDir)
+	if err != nil {
+		return err
+	}
 	starter, closeFn, err := dialer.DialRequestWorkflowStarter(ctx, hb.TemporalAddress)
 	if err != nil {
 		return fmt.Errorf("reach Temporal at %s: %w", hb.TemporalAddress, err)
 	}
 	defer closeFn()
-	return startRequestWorkflow(ctx, starter, queueID, requestID, jobs, light)
+	return wakeOrStartRequestWorkflow(ctx, starter, queueID, requestID, jobs, light)
+}
+
+// wakeOrStartRequestWorkflow signals requestID's workflow. A request whose
+// workflow still has its legacy id on this data dir's light queue (a worker
+// not yet restarted onto this binary) is signalled there, not started under
+// the new id, which would put a second driver on the request.
+func wakeOrStartRequestWorkflow(ctx context.Context, c requestWorkflowStarter, queueID, requestID, jobsQueue, lightQueue string) error {
+	_, onQueue, err := legacyRequestWorkflowOnQueue(ctx, c, requestID, lightQueue)
+	if err != nil {
+		return err
+	}
+	if onQueue {
+		return c.SignalWorkflow(ctx, workflow.LegacyRequestWorkflowID(requestID), "", workflow.RequestWakeSignalName, nil)
+	}
+	return startRequestWorkflow(ctx, c, queueID, requestID, jobsQueue, lightQueue)
 }
 
 // requestWakeTimeout bounds one wake (dial plus signal-with-start), so an

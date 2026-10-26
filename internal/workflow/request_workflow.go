@@ -11,8 +11,8 @@ import (
 )
 
 // RequestWorkflow drives one request (internal/request) from submitted to a
-// terminal state, one step at a time. Its id is the request id
-// (RequestWorkflowID), so a request has at most one driver.
+// terminal state, one step at a time. Its id names the data dir and the
+// request (RequestWorkflowID), so a request has at most one driver.
 //
 // request.json stays the source of truth: every iteration starts with
 // LoadRequestStep, which reads it and says what to do next, and every step
@@ -153,7 +153,9 @@ func RequestWorkflowID(queueID, requestID string) string {
 // LegacyRequestWorkflowID is the id a RequestWorkflow had before ids carried
 // the data dir's queue id. A workflow started under it is still running when
 // a worker is upgraded; the worker ends it (retireLegacyRequestWorkflows) and
-// starts the request under RequestWorkflowID.
+// starts the request under RequestWorkflowID. Delete this, its callers and
+// their tests once no data dir can hold a request whose workflow started
+// before ids carried the queue id.
 func LegacyRequestWorkflowID(requestID string) string {
 	return "factoryd-request-" + requestID
 }

@@ -362,6 +362,13 @@ func (a *requestActivities) RemindRequest(_ context.Context, id string) error {
 // lost corrective round's run is reclaimed, with its request, at the next
 // worker start (haltRequestsOfLostRuns).
 func (a *requestActivities) HaltLostRequestStep(_ context.Context, in workflow.HaltLostRequestStepInput) error {
+	return a.HaltLostRequestStepOf(in.RequestID, in.State)
+}
+
+// HaltLostRequestStepOf is HaltLostRequestStep for a caller outside a
+// workflow: the one home of what a lost step does to its request.
+func (a *requestActivities) HaltLostRequestStepOf(requestID, state string) error {
+	in := workflow.HaltLostRequestStepInput{RequestID: requestID, State: state}
 	if in.State == string(request.StatePRReview) {
 		return nil
 	}
