@@ -39,9 +39,10 @@ type Decision struct {
 func advice(reason string) Decision { return Decision{Verdict: VerdictAdvice, Reason: reason} }
 
 // Decide is SC-022's table. The reproduction blocks only when some of its own
-// test IDs failed on both head launches and they do not all fail the same way
-// (same ID, same kind) on the base; when they do, it blocks only when the
-// cited line's backticked literal appears byte-for-byte in the content.
+// test IDs failed on both head launches and, on the base, it does not
+// compile or they do not all fail the same way (same ID, same kind); when
+// they do, it blocks only when the cited line's backticked literal appears
+// byte-for-byte in the content. A base launch with no report is advice.
 func Decide(e Evidence) Decision {
 	if e.Head1 == nil || e.Head2 == nil {
 		return advice("the reproduction did not fail on the result commit")
@@ -56,8 +57,14 @@ func Decide(e Evidence) Decision {
 	if e.Base == nil {
 		return advice("base not checked")
 	}
-	if e.Base.Outcome == OutcomeCompile || e.Base.Outcome == OutcomeMissing {
-		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails on the result commit and does not run on the base", TestIDs: failing}
+	switch e.Base.Outcome {
+	case OutcomeCompile:
+		// It uses what the result commit adds: SC-022's new-API case.
+		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails on the result commit and does not compile on the base", TestIDs: failing}
+	case OutcomeMissing:
+		// No report says nothing about the base; a launch that left none
+		// never turns a finding into a refusal.
+		return advice("the base launch left no report")
 	}
 	if !sameOnBase(failing, e) {
 		return Decision{Verdict: VerdictBlocks, Reason: "the reproduction fails on the result commit and not the same way on the base", TestIDs: failing}

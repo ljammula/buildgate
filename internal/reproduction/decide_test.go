@@ -55,7 +55,7 @@ func TestDecideSameBaseFailureIsAdviceUnlessLiteral(t *testing.T) {
 		{"base unknown", nil, with, citedLiteral, VerdictAdvice},
 		{"base passes", res(OutcomePassed, map[string]Kind{"TestA": KindPass}), without, citedLiteral, VerdictBlocks},
 		{"base does not compile", res(OutcomeCompile, map[string]Kind{"TestA": KindCompile}), without, citedLiteral, VerdictBlocks},
-		{"base report missing", res(OutcomeMissing, map[string]Kind{"TestA": KindMissing}), without, citedLiteral, VerdictBlocks},
+		{"base report missing", res(OutcomeMissing, map[string]Kind{"TestA": KindMissing}), with, citedLiteral, VerdictAdvice},
 		{"base fails another kind", fails(KindError), without, citedLiteral, VerdictBlocks},
 		{"base skips", res(OutcomeInconclusive, map[string]Kind{"TestA": KindSkipped}), without, citedLiteral, VerdictBlocks},
 		{"same failure, no literal in content", fails(KindFail), without, citedLiteral, VerdictAdvice},
