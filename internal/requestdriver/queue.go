@@ -20,7 +20,7 @@ type QueueEntry struct {
 	SpecPath string `json:"spec_path"`
 	// ReviewSpecPath is the request's approved spec.md (its hash checked
 	// against the approval), forwarded as -review-spec: the review cites it
-	// by line. Empty for a request with no approved spec hash.
+	// by line. Set only with ReviewReproduction; empty otherwise.
 	ReviewSpecPath string `json:"review_spec_path,omitempty"`
 	// ReviewReproduction is forwarded as -review-reproduction: the build
 	// holds and runs its review's reproductions, so a finding can refuse the

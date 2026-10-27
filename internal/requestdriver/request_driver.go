@@ -2269,7 +2269,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 }
 
 // reviewInputs are a ticket build's review inputs: SpecPath, the approved
-// spec its review cites (-review-spec); Reproduce, whether it holds and runs
+// spec its review cites (-review-spec), set only with Reproduce; Reproduce, whether it holds and runs
 // the review's reproductions (-review-reproduction, SC-022); and Recheck,
 // its -recheck-reproductions manifest.
 type reviewInputs struct {
@@ -2281,13 +2281,22 @@ type reviewInputs struct {
 // reproductionInputs are a ticket build's review inputs. review is false for
 // a restack's replay run, which cannot take a corrective build: it gets none,
 // and the ticket's list stays as it is. hold is the session config's
-// review_reproductions off (the default) keeps the approved spec but holds no new
-// reproduction, so every finding of the build's review is advice; a ticket
+// review_reproductions off (the default) gives the build no approved spec and
+// holds no new reproduction, so every finding of the build's review is advice
+// (the spec is still checked against its approval); a ticket
 // whose list is not empty (a refusal recorded while it was on) is still
 // rechecked against that list, and so still holds. A ticket whose list is not
 // empty is never built without it: with no approved spec to run them under,
 // the build is refused (errNoRecheck).
 func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
+	in, err := reproductionInputsWithSpec(dataDir, r, index, buildID, review, hold)
+	if !in.Reproduce {
+		in.SpecPath = ""
+	}
+	return in, err
+}
+
+func reproductionInputsWithSpec(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
 	if !review {
 		return reviewInputs{}, nil
 	}
