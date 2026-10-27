@@ -728,11 +728,11 @@
       "headers_missing": []
     },
     {
-      "name": "empty out of scope",
+      "name": "empty out of scope is accepted",
       "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\n",
-      "plan_valid": false,
+      "plan_valid": true,
       "missing_heading": "",
-      "empty_section": "## Out of scope",
+      "empty_section": "",
       "covered": [
         1
       ],

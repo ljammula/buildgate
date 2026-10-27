@@ -2,6 +2,8 @@ package requestdriver_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -88,5 +90,64 @@ func TestAdvancePlanningMalformedPlanTwiceHaltsAfterTwoLaunches(t *testing.T) {
 	}
 	if !strings.Contains(loaded.Error, "Acceptance criteria covered") {
 		t.Errorf("Error = %q, want the parser's message", loaded.Error)
+	}
+}
+
+// TestAdvancePlanningKeepsEachRefusedPlanForTheRecord: every refused draft's
+// tickets stay under <request>/refused-plans/<n>/, while the halted request's
+// tickets dir is still removed.
+func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	content := malformedCoverageTicket(t)
+	malformed := func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}, &request.PlanEvidence{}, nil
+	}
+	runner, _, _ := sequencedPlanTicketsRunner(t, dataDir, malformed, malformed)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	for _, n := range []string{"1", "2"} {
+		got, err := os.ReadFile(filepath.Join(request.Dir(dataDir, id), "refused-plans", n, "001.spec.md"))
+		if err != nil {
+			t.Fatalf("refused plan %s: %v", n, err)
+		}
+		if string(got) != content {
+			t.Errorf("refused plan %s differs from the draft", n)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(request.Dir(dataDir, id), "tickets")); !os.IsNotExist(err) {
+		t.Errorf("tickets dir after the halt: err = %v, want it removed", err)
+	}
+}
+
+// TestAdvancePlanningAcceptsAnEmptyOutOfScopeSection: the section's prose is
+// for the reviewer, so a plan whose tickets leave it empty reaches plan_review.
+func TestAdvancePlanningAcceptsAnEmptyOutOfScopeSection(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	valid := requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)
+	idx := strings.Index(valid, "## Out of scope")
+	if idx < 0 {
+		t.Fatal("the valid ticket has no Out of scope section; update this fixture")
+	}
+	empty := valid[:idx] + "## Out of scope\n\n"
+	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir,
+		func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
+			return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: empty}}, &request.PlanEvidence{}, nil
+		},
+	)
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatalf("driveRequests: %v", err)
+	}
+	if *callCount != 1 {
+		t.Fatalf("planning launches = %d, want 1", *callCount)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("State = %q (%s), want %q", loaded.State, loaded.Error, request.StatePlanReview)
 	}
 }
