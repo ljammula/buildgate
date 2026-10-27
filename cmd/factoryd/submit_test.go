@@ -1030,3 +1030,33 @@ preflight_profile: brownfield
 		}
 	}
 }
+
+// TestSubmitMainRecordsPlanReviewFlag: -plan-review opts one request into
+// plan_review; without it the field stays false.
+func TestSubmitMainRecordsPlanReviewFlag(t *testing.T) {
+	dp := newTestDeps(t)
+	workspace := t.TempDir()
+	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
+preflight_profile: brownfield
+`)
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"-plan-review"}, true},
+		{nil, false},
+	} {
+		dataDir := t.TempDir()
+		args := append(append([]string{}, tc.args...), "-data-dir", dataDir, workspace, "Add a new func")
+		if err := submitMain(dp, args); err != nil {
+			t.Fatalf("submitMain(%v): %v", tc.args, err)
+		}
+		requests, err := request.List(dataDir)
+		if err != nil || len(requests) != 1 {
+			t.Fatalf("List = %v, %v; want one request", requests, err)
+		}
+		if requests[0].PlanReview != tc.want {
+			t.Errorf("args %v: PlanReview = %v, want %v", tc.args, requests[0].PlanReview, tc.want)
+		}
+	}
+}

@@ -159,6 +159,7 @@ func OracleStageFixture(t *testing.T, draftOracles bool) (dataDir, id string) {
 		t.Fatal(err)
 	}
 	r := request.New(id, workspace, "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.PlanReview = true // most tests drive the plan_review gate; PlanReviewOff clears it
 	r.State = request.StateSpecReview
 	r.DraftOracles = draftOracles
 	if err := r.Save(dataDir); err != nil {
@@ -369,6 +370,7 @@ func ApprovedPlanningFixture(t *testing.T, specContent, verifyCommand string) (d
 		t.Fatal(err)
 	}
 	r := request.New(id, workspace, "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.PlanReview = true // most tests drive the plan_review gate; PlanReviewOff clears it
 	r.State = request.StateSpecReview
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
@@ -398,6 +400,7 @@ func ApprovedPlanningFixtureNoFactoryYML(t *testing.T, specContent, verifyComman
 		t.Fatal(err)
 	}
 	r := request.New(id, workspace, "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.PlanReview = true // most tests drive the plan_review gate; PlanReviewOff clears it
 	r.VerifyCommand = verifyCommand
 	r.State = request.StateSpecReview
 	if err := r.Save(dataDir); err != nil {
@@ -433,8 +436,8 @@ func CountNotificationLogLines(t *testing.T, dataDir, id string) int {
 // BuildingFixture drives a request all the way from an approved spec
 // (ApprovedPlanningFixture) through planning (n tickets, each claiming
 // TwoCriteriaSpec's own first criterion, real files under
-// <dataDir>/requests/<id>/tickets/) and a plan approval (plan_review ->
-// building), returning it ready for advanceBuilding/driveRequests to pick
+// <dataDir>/requests/<id>/tickets/) and the plan's approval (the factory's for
+// one ticket, a person's at plan_review for more), returning it ready for advanceBuilding/driveRequests to pick
 // up ticket 1.
 func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id string) {
 	t.Helper()
@@ -454,8 +457,12 @@ func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id st
 	if err := DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, FailingSpecDraftRunner(t), runner, FailingOracleDraftRunner(t), FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (planning): %v", err)
 	}
-	if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
-		t.Fatalf("approve plan: %v", err)
+	// A one-ticket plan is approved by the factory in the planning step; a
+	// longer one waits at plan_review for a person.
+	if LoadRequest(t, dataDir, id).State == request.StatePlanReview {
+		if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
+			t.Fatalf("approve plan: %v", err)
+		}
 	}
 	return dataDir, id
 }
@@ -506,6 +513,7 @@ func RequestOracleFixtureAtReview(t *testing.T, files map[string]string) (dataDi
 		t.Fatal(err)
 	}
 	r := request.New(id, workspace, "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.PlanReview = true // most tests drive the plan_review gate; PlanReviewOff clears it
 	r.VerifyCommand = "make verify"
 	r.DraftOracles = true
 	r.State = request.StateSpecReview
@@ -654,3 +662,14 @@ var criterionItem = regexp.MustCompile(`^(\d+)\.\s+(\S.*)$`)
 // DraftedSpec is CanonicalValidSpec as the drafting job writes a spec: with
 // criterion IDs.
 var DraftedSpec = WithCriterionIDs(CanonicalValidSpec)
+
+// PlanReviewOff clears the request's plan_review opt-in, which these
+// fixtures set, so a one-ticket plan is approved by the factory.
+func PlanReviewOff(t *testing.T, dataDir, id string) {
+	t.Helper()
+	r := LoadRequest(t, dataDir, id)
+	r.PlanReview = false
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+}

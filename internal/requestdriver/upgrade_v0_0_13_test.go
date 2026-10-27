@@ -192,8 +192,9 @@ func TestV0_0_13HandedOverPlanIsTakenWithNoCriteriaHalt(t *testing.T) {
 	if err := requestdriver.AdvancePlanning(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatalf("AdvancePlanning: %v", err)
 	}
-	if r.State != request.StatePlanReview {
-		t.Fatalf("State = %q, error %q; want plan_review", r.State, r.Error)
+	// The handed-over plan is one ticket and nobody asked for plan review.
+	if r.State != request.StateBuilding {
+		t.Fatalf("State = %q, error %q; want building", r.State, r.Error)
 	}
 	if strings.Contains(r.Error, "criteria changed") {
 		t.Errorf("Error = %q, want no criteria-change halt", r.Error)

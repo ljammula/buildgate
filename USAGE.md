@@ -17,7 +17,7 @@ The shortest path from a fresh install to a reviewable pull request:
 | 1 | `factoryd doctor` | Checks Docker, images, model route, mounts; prints the fix for anything wrong |
 | 2 | `factoryd quickstart <repo-path> "<task>"` | Configures the session, starts a `worker` and `factoryd serve`, submits the request, opens its tokenized console link, stops at `spec_review` |
 | 3 | `factoryd approve <req-id>` / `factoryd reject -reason "..." <req-id>` | Your decision at each review gate (console: Approve / Request changes). Quickstart prints each command with the `-data-dir` it needs |
-| 4 | `factoryd watch <req-id>` / `factoryd status` | Follow progress; `factoryd retry <req-id>` after a halt or quarantine |
+| 4 | `factoryd watch <req-id>` / `factoryd status` (or `submit -watch`, which follows the request after submitting) | Follow progress; `factoryd retry <req-id>` after a halt or quarantine |
 | 5 | The pull request on the repo's GitHub remote | Opens as a draft, marked ready for review automatically once checks pass and no reviewer thread blocks it. The factory never merges; you do |
 
 **Which document do I read?**
@@ -73,7 +73,7 @@ act in "you" rows.
 | `oracle_drafting` | factory | Only with `-draft-oracles`: drafts executable acceptance tests from the spec |
 | `oracle_review` | **you** | Read every oracle file, then `approve` (to `planning`) or `reject -reason` (back to `oracle_drafting`) |
 | `planning` | factory | Drafts the tickets of the approved spec: one ticket when the planner's estimate of the whole change fits `pr_budget_lines` (default 400 changed lines, insertions plus deletions), otherwise the fewest tickets that each fit; each ticket declares its `Estimated-Changed-Lines:`. With `submit -plan-dir`, your own tickets are taken with no model call and get the same checks |
-| `plan_review` | **you** | Each ticket shows its estimate against the budget the plan was drafted under (the console, beside the ticket's plan, and once built beside the changed lines of its accepted run); a note says "Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget." for one over it. The estimate is the planner's guess and the note is advice: `approve` (to `building`) or `reject -reason` (back to `planning`). Comments on passages of a ticket (`reject -comments-file`) redraft only the commented sections and tickets |
+| `plan_review` | **you** | Only for a plan of more than one ticket, a request submitted with `-plan-review` or under the session key `plan_review`, or a repository whose `.factory.yml` sets `plan_review: true`. A one-ticket plan otherwise goes straight to `building`: the factory runs the checks of a plan approval, pins the ticket and oracle files, and records itself in the request's history; if a check refuses, the plan waits here for you. Each ticket shows its estimate against the budget the plan was drafted under (the console, beside the ticket's plan, and once built beside the changed lines of its accepted run); a note says "Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget." for one over it. The estimate is the planner's guess and the note is advice: `approve` (to `building`) or `reject -reason` (back to `planning`). Comments on passages of a ticket (`reject -comments-file`) redraft only the commented sections and tickets |
 | `building` | factory | One ticket at a time in the Docker sandbox, verified, gated, PR opened when release policy allows. A quarantine by checks a build can fix when told what failed (a failed verification, a command or repository gate, a diff outside Allowed-Files, a missing required file or content, or a reviewer's reproduction test the factory ran and saw fail: `review_reproduction`) first gets up to `-review-corrective-rounds` (default `1`) automatic corrective builds on the same branch before quarantining. That build is given the factory's record of the failed attempt; after a reproduction, the record names each blocking finding in one line (never the test itself) and the build reruns the held test once on its result, so a test that still fails quarantines the request with check `review_reproduction`. A review finding never quarantines by its severity: without a reproduction the factory ran it is advice, listed in the pull request under **Reviewer advice**. A failed `tests_added`, an unknown check or a halt gets none. A review that gave no verdict (it timed out or returned nothing; the combined review has 20 minutes) is no quarantine and gets no corrective build: nothing was judged, so the request waits in `resume_review` with the cause, and the build is kept |
 | `pr_review` | **you** (on GitHub) | Trusted reviewer comments trigger corrective rounds; PR auto-marked ready once checks pass and no thread blocks it; merging is yours. Next ticket starts once this one is accepted (or, under `-advance-on pr_approved`, once reviewer-approved) |
 | `resume_review` | **you** | A step ended with no verdict on the work: the `worker` running it stopped (drafting, planning, a build, a corrective or PR-review round), the sandbox of a build or round step could not be started, the model route did not serve a build, a review gave no verdict, a package registry could not be reached while a verify or gate command ran, or the oracle-drafting job ended before it produced a draft. Or a park: an earlier ticket's pull request was closed, or its branch is gone, without merging (see below the table). The reason line says which (the table below), and nothing reruns on its own. `factoryd resume <id>` continues a lost build in its kept worktree from the last completed round, reviews again a kept build whose review gave no verdict without building it again (or reruns a lost drafting/planning step), `factoryd resume -from scratch <id>` rebuilds the ticket, `factoryd cancel <id>` drops it (console: Resume / Rebuild from scratch / Cancel on the request page). `resume` is refused, naming the other two, when a container of the lost run is alive or the worktree's history changed. The request returns to the state of the lost step |
@@ -196,8 +196,8 @@ submitted -> spec_drafting <-> spec_review ------+
                                  |                |
                                  +---> planning <-+
                                           <->
-                                      plan_review
-                                          |
+                                      plan_review  (several tickets, or opt-in:
+                                          |         -plan-review, plan_review: true)
                                           v
                                       building -> pr_review
                                           ^           |  \
@@ -567,7 +567,7 @@ you: "use buildgate to implement x_spec.md in ~/code/repo"
   -> factoryd doctor -target-repo <repo>   environment + what submit would refuse
   -> factoryd submit -request-file x_spec.md [-preflight-profile brownfield] <repo>
        report: request id, console link, verify command used
-  -> factoryd watch <id>                   stops at spec_review / plan_review / pr_review
+  -> factoryd watch <id>                   stops at spec_review / pr_review (and plan_review for several tickets or an opt-in)
        report: what is waiting + the approve/reject commands for you
   -> once a ticket builds: the run's Temporal UI link (status -json temporal_ui_url)
 ```
@@ -1244,7 +1244,7 @@ carries a token.
 |---|---|---|
 | reaches `spec_review` | Spec ready for your review | On entry, then every `hitl_reminder_interval` while it waits |
 | reaches `oracle_review` | Acceptance tests ready for your review | Same |
-| reaches `plan_review` | Plan ready for your review | Same |
+| reaches `plan_review` (a plan of several tickets, or an opted-in request) | Plan ready for your review | Same |
 | reaches `resume_review` | A step gave no verdict on the work: choose how to continue | Same |
 | is halted | Halted: needs you | Once, with the reason (a review gate that waited longer than `review_gate_expiry` is halted with `<state> expired: no decision in <duration>`) |
 | is quarantined | Quarantined: needs you | Once, with the reason. A quarantined build the factory follows with a corrective round of its own sends nothing |
@@ -1385,7 +1385,8 @@ factoryd memory list        collects candidates; only you see them
 factoryd memory propose     one request: its ticket rewrites the fenced
         |                   section of AGENTS.md to the text shown in its spec
         v
-spec_review -> plan_review  you approve each, as for any request
+spec_review -> building     you approve the spec; its one-ticket plan
+        |                   goes to building with no second approval
         |
 build -> release check      AGENTS.md must be byte-for-byte that text,
         |                   and no other file may change

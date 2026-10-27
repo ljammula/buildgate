@@ -271,7 +271,7 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 		args = append(args, "-changed-by-earlier-tickets", strings.Join(entry.ChangedByEarlierTickets, ","))
 	}
 	// A request's ticket build holds and runs its review's reproductions
-	// (SC-022) unless review_reproductions is off (reproductionInputs); a
+	// (SC-022) only when review_reproductions is on (reproductionInputs); a
 	// bare run never gets these flags.
 	if entry.ReviewReproduction {
 		args = append(args, "-review-reproduction")

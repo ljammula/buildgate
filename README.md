@@ -150,7 +150,8 @@ submitted -> spec_drafting -> [spec_review] -----------------+
                                     |                          |
                                     +------------> planning <--+
                                                        |
-                                                  [plan_review]
+                                      [plan_review] (several tickets,
+                                       or -plan-review / plan_review: true)
                                                        |
                                                        v
                                         building (sandbox + gates)

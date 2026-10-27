@@ -549,6 +549,7 @@ const maxPlanningAttempts = 2
 
 type planningInputs struct {
 	verifyCommand string
+	planReview    bool // the repository's .factory.yml plan_review
 	testPatterns  []string
 	criteriaCount int
 }
@@ -575,8 +576,10 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 		return haltPlanningInputs(dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
 	}
 	var testPatterns []string
+	planReview := false
 	if cfgFile != nil {
 		testPatterns = cfgFile.TestPatterns
+		planReview = cfgFile.PlanReview
 	}
 
 	specBytes, err := os.ReadFile(RequestSpecPath(dataDir, r.ID))
@@ -602,6 +605,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 	return planningInputs{
 		verifyCommand: verifyCommand,
 		testPatterns:  testPatterns,
+		planReview:    planReview,
 		criteriaCount: criteriaCount,
 	}, nil
 }
@@ -746,6 +750,21 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	r.Tickets = requestTickets
 	r.TicketCount = len(requestTickets)
 	recordPlanEvidence(r, evidence)
+	_, supersedes := materializedOracles(dataDir, r)
+	if r.PlanReviewReason(inputs.planReview, len(supersedes)) == "" {
+		// The spec approval stays the person's; a one-ticket plan nobody
+		// asked to review is approved here with the checks a person's plan
+		// approval makes. A refusal sends the plan to plan_review instead.
+		const skipped = "plan approved by the factory: one ticket, plan review not requested (opt in with `factoryd submit -plan-review`, the session key plan_review or plan_review: true in .factory.yml)"
+		err := request.ApprovePlanByFactory(dataDir, r, skipped, now)
+		if err == nil {
+			log.Printf("request %s: planning -> building (one-ticket plan approved by the factory)", r.ID)
+			// No person reads the plan's notes at a gate; they stay on the record.
+			r.RefreshReviewNotes(dataDir)
+			return r.Save(dataDir)
+		}
+		log.Printf("request %s: the factory could not approve the plan itself (%v) -- it waits at plan_review", r.ID, err)
+	}
 	if err := r.CompletePlanning(now); err != nil {
 		return err
 	}
@@ -2184,7 +2203,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, !cfg.Settings.ReviewReproductionsOff)
+	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, cfg.Settings.ReviewReproductions)
 	if err != nil {
 		return nil, err
 	}
@@ -2263,7 +2282,7 @@ type reviewInputs struct {
 // reproductionInputs are a ticket build's review inputs. review is false for
 // a restack's replay run, which cannot take a corrective build: it gets none,
 // and the ticket's list stays as it is. hold is the session config's
-// review_reproductions: false keeps the approved spec but holds no new
+// review_reproductions off (the default) keeps the approved spec but holds no new
 // reproduction, so every finding of the build's review is advice; a ticket
 // whose list is not empty (a refusal recorded while it was on) is still
 // rechecked against that list, and so still holds. A ticket whose list is not
@@ -2996,11 +3015,22 @@ func PlanReviewOracleNote(dataDir string, r *request.Request) string {
 	if len(request.RequestOraclePins(r)) == 0 {
 		return ""
 	}
+	perTicket, supersedes := materializedOracles(dataDir, r)
+	note := fmt.Sprintf(" Oracle materialized from oracle/ (read-only: reject the plan to re-plan; oracle/ itself is editable only at oracle_review, which `factoryd retry %s` returns to if planning halts on it) -- per ticket: %s. Run command for every ticket: %s (read-only).",
+		r.ID, strings.Join(perTicket, "; "), filepath.Join(request.Dir(dataDir, r.ID), request.RequestOracleDirName, TicketOracleRunCommandFilename))
+	if len(supersedes) > 0 {
+		note += " Approving will DELETE these committed oracle paths (supersedes): " + strings.Join(supersedes, ", ") + "."
+	}
+	return note
+}
+
+// materializedOracles reads each ticket's materialized oracle directory: the
+// per-ticket file lists, and every committed path the manifests supersede
+// (sorted), which the host deletes on commit.
+func materializedOracles(dataDir string, r *request.Request) (perTicket, supersedes []string) {
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 	specs, _ := filepath.Glob(filepath.Join(ticketsDir, "*.spec.md"))
 	sort.Strings(specs)
-	var perTicket []string
-	var supersedes []string
 	for _, spec := range specs {
 		name := strings.TrimSuffix(filepath.Base(spec), ".spec.md")
 		entries, err := os.ReadDir(request.TicketOracleDir(spec))
@@ -3026,13 +3056,8 @@ func PlanReviewOracleNote(dataDir string, r *request.Request) string {
 			}
 		}
 	}
-	note := fmt.Sprintf(" Oracle materialized from oracle/ (read-only: reject the plan to re-plan; oracle/ itself is editable only at oracle_review, which `factoryd retry %s` returns to if planning halts on it) -- per ticket: %s. Run command for every ticket: %s (read-only).",
-		r.ID, strings.Join(perTicket, "; "), filepath.Join(request.Dir(dataDir, r.ID), request.RequestOracleDirName, TicketOracleRunCommandFilename))
-	if len(supersedes) > 0 {
-		sort.Strings(supersedes)
-		note += " Approving will DELETE these committed oracle paths (supersedes): " + strings.Join(supersedes, ", ") + "."
-	}
-	return note
+	sort.Strings(supersedes)
+	return perTicket, supersedes
 }
 
 // MaxFeedbackBytes caps the feedback file handed to a drafter (oracle, spec,

@@ -500,6 +500,7 @@
       }
     ],
     "draft_oracles": true,
+    "plan_review": true,
     "bug": true,
     "spec_imported": true,
     "build_input": "every-field build_input",

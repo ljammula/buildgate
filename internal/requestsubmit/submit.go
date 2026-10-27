@@ -169,6 +169,9 @@ type Params struct {
 	FullSuiteCommand      string
 	NoCommitOracles       bool
 	DraftOracles          bool
+	// PlanReview is `factoryd submit -plan-review`; Settings.PlanReview
+	// (the session key plan_review) opts in too.
+	PlanReview bool
 	// Bug is `factoryd submit -bug`: stored on the request, which then drafts
 	// oracles whether or not DraftOracles is set.
 	Bug bool
@@ -797,6 +800,7 @@ func Submit(p Params) (Result, error) {
 	}
 	req.FullSuiteCommand, req.FullSuiteSource = fullSuiteCommand, fullSuiteSource
 	recordOracleOptions(req, p)
+	req.PlanReview = p.PlanReview || p.Settings.PlanReview
 	req.PlanImported = len(p.ImportedTickets) > 0
 	if err := recordHandedOverPlanCriteria(req, p.ImportedSpec); err != nil {
 		return Result{}, err

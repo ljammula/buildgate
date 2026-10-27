@@ -499,3 +499,35 @@ func TestAPICreateRequestHarnessesField(t *testing.T) {
 		t.Errorf("planning=pifork: status = %d body = %s, want 422 refusing a harness the role does not allow", bad.Code, bad.Body.String())
 	}
 }
+
+// plan_review opts a request in from the body or from the server's session config.
+func TestCreateRequestRecordsThePlanReviewOptIn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body, session, want bool
+	}{"neither": {false, false, false}, "body": {true, false, true}, "session config": {false, true, true}} {
+		t.Run(name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			workspace := initGitWorkspace(t, "app")
+			writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+			settings := sessionconfig.DefaultSettings()
+			settings.PlanReview = tc.session
+			server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}), WithSessionRoles(settings))
+			body := `{"workspace":` + jsonString(workspace) + `,"text":"opt in"`
+			if tc.body {
+				body += `,"plan_review":true`
+			}
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, requestActionFor(t, http.MethodPost, "/requests", "test-token", body+"}"))
+			if recorder.Code != http.StatusCreated {
+				t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+			}
+			var got request.Request
+			if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.PlanReview != tc.want {
+				t.Errorf("PlanReview = %t, want %t", got.PlanReview, tc.want)
+			}
+		})
+	}
+}

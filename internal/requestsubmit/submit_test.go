@@ -706,3 +706,36 @@ func TestRefusalNamesTheFlagOnlyForACallerWithFlags(t *testing.T) {
 		t.Errorf("WithoutFlags() = %q, want the committed-file remedy and no flag", got)
 	}
 }
+
+// plan_review opts a request in from the submit flag or the session config.
+func TestSubmitRecordsThePlanReviewOptIn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		flag, session, want bool
+	}{"neither": {false, false, false}, "flag": {true, false, true}, "session key": {false, true, true}} {
+		t.Run(name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dataDir := t.TempDir()
+			testfixture.CommitAgentsFile(t, workspace)
+			settings := sessionconfig.DefaultSettings()
+			settings.PlanReview = tc.session
+			result, err := Submit(Params{
+				WorkspaceArg: workspace, DataDir: dataDir, RequestText: "Add idempotency keys",
+				Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+				PlanReview: tc.flag, Settings: settings,
+			})
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			req, err := request.Load(dataDir, result.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if req.PlanReview != tc.want {
+				t.Errorf("PlanReview = %t, want %t", req.PlanReview, tc.want)
+			}
+		})
+	}
+}

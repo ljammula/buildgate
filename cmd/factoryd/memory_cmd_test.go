@@ -885,19 +885,16 @@ func TestMemoryRequestStopsAtSpecReview(t *testing.T) {
 	}
 }
 
-// Approved at spec review, the request reaches plan review with its one
-// ticket, again with no model call, and waits again.
+// Approved at spec review, the request plans its one ticket with no model
+// call, and the factory approves that plan: it reaches building.
 func TestMemoryRequestPlanIsItsOneTicket(t *testing.T) {
 	f, id, _, _ := proposedMemoryRequest(t)
 	driveMemoryRequest(t, f, id, request.StateSpecReview)
 	if _, err := request.Approve(f.data, id, "alice", time.Now(), nil); err != nil {
 		t.Fatalf("approve the spec: %v", err)
 	}
-	if got := driveMemoryRequest(t, f, id, request.StatePlanReview); got != request.StatePlanReview {
-		t.Fatalf("state after the spec's approval = %s, want plan_review", got)
-	}
-	if got := driveMemoryRequest(t, f, id, request.StateBuilding); got != request.StatePlanReview {
-		t.Fatalf("state after four more passes = %s: the request left plan review with no approval", got)
+	if got := driveMemoryRequest(t, f, id, request.StateBuilding); got != request.StateBuilding {
+		t.Fatalf("state after the spec's approval = %s, want building: the one-ticket plan is approved by the factory", got)
 	}
 	loaded, err := request.Load(f.data, id)
 	if err != nil || len(loaded.Tickets) != 1 {
