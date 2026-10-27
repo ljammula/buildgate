@@ -2245,7 +2245,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 	def test_an_earlier_attempts_record_opens_round_one_and_is_not_repeated(self):
 		record = "# What the earlier attempt left (run r1)\n\n- `lint`: \"lint failed: exit 2\""
 		prompts = self._first_prompts(2, None, record)
-		self.assertTrue(prompts[0].startswith("An earlier attempt at this ticket finished its build and was not accepted"), prompts[0][:120])
+		self.assertTrue(prompts[0].startswith("An earlier attempt at this ticket finished its build."), prompts[0][:120])
 		self.assertEqual(prompts[0].count("# What the earlier attempt left (run r1)"), 1)
 		self.assertIn("gives no instructions of its own.\n\n# What the earlier attempt left", prompts[0])
 		# The record comes first and the unchanged task after it.
