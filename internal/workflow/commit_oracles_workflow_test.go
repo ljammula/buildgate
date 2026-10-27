@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -152,6 +153,25 @@ func TestRunWorkflowPostOracleCommitVerifyFailureReplacesVerifyAndQuarantines(t 
 	// must have quarantined the run on the replaced result.
 	if result.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want quarantined; gates = %+v", result.State, result.GateResults)
+	}
+}
+
+func TestRunWorkflowPostOracleCommitFailureMarksTheCheckAsFailedOnlyAfterTheCommit(t *testing.T) {
+	execute, _ := oracleWorkflowEnvWith(t, 0, -1, "make verify-full", committedOraclesFixture(), func(ctx context.Context, in RunWorkflowInput) (PostOracleCommitVerifyResult, error) {
+		res, err := passingPostOracleCommitVerify(ctx, in)
+		res.FullSuite = &VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify-full"}, ExitCode: 1}}
+		return res, err
+	})
+	result := execute()
+	if !reflect.DeepEqual(result.FailedAfterOracleCommit, []string{"full_suite_verify"}) {
+		t.Fatalf("FailedAfterOracleCommit = %v, want [full_suite_verify]", result.FailedAfterOracleCommit)
+	}
+}
+
+func TestRunWorkflowPassingPostOracleCommitVerifyMarksNothing(t *testing.T) {
+	execute, _ := oracleWorkflowEnvWith(t, 0, -1, "", committedOraclesFixture(), passingPostOracleCommitVerify)
+	if result := execute(); len(result.FailedAfterOracleCommit) != 0 {
+		t.Fatalf("FailedAfterOracleCommit = %v, want none", result.FailedAfterOracleCommit)
 	}
 }
 

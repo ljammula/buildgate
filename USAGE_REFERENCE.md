@@ -2490,7 +2490,7 @@ A run with an approved oracle (`submit -draft-oracles`, or
 |---|---|
 | `RunNamedGateActivity` | Runs the `reference_oracle` gate (and other named gates). The oracle gate also runs the runtime canary, so its timeout is doubled |
 | `CommitOraclesActivity` | After every gate and the review pass, commits the oracle files plus `.buildgate/oracles.json` on the factory host. With `-no-commit-oracles`: validate only, nothing committed |
-| `RunPostOracleCommitVerifyActivity` | Re-runs canonical verify, full suite, and named gates on the committed tree. Failure quarantines the run |
+| `RunPostOracleCommitVerifyActivity` | Re-runs canonical verify, full suite, and named gates on the committed tree. Failure quarantines the run, and the run records which checks passed on the build's tree and failed only on this one: the quarantine sentence then ends "(passed before the oracle files were committed; a build cannot change them)". Check the oracle files against the repository's own checks, then rerun with `-no-commit-oracles` or fix the oracle at `oracle_review`. A corrective build is not told about the oracle |
 
 `-no-commit-oracles` travels as the `no_commit_oracles` input field; older
 workers ignore it, so the opt-out holds only once every worker is current.

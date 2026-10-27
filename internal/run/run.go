@@ -1684,6 +1684,11 @@ type Run struct {
 	// OracleEvidence); nil unless the base commit carries an oracle index
 	// or this run's factory host committed oracles.
 	Oracles *OracleEvidence `json:"oracles,omitempty"`
+	// FailedAfterOracleCommit names the checks (a GateResult.Check) that
+	// passed on the build's tree and failed only when the factory host reran
+	// them on the tree with the committed oracle files. Empty for a run with
+	// no such check.
+	FailedAfterOracleCommit []string `json:"failed_after_oracle_commit,omitempty"`
 	// DependencyLockfilesTouched is filename-based evidence only and never
 	// affects run state or a gate. Like ChangedFiles, it deliberately has no
 	// `omitempty`: a genuinely computed empty result must serialize as `[]`,
@@ -2421,4 +2426,16 @@ func (r *Run) DiffBase() string {
 		return r.DiffBaseSHA
 	}
 	return r.BaseSHA
+}
+
+// FailedOnlyAfterOracleCommit reports whether check passed on the build's
+// tree and failed only on the tree with the committed oracle files
+// (FailedAfterOracleCommit).
+func (r *Run) FailedOnlyAfterOracleCommit(check string) bool {
+	for _, c := range r.FailedAfterOracleCommit {
+		if c == check {
+			return true
+		}
+	}
+	return false
 }

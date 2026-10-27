@@ -144,6 +144,19 @@ func commandGateLogTail(r *run.Run, check string) string {
 // approved oracle could be the thing that is wrong, naming it. FailedGates lists every gate for a later build attempt, which is not
 // told about the oracle, so it gets neither.
 func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool) string {
+	s := gateCauseSentence(r, dataDir, g, forOperator)
+	if !forOperator || !r.FailedOnlyAfterOracleCommit(g.Check) {
+		return s
+	}
+	if s == "" {
+		s = g.Check + " failed"
+	}
+	return fitTriageSuffix(s, afterOracleCommitSuffix)
+}
+
+// gateCauseSentence is gateSentence before the operator's note that the check
+// failed only on the tree with the committed oracle files.
+func gateCauseSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool) string {
 	switch g.Check {
 	case "diff_scope":
 		return triageDiffScope(r, dataDir, forOperator)
@@ -214,6 +227,12 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 		return triageLogGate(r, g.Check, 0)
 	}
 }
+
+// afterOracleCommitSuffix is the operator's note on a check that passed on the
+// build's tree and failed only on the tree with the committed oracle files
+// (run.Run.FailedAfterOracleCommit). A build cannot change those files. Fixed
+// text, so fitTriageSuffix never cuts it.
+const afterOracleCommitSuffix = " (passed before the oracle files were committed; a build cannot change them)"
 
 // shortBaseSHA is the base commit of g's rerun as a sentence names it.
 func shortBaseSHA(g run.GateResult) string {

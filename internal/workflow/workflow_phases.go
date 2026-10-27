@@ -651,9 +651,11 @@ func rerunVerifyOnCommittedTree(ctx temporalworkflow.Context, ids *activityIDs, 
 	if post.Verify.Result.ExitCode != 0 {
 		*verify = post.Verify
 		result.Verify = post.Verify.Result
+		result.FailedAfterOracleCommit = append(result.FailedAfterOracleCommit, "canonical_verify")
 	}
 	if post.FullSuite != nil && post.FullSuite.Result.ExitCode != 0 {
 		gates.fullSuite = *post.FullSuite
+		result.FailedAfterOracleCommit = append(result.FailedAfterOracleCommit, "full_suite_verify")
 	}
 	// A named gate that fails on the committed tree replaces that
 	// gate's earlier (passing) result so the gate quarantines the run.
@@ -662,6 +664,7 @@ func rerunVerifyOnCommittedTree(ctx temporalworkflow.Context, ids *activityIDs, 
 			continue
 		}
 		gates.namedGatesFailed = true
+		result.FailedAfterOracleCommit = append(result.FailedAfterOracleCommit, g.Check)
 		for i := range gates.namedGateInputs {
 			if gates.namedGateInputs[i].Check == g.Check {
 				gates.namedGateInputs[i].Command = g.Result.Result.Command
