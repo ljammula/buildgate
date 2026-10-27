@@ -92,6 +92,7 @@ const stageOrder: readonly string[] = [
   "full_suite",
   "gate",
   "evidence",
+  "tests_red_on_base",
   // conformity_review and code_review are the retired standalone review
   // stages, kept so an older run's Timeline still reads; 'review' is the one
   // review launch (reviewstep.CombinedStep) every run now has.
@@ -119,6 +120,7 @@ export const stageLabels: Readonly<Record<string, string>> = {
   conformity_review: "Conformity review",
   code_review: "Code review",
   review: "Review",
+  tests_red_on_base: "Changed tests on base and result",
   review_reproduction: "Reviewer reproduction",
   commit_oracles: "Commit oracles",
   post_oracle_commit_verify: "Re-verify after oracle commit",

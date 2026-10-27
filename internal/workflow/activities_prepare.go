@@ -114,9 +114,9 @@ func (a *Activities) CheckChainSuccessorActivity(_ context.Context, input CheckC
 // application code lives under backend/, not the checkout root -- see
 // ticketspec.MisprefixedWorkspacePaths's own doc comment for the real
 // incident that found this and why it's checked here, before the build,
-// rather than left to diff_scope/required_files_changed after it), then
+// rather than left to diff_scope after it), then
 // checks whether any of the ticket's declared Required-Changed-Files
-// already has uncommitted changes in the workspace. required_files_changed
+// already has uncommitted changes in the workspace. The required-file note
 // (evaluated after the run, against a diff from base_sha) can't tell an
 // edit the agent actually made apart from one that was already sitting
 // uncommitted before the run started — base_sha only captures HEAD, and the
@@ -228,7 +228,7 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 	}
 	if alreadyDirty := policy.RequiredFilesPreDirty(initialDirty, input.RequiredChangedFiles); len(alreadyDirty) > 0 {
 		return temporal.NewApplicationError(
-			fmt.Sprintf("required file(s) already had uncommitted changes before this run started, so required_files_changed could not honestly attribute a change to this run: %v", alreadyDirty),
+			fmt.Sprintf("required file(s) already had uncommitted changes before this run started, so the required-file check could not honestly attribute a change to this run: %v", alreadyDirty),
 			PreflightFailureType,
 		)
 	}

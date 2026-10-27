@@ -285,7 +285,7 @@ func failedChecksRecovered(failed, accepted []run.GateResult) string {
 
 func learningCheckRequiresCommand(check string) bool {
 	switch check {
-	case "diff_scope", "required_files_changed", "required_content_present", "tests_added":
+	case "diff_scope", policy.TestsRedOnBaseCheck:
 		return false
 	default:
 		return true

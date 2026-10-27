@@ -25,10 +25,10 @@ test("GET /runs/{id}/handoff decodes", () => {
         notJudged: false,
       },
       {
-        check: "tests_added",
-        bin: "never",
+        check: "tests_red_on_base",
+        bin: "corrective",
         exitCode: 0,
-        finding: "tests_added: no test file changed",
+        finding: "tests_red_on_base: no test file changed",
         output: [],
         notJudged: true,
       },

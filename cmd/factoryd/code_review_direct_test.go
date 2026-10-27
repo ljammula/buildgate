@@ -18,7 +18,7 @@ func TestRunMainWithReadyAcceptsCodeReviewPolicyFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	dir := t.TempDir()
 	spec := filepath.Join(dir, "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +77,7 @@ func TestIntegrationCodeReviewOffRunsNoPhaseAtAll(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-code-review-policy", "off"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-code-review-policy", "off"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -113,7 +113,7 @@ func TestRunMainWithReadyRequiredCodeReviewPolicyHaltsWithNoRelayConfigured(t *t
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-code-review-policy", "required"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-code-review-policy", "required"})
 
 	if r.State != run.StateHalted {
 		t.Fatalf("state = %q, want %q (code review required with no relay configured must halt, not silently skip)", r.State, run.StateHalted)

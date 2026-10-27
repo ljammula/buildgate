@@ -160,7 +160,7 @@ class BuildPromptTests(unittest.TestCase):
 				VALID_SPEC, "Add idempotency keys", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR,
 			)
 		self.assertIn("Tests-Required: no -- <reason>", prompt)
-		self.assertIn("tests_added gate", prompt)
+		self.assertIn("tests_red_on_base gate", prompt)
 		self.assertIn("Required-Changed-Files", prompt)
 
 	def test_states_the_multi_file_criterion_rule(self):

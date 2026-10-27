@@ -35,7 +35,7 @@ import (
 func TestIntegrationRelativeDataDirInsideWorkspaceFailsClosedWithClearMessage(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	fakeDocker := filepath.Join(t.TempDir(), "fake-docker")

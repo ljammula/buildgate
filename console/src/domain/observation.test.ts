@@ -48,7 +48,7 @@ test("GET /projects/{project}/observations decodes", () => {
   });
   expect(report.observations.slice(2, 4).map((o) => o.check)).toEqual([
     "canonical_verify",
-    "tests_added",
+    "tests_red_on_base",
   ]);
   expect(report.observations[0]!.id).toMatch(/^[0-9a-f]{16}$/);
   const edit = report.observations[4]!;
@@ -75,7 +75,10 @@ test("the three request-era kinds decode with their fields and have labels", () 
           run_id: "q1",
           accepted_run_id: "a1",
           what: "w",
-          checks: [{ check: "canonical_verify", sentence: "It failed." }, { check: "tests_added" }],
+          checks: [
+            { check: "canonical_verify", sentence: "It failed." },
+            { check: "tests_red_on_base" },
+          ],
         },
         {
           kind: "review_comment_accepted",
@@ -92,7 +95,7 @@ test("the three request-era kinds decode with their fields and have labels", () 
   );
   expect(report.observations[0]!.checks).toEqual([
     { check: "canonical_verify", sentence: "It failed." },
-    { check: "tests_added", sentence: "" },
+    { check: "tests_red_on_base", sentence: "" },
   ]);
   expect(report.observations[0]!.acceptedRunId).toBe("a1");
   expect(report.observations[1]).toMatchObject({

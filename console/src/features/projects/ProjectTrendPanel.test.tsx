@@ -24,7 +24,7 @@ const metrics = (over: Record<string, unknown> = {}) => ({
   comparable_pairs: 4,
   same_failure_pairs: 1,
   no_change_pairs: 1,
-  quarantined_by: [{ name: "tests_added <b>x</b>", runs: 3 }],
+  quarantined_by: [{ name: "tests_red_on_base <b>x</b>", runs: 3 }],
   halted_by: [],
   corrective_builds: { ran: 2, accepted: 1 },
   spend: {
@@ -87,7 +87,7 @@ test("the tiles, the bucket table and the two lists show the report as the CLI p
     chart.compareDocumentPosition(screen.getByRole("table")) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   const quarantined = screen.getByTestId("trend-quarantined");
-  expect(quarantined).toHaveTextContent("tests_added <b>x</b>3");
+  expect(quarantined).toHaveTextContent("tests_red_on_base <b>x</b>3");
   expect(quarantined.querySelector("b")).toBeNull();
   expect(screen.getByText("None in this window.")).toBeInTheDocument();
   expect(screen.getByText("2 live-smoke run(s) are not counted.")).toBeInTheDocument();

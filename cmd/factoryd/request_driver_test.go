@@ -268,7 +268,7 @@ func TestAdvanceBuildingQuarantineOfTicket2LeavesTicket1IntactAndRetryable(t *te
 		if onReady != nil {
 			onReady(&run.Run{ID: ticket, State: run.StateReady})
 		}
-		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_added"}
+		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_red_on_base"}
 		return rr.Save(dataDir)
 	}
 
@@ -285,7 +285,7 @@ func TestAdvanceBuildingQuarantineOfTicket2LeavesTicket1IntactAndRetryable(t *te
 	if loaded.State != request.StateQuarantined {
 		t.Fatalf("State = %q, want %q", loaded.State, request.StateQuarantined)
 	}
-	if !strings.Contains(loaded.Error, "ticket 2/3") || !strings.Contains(loaded.Error, "quarantined") || !strings.Contains(loaded.Error, "gate failed: tests_added") {
+	if !strings.Contains(loaded.Error, "ticket 2/3") || !strings.Contains(loaded.Error, "quarantined") || !strings.Contains(loaded.Error, "gate failed: tests_red_on_base") {
 		t.Errorf("Error = %q, want it to name ticket 2/3, quarantined, and the run's own reason", loaded.Error)
 	}
 	if got := loaded.Tickets[0].RunID; got != requestdrivertest.TicketRunID(id, 1) {
@@ -340,11 +340,11 @@ func TestAdvanceBuildingRetryStartFailureDoesNotReplayStaleRunID(t *testing.T) {
 		if onReady != nil {
 			onReady(&run.Run{ID: ticket, State: run.StateReady})
 		}
-		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_added"}
+		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_red_on_base"}
 		if err := rr.Save(dataDir); err != nil {
 			return err
 		}
-		return fmt.Errorf("run quarantined: gate failed: tests_added")
+		return fmt.Errorf("run quarantined: gate failed: tests_red_on_base")
 	}
 
 	for i := 1; i <= 2; i++ {
@@ -398,7 +398,7 @@ func TestAdvanceBuildingRetryStartFailureDoesNotReplayStaleRunID(t *testing.T) {
 	if !strings.Contains(final.Error, "start failed") || !strings.Contains(final.Error, "sandbox image pull failed") {
 		t.Errorf("Error = %q, want it to name the new start failure", final.Error)
 	}
-	if strings.Contains(final.Error, "tests_added") {
+	if strings.Contains(final.Error, "tests_red_on_base") {
 		t.Errorf("Error = %q, must not replay the stale quarantine's own reason", final.Error)
 	}
 }

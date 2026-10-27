@@ -63,7 +63,7 @@ type parityScenario struct {
 	// by gate ID) for this scenario -- RunWorkflowInput.
 	// GateCommands get it identically, so a scenario like lint_gate_fails
 	// below exercises the M4-K2 command-gate registry plumbing on both
-	// paths, not just canonical_verify/diff_scope/tests_added.
+	// paths, not just canonical_verify/diff_scope/tests_red_on_base.
 	gateCommands map[string]string
 }
 
@@ -73,13 +73,13 @@ func parityScenarios() []parityScenario {
 			name:          "clean_accept",
 			mode:          "commit",
 			verifyCommand: "true",
-			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_added\n",
+			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateAccepted,
 			wantCommitted: false,
-			// tests_added always runs (see its own gate doc comment in
+			// tests_red_on_base always runs (see its own gate doc comment in
 			// internal/policy); with a declared opt-out reason it always
 			// passes regardless of what actually changed.
-			wantGates: map[string]bool{"canonical_verify": true, "tests_added": true, "full_suite_verify": true},
+			wantGates: map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true},
 		},
 		{
 			// The agent (fake_build_app.sh) edits content.txt but never
@@ -89,19 +89,19 @@ func parityScenarios() []parityScenario {
 			name:          "uncommitted_diff_auto_commit",
 			mode:          "leave_dirty",
 			verifyCommand: "true",
-			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_added\n",
+			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateAccepted,
 			wantCommitted: true,
-			wantGates:     map[string]bool{"canonical_verify": true, "tests_added": true, "full_suite_verify": true},
+			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true},
 		},
 		{
 			name:          "canonical_verify_fails",
 			mode:          "commit",
 			verifyCommand: "false",
-			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_added\n",
+			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateQuarantined,
 			wantCommitted: false,
-			wantGates:     map[string]bool{"canonical_verify": false, "tests_added": true},
+			wantGates:     map[string]bool{"canonical_verify": false, "tests_red_on_base": true},
 		},
 		{
 			// commit_extra touches content.txt (allowed) plus
@@ -110,10 +110,10 @@ func parityScenarios() []parityScenario {
 			name:          "diff_scope_violation",
 			mode:          "commit_extra",
 			verifyCommand: "true",
-			specExtra:     "\n## Out of scope\n\nAllowed-Files: content.txt\n\nTests-Required: no -- parity fixture doesn't exercise tests_added\n",
+			specExtra:     "\n## Out of scope\n\nAllowed-Files: content.txt\n\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateQuarantined,
 			wantCommitted: false,
-			wantGates:     map[string]bool{"canonical_verify": true, "diff_scope": false, "tests_added": true, "full_suite_verify": true},
+			wantGates:     map[string]bool{"canonical_verify": true, "diff_scope": false, "tests_red_on_base": true, "full_suite_verify": true},
 		},
 		{
 			// Explicit "Tests-Required: yes" (not merely omitted --
@@ -121,15 +121,15 @@ func parityScenarios() []parityScenario {
 			// both auto-append a Tests-Required opt-out when the spec
 			// doesn't mention the key at all, a convenience for every
 			// other test in this package that isn't exercising this gate)
-			// and no test file in the diff: tests_added must reject it on
+			// and no test file in the diff: tests_red_on_base must reject it on
 			// the Temporal path.
-			name:          "tests_added_missing",
+			name:          "tests_red_on_base_missing",
 			mode:          "commit",
 			verifyCommand: "true",
 			specExtra:     "\nTests-Required: yes\n",
 			wantState:     run.StateQuarantined,
 			wantCommitted: false,
-			wantGates:     map[string]bool{"canonical_verify": true, "tests_added": false, "full_suite_verify": true},
+			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": false, "full_suite_verify": true},
 		},
 		{
 			// lint_gate_fails exercises policy.CommandGates' registry
@@ -140,10 +140,10 @@ func parityScenarios() []parityScenario {
 			name:          "lint_gate_fails",
 			mode:          "commit",
 			verifyCommand: "true",
-			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_added\n",
+			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateQuarantined,
 			wantCommitted: false,
-			wantGates:     map[string]bool{"canonical_verify": true, "tests_added": true, "full_suite_verify": true, "lint": false},
+			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true, "lint": false},
 			gateCommands:  map[string]string{"lint": "false"},
 		},
 		{
@@ -159,7 +159,7 @@ func parityScenarios() []parityScenario {
 			name:          "base_sha_ancestry_halt",
 			mode:          "rewind_and_commit",
 			verifyCommand: "true",
-			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_added\n",
+			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateHalted,
 			wantCommitted: false,
 			wantGates:     nil,
@@ -342,7 +342,7 @@ func runTemporalPathFixtureWithRoles(t *testing.T, workspace, mode, verifyComman
 func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyCommand, specContent string, requestTicket bool, gateCommands map[string]string, thinking, reviewThinking string, reviewRelayPolicy *sandbox.RoutePolicy, compose composeServicesOptions) *run.Run {
 	t.Helper()
 	if !strings.Contains(specContent, "Tests-Required:") {
-		specContent += "\nTests-Required: no -- parity fixture doesn't exercise tests_added\n"
+		specContent += "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n"
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
@@ -573,7 +573,7 @@ func TestOnBranchTemporalPathChecksOutPRBranchNotSharedHEAD(t *testing.T) {
 		t.Fatalf("fixture setup: main HEAD %s must differ from %s's own tip %s", mainHead, branch, branchTip)
 	}
 
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt\nTests-Required: no -- fixture doesn't exercise tests_added\n"
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt\nTests-Required: no -- fixture doesn't exercise tests_red_on_base\n"
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -745,7 +745,7 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 		t.Fatalf("checkout main: %v: %s", err, out)
 	}
 
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nRequired-Changed-Files: content.txt, b_test.go\nTests-Required: no -- fixture doesn't exercise tests_added\n"
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nRequired-Changed-Files: content.txt, b_test.go\nTests-Required: no -- fixture doesn't exercise tests_red_on_base\n"
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -840,9 +840,9 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 	if !slices.Contains(result.ChangedFiles, "content.txt") || !slices.Contains(result.ChangedFiles, "b_test.go") {
 		t.Errorf("ChangedFiles = %v, want it to include both content.txt and b_test.go from the cumulative range %s..HEAD, not just this round's own delta %s..HEAD", result.ChangedFiles, diffBase, branchTip)
 	}
-	for _, g := range result.GateResults {
-		if g.Check == "required_files_changed" && !g.Passed {
-			t.Errorf("required_files_changed gate failed (%+v), want it to pass against the cumulative diff", g)
+	for _, n := range result.Notes {
+		if strings.Contains(n, "required file not changed") {
+			t.Errorf("note %q: want the required-file check to pass against the cumulative diff", n)
 		}
 	}
 }

@@ -217,21 +217,32 @@ func judgedFacts(ctx context.Context, input RunWorkflowInput) (reproduction.Judg
 		return j, err
 	}
 	j.Tracked = tracked
+	if j.Root, err = rootFactsAt(ctx, input.WorkspacePath, "HEAD", tracked); err != nil {
+		return j, err
+	}
+	return j, nil
+}
+
+// rootFactsAt reads the root files of commit that select a reproduction
+// runner (reproduction.MarkerFiles) from the repository at dir, given the
+// commit's tracked paths, by a host git that runs nothing of the repository's.
+func rootFactsAt(ctx context.Context, dir, commit string, tracked []string) (reproduction.RootFacts, error) {
 	present := map[string]bool{}
 	for _, p := range tracked {
 		present[p] = true
 	}
+	root := reproduction.RootFacts{}
 	for _, name := range reproduction.MarkerFiles() {
 		if !present[name] {
 			continue
 		}
-		content, err := readCommitFile(ctx, input.WorkspacePath, "HEAD", name)
+		content, err := readCommitFile(ctx, dir, commit, name)
 		if err != nil {
-			return j, fmt.Errorf("read %s at the judged commit: %w", name, err)
+			return nil, fmt.Errorf("read %s at the judged commit: %w", name, err)
 		}
-		j.Root[name] = []byte(content)
+		root[name] = []byte(content)
 	}
-	return j, nil
+	return root, nil
 }
 
 // treePaths lists every path tracked in commit of the repository at dir.
@@ -284,6 +295,19 @@ type ReproductionRunInput struct {
 	Held   run.HeldReproduction `json:"held"`
 	Pass   string               `json:"pass"`
 	Commit string               `json:"commit"`
+	// AttemptKind names the launch on the run record, the progress feed and
+	// the heartbeat: testsRedAttemptKind for a changed test file's launch in
+	// the tests_red_on_base proof, "" (reproductionAttemptKind) for a held
+	// reviewer's reproduction. It changes nothing else about the launch.
+	AttemptKind string `json:"attempt_kind,omitempty"`
+}
+
+// kind is the launch's attempt kind.
+func (in ReproductionRunInput) kind() string {
+	if in.AttemptKind != "" {
+		return in.AttemptKind
+	}
+	return reproductionAttemptKind
 }
 
 // ReproductionRunResult is one run of a held reproduction: what the runner's
@@ -339,9 +363,9 @@ func (a *Activities) RunReviewReproductionActivity(ctx context.Context, input Re
 		return ReproductionRunResult{}, temporal.NewApplicationError("a prior attempt of this review reproduction Activity left an intent or journal without its checkpoint — halting rather than risk a duplicate launch", AmbiguousPriorAttemptType)
 	}
 	detail := fmt.Sprintf("finding %d %s", input.Held.Finding, input.Pass)
-	progressMark(ctx, a.logDirFor(input.RunWorkflowInput), reproductionAttemptKind, "start", "", detail)
+	progressMark(ctx, a.logDirFor(input.RunWorkflowInput), input.kind(), "start", "", detail)
 	res, runErr := a.runReproduction(ctx, input, scratchRoot)
-	progressMark(ctx, a.logDirFor(input.RunWorkflowInput), reproductionAttemptKind, "end", reproductionProgressOutcome(res, runErr), detail)
+	progressMark(ctx, a.logDirFor(input.RunWorkflowInput), input.kind(), "end", reproductionProgressOutcome(res, runErr), detail)
 	checkpoint.Result = res
 	errType := ""
 	if runErr != nil {
@@ -554,12 +578,12 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 	if err != nil {
 		return res, err
 	}
-	composeSpec, err := a.composeServicesSpecFor(input.RunWorkflowInput, reproductionAttemptKind)
+	composeSpec, err := a.composeServicesSpecFor(input.RunWorkflowInput, input.kind())
 	if err != nil {
 		return res, err
 	}
 	command := stepCommand(input.SetupCommands, l.cmd.Script)
-	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), reproductionAttemptKind, command); err != nil {
+	if _, err := recordActivityIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.kind(), command); err != nil {
 		return res, fmt.Errorf("record the reproduction's intent: %w", err)
 	}
 	logPath := activityLogPath(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), fmt.Sprintf("review-repro-%d-%s.log", input.Held.Finding, input.Pass)))
@@ -572,24 +596,24 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 		if err := checkHeldHash(staged, input.Held.SHA256); err != nil {
 			return err
 		}
-		_, err = recordActivityAttemptIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), attempt, reproductionAttemptKind, command, time.Now().UTC().Format(time.RFC3339))
+		_, err = recordActivityAttemptIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), attempt, input.kind(), command, time.Now().UTC().Format(time.RFC3339))
 		return err
 	}
 	before = a.leaseChecked(ctx, a.checkpointDirFor(input.RunWorkflowInput), before)
 	after := func(attempt int, r runner.Result, _ error) error {
 		res.Attempts = append(res.Attempts, run.Attempt{
-			Kind: reproductionAttemptKind, Command: r.Command, SetupSHA256: run.SetupDigest(input.SetupCommands),
+			Kind: input.kind(), Command: r.Command, SetupSHA256: run.SetupDigest(input.SetupCommands),
 			StartedAt: r.StartedAt.Format(time.RFC3339), FinishedAt: r.FinishedAt.Format(time.RFC3339),
 			ExitCode: r.ExitCode, LogPath: logPath(attempt), ImageDigest: r.ImageDigest, Resources: attemptResources(r),
 			FactoryDirSHA256: r.FactoryDirSHA256, FactoryDirCommit: r.FactoryDirCommit, FactoryDirError: r.FactoryDirError,
 		})
-		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input.RunWorkflowInput), reproductionAttemptKind, res.Attempts)
+		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.kind(), res.Attempts)
 	}
 	launchCtx, cancel := context.WithTimeout(ctx, l.cmd.Timeout+reproductionLaunchMargin)
 	defer cancel()
 	started := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: reproductionAttemptKind, Elapsed: time.Since(started)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: input.kind(), Elapsed: time.Since(started)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(launchCtx, l.scratch, logPath, 1, before, after, command[0], command[1:]...)

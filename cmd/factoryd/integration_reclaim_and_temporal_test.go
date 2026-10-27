@@ -45,7 +45,7 @@ func TestIntegrationDaemonReclaimHoldsRepositoryOwnershipAfterSubmitterCrash(t *
 	}
 	lockPath := filepath.Join(commonDir, "factoryd-direct.lock")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -170,7 +170,7 @@ func TestIntegrationDaemonReclaimHoldsRepositoryOwnershipAfterSubmitterCrash(t *
 		BuildMaxAttempts:    1,
 		VerifyCommand:       "sleep 5; true",
 		VerifyMaxAttempts:   1,
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		RepositoryOwnerID:   ownerID,
 		TaskQueue:           taskQueue + "-run-" + runID,
 	}
@@ -395,7 +395,7 @@ func reconcileAfterFailedBuild(t *testing.T, name string, deadline time.Duration
 		SpecPath:            "/fixture/spec.md",
 		BaseSHA:             "fixture-base-sha",
 		SandboxImage:        fakeSandboxImage,
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		IsolateWorkspace:    true,
 		IsolatedRepoDir:     "/fixture/repo",
 		IsolatedParentDir:   "/fixture/data/workspaces",
@@ -552,7 +552,7 @@ func TestIntegrationDaemonWiresSandboxDockerFlagIntoActivities(t *testing.T) {
 		// script or Docker binary is ever needed for this test.
 		SandboxImage:        "factory-worker:test@sha256:deadbeef",
 		SandboxDocker:       "/fixture/request-supplied-docker",
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -861,7 +861,7 @@ func TestIntegrationReconcileReclaimedRunCancelsLateArrivingNeverStartedSignal(t
 		t.Fatalf("git rev-parse HEAD: %v", err)
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	taskQueue := "factoryd-repo-" + ownerID
@@ -885,7 +885,7 @@ func TestIntegrationReconcileReclaimedRunCancelsLateArrivingNeverStartedSignal(t
 			BuildMaxAttempts:    1,
 			VerifyCommand:       "true",
 			VerifyMaxAttempts:   1,
-			TestsRequiredOptOut: "not exercising tests_added in this fixture",
+			TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		}},
 		temporalclient.StartWorkflowOptions{ID: ownerID, TaskQueue: taskQueue},
 		workflow.RepositoryOwnerWorkflow, workflow.RepositoryOwnerWorkflowInput{Repository: repository},
@@ -1007,7 +1007,7 @@ func TestIntegrationReconcileReclaimedRunDoesNotFalselyConfirmQueuedBehindLongRu
 	}
 	baseSHA := strings.TrimSpace(string(baseSHABytes))
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 
@@ -1050,7 +1050,7 @@ func TestIntegrationReconcileReclaimedRunDoesNotFalselyConfirmQueuedBehindLongRu
 			BuildMaxAttempts:    1,
 			VerifyCommand:       "true",
 			VerifyMaxAttempts:   1,
-			TestsRequiredOptOut: "not exercising tests_added in this fixture",
+			TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		}
 	}
 
@@ -1269,7 +1269,7 @@ func TestIntegrationReconcileReclaimedRunSurvivesOwnerIdleRestart(t *testing.T) 
 	}
 	baseSHA := strings.TrimSpace(string(baseSHABytes))
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 
@@ -1310,7 +1310,7 @@ func TestIntegrationReconcileReclaimedRunSurvivesOwnerIdleRestart(t *testing.T) 
 			BuildMaxAttempts:    1,
 			VerifyCommand:       "true",
 			VerifyMaxAttempts:   1,
-			TestsRequiredOptOut: "not exercising tests_added in this fixture",
+			TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		}
 	}
 
@@ -1552,7 +1552,7 @@ func TestIntegrationReconcileReclaimedRunNamespacesChildByRepository(t *testing.
 		}
 		baseSHA := strings.TrimSpace(string(baseSHABytes))
 		specPath := filepath.Join(t.TempDir(), "spec.md")
-		if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+		if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 			t.Fatalf("write spec (%s): %v", f.label, err)
 		}
 		logDir := filepath.Join(t.TempDir(), "logs")
@@ -1581,7 +1581,7 @@ func TestIntegrationReconcileReclaimedRunNamespacesChildByRepository(t *testing.
 			BuildMaxAttempts:    1,
 			VerifyCommand:       "true",
 			VerifyMaxAttempts:   1,
-			TestsRequiredOptOut: "not exercising tests_added in this fixture",
+			TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		}
 
 		seeded := &run.Run{

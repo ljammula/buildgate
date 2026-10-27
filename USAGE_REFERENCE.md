@@ -252,19 +252,6 @@ continues. Corrective and PR-review rounds build on the ticket's current
 PR-head run, on the ticket's pull-request branch; their `-diff-base` stays
 the ticket's original base, so the gates judge the whole pull request.
 
-Every ticket build sees the whole approved spec, so an earlier ticket can do
-a later ticket's work in a file both may change. `required_files_changed`
-then judges the stack, not the ticket alone:
-
-| Ticket N+1's required file | `required_files_changed` |
-|---|---|
-| Changed by this build | Changed |
-| Untouched by this build, changed by an earlier ticket's PR-head run, and this build changed another of its required files | Changed: the gate's `changed_by_earlier_tickets` in `run.json` and a line under the gate in the pull request name it |
-| Untouched by this build and by every earlier ticket | Fails |
-| Any, when this build changed none of its required files | Fails for every untouched one, whatever earlier tickets changed |
-
-Ticket 1, and every run outside a request, is judged on its own diff only.
-
 An approval moves a ticket on (under `-advance-on pr_approved`) only when some
 reviewer's latest opinion (an approval, a change request or a dismissal; a
 comment is none) approves the pull request's current head commit and no
@@ -375,7 +362,7 @@ on the ticket with kind `corrective`. `-review-corrective-rounds` (default
 disables it, and it is counted separately from `max_review_rounds`. An
 accepted round opens the PR and advances exactly like a first build's
 acceptance. A budget greater than `1` runs up to that many consecutive
-rounds while each round's own outcome is still eligible. Not eligible: `tests_added` on a committed diff, a review that
+rounds while each round's own outcome is still eligible. Not eligible: a review that
 gave no verdict, an unknown check, a repository gate the worker never ran, a
 build a `setup:` command stopped before its first agent turn (decided only by
 the factory's own records: the meter counted no token for the build and the
@@ -454,7 +441,7 @@ as a fresh run with every gate again. Where it starts and what it is told:
 |---|---|---|
 | Quarantined, with a handoff a build may be given (the corrective round's rule), built from the ticket's own spec as it is now, and it committed something | On that run's branch, from its commit (`-on-branch`, with the run's diff base); given the record (`rounds/<ticket>-retry/earlier-attempt.md`), which opens by saying the attempt's commit is in the workspace | From the base commit; given the record, which opens by saying the workspace starts from the base |
 | The same, but it committed nothing (verification never passed) or recorded no branch | From the base commit; given the record | The same |
-| Anything else: a failure a build is never told about (`tests_added`, a review with no verdict, a failed `code_review`), a spec changed since (`amend-scope`, an edit), an older record's review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
+| Anything else: a failure a build is never told about (a review with no verdict, a failed `code_review`), a spec changed since (`amend-scope`, an edit), an older record's review corrective round (it was built from the spec plus the reviewers' findings, not the ticket's own spec), an accepted run whose pull request the release policy refused, a halted run | From the base commit, no record | The same |
 
 The gates and the release decision of a rebuild that continues judge the
 ticket's whole change, measured from the diff base, so nothing in the commit
@@ -859,7 +846,7 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 #   registries: [npm]
 # autofix:                                         # formatters run inside each build round; see "Setup and autofix commands"
 #   - "gofmt -w ."
-# test_patterns:                                     # glob patterns for the always-on "tests_added" gate
+# test_patterns:                                     # glob patterns for the always-on "tests_red_on_base" gate
 #   - "*_test.go"
 #   - "*.spec.ts"
 #   - "__tests__/"                                  # an entry ending in "/" names a test directory
@@ -930,7 +917,7 @@ operator-approved worker image, write an explicit `verify_command`, and use
 `required_binaries` to check executables before a run.
 
 Profile test patterns are suggestions only, and a profile may omit a pattern
-when it cannot safely cover common layouts. The `tests_added` gate uses
+when it cannot safely cover common layouts. The `tests_red_on_base` gate uses
 committed `test_patterns` or the global defaults. Doctor's candidate adds
 each test directory (`__tests__/`, `test/`, `tests/`, `spec/`, `specs/`) it
 finds holding files of the profile's languages that the profile's name patterns
@@ -1132,17 +1119,44 @@ with `-reference-oracle-mount-path` on `factoryd <run>` to bind-mount a
 pristine read-only host copy over that path for the gate's own container
 run.
 
-`test_patterns` bounds the always-on `tests_added` gate: passes when a
-changed file matches one of these globs (full path or basename) or sits under
-a test directory (an entry ending in `/`, like `__tests__/`, matches any file
-under a directory of that name), or the
-ticket declares `Tests-Required: no -- <reason>` in spec.md (recorded on
-the release decision). Unset falls back to
-`policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust, plus
-`__tests__/`); this
-gate always runs. Plan drafting rejects a ticket up front, before it ever
-reaches `plan_review`, if its own `Allowed-Files` could never satisfy
-`tests_added` and it declares no `Tests-Required` opt-out.
+`test_patterns` bounds the always-on `tests_red_on_base` gate, which finds the
+test files a run changed: a changed file that matches one of these globs (full
+path or basename) or sits under a test directory (an entry ending in `/`, like
+`__tests__/`, matches any file under a directory of that name). Unset falls
+back to `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust, plus
+`__tests__/`). The factory then runs those files, in the gate sandbox, on a
+scratch checkout of the base commit and one of the result commit, each with the
+result commit's copy of the file mounted read-only over its path (the toolchain
+runner picks the test IDs and the command, as for a review's reproduction):
+
+| What the runs show | `tests_red_on_base` |
+|---|---|
+| A changed test fails, times out or does not compile on the base, and passes on the result | Passes |
+| Every test that ran passes on the base too | Fails: `tests pass on the base commit: they do not exercise the change` |
+| A changed test does not pass on the result | Fails |
+| The ticket declares `Tests-Required: no -- <reason>` | Passes with no runs; the pull request names the reason (the release decision records it) |
+| No test file changed, and no opt-out | Fails |
+| No runner takes a changed file, the report is missing, the run has no known base commit, or the proof is otherwise not reached | Passes, and the pull request lists a note: the check refuses only on what it saw run |
+
+The proof runs only after the run's own checks passed (verification, the full
+suite, the named gates), at most `MaxReproductions` (3) changed test files
+of at most 32 KiB each, with at most 20 test IDs a file, and the gate sandbox
+has no model route. The run record keeps each file's path, the SHA-256 of the
+copy it ran, the test IDs and each launch's result (`tests_red_on_base` in
+`run.json`), never the file's content. A launch that fails to start halts the
+run for a human like a review reproduction does, and a build that failed this
+gate is told in one line (`tests_red_on_base: the changed tests pass on the base
+commit, so they do not exercise the change`), then rebuilt once like any
+corrective check. Plan drafting rejects a ticket up front, before it ever
+reaches `plan_review`, if its own `Allowed-Files` could never include a test
+file and it declares no `Tests-Required` opt-out.
+
+`Required-Changed-Files:` and `Required-Content:` header lines are notes, not
+gates: a required file the run left unchanged, or a required string not newly
+present in a required file, becomes one line each under `## Notes` in the pull
+request (and in `run.json`'s `notes`), and the run is not refused for it. A
+required file already dirty in the workspace before the run still halts the run
+before its build.
 
 The Ruby defaults include both `*_spec.rb` and `*_test.rb`, covering common
 RSpec and Minitest file names. Supply `test_patterns` for a repository whose

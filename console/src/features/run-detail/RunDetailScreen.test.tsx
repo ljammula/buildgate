@@ -821,7 +821,7 @@ describe("Timeline", () => {
       "canonical_verify",
       "diff_scope",
       "required_files_changed",
-      "tests_added",
+      "tests_red_on_base",
       "full_suite_verify",
       "spec_conformity",
     ];
@@ -844,7 +844,7 @@ describe("Timeline", () => {
     expect(within(row).getByText("Passed")).toBeInTheDocument();
     expect(
       within(row).getByText(
-        "6 passed: canonical_verify, diff_scope, required_files_changed, tests_added, full_suite_verify, spec_conformity",
+        "6 passed: canonical_verify, diff_scope, required_files_changed, tests_red_on_base, full_suite_verify, spec_conformity",
       ),
     ).toBeInTheDocument();
   });
@@ -863,12 +863,12 @@ describe("Timeline", () => {
             log_sha256: "hash-canonical_verify",
           },
           {
-            check: "tests_added",
+            check: "tests_red_on_base",
             command: ["make", "verify"],
             passed: false,
             exit_code: 1,
             duration_ms: 500,
-            log_sha256: "hash-tests_added",
+            log_sha256: "hash-tests_red_on_base",
           },
         ],
       },
@@ -888,7 +888,7 @@ describe("Timeline", () => {
     const row = await screen.findByTestId("timeline-row-gate");
     expect(within(row).getByText("Failed")).toBeInTheDocument();
     expect(
-      within(row).getByText("1 failed of 2: canonical_verify (pass), tests_added (fail)"),
+      within(row).getByText("1 failed of 2: canonical_verify (pass), tests_red_on_base (fail)"),
     ).toBeInTheDocument();
   });
 

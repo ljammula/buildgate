@@ -120,35 +120,34 @@ func TestEvaluateRunDiffScopeIgnoresOnlyHashVerifiedOracles(t *testing.T) {
 	}
 }
 
-func TestEvaluateRunTestsAddedNotSatisfiedByFactoryOracle(t *testing.T) {
+func TestEvaluateRunTestsRedOnBaseNotSatisfiedByFactoryOracle(t *testing.T) {
 	// The agent added no test; the factory's oracle file is the only *_test.go.
 	in := baseInput([]string{"internal/mood/mood.go", oraclePath, ".buildgate/oracles.json"})
 	in.AllowedFiles = nil
 	in.Oracles = oracleEvidence()
 	res := EvaluateRun(in)
-	if g, _ := gateByName(res, "tests_added"); g.Passed {
-		t.Fatal("tests_added was satisfied by the factory-authored oracle")
+	if g, _ := gateByName(res, "tests_red_on_base"); g.Passed {
+		t.Fatal("tests_red_on_base was satisfied by the factory-authored oracle")
 	}
 	// Without the evidence (today's behaviour) the same inventory passes.
 	in.Oracles = nil
-	if g, _ := gateByName(EvaluateRun(in), "tests_added"); !g.Passed {
+	if g, _ := gateByName(EvaluateRun(in), "tests_red_on_base"); !g.Passed {
 		t.Fatal("control: without evidence the _test.go file counts, as before")
 	}
 	// The agent's own test still satisfies it.
 	in.Oracles = oracleEvidence()
 	in.ChangedFiles = append(in.ChangedFiles, "internal/mood/mood_test.go")
-	if g, _ := gateByName(EvaluateRun(in), "tests_added"); !g.Passed {
-		t.Fatal("agent-authored test no longer satisfies tests_added")
+	if g, _ := gateByName(EvaluateRun(in), "tests_red_on_base"); !g.Passed {
+		t.Fatal("agent-authored test no longer satisfies tests_red_on_base")
 	}
 }
 
-func TestEvaluateRunRequiredFilesChangedUnaffectedByOracles(t *testing.T) {
+func TestEvaluateRunRequiredFilesNoteStillSeesTheOraclePath(t *testing.T) {
 	in := baseInput([]string{oraclePath})
 	in.AllowedFiles = nil
 	in.RequiredChangedFiles = []string{oraclePath}
 	in.Oracles = oracleEvidence()
-	res := EvaluateRun(in)
-	if g, ok := gateByName(res, "required_files_changed"); !ok || !g.Passed {
-		t.Fatalf("required_files_changed must still see the oracle path: %+v", res.GateResults)
+	if res := EvaluateRun(in); len(res.Notes) != 0 {
+		t.Fatalf("the required-file note must still see the oracle path as changed: %q", res.Notes)
 	}
 }

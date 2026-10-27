@@ -140,7 +140,7 @@ func TestPrintRunRecapAccepted(t *testing.T) {
 		DiffStat:       &run.DiffStat{FilesChanged: 3, Insertions: 40, Deletions: 5},
 		GateResults: []run.GateResult{
 			{Check: "diff_scope", Passed: true},
-			{Check: "tests_added", Passed: true},
+			{Check: "tests_red_on_base", Passed: true},
 		},
 		AgentEvidence: &run.AgentEvidence{Rounds: []run.AgentEvidenceRound{{Index: 1}, {Index: 2}}},
 		Attempts: []run.Attempt{
@@ -159,7 +159,7 @@ func TestPrintRunRecapAccepted(t *testing.T) {
 		"run run-accepted ACCEPTED in",
 		"ticket T1",
 		"changed: 3 files (+40/-5)",
-		"gates: diff_scope ok · tests_added ok",
+		"gates: diff_scope ok · tests_red_on_base ok",
 		"rounds: 2",
 		"tokens 1000/500",
 		"$0.0250",

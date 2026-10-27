@@ -127,7 +127,7 @@ func TestTemporalLiveRunWorkflow(t *testing.T) {
 		// Sandboxing is unconditional: this test now also requires a real
 		// Docker daemon and the canonical sandbox image, on top of the
 		// test Temporal server dialTemporal already requires.
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if err != nil {
 		t.Fatalf("start Workflow Execution: %v", err)
@@ -215,7 +215,7 @@ func TestTemporalLiveRunWorkflowQuarantinesOnDiffScopeViolation(t *testing.T) {
 		// Sandboxing is unconditional: this test now also requires a real
 		// Docker daemon and the canonical sandbox image, on top of the
 		// test Temporal server dialTemporal already requires.
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if err != nil {
 		t.Fatalf("start Workflow Execution: %v", err)
@@ -518,6 +518,6 @@ func liveFixtureInput(t *testing.T, ticket string) RunWorkflowInput {
 		// Sandboxing is unconditional: this fixture now also requires a real
 		// Docker daemon and the canonical sandbox image, on top of the
 		// test Temporal server dialTemporal already requires.
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	}
 }

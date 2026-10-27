@@ -39,7 +39,7 @@ func TestIntegrationFactoryDoesNotCommitVerificationOutputWhenVerificationFails(
 	// Writes dirt (like a formatter would) and then fails, the same way a
 	// real "fmt + test" verify command can rewrite files before its test
 	// step fails.
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "echo formatted >> content.txt; exit 1"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "echo formatted >> content.txt; exit 1"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -85,7 +85,7 @@ func TestIntegrationBuildFailureQuarantines(t *testing.T) {
 	if attempts := afterBaselineAttempt(t, r.Attempts); len(attempts) != 2 || attempts[0].Kind != "build" || attempts[0].ExitCode != 1 || attempts[1].Kind != "verify" {
 		t.Errorf("expected the baseline, one failed build attempt, then one verify attempt, got %v", r.Attempts)
 	}
-	// canonical_verify (failing) plus tests_added (passing via the opt-out
+	// canonical_verify (failing) plus tests_red_on_base (passing via the opt-out
 	// runFactoryd's spec content carries) -- see that helper's own comment.
 	if len(r.GateResults) != 2 || r.GateResults[0].Passed {
 		t.Errorf("expected one failing gate result (gated on build exit code, not just verify), got %v", r.GateResults)
@@ -144,7 +144,7 @@ func TestIntegrationQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
+	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
 		[]string{"FACTORYD_DISCORD_WEBHOOK_URLS=" + srv.URL + "/hook-a, " + srv.URL + "/hook-b"})
 
 	if r.State != run.StateQuarantined {
@@ -181,7 +181,7 @@ func TestIntegrationQuarantineNotifiesSlackWebhook(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s",
+	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
 		[]string{"FACTORYD_SLACK_WEBHOOK_URLS=" + srv.URL})
 
 	if r.State != run.StateQuarantined {
@@ -222,7 +222,7 @@ func TestIntegrationQuarantinePersistsBeforeDiscordCompletes(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -331,7 +331,7 @@ func TestIntegrationOverrideDuringDiscordWaitIsNotLost(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -645,7 +645,7 @@ func TestIntegrationTicketVerifyCommandOverridesFlagDefault(t *testing.T) {
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q — factoryd should have used the ticket's declared verify command (true), not the flag default (false)", r.State, run.StateAccepted)
 	}
-	// canonical_verify plus tests_added (which always runs -- see
+	// canonical_verify plus tests_red_on_base (which always runs -- see
 	// runFactorydWithSpecFlagsAndDataDir's own opt-out injection, which
 	// this specContent doesn't override) plus full_suite_verify: no
 	// -full-suite-command/.factory.yml full_suite_command is configured
@@ -653,7 +653,7 @@ func TestIntegrationTicketVerifyCommandOverridesFlagDefault(t *testing.T) {
 	// verify command -- see TestIntegrationFullSuiteDefaultsToVerifyCommand
 	// for that substitution's own dedicated test.
 	if len(r.GateResults) != 3 {
-		t.Fatalf("expected exactly three gate results (canonical_verify, tests_added, full_suite_verify), got %v", r.GateResults)
+		t.Fatalf("expected exactly three gate results (canonical_verify, tests_red_on_base, full_suite_verify), got %v", r.GateResults)
 	}
 	want := []string{"sh", "-c", "true"}
 	// On the Temporal path the recorded argv is the sandbox's docker run
@@ -716,7 +716,7 @@ func TestIntegrationRejectsTicketWithPathTraversal(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -872,7 +872,7 @@ func TestIntegrationIsolatedTemporalUnreachableHaltsInsteadOfFallingBack(t *test
 	unreachable := ln.Addr().String()
 	ln.Close()
 
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-temporal-address", unreachable})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-temporal-address", unreachable})
 
 	if r.State != run.StateHalted {
 		t.Fatalf("state = %q, want %q — an unreachable -temporal-address combined with the now-default isolation must halt, not fall back", r.State, run.StateHalted)
@@ -905,7 +905,7 @@ func TestIntegrationTemporalRelativeDataDirResolvesCheckpointDir(t *testing.T) {
 	harnessDir := t.TempDir() // deliberately not ws — reproduces the cwd/workspace split
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1178,7 +1178,7 @@ func TestIntegrationDaemonServicesRepositoryWithNoRunInvocation(t *testing.T) {
 	}
 	baseSHA := strings.TrimSpace(string(baseSHABytes))
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 
@@ -1218,7 +1218,7 @@ func TestIntegrationDaemonServicesRepositoryWithNoRunInvocation(t *testing.T) {
 		BuildMaxAttempts:    1,
 		VerifyCommand:       "true",
 		VerifyMaxAttempts:   1,
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	}
 	// This test process registers no Worker at all — SignalWithStartWorkflow
 	// only ever creates/signals the Workflow Execution server-side; the
@@ -1302,7 +1302,7 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 	}
 	baseSHA := strings.TrimSpace(string(baseSHABytes))
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 
@@ -1342,7 +1342,7 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 		BuildMaxAttempts:    1,
 		VerifyCommand:       "true",
 		VerifyMaxAttempts:   1,
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	}
 
 	// The submitter's own dataDir — deliberately separate from the

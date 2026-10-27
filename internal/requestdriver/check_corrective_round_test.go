@@ -119,10 +119,11 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 		{"the diff left Allowed-Files", result, []string{"diff_scope"}, 1, true},
 		{"the reference oracle failed: a request's build already sees it", result, []string{"reference_oracle"}, 1, true},
 		{"a gate and a review failed together", result, []string{"lint", "code_review"}, 1, false}, // the review gave no verdict in this fixture
-		{"tests_added failed on a committed diff", result, []string{"lint", "tests_added"}, 1, false},
+		{"tests_red_on_base failed on a committed diff", result, []string{"lint", "tests_red_on_base"}, 1, true},
+		{"only tests_red_on_base failed: the build is told the tests do not exercise the change", result, []string{"tests_red_on_base"}, 1, true},
 		// Verification never passed, so nothing was committed and the
 		// checks on the diff were not judged: sorted on verification alone.
-		{"verification failed and nothing was committed", base, []string{"canonical_verify", "diff_scope", "required_files_changed", "tests_added"}, 1, true},
+		{"verification failed and nothing was committed", base, []string{"canonical_verify", "diff_scope", "tests_red_on_base"}, 1, true},
 		{"an unknown check failed", result, []string{"a_check_from_the_future"}, 1, false},
 		{"only a review failed, with no verdict", result, []string{"code_review"}, 1, false},
 		{"the budget is zero", result, []string{"lint"}, 0, false},
@@ -387,7 +388,7 @@ func TestCheckCorrectiveRoundKeepsTheDiffScopeCheckOnTheRequest(t *testing.T) {
 			requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				checks := []string{"diff_scope"}
 				if budget == 1 {
-					checks = append(checks, "tests_added") // no longer something a build is told about
+					checks = append(checks, "tests_red_on_base") // no longer something a build is told about
 				}
 				return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, checks...)
 			})

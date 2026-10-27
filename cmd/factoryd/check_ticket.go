@@ -144,11 +144,11 @@ var ticketHeaderChecks = map[string]ticketHeaderCheck{
 			// explicit "Tests-Required: yes" -- present[...] is what
 			// disambiguates them here.
 			if err == nil && present[ticketspec.TestsRequiredPrefix] && reason == "" {
-				reason = "yes (tests_added gate applies normally)"
+				reason = "yes (tests_red_on_base gate applies normally)"
 			}
 			return reason, err
 		},
-		Absent: "not present -- the tests_added gate applies with no opt-out",
+		Absent: "not present -- the tests_red_on_base gate applies with no opt-out",
 	},
 	ticketspec.EstimatedChangedLinesPrefix: {
 		Read: func(specPath string, _ map[string]bool) (string, error) {
@@ -325,7 +325,7 @@ Verify-Command: the exact command that proves this ticket's change works, e.g. m
   -verify-command default instead of a command this ticket chose itself.
 
 Tests-Required: yes
-  -- optional, defaults to "yes" (the tests_added gate applies normally).
+  -- optional, defaults to "yes" (the tests_red_on_base gate applies normally).
   Set to ` + "`Tests-Required: no -- <reason>`" + ` only for a ticket that
   genuinely adds no tests (e.g. documentation-only), and always give the
   reason.

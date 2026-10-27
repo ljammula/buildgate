@@ -42,10 +42,10 @@
       "exit_code": 1
     },
     {
-      "check": "tests_added",
-      "bin": "never",
+      "check": "tests_red_on_base",
+      "bin": "corrective",
       "exit_code": 0,
-      "finding": "tests_added: no test file changed",
+      "finding": "tests_red_on_base: no test file changed",
       "not_judged": true
     }
   ],

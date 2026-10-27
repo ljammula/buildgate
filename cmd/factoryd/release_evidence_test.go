@@ -155,7 +155,7 @@ func TestRenderEvidenceMarkdownOmitsReferenceOracleHashWhenNotComputed(t *testin
 	}
 }
 
-// TestRenderEvidenceMarkdownShowsTestsAddedOptOutReason is the tests_added
+// TestRenderEvidenceMarkdownShowsTestsAddedOptOutReason is the tests_red_on_base
 // gate's PR-body requirement: a pass via the ticket's declared opt-out must
 // show the reason, not read identically to a real test file satisfying it.
 func TestRenderEvidenceMarkdownShowsTestsAddedOptOutReason(t *testing.T) {
@@ -165,15 +165,15 @@ func TestRenderEvidenceMarkdownShowsTestsAddedOptOutReason(t *testing.T) {
 		TestsRequiredOptOut: "this ticket only updates documentation",
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: true},
-			{Check: "tests_added", Passed: true},
+			{Check: "tests_red_on_base", Passed: true},
 		},
 	}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if !strings.Contains(body, "`tests_added` opted out: this ticket only updates documentation") {
+	if !strings.Contains(body, "`tests_red_on_base` opted out: this ticket only updates documentation") {
 		t.Errorf("evidence body does not contain the opt-out reason:\n%s", body)
 	}
 
-	withoutOptOut := &run.Run{ID: "run-2", GateResults: []run.GateResult{{Check: "tests_added", Passed: true}}}
+	withoutOptOut := &run.Run{ID: "run-2", GateResults: []run.GateResult{{Check: "tests_red_on_base", Passed: true}}}
 	body = renderEvidenceMarkdown(withoutOptOut, &release.MergePolicy{})
 	if strings.Contains(body, "opted out") {
 		t.Errorf("evidence body should not mention an opt-out when none was declared:\n%s", body)
@@ -927,7 +927,7 @@ func TestAPIStartStarterPlumbsOpenPullRequestFlagBestEffort(t *testing.T) {
 	tier2SettingsOverride.ReleaseAllowUnsandboxed = true
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1316,19 +1316,21 @@ func TestOpenEvidencePullRequestChecksFromTheRunsDiffBase(t *testing.T) {
 	}
 }
 
-// The pull request body names, under required_files_changed, the required
-// files an earlier ticket of the request changed in this ticket's place, so
-// the reviewer looks for that work in the earlier ticket's pull request.
-func TestEvidenceMarkdownNamesRequiredFilesChangedByEarlierTickets(t *testing.T) {
-	r := &run.Run{ID: "r", GateResults: []run.GateResult{
-		{Check: "required_files_changed", Passed: true, ChangedByEarlierTickets: []string{"main.go", "a`b.go"}},
-	}}
+// The pull request body lists the run's notes under one "## Notes" heading,
+// one line each, cleaned: a path with a backtick or a newline cannot break
+// out of the line. A run with no notes has no heading.
+func TestEvidenceMarkdownListsNotesInOneSection(t *testing.T) {
+	r := &run.Run{ID: "r", Notes: []string{"required file not changed: a`b.go", "tests_red_on_base: no verdict (x)\n## injected"}}
 	md := renderEvidenceMarkdown(r, nil)
-	if want := "- `required_files_changed`: pass (exit 0, 0ms)\n  - changed by an earlier ticket of this request, not by this one: `main.go`, `a'b.go`\n"; !strings.Contains(md, want) {
+	want := "## Notes\n\n- required file not changed: a'b.go\n- tests_red_on_base: no verdict (x) ## injected\n"
+	if !strings.Contains(md, want) {
 		t.Errorf("evidence markdown does not contain %q:\n%s", want, md)
 	}
-	r.GateResults[0].ChangedByEarlierTickets = nil
-	if md := renderEvidenceMarkdown(r, nil); strings.Contains(md, "earlier ticket") {
-		t.Errorf("evidence markdown names an earlier ticket for a gate that counted none:\n%s", md)
+	if strings.Count(md, "## Notes") != 1 || strings.Contains(md, "\n## injected") {
+		t.Errorf("notes did not stay in one section of single lines:\n%s", md)
+	}
+	r.Notes = nil
+	if md := renderEvidenceMarkdown(r, nil); strings.Contains(md, "## Notes") {
+		t.Errorf("evidence markdown has a Notes section for a run with none:\n%s", md)
 	}
 }

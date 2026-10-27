@@ -9,7 +9,7 @@ import (
 	"buildgate/internal/run"
 )
 
-const baselineFixtureSpec = "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"
+const baselineFixtureSpec = "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"
 
 // TestIntegrationBaselineVerifyHaltsBeforeTheBuild runs the real binary on
 // a verify command that fails on the base commit with a test the ticket
@@ -52,7 +52,7 @@ func TestIntegrationBaselineVerifyHaltsBeforeTheBuild(t *testing.T) {
 // then judged by canonical verification as any other.
 func TestIntegrationBaselineVerifyFailureTheTicketNamesBuilds(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpec(t, ws, "commit", afterBaselineFailing(t, "echo '--- FAIL: TestPager (0.00s)'; echo leftover > left.txt; exit 1"), "# fixture spec\n\nMake `TestPager` pass.\n\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s")
+	r := runFactorydWithSpec(t, ws, "commit", afterBaselineFailing(t, "echo '--- FAIL: TestPager (0.00s)'; echo leftover > left.txt; exit 1"), "# fixture spec\n\nMake `TestPager` pass.\n\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s")
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want accepted (triage %q, halt %q)", r.State, r.Triage, r.HaltError)
@@ -99,7 +99,7 @@ func TestIntegrationBaselineVerifyThatPassesIsOnTheAcceptedRun(t *testing.T) {
 // the worktree and the operator's checkout is untouched.
 func TestIntegrationBaselineVerifyThatLeavesAFileOutsideAllowedFilesHalts(t *testing.T) {
 	ws := newFixtureRepo(t)
-	spec := "# fixture spec\n\nAllowed-Files: content.txt\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"
+	spec := "# fixture spec\n\nAllowed-Files: content.txt\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"
 	r := runFactorydWithSpec(t, ws, "commit", "echo bytes > left.pyc", spec, "30s")
 
 	if r.State != run.StateHalted || r.HaltReasonCode != run.HaltReasonBaselineVerifyFailed {

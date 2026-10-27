@@ -31,7 +31,7 @@ type Decision struct {
 	// can never silently clear an invalidation it doesn't know about.
 	Invalidated bool `json:"invalidated,omitempty"`
 	// TestsRequiredOptOut mirrors run.Run.TestsRequiredOptOut: the
-	// ticket's declared reason for skipping the tests_added gate on
+	// ticket's declared reason for skipping the tests_red_on_base gate on
 	// this run, or "" when no opt-out was declared. Recorded here (not
 	// just on the run record) so the release decision itself -- the
 	// durable, auditable "why was this allowed" document -- shows the

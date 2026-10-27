@@ -61,7 +61,7 @@ func TestIntegrationAcceptedRunRecordsReleaseDecision(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls testfixture.NewGitRepo, which uses t.Setenv (GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM); t.Setenv forbids t.Parallel on the same test.
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
-	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
 	}
@@ -122,7 +122,7 @@ func TestIntegrationKillSwitchEngagedDeniesReleaseDecision(t *testing.T) {
 		t.Fatalf("kill-switch engage output = %q, want it to report engaged=true", engaged)
 	}
 
-	denied := runFactorydWithSpecFlagsAndDataDir(t, engagedWorkspace, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	denied := runFactorydWithSpecFlagsAndDataDir(t, engagedWorkspace, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if denied.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", denied.State, run.StateAccepted)
 	}
@@ -142,7 +142,7 @@ func TestIntegrationKillSwitchEngagedDeniesReleaseDecision(t *testing.T) {
 	// The same repository again (a fresh run id): the project id is the
 	// repository's own, so a sibling checkout under the same parent would
 	// be a different project, not "the next run" of this one.
-	after := runFactorydWithSpecFlagsAndDataDir(t, engagedWorkspace, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	after := runFactorydWithSpecFlagsAndDataDir(t, engagedWorkspace, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if after.State != run.StateAccepted {
 		t.Fatalf("state after disengage = %q, want %q", after.State, run.StateAccepted)
 	}
@@ -289,7 +289,7 @@ func TestIntegrationOverrideRateReportsAcceptedAndOverriddenCounts(t *testing.T)
 	dataDir := t.TempDir()
 
 	// A plain, unattended acceptance.
-	clean := runFactorydWithSpecFlagsAndDataDir(t, newFixtureRepo(t), "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	clean := runFactorydWithSpecFlagsAndDataDir(t, newFixtureRepo(t), "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if clean.State != run.StateAccepted {
 		t.Fatalf("clean run state = %q, want %q", clean.State, run.StateAccepted)
 	}

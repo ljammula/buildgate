@@ -14,9 +14,7 @@ func TestAllGateChecksExactValue(t *testing.T) {
 	want := []string{
 		"canonical_verify",
 		"diff_scope",
-		"required_files_changed",
-		"required_content_present",
-		"tests_added",
+		"tests_red_on_base",
 		"full_suite_verify",
 		"lint",
 		"security_audit",

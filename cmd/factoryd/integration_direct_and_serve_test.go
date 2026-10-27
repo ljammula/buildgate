@@ -35,7 +35,7 @@ func TestIntegrationInvalidDirectRunDoesNotCreateOwnershipLock(t *testing.T) {
 	}
 	lockPath := filepath.Join(commonDir, "factoryd-direct.lock")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -77,7 +77,7 @@ func TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold(t *testing.T) 
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepoWithoutBootstrapScaffold(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -118,7 +118,7 @@ func TestIntegrationRunIsRefusedWithoutACommittedAgentsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -165,7 +165,7 @@ func TestIntegrationRunRecordsDerivedProjectID(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil)
 
 	want := release.ProjectFromWorkspace(ws)
 	if r.Project != want {
@@ -177,7 +177,7 @@ func TestIntegrationProjectBootstrapPreflightSkippedWithFlag(t *testing.T) {
 	// not parallel-safe: newFixtureRepoWithoutBootstrapScaffold calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepoWithoutBootstrapScaffold(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-skip-project-check"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-skip-project-check"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q — -skip-project-check must let an unbootstrapped project run normally", r.State, run.StateAccepted)
@@ -245,7 +245,7 @@ func TestIntegrationRunRejectsMalformedPRClosesIssueFlag(t *testing.T) {
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -285,7 +285,7 @@ func TestIntegrationRunAcceptsWellFormedPRClosesIssueFlag(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-skip-project-check", "-pr-closes-issue", "acme/widgets#42"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-skip-project-check", "-pr-closes-issue", "acme/widgets#42"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q -- a well-formed -pr-closes-issue must not be rejected", r.State, run.StateAccepted)
@@ -305,7 +305,7 @@ func TestIntegrationRunRejectsMalformedPRBaseFlag(t *testing.T) {
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -345,7 +345,7 @@ func TestIntegrationRunAcceptsWellFormedPRBaseFlag(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-skip-project-check", "-pr-base", "factoryd/run-1"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-skip-project-check", "-pr-base", "factoryd/run-1"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q -- a well-formed -pr-base must not be rejected", r.State, run.StateAccepted)
@@ -403,7 +403,7 @@ func TestIntegrationProjectBootstrapPreflightAcceptsCustomArchitectureSections(t
 		t.Fatalf("abs script path: %v", err)
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	baseArgs := []string{
@@ -463,7 +463,7 @@ func TestIntegrationPiTicketStructurePreflightHaltsBeforeBuild(t *testing.T) {
 		t.Fatalf("write malformed native ticket: %v", err)
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# internal factoryd ticket spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# internal factoryd ticket spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write internal ticket spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -506,7 +506,7 @@ func TestIntegrationPiTicketStructurePreflightAllowsValidTicket(t *testing.T) {
 		t.Fatalf("write valid native ticket: %v", err)
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# internal factoryd ticket spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# internal factoryd ticket spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write internal ticket spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -556,7 +556,7 @@ func TestIntegrationPiTicketStructurePreflightAllowsValidTicket(t *testing.T) {
 const wellFormedRequestTicketspec = `Verify-Command: true
 Allowed-Files: content.txt
 Required-Changed-Files: content.txt
-Tests-Required: no -- integration fixture doesn't exercise tests_added
+Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base
 
 ## Goal
 
@@ -701,7 +701,7 @@ func TestIntegrationIsolateWorkspaceDefaultsOnWithoutFlag(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil)
 
 	if r.Branch == "" || r.WorkspacePath == ws {
 		t.Fatalf("run did not execute isolated by default: branch=%q workspacePath=%q workspace=%q", r.Branch, r.WorkspacePath, ws)
@@ -727,7 +727,7 @@ func fakeSandboxDockerBinary(t *testing.T) string {
 // halted run is a valid, expected outcome for some scenarios.
 func runFactoryd(t *testing.T, workspace, mode, verifyCommand string) *run.Run {
 	t.Helper()
-	return runFactorydWithSpec(t, workspace, mode, verifyCommand, "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s")
+	return runFactorydWithSpec(t, workspace, mode, verifyCommand, "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s")
 }
 
 // runFactorydWithSpec is runFactoryd with control over the ticket spec's
@@ -771,17 +771,17 @@ func runFactorydWithSpecFlagsAndDataDir(t *testing.T, workspace, mode, verifyCom
 	// let `git add -A` sweep it into the agent's own commit and corrupt
 	// the changed-file/diff-size evidence this test and others check.
 	//
-	// tests_added always runs, and testdata/fake_build_app.sh's
+	// tests_red_on_base always runs, and testdata/fake_build_app.sh's
 	// fixtures don't add a real *_test.go file — appended here, the one
 	// chokepoint every runFactorydWithSpec* helper routes through, rather
 	// than in each of this suite's many callers, so none of them (none of
-	// which are testing tests_added itself) has to know that gate exists.
+	// which are testing tests_red_on_base itself) has to know that gate exists.
 	// A caller whose own specContent already declares Tests-Required:
 	// keeps its own declaration -- ticketspec's parseTopLevelKeyLine
 	// returns only the first occurrence of a key, so this appended line
 	// never overrides one already present.
 	if !strings.Contains(specContent, "Tests-Required:") {
-		specContent += "\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"
+		specContent += "\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
@@ -879,7 +879,7 @@ func TestIntegrationRelativeDataDirResolvesSnapshotPath(t *testing.T) {
 	harnessDir := t.TempDir() // deliberately not ws — reproduces the cwd/workspace split
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1076,7 +1076,7 @@ func TestIntegrationServeDrainsAPIStartedRunBeforeExiting(t *testing.T) {
 	writeNativeTicketForAPI(t, ws, "fixture-drain-ticket")
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1254,7 +1254,7 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 	// Opus review, S1): a decision this test expects Allowed to require
 	// every gate to have a real passing result, not merely "none
 	// recorded failed".
-	specContent := "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n" +
+	specContent := "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
 		"Allowed-Files: content.txt\n" +
 		"Required-Changed-Files: content.txt\n" +
 		"Required-Content: REQUIRED_MARKER_STRING\n"
@@ -1428,7 +1428,7 @@ func TestIntegrationRunRefusesOverrideTokenInEnvironment(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")

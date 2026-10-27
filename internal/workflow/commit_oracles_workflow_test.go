@@ -344,9 +344,9 @@ func TestRunWorkflowPolicyInputCarriesPostCommitEvidenceWhenBothReRunsFail(t *te
 }
 
 // The host commit can write or supersede a path in the ticket's required
-// files, so the required-content gate must judge the COMMITTED tree, not the
+// files, so the required-content note must judge the COMMITTED tree, not the
 // pre-commit snapshot CollectEvidenceActivity took (Codex review of #203).
-func TestRunWorkflowRequiredContentGateUsesTheContentAfterTheOracleCommit(t *testing.T) {
+func TestRunWorkflowRequiredContentNoteUsesTheContentAfterTheOracleCommit(t *testing.T) {
 	withRequired := func(in *RunWorkflowInput) {
 		in.RequiredChangedFiles = []string{"pkg/o.go"}
 		in.RequiredContent = []string{"MARKER"}
@@ -359,13 +359,12 @@ func TestRunWorkflowRequiredContentGateUsesTheContentAfterTheOracleCommit(t *tes
 	}
 	execute, _ := oracleWorkflowEnvWith(t, 0, -1, "", commit, passingPostOracleCommitVerify, withRequired)
 	result := execute()
+	if len(result.Notes) != 0 {
+		t.Fatalf("notes %q although the committed tree carries the marker (stale pre-commit evidence)", result.Notes)
+	}
 	for _, g := range result.GateResults {
 		if g.Check == "required_content_present" {
-			if !g.Passed {
-				t.Fatalf("required_content_present failed although the committed tree carries the marker (stale pre-commit evidence): %+v", g)
-			}
-			return
+			t.Fatalf("required_content_present is a note, not a gate: %+v", g)
 		}
 	}
-	t.Fatalf("no required_content_present gate in %+v", result.GateResults)
 }

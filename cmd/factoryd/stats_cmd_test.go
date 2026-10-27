@@ -23,7 +23,7 @@ func statsFail(i int, sig string) run.AgentEvidenceRound {
 
 // statsFixtureDataDir writes, under two projects:
 //
-//	app:   t-001 accepted in one round; t-002 quarantined on tests_added then a
+//	app:   t-001 accepted in one round; t-002 quarantined on tests_red_on_base then a
 //	       corrective round accepted (two rounds, failed the same way twice before);
 //	       t-003 halted; a live-smoke run; one run still in progress.
 //	other: o-001 accepted in one round.
@@ -39,7 +39,7 @@ func statsFixtureDataDir(t *testing.T) string {
 	round := func(rs ...run.AgentEvidenceRound) *run.AgentEvidence { return &run.AgentEvidence{Rounds: rs} }
 	save(run.Run{ID: "t-001", Ticket: "t-001", Project: "app", State: run.StateAccepted, CreatedAt: "2026-10-01T10:00:00Z", AgentEvidence: round(statsPass(1))})
 	save(run.Run{ID: "t-002", Ticket: "t-002", Project: "app", State: run.StateQuarantined, CreatedAt: "2026-10-02T10:00:00Z",
-		AgentEvidence: round(statsFail(1, "aa"), statsFail(2, "aa")), GateResults: []run.GateResult{{Check: "tests_added"}}})
+		AgentEvidence: round(statsFail(1, "aa"), statsFail(2, "aa")), GateResults: []run.GateResult{{Check: "tests_red_on_base"}}})
 	save(run.Run{ID: "t-002-corrective1", Ticket: "t-002-corrective1", Project: "app", State: run.StateAccepted, CreatedAt: "2026-10-02T12:00:00Z", AgentEvidence: round(statsPass(1))})
 	save(run.Run{ID: "t-003", Ticket: "t-003", Project: "app", State: run.StateHalted, CreatedAt: "2026-10-09T10:00:00Z", HaltReasonCode: "relay_ceiling_exceeded"})
 	save(run.Run{ID: "live-smoke-m-1", Ticket: "live-smoke-m-1", Project: "app", State: run.StateAccepted, CreatedAt: "2026-10-09T11:00:00Z"})
@@ -64,9 +64,9 @@ func TestStatsSummaryTablePrintsOneRowPerProjectAndAnOverallRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `PROJECT  TICKETS  ONE-SHOT   ACCEPTED   MEDIAN ROUNDS  TOP QUARANTINE CHECK
-app      3        1/3 (33%)  2/3 (67%)  2              tests_added (1)
+app      3        1/3 (33%)  2/3 (67%)  2              tests_red_on_base (1)
 other    1        1/1 (100%) 1/1 (100%) 1              -
-overall  4        2/4 (50%)  3/4 (75%)  1              tests_added (1)
+overall  4        2/4 (50%)  3/4 (75%)  1              tests_red_on_base (1)
 
 1 live-smoke run(s) not counted; -all counts them.
 1 run(s) still in progress not counted.
@@ -106,7 +106,7 @@ func TestStatsProjectFormPrintsTheBlockTheBucketTableAndTheLists(t *testing.T) {
 		"WEEK OF TICKETS ONE-SHOT % ACCEPTED % MEDIAN ROUNDS SAME-FAILURE %",
 		"2026-09-27 2 1/2 (50%) 2/2 (100%) 2 1/1 (100%)",
 		"2026-10-04 1 0/1 (0%) 0/1 (0%) - -",
-		"quarantined by:\ntests_added 1",
+		"quarantined by:\ntests_red_on_base 1",
 		"halted by:\nrelay_ceiling_exceeded 1",
 	} {
 		if !strings.Contains(normalizeSpaces(got), want) {

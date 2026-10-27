@@ -224,7 +224,7 @@ type ProjectStats struct {
 	AcceptedViaOverride int    `json:"accepted_via_override"`
 	OverrideRatePercent *int   `json:"override_rate_percent,omitempty"`
 	// QuarantinedByCause keys are policy.Check names (e.g.
-	// "canonical_verify", "required_files_changed", "diff_scope") --
+	// "canonical_verify", "tests_red_on_base", "diff_scope") --
 	// one run quarantined on multiple failed checks counts once under
 	// each, the same way the quarantine's own log line already names
 	// every failing check together.

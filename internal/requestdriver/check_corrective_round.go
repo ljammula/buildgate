@@ -85,7 +85,7 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 // with the oracle mounted and -reference-oracle-in-loop-retry
 // (BuildTicketRunArgs), so the build given the record sees nothing the
 // first one did not. Everything else is not: a check a build is never told
-// about (tests_added, a review with no verdict, an unknown check), a halt,
+// about (a review with no verdict, an unknown check), a halt,
 // and a run with no handoff.
 func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
 	if quarantined.State != run.StateQuarantined || quarantined.HandoffSHA256 == "" {

@@ -147,12 +147,8 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 	switch g.Check {
 	case "diff_scope":
 		return triageDiffScope(r, dataDir, forOperator)
-	case "required_files_changed":
-		return triageRequiredFilesChanged(r, dataDir)
-	case "required_content_present":
-		return triageRequiredContentPresent(r, dataDir)
-	case "tests_added":
-		return triageTestsAdded(r)
+	case policy.TestsRedOnBaseCheck:
+		return triageTestsRedOnBase(r)
 	case policy.ReviewReproductionCheck:
 		return triageReviewReproduction(r)
 	case "canonical_verify":
@@ -176,7 +172,7 @@ func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool
 			return s
 		}
 		// A live run once quarantined with "canonical_verify failed:
-		// exit 1" while diff_scope and required_files_changed also
+		// exit 1" while diff_scope and another gate also
 		// failed, and the actual cause (a Go compile error) was only
 		// in the verify log -- triageLogGate/extractFailureMarker
 		// above already surface that line when recognized; naming
@@ -352,78 +348,30 @@ func criterionNumber(criterion string) string {
 	return strings.TrimSpace(criterion)
 }
 
-// triageRequiredFilesChanged mirrors triageDiffScope for the
-// required_files_changed gate.
-func triageRequiredFilesChanged(r *run.Run, dataDir string) string {
-	required, err := ticketspec.ParseRequiredChangedFiles(specSnapshotPathFor(dataDir, r.ID))
-	if err != nil || len(required) == 0 {
-		return ""
+// triageTestsRedOnBase words a failed tests_red_on_base gate from the run's
+// recorded proof (r.TestsRedOnBase): no test file changed, the changed tests
+// all pass on the base commit, or a changed test fails on the result commit,
+// naming the first test file and, for a failure, its first test ID. Paths and
+// IDs come from the agent's own files, so they are quoted, cleaned and
+// capped like a reviewer's (reproductionName).
+func triageTestsRedOnBase(r *run.Run) string {
+	proof := r.TestsRedOnBase
+	if proof == nil || len(proof.Files) == 0 {
+		return "tests_red_on_base: no test file changed"
 	}
-	_, missing := policy.RequiredFilesChanged(r.ChangedFiles, required, r.ChangedByEarlierTickets)
-	if len(missing) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("required_files_changed: %s untouched", strings.Join(missing, ", "))
-}
-
-// triageRequiredContentPresent looks for the ticket's declared
-// Required-Content markers among the added lines of the run's own
-// snapshotted diff (run.DiffPath) -- durable factory evidence of exactly
-// what this run added, the same evidence a human clicking "view diff"
-// would read. The first declared marker that never appears on an added
-// line is reported; if the diff was never captured (DiffAvailable false)
-// this returns "" rather than guessing which marker was missing.
-func triageRequiredContentPresent(r *run.Run, dataDir string) string {
-	required, err := ticketspec.ParseRequiredContent(specSnapshotPathFor(dataDir, r.ID))
-	if err != nil || len(required) == 0 || !r.DiffAvailable {
-		return ""
-	}
-	diff, err := os.ReadFile(run.DiffPath(dataDir, r.ID))
-	if err != nil {
-		return ""
-	}
-	added := addedDiffLines(string(diff))
-	for _, marker := range required {
-		found := false
-		for _, line := range added {
-			if strings.Contains(line, marker) {
-				found = true
-				break
+	file := proof.Files[0]
+	switch proof.Verdict {
+	case run.TestsRedNotExercised:
+		return fmt.Sprintf("tests_red_on_base: the changed tests pass on the base commit, so they do not exercise the change (%q)", reproductionName(file.Path))
+	case run.TestsRedFailsOnResult:
+		for _, f := range proof.Files {
+			if id, kind := f.FailedOnResult(); id != "" {
+				return fmt.Sprintf("tests_red_on_base: a changed test in %q fails on the result commit%s", reproductionName(f.Path), testFailure(id, kind))
 			}
 		}
-		if !found {
-			return fmt.Sprintf("required_content_present: missing %q", marker)
-		}
+		return fmt.Sprintf("tests_red_on_base: a changed test in %q fails on the result commit", reproductionName(file.Path))
 	}
-	return ""
-}
-
-// addedDiffLines returns the content of every unified-diff added line
-// (a "+" line, excluding the "+++ b/path" file header), stripped of its
-// leading "+".
-func addedDiffLines(diff string) []string {
-	var out []string
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+++") {
-			continue
-		}
-		if strings.HasPrefix(line, "+") {
-			out = append(out, line[1:])
-		}
-	}
-	return out
-}
-
-// triageTestsAdded reports either the ticket's own declared opt-out
-// reason (Tests-Required: no -- <reason>, already recorded on the run) or
-// the plain fact that no changed file matched a test pattern -- both are
-// durable, factory-recorded facts, never a guess at which file "should
-// have" been a test.
-func triageTestsAdded(r *run.Run) string {
-	if r.TestsRequiredOptOut != "" {
-		return fmt.Sprintf("tests_added: opted out (%s)", r.TestsRequiredOptOut)
-	}
-	return "tests_added: no test file changed"
+	return "tests_red_on_base: the changed tests were not shown to fail on the base commit"
 }
 
 // triageNoChanges special-cases a canonical_verify failure that comes
@@ -655,7 +603,7 @@ func passedInsideTheBuildSuffix(r *run.Run) string {
 // that also failed, and returns a "(+N more failing gate(s))" suffix, or
 // "" when check was the only failing gate -- a canonical_verify sentence
 // must not read as though it were the run's only problem when
-// diff_scope/required_files_changed/etc. failed too.
+// diff_scope and other gates failed too.
 func otherFailingGatesSuffix(r *run.Run, check string) string {
 	count := 0
 	for _, g := range r.GateResults {

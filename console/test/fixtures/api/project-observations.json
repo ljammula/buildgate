@@ -72,18 +72,18 @@
       "excerpt": "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s"
     },
     {
-      "id": "ab7ec8cfeb7a5dfd",
+      "id": "3aa09b6eb0282e83",
       "kind": "check_failed",
       "source": "run",
       "run_id": "run-quarantined",
       "ticket": "ticket-run-quarantined",
       "at": "2026-09-10T09:40:00Z",
-      "what": "The run was quarantined; its tests_added check failed (exit 0).",
+      "what": "The run was quarantined; its tests_red_on_base check failed (exit 0).",
       "blockers": [
         "no changes made to the workspace",
         "canonical verification failed"
       ],
-      "check": "tests_added",
+      "check": "tests_red_on_base",
       "signature": "9a41c07be2d3f518",
       "log": "round-logs/round-3/verify.log",
       "excerpt": "--- FAIL: TestKeyScopedToAccount (0.00s)\n    idempotency_test.go:41: key reused across accounts\nFAIL\nFAIL\tapp/checkout\t0.031s"

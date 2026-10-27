@@ -37,8 +37,8 @@ func widenForTimeoutMinutes(options temporalworkflow.ActivityOptions, timeoutMin
 }
 
 // buildToVerdict runs everything after the pre-build checks: build, verify,
-// the gates, evidence, the review steps, the oracle commit and the policy
-// verdict, in that order.
+// the gates, evidence, the tests_red_on_base proof, the review steps, the
+// oracle commit and the policy verdict, in that order.
 func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input *RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) error {
 	verify, err := buildAndVerify(ctx, ids, buildVerifyCtx, *input, current, result, worktreePath, branch)
 	if err != nil {
@@ -55,6 +55,11 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return err
 	}
 
+	testsRed, err := runTestsRedOnBase(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
+	if err != nil {
+		return err
+	}
+
 	reviews, err := runReviewSteps(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
 	if err != nil {
 		return err
@@ -64,7 +69,7 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return err
 	}
 
-	if err = evaluateRun(ctx, ids, *input, current, result, worktreePath, branch, verify, evidenceResult, gates, reviews); err != nil {
+	if err = evaluateRun(ctx, ids, *input, current, result, worktreePath, branch, verify, evidenceResult, gates, reviews, testsRed); err != nil {
 		return err
 	}
 	return nil
@@ -439,6 +444,13 @@ type reviewOutcome struct {
 	reproductions    reproductionOutcome
 }
 
+// earlierGatesPassed reports whether build, canonical verification, the full
+// suite and the named gates all passed: the point from which the proof of the
+// changed tests and the review run.
+func earlierGatesPassed(result *RunWorkflowResult, gates gateOutcome) bool {
+	return result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed
+}
+
 // runReviewSteps runs the review step (planReviewSteps) once every earlier
 // gate passed, chaining its relay spend from the build's.
 func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, worktreePath, branch string) (reviewOutcome, error) {
@@ -451,9 +463,8 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	// of the conditions below: "declared, independent of whether the gate
 	// ran", as run.Run's own contract says.
 	result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
-	gatesPassed := result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed
 	var outcome reviewOutcome
-	if !gatesPassed {
+	if !earlierGatesPassed(result, gates) {
 		return outcome, nil
 	}
 	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
@@ -559,7 +570,7 @@ func oracleCommitPhase(ctx temporalworkflow.Context, ids *activityIDs, buildVeri
 
 // evaluateRun builds the policy input from everything the earlier phases
 // found and records the verdict (EvaluateRunActivity) in result.
-func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, verify VerifyActivityResult, evidenceResult CollectedEvidence, gates gateOutcome, reviews reviewOutcome) error {
+func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, verify VerifyActivityResult, evidenceResult CollectedEvidence, gates gateOutcome, reviews reviewOutcome, testsRed testsRedOutcome) error {
 	policyInput := policy.EvaluateRunInput{
 		VerifyCommand:             result.Verify.Command,
 		BuildExitCode:             result.Build.ExitCode,
@@ -570,7 +581,6 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		ChangedFiles:              evidenceResult.ChangedFiles,
 		AllowedFiles:              input.AllowedFiles,
 		RequiredChangedFiles:      input.RequiredChangedFiles,
-		ChangedByEarlierTickets:   input.ChangedByEarlierTickets,
 		RequiredContent:           input.RequiredContent,
 		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
 		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,
@@ -587,6 +597,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		policyInput.FullSuiteRerun = gates.fullSuite.Rerun
 	}
 	policyInput.ReviewReproduction = reviews.reproductions.policyInput()
+	policyInput.TestsRedOnBase = testsRed.policyInput()
 	if reviews.ranCodeReview {
 		policyInput.CodeReviewCommand = reviews.codeReview.Result.Command
 		policyInput.CodeReviewExitCode = reviews.codeReview.Result.ExitCode
@@ -599,6 +610,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		return wrapActivityFailure("evaluate run policy activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	result.GateResults = evalResult.GateResults
+	result.Notes = evalResult.Notes
 	result.State = run.StateQuarantined
 	if evalResult.Accepted {
 		result.State = run.StateAccepted

@@ -143,10 +143,9 @@ func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxInsert
 		// RollbackPlan's "" default always denies rather than passing an
 		// unconfigured policy by omission (found via the 2026-09-05 Opus
 		// review, S1). Deliberately NOT policy.AllGateChecks (every gate
-		// EvaluateRun can produce): diff_scope/required_files_changed/
-		// required_content_present run only if the ticket declared the
-		// corresponding key, which is not recorded anywhere on run.Run,
-		// so requiring them unconditionally would deny release for every
+		// EvaluateRun can produce): diff_scope runs only if the
+		// ticket declared Allowed-Files, which is not recorded anywhere on
+		// run.Run, so requiring it unconditionally would deny release for every
 		// legitimately undeclared-scope ticket (found via a real local
 		// `codex review` pass on this same PR -- the same pass also
 		// caught full_suite_verify being required even on a
@@ -918,7 +917,6 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 				status = "FAIL"
 			}
 			fmt.Fprintf(&b, "- `%s`: %s (exit %d, %dms)\n", sanitizeMarkdownField(g.Check), status, g.ExitCode, g.DurationMs)
-			writeChangedByEarlierTickets(&b, g.ChangedByEarlierTickets)
 		}
 		b.WriteString("\n")
 	}
@@ -932,22 +930,22 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	if r.FullSuiteSource == fullSuiteSourceVerifyCommand {
 		b.WriteString("full suite = verify command (no separate full_suite_command configured)\n\n")
 	}
-	// tests_added's opt-out reason gets its own line rather than
+	// tests_red_on_base's opt-out reason gets its own line rather than
 	// living only in the gate's pass/fail bit above -- a reviewer seeing
-	// "tests_added: pass" with no changed test file otherwise has no way
-	// to tell "a real test file satisfied this" apart from "the ticket
-	// opted out and why".
+	// "tests_red_on_base: pass" with no changed test file otherwise has no
+	// way to tell "a test that fails on the base satisfied this" apart from
+	// "the ticket opted out and why".
 	writeOracleOptOutLine(&b, r)
 	if r.TestsRequiredOptOut != "" {
-		fmt.Fprintf(&b, "`tests_added` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
+		fmt.Fprintf(&b, "`tests_red_on_base` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
 	}
+	writeNotesSection(&b, r.Notes)
 	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
 	// Every policy.CommandGate always gets its own line, even when the
 	// project never configured one -- "not configured" is a real,
 	// distinct state a reviewer needs to see, not silence the way an
-	// undeclared ticket-scoped gate (diff_scope, required_files_changed,
-	// required_content_present) is: those have no "the operator should
-	// have configured this" implication, these project-scoped ones do.
+	// undeclared ticket-scoped gate (diff_scope) is: that has no "the operator
+	// should have configured this" implication, these project-scoped ones do.
 	writeNamedGatesSection(&b, r)
 	writeChangedFilesAndDependencies(&b, r)
 	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
@@ -991,18 +989,18 @@ func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
 	}
 }
 
-// writeChangedByEarlierTickets names, under the required_files_changed gate,
-// the required files this ticket left untouched because an earlier ticket of
-// the request already changed them, so a reviewer looks for that work there.
-func writeChangedByEarlierTickets(b *strings.Builder, files []string) {
-	if len(files) == 0 {
+// writeNotesSection lists the run's notes, one line each: facts that refuse
+// nothing (a required file or required content the run did not produce, a
+// tests_red_on_base check that reached no verdict).
+func writeNotesSection(b *strings.Builder, notes []string) {
+	if len(notes) == 0 {
 		return
 	}
-	quoted := make([]string, len(files))
-	for i, f := range files {
-		quoted[i] = "`" + sanitizeMarkdownField(f) + "`"
+	b.WriteString("## Notes\n\n")
+	for _, n := range notes {
+		fmt.Fprintf(b, "- %s\n", sanitizePRField(n))
 	}
-	fmt.Fprintf(b, "  - changed by an earlier ticket of this request, not by this one: %s\n", strings.Join(quoted, ", "))
+	b.WriteString("\n")
 }
 
 // writeNamedGatesSection lists every command gate and the repository's own

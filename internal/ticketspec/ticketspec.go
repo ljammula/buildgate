@@ -62,7 +62,7 @@ const RequiredChangedFilesPrefix = "Required-Changed-Files:"
 const RequiredContentPrefix = "Required-Content:"
 
 // TestsRequiredPrefix is the machine-readable line a ticket spec.md may
-// contain to opt out of the tests_added gate, e.g.
+// contain to opt out of the tests_red_on_base gate, e.g.
 // "Tests-Required: no -- this ticket only updates documentation". The
 // gate defaults to requiring at least one changed file to match the
 // repo's test patterns; this key is the ticket's own declared exception,
@@ -252,7 +252,7 @@ func HeaderStrictnessProblems(specPath string) ([]string, error) {
 }
 
 // ParseTestsRequiredOptOut returns the ticket's declared opt-out reason
-// for the tests_added gate, or "" if the ticket doesn't opt out --
+// for the tests_red_on_base gate, or "" if the ticket doesn't opt out --
 // either it doesn't declare Tests-Required: at all, or declares
 // "Tests-Required: yes" (the same thing said explicitly). Callers treat
 // "" as "the gate must run normally". A declared "no" requires a reason
@@ -563,7 +563,7 @@ func isValidWorkspaceRelativePath(p string) bool {
 // same session) declared Allowed-Files/Required-Changed-Files the way a
 // human or an LLM naturally thinks of a package path, with no awareness
 // that this repo's own application code lives under backend/, not the git
-// root. diff_scope/required_files_changed correctly quarantined the run
+// root. diff_scope correctly quarantined the run
 // after a real, ~25-minute sandboxed round produced entirely correct
 // code -- the earliest this repo's existing checks catch a misprefixed
 // path is after the full build cost has already been paid. This function

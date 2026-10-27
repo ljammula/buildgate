@@ -985,7 +985,7 @@ func TestAPIStartStarterPlumbsPreflightProfileFlag(t *testing.T) {
 		t.Fatalf("write ticket: %v", err)
 	}
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1039,7 +1039,7 @@ func TestAPIStartStarterRejectsInvalidPreflightProfile(t *testing.T) {
 	// t.Setenv, which panics if the test has already called t.Parallel().
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()

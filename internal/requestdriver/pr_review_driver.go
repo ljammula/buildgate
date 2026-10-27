@@ -991,8 +991,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// The round builds on the ticket's current PR-head run (the commit on
 	// the pull request's branch now), on the branch that run pushed, and
 	// its -diff-base is the ticket's original base carried on that run, so
-	// the diff-shape gates (diff_scope, required_files_changed,
-	// required_content, tests_added) judge the cumulative diff the PR as a
+	// the diff-shape gates (diff_scope, tests_red_on_base) judge the cumulative diff the PR as a
 	// whole will merge, not just this round's own small delta from the
 	// branch tip it starts on (see loadPRHead and -diff-base's flag help).
 	head, err := loadPRHead(dataDir, ticket)

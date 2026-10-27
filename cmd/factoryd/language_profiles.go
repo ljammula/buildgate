@@ -146,7 +146,7 @@ func doctorCheckLanguageProfile(root string) doctorCheck {
 
 // doctorCheckCommittedTestPatterns reports a committed test_patterns that
 // misses test files under the repository's own test directories: the
-// tests_added gate and plan drafting would not count those files as tests.
+// tests_red_on_base gate and plan drafting would not count those files as tests.
 func doctorCheckCommittedTestPatterns(root, name string, committed, testDirs []string) (doctorCheck, bool) {
 	if len(committed) == 0 {
 		return doctorCheck{}, false
@@ -156,7 +156,7 @@ func doctorCheckCommittedTestPatterns(root, name string, committed, testDirs []s
 		return doctorCheck{}, false
 	}
 	return doctorCheck{Name: name, Err: fmt.Errorf(".factory.yml test_patterns match no file under the test directories %s", strings.Join(missed, ", ")), Advisory: true,
-		Fix: "add [" + quotedYAMLList(missed) + "] to test_patterns and commit .factory.yml, so the tests_added gate and plan drafting count the repository's own test files"}, true
+		Fix: "add [" + quotedYAMLList(missed) + "] to test_patterns and commit .factory.yml, so the tests_red_on_base gate and plan drafting count the repository's own test files"}, true
 }
 
 func profileDoctorDetail(profile languageprofile.Profile, markers []string, config projectconfig.Config) string {

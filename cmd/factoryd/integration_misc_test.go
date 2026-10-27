@@ -94,7 +94,7 @@ func TestIntegrationTerminateOrCancelOwnRequestCancelsQueuedRequest(t *testing.T
 	}
 	baseSHA := strings.TrimSpace(string(baseSHABytes))
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 
@@ -137,7 +137,7 @@ func TestIntegrationTerminateOrCancelOwnRequestCancelsQueuedRequest(t *testing.T
 			BuildMaxAttempts:    1,
 			VerifyCommand:       "true",
 			VerifyMaxAttempts:   1,
-			TestsRequiredOptOut: "not exercising tests_added in this fixture",
+			TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 		}
 	}
 
@@ -259,7 +259,7 @@ func TestIntegrationTemporalRepositoryOwnerHeartbeatKillsHungSubprocess(t *testi
 	dataDir := t.TempDir()
 	pidPath := filepath.Join(t.TempDir(), "hung-child.pid")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -336,7 +336,7 @@ func TestIntegrationRecordsDurableEventLog(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -595,7 +595,7 @@ func TestPreflightRefusesNearMissTicketHeader(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	specContent := "# Ticket: fixture\n\n" +
 		"Verify-command: true\n" +
-		"Tests-Required: no -- integration fixture doesn't exercise tests_added\n"
+		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchWithDifferingValues(t *tes
 	// legitimately supports.
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	specContent := "# internal factoryd ticket spec\n\n" +
-		"Tests-Required: no -- integration fixture doesn't exercise tests_added\n" +
+		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
 		"Verify-Command: false\n" +
 		"Allowed-Files: unrelated.txt\n" +
 		"Required-Changed-Files: unrelated.txt\n"
@@ -732,7 +732,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchEvenWithSkipProjectCheck(t
 	ws := newFixtureRepo(t)
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	ticketPath := filepath.Join(t.TempDir(), "001-ticket.md")
@@ -800,7 +800,7 @@ func TestIntegrationAllowsSpecOwnScopeWhenTicketFileDoesNotDeclareIt(t *testing.
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	specContent := "# internal factoryd ticket spec\n\n" +
-		"Tests-Required: no -- integration fixture doesn't exercise tests_added\n" +
+		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
 		"Verify-Command: true\n" +
 		"Allowed-Files: content.txt\n" +
 		"Required-Changed-Files: content.txt\n"
@@ -917,7 +917,7 @@ func TestIntegrationRejectsMalformedTicketFileScopeDeclaration(t *testing.T) {
 	ws := newFixtureRepo(t)
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	ticketPath := filepath.Join(t.TempDir(), "001-ticket.md")
@@ -973,7 +973,7 @@ func TestIntegrationRejectsUnreadableExplicitTicketFileUnderSkipProjectCheck(t *
 	ws := newFixtureRepo(t)
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	missingTicketPath := filepath.Join(t.TempDir(), "does-not-exist.md")
@@ -1013,13 +1013,13 @@ func TestIntegrationAllowsSpecTicketFileScopeMismatchWithOptOut(t *testing.T) {
 	ws := newFixtureRepo(t)
 	root := filepath.Dir(ws)
 	specPath := filepath.Join(root, "spec", "spec.md")
-	// tests_added always runs; this test's -spec is the scaffold's
+	// tests_red_on_base always runs; this test's -spec is the scaffold's
 	// own spec/spec.md (testfixture.WriteProjectBootstrapScaffold), which
 	// declares no opt-out on its own -- appended here rather than in that
 	// shared fixture, which many other tests also depend on byte-for-byte.
 	if content, err := os.ReadFile(specPath); err != nil {
 		t.Fatalf("read scaffolded spec.md: %v", err)
-	} else if err := os.WriteFile(specPath, append(content, []byte("\nTests-Required: no -- integration fixture doesn't exercise tests_added\n")...), 0o644); err != nil {
+	} else if err := os.WriteFile(specPath, append(content, []byte("\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n")...), 0o644); err != nil {
 		t.Fatalf("append tests-required opt-out to spec.md: %v", err)
 	}
 
@@ -1103,7 +1103,7 @@ func TestIntegrationRejectsSpecTicketFileRequiredContentMismatch(t *testing.T) {
 
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	specContent := "# internal factoryd ticket spec\n\n" +
-		"Tests-Required: no -- integration fixture doesn't exercise tests_added\n" +
+		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
 		"Verify-Command: true\n" +
 		"Allowed-Files: content.txt\n" +
 		"Required-Changed-Files: content.txt\n" +
@@ -1172,7 +1172,7 @@ func TestIntegrationReconcileNormalizesRelativeWorkspace(t *testing.T) {
 	dataDir := t.TempDir()
 	pidPath := filepath.Join(t.TempDir(), "hung-child.pid")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")

@@ -166,7 +166,7 @@ def _rule_false_accept_is_factoryd_bug(run_json: Dict[str, Any], category: str) 
     return category == "false_accept"
 
 
-_SCOPE_GATES = {"diff_scope", "required_files_changed", "required_content_present", "tests_added"}
+_SCOPE_GATES = {"diff_scope", "tests_red_on_base"}
 _BUILD_QUALITY_GATES = {
     "canonical_verify", "unit_tests", "integration_tests", "lint", "security_audit", "full_suite_verify",
 }

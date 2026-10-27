@@ -947,11 +947,11 @@ func fixtureInputForTicket(ticket string) RunWorkflowInput {
 		IsolateWorkspace:  true,
 		IsolatedRepoDir:   "/fixture/repo",
 		IsolatedParentDir: "/fixture/data/workspaces",
-		// tests_added always runs; these fixtures exercise
+		// tests_red_on_base always runs; these fixtures exercise
 		// unrelated behavior and declare no ChangedFiles matching a test
 		// pattern, so opt out rather than have every one of them fail a
 		// gate none of them are testing.
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	}
 }
 

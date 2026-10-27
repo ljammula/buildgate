@@ -10,9 +10,6 @@
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,
-  "changed_by_earlier_tickets": [
-    "content.txt"
-  ],
   "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
   "code_review_policy": "advisory",
   "compose_services_allowed_registries": [
@@ -179,7 +176,7 @@
     "make generate"
   ],
   "spec_path": "<DATA_DIR>/runs/<RUN_ID>/spec.snapshot.md",
-  "tests_required_opt_out": "integration fixture doesn't exercise tests_added",
+  "tests_required_opt_out": "integration fixture doesn't exercise tests_red_on_base",
   "thinking": "low",
   "ticket": "001-golden",
   "ticket_path": "<INPUTS>/spec.md",
