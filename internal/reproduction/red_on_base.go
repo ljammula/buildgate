@@ -43,14 +43,12 @@ type FileRuns struct {
 }
 
 // The verdicts of DecideRedOnBase. They are the strings of run.TestsRedProved,
-// run.TestsRedNotExercised, run.TestsRedFailsOnResult and
-// run.TestsRedNoVerdict, which this package, a pure leaf, does not import
+// run.TestsRedNotExercised and run.TestsRedNoVerdict, which this package, a pure leaf, does not import
 // (TestRedVerdictsAreTheRunRecordsStrings pins the match).
 const (
-	RedProved        = "red_on_base"
-	RedNotExercised  = "not_exercised"
-	RedFailsOnResult = "fails_on_result"
-	RedNoVerdict     = "no_verdict"
+	RedProved       = "red_on_base"
+	RedNotExercised = "not_exercised"
+	RedNoVerdict    = "no_verdict"
 )
 
 // RedDecision is DecideRedOnBase's answer: one of the Red verdicts and a fixed
@@ -61,28 +59,34 @@ type RedDecision struct {
 	TestIDs []string
 }
 
+// FailedAloneReason is the fixed reason of a proof with no red test in which a
+// changed test failed on the result commit.
+const FailedAloneReason = "a changed test failed when run alone on the result commit although the full suite passed"
+
 // DecideRedOnBase is the tests_red_on_base table. Per test ID:
 //
-//   - fails on the result commit (fail, error or timeout): the change's own
-//     test does not pass, whatever the base shows;
+//   - fails on the result commit (fail, error or timeout): no evidence. The
+//     proof runs only after the full suite passed on the result commit, so a
+//     test that fails when run alone there points at the factory's per-test
+//     setup, not at the change;
 //   - passes on the result commit and fails, times out or does not compile on
 //     the base (the toolchain names the file's own compile error; a module
 //     that cannot be resolved is missing, never a compile error): red on base;
 //   - passes on both: exercises nothing of the change;
 //   - anything else (skipped, missing, no launch): no evidence either way.
 //
-// A test that fails on the result commit refuses the run. Otherwise one red
-// test proves the change. Otherwise the run is refused only when some test
-// passes on the base and none was left without evidence; a test with no
-// evidence leaves the question open, and an open question is no verdict.
+// One red test proves the change. Otherwise the run is refused only when some
+// test passes on both commits and none was left without evidence; a test with
+// no evidence (a failure on the result included) leaves the question open, and
+// an open question is no verdict.
 func DecideRedOnBase(files []FileRuns) RedDecision {
-	var red, bothPass, failing []string
-	open := false
+	var red, bothPass []string
+	open, failedAlone := false, false
 	for _, f := range files {
 		for _, id := range f.IDs {
 			switch classifyID(f, id) {
 			case idFailsOnResult:
-				failing = append(failing, id)
+				open, failedAlone = true, true
 			case idRedOnBase:
 				red = append(red, id)
 			case idPassesOnBase:
@@ -92,16 +96,16 @@ func DecideRedOnBase(files []FileRuns) RedDecision {
 			}
 		}
 	}
-	sort.Strings(failing)
 	sort.Strings(red)
 	sort.Strings(bothPass)
 	switch {
-	case len(failing) > 0:
-		return RedDecision{Verdict: RedFailsOnResult, Reason: "a changed test does not pass on the result commit", TestIDs: failing}
 	case len(red) > 0:
 		return RedDecision{Verdict: RedProved, Reason: "a changed test fails on the base commit and passes on the result commit", TestIDs: red}
 	case len(bothPass) > 0 && !open:
 		return RedDecision{Verdict: RedNotExercised, Reason: "tests pass on the base commit: they do not exercise the change", TestIDs: bothPass}
+	}
+	if failedAlone {
+		return RedDecision{Verdict: RedNoVerdict, Reason: FailedAloneReason}
 	}
 	return RedDecision{Verdict: RedNoVerdict, Reason: "no changed test ran to a result on both commits"}
 }

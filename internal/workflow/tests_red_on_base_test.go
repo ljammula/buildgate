@@ -126,7 +126,7 @@ func TestTestsRedOnBaseFollowsTheVerdictTable(t *testing.T) {
 		{"fails on the base, passes on the result", map[string]ReproductionRunResult{"result": pass, "base": fail}, []string{"tests-red-hold", "tests-red-0-result", "tests-red-0-base"}, run.TestsRedProved, true, ""},
 		{"does not compile on the base", map[string]ReproductionRunResult{"result": pass, "base": compile}, []string{"tests-red-hold", "tests-red-0-result", "tests-red-0-base"}, run.TestsRedProved, true, ""},
 		{"passes on both", map[string]ReproductionRunResult{"result": pass, "base": pass}, []string{"tests-red-hold", "tests-red-0-result", "tests-red-0-base"}, run.TestsRedNotExercised, false, ""},
-		{"fails on the result: the base is not run", map[string]ReproductionRunResult{"result": fail, "base": fail}, []string{"tests-red-hold", "tests-red-0-result"}, run.TestsRedFailsOnResult, false, ""},
+		{"fails on the result: the base is not run, no verdict", map[string]ReproductionRunResult{"result": fail, "base": fail}, []string{"tests-red-hold", "tests-red-0-result"}, run.TestsRedNoVerdict, true, "tests_red_on_base: no verdict (a changed test failed when run alone on the result commit although the full suite passed)"},
 		{"the base leaves no report", map[string]ReproductionRunResult{"result": pass, "base": missing}, []string{"tests-red-hold", "tests-red-0-result", "tests-red-0-base"}, run.TestsRedNoVerdict, true, "tests_red_on_base: no verdict"},
 		{"the result leaves no report", map[string]ReproductionRunResult{"result": missing, "base": pass}, []string{"tests-red-hold", "tests-red-0-result", "tests-red-0-base"}, run.TestsRedNoVerdict, true, "tests_red_on_base: no verdict"},
 	} {
@@ -237,7 +237,7 @@ func TestHistoryRecordedBeforeTestsRedOnBaseReplaysUnchanged(t *testing.T) {
 func TestRedVerdictsAreTheRunRecordsStrings(t *testing.T) {
 	for _, p := range [][2]string{
 		{reproduction.RedProved, run.TestsRedProved}, {reproduction.RedNotExercised, run.TestsRedNotExercised},
-		{reproduction.RedFailsOnResult, run.TestsRedFailsOnResult}, {reproduction.RedNoVerdict, run.TestsRedNoVerdict},
+		{reproduction.RedNoVerdict, run.TestsRedNoVerdict},
 	} {
 		if p[0] != p[1] {
 			t.Errorf("reproduction verdict %q != run verdict %q", p[0], p[1])

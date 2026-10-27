@@ -36,7 +36,7 @@ func (f *reproFixture) holdChanged(commit string, files ...string) (TestsRedHold
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestActivityEnvironment()
 	env.RegisterActivity(f.acts.HoldChangedTestsActivity)
-	val, err := env.ExecuteActivity(f.acts.HoldChangedTestsActivity, TestsRedHoldInput{RunWorkflowInput: f.input, Commit: commit, Files: files})
+	val, err := env.ExecuteActivity(f.acts.HoldChangedTestsActivity, TestsRedHoldInput{RunWorkflowInput: f.input, Commit: commit, Base: f.commit, Files: files})
 	var res TestsRedHoldResult
 	if err != nil {
 		return res, err
@@ -142,5 +142,31 @@ func TestChangedTestFileIsMountedOverTheBasesOwnCopyOnBothCommits(t *testing.T) 
 	}
 	if body, _ := os.ReadFile(filepath.Join(f.repo, "p", "add_test.go")); string(body) != redNewTest {
 		t.Error("the run's own worktree was changed by the proof")
+	}
+}
+
+// With more changed test files than the cap, the files the change adds are
+// held before the ones it only modifies, whatever their names sort to.
+func TestHoldChangedTestsHoldsAddedFilesBeforeModifiedOnes(t *testing.T) {
+	f := newReproFixture(t)
+	for _, n := range []string{"a", "b", "c"} {
+		writeFile(t, filepath.Join(f.repo, "p", n+"_test.go"), strings.Replace(redOldTest, "TestAdd", "Test"+strings.ToUpper(n), 1))
+	}
+	f.commit = trustedCommit(t, f.repo)
+	for _, n := range []string{"a", "b", "c"} {
+		writeFile(t, filepath.Join(f.repo, "p", n+"_test.go"), strings.Replace(redNewTest, "TestAdd", "Test"+strings.ToUpper(n), 1))
+	}
+	writeFile(t, filepath.Join(f.repo, "p", "z_test.go"), strings.Replace(redOldTest, "TestAdd", "TestZ", 1))
+	result := trustedCommit(t, f.repo)
+	res, err := f.holdChanged(result, "p/a_test.go", "p/b_test.go", "p/c_test.go", "p/z_test.go")
+	if err != nil || len(res.Held) != reproduction.MaxReproductions {
+		t.Fatalf("hold = %+v, %v; want %d files", res, err, reproduction.MaxReproductions)
+	}
+	var paths []string
+	for _, h := range res.Held {
+		paths = append(paths, h.Path)
+	}
+	if want := "p/z_test.go,p/a_test.go,p/b_test.go"; strings.Join(paths, ",") != want {
+		t.Errorf("held = %v, want %s: the added file first, then the modified ones sorted", paths, want)
 	}
 }

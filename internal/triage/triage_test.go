@@ -276,21 +276,6 @@ func TestTriageRun(t *testing.T) {
 			want: `tests_red_on_base: the changed tests pass on the base commit, so they do not exercise the change ("internal/refund/refund_test.go")`,
 		},
 		{
-			name: "tests_red_on_base a changed test fails on the result",
-			setup: func(t *testing.T, dataDir string) *run.Run {
-				return &run.Run{
-					ID:          id,
-					State:       run.StateQuarantined,
-					GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_red_on_base", Passed: false}},
-					TestsRedOnBase: &run.TestsRedOnBase{Verdict: run.TestsRedFailsOnResult, Files: []run.TestsRedFile{{
-						Path: "internal/refund/refund_test.go", TestIDs: []string{"TestRefund"},
-						Runs: []run.ReproductionRun{{Pass: run.TestsRedPassResult, Tests: map[string]string{"TestRefund": "fail"}}},
-					}}},
-				}
-			},
-			want: `tests_red_on_base: a changed test in "internal/refund/refund_test.go" fails on the result commit ("TestRefund" fail)`,
-		},
-		{
 			name: "first failed gate wins over a later one",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				writeRunFile(t, dataDir, id, "spec.snapshot.md", "# Ticket\n\nAllowed-Files: a.go\n")

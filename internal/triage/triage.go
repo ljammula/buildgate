@@ -350,10 +350,8 @@ func criterionNumber(criterion string) string {
 
 // triageTestsRedOnBase words a failed tests_red_on_base gate from the run's
 // recorded proof (r.TestsRedOnBase): no test file changed, the changed tests
-// all pass on the base commit, or a changed test fails on the result commit,
-// naming the first test file and, for a failure, its first test ID. Paths and
-// IDs come from the agent's own files, so they are quoted, cleaned and
-// capped like a reviewer's (reproductionName).
+// all pass on the base commit. The path comes from the agent's own files, so
+// it is quoted, cleaned and capped like a reviewer's (reproductionName).
 func triageTestsRedOnBase(r *run.Run) string {
 	proof := r.TestsRedOnBase
 	if proof == nil || len(proof.Files) == 0 {
@@ -363,13 +361,6 @@ func triageTestsRedOnBase(r *run.Run) string {
 	switch proof.Verdict {
 	case run.TestsRedNotExercised:
 		return fmt.Sprintf("tests_red_on_base: the changed tests pass on the base commit, so they do not exercise the change (%q)", reproductionName(file.Path))
-	case run.TestsRedFailsOnResult:
-		for _, f := range proof.Files {
-			if id, kind := f.FailedOnResult(); id != "" {
-				return fmt.Sprintf("tests_red_on_base: a changed test in %q fails on the result commit%s", reproductionName(f.Path), testFailure(id, kind))
-			}
-		}
-		return fmt.Sprintf("tests_red_on_base: a changed test in %q fails on the result commit", reproductionName(file.Path))
 	}
 	return "tests_red_on_base: the changed tests were not shown to fail on the base commit"
 }

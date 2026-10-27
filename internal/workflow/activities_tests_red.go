@@ -3,6 +3,9 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"slices"
+	"strings"
 
 	"go.temporal.io/sdk/temporal"
 
@@ -31,8 +34,11 @@ const testsRedAttemptKind = "tests_red_on_base"
 // result commit and the changed test files (policy.TestFiles) to hold.
 type TestsRedHoldInput struct {
 	RunWorkflowInput
-	Commit string   `json:"commit"`
-	Files  []string `json:"files"`
+	Commit string `json:"commit"`
+	// Base is the commit the change started from; "" when unknown. Files
+	// the change added (against it) are held before files it modified.
+	Base  string   `json:"base,omitempty"`
+	Files []string `json:"files"`
 }
 
 // TestsRedHoldResult is the files the proof will run, one HeldReproduction
@@ -44,7 +50,8 @@ type TestsRedHoldResult struct {
 }
 
 // HoldChangedTestsActivity reads each changed test file from the result
-// commit, keeps those a runner takes (reproduction.CheckChangedTest), up to
+// commit, added files first and then modified ones (each group sorted), keeps
+// those a runner takes (reproduction.CheckChangedTest), up to
 // reproduction.MaxReproductions, and copies each to the run's own directory
 // (run.TestsRedOnBaseDir), mode 0444, recording its SHA-256. The content never
 // reaches the workflow, its history or the run record. A copy that cannot be
@@ -60,7 +67,7 @@ func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRe
 	}
 	dir := run.TestsRedOnBaseDir(a.logDirFor(input.RunWorkflowInput))
 	var res TestsRedHoldResult
-	for _, p := range input.Files {
+	for _, p := range a.addedFirst(ctx, input) {
 		if len(res.Held) >= reproduction.MaxReproductions {
 			break
 		}
@@ -82,4 +89,31 @@ func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRe
 		res.Reason = "no changed test file has a test runner the factory can run"
 	}
 	return res, nil
+}
+
+// addedFirst is input.Files with the files input.Commit adds against
+// input.Base first, then the rest, each group sorted. With no base, or a diff
+// that cannot be read, it is the files sorted.
+func (a *Activities) addedFirst(ctx context.Context, input TestsRedHoldInput) []string {
+	files := slices.Clone(input.Files)
+	added := map[string]bool{}
+	if input.Base != "" {
+		out, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(input.WorkspacePath),
+			"diff", "--name-only", "--diff-filter=A", "-z", "--no-renames", input.Base, input.Commit, "--")...).Output()
+		if err == nil {
+			for _, p := range strings.Split(string(out), "\x00") {
+				added[p] = true
+			}
+		}
+	}
+	slices.SortFunc(files, func(x, y string) int {
+		if added[x] != added[y] {
+			if added[x] {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(x, y)
+	})
+	return files
 }

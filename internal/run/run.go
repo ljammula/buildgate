@@ -871,9 +871,6 @@ const (
 	// TestsRedNotExercised: every test that ran passes on the base commit
 	// too, so the changed tests do not exercise the change.
 	TestsRedNotExercised = "not_exercised"
-	// TestsRedFailsOnResult: a changed test does not pass on the result
-	// commit.
-	TestsRedFailsOnResult = "fails_on_result"
 	// TestsRedNoVerdict: the proof could not be run or read (no runner
 	// applies, no report, no base commit, a sandbox that never started). It
 	// refuses nothing.
@@ -915,24 +912,6 @@ type TestsRedFile struct {
 	Runner  string            `json:"runner,omitempty"`
 	TestIDs []string          `json:"test_ids,omitempty"`
 	Runs    []ReproductionRun `json:"runs,omitempty"`
-}
-
-// FailedOnResult is the first of the file's test IDs, in order, that failed
-// (an assertion, an error or the timeout) on its launch on the result commit,
-// and that launch's kind for it; "", "" when none did.
-func (f TestsRedFile) FailedOnResult() (id, kind string) {
-	for _, r := range f.Runs {
-		if r.Pass != TestsRedPassResult {
-			continue
-		}
-		for _, id := range f.TestIDs {
-			switch k := r.Tests[id]; k {
-			case "fail", "error", "timeout":
-				return id, k
-			}
-		}
-	}
-	return "", ""
 }
 
 // The dispositions of a finding (CodeReviewFinding.Disposition), and the

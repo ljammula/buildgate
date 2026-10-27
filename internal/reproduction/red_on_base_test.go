@@ -22,8 +22,8 @@ func TestDecideRedOnBaseOneTest(t *testing.T) {
 		{"times out on the base", kinds(KindPass), kinds(KindTimeout), RedProved},
 		{"does not compile on the base", kinds(KindPass), kinds(KindCompile), RedProved},
 		{"passes on both", kinds(KindPass), kinds(KindPass), RedNotExercised},
-		{"fails on the result", kinds(KindFail), kinds(KindFail), RedFailsOnResult},
-		{"times out on the result", kinds(KindTimeout), nil, RedFailsOnResult},
+		{"fails on the result", kinds(KindFail), kinds(KindFail), RedNoVerdict},
+		{"times out on the result", kinds(KindTimeout), nil, RedNoVerdict},
 		{"the base left no report", kinds(KindPass), kinds(KindMissing), RedNoVerdict},
 		{"skipped on the base", kinds(KindPass), kinds(KindSkipped), RedNoVerdict},
 		{"no launch on the base", kinds(KindPass), nil, RedNoVerdict},
@@ -59,7 +59,8 @@ func TestDecideRedOnBaseSeveralTestsAndFiles(t *testing.T) {
 			{IDs: ids, Result: two(KindPass, KindPass), Base: two(KindPass, KindPass)},
 			{IDs: ids, Result: two(KindPass, KindPass), Base: two(KindCompile, KindCompile)},
 		}, RedProved},
-		{"a failing test on the result beats a red one", []FileRuns{{IDs: ids, Result: two(KindPass, KindFail), Base: two(KindFail, KindFail)}}, RedFailsOnResult},
+		{"a red test still proves it when another fails alone on the result", []FileRuns{{IDs: ids, Result: two(KindPass, KindFail), Base: two(KindFail, KindFail)}}, RedProved},
+		{"tests passing on the base are not refused while another fails alone on the result", []FileRuns{{IDs: ids, Result: two(KindPass, KindFail), Base: two(KindPass, KindFail)}}, RedNoVerdict},
 		{"passing everywhere", []FileRuns{{IDs: ids, Result: two(KindPass, KindPass), Base: two(KindPass, KindPass)}}, RedNotExercised},
 		{"passing, with one test unknown on the base", []FileRuns{{IDs: ids, Result: two(KindPass, KindPass), Base: two(KindPass, KindMissing)}}, RedNoVerdict},
 		{"passing, with a second file that never ran", []FileRuns{
@@ -111,4 +112,11 @@ func manyGoTests(n int) string {
 		b.WriteString("(t *testing.T) {}\n")
 	}
 	return b.String()
+}
+
+func TestDecideRedOnBaseNamesAFailureOnTheResultAlone(t *testing.T) {
+	got := DecideRedOnBase([]FileRuns{{IDs: []string{"TestA"}, Result: kinds(KindFail), Base: kinds(KindFail)}})
+	if got.Verdict != RedNoVerdict || got.Reason != FailedAloneReason {
+		t.Errorf("DecideRedOnBase() = %+v, want no verdict with the fixed reason", got)
+	}
 }

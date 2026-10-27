@@ -72,7 +72,7 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 	current.Stage, current.StartedAt = testsRedAttemptKind, temporalworkflow.Now(ctx)
 	var held TestsRedHoldResult
 	holdCtx := temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions())
-	if err := temporalworkflow.ExecuteActivity(ids.with(holdCtx, "tests-red-hold"), HoldChangedTestsActivityName, TestsRedHoldInput{RunWorkflowInput: input, Commit: result.ResultSHA, Files: tests}).Get(ctx, &held); err != nil {
+	if err := temporalworkflow.ExecuteActivity(ids.with(holdCtx, "tests-red-hold"), HoldChangedTestsActivityName, TestsRedHoldInput{RunWorkflowInput: input, Commit: result.ResultSHA, Base: base, Files: tests}).Get(ctx, &held); err != nil {
 		return testsRedOutcome{}, wrapActivityFailure("hold changed tests activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	if len(held.Held) == 0 {

@@ -533,7 +533,6 @@ func TestTestsRedOnBaseVerdictTable(t *testing.T) {
 	}{
 		{"red on base proved", tests, "", proof(run.TestsRedProved), true, ""},
 		{"every test passes on base", tests, "", proof(run.TestsRedNotExercised), false, ""},
-		{"a changed test fails on the result", tests, "", proof(run.TestsRedFailsOnResult), false, ""},
 		{"no verdict passes with a note", tests, "", proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
 		{"no proof at all passes with a note", tests, "", nil, true, "tests_red_on_base: the changed tests were not run"},
 		{"no test file changed refuses", nil, "", nil, false, ""},

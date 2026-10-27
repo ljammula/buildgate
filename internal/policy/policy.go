@@ -224,8 +224,8 @@ func TestFiles(changed, patterns []string, oracles *run.OracleEvidence) []string
 const TestsRedOnBaseCheck = "tests_red_on_base"
 
 // TestsRedOnBaseInput is the factory's runs of the changed test files (the
-// proof): one of run.TestsRedProved, TestsRedNotExercised,
-// TestsRedFailsOnResult or TestsRedNoVerdict, and a one-line reason.
+// proof): one of run.TestsRedProved, TestsRedNotExercised or
+// TestsRedNoVerdict, and a one-line reason.
 type TestsRedOnBaseInput struct {
 	Verdict string
 	Reason  string
@@ -237,8 +237,7 @@ type TestsRedOnBaseInput struct {
 // refuses, in order:
 //
 //   - with no opt-out and no test file changed;
-//   - a proof that every test that ran also passes on the base commit, or that
-//     a changed test fails on the result commit.
+//   - a proof that every test that ran also passes on the base commit.
 //
 // An opt-out passes with no proof (the pull request names the reason). A
 // proof with no verdict, or none at all, passes and returns a note: a check
@@ -257,7 +256,7 @@ func TestsRedOnBase(tests []string, optOutReason string, proof *TestsRedOnBaseIn
 	switch proof.Verdict {
 	case run.TestsRedProved:
 		return gate, ""
-	case run.TestsRedNotExercised, run.TestsRedFailsOnResult:
+	case run.TestsRedNotExercised:
 		gate.Passed = false
 		return gate, ""
 	}

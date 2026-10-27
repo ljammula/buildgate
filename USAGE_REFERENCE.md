@@ -1133,13 +1133,12 @@ runner picks the test IDs and the command, as for a review's reproduction):
 |---|---|
 | A changed test fails, times out or does not compile on the base, and passes on the result | Passes |
 | Every test that ran passes on the base too | Fails: `tests pass on the base commit: they do not exercise the change` |
-| A changed test does not pass on the result | Fails |
 | The ticket declares `Tests-Required: no -- <reason>` | Passes with no runs; the pull request names the reason (the release decision records it) |
 | No test file changed, and no opt-out | Fails |
-| No runner takes a changed file, the report is missing, the run has no known base commit, or the proof is otherwise not reached | Passes, and the pull request lists a note: the check refuses only on what it saw run |
+| No runner takes a changed file, the report is missing, a changed test fails when run alone on the result commit although the full suite passed, the run has no known base commit, or the proof is otherwise not reached | Passes, and the pull request lists a note: the check refuses only on what it saw run |
 
 The proof runs only after the run's own checks passed (verification, the full
-suite, the named gates), at most `MaxReproductions` (3) changed test files
+suite, the named gates), at most 3 changed test files (added files first, then modified ones, each sorted)
 of at most 32 KiB each, with at most 20 test IDs a file, and the gate sandbox
 has no model route. The run record keeps each file's path, the SHA-256 of the
 copy it ran, the test IDs and each launch's result (`tests_red_on_base` in
