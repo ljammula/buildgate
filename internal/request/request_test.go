@@ -547,27 +547,27 @@ func btoi(b bool) int {
 func TestPlanReviewReason(t *testing.T) {
 	r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
 	r.TicketCount = 1
-	if got := r.PlanReviewReason(false); got != "" {
+	if got := r.PlanReviewReason(false, 0); got != "" {
 		t.Errorf("one ticket, no opt-in: reason %q, want none", got)
 	}
-	if r.PlanReviewReason(true) == "" {
+	if r.PlanReviewReason(true, 0) == "" {
 		t.Error("the repository's plan_review: want a reason")
 	}
 	r.PlanReview = true
-	if r.PlanReviewReason(false) == "" {
+	if r.PlanReviewReason(false, 0) == "" {
 		t.Error("the request's opt-in: want a reason")
 	}
 	r.PlanReview, r.TicketCount = false, 2
-	if r.PlanReviewReason(false) == "" {
+	if r.PlanReviewReason(false, 0) == "" {
 		t.Error("two tickets: want a reason")
 	}
 	r.TicketCount = 1
 	r.Rejections = []Rejection{{By: FactoryActor, FromState: StatePlanning, ForStage: StatePlanReview}}
-	if got := r.PlanReviewReason(false); got != "" {
+	if got := r.PlanReviewReason(false, 0); got != "" {
 		t.Errorf("a factory re-plan: reason %q, want none", got)
 	}
 	r.Rejections = append(r.Rejections, Rejection{By: "op", FromState: StatePlanReview})
-	if r.PlanReviewReason(false) == "" {
+	if r.PlanReviewReason(false, 0) == "" {
 		t.Error("a person's rejection: want a reason")
 	}
 }
@@ -584,5 +584,13 @@ func TestSkipPlanReviewMovesPlanningToBuildingAsTheFactory(t *testing.T) {
 	last := r.History[len(r.History)-1]
 	if r.State != StateBuilding || last.By != factoryActor || last.Reason != "why" || r.ApprovedBy != "" {
 		t.Errorf("state %s, last %+v, ApprovedBy %q; want building by the factory with no human approval", r.State, last, r.ApprovedBy)
+	}
+}
+
+func TestPlanReviewReasonForSupersededOraclePaths(t *testing.T) {
+	r := New("req-1", "/repos/app", "app", Source{Kind: SourceText}, fixedNow)
+	r.TicketCount = 1
+	if got := r.PlanReviewReason(false, 2); !strings.Contains(got, "supersede 2") {
+		t.Errorf("reason = %q, want it to name the 2 superseded paths", got)
 	}
 }

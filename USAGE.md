@@ -17,7 +17,7 @@ The shortest path from a fresh install to a reviewable pull request:
 | 1 | `factoryd doctor` | Checks Docker, images, model route, mounts; prints the fix for anything wrong |
 | 2 | `factoryd quickstart <repo-path> "<task>"` | Configures the session, starts a `worker` and `factoryd serve`, submits the request, opens its tokenized console link, stops at `spec_review` |
 | 3 | `factoryd approve <req-id>` / `factoryd reject -reason "..." <req-id>` | Your decision at each review gate (console: Approve / Request changes). Quickstart prints each command with the `-data-dir` it needs |
-| 4 | `factoryd watch <req-id>` / `factoryd status` | Follow progress; `factoryd retry <req-id>` after a halt or quarantine |
+| 4 | `factoryd watch <req-id>` / `factoryd status` (or `submit -watch`, which follows the request after submitting) | Follow progress; `factoryd retry <req-id>` after a halt or quarantine |
 | 5 | The pull request on the repo's GitHub remote | Opens as a draft, marked ready for review automatically once checks pass and no reviewer thread blocks it. The factory never merges; you do |
 
 **Which document do I read?**
@@ -567,7 +567,7 @@ you: "use buildgate to implement x_spec.md in ~/code/repo"
   -> factoryd doctor -target-repo <repo>   environment + what submit would refuse
   -> factoryd submit -request-file x_spec.md [-preflight-profile brownfield] <repo>
        report: request id, console link, verify command used
-  -> factoryd watch <id>                   stops at spec_review / plan_review / pr_review
+  -> factoryd watch <id>                   stops at spec_review / pr_review (and plan_review for several tickets or an opt-in)
        report: what is waiting + the approve/reject commands for you
   -> once a ticket builds: the run's Temporal UI link (status -json temporal_ui_url)
 ```

@@ -44,7 +44,8 @@ type PlanTicket struct {
 // RefreshReviewNotes sets r.ReviewNotes to the notes on what r's current
 // review gate shows, read from the request's files: SpecReviewNotes in
 // spec_review (after the read-back's note, readBackNote), PlanReviewNotes in
-// plan_review, none in any other state. A
+// plan_review (and in building, for a plan the factory approved itself),
+// none in any other state. A
 // file that cannot be read gives no note. The caller saves r, or does not:
 // reading is cheap (the spec, the tickets, a few directory listings), so
 // every place that shows the notes (the API's request view, `factoryd
@@ -55,7 +56,7 @@ type PlanTicket struct {
 // count see.
 func (r *Request) RefreshReviewNotes(dataDir string) {
 	r.ReviewNotes = nil
-	if r.State != StateSpecReview && r.State != StatePlanReview {
+	if r.State != StateSpecReview && r.State != StatePlanReview && !r.planSkippedReview() {
 		return
 	}
 	spec, err := os.ReadFile(SpecPath(dataDir, r.ID))
@@ -95,6 +96,21 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed, Estimate: estimate})
 	}
 	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r), idNotes, r.PlanBudgetLines)
+}
+
+// planSkippedReview reports whether r is building on a plan the factory
+// approved itself: the latest move out of planning went straight to building.
+// Such a request keeps the plan's review notes, which no person read at a gate.
+func (r *Request) planSkippedReview() bool {
+	if r.State != StateBuilding {
+		return false
+	}
+	for i := len(r.History) - 1; i >= 0; i-- {
+		if h := r.History[i]; h.From == StatePlanning && (h.To == StatePlanReview || h.To == StateBuilding) {
+			return h.To == StateBuilding
+		}
+	}
+	return false
 }
 
 // readBackNote is the spec review's note on rb against the spec.md bytes

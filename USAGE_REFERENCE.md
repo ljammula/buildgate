@@ -56,6 +56,10 @@ ticket (see "Ticket sequencing (`building`)"), absent for the earlier
 ticket-first shape. A request submitted before the upgrade has no such field and
 keeps the earlier shape through every remaining ticket and corrective round.
 
+A request already in `spec_review` or `planning` when the binary is upgraded
+follows the current plan-review rule: a one-ticket plan skips `plan_review`
+unless the request, the session config or the repository's `.factory.yml` opts in.
+
 | Field a later release added | A request written before it |
 |---|---|
 | `build_input` | Absent: ticket-first build input, no `# Approved spec`, no read-back block |
@@ -638,8 +642,9 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
   └─ refused unless the tickets are 001.spec.md, 002.spec.md, ... with the ticket headings,
      and together cover every acceptance criterion of the spec
 ... -> spec_review -> planning   (no model call: your tickets get a drafted plan's checks)
-                   -> plan_review  approve, or reject -reason "..."
+                   -> plan_review  only for several tickets or an opt-in; approve, or reject -reason "..."
                                      └─ reject: the planning model revises YOUR tickets with the feedback
+                      (one ticket, no opt-in: straight to building)
 ```
 
 | Point | Detail |

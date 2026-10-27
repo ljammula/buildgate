@@ -289,7 +289,7 @@ func planApprovalHashes(dataDir string, r *Request) (map[string]string, error) {
 }
 
 // ApprovePlanByFactory is the factory's own plan approval for a plan that
-// needs no person's (PlanNeedsReview): the same checks and pinning as a
+// needs no person's (PlanReviewReason): the same checks and pinning as a
 // person's (planApprovalHashes, VerifyApprovedHashes first), then planning
 // to building with why on the History entry. ApprovedBy and ApprovedAt stay
 // a person's. A refusal returns its error with r unchanged, and the caller

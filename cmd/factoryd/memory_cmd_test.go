@@ -885,8 +885,8 @@ func TestMemoryRequestStopsAtSpecReview(t *testing.T) {
 	}
 }
 
-// Approved at spec review, the request reaches plan review with its one
-// ticket, again with no model call, and waits again.
+// Approved at spec review, the request plans its one ticket with no model
+// call, and the factory approves that plan: it reaches building.
 func TestMemoryRequestPlanIsItsOneTicket(t *testing.T) {
 	f, id, _, _ := proposedMemoryRequest(t)
 	driveMemoryRequest(t, f, id, request.StateSpecReview)

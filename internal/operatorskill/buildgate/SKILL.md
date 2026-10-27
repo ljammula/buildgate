@@ -136,8 +136,8 @@ when `factoryd doctor` warns `worker runs this factoryd`, relay its fix line.
 
 ## Gates belong to the operator
 
-A request pauses for a human at `spec_review`, `oracle_review`, `plan_review`,
-and `pr_review`. At each one: summarize what is waiting, give the console
+A request pauses for a human at `spec_review`, `oracle_review`, `plan_review`
+(only for a plan of several tickets or an opted-in request) and `pr_review`. At each one: summarize what is waiting, give the console
 link, and name the commands the operator chooses between:
 `factoryd approve <id>` to continue, or
 `factoryd reject -reason "<what to change>" <id>` to send it

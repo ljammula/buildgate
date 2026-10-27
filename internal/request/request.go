@@ -1153,7 +1153,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	if to == StatePlanning {
 		r.pruneTicketApprovals()
 	}
-	if to == StateSpecReview || to == StatePlanReview {
+	if to == StateSpecReview || to == StatePlanReview || (from == StatePlanning && to == StateBuilding) {
 		r.DraftHalt = nil
 	}
 	return nil
@@ -1305,9 +1305,13 @@ func (r *Request) CompletePlanning(now time.Time) error {
 // or "" when the factory may approve it itself (ApprovePlanByFactory): the
 // plan has more than one ticket, the request opted in (PlanReview), the
 // repository's .factory.yml did (repoOptIn), or a person already sent a plan
-// of this request back. r.TicketCount must be set.
-func (r *Request) PlanReviewReason(repoOptIn bool) string {
+// of this request back, or the ticket oracles supersede committed paths
+// (supersedes of them), which the host deletes on commit and only a person's
+// approval may allow. r.TicketCount must be set.
+func (r *Request) PlanReviewReason(repoOptIn bool, supersedes int) string {
 	switch {
+	case supersedes > 0:
+		return fmt.Sprintf("the ticket oracles supersede %d committed path(s), which the build deletes", supersedes)
 	case r.TicketCount > 1:
 		return fmt.Sprintf("the plan has %d tickets", r.TicketCount)
 	case r.PlanReview:
@@ -1325,7 +1329,7 @@ func (r *Request) PlanReviewReason(repoOptIn bool) string {
 
 // SkipPlanReview moves a request from planning straight to building: the
 // factory's own plan approval for a plan that does not need a person's (see
-// PlanNeedsReview). why is the History reason. It does not set ApprovedBy or
+// PlanReviewReason). why is the History reason. It does not set ApprovedBy or
 // ApprovedAt, which stay a person's; the History entry records the factory.
 func (r *Request) SkipPlanReview(why string, now time.Time) error {
 	return advance(r, []State{StatePlanning}, StateBuilding, factoryActor, why, now)
