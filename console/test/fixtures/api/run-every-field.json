@@ -368,6 +368,10 @@
   "earlier_attempt_of": "every-field earlier_attempt_of",
   "escalated": true,
   "tests_required_opt_out": "every-field tests_required_opt_out",
+  "scope_unapproved": true,
+  "allowed_paths": [
+    "every-field allowed_paths"
+  ],
   "tests_red_on_base": {
     "verdict": "every-field verdict",
     "reason": "every-field reason",

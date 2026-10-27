@@ -3335,3 +3335,45 @@ func seedFirstTicketRun(t *testing.T, dataDir string, r *request.Request) {
 	}
 	r.Tickets[0].RunID = first.ID
 }
+
+// TestBuildRequestBuildArgsForwardsWhetherAPersonApprovedTheScope proves a
+// request's ticket build always carries -scope-approval: unapproved for a
+// plan the factory approved itself (Allowed-Files is then a guess, so a file
+// outside it is a PR note), approved for a plan a person approved and for a
+// ticket the operator widened with amend-scope.
+func TestBuildRequestBuildArgsForwardsWhetherAPersonApprovedTheScope(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "001.spec.md")
+	if err := os.WriteFile(specPath, []byte("Verify-Command: pytest\n\n## Goal\n\ndo the thing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	factoryApproved := request.Transition{From: request.StatePlanning, To: request.StateBuilding, By: "factory"}
+	personApproved := request.Transition{From: request.StatePlanReview, To: request.StateBuilding, By: "kanna"}
+	for _, tc := range []struct {
+		name   string
+		mutate func(r *request.Request)
+		want   string
+	}{
+		{"the factory approved a one-ticket plan", func(r *request.Request) { r.History = []request.Transition{factoryApproved} }, "unapproved"},
+		{"a person approved the plan", func(r *request.Request) { r.History = []request.Transition{personApproved} }, "approved"},
+		{"the operator widened the ticket", func(r *request.Request) {
+			r.History = []request.Transition{factoryApproved}
+			r.Tickets[0].ScopeAmendedBy = "kanna"
+		}, "approved"},
+	} {
+		r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", Tickets: []request.Ticket{{Index: 1, SpecPath: specPath}}}
+		tc.mutate(r)
+		args, err := requestdriver.BuildRequestBuildArgs("data", r, r.Tickets[0], requestdriver.WorkerConfig{})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var got []string
+		for i, a := range args {
+			if a == "-scope-approval" {
+				got = append(got, args[i+1])
+			}
+		}
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("%s: -scope-approval values = %v, want exactly %q", tc.name, got, tc.want)
+		}
+	}
+}

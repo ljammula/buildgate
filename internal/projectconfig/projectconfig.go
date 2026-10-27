@@ -15,8 +15,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -99,6 +101,13 @@ type Config struct {
 	// that name counts ("__tests__/" matches "src/__tests__/a.js"). Empty
 	// (the default) falls back to policy.DefaultTestPatterns.
 	TestPatterns []string `yaml:"test_patterns"`
+	// AllowedPaths bounds every change a build makes in this repository: a
+	// changed file that matches none of these patterns fails the diff_scope
+	// gate, whatever the ticket's Allowed-Files says. Entries are anchored at
+	// the repository root: "dir/" allows everything under dir, any other
+	// entry is a path.Match glob of the whole path (policy.PathAllowed). Empty (the
+	// default) bounds nothing. A person wrote it, so it always refuses.
+	AllowedPaths []string `yaml:"allowed_paths"`
 	// RequiredBinaries names executables the operator-selected worker image
 	// must provide for this repository's verify/setup commands.
 	RequiredBinaries    []string `yaml:"required_binaries"`
@@ -306,16 +315,11 @@ func (c *Config) Validate() error {
 	if c.DesignGuide != "" && !designGuideNameRE.MatchString(c.DesignGuide) {
 		return fmt.Errorf("design_guide %q must be a bare guide name (%s), not a path", c.DesignGuide, designGuideNameRE)
 	}
-	for _, p := range c.TestPatterns {
-		if p == "" {
-			return errors.New("test_patterns must not contain an empty entry")
-		}
-		if strings.HasPrefix(p, "/") {
-			return fmt.Errorf("test_patterns entry %q must not begin with \"/\": a directory entry is relative, like \"__tests__/\"", p)
-		}
-		if strings.HasSuffix(p, "/") && strings.ContainsAny(p, "*?[") {
-			return fmt.Errorf("test_patterns directory entry %q must not contain a glob character: it names a directory literally, like \"__tests__/\"", p)
-		}
+	if err := validatePathPatterns("test_patterns", c.TestPatterns); err != nil {
+		return err
+	}
+	if err := validateAllowedPaths(c.AllowedPaths); err != nil {
+		return err
 	}
 	if err := validateCommandList("setup", c.Setup); err != nil {
 		return err
@@ -556,4 +560,45 @@ func warnIfWorktreeDiverges(root string, headData []byte, headFound bool) {
 	case !bytes.Equal(worktreeData, headData):
 		warnOnce(path, warnReasonDiverges, worktreeData, "%s: %s in the worktree differs from the committed HEAD version -- using the committed version", FileName, path)
 	}
+}
+
+// validatePathPatterns checks the entries of a pattern list key (test_patterns): none empty or rooted at "/", and a directory entry (ending
+// in "/") names a directory literally, with no glob character.
+func validatePathPatterns(key string, patterns []string) error {
+	for _, p := range patterns {
+		if p == "" {
+			return fmt.Errorf("%s must not contain an empty entry", key)
+		}
+		if strings.HasPrefix(p, "/") {
+			return fmt.Errorf("%s entry %q must not begin with \"/\": a directory entry is relative, like \"__tests__/\"", key, p)
+		}
+		if strings.HasSuffix(p, "/") && strings.ContainsAny(p, "*?[") {
+			return fmt.Errorf("%s directory entry %q must not contain a glob character: it names a directory literally, like \"__tests__/\"", key, p)
+		}
+	}
+	return nil
+}
+
+// validateAllowedPaths checks allowed_paths: each entry non-empty, relative
+// (no leading "/", no ".." segment), without "**" (unsupported) and, unless
+// it names a directory ("src/"), a valid path.Match pattern.
+func validateAllowedPaths(patterns []string) error {
+	for _, p := range patterns {
+		switch {
+		case p == "":
+			return errors.New("allowed_paths must not contain an empty entry")
+		case strings.HasPrefix(p, "/"):
+			return fmt.Errorf("allowed_paths entry %q must not begin with \"/\": entries are relative to the repository root", p)
+		case slices.Contains(strings.Split(p, "/"), ".."):
+			return fmt.Errorf("allowed_paths entry %q must not contain \"..\"", p)
+		case strings.Contains(p, "**"):
+			return fmt.Errorf("allowed_paths entry %q: \"**\" is not supported; end a directory entry with \"/\" to allow everything under it", p)
+		case strings.HasSuffix(p, "/") && strings.ContainsAny(p, "*?["):
+			return fmt.Errorf("allowed_paths directory entry %q must not contain a glob character: it names a directory literally, like \"src/\"", p)
+		}
+		if _, err := path.Match(p, ""); err != nil {
+			return fmt.Errorf("allowed_paths entry %q is not a valid pattern: %w", p, err)
+		}
+	}
+	return nil
 }

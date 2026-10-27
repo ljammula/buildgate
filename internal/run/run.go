@@ -1781,6 +1781,14 @@ type Run struct {
 	// fails on the base actually satisfied, and so release.Decision can carry the
 	// reason forward.
 	TestsRequiredOptOut string `json:"tests_required_opt_out,omitempty"`
+	// ScopeUnapproved and AllowedPaths are the run's policy.Scope beside the
+	// ticket's Allowed-Files (re-read from the spec snapshot): no person
+	// approved that list, so a file outside it was a note and refused nothing;
+	// and the repository's .factory.yml allowed_paths, which always refuses.
+	// Recorded at run start so the sentence for a diff_scope quarantine
+	// (triage) is worked out from the same inputs the gate used.
+	ScopeUnapproved bool     `json:"scope_unapproved,omitempty"`
+	AllowedPaths    []string `json:"allowed_paths,omitempty"`
 	// TestsRedOnBase is the factory's proof for the tests_red_on_base gate:
 	// which changed test files it ran on the base and the result commits and
 	// what each run showed. Nil when the gate took no launches (an opt-out,

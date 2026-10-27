@@ -252,6 +252,21 @@ func TestTriageRun(t *testing.T) {
 			want: "diff_scope: changed internal/auth/x.go outside Allowed-Files",
 		},
 		{
+			name: "diff_scope names a file outside the repository's allowed_paths",
+			setup: func(t *testing.T, dataDir string) *run.Run {
+				writeRunFile(t, dataDir, id, "spec.snapshot.md", "# Ticket\n\nAllowed-Files: internal/refund/refund.go\n")
+				return &run.Run{
+					ID:              id,
+					State:           run.StateQuarantined,
+					ScopeUnapproved: true,
+					AllowedPaths:    []string{"internal/refund/"},
+					ChangedFiles:    []string{"internal/refund/refund.go", "internal/refund/extra.go", "ci/build.sh"},
+					GateResults:     []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "diff_scope", Passed: false}},
+				}
+			},
+			want: "diff_scope: changed ci/build.sh outside the repository's allowed_paths (.factory.yml)",
+		},
+		{
 			name: "tests_red_on_base no test file changed",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{

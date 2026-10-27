@@ -260,22 +260,31 @@ func specSnapshotPathFor(dataDir, id string) string {
 	return filepath.Join(run.Dir(dataDir, id), "spec.snapshot.md")
 }
 
-// triageDiffScope recomputes DiffScope's own verdict from the same two
-// inputs the gate itself used -- r.ChangedFiles (already durable on the
-// run) and the ticket's Allowed-Files (re-read from the durable spec
-// snapshot, since GateResult itself records no detail) -- rather than
-// guessing which changed file was out of scope.
+// triageDiffScope recomputes the diff_scope gate's own verdict from the same
+// inputs the gate itself used -- r.ChangedFiles (already durable on the run),
+// the ticket's Allowed-Files (re-read from the durable spec snapshot, since
+// GateResult itself records no detail), and the scope the run recorded
+// (r.ScopeUnapproved, r.AllowedPaths) -- rather than guessing which changed
+// file was out of scope.
 func triageDiffScope(r *run.Run, dataDir string, oracleHint bool) string {
 	allowed, err := ticketspec.ParseAllowedFiles(specSnapshotPathFor(dataDir, r.ID))
-	if err != nil || len(allowed) == 0 {
+	if err != nil {
 		return ""
 	}
-	_, violations := policy.DiffScope(policy.ExcludeFactoryOracles(policy.ExcludeHarnessByproducts(r.ChangedFiles), r.Oracles), allowed)
-	if len(violations) == 0 {
+	scope := policy.Scope{AllowedFiles: allowed, Unapproved: r.ScopeUnapproved, AllowedPaths: r.AllowedPaths}
+	verdict := scope.Judge(policy.ExcludeFactoryOracles(policy.ExcludeHarnessByproducts(r.ChangedFiles), r.Oracles))
+	var parts []string
+	if len(verdict.OutsideTicket) > 0 {
+		parts = append(parts, fmt.Sprintf("changed %s outside Allowed-Files", strings.Join(verdict.OutsideTicket, ", ")))
+	}
+	if len(verdict.OutsideRepo) > 0 {
+		parts = append(parts, fmt.Sprintf("changed %s outside the repository's allowed_paths (.factory.yml)", strings.Join(verdict.OutsideRepo, ", ")))
+	}
+	if len(parts) == 0 {
 		return ""
 	}
-	base := fmt.Sprintf("diff_scope: changed %s outside Allowed-Files", strings.Join(violations, ", "))
-	if !oracleHint {
+	base := "diff_scope: " + strings.Join(parts, "; ")
+	if !oracleHint || len(verdict.OutsideTicket) == 0 {
 		return base
 	}
 	if hint := oracleScopeHint(r); hint != "" {

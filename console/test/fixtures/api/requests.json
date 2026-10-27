@@ -255,6 +255,7 @@
         "run_id": "run-quarantined",
         "branch": "every-field branch",
         "pr_url": "every-field pr_url",
+        "scope_amended_by": "every-field scope_amended_by",
         "pr_state": "every-field pr_state",
         "merge_readiness": {
           "ready": true,

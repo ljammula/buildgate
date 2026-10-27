@@ -129,6 +129,7 @@ func AmendScope(dataDir, id, by, reason string, files []string, now time.Time) (
 	}
 	r.ApprovedSHA256[relPath] = hash
 
+	ticket.ScopeAmendedBy = by
 	ts := now.UTC().Format(time.RFC3339Nano)
 	r.History = append(r.History, Transition{
 		From:   StateQuarantined,

@@ -66,6 +66,109 @@ func DiffScope(changed, allowed []string) (run.GateResult, []string) {
 	}, violations
 }
 
+// Scope is a run's changed-file boundary, the one input of the diff_scope
+// check. AllowedFiles is the ticket's Allowed-Files (nil: the ticket declared
+// none). Unapproved says that list is the model's guess, not a person's: no
+// person approved the plan it came from (request.ScopeApproved), so a changed
+// file outside it is a note on the pull request and refuses nothing.
+// AllowedPaths is the repository's .factory.yml allowed_paths, which a person
+// wrote and which therefore always refuses: a changed file that matches none
+// of its patterns (PathAllowed).
+type Scope struct {
+	AllowedFiles []string
+	Unapproved   bool
+	AllowedPaths []string
+}
+
+// ScopeNotePrefix begins the note of a changed file outside an unapproved
+// Allowed-Files list; the file follows.
+const ScopeNotePrefix = "changed outside the plan's Allowed-Files: "
+
+// Declared reports whether s bounds the run at all: the diff_scope check runs
+// only then.
+func (s Scope) Declared() bool {
+	return s.AllowedFiles != nil || len(s.AllowedPaths) > 0
+}
+
+// ScopeVerdict is Scope.Judge's answer: the files outside an approved
+// Allowed-Files list, the files outside the repository's allowed_paths (each
+// refuses), and the files outside an unapproved list (each a note).
+type ScopeVerdict struct {
+	OutsideTicket []string
+	OutsideRepo   []string
+	Noted         []string
+}
+
+// Refused is every file the verdict refuses the run for, without repeats.
+func (v ScopeVerdict) Refused() []string {
+	out := append([]string(nil), v.OutsideTicket...)
+	for _, f := range v.OutsideRepo {
+		if !containsPath(out, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// Judge sorts changed (already stripped of harness byproducts and factory
+// oracles by the caller) against s.
+func (s Scope) Judge(changed []string) ScopeVerdict {
+	var v ScopeVerdict
+	if s.AllowedFiles != nil {
+		outside := diffScopeViolations(changed, s.AllowedFiles)
+		if s.Unapproved {
+			v.Noted = outside
+		} else {
+			v.OutsideTicket = outside
+		}
+	}
+	if len(s.AllowedPaths) > 0 {
+		for _, f := range changed {
+			if !PathAllowed(f, s.AllowedPaths) {
+				v.OutsideRepo = append(v.OutsideRepo, f)
+			}
+		}
+		// A file the repository refuses needs no note beside it.
+		var noted []string
+		for _, f := range v.Noted {
+			if !containsPath(v.OutsideRepo, f) {
+				noted = append(noted, f)
+			}
+		}
+		v.Noted = noted
+	}
+	return v
+}
+
+// PathAllowed reports whether the repository-relative file matches one of
+// patterns, anchored at the repository root: a pattern ending in "/" allows
+// every path under that directory, and any other pattern is a path.Match glob
+// against the whole path ("*.md" allows root-level markdown only, "docs/*.md"
+// that directory's). "**" is not supported (projectconfig refuses it).
+func PathAllowed(file string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.HasSuffix(p, "/") {
+			if strings.HasPrefix(file, p) {
+				return true
+			}
+			continue
+		}
+		if ok, err := path.Match(p, file); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPath(list []string, f string) bool {
+	for _, x := range list {
+		if x == f {
+			return true
+		}
+	}
+	return false
+}
+
 // UnchangedRequiredFiles returns the files the ticket declared as required
 // that do not appear in the changed-file inventory. A passing canonical
 // verification only proves the ticket's Verify-Command exited 0, not that the
@@ -427,6 +530,12 @@ type EvaluateRunInput struct {
 	AllowedFiles         []string
 	RequiredChangedFiles []string
 
+	// ScopeUnapproved and AllowedPaths complete AllowedFiles into the run's
+	// Scope: the list is the model's guess (notes only), and the
+	// repository's .factory.yml allowed_paths (always refuses).
+	ScopeUnapproved bool
+	AllowedPaths    []string
+
 	RequiredContent           []string
 	RequiredContentBaseFiles  map[string]string
 	RequiredContentFinalFiles map[string]string
@@ -515,15 +624,21 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		result.FailedChecks = append(result.FailedChecks, gate.Check)
 	}
 
-	if input.AllowedFiles != nil {
+	scope := Scope{AllowedFiles: input.AllowedFiles, Unapproved: input.ScopeUnapproved, AllowedPaths: input.AllowedPaths}
+	if scope.Declared() {
 		// ExcludeHarnessByproducts is applied here, at the ticket-scope
 		// call site, and deliberately not inside DiffScope itself — see
 		// ExcludeHarnessByproducts' own doc comment for why DiffScope must
 		// stay a neutral matcher for internal/release's differently-scoped
 		// reuse of it.
-		scopeGate, violations := DiffScope(ExcludeFactoryOracles(ExcludeHarnessByproducts(input.ChangedFiles), input.Oracles), input.AllowedFiles)
+		verdict := scope.Judge(ExcludeFactoryOracles(ExcludeHarnessByproducts(input.ChangedFiles), input.Oracles))
+		refused := verdict.Refused()
+		scopeGate := run.GateResult{Check: "diff_scope", Passed: len(refused) == 0}
 		result.GateResults = append(result.GateResults, scopeGate)
-		result.DiffScopeViolations = violations
+		result.DiffScopeViolations = refused
+		for _, f := range verdict.Noted {
+			result.Notes = append(result.Notes, ScopeNotePrefix+f)
+		}
 		if !scopeGate.Passed {
 			accepted = false
 			result.FailedChecks = append(result.FailedChecks, "diff_scope")

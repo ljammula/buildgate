@@ -312,17 +312,17 @@ func BuildNote(b *run.BaselineVerify) string {
 	return s.String()
 }
 
-// OutOfScope is what the diff_scope gate would flag among left, the paths a
+// OutOfScope is what the diff_scope gate would refuse among left, the paths a
 // command left in the workspace: the call policy.EvaluateRun makes for a
-// run's changed files (ExcludeHarnessByproducts, then DiffScope), and under
-// the same condition, a ticket that declares Allowed-Files (non-nil).
-// A ticket without them has no such gate and nothing is out of scope. Sorted,
-// without duplicates.
-func OutOfScope(left, allowed []string) []string {
-	if allowed == nil {
+// run's changed files (ExcludeHarnessByproducts, then Scope.Judge), under the
+// same condition, a scope that bounds the run (Scope.Declared). A path outside
+// a list that no person approved is a note, not a refusal, and is not listed.
+// Sorted, without duplicates.
+func OutOfScope(left []string, scope policy.Scope) []string {
+	if !scope.Declared() {
 		return nil
 	}
-	_, violations := policy.DiffScope(policy.ExcludeHarnessByproducts(left), allowed)
+	violations := scope.Judge(policy.ExcludeHarnessByproducts(left)).Refused()
 	seen := make(map[string]bool, len(violations))
 	var out []string
 	for _, v := range violations {
@@ -336,11 +336,11 @@ func OutOfScope(left, allowed []string) []string {
 }
 
 // NoteLeftovers records on b the paths of left that OutOfScope flags for
-// allowed: at most run.BaselineVerifyMaxNamed of them, each as a clean line
+// scope: at most run.BaselineVerifyMaxNamed of them, each as a clean line
 // of at most maxNameLen bytes (a path is the repository's own output), and
 // how many there were.
-func NoteLeftovers(b *run.BaselineVerify, left, allowed []string) {
-	out := OutOfScope(left, allowed)
+func NoteLeftovers(b *run.BaselineVerify, left []string, scope policy.Scope) {
+	out := OutOfScope(left, scope)
 	b.LeftOutOfScopeCount = len(out)
 	for _, p := range out {
 		if len(b.LeftOutOfScope) == run.BaselineVerifyMaxNamed {

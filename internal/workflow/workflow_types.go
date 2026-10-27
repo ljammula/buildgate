@@ -142,6 +142,14 @@ type RunWorkflowInput struct {
 	// Worker-level default.
 	TestPatterns        []string `json:"test_patterns,omitempty"`
 	TestsRequiredOptOut string   `json:"tests_required_opt_out,omitempty"`
+	// ScopeUnapproved and AllowedPaths are policy.Scope's other two fields,
+	// beside AllowedFiles above: no person approved the list AllowedFiles
+	// holds (a note on the pull request, never a refusal), and the
+	// repository's .factory.yml allowed_paths (always a refusal). The zero
+	// value of ScopeUnapproved is the refusing one, so a history recorded
+	// before the field existed replays as it ran.
+	ScopeUnapproved bool     `json:"scope_unapproved,omitempty"`
+	AllowedPaths    []string `json:"allowed_paths,omitempty"`
 	// FullSuiteCommand is cmd/factoryd's -full-suite-command, carried
 	// per-execution with no Worker-static fallback (unlike VerifyCommand
 	// above) — this field doubles as RunWorkflow's own deterministic
@@ -709,8 +717,11 @@ type PreflightInput struct {
 	LogDir               string   `json:"log_dir,omitempty"`
 	AllowedFiles         []string `json:"allowed_files,omitempty"`
 	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
-	TicketPath           string   `json:"ticket_path,omitempty"`
-	TicketNumber         int      `json:"ticket_number,omitempty"`
+	// ScopeUnapproved is RunWorkflowInput.ScopeUnapproved: AllowedFiles is
+	// then no person's list, and the misprefix check below leaves it out.
+	ScopeUnapproved bool   `json:"scope_unapproved,omitempty"`
+	TicketPath      string `json:"ticket_path,omitempty"`
+	TicketNumber    int    `json:"ticket_number,omitempty"`
 	// RequestTicket is RunWorkflowInput.RequestTicket, carried here so
 	// PreflightActivity knows to check TicketPath with
 	// policy.TicketStructureBrownfield instead of policy.TicketStructure.

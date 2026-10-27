@@ -2206,6 +2206,10 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
+	scopeApproved, scopeWhy := request.ScopeApproved(r, ticket.Index)
+	if !scopeApproved {
+		log.Printf("request %s ticket %d: Allowed-Files is not a person's list (%s): files outside it are PR notes", r.ID, ticket.Index, scopeWhy)
+	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
@@ -2252,6 +2256,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// own file, or its conformity-corrective addendum), never a
 		// repo-native pi-harness ticket.
 		RequestTicket: true,
+		// ScopeUnapproved: see QueueEntry.ScopeUnapproved's own doc comment.
+		ScopeUnapproved: !scopeApproved,
 		// ExecutionModel: r.Models["execution"] is `factoryd submit
 		// -model execution=...` / the API's own "models" field, already
 		// validated at submit time (sessionconfig.ValidateRequestModels)

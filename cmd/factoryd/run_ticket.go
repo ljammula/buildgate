@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -259,6 +260,7 @@ type runFlags struct {
 	reviewReproduction           *bool
 	reviewSpec                   *string
 	recheckReproductions         *string
+	scopeApproval                *string
 }
 
 // newRunFlags builds `factoryd <run>`'s FlagSet in isolation from parsing,
@@ -327,6 +329,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.reviewReproduction = flags.Bool("review-reproduction", false, "internal: hold the review's reproductions and run them, so a finding can refuse the run (SC-022); a request's ticket build sets it")
 	f.reviewSpec = flags.String("review-spec", "", "internal: the request's approved spec.md, which the review cites by line and the reproduction check compares citations with")
 	f.recheckReproductions = flags.String("recheck-reproductions", "", "internal: manifest of a quarantined run's held reproductions that this corrective build's result must pass")
+	f.scopeApproval = flags.String("scope-approval", "", "internal: \"approved\" or \"unapproved\": whether a person approved the ticket's Allowed-Files; if not, a file outside it is a pull request note. A request's ticket build sets it; other runs may omit it")
 	f.configPath = flags.String("config", "", "session config path, or a profile name; empty uses the active profile or the default paths")
 	finishFlags(flags)
 	flags.Usage = func() {
@@ -454,6 +457,8 @@ type ticketRun struct {
 	releaseAllowSkippedProjectCheck       *bool
 	relayNeededForExecution               bool
 	testPatterns                          []string
+	allowedPaths                          []string
+	scopeUnapproved                       bool
 	gateCommands                          map[string]string
 	sandboxImageExplicit                  bool
 	sandboxDataDir                        string
@@ -1907,9 +1912,8 @@ func (tr *ticketRun) snapshotSpec() error {
 	// real validation run: a harness housekeeping change to .gitignore
 	// rode along unchecked). Allowed-Files: is optional; when a ticket
 	// doesn't declare it, the scope check below is skipped entirely.
-	tr.allowedFiles, err = ticketspec.ParseAllowedFiles(tr.specSnapshotPath)
-	if err != nil {
-		return fmt.Errorf("parse ticket allowed files: %w", err)
+	if err := tr.parseAllowedScope(); err != nil {
+		return err
 	}
 
 	// A passing Verify-Command only proves the declared command exited 0,
@@ -1934,14 +1938,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	// rejected only after the fact for a scope declaration that could never
 	// have matched). Checked here, before build_app.py ever runs, the same
 	// preflight-not-postflight shape as every other check in this block.
-	var scopePathsToCheck []string
-	seenScopePath := map[string]bool{}
-	for _, p := range append(append([]string{}, tr.allowedFiles...), tr.requiredChangedFiles...) {
-		if !seenScopePath[p] {
-			seenScopePath[p] = true
-			scopePathsToCheck = append(scopePathsToCheck, p)
-		}
-	}
+	scopePathsToCheck := tr.misprefixCheckPaths()
 	if len(scopePathsToCheck) > 0 {
 		corrections, err := ticketspec.MisprefixedWorkspacePaths(*tr.workspace, scopePathsToCheck)
 		if err != nil {
@@ -2228,6 +2225,8 @@ func (tr *ticketRun) createRunRecord() error {
 		PRCloses:            *tr.prClosesIssue,
 		PRBase:              *tr.prBase,
 		TestsRequiredOptOut: tr.testsRequiredOptOut,
+		ScopeUnapproved:     tr.scopeUnapproved,
+		AllowedPaths:        tr.allowedPaths,
 		// ReleasePolicy: persisted here, at run start, so a LATER
 		// reconciliation of this same run (Temporal reconcileReclaimedRun,
 		// or a daemon-restart reclaim) can evaluate its release decision
@@ -2684,6 +2683,8 @@ func (tr *ticketRun) dispatch() error {
 			RequiredChangedFiles:     tr.requiredChangedFiles,
 			RequiredContent:          tr.requiredContent,
 			TestPatterns:             tr.testPatterns,
+			AllowedPaths:             tr.allowedPaths,
+			ScopeUnapproved:          tr.scopeUnapproved,
 			TestsRequiredOptOut:      tr.r.TestsRequiredOptOut,
 			Slice:                    sliceOpts,
 			ReleasePolicy:            releasePolicy,
@@ -2747,6 +2748,7 @@ func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 		}
 		tr.setup, tr.autofix, tr.requiredBinaries, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.RequiredBinaries, cfg.SHA256
 		tr.sandbox = cfg.Sandbox
+		tr.allowedPaths = cfg.AllowedPaths
 	}
 	// HEAD is the commit it was before the first read of the file
 	// (headBeforeProjectConfig) and that commit's file is the one just read,
@@ -2782,4 +2784,54 @@ func replayStackBase(replay *run.Replay) string {
 		return ""
 	}
 	return replay.OntoSHA
+}
+
+// resolveScopeApproval is -scope-approval: whether the ticket's Allowed-Files
+// list is one no person approved (a request whose plan the factory approved
+// itself), so a changed file outside it is a note. A request's ticket build
+// (-request-ticket) must say which, so a dropped flag cannot turn the
+// refusing default into a silent note; a run without a request is a ticket an
+// operator wrote and is approved.
+func resolveScopeApproval(value string, requestTicket bool) (unapproved bool, err error) {
+	switch value {
+	case "approved":
+		return false, nil
+	case "unapproved":
+		return true, nil
+	case "":
+		if requestTicket {
+			return false, errors.New("-scope-approval is required with -request-ticket: approved or unapproved")
+		}
+		return false, nil
+	}
+	return false, fmt.Errorf("-scope-approval must be approved or unapproved, got %q", value)
+}
+
+// parseAllowedScope reads the ticket's Allowed-Files (nil when it declares
+// none) and whether a person approved that list (-scope-approval).
+func (tr *ticketRun) parseAllowedScope() (err error) {
+	tr.allowedFiles, err = ticketspec.ParseAllowedFiles(tr.specSnapshotPath)
+	if err != nil {
+		return fmt.Errorf("parse ticket allowed files: %w", err)
+	}
+	tr.scopeUnapproved, err = resolveScopeApproval(*tr.rf.scopeApproval, *tr.requestTicket)
+	return err
+}
+
+// misprefixCheckPaths are the declared paths checked for a missing directory
+// prefix, without repeats: Required-Changed-Files, and Allowed-Files unless no
+// person approved that list (it refuses nothing then, so a wrong prefix in it
+// halts nothing).
+func (tr *ticketRun) misprefixCheckPaths() []string {
+	declared := tr.requiredChangedFiles
+	if !tr.scopeUnapproved {
+		declared = append(slices.Clone(tr.allowedFiles), tr.requiredChangedFiles...)
+	}
+	var paths []string
+	for _, p := range declared {
+		if !slices.Contains(paths, p) {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }

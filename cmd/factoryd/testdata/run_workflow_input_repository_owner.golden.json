@@ -173,6 +173,7 @@
   "sandbox_docker": "<TESTDATA>/fake_docker.sh",
   "sandbox_image": "example.test/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "sandbox_user": "1234:5678",
+  "scope_unapproved": true,
   "setup_commands": [
     "npm ci",
     "make generate"

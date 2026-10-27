@@ -580,6 +580,8 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		VerifyRerun:               verify.Rerun,
 		ChangedFiles:              evidenceResult.ChangedFiles,
 		AllowedFiles:              input.AllowedFiles,
+		ScopeUnapproved:           input.ScopeUnapproved,
+		AllowedPaths:              input.AllowedPaths,
 		RequiredChangedFiles:      input.RequiredChangedFiles,
 		RequiredContent:           input.RequiredContent,
 		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,

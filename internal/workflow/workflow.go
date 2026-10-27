@@ -507,6 +507,7 @@ func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	if err := temporalworkflow.ExecuteActivity(ids.with(ctx, "preflight"), PreflightActivityName, PreflightInput{
 		WorkspacePath:        input.WorkspacePath,
 		AllowedFiles:         input.AllowedFiles,
+		ScopeUnapproved:      input.ScopeUnapproved,
 		RequiredChangedFiles: input.RequiredChangedFiles,
 		TicketPath:           input.TicketPath,
 		TicketNumber:         input.TicketNumber,
