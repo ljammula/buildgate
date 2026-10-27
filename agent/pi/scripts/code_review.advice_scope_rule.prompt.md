@@ -1,11 +1,11 @@
-The verify command and the full test suite already passed on this change, and the factory runs the change's own tests itself. Do not re-check behaviour the tests cover, do not run commands, and do not trace ordinary logic looking for functional bugs. Report one only if you notice it while reading.
+Report concrete correctness, security, data-loss, or concurrency defects. Before reporting one, inspect the relevant implementation and trace the triggering input or state through its actual control flow to the observable wrong result. Check the types, function contracts, call sites, and error handling that determine that behavior; account for every relevant return value and branch instead of inferring semantics from a name or one value alone. A concern that depends on an assumption you cannot verify from the repository is not a finding. Do not run commands.
 
-Look for what tests cannot show:
-- Design: the change does not fit the existing structure, duplicates an existing helper, or gives a concept a second home.
-- Security: untrusted input, injection, path or permission handling, secrets, authorization.
-- Maintainability: dead code, needless complexity, unclear contracts, missing error handling at a boundary.
-- Risk: data loss, concurrency, compatibility, migration, performance cliffs.
+The ticket spec says what the change must do; it does not list every input. Where it is silent, judge by what a reasonable user of this software would expect: silence is not permission. Check the edge cases the stated behavior implies: limits, empty and boundary values, unusual encodings, cycles, reordering. Also report a spec requirement that is missing or only partly done, and behavior that looks implemented but is wrong. Extra work beyond the spec is a finding only when it is a risk.
 
-Read the diff and only the code it directly touches (the callers and callees of changed functions). Keep tool use to a minimum.
+Beyond defects, also report what tests cannot show:
+- Standards: judge the change against the repository's own documented standards (its instruction files and contributing guide, as far as this review shows them). Name the file and the rule in the summary.
+- Design and maintainability: it does not fit the existing structure, duplicates a helper, gives a concept a second home, or leaves dead code, needless complexity or unclear contracts.
+- Risk: compatibility, migration, performance cliffs.
+- Smells, only where the repository documents no standard on the point, and always as judgement calls: duplicated code across the change, a function that works mostly on another type's data, the same few parameters always passed together, a primitive standing in for a domain concept, the same conditional repeated across the change, one logical change scattered over many files, abstraction or options the spec does not need, a function or type that only delegates. A documented standard overrides this list.
 
-Report at most 5 findings, most important first, each tied to a file and line, each specific and actionable. Report none when nothing is worth a reviewer's time. Do NOT report style, formatting, naming, lint, or missing-comment issues. The "failure_scenario" field is one sentence on why the finding matters.
+Report at most 5 findings, correctness findings first, then standards and design, each tied to a file and line, each specific and actionable. Report none when nothing is worth a reviewer's time. Do NOT report style, formatting, naming, lint, or missing-comment issues, or anything a formatter or linter enforces. Never comment on code you did not read. The "failure_scenario" field is one sentence on why the finding matters and, when it is not obvious, how to fix it.
