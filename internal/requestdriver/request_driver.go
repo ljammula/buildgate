@@ -1940,13 +1940,11 @@ func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket, reason error) 
 		}
 	}
 	dir := filepath.Join(root, strconv.Itoa(n))
-	if err := os.MkdirAll(root, 0o750); err == nil {
-		err = os.Mkdir(dir, 0o750)
-		if err != nil {
-			log.Printf("request %s: keep refused plan: %v", id, err)
-			return
-		}
-	} else {
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		log.Printf("request %s: keep refused plan: %v", id, err)
+		return
+	}
+	if err := os.Mkdir(dir, 0o750); err != nil {
 		log.Printf("request %s: keep refused plan: %v", id, err)
 		return
 	}
