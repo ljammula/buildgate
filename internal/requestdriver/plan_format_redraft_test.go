@@ -103,11 +103,24 @@ func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 	malformed := func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}, &request.PlanEvidence{}, nil
 	}
+	// A refused plan already kept as number 2 is never written into: the
+	// next ones are 3 and 4.
+	existing := filepath.Join(request.Dir(dataDir, id), "refused-plans", "2")
+	if err := os.MkdirAll(existing, 0o750); err != nil {
+		t.Fatal(err)
+	}
 	runner, _, _ := sequencedPlanTicketsRunner(t, dataDir, malformed, malformed)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
-	for _, n := range []string{"1", "2"} {
+	if entries, err := os.ReadDir(existing); err != nil || len(entries) != 0 {
+		t.Errorf("pre-existing refused-plans/2 = %v, %v, want it untouched", entries, err)
+	}
+	for _, n := range []string{"3", "4"} {
+		reason, err := os.ReadFile(filepath.Join(request.Dir(dataDir, id), "refused-plans", n, "reason.txt"))
+		if err != nil || !strings.Contains(string(reason), "Acceptance criteria covered") {
+			t.Errorf("refused plan %s reason.txt = %q, %v, want the refusal", n, reason, err)
+		}
 		got, err := os.ReadFile(filepath.Join(request.Dir(dataDir, id), "refused-plans", n, "001.spec.md"))
 		if err != nil {
 			t.Fatalf("refused plan %s: %v", n, err)

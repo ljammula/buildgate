@@ -1204,7 +1204,10 @@ of its prose:
 A plan the planning model drafted that fails one is re-planned once, with
 the check's message as the feedback; a second refused plan halts the
 request. A handed-over plan is re-planned only for the tests rule; any
-other failure halts it at once.
+other failure halts it at once. Each refused plan's tickets and the
+refusal's reason are kept under `<data dir>/requests/<id>/refused-plans/<n>/`
+(`reason.txt` and the ticket files). A ticket's `## Out of scope` section may
+be empty: its heading is required, its content is not.
 
 What the factory reads from prose is a **review note**: one line on the
 request (`review_notes` in `request.json` and `GET /requests/{id}`), shown

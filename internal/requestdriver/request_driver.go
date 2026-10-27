@@ -720,7 +720,11 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		if validateErr == nil {
 			break
 		}
-		keepRefusedPlan(dataDir, r.ID, tickets)
+		refused := tickets
+		if spliced, err := spliceScopedTickets(r, reviewedTickets, tickets); err == nil {
+			refused = spliced
+		}
+		keepRefusedPlan(dataDir, r.ID, refused, validateErr)
 		if attempt == maxPlanningAttempts || !planRedraftable(r, validateErr) {
 			_ = os.RemoveAll(ticketsDir)
 			// Keep what every attempt spent: `factoryd cost` reads it from
@@ -1917,24 +1921,41 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 	return requestTickets, nil
 }
 
-// keepRefusedPlan copies a refused draft's tickets to
-// <request>/refused-plans/<n>/<ticket filename>, n the next free number, so a
-// halted request still holds what the checks refused (AdvancePlanning removes
-// the tickets dir on that path). Best effort: a copy that cannot be written is
-// logged, never a reason to change the planning outcome.
-func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket) {
+// keepRefusedPlan copies the tickets of a refused plan (the whole set the
+// checks saw, a scoped redraft's splice included) to
+// <request>/refused-plans/<n>/<ticket filename>, with the factory's refusal
+// note in reason.txt, so a halted request still holds what was refused
+// (AdvancePlanning removes the tickets dir on that path). n is one past the
+// highest number there; the directory is created with os.Mkdir, so an
+// existing one is never written into. Best effort: a copy that cannot be
+// written is logged, never a reason to change the planning outcome.
+func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket, reason error) {
 	root := filepath.Join(request.Dir(dataDir, id), "refused-plans")
 	n := 1
 	if entries, err := os.ReadDir(root); err == nil {
-		n = len(entries) + 1
+		for _, e := range entries {
+			if v, err := strconv.Atoi(e.Name()); err == nil && v >= n {
+				n = v + 1
+			}
+		}
 	}
 	dir := filepath.Join(root, strconv.Itoa(n))
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(root, 0o750); err == nil {
+		err = os.Mkdir(dir, 0o750)
+		if err != nil {
+			log.Printf("request %s: keep refused plan: %v", id, err)
+			return
+		}
+	} else {
 		log.Printf("request %s: keep refused plan: %v", id, err)
 		return
 	}
+	files := map[string]string{"reason.txt": DraftHaltNote(reason.Error()) + "\n"}
 	for _, ticket := range tickets {
-		if err := os.WriteFile(filepath.Join(dir, filepath.Base(ticket.Filename)), []byte(ticket.Content), 0o600); err != nil {
+		files[filepath.Base(ticket.Filename)] = ticket.Content
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 			log.Printf("request %s: keep refused plan: %v", id, err)
 			return
 		}
