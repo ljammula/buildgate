@@ -1,0 +1,1 @@
+Severity: "high" is a bug, a security hole, data loss, or broken behavior the spec or a reasonable user relies on. "medium" is a design or error-handling problem that should be fixed before merge. "low" is worth knowing. A smell is "low" or "medium", never "high". Severity only orders the advice; no finding blocks the change.

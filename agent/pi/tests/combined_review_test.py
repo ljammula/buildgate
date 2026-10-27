@@ -58,7 +58,7 @@ def repro_finding(n: int, content: str = "package a\n") -> dict:
 class CombinedReviewPromptTests(unittest.TestCase):
 	def test_diff_comes_before_the_specs_and_the_one_tasks_rules_are_present(self):
 		prompt = combined_review.combined_review_prompt(
-			"Add a widget to the app.", "abc123", diff=("stat text", "diff text"), approved_spec=APPROVED_SPEC,
+			"Add a widget to the app.", "abc123", diff=("stat text", "diff text"), approved_spec=APPROVED_SPEC, reproductions=True,
 		)
 		diff_index = prompt.index("diff text")
 		self.assertLess(diff_index, prompt.index("Add a widget to the app."), "diff block must precede the ticket spec")
@@ -71,12 +71,12 @@ class CombinedReviewPromptTests(unittest.TestCase):
 		self.assertIn('"reproduction"', prompt)
 
 	def test_there_is_no_conformity_task(self):
-		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC)
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC, reproductions=True)
 		for gone in ('"criteria"', "Task A", "acceptance criteri", "Pure formatting or lint drift"):
 			self.assertNotIn(gone, prompt)
 
 	def test_the_approved_spec_is_numbered_by_file_line_blank_lines_included(self):
-		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC)
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC, reproductions=True)
 		for want in ("L1: # Widget", "L2: ", "L3: The widget is `rounded` to two places.", "L4: It never panics."):
 			self.assertIn(want, prompt.split("\n"))
 		self.assertNotIn("L5:", prompt)
@@ -87,12 +87,12 @@ class CombinedReviewPromptTests(unittest.TestCase):
 		)
 
 	def test_without_an_approved_spec_nothing_is_citable(self):
-		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"))
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), reproductions=True)
 		self.assertIn("No approved spec is given", prompt)
 		self.assertNotIn("L1:", prompt)
 
 	def test_the_reproduction_rule_and_severity_rule_are_in_the_prompt(self):
-		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC)
+		prompt = combined_review.combined_review_prompt("spec", "abc123", diff=("s", "d"), approved_spec=APPROVED_SPEC, reproductions=True)
 		self.assertIn("blocks the change only through a reproduction", prompt)
 		self.assertIn("You write no file in the workspace", prompt)
 		self.assertIn("A reproduction at an existing path is advice", prompt)
@@ -104,6 +104,81 @@ class CombinedReviewPromptTests(unittest.TestCase):
 	def test_falls_back_to_instruction_only_diff_when_diff_is_none(self):
 		prompt = combined_review.combined_review_prompt("spec text", "abc123", diff=None)
 		self.assertIn("Diff the workspace against abc123", prompt)
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "combined_review"
+
+
+class AdviceReviewTests(unittest.TestCase):
+	def test_with_reproductions_the_prompt_is_byte_identical_to_before_the_flag_existed(self):
+		inline = combined_review.combined_review_prompt(
+			"Add a widget to the app.\n", "abc123", diff=("stat text", "diff text"), instructions_block="\n[instr]",
+			approved_spec=APPROVED_SPEC, reproductions=True,
+		)
+		self.assertEqual(inline, (FIXTURES / "reproductions_inline.txt").read_text())
+		bare = combined_review.combined_review_prompt("Add a widget to the app.\n", "abc123", diff=None, reproductions=True)
+		self.assertEqual(bare, (FIXTURES / "reproductions_self_no_spec.txt").read_text())
+
+	def test_the_advice_prompt_has_the_advice_rules_and_no_spec_or_reproduction_text(self):
+		prompt = combined_review.combined_review_prompt(
+			"Add a widget to the app.", "abc123", diff=("stat text", "diff text"), approved_spec=APPROVED_SPEC,
+		)
+		self.assertIn("Report concrete correctness, security, data-loss, or concurrency defects", prompt)
+		self.assertIn("account for every relevant return value and branch", prompt)
+		self.assertIn("what tests cannot show", prompt)
+		self.assertIn("Do not run commands", prompt)
+		self.assertNotIn("only code it directly touches", prompt)
+		self.assertNotIn("do not trace ordinary logic", prompt)
+		self.assertIn("at most 5 findings", prompt)
+		self.assertIn("silence is not permission", prompt)
+		self.assertIn("missing or only partly done", prompt)
+		self.assertIn("Name the file and the rule in the summary", prompt)
+		self.assertIn("A documented standard overrides this list", prompt)
+		self.assertIn("correctness findings first, then standards and design", prompt)
+		self.assertIn('A smell is "low" or "medium", never "high"', prompt)
+		self.assertIn("IMPORTANT rule for command-outcome findings", prompt)
+		self.assertIn("diff text", prompt)
+		self.assertIn("Add a widget to the app.", prompt)
+		for gone in ("L1:", "reproduction", "spec_line", "approved spec", "It never panics."):
+			self.assertNotIn(gone, prompt)
+
+	def test_the_advice_prompt_keeps_the_instructions_diff(self):
+		prompt = combined_review.combined_review_prompt("s", "abc", diff=("st", "d"), instructions_block="\n[instr]")
+		self.assertIn("[instr]", prompt)
+
+	def test_the_parser_drops_a_spec_line_and_reproduction_without_the_flag(self):
+		reply = {"findings": [repro_finding(1)]}
+		_, findings = code_review.parse_code_review_findings(json.dumps(reply), reproductions=False)
+		self.assertEqual(len(findings), 1)
+		self.assertNotIn("spec_line", findings[0])
+		self.assertNotIn("reproduction", findings[0])
+		_, findings = code_review.parse_code_review_findings(json.dumps(reply))
+		self.assertIn("reproduction", findings[0])
+
+	def test_an_advice_review_keeps_five_findings_and_notes_the_rest(self):
+		findings = [repro_finding(n) for n in range(1, 8)]
+		notes = code_review.cap_advice(findings)
+		self.assertEqual(len(findings), 5)
+		self.assertEqual(len(notes), 1)
+		self.assertIn("2 further finding(s) dropped", notes[0])
+		self.assertEqual(code_review.cap_advice(findings), [])
+
+	def test_run_without_the_flag_never_reads_the_spec_and_caps_with_a_note(self):
+		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			spec_path = Path(spec_dir) / "ticket.md"
+			spec_path.write_text("Add a widget.\n")
+			findings = [repro_finding(n) for n in range(1, 8)]
+			with mock.patch.object(build_app, "sh", return_value=answer({"findings": findings})) as sh:
+				review = combined_review.run_combined_review(
+					root, spec_path=spec_path, approved_spec_path=Path(spec_dir) / "missing.md",
+				)
+			self.assertNotIn("reproduction", sh.call_args.args[0][-1])
+			self.assertEqual(len(review["findings"]), 5)
+			self.assertTrue(all("spec_line" not in f and "reproduction" not in f for f in review["findings"]))
+			self.assertEqual(len(review["notes"]), 1)
+			self.assertTrue(review["succeeded"])
 
 
 class RunCombinedReviewTests(unittest.TestCase):
@@ -129,7 +204,7 @@ class RunCombinedReviewTests(unittest.TestCase):
 
 			with mock.patch.object(build_app, "sh", side_effect=side_effect):
 				review = combined_review.run_combined_review(
-					root, spec_path=spec_path, approved_spec_path=approved, review_policy="required",
+					root, spec_path=spec_path, approved_spec_path=approved, review_policy="required", reproductions=True,
 				)
 			self.assertNotIn("add", git_calls)
 			self.assertNotIn("commit", git_calls)
@@ -145,7 +220,7 @@ class RunCombinedReviewTests(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root, spec_path, approved = self._files(directory, spec_dir)
 			with mock.patch.object(build_app, "sh", return_value=answer({"findings": []})) as sh:
-				combined_review.run_combined_review(root, spec_path=spec_path, approved_spec_path=approved)
+				combined_review.run_combined_review(root, spec_path=spec_path, approved_spec_path=approved, reproductions=True)
 			self.assertIn("L4: It never panics.", sh.call_args.args[0][-1])
 
 	def test_a_high_finding_does_not_fail_a_required_review_and_a_missing_list_does(self):
@@ -178,7 +253,7 @@ class RunCombinedReviewTests(unittest.TestCase):
 			root, spec_path, _ = self._files(directory, spec_dir)
 			findings = [repro_finding(n) for n in range(1, 6)]
 			with mock.patch.object(build_app, "sh", return_value=answer({"findings": findings})):
-				review = combined_review.run_combined_review(root, spec_path=spec_path)
+				review = combined_review.run_combined_review(root, spec_path=spec_path, reproductions=True)
 			self.assertTrue(review["succeeded"], "a cap never fails the review")
 			self.assertEqual(len(review["findings"]), 5)
 			self.assertEqual(["reproduction" in f for f in review["findings"]], [True, True, True, False, False])
@@ -193,7 +268,7 @@ class RunCombinedReviewTests(unittest.TestCase):
 			at_cap = "a" * code_review.MAX_REPRODUCTION_BYTES
 			findings = [repro_finding(1, at_cap), repro_finding(2, at_cap + "a"), repro_finding(3, "é" * 20_000)]
 			with mock.patch.object(build_app, "sh", return_value=answer({"findings": findings})):
-				review = combined_review.run_combined_review(root, spec_path=spec_path)
+				review = combined_review.run_combined_review(root, spec_path=spec_path, reproductions=True)
 			self.assertEqual(["reproduction" in f for f in review["findings"]], [True, False, False])
 			self.assertEqual(len(review["notes"]), 2, "bytes are counted, not characters")
 			self.assertIn("over the 32768 byte cap", review["notes"][0])
@@ -219,7 +294,7 @@ class RunCombinedReviewTests(unittest.TestCase):
 				mock.patch.object(build_app, "sh", side_effect=timing_out),
 				mock.patch.object(combined_review, "clock", side_effect=lambda: next(ticks)),
 			):
-				review = combined_review.run_combined_review(root, spec_path=spec_path)
+				review = combined_review.run_combined_review(root, spec_path=spec_path, reproductions=True)
 			self.assertEqual(timeouts, [20 * 60])
 			self.assertNotIn("retry", review)
 			self.assertFalse(review["available"])
@@ -230,7 +305,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 	"""An answer with no parseable findings list is asked for once more, with
 	the same prompt. A turn that failed is not asked again."""
 
-	def _run(self, answers, *, thinking="high", clock=None, review_policy="required"):
+	def _run(self, answers, *, thinking="high", clock=None, review_policy="required", reproductions=True):
 		"""Runs the review with the model turns answered in order by answers
 		(a CompletedProcess, or an exception to raise). Returns (review,
 		turns, root): turns holds, per model call, its prompt, session
@@ -280,6 +355,7 @@ class CombinedReviewRetryTests(unittest.TestCase):
 				stack.enter_context(patch)
 			review = combined_review.run_combined_review(
 				root, spec_path=spec_path, review_policy=review_policy, review_base_sha=base_sha, thinking=thinking,
+				reproductions=reproductions,
 			)
 		self.assertEqual(queue, [], "every prepared answer is one model call")
 		return review, turns, root

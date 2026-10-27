@@ -62,12 +62,12 @@ func TestRequestTicketBuildCarriesTheApprovedSpecForReproductions(t *testing.T) 
 	}
 }
 
-// With review_reproductions off, a request's ticket build keeps -review-spec
-// (its review still cites the approved spec) but gets neither
-// -review-reproduction nor -recheck-reproductions: every finding is advice.
+// With review_reproductions off, a request's ticket build gets none of
+// -review-spec, -review-reproduction and -recheck-reproductions: its review
+// is sent no spec and every finding is advice.
 // A ticket whose list already holds a reproduction is still rechecked
 // against it (SC-022). Off is the default.
-func TestReviewReproductionsOffKeepsTheSpecButHoldsNothing(t *testing.T) {
+func TestReviewReproductionsOffPassesNoSpecAndHoldsNothing(t *testing.T) {
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "001.spec.md")
 	if err := os.WriteFile(specPath, []byte("Verify-Command: pytest\n\n## Goal\n\ndo the thing\n"), 0o644); err != nil {
@@ -91,16 +91,15 @@ func TestReviewReproductionsOffKeepsTheSpecButHoldsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	i := slices.Index(args, "-review-spec")
-	if i < 0 || args[i+1] != approved || slices.Contains(args, "-review-reproduction") || slices.Contains(args, "-recheck-reproductions") {
-		t.Errorf("default (off): args = %v, want -review-spec %s and no reproduction flags", args, approved)
+	if slices.Contains(args, "-review-spec") || slices.Contains(args, "-review-reproduction") || slices.Contains(args, "-recheck-reproductions") {
+		t.Errorf("default (off): args = %v, want no -review-spec and no reproduction flags", args)
 	}
 
 	args, err = requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, on)
 	if err != nil {
 		t.Fatal(err)
 	}
-	i = slices.Index(args, "-review-spec")
+	i := slices.Index(args, "-review-spec")
 	if !slices.Contains(args, "-review-reproduction") || i < 0 || args[i+1] != approved || slices.Contains(args, "-recheck-reproductions") {
 		t.Errorf("on: args = %v, want -review-reproduction and -review-spec %s", args, approved)
 	}

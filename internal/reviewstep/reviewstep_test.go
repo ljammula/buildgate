@@ -52,7 +52,7 @@ func TestReviewExitCodeDecodesAVerdictAndNothingElseAsAPass(t *testing.T) {
 }
 
 func TestCombinedArgsIncludesApprovedSpecWhenSetAndOmitsEmptyOptionals(t *testing.T) {
-	got := CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "/ws/spec.md", "advisory", "", "", "pi")
+	got := CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "/ws/spec.md", "advisory", "", "", "pi", false)
 	want := []string{
 		"/path/combined_review.py",
 		"--workspace", "/ws",
@@ -64,14 +64,14 @@ func TestCombinedArgsIncludesApprovedSpecWhenSetAndOmitsEmptyOptionals(t *testin
 	if !slices.Equal(got, want) {
 		t.Fatalf("CombinedArgs() = %v, want %v", got, want)
 	}
-	got = CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "", "advisory", "", "", "pi")
+	got = CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "", "advisory", "", "", "pi", false)
 	if slices.Contains(got, "--approved-spec") {
 		t.Fatalf("CombinedArgs() = %v, want no --approved-spec for an empty path", got)
 	}
 }
 
 func TestCombinedArgsIncludesBaseSHAAndThinkingWhenSet(t *testing.T) {
-	got := CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "/ws/spec.md", "required", "deadbeef", "max", "pi")
+	got := CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "/ws/spec.md", "required", "deadbeef", "max", "pi", false)
 	want := []string{
 		"/path/combined_review.py",
 		"--workspace", "/ws",
@@ -88,8 +88,19 @@ func TestCombinedArgsIncludesBaseSHAAndThinkingWhenSet(t *testing.T) {
 }
 
 func TestCombinedArgsPassesHarnessWhenSet(t *testing.T) {
-	got := CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "", "advisory", "", "", "pifork")
+	got := CombinedArgs("/path/combined_review.py", "/ws", "/ws/ticket.md", "", "advisory", "", "", "pifork", false)
 	if n := len(got); n < 2 || got[n-2] != "--harness" || got[n-1] != "pifork" {
 		t.Fatalf("CombinedArgs() = %v, want it to end with --harness pifork", got)
+	}
+}
+
+func TestCombinedArgsPassesReproductionsOnlyWhenTheBuildHoldsThem(t *testing.T) {
+	with := CombinedArgs("/s.py", "/ws", "/ws/ticket.md", "/ws/spec.md", "required", "", "", "pi", true)
+	if !slices.Contains(with, "--reproductions") {
+		t.Fatalf("CombinedArgs(reproductions) = %v, want --reproductions", with)
+	}
+	without := CombinedArgs("/s.py", "/ws", "/ws/ticket.md", "", "required", "", "", "pi", false)
+	if slices.Contains(without, "--reproductions") {
+		t.Fatalf("CombinedArgs(no reproductions) = %v, want no --reproductions", without)
 	}
 }
