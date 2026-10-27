@@ -994,3 +994,37 @@ func TestTriageCodeReviewSaysTheReviewerGaveNoVerdict(t *testing.T) {
 		}
 	})
 }
+
+func TestTriageRunNamesACheckThatFailedOnlyAfterTheOracleCommit(t *testing.T) {
+	r := &run.Run{
+		ID:    "run1",
+		State: run.StateQuarantined,
+		GateResults: []run.GateResult{
+			{Check: "canonical_verify", Passed: true},
+			{Check: "full_suite_verify", Passed: false, ExitCode: 1},
+		},
+		FailedAfterOracleCommit: []string{"full_suite_verify"},
+	}
+	got := Run(r, t.TempDir())
+	r.FailedAfterOracleCommit = nil
+	plain := Run(r, t.TempDir())
+	r.FailedAfterOracleCommit = []string{"full_suite_verify"}
+	if plain == "" {
+		plain = "full_suite_verify failed"
+	}
+	if want := plain + " (passed before the oracle files were committed; a build cannot change them)"; got != want {
+		t.Fatalf("Run = %q, want the ordinary sentence %q plus the note", got, plain)
+	}
+	// A long repository gate name and a long log line: the note survives whole under the cap.
+	long := "repo-" + strings.Repeat("x", 32)
+	r.GateResults[1].Check = long
+	r.FailedAfterOracleCommit = []string{long}
+	if got := Run(r, t.TempDir()); len(got) > maxTriageSentenceLen || !strings.HasSuffix(got, afterOracleCommitSuffix) {
+		t.Fatalf("Run = %q (%d bytes), want the whole note under %d bytes", got, len(got), maxTriageSentenceLen)
+	}
+	// Not marked: the ordinary sentence.
+	r.FailedAfterOracleCommit = nil
+	if got := Run(r, t.TempDir()); strings.Contains(got, "oracle files") {
+		t.Fatalf("unmarked check got the oracle-commit sentence: %q", got)
+	}
+}

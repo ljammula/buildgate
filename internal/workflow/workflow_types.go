@@ -1082,6 +1082,10 @@ type RunWorkflowResult struct {
 	// committed-oracle evidence carried from CollectEvidenceActivity /
 	// CommitOraclesActivity so the durable record and release check see it.
 	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
+	// FailedAfterOracleCommit mirrors run.Run.FailedAfterOracleCommit: the
+	// checks whose post-oracle-commit rerun replaced a passing result with a
+	// failing one. Data only: no activity or workflow call depends on it.
+	FailedAfterOracleCommit []string `json:"failed_after_oracle_commit,omitempty"`
 	// OracleCanary mirrors run.Run.OracleCanary: the reference_oracle gate's
 	// runtime-canary outcome (nil when it never ran).
 	OracleCanary *run.OracleCanaryEvidence `json:"oracle_canary,omitempty"`
