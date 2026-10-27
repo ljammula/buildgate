@@ -116,7 +116,7 @@ func workerMain(dp *deps, args []string) error {
 	if err := startRequestWorkflows(ctx, temporalClient, dataDir, queueID, jobsQueue, lightQueue); err != nil {
 		return err
 	}
-	<-ctx.Done()
+	retryPendingWakes(ctx, temporalClient, time.NewTicker(workerAdoptInterval), dataDir, queueID, jobsQueue, lightQueue)
 	log.Printf("factoryd worker: stopping")
 	return nil
 }
@@ -234,19 +234,85 @@ func startRequestWorkflow(ctx context.Context, c requestWorkflowStarter, workflo
 // startRequestWorkflows starts or wakes the workflow of every request in
 // dataDir that is not finished. A request whose legacy workflow is still its
 // driver (requestDriverWorkflowID) is woken there, not started a second time;
-// a lookup that fails fails the start.
+// a lookup that fails fails the start. The wake-pending marker of each request
+// it woke is cleared, and a finished request's marker with it.
 func startRequestWorkflows(ctx context.Context, c requestWorkflowStarter, dataDir, queueID, jobsQueue, lightQueue string) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
 	}
+	marks, err := request.ListWakePending(dataDir)
+	if err != nil {
+		return fmt.Errorf("list wake markers: %w", err)
+	}
+	pending := make(map[string]request.WakePending, len(marks))
+	for _, m := range marks {
+		pending[m.ID] = m
+	}
 	for _, r := range requests {
-		if r.State.Finished() {
-			continue
+		m, marked := pending[r.ID]
+		// A marked finished request is woken too: the save that finished it
+		// (a cancel at a gate) is what its sleeping workflow has not seen.
+		if !r.State.Finished() || marked {
+			if err := wakeOrStartRequestWorkflow(ctx, c, queueID, r.ID, jobsQueue, lightQueue); err != nil {
+				return err
+			}
 		}
-		if err := wakeOrStartRequestWorkflow(ctx, c, queueID, r.ID, jobsQueue, lightQueue); err != nil {
-			return err
+		if marked {
+			if err := request.ClearWakePending(dataDir, m); err != nil {
+				log.Printf("factoryd worker: clear wake marker of request %s: %v", r.ID, err)
+			}
 		}
 	}
 	return nil
+}
+
+// workerAdoptInterval is how often a running worker retries the wakes that
+// failed after a save (a new request or a decision), which left a marker.
+const workerAdoptInterval = time.Minute
+
+// retryPendingWakes runs retryWakes on every tick until ctx is done, then
+// stops the ticker.
+func retryPendingWakes(ctx context.Context, c requestWorkflowStarter, ticker *time.Ticker, dataDir, queueID, jobsQueue, lightQueue string) {
+	defer ticker.Stop()
+	retryOnTicks(ctx, c, ticker.C, dataDir, queueID, jobsQueue, lightQueue)
+}
+
+// retryOnTicks is the loop of retryPendingWakes over a tick channel.
+func retryOnTicks(ctx context.Context, c requestWorkflowStarter, ticks <-chan time.Time, dataDir, queueID, jobsQueue, lightQueue string) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			retryWakes(ctx, c, dataDir, queueID, jobsQueue, lightQueue)
+		}
+	}
+}
+
+// retryWakes redoes the wake of every request with a wake-pending marker, the
+// one the save's own wake would have done, and clears the marker once it
+// succeeded. A finished request is woken too: the save that finished it (a
+// cancel at a gate) must still end its sleeping workflow, which reads the
+// request, finds it done and returns. A failure is logged, one line
+// per request, and the marker kept for the next tick. A request with no
+// marker is not touched: nothing is described, started or signalled for it.
+func retryWakes(ctx context.Context, c requestWorkflowStarter, dataDir, queueID, jobsQueue, lightQueue string) {
+	marks, err := request.ListWakePending(dataDir)
+	if err != nil {
+		log.Printf("factoryd worker: retry wakes: %v", err)
+		return
+	}
+	for _, m := range marks {
+		if err := retryWake(ctx, c, dataDir, queueID, jobsQueue, lightQueue, m); err != nil {
+			log.Printf("factoryd worker: retry wake of request %s: %v", m.ID, err)
+		}
+	}
+}
+
+func retryWake(ctx context.Context, c requestWorkflowStarter, dataDir, queueID, jobsQueue, lightQueue string, m request.WakePending) error {
+	if err := wakeOrStartRequestWorkflow(ctx, c, queueID, m.ID, jobsQueue, lightQueue); err != nil {
+		return err
+	}
+	return request.ClearWakePending(dataDir, m)
 }

@@ -61,7 +61,7 @@ func writeWakeHeartbeat(t *testing.T, dataDir string, pid int, address string, u
 	}
 }
 
-func TestWakeRequestWorkflowIsANoOpWithoutALiveWorker(t *testing.T) {
+func TestWakeRequestWorkflowSaysWhyWithoutALiveWorker(t *testing.T) {
 	dp := newTestDeps(t)
 	oldLooks := fakeHostOf(dp).pidLooksLikeWorkerFn
 	fakeHostOf(dp).pidLooksLikeWorkerFn = func(int) bool { return true }
@@ -71,20 +71,21 @@ func TestWakeRequestWorkflowIsANoOpWithoutALiveWorker(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(dataDir string)
+		want  string
 	}{
-		{"no heartbeat", func(string) {}},
-		{"worker heartbeat", func(d string) { writeWakeHeartbeat(t, d, os.Getpid(), "", time.Now()) }},
+		{"no heartbeat", func(string) {}, "no worker heartbeat"},
+		{"worker heartbeat", func(d string) { writeWakeHeartbeat(t, d, os.Getpid(), "", time.Now()) }, "not a worker"},
 		{"stale worker heartbeat", func(d string) {
 			writeWakeHeartbeat(t, d, os.Getpid(), "localhost:7233", time.Now().Add(-2*workerStaleAfter))
-		}},
-		{"dead worker pid", func(d string) { writeWakeHeartbeat(t, d, 0x7ffffff0, "localhost:7233", time.Now()) }},
+		}, "stale"},
+		{"dead worker pid", func(d string) { writeWakeHeartbeat(t, d, 0x7ffffff0, "localhost:7233", time.Now()) }, "not running"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			tc.setup(dataDir)
-			if err := wakeRequestWorkflowWith(dp, context.Background(), dialer, dataDir, "req-1"); err != nil {
-				t.Fatalf("wake: %v", err)
+			if err := wakeRequestWorkflowWith(dp, context.Background(), dialer, dataDir, "req-1"); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("wake err = %v, want it to say %q", err, tc.want)
 			}
 		})
 	}
@@ -138,7 +139,7 @@ func TestWakeRequestWorkflowReportsADialFailure(t *testing.T) {
 func TestWarnWakeFailedSaysTheDecisionIsSaved(t *testing.T) {
 	var out bytes.Buffer
 	warnWakeFailed(&out, "req-1", errors.New("boom"))
-	for _, want := range []string{"req-1", "saved", "boom", "next start"} {
+	for _, want := range []string{"req-1", "saved", "boom", "within a minute"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("warning %q lacks %q", out.String(), want)
 		}

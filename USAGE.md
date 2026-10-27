@@ -1499,7 +1499,7 @@ state of its own.
 | Model jobs and builds | The jobs task queue, at most `max_parallel_jobs` at once across all requests (default 2); everything else runs on an uncapped light queue. Both are named after a random id kept in `<data-dir>/worker-queue-id` |
 | A ticket's build | Its own `RunWorkflow` (workflow id = run id), started by that step |
 | Waiting on you (`spec_review`, `oracle_review`, `plan_review`, `resume_review`) | The workflow sleeps; a reminder goes out every `-hitl-reminder-interval` |
-| Your decision (`approve`, `reject`, `retry`, `resume`, `cancel`, amend scope, send back; CLI or console) | Saved to `request.json`, then a wake signal ends the wait. With no worker running the decision is still saved and picked up at the next start |
+| Your decision (`approve`, `reject`, `retry`, `resume`, `cancel`, amend scope, send back; CLI or console) | Saved to `request.json`, then a wake signal ends the wait. With no worker running the decision is still saved; a running worker retries a wake that failed within a minute, and a worker started later wakes it at its start |
 | `pr_review` | The PR is read at most once per `-pr-poll-interval` |
 | A build on a repository another build holds alone | Gives its job slot back and retries every 30 s |
 | A step whose worker stops (no heartbeat for 2 minutes), or a worker restarted mid-build | The request goes to `resume_review`; nothing reruns on its own (below) |
