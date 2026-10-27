@@ -767,7 +767,7 @@ func (sv *serveRun) listenAndServe() error {
 		// Decisions and new requests wake the live worker's workflow; a
 		// no-op without one.
 		api.WithRequestWaker(func(ctx context.Context, id string) error {
-			return sv.dp.temporal.wakeRequest(ctx, *sv.dataDir, id)
+			return wakeAndMark(sv.dp, ctx, *sv.dataDir, id)
 		}),
 		// WithListenAddr tells the Server its own real bind address so its
 		// Host check and loopback-write relaxation can activate (see

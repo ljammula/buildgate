@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
 
 	"buildgate/internal/request"
@@ -65,6 +69,13 @@ type recordingStarter struct {
 	options                []client.StartWorkflowOptions
 	inputs                 []workflow.RequestWorkflowInput
 	signals                []string
+	startErrs              []error // consumed one per SignalWithStartWorkflow call
+	describes              int
+}
+
+func (s *recordingStarter) DescribeWorkflowExecution(ctx context.Context, workflowID, runID string) (*workflowservice.DescribeWorkflowExecutionResponse, error) {
+	s.describes++
+	return s.stubWorkflowTerminator.DescribeWorkflowExecution(ctx, workflowID, runID)
 }
 
 func (s *recordingStarter) SignalWorkflow(_ context.Context, workflowID, _, _ string, _ interface{}) error {
@@ -77,6 +88,11 @@ func (s *recordingStarter) SignalWithStartWorkflow(_ context.Context, workflowID
 	s.signals = append(s.signals, signalName)
 	s.options = append(s.options, options)
 	s.inputs = append(s.inputs, workflowArgs[0].(workflow.RequestWorkflowInput))
+	if len(s.startErrs) > 0 {
+		err := s.startErrs[0]
+		s.startErrs = s.startErrs[1:]
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -128,5 +144,157 @@ func TestRequestWorkflowIDsDifferPerDataDir(t *testing.T) {
 	}
 	if workflow.RequestWorkflowID(qa, "req-1") == workflow.LegacyRequestWorkflowID("req-1") {
 		t.Fatal("the new id equals the legacy id")
+	}
+}
+
+// tickLoop runs retryOnTicks over n ticks and returns once they are consumed.
+func tickLoop(t *testing.T, c requestWorkflowStarter, dataDir string, n int) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	ticks := make(chan time.Time)
+	done := make(chan struct{})
+	go func() {
+		retryOnTicks(ctx, c, ticks, dataDir, "qid", "jobs-q", "light-q")
+		close(done)
+	}()
+	for range n {
+		ticks <- time.Now()
+	}
+	// A sweep finishes before the loop takes another tick or sees ctx.Done.
+	cancel()
+	<-done
+}
+
+func markWake(t *testing.T, dataDir, id string) {
+	t.Helper()
+	if err := request.MarkWakePending(dataDir, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func wakeMarkers(t *testing.T, dataDir string) []string {
+	t.Helper()
+	marks, err := request.ListWakePending(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range marks {
+		ids = append(ids, m.ID)
+	}
+	return ids
+}
+
+func TestFailedWakeAfterSaveLeavesAMarker(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-1", request.StateSubmitted)
+	stubWake(dp, t, errors.New("temporal down"))
+	var out bytes.Buffer
+	wakeAfterSave(dp, context.Background(), &out, dataDir, "req-1")
+	if got := wakeMarkers(t, dataDir); !slices.Equal(got, []string{"req-1"}) {
+		t.Fatalf("markers %v, want req-1", got)
+	}
+	if !strings.Contains(out.String(), "temporal down") || !strings.Contains(out.String(), "within a minute") {
+		t.Errorf("warning %q", out.String())
+	}
+	stubWake(dp, t, nil)
+	if err := wakeAndMark(dp, context.Background(), dataDir, "req-2"); err != nil || len(wakeMarkers(t, dataDir)) != 1 {
+		t.Fatalf("a successful wake must not mark: %v %v", err, wakeMarkers(t, dataDir))
+	}
+}
+
+func TestTickWakesAMarkedRequestAndClearsItsMarker(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-late", request.StateSubmitted)
+	markWake(t, dataDir, "req-late")
+	starter := &recordingStarter{}
+	tickLoop(t, starter, dataDir, 2)
+	id := workflow.RequestWorkflowID("qid", "req-late")
+	if !slices.Equal(starter.ids, []string{id}) || starter.signals[0] != workflow.RequestWakeSignalName {
+		t.Fatalf("signal-with-start %v %v, want one for %q", starter.ids, starter.signals, id)
+	}
+	if in := starter.inputs[0]; in != (workflow.RequestWorkflowInput{RequestID: "req-late", JobsTaskQueue: "jobs-q", LightTaskQueue: "light-q"}) {
+		t.Errorf("input %+v", in)
+	}
+	if got := wakeMarkers(t, dataDir); len(got) != 0 {
+		t.Errorf("markers %v, want none", got)
+	}
+}
+
+func TestTickSignalsAMarkedRequestAtAReviewGate(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-gate", request.StateSpecReview)
+	markWake(t, dataDir, "req-gate")
+	starter := &recordingStarter{}
+	tickLoop(t, starter, dataDir, 1)
+	if !slices.Equal(starter.ids, []string{workflow.RequestWorkflowID("qid", "req-gate")}) || starter.signals[0] != workflow.RequestWakeSignalName {
+		t.Fatalf("signal-with-start %v %v", starter.ids, starter.signals)
+	}
+}
+
+func TestTickKeepsTheMarkerWhenTheWakeFailsAndRetriesNextTick(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-a", request.StateSubmitted)
+	markWake(t, dataDir, "req-a")
+	starter := &recordingStarter{startErrs: []error{context.DeadlineExceeded}}
+	tickLoop(t, starter, dataDir, 1)
+	if got := wakeMarkers(t, dataDir); !slices.Equal(got, []string{"req-a"}) {
+		t.Fatalf("markers %v, want the failed wake kept", got)
+	}
+	tickLoop(t, starter, dataDir, 1)
+	if len(starter.ids) != 2 || len(wakeMarkers(t, dataDir)) != 0 {
+		t.Fatalf("starts %v, markers %v; want a retry that cleared it", starter.ids, wakeMarkers(t, dataDir))
+	}
+}
+
+func TestTickTouchesNothingWithoutAMarker(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-review", request.StateSpecReview)
+	saveRequestInState(t, dataDir, "req-new", request.StateSubmitted)
+	starter := &recordingStarter{}
+	tickLoop(t, starter, dataDir, 3)
+	if len(starter.ids) != 0 || len(starter.signaled) != 0 || starter.describes != 0 {
+		t.Fatalf("starts %v, signals %v, describes %d; want none", starter.ids, starter.signaled, starter.describes)
+	}
+}
+
+// A cancel at a review gate finishes the request; its workflow sleeps until it
+// is woken, so the retry wakes a finished request too (seen live: the workflow
+// slept out its reminder timer when the retry only cleared the marker).
+func TestTickWakesAMarkedFinishedRequestAndClearsItsMarker(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-cancelled", request.StateCancelled)
+	markWake(t, dataDir, "req-cancelled")
+	starter := &recordingStarter{}
+	tickLoop(t, starter, dataDir, 2)
+	want := []string{workflow.RequestWorkflowID("qid", "req-cancelled")}
+	if !slices.Equal(starter.ids, want) || len(wakeMarkers(t, dataDir)) != 0 {
+		t.Fatalf("signal-with-start %v, want %v once; markers %v", starter.ids, want, wakeMarkers(t, dataDir))
+	}
+}
+
+func TestStartupClearsTheMarkersItWoke(t *testing.T) {
+	dataDir := t.TempDir()
+	saveRequestInState(t, dataDir, "req-a", request.StateSubmitted)
+	saveRequestInState(t, dataDir, "req-done", request.StateDone)
+	markWake(t, dataDir, "req-a")
+	markWake(t, dataDir, "req-done")
+	starter := &recordingStarter{}
+	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q"); err != nil {
+		t.Fatal(err)
+	}
+	// req-a is unfinished; req-done is finished but marked, so it is woken too.
+	if len(starter.ids) != 2 || len(wakeMarkers(t, dataDir)) != 0 {
+		t.Fatalf("starts %v, markers %v", starter.ids, wakeMarkers(t, dataDir))
+	}
+	// A failed startup wake keeps the marker.
+	markWake(t, dataDir, "req-a")
+	starter.startErrs = []error{context.DeadlineExceeded}
+	if err := startRequestWorkflows(context.Background(), starter, dataDir, "qid", "jobs-q", "light-q"); err == nil {
+		t.Fatal("want the start error")
+	}
+	if got := wakeMarkers(t, dataDir); !slices.Equal(got, []string{"req-a"}) {
+		t.Fatalf("markers %v, want req-a kept", got)
 	}
 }

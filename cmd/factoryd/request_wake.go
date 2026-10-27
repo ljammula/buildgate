@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/request"
 )
 
 // requestWorkflowDialer opens the Temporal client a wake signals through, so
@@ -33,11 +35,12 @@ func (temporalDialer) DialRequestWorkflowStarter(ctx context.Context, address st
 }
 
 // wakeRequest starts requestID's RequestWorkflow, or wakes it, after
-// a command saved the request's new state. It does nothing (nil) unless
-// dataDir's heartbeat shows a live `factoryd worker`: worker and a data dir
-// with no daemon pick requests up from request.json themselves. Signal-with-
-// start adopts a request submitted before the worker took over. a boundary method
-// so tests can stub it.
+// a command saved the request's new state. Unless dataDir's heartbeat shows a
+// live `factoryd worker` it returns the reason it did not signal; wakeAndMark
+// then leaves the request's wake-pending marker, which a running worker
+// retries every workerAdoptInterval and a starting worker clears. Signal-with-
+// start adopts a request submitted before the worker took over. A boundary
+// method so tests can stub it.
 func (impl realTemporal) wakeRequest(ctx context.Context, dataDir, requestID string) error {
 	return wakeRequestWorkflowWith(impl.dp, ctx, temporalDialer{}, dataDir, requestID)
 }
@@ -48,8 +51,15 @@ func wakeRequestWorkflowWith(dp *deps, ctx context.Context, dialer requestWorkfl
 	ctx, cancel := context.WithTimeout(ctx, requestWakeTimeout)
 	defer cancel()
 	hb, err := daemonheartbeat.Read(workerHeartbeatPath(dataDir))
-	if err != nil || !hb.Worker() || daemonheartbeat.Stale(hb, time.Now(), workerStaleAfter) || !hostcontrol.AliveFactoryd(dp, hb.PID) {
-		return nil
+	switch {
+	case err != nil:
+		return fmt.Errorf("no worker heartbeat in %s: %w", dataDir, err)
+	case !hb.Worker():
+		return errors.New("the data dir's daemon heartbeat is not a worker's")
+	case daemonheartbeat.Stale(hb, time.Now(), workerStaleAfter):
+		return errors.New("the worker's heartbeat is stale")
+	case !hostcontrol.AliveFactoryd(dp, hb.PID):
+		return fmt.Errorf("the worker (pid %d) is not running", hb.PID)
 	}
 	queueID, err := requestQueueID(dataDir)
 	if err != nil {
@@ -72,13 +82,26 @@ const requestWakeTimeout = 5 * time.Second
 // warnWakeFailed tells the operator a decision is saved but the worker was
 // not told.
 func warnWakeFailed(w io.Writer, requestID string, err error) {
-	fmt.Fprintf(w, "warning: request %s is saved, but the worker could not be woken (%v); it picks the request up at its next start.\n", requestID, err)
+	fmt.Fprintf(w, "warning: request %s is saved, but the worker was not woken (%v); a running worker retries the wake within a minute.\n", requestID, err)
+}
+
+// wakeAndMark wakes requestID's workflow and, when the wake fails for any
+// reason, leaves the request's wake-pending marker for a running worker to
+// retry. The one place a save's wake is marked, for the commands and for serve.
+func wakeAndMark(dp *deps, ctx context.Context, dataDir, requestID string) error {
+	err := dp.temporal.wakeRequest(ctx, dataDir, requestID)
+	if err != nil {
+		if markErr := request.MarkWakePending(dataDir, requestID); markErr != nil {
+			return fmt.Errorf("%w (and the wake could not be queued for retry: %v)", err, markErr)
+		}
+	}
+	return err
 }
 
 // wakeAfterSave wakes requestID's workflow and reports a failure on w, never
 // returning it: the command's own result is already saved.
 func wakeAfterSave(dp *deps, ctx context.Context, w io.Writer, dataDir, requestID string) {
-	if err := dp.temporal.wakeRequest(ctx, dataDir, requestID); err != nil {
+	if err := wakeAndMark(dp, ctx, dataDir, requestID); err != nil {
 		warnWakeFailed(w, requestID, err)
 	}
 }

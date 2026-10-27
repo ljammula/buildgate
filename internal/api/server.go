@@ -556,7 +556,7 @@ func (s *Server) wakeRequest(ctx context.Context, requestID string) {
 		return
 	}
 	if err := s.requestWaker(ctx, requestID); err != nil {
-		log.Printf("wake request %s: %v (the decision is saved; the worker picks it up at its next start)", requestID, err)
+		log.Printf("wake request %s: %v (the save is kept; a running worker retries the wake within a minute)", requestID, err)
 	}
 }
 
