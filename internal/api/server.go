@@ -3083,7 +3083,7 @@ func planCostUnrecorded(req *request.Request) bool {
 }
 
 // pastPlanning is pastSpecDrafting's own reasoning one state later: only
-// reachable after CompletePlanning has run.
+// reachable once planning has produced the tickets.
 func pastPlanning(state request.State) bool {
 	switch state {
 	case request.StatePlanReview, request.StateBuilding, request.StatePRReview, request.StateDone, request.StateClosed:

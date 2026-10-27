@@ -231,10 +231,17 @@ type Config struct {
 	PRBudgetLines *int `yaml:"pr_budget_lines,omitempty"`
 
 	// ReviewReproductions is whether a request's ticket build holds and runs
-	// its review's reproductions (SC-022). Default true. False keeps the
-	// review and its approved spec, so every finding is advice and no
-	// review_reproduction check is recorded.
+	// its review's reproductions (SC-022). Default false: the review and its
+	// approved spec stay, so every finding is advice and no
+	// review_reproduction check is recorded. True holds and runs them.
 	ReviewReproductions *bool `yaml:"review_reproductions,omitempty"`
+
+	// PlanReview, opt-in and false by default, makes every request submitted
+	// under this config wait at plan_review for a person to approve its
+	// tickets. Without it a one-ticket plan goes straight to building (the
+	// factory pins and checks the files as a plan approval does); a plan of
+	// more than one ticket always waits.
+	PlanReview *bool `yaml:"plan_review,omitempty"`
 
 	// AdvanceOn mirrors worker's own -advance-on flag: whether
 	// a request's ticket build advances to the next ticket as soon as a
@@ -522,10 +529,13 @@ type Settings struct {
 	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
 	PRBudgetLines int
 
-	// ReviewReproductionsOff is set when the config says
-	// review_reproductions: false. Its zero value keeps reproductions on, so
-	// a Settings built without DefaultSettings never turns SC-022's hold off.
-	ReviewReproductionsOff bool
+	// ReviewReproductions is set when the config says
+	// review_reproductions: true; the zero value holds no reproduction.
+	ReviewReproductions bool
+
+	// PlanReview is set when the config says plan_review: true; Submit
+	// copies it onto each new request.
+	PlanReview bool
 
 	RegistryProxy                      bool
 	RegistryProxyConfigured            bool
@@ -849,9 +859,8 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	boolean(&s.ComposeServicesRequireDigest, c.ComposeServicesRequireDigest)
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
 
-	if c.ReviewReproductions != nil {
-		s.ReviewReproductionsOff = !*c.ReviewReproductions
-	}
+	boolean(&s.ReviewReproductions, c.ReviewReproductions)
+	boolean(&s.PlanReview, c.PlanReview)
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)
 	integer(&s.ReleaseMaxFilesChanged, c.ReleaseMaxFilesChanged)

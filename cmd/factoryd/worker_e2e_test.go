@@ -149,8 +149,7 @@ func TestWorkerEndToEndRequestReachesAcceptedRun(t *testing.T) {
 
 	waitForRequest(id, "spec_review", inState(request.StateSpecReview))
 	cli("approve", "-config", configPath, "-data-dir", dataDir, id)
-	waitForRequest(id, "plan_review", inState(request.StatePlanReview))
-	cli("approve", "-config", configPath, "-data-dir", dataDir, id)
+	// The one-ticket plan is approved by the factory: no plan_review wait.
 
 	// The ticket's run, once its record is terminal and the request has taken
 	// its outcome (a halted or quarantined request fails the wait itself).

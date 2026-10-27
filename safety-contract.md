@@ -1106,6 +1106,29 @@ at, with a fresh `EnteredAt` and reminder state and nothing redrafted; a
 - `halted -> plan_review`
 - `halted -> resume_review`
 
+### Request lifecycle: a one-ticket plan goes to building
+
+The spec approval stays the human approval of what is built. A drafted plan
+waits at `plan_review` for a person when it has more than one ticket, when the
+request opted in (`factoryd submit -plan-review` or the session-config key
+`plan_review`), when the repository's `.factory.yml` sets `plan_review: true`,
+or when a person already sent a plan of the request back. Any other plan, one
+ticket and no opt-in, is approved by the factory itself in the planning step
+(`internal/request.ApprovePlanByFactory`): it re-verifies every recorded
+hash, runs the checks of a person's plan approval (the same
+`planApprovalHashes` function: each ticket spec re-validated, the ticket
+oracle files listed, a bug request's ticket 1 holding an oracle, the
+request-level oracle's assignment equal to the ticket oracle directories),
+pins the SHA-256 of every ticket file and oracle file into `ApprovedSHA256`,
+and moves the request to `building`, recording the factory in the History
+entry and leaving `ApprovedBy` and `ApprovedAt` to a person. Any refusal of
+those checks leaves the request unchanged and moves it to `plan_review`, so a
+person decides: the factory fails toward the human, never toward building.
+Every later step re-verifies the pinned hashes exactly as after a person's
+approval, and every gate (verify, policy, review, release) is unchanged.
+
+- `planning -> building`
+
 ### Request lifecycle: a pull request closed without merging
 
 The factory never merges and never re-opens a pull request a person closed.

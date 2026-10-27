@@ -549,6 +549,7 @@ const maxPlanningAttempts = 2
 
 type planningInputs struct {
 	verifyCommand string
+	planReview    bool // the repository's .factory.yml plan_review
 	testPatterns  []string
 	criteriaCount int
 }
@@ -575,8 +576,10 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 		return haltPlanningInputs(dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
 	}
 	var testPatterns []string
+	planReview := false
 	if cfgFile != nil {
 		testPatterns = cfgFile.TestPatterns
+		planReview = cfgFile.PlanReview
 	}
 
 	specBytes, err := os.ReadFile(RequestSpecPath(dataDir, r.ID))
@@ -602,6 +605,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 	return planningInputs{
 		verifyCommand: verifyCommand,
 		testPatterns:  testPatterns,
+		planReview:    planReview,
 		criteriaCount: criteriaCount,
 	}, nil
 }
@@ -746,6 +750,18 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	r.Tickets = requestTickets
 	r.TicketCount = len(requestTickets)
 	recordPlanEvidence(r, evidence)
+	if r.PlanReviewReason(inputs.planReview) == "" {
+		// The spec approval stays the person's; a one-ticket plan nobody
+		// asked to review is approved here with the checks a person's plan
+		// approval makes. A refusal sends the plan to plan_review instead.
+		const skipped = "plan approved by the factory: one ticket, plan review not requested (opt in with `factoryd submit -plan-review`, the session key plan_review or plan_review: true in .factory.yml)"
+		err := request.ApprovePlanByFactory(dataDir, r, skipped, now)
+		if err == nil {
+			log.Printf("request %s: planning -> building (one-ticket plan approved by the factory)", r.ID)
+			return r.Save(dataDir)
+		}
+		log.Printf("request %s: the factory could not approve the plan itself (%v) -- it waits at plan_review", r.ID, err)
+	}
 	if err := r.CompletePlanning(now); err != nil {
 		return err
 	}
@@ -2184,7 +2200,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, !cfg.Settings.ReviewReproductionsOff)
+	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, cfg.Settings.ReviewReproductions)
 	if err != nil {
 		return nil, err
 	}
@@ -2263,7 +2279,7 @@ type reviewInputs struct {
 // reproductionInputs are a ticket build's review inputs. review is false for
 // a restack's replay run, which cannot take a corrective build: it gets none,
 // and the ticket's list stays as it is. hold is the session config's
-// review_reproductions: false keeps the approved spec but holds no new
+// review_reproductions off (the default) keeps the approved spec but holds no new
 // reproduction, so every finding of the build's review is advice; a ticket
 // whose list is not empty (a refusal recorded while it was on) is still
 // rechecked against that list, and so still holds. A ticket whose list is not

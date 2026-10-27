@@ -1065,6 +1065,7 @@ func TestReplayRunCarriesNoReviewReproduction(t *testing.T) {
 	}
 	f.r.ApprovedSHA256["spec.md"] = hex.EncodeToString(sum[:])
 	f.save()
+	f.cfg.Settings.ReviewReproductions = true
 	build, err := requestdriver.BuildRequestBuildArgs(f.dataDir, f.r, f.r.Tickets[1], f.cfg)
 	if err != nil {
 		t.Fatal(err)

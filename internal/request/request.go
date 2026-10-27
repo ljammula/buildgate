@@ -585,6 +585,10 @@ type Request struct {
 	// approval going straight to planning, byte-for-byte as before this field
 	// existed. Read only by Approve's routing, never by advance.
 	DraftOracles bool `json:"draft_oracles,omitempty"`
+	// PlanReview is `factoryd submit -plan-review` or the session key
+	// plan_review: the request waits at plan_review even when its plan is one
+	// ticket. Read only by the planning step (advancePlanning), never by advance.
+	PlanReview bool `json:"plan_review,omitempty"`
 	// Bug is `factoryd submit -bug`: the request fixes a bug, so it needs a
 	// test that fails before the change. Submit sets DraftOracles with it; an
 	// oracle_review approval with no oracle files is refused, and a build
@@ -1295,6 +1299,36 @@ func (r *Request) CompletePlanning(now time.Time) error {
 		reason = fmt.Sprintf("plan handed over by the operator: %d tickets", r.TicketCount)
 	}
 	return advance(r, []State{StatePlanning}, StatePlanReview, factoryActor, reason, now)
+}
+
+// PlanReviewReason is why a drafted plan waits at plan_review for a person,
+// or "" when the factory may approve it itself (ApprovePlanByFactory): the
+// plan has more than one ticket, the request opted in (PlanReview), the
+// repository's .factory.yml did (repoOptIn), or a person already sent a plan
+// of this request back. r.TicketCount must be set.
+func (r *Request) PlanReviewReason(repoOptIn bool) string {
+	switch {
+	case r.TicketCount > 1:
+		return fmt.Sprintf("the plan has %d tickets", r.TicketCount)
+	case r.PlanReview:
+		return "the request asked for plan review"
+	case repoOptIn:
+		return "the repository's .factory.yml sets plan_review"
+	}
+	for _, rej := range r.Rejections {
+		if rej.Stage() == StatePlanReview && rej.By != FactoryActor {
+			return "a person sent an earlier plan back"
+		}
+	}
+	return ""
+}
+
+// SkipPlanReview moves a request from planning straight to building: the
+// factory's own plan approval for a plan that does not need a person's (see
+// PlanNeedsReview). why is the History reason. It does not set ApprovedBy or
+// ApprovedAt, which stay a person's; the History entry records the factory.
+func (r *Request) SkipPlanReview(why string, now time.Time) error {
+	return advance(r, []State{StatePlanning}, StateBuilding, factoryActor, why, now)
 }
 
 // RejectPlan moves a request from plan_review back to planning, so a

@@ -65,21 +65,37 @@ func TestPRBudgetLinesDefaultsAndValidates(t *testing.T) {
 	}
 }
 
-func TestReviewReproductionsDefaultsOnAndTurnsOff(t *testing.T) {
-	if DefaultSettings().ReviewReproductionsOff || (Settings{}).ReviewReproductionsOff {
-		t.Error("reproductions off by default, want on")
+func TestReviewReproductionsDefaultsOffAndTurnsOn(t *testing.T) {
+	if DefaultSettings().ReviewReproductions || (Settings{}).ReviewReproductions {
+		t.Error("reproductions on by default, want off")
 	}
-	for body, wantOff := range map[string]bool{"review_reproductions: false\n": true, "review_reproductions: true\n": false, "pr_budget_lines: 250\n": false} {
+	for body, want := range map[string]bool{"review_reproductions: false\n": false, "review_reproductions: true\n": true, "pr_budget_lines: 250\n": false} {
 		cfg, err := Load(writeConfig(t, body))
 		if err != nil {
 			t.Fatalf("Load %q: %v", body, err)
 		}
 		s, err := cfg.ApplySettings(DefaultSettings())
-		if err != nil || s.ReviewReproductionsOff != wantOff {
-			t.Errorf("%q: ReviewReproductionsOff = %t err %v, want %t", body, s.ReviewReproductionsOff, err, wantOff)
+		if err != nil || s.ReviewReproductions != want {
+			t.Errorf("%q: ReviewReproductions = %t err %v, want %t", body, s.ReviewReproductions, err, want)
 		}
 	}
 	if _, err := Load(writeConfig(t, "review_reproductions: sometimes\n")); err == nil {
 		t.Error("review_reproductions: sometimes loaded, want a refusal")
+	}
+}
+
+func TestPlanReviewIsOffByDefaultAndTurnsOn(t *testing.T) {
+	if DefaultSettings().PlanReview || (Settings{}).PlanReview {
+		t.Error("plan_review on by default, want off")
+	}
+	for body, want := range map[string]bool{"plan_review: true\n": true, "plan_review: false\n": false, "pr_budget_lines: 250\n": false} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.PlanReview != want {
+			t.Errorf("%q: PlanReview = %t err %v, want %t", body, s.PlanReview, err, want)
+		}
 	}
 }

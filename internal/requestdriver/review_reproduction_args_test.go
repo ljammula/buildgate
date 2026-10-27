@@ -37,7 +37,8 @@ func TestRequestTicketBuildCarriesTheApprovedSpecForReproductions(t *testing.T) 
 	sum := sha256.Sum256(body)
 
 	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
-	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
+	on := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{ReviewReproductions: true}}
+	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, on)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +47,7 @@ func TestRequestTicketBuildCarriesTheApprovedSpecForReproductions(t *testing.T) 
 	}
 
 	r.ApprovedSHA256 = map[string]string{"spec.md": hex.EncodeToString(sum[:])}
-	args, err = requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
+	args, err = requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, on)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +57,7 @@ func TestRequestTicketBuildCarriesTheApprovedSpecForReproductions(t *testing.T) 
 	}
 
 	r.ApprovedSHA256["spec.md"] = strings.Repeat("0", 64)
-	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{}); err == nil || !strings.Contains(err.Error(), "changed since spec_review approved it") {
+	if _, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, on); err == nil || !strings.Contains(err.Error(), "changed since spec_review approved it") {
 		t.Errorf("a spec edited since approval = %v, want the build refused", err)
 	}
 }
@@ -65,7 +66,7 @@ func TestRequestTicketBuildCarriesTheApprovedSpecForReproductions(t *testing.T) 
 // (its review still cites the approved spec) but gets neither
 // -review-reproduction nor -recheck-reproductions: every finding is advice.
 // A ticket whose list already holds a reproduction is still rechecked
-// against it (SC-022). On is the default.
+// against it (SC-022). Off is the default.
 func TestReviewReproductionsOffKeepsTheSpecButHoldsNothing(t *testing.T) {
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "001.spec.md")
@@ -83,7 +84,8 @@ func TestReviewReproductionsOffKeepsTheSpecButHoldsNothing(t *testing.T) {
 	sum := sha256.Sum256(body)
 	ticket := request.Ticket{Index: 1, SpecPath: specPath}
 	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", Tickets: []request.Ticket{ticket}, ApprovedSHA256: map[string]string{"spec.md": hex.EncodeToString(sum[:])}}
-	off := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{ReviewReproductionsOff: true}}
+	off := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
+	on := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{ReviewReproductions: true}}
 
 	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, off)
 	if err != nil {
@@ -91,16 +93,16 @@ func TestReviewReproductionsOffKeepsTheSpecButHoldsNothing(t *testing.T) {
 	}
 	i := slices.Index(args, "-review-spec")
 	if i < 0 || args[i+1] != approved || slices.Contains(args, "-review-reproduction") || slices.Contains(args, "-recheck-reproductions") {
-		t.Errorf("off: args = %v, want -review-spec %s and no reproduction flags", args, approved)
+		t.Errorf("default (off): args = %v, want -review-spec %s and no reproduction flags", args, approved)
 	}
 
-	args, err = requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()})
+	args, err = requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, on)
 	if err != nil {
 		t.Fatal(err)
 	}
 	i = slices.Index(args, "-review-spec")
 	if !slices.Contains(args, "-review-reproduction") || i < 0 || args[i+1] != approved || slices.Contains(args, "-recheck-reproductions") {
-		t.Errorf("default: args = %v, want -review-reproduction and -review-spec %s", args, approved)
+		t.Errorf("on: args = %v, want -review-reproduction and -review-spec %s", args, approved)
 	}
 
 	const origin = "run-origin"

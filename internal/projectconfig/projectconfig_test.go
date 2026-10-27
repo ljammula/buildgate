@@ -642,3 +642,19 @@ func TestLoadRejectsRootedOrGlobbedTestPatternDirectoryEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanReviewKeyIsOffUnlessSet(t *testing.T) {
+	for body, want := range map[string]bool{"verify_command: pytest\n": false, "verify_command: pytest\nplan_review: true\n": true} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ".factory.yml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _, err := Load(dir)
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		if cfg.PlanReview != want {
+			t.Errorf("%q: PlanReview = %t, want %t", body, cfg.PlanReview, want)
+		}
+	}
+}

@@ -112,6 +112,9 @@ type Config struct {
 	// only selects among guides the operator provides; it never supplies
 	// a path or the text.
 	DesignGuide string `yaml:"design_guide"`
+	// PlanReview makes every request on this repository wait at plan_review
+	// for a person to approve its tickets, even a one-ticket plan.
+	PlanReview bool `yaml:"plan_review"`
 	// Gates are command gates this repository defines for itself, beyond
 	// the five named ones above: each runs in the sandbox after canonical
 	// verification passes, like lint_command, and is its own

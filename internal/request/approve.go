@@ -163,30 +163,13 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 		return nil, err
 	}
 
-	relPaths, specRelPaths, err := approvalRelPaths(dataDir, id, r)
-	if err != nil {
-		return nil, err
-	}
-
 	// Hash every covered file, and check it against expectedSHA256,
 	// before committing any state transition below -- a stale-artifact
 	// refusal must leave the request exactly as it was, not halfway
 	// through an approval it's about to reject.
-	hashes := make(map[string]string, len(relPaths))
-	for _, relPath := range relPaths {
-		hash, err := HashFile(dataDir, id, relPath)
-		if err != nil {
-			return nil, fmt.Errorf("request %s: hash %s: %w", id, relPath, err)
-		}
-		hashes[relPath] = hash
-	}
-	if r.State == StatePlanReview {
-		// Re-derive the request-level oracle's assignment and require the
-		// ticket oracle directories to equal it (a no-op for every request
-		// without a request-level oracle).
-		if err := verifyMaterializedOracles(dataDir, r, specRelPaths, hashes); err != nil {
-			return nil, fmt.Errorf("request %s: %w", id, err)
-		}
+	relPaths, hashes, err := approvalHashes(dataDir, id, r)
+	if err != nil {
+		return nil, err
 	}
 	expectedFiles, err := takeReadBackShown(id, r, expectedSHA256, requireOracleShown)
 	if err != nil {
@@ -210,12 +193,7 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 	// takes over.
 	r.ClearReminderState()
 
-	if r.ApprovedSHA256 == nil {
-		r.ApprovedSHA256 = make(map[string]string, len(relPaths))
-	}
-	for relPath, hash := range hashes {
-		r.ApprovedSHA256[relPath] = hash
-	}
+	r.pinApproved(hashes)
 	r.ApprovedBy = by
 	r.ApprovedAt = now.UTC().Format(time.RFC3339Nano)
 
@@ -225,55 +203,127 @@ func approve(dataDir, id, by string, now time.Time, expectedSHA256 map[string]st
 	return r, nil
 }
 
-// approvalRelPaths returns the files an approval from r's state covers
-// (relPaths) and, at plan review, the ticket specs among them (specRelPaths).
-// It refuses a state nothing is approved from, a spec with open decisions,
-// an invalid ticket spec and an unusable oracle directory.
-func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []string, err error) {
+// approvalHashes returns the files an approval from r's state covers
+// (relPaths, sorted) and the SHA-256 each currently hashes to. A plan
+// approval's set and checks are planApprovalHashes, the one function a
+// person's plan approval and the factory's own (ApprovePlanByFactory) share.
+func approvalHashes(dataDir, id string, r *Request) (relPaths []string, hashes map[string]string, err error) {
+	if r.State == StatePlanReview {
+		hashes, err = planApprovalHashes(dataDir, r)
+		if err != nil {
+			return nil, nil, err
+		}
+		return slices.Sorted(maps.Keys(hashes)), hashes, nil
+	}
+	relPaths, err = approvalRelPaths(dataDir, id, r)
+	if err != nil {
+		return nil, nil, err
+	}
+	hashes, err = hashRelPaths(dataDir, id, relPaths)
+	return relPaths, hashes, err
+}
+
+// hashRelPaths is the SHA-256 of each file under request id's directory.
+func hashRelPaths(dataDir, id string, relPaths []string) (map[string]string, error) {
+	hashes := make(map[string]string, len(relPaths))
+	for _, relPath := range relPaths {
+		hash, err := HashFile(dataDir, id, relPath)
+		if err != nil {
+			return nil, fmt.Errorf("request %s: hash %s: %w", id, relPath, err)
+		}
+		hashes[relPath] = hash
+	}
+	return hashes, nil
+}
+
+// pinApproved merges hashes into ApprovedSHA256 (see that field's own doc
+// comment for why merged, not replaced).
+func (r *Request) pinApproved(hashes map[string]string) {
+	if r.ApprovedSHA256 == nil {
+		r.ApprovedSHA256 = make(map[string]string, len(hashes))
+	}
+	maps.Copy(r.ApprovedSHA256, hashes)
+}
+
+// planApprovalHashes is every check a plan approval makes, and the hashes it
+// pins: the tickets' specs (each re-validated) and their oracle files, a bug
+// request's ticket 1 having an oracle, and the request-level oracle's
+// assignment equal to the ticket oracle directories. It reads r and disk and
+// changes neither, so a refusal leaves the request as it was.
+func planApprovalHashes(dataDir string, r *Request) (map[string]string, error) {
+	id := r.ID
+	specRelPaths, err := ticketSpecRelPaths(dataDir, id)
+	if err != nil {
+		return nil, err
+	}
+	// Re-validate every ticket's own content before this approval
+	// proceeds any further -- the same ValidateTicketSpecContent the
+	// console's ticket editor (PUT /requests/{id}/tickets/{n}) enforces on
+	// every edit. An operator who edits tickets/NNN.spec.md directly on
+	// disk and then approves gets the same validation (found live
+	// 2026-09-25).
+	if err := validateTicketSpecs(dataDir, id, specRelPaths); err != nil {
+		return nil, err
+	}
+	// A ticket's own <NNN>.oracle/ directory is hash-pinned and
+	// tamper-detected on every later state advance (VerifyApprovedHashes)
+	// the same way its ticket spec is: one more relPath in this file set.
+	oraclePaths, err := ticketOracleRelPaths(dataDir, id, specRelPaths)
+	if err != nil {
+		return nil, err
+	}
+	if r.Bug && !ticketOneHasOracle(specRelPaths, oraclePaths) {
+		return nil, fmt.Errorf("request %s: a bug request needs ticket 1 to run a failing oracle, and ticket 1 has none: map the approved oracle to ticket 1's criteria (list the criteria the oracle's MANIFEST.json covers under ticket 1's \"### Acceptance criteria covered\"), or edit the plan so ticket 1 covers them, then approve again", id)
+	}
+	hashes, err := hashRelPaths(dataDir, id, append(slices.Clone(specRelPaths), oraclePaths...))
+	if err != nil {
+		return nil, err
+	}
+	// Re-derive the request-level oracle's assignment and require the
+	// ticket oracle directories to equal it (a no-op for every request
+	// without a request-level oracle).
+	if err := verifyMaterializedOracles(dataDir, r, specRelPaths, hashes); err != nil {
+		return nil, fmt.Errorf("request %s: %w", id, err)
+	}
+	return hashes, nil
+}
+
+// ApprovePlanByFactory is the factory's own plan approval for a plan that
+// needs no person's (PlanNeedsReview): the same checks and pinning as a
+// person's (planApprovalHashes, VerifyApprovedHashes first), then planning
+// to building with why on the History entry. ApprovedBy and ApprovedAt stay
+// a person's. A refusal returns its error with r unchanged, and the caller
+// sends the plan to plan_review instead.
+func ApprovePlanByFactory(dataDir string, r *Request, why string, now time.Time) error {
+	if err := VerifyApprovedHashes(dataDir, r); err != nil {
+		return err
+	}
+	hashes, err := planApprovalHashes(dataDir, r)
+	if err != nil {
+		return err
+	}
+	if err := r.SkipPlanReview(why, now); err != nil {
+		return err
+	}
+	r.ClearReminderState()
+	r.pinApproved(hashes)
+	return nil
+}
+
+// approvalRelPaths returns the files an approval from r's state covers,
+// other than a plan approval's (planApprovalHashes). It refuses a state
+// nothing is approved from, a spec with open decisions and an unusable
+// oracle directory.
+func approvalRelPaths(dataDir, id string, r *Request) (relPaths []string, err error) {
 	switch r.State {
 	case StateSpecReview:
 		relPaths = []string{specFileName}
 		if err := refuseOpenDecisions(dataDir, id); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if err := refuseOversizedApproval(dataDir, id, r); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-	case StatePlanReview:
-		relPaths, err = ticketSpecRelPaths(dataDir, id)
-		if err != nil {
-			return nil, nil, err
-		}
-		specRelPaths = append([]string(nil), relPaths...)
-		// Re-validate every ticket's own content before this approval
-		// proceeds any further -- the same request.ValidateTicketSpecContent
-		// the console's own ticket editor (PUT /requests/{id}/tickets/{n},
-		// internal/api/server.go) already enforces on every edit. Without
-		// this, an operator who edits tickets/NNN.spec.md directly on disk
-		// (bypassing the console entirely) and then runs `factoryd approve`
-		// gets no validation at all: the malformed edit sails through
-		// plan_review approval and only fails much later, at build start,
-		// via -request-ticket's own fail-closed preflight (found live
-		// 2026-09-25). Runs before any hashing or state mutation below, so
-		// a refusal here leaves the request exactly as it was.
-		if err := validateTicketSpecs(dataDir, id, specRelPaths); err != nil {
-			return nil, nil, err
-		}
-		// Any ticket's own <NNN>.oracle/ directory (an optional,
-		// operator-reviewed reference oracle drafted for that ticket) is
-		// approved -- hash-pinned, tamper-detected on every later state
-		// advance via VerifyApprovedHashes -- the exact same way, at the
-		// exact same moment, its ticket spec already is. No new hashing
-		// mechanism: an oracle file is just one more relPath in this same
-		// approval's own file set.
-		oraclePaths, err := ticketOracleRelPaths(dataDir, id, relPaths)
-		if err != nil {
-			return nil, nil, err
-		}
-		if r.Bug && !ticketOneHasOracle(specRelPaths, oraclePaths) {
-			return nil, nil, fmt.Errorf("request %s: a bug request needs ticket 1 to run a failing oracle, and ticket 1 has none: map the approved oracle to ticket 1's criteria (list the criteria the oracle's MANIFEST.json covers under ticket 1's \"### Acceptance criteria covered\"), or edit the plan so ticket 1 covers them, then approve again", id)
-		}
-		relPaths = append(relPaths, oraclePaths...)
 	case StateOracleReview:
 		// The request-level oracle (oracle/*, beside spec.md) is hash-pinned
 		// here like spec.md is at spec approval; an absent or empty directory
@@ -281,15 +331,15 @@ func approvalRelPaths(dataDir, id string, r *Request) (relPaths, specRelPaths []
 		// an unusable directory -- see requestOracleRelPaths.
 		relPaths, err = requestOracleRelPaths(dataDir, id)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if r.Bug && len(relPaths) == 0 {
-			return nil, nil, fmt.Errorf("request %s: a bug request needs a failing test: hand-write oracle/ (a test that fails on the current code) and approve again", id)
+			return nil, fmt.Errorf("request %s: a bug request needs a failing test: hand-write oracle/ (a test that fails on the current code) and approve again", id)
 		}
 	default:
-		return nil, nil, fmt.Errorf("request %s: cannot approve from state %q (must be %q, %q or %q) %w", id, r.State, StateSpecReview, StateOracleReview, StatePlanReview, ErrIllegalTransition)
+		return nil, fmt.Errorf("request %s: cannot approve from state %q (must be %q, %q or %q) %w", id, r.State, StateSpecReview, StateOracleReview, StatePlanReview, ErrIllegalTransition)
 	}
-	return relPaths, specRelPaths, nil
+	return relPaths, nil
 }
 
 // checkApprovalAgainstExpected compares the files about to be approved

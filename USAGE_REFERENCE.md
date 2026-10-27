@@ -84,9 +84,9 @@ it explains what the flag changes. Flags come before positional arguments.
 | `-spec-file <path>` | `submit` | Hands over a finished spec in place of a drafted one |
 | `-plan-dir <dir>` | `submit` | With `-spec-file`, hands over the finished tickets |
 | `-draft-oracles` | `submit` | Adds the staged oracle step (`oracle_drafting`, `oracle_review`) |
+| `-plan-review` | `submit` | Waits at `plan_review` for you to approve the tickets even when the plan is one ticket (a plan of several tickets always waits) |
 | `-model role=model` | `submit` | The model for the `planning` or `execution` role of this request, within `roles.<role>.allowed`. Repeatable |
 | `-harness role=name` | `submit` | The coding agent for a role of this request, within `roles.<role>.allowed_harnesses`. Repeatable |
-| `-watch` | `submit` | Follows the request after submitting, as `factoryd watch` does |
 | `-reason "<text>"` | `reject` (required unless `-comments-file` is given), `amend-scope`, `override` (required); `kill-switch` (required with `-state`); `retry`, `cancel` | Why. A rejection's reason reaches the next draft |
 | `-to plan\|spec` | `reject` | Sends a `quarantined` or `halted` request back to `planning` or `spec_drafting` |
 | `-from attempt\|scratch\|<round>` (`retry`), `-from round\|scratch` (`resume`) | `retry`, `resume` | Continue from the failed attempt's commit or the last completed round (the defaults), or rebuild the ticket from the base; `retry` also takes a round number of the ledger (`factoryd rounds`) |
@@ -158,7 +158,7 @@ each `daemon` child it runs.
 
 `submitted` -> `spec_drafting` -> `spec_review` (you) -> [`oracle_drafting`
 -> `oracle_review` (you), only with `-draft-oracles`] -> `planning` ->
-`plan_review` (you) -> `building` (one ticket at a time) -> `pr_review` ->
+`plan_review` (you; only for a plan of several tickets or an opt-in: `submit -plan-review`, session key `plan_review`, `.factory.yml` `plan_review: true`, so a one-ticket plan otherwise goes from `planning` to `building` after the factory runs a plan approval's checks and pins the files) -> `building` (one ticket at a time) -> `pr_review` ->
 `done`, or `closed` when the last ticket's pull request is closed without
 merging. Off-ramps: `quarantined`, `halted`, `cancelled`. A step that ended
 with no verdict on the work (its `worker` stopped, or one of the causes in
@@ -868,6 +868,7 @@ protected_paths:                       # same as session config's release_protec
 token_ceiling: 5000000                 # same as meter_token_ceiling; may only lower the session's effective ceiling, never raise it (a higher value refuses the run/submission)
 cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; lower-only, like token_ceiling
 # design_guide: go-service             # team design guide for spec drafting and planning; see "Design guide"
+# plan_review: true                    # a one-ticket plan also waits at plan_review (a plan of several tickets always does)
 ```
 
 `required_binaries` is an optional list of at most 32 bare executable names,
@@ -2188,7 +2189,7 @@ limits for API-started runs.
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
 | `pr_budget_lines` | `400` -- the target size of one ticket's pull request, in changed lines: insertions plus deletions, as `git diff --shortstat` counts them. `0` is no budget. A negative value is refused. Planning writes one ticket when its estimate of the whole change is within the budget, and splits only a larger change, into the fewest tickets that each fit, each independently buildable and testable and never split by layer; with `0` it writes one ticket unless the spec's parts are independently shippable. The planner declares each ticket's estimate in an `Estimated-Changed-Lines:` header; the value the planning job ran under is recorded on the request (`plan_budget_lines`), and `plan_review` carries one note for each ticket whose estimate is over it. A planning target, not a cap: `release_max_insertions` and `release_max_files_changed` stay the hard limits. A running `worker` reads it at its next start (`factoryd restart`). |
 | `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, the oracle run-command edit and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
-| `review_reproductions` | `true` -- a request's ticket build holds and runs its review's reproductions (`review_reproduction`, SC-022). `false`: the review still runs and cites the approved spec, but holds no reproduction, so every finding is advice in the pull request's **Reviewer advice** and no `review_reproduction` check is recorded. A ticket that already has reproductions on its list still holds and runs them, and its review can still block, until the list is empty. A running `worker` reads it at its next start (`factoryd restart`). |
+| `review_reproductions` | `false` -- a request's ticket build's review still runs and cites the approved spec, but holds no reproduction, so every finding is advice in the pull request's **Reviewer advice** and no `review_reproduction` check is recorded. `true` holds and runs each finding's reproduction (`review_reproduction`, SC-022), so a finding can block. A ticket that already has reproductions on its list still holds and runs them, and its review can still block, until the list is empty. A running `worker` reads it at its next start (`factoryd restart`). |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
 | `registry_proxy_pypi_upstream` | `https://pypi.org/simple` |
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |
@@ -2206,6 +2207,7 @@ limits for API-started runs.
 | `compose_services_ready_timeout` | `3m` |
 | `compose_services_allowed_registries` | `[docker.io/library/]` -- the registry/namespace prefixes a target repo's compose images may come from. Never widened by a run or by a compose file: `doctor -target-repo <repo> -fix` and `quickstart` offer the prefixes a repo's images need and write them only on a yes |
 | `compose_services_worker_env` | empty -- `KEY: VALUE` worker variables for application endpoints the published ports don't already cover (the worker's `localhost` reaches each published port), e.g. `PSQL_URL: postgres://database:5432/<db>`, `REDIS_URL: redis:6379`. Factory, sandbox, credential, cache, proxy and `SF_*` names are rejected. Values reach the worker by name only: never in the docker argv, `run.json` or Temporal history |
+| `plan_review` | `false` -- every request submitted under this config waits at `plan_review`, as `submit -plan-review` does for one request. Off, a one-ticket plan goes straight to `building`; a plan of several tickets always waits. A repository's `.factory.yml` `plan_review: true` does the same for that repository |
 | `compose_services_require_digest` | `false` |
 | `compose_services_concurrency` | `1` -- runs on this machine (any data dir or factoryd process) with compose sidecars at once; `0` disables the slot |
 | `release_protected_paths` | empty (`.factory.yml`'s `protected_paths` overlays it) |
