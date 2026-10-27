@@ -677,7 +677,7 @@ func TestAllowedPathsLoadsAndIsValidatedLikeTestPatterns(t *testing.T) {
 	if want := []string{"src/", "*.md"}; !reflect.DeepEqual(cfg.AllowedPaths, want) {
 		t.Errorf("AllowedPaths = %v, want %v", cfg.AllowedPaths, want)
 	}
-	for _, entry := range []string{"", "/", "/x/", "*/src/", "src[s]/"} {
+	for _, entry := range []string{"", "/", "/x/", "*/src/", "src[s]/", "../x", "a/../b", "**/a.go", "src/**", "[a"} {
 		if _, err := load("allowed_paths:\n  - \"" + entry + "\"\n"); err == nil || !strings.Contains(err.Error(), "allowed_paths") {
 			t.Errorf("allowed_paths entry %q: err = %v, want a refusal naming allowed_paths", entry, err)
 		}

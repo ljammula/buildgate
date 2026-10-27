@@ -76,3 +76,24 @@ func TestEvaluateRunRepositoryPathsStillExcludeByproductsAndOracles(t *testing.T
 		t.Errorf("without oracle evidence .buildgate/oracles.json is an ordinary change outside allowed_paths: %v", res.DiffScopeViolations)
 	}
 }
+
+func TestPathAllowedIsAnchoredAtTheRepositoryRoot(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, file string
+		want          bool
+	}{
+		{"src/", "src/a.go", true},
+		{"src/", "src/deep/a.go", true},
+		{"src/", "x/src/a.go", false},
+		{"*.md", "README.md", true},
+		{"*.md", "docs/a.md", false},
+		{"docs/*.md", "docs/a.md", true},
+		{"docs/*.md", "docs/x/a.md", false},
+		{"a.go", "a.go", true},
+		{"a.go", "x/a.go", false},
+	} {
+		if got := PathAllowed(tc.file, []string{tc.pattern}); got != tc.want {
+			t.Errorf("PathAllowed(%q, %q) = %v, want %v", tc.file, tc.pattern, got, tc.want)
+		}
+	}
+}

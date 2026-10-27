@@ -862,8 +862,8 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 #   - "*.spec.ts"
 #   - "__tests__/"                                  # an entry ending in "/" names a test directory
 # allowed_paths:                                     # the only files a build may change; a change outside fails "diff_scope" whatever the ticket says
-#   - "src/"                                       # same patterns as test_patterns
-#   - "*.md"
+#   - "src/"                                       # everything under src/, from the repository root
+#   - "docs/*.md"                                  # a glob of the whole path
 # required_binaries:                                 # bare executable names required in the final worker image; doctor checks the configured base image
 #   - cargo
 #   - rustc
@@ -1133,9 +1133,14 @@ with `-reference-oracle-mount-path` on `factoryd <run>` to bind-mount a
 pristine read-only host copy over that path for the gate's own container
 run.
 
-`allowed_paths` is a list of the repository's own, matched like `test_patterns`
-(full path or basename, an entry ending in `/` for a directory; no empty entry,
-no leading `/`, no glob in a directory entry). Empty or unset bounds nothing.
+`allowed_paths` is a list of the repository's own, matched against the whole
+repository-relative path, never the basename. An entry ending in `/` allows
+every path under that directory from the root (`src/` allows `src/a.go`, not
+`x/src/a.go`); any other entry is a `path.Match` glob of the whole path (`*.md`
+allows root-level markdown only, `docs/*.md` that directory's). `**` is not
+supported. An entry that is empty, begins with `/`, contains `..` or `**`, is an
+invalid glob, or is a directory entry with a glob character is refused when the
+file loads. Empty or unset bounds nothing.
 When set, the `diff_scope` check fails a run that changed a file matching none
 of the patterns, for a direct run and a request's ticket alike. It is read from
 the commit of `.factory.yml`, and a ticket's `Allowed-Files:` or `amend-scope`

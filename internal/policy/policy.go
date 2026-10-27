@@ -73,7 +73,7 @@ func DiffScope(changed, allowed []string) (run.GateResult, []string) {
 // file outside it is a note on the pull request and refuses nothing.
 // AllowedPaths is the repository's .factory.yml allowed_paths, which a person
 // wrote and which therefore always refuses: a changed file that matches none
-// of its patterns (IsTestFile's matching, the same as test_patterns).
+// of its patterns (PathAllowed).
 type Scope struct {
 	AllowedFiles []string
 	Unapproved   bool
@@ -124,7 +124,7 @@ func (s Scope) Judge(changed []string) ScopeVerdict {
 	}
 	if len(s.AllowedPaths) > 0 {
 		for _, f := range changed {
-			if !IsTestFile(f, s.AllowedPaths) {
+			if !PathAllowed(f, s.AllowedPaths) {
 				v.OutsideRepo = append(v.OutsideRepo, f)
 			}
 		}
@@ -138,6 +138,26 @@ func (s Scope) Judge(changed []string) ScopeVerdict {
 		v.Noted = noted
 	}
 	return v
+}
+
+// PathAllowed reports whether the repository-relative file matches one of
+// patterns, anchored at the repository root: a pattern ending in "/" allows
+// every path under that directory, and any other pattern is a path.Match glob
+// against the whole path ("*.md" allows root-level markdown only, "docs/*.md"
+// that directory's). "**" is not supported (projectconfig refuses it).
+func PathAllowed(file string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.HasSuffix(p, "/") {
+			if strings.HasPrefix(file, p) {
+				return true
+			}
+			continue
+		}
+		if ok, err := path.Match(p, file); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 func containsPath(list []string, f string) bool {
