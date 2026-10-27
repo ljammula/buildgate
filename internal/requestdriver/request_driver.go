@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -719,6 +720,11 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		if validateErr == nil {
 			break
 		}
+		refused := tickets
+		if spliced, err := spliceScopedTickets(r, reviewedTickets, tickets); err == nil {
+			refused = spliced
+		}
+		keepRefusedPlan(dataDir, r.ID, refused, validateErr)
 		if attempt == maxPlanningAttempts || !planRedraftable(r, validateErr) {
 			_ = os.RemoveAll(ticketsDir)
 			// Keep what every attempt spent: `factoryd cost` reads it from
@@ -1852,9 +1858,10 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // numbers), never the meaning of its prose: what the factory reads from
 // prose is a note at the review (request.PlanReviewNotes).
 // Every other validation failure returns immediately, naming the failing
-// ticket's filename; the caller (AdvancePlanning) removes ticketsDir on
-// any failure path so a halted request's directory doesn't keep
-// half-valid ticket files around.
+// ticket's filename; the caller (AdvancePlanning) keeps a copy of the
+// refused tickets (keepRefusedPlan) and removes ticketsDir on any failure
+// path so a halted request's directory doesn't keep half-valid ticket files
+// around.
 func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string) ([]request.Ticket, error) {
 	requestTickets := make([]request.Ticket, 0, len(tickets))
 	contents := make([]string, 0, len(tickets))
@@ -1912,6 +1919,47 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		return nil, contentErr(fmt.Errorf("%s: %w", strings.Join(infeasible, "; "), errPlanInfeasible))
 	}
 	return requestTickets, nil
+}
+
+// keepRefusedPlan copies the tickets of a refused plan (the whole set the
+// checks saw, a scoped redraft's splice included) to
+// <request>/refused-plans/<n>/<ticket filename>, with the factory's refusal
+// note in reason.txt, so a halted request still holds what was refused
+// (AdvancePlanning removes the tickets dir on that path). n is one past the
+// highest number there; the directory is created with os.Mkdir, so an
+// existing one is never written into. Best effort: a copy that cannot be
+// written is logged, never a reason to change the planning outcome.
+func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket, reason error) {
+	root := filepath.Join(request.Dir(dataDir, id), "refused-plans")
+	n := 1
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, e := range entries {
+			if v, err := strconv.Atoi(e.Name()); err == nil && v >= n {
+				n = v + 1
+			}
+		}
+	}
+	dir := filepath.Join(root, strconv.Itoa(n))
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		log.Printf("request %s: keep refused plan: %v", id, err)
+		return
+	}
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		log.Printf("request %s: keep refused plan: %v", id, err)
+		return
+	}
+	files := map[string]string{}
+	for _, ticket := range tickets {
+		files[filepath.Base(ticket.Filename)] = ticket.Content
+	}
+	// The reason wins over a drafted file of the same name: it is the record.
+	files["reason.txt"] = DraftHaltNote(reason.Error()) + "\n"
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			log.Printf("request %s: keep refused plan: %v", id, err)
+			return
+		}
+	}
 }
 
 // ticketProtectedPaths reports a ticket whose Allowed-Files or

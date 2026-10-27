@@ -36,6 +36,7 @@ export const requiredTicketHeaderKeys: readonly string[] = [
 const ACCEPTANCE_CRITERIA = "## Acceptance criteria";
 const CRITERIA_COVERED = "### Acceptance criteria covered";
 const PLAN_CONTAINER = "## Plan";
+const OUT_OF_SCOPE = "## Out of scope";
 
 /** The byte cap the server applies to an operator-shaped spec. */
 export const MAX_HANDED_OVER_SPEC_BYTES = 120_000;
@@ -591,7 +592,7 @@ function parseCriteriaNumbers(lines: readonly string[]): CoveredCriteria {
 export interface TicketPlanResult {
   readonly ok: boolean;
   readonly missingHeading: string | null;
-  /** The first heading with nothing but blank lines under it ("## Plan" is a container and exempt). */
+  /** The first heading with nothing but blank lines under it ("## Plan" is a container and "## Out of scope" is human prose; both exempt). */
   readonly emptySection: string | null;
   /** The covered-criteria line that is not "- N", or "" when the section names no number. */
   readonly badCriteriaLine: string | null;
@@ -612,7 +613,8 @@ export function validateTicketPlan(content: string): TicketPlanResult {
   const parsed = parseCriteriaNumbers(section(requiredTicketHeadings.indexOf(CRITERIA_COVERED)));
   const covered = parsed.badLine === null ? parsed.numbers : [];
   const empty = requiredTicketHeadings.find(
-    (heading, i) => heading !== PLAN_CONTAINER && !anyNonBlank(section(i)),
+    (heading, i) =>
+      heading !== PLAN_CONTAINER && heading !== OUT_OF_SCOPE && !anyNonBlank(section(i)),
   );
   if (empty !== undefined) return { ...refused, emptySection: empty, covered };
   if (parsed.badLine !== null) return { ...refused, badCriteriaLine: parsed.badLine, covered };
@@ -749,7 +751,9 @@ export function ticketStructure(content: string): StructureCheck {
   }));
   rows.push(
     ...headingRows(lines, requiredTicketHeadings, (heading, body) =>
-      heading !== PLAN_CONTAINER && !anyNonBlank(body) ? "no content" : "",
+      heading !== PLAN_CONTAINER && heading !== OUT_OF_SCOPE && !anyNonBlank(body)
+        ? "no content"
+        : "",
     ),
   );
   const listed = plan.covered.length > 0;

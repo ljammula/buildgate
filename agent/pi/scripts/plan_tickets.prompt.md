@@ -92,7 +92,7 @@ restate the criteria's text here -- the number or ID only.)
 
 ## Out of scope
 
-(What this ticket deliberately does not do.)
+(What this ticket deliberately does not do. May be left empty or "None.")
 
 Write the finished ticket files, and nothing else, to {draft_dir}. Do not
 print any ticket as your response text; write each one to its own file

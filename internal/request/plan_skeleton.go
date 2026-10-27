@@ -31,10 +31,15 @@ var requiredTicketHeadings = []string{
 // integer-parseable content under.
 const acceptanceCriteriaCoveredHeading = "### Acceptance criteria covered"
 
+// outOfScopeHeading is the one required heading whose section may be empty:
+// its prose is for the reviewer, and the diff-scope boundary is the
+// ticket's Allowed-Files: header, so an empty section protects nothing less.
+const outOfScopeHeading = "## Out of scope"
+
 // ValidateTicketPlan checks that content contains every heading in
 // requiredTicketHeadings, in order, that each heading's own section (up
-// to the next heading, or end of document) has at least one non-blank
-// line of content underneath it, and that "### Acceptance criteria
+// to the next heading, or end of document) except "## Out of scope" has
+// at least one non-blank line of content underneath it, and that "### Acceptance criteria
 // covered" section parses to a non-empty list of criterion numbers. It is
 // a pure function -- no I/O, no model calls -- so the request driver can
 // call it against a drafted ticket before ever writing it under
@@ -67,6 +72,9 @@ func ValidateTicketPlan(content string) error {
 	for i, heading := range requiredTicketHeadings {
 		if heading == "## Plan" {
 			continue // a pure container heading -- its content lives in the ### subsections below, checked individually.
+		}
+		if heading == outOfScopeHeading {
+			continue // human prose nothing machine-reads (the diff boundary is Allowed-Files:); the heading is still required above.
 		}
 		end := len(lines)
 		if i+1 < len(positions) {

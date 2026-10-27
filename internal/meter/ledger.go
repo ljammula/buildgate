@@ -25,6 +25,10 @@ type LedgerRecord struct {
 	CostMicroUSD      int64  `json:"cost_micro_usd"`
 	ReasoningEffort   string `json:"reasoning_effort,omitempty"`
 	CachedInputTokens int64  `json:"cached_input_tokens,omitempty"`
+	// UncachedInputTokens is the raw count of this response's input tokens
+	// that were neither cache hits nor cache writes, unweighted: the figure
+	// an audit of fresh input wants. InputTokens is not it (see Append).
+	UncachedInputTokens int64 `json:"uncached_input_tokens,omitempty"`
 	// Kind is "" for a usage record (every field above, exactly the line
 	// shape the relay has always written) or one of the event kinds below,
 	// which carry RequestID and the estimate fields instead of usage. A line
@@ -123,7 +127,13 @@ func (l *Ledger) Close() error {
 // otherwise (2026-09-28 operator decision) -- so an audit reading this ledger
 // can see both the weighted figure that counted against budgets and the raw
 // split behind it, without this relay needing to keep a second, unweighted
-// ledger. rec.TS defaults to the current UTC time.
+// ledger. rec.UncachedInputTokens (the raw uncached input count the cost
+// is priced from) is recorded as "uncached_input_tokens" when > 0, so an
+// audit never has to back it out of the weighted input_tokens. Like
+// cached_input_tokens it is absent both when the count is 0 and on a line
+// written before the field existed, and on a response whose usage could not
+// be read it carries the conservative estimate, as input_tokens does (the
+// request's complete record says settled "estimate"). rec.TS defaults to the current UTC time.
 //
 // This exists for exactly the case the "usage: " log line cannot cover: that
 // line lives only in the meter's own stdout. The ledger file is on a host
@@ -158,6 +168,9 @@ func (l *Ledger) Append(rec LedgerRecord) {
 	}
 	if rec.CachedInputTokens > 0 {
 		fmt.Fprintf(&b, ",\"cached_input_tokens\":%d", rec.CachedInputTokens)
+	}
+	if rec.UncachedInputTokens > 0 {
+		fmt.Fprintf(&b, ",\"uncached_input_tokens\":%d", rec.UncachedInputTokens)
 	}
 	b.WriteString("}\n")
 	l.appendLine(b.String())
