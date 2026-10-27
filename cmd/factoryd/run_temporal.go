@@ -337,6 +337,8 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		RequiredContent:       o.RequiredContent,
 		TestPatterns:          o.TestPatterns,
 		TestsRequiredOptOut:   o.TestsRequiredOptOut,
+		AllowedPaths:          o.AllowedPaths,
+		ScopeUnapproved:       o.ScopeUnapproved,
 		TicketPath:            o.Slice.TicketPath,
 		TicketNumber:          o.Slice.TicketNumber,
 		RequestTicket:         o.Slice.RequestTicket,

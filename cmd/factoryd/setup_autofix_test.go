@@ -60,6 +60,44 @@ func TestTicketRunCarriesRequiredBinariesFromTheCommittedFile(t *testing.T) {
 	}
 }
 
+func TestTicketRunCarriesAllowedPathsFromTheCommittedFile(t *testing.T) {
+	workspace := newFixtureRepo(t)
+	commitFactoryYML(t, workspace, "allowed_paths: [\"src/\", \"*.md\"]\n")
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("allowed_paths: [\"**\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full := ""
+	tr := &ticketRun{workspace: &workspace, fullSuiteCommand: &full}
+	if err := tr.applyCommittedProjectConfig(false); err != nil {
+		t.Fatalf("applyCommittedProjectConfig: %v", err)
+	}
+	if want := []string{"src/", "*.md"}; !reflect.DeepEqual(tr.allowedPaths, want) {
+		t.Errorf("allowedPaths = %q, want the committed %q", tr.allowedPaths, want)
+	}
+}
+
+func TestResolveScopeApproval(t *testing.T) {
+	for _, tc := range []struct {
+		value         string
+		requestTicket bool
+		unapproved    bool
+		wantErr       bool
+	}{
+		{"", false, false, false},
+		{"approved", false, false, false},
+		{"unapproved", false, true, false},
+		{"approved", true, false, false},
+		{"unapproved", true, true, false},
+		{"", true, false, true},
+		{"maybe", false, false, true},
+	} {
+		got, err := resolveScopeApproval(tc.value, tc.requestTicket)
+		if (err != nil) != tc.wantErr || got != tc.unapproved {
+			t.Errorf("resolveScopeApproval(%q, requestTicket=%v) = %v, %v; want unapproved=%v, error=%v", tc.value, tc.requestTicket, got, err, tc.unapproved, tc.wantErr)
+		}
+	}
+}
+
 func headOf(t *testing.T, workspace string) string {
 	t.Helper()
 	out, err := runGit(t, workspace, "rev-parse", "HEAD")

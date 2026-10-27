@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -655,6 +656,30 @@ func TestPlanReviewKeyIsOffUnlessSet(t *testing.T) {
 		}
 		if cfg.PlanReview != want {
 			t.Errorf("%q: PlanReview = %t, want %t", body, cfg.PlanReview, want)
+		}
+	}
+}
+
+func TestAllowedPathsLoadsAndIsValidatedLikeTestPatterns(t *testing.T) {
+	load := func(yml string) (*Config, error) {
+		root := t.TempDir()
+		initGitRepo(t, root)
+		if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _, err := Load(root)
+		return cfg, err
+	}
+	cfg, err := load("allowed_paths:\n  - \"src/\"\n  - \"*.md\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"src/", "*.md"}; !reflect.DeepEqual(cfg.AllowedPaths, want) {
+		t.Errorf("AllowedPaths = %v, want %v", cfg.AllowedPaths, want)
+	}
+	for _, entry := range []string{"", "/", "/x/", "*/src/", "src[s]/"} {
+		if _, err := load("allowed_paths:\n  - \"" + entry + "\"\n"); err == nil || !strings.Contains(err.Error(), "allowed_paths") {
+			t.Errorf("allowed_paths entry %q: err = %v, want a refusal naming allowed_paths", entry, err)
 		}
 	}
 }

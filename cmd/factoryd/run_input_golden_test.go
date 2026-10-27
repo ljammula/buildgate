@@ -60,7 +60,7 @@ func runInputGoldenConfig(t *testing.T) string {
 // also refuses -earlier-attempt),
 // -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
 // covers it), and the
-// spec's Required-Content and the config's skills and test patterns.
+// spec's Required-Content and the config's skills, test patterns and allowed paths.
 // inputs is the directory the flag files (spec, criteria, oracle) are written to.
 func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, address string) []string {
 	t.Helper()
@@ -101,6 +101,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-workspace", workspace,
 		"-spec", write("spec.md", wellFormedRequestTicketspec),
 		"-request-ticket",
+		"-scope-approval", "unapproved",
 		"-data-dir", dataDir,
 		"-temporal-address", address,
 		"-build-app-interpreter", "/bin/sh",

@@ -68,6 +68,33 @@ func TestPreflightActivityHaltsOnMisprefixedAllowedFile(t *testing.T) {
 	}
 }
 
+// A misprefixed path in an Allowed-Files list no person approved halts
+// nothing (it is the model's guess and refuses nothing); the same path in
+// Required-Changed-Files still does.
+func TestPreflightActivityLeavesAnUnapprovedAllowedFilesListUnchecked(t *testing.T) {
+	workspacePath := testfixture.NewGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(workspacePath, "backend", "internal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspacePath, "backend", "internal", "note.go"), []byte("package internal\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspacePath, "backend", "go.mod"), []byte("module example.com/backend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	activities := &Activities{}
+	if err := activities.PreflightActivity(context.Background(), PreflightInput{
+		WorkspacePath: workspacePath, AllowedFiles: []string{"internal/note.go"}, ScopeUnapproved: true,
+	}); err != nil {
+		t.Fatalf("an unapproved Allowed-Files list halted the preflight: %v", err)
+	}
+	if err := activities.PreflightActivity(context.Background(), PreflightInput{
+		WorkspacePath: workspacePath, RequiredChangedFiles: []string{"internal/note.go"}, ScopeUnapproved: true,
+	}); err == nil {
+		t.Fatal("a misprefixed Required-Changed-Files path no longer halts the preflight")
+	}
+}
+
 // TestPreflightActivityAllowsANewFileThatDoesNotExistAnywhereYet confirms
 // the guard above does not false-positive on the ordinary case: an
 // Allowed-Files/Required-Changed-Files entry naming a file the ticket is

@@ -4,6 +4,7 @@ import (
 	"buildgate/internal/baseline"
 	"buildgate/internal/evidence"
 	"buildgate/internal/oraclecanary"
+	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
@@ -822,13 +823,13 @@ func recordLeftovers(ctx context.Context, input RunWorkflowInput, before []strin
 	if err != nil {
 		return err
 	}
-	allowed := input.AllowedFiles
+	scope := policy.Scope{AllowedFiles: input.AllowedFiles, Unapproved: input.ScopeUnapproved, AllowedPaths: input.AllowedPaths}
 	if input.BaselineCheck {
 		// A baseline check has no ticket, so every path a build would leave
 		// outside the repository's ignored files is out of scope.
-		allowed = []string{}
+		scope = policy.Scope{AllowedFiles: []string{}}
 	}
-	baseline.NoteLeftovers(record, left, allowed)
+	baseline.NoteLeftovers(record, left, scope)
 	return nil
 }
 
@@ -871,7 +872,7 @@ func baselineCheckFullSuiteLeftoverError(ctx context.Context, input RunWorkflowI
 		return temporal.NewApplicationErrorWithCause("read the workspace's state after the baseline full-suite verify", InfrastructureFailureType, err, attempts)
 	}
 	record := &run.BaselineVerify{Passed: true}
-	baseline.NoteLeftovers(record, left, []string{})
+	baseline.NoteLeftovers(record, left, policy.Scope{AllowedFiles: []string{}})
 	if !record.Halts() {
 		return nil
 	}

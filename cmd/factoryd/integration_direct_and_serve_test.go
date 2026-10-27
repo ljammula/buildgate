@@ -626,6 +626,7 @@ func TestIntegrationRequestTicketPreflightValidatesSpecFile(t *testing.T) {
 		"-verify-command", "true",
 		"-data-dir", dataDir,
 		"-request-ticket",
+		"-scope-approval", "approved",
 	)
 	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	out, err := cmd.CombinedOutput()
@@ -678,6 +679,7 @@ func TestIntegrationRequestTicketPreflightFailsClosedOnMalformedSpec(t *testing.
 		"-verify-command", "true",
 		"-data-dir", t.TempDir(),
 		"-request-ticket",
+		"-scope-approval", "approved",
 	)
 	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	out, err := cmd.CombinedOutput()

@@ -26,7 +26,7 @@
 31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 26 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 32 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-30 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
+28 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 46 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 30 cmd/factoryd/watch.go printRunRecap
 32 cmd/factoryd/worker_uid_separation_live_test.go TestWorkerUIDSeparationLiveDocker

@@ -99,6 +99,12 @@ type Config struct {
 	// that name counts ("__tests__/" matches "src/__tests__/a.js"). Empty
 	// (the default) falls back to policy.DefaultTestPatterns.
 	TestPatterns []string `yaml:"test_patterns"`
+	// AllowedPaths bounds every change a build makes in this repository: a
+	// changed file that matches none of these patterns fails the diff_scope
+	// gate, whatever the ticket's Allowed-Files says. The same pattern
+	// syntax and matching as TestPatterns (policy.IsTestFile). Empty (the
+	// default) bounds nothing. A person wrote it, so it always refuses.
+	AllowedPaths []string `yaml:"allowed_paths"`
 	// RequiredBinaries names executables the operator-selected worker image
 	// must provide for this repository's verify/setup commands.
 	RequiredBinaries    []string `yaml:"required_binaries"`
@@ -306,16 +312,11 @@ func (c *Config) Validate() error {
 	if c.DesignGuide != "" && !designGuideNameRE.MatchString(c.DesignGuide) {
 		return fmt.Errorf("design_guide %q must be a bare guide name (%s), not a path", c.DesignGuide, designGuideNameRE)
 	}
-	for _, p := range c.TestPatterns {
-		if p == "" {
-			return errors.New("test_patterns must not contain an empty entry")
-		}
-		if strings.HasPrefix(p, "/") {
-			return fmt.Errorf("test_patterns entry %q must not begin with \"/\": a directory entry is relative, like \"__tests__/\"", p)
-		}
-		if strings.HasSuffix(p, "/") && strings.ContainsAny(p, "*?[") {
-			return fmt.Errorf("test_patterns directory entry %q must not contain a glob character: it names a directory literally, like \"__tests__/\"", p)
-		}
+	if err := validatePathPatterns("test_patterns", c.TestPatterns); err != nil {
+		return err
+	}
+	if err := validatePathPatterns("allowed_paths", c.AllowedPaths); err != nil {
+		return err
 	}
 	if err := validateCommandList("setup", c.Setup); err != nil {
 		return err
@@ -556,4 +557,22 @@ func warnIfWorktreeDiverges(root string, headData []byte, headFound bool) {
 	case !bytes.Equal(worktreeData, headData):
 		warnOnce(path, warnReasonDiverges, worktreeData, "%s: %s in the worktree differs from the committed HEAD version -- using the committed version", FileName, path)
 	}
+}
+
+// validatePathPatterns checks the entries of a pattern list key (test_patterns,
+// allowed_paths): none empty or rooted at "/", and a directory entry (ending
+// in "/") names a directory literally, with no glob character.
+func validatePathPatterns(key string, patterns []string) error {
+	for _, p := range patterns {
+		if p == "" {
+			return fmt.Errorf("%s must not contain an empty entry", key)
+		}
+		if strings.HasPrefix(p, "/") {
+			return fmt.Errorf("%s entry %q must not begin with \"/\": a directory entry is relative, like \"__tests__/\"", key, p)
+		}
+		if strings.HasSuffix(p, "/") && strings.ContainsAny(p, "*?[") {
+			return fmt.Errorf("%s directory entry %q must not contain a glob character: it names a directory literally, like \"__tests__/\"", key, p)
+		}
+	}
+	return nil
 }

@@ -94,6 +94,8 @@ type runOptions struct {
 	RequiredContent      []string
 	TestPatterns         []string
 	TestsRequiredOptOut  string
+	AllowedPaths         []string
+	ScopeUnapproved      bool
 
 	Slice         temporalSliceOptions
 	ReleasePolicy release.MergePolicy

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/policy"
 	"buildgate/internal/run"
 )
 
@@ -1043,6 +1044,67 @@ func TestIntegrationDiffScopeGateQuarantinesOutOfScopeChange(t *testing.T) {
 	}
 	if !slices.Contains(r.ChangedFiles, "extra-out-of-scope.txt") {
 		t.Errorf("ChangedFiles = %v, want it to include the out-of-scope file", r.ChangedFiles)
+	}
+}
+
+// TestIntegrationUnapprovedScopeNotesAnOutOfScopeChange is the same run as
+// TestIntegrationDiffScopeGateQuarantinesOutOfScopeChange with -scope-approval
+// unapproved (what a request whose plan the factory approved itself passes):
+// Allowed-Files is then the model's guess, so the run is accepted and the
+// out-of-scope file is one note.
+func TestIntegrationUnapprovedScopeNotesAnOutOfScopeChange(t *testing.T) {
+	ws := newFixtureRepo(t)
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt\n"
+
+	r := runFactorydWithSpecAndFlags(t, ws, "commit_extra", "true", specContent, "30s", nil, []string{"-scope-approval", "unapproved"})
+
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q, want %q: an unapproved Allowed-Files list refuses nothing", r.State, run.StateAccepted)
+	}
+	if !r.ScopeUnapproved {
+		t.Error("the run record does not say its scope was unapproved")
+	}
+	want := policy.ScopeNotePrefix + "extra-out-of-scope.txt"
+	if !slices.Contains(r.Notes, want) {
+		t.Errorf("notes = %q, want %q", r.Notes, want)
+	}
+	for _, g := range r.GateResults {
+		if g.Check == "diff_scope" && !g.Passed {
+			t.Errorf("diff_scope = %+v, want it to pass", g)
+		}
+	}
+}
+
+// TestIntegrationRepositoryAllowedPathsRefuseWhateverTheTicketSays proves the
+// committed .factory.yml allowed_paths refuses a changed file outside it for
+// a ticket with no Allowed-Files, and for one whose list is unapproved.
+func TestIntegrationRepositoryAllowedPathsRefuseWhateverTheTicketSays(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		spec  string
+		flags []string
+	}{
+		{"no Allowed-Files", "# Ticket: fixture\n", nil},
+		{"an unapproved Allowed-Files list", "# Ticket: fixture\n\nAllowed-Files: content.txt, extra-out-of-scope.txt\n", []string{"-scope-approval", "unapproved"}},
+	} {
+		ws := newFixtureRepo(t)
+		commitFactoryYML(t, ws, "allowed_paths: [\"content.txt\"]\n")
+		r := runFactorydWithSpecAndFlags(t, ws, "commit_extra", "true", tc.spec, "30s", nil, tc.flags)
+		if r.State != run.StateQuarantined || !slices.Contains(r.AllowedPaths, "content.txt") {
+			t.Errorf("%s: state = %q, allowed paths %v, want quarantined with the repository's list recorded", tc.name, r.State, r.AllowedPaths)
+		}
+		failed := false
+		for _, g := range r.GateResults {
+			failed = failed || (g.Check == "diff_scope" && !g.Passed)
+		}
+		if !failed {
+			t.Errorf("%s: diff_scope did not fail: %v", tc.name, r.GateResults)
+		}
+	}
+	ws := newFixtureRepo(t)
+	commitFactoryYML(t, ws, "allowed_paths: [\"*.txt\"]\n")
+	if r := runFactorydWithSpecAndFlags(t, ws, "commit_extra", "true", "# Ticket: fixture\n", "30s", nil, nil); r.State != run.StateAccepted {
+		t.Errorf("a change inside allowed_paths: state = %q, want accepted", r.State)
 	}
 }
 

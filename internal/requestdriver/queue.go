@@ -83,6 +83,12 @@ type QueueEntry struct {
 	// architecture_structure all passed -- strict + the request pipeline
 	// could never pass together.
 	RequestTicket bool `json:"request_ticket,omitempty"`
+	// ScopeUnapproved is forwarded as -scope-approval unapproved (approved
+	// when false): no person approved this ticket's Allowed-Files list
+	// (request.ScopeApproved), so a file the build changes outside it is a
+	// note on the pull request and refuses nothing. BuildTicketRunArgs always
+	// forwards one of the two for a request's ticket build.
+	ScopeUnapproved bool `json:"scope_unapproved,omitempty"`
 	// IssueRef is the fully-qualified "<owner>/<repo>#<N>" GitHub issue
 	// reference this entry was submitted from (`factoryd submit -issue
 	// <url>`), empty when it wasn't. Qualified with the ISSUE's own

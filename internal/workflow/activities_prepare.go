@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -187,7 +188,13 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 			)
 		}
 	}
-	if scopePaths := dedupStrings(append(append([]string{}, input.AllowedFiles...), input.RequiredChangedFiles...)); len(scopePaths) > 0 {
+	// An Allowed-Files list no person approved is the model's guess and
+	// refuses nothing (policy.Scope), so a wrong prefix in it halts nothing.
+	declared := input.RequiredChangedFiles
+	if !input.ScopeUnapproved {
+		declared = append(slices.Clone(input.AllowedFiles), input.RequiredChangedFiles...)
+	}
+	if scopePaths := dedupStrings(declared); len(scopePaths) > 0 {
 		corrections, err := ticketspec.MisprefixedWorkspacePaths(input.WorkspacePath, scopePaths)
 		if err != nil {
 			return temporal.NewApplicationErrorWithCause("check ticket Allowed-Files/Required-Changed-Files against the workspace", InfrastructureFailureType, err)

@@ -149,6 +149,10 @@ type Ticket struct {
 	// old guess only then.
 	Branch string `json:"branch,omitempty"`
 	PRURL  string `json:"pr_url,omitempty"`
+	// ScopeAmendedBy is who re-pinned this ticket's Allowed-Files with
+	// `factoryd amend-scope` (AmendScope): a person's own widening, which
+	// makes the list one a person approved (ScopeApproved). Empty otherwise.
+	ScopeAmendedBy string `json:"scope_amended_by,omitempty"`
 	// PRState is this ticket's own PR status as the PR-review poll last
 	// left it: "" (not yet opened or not yet polled), "open" (open, no
 	// unresolved threads acted on yet is not itself tracked here -- see
@@ -1440,7 +1444,8 @@ const QuarantineCheckCodeReview = "code_review"
 const QuarantineCheckReviewReproduction = "review_reproduction"
 
 // QuarantineCheckDiffScope is set when a build quarantined because it
-// changed a file outside the ticket's own Allowed-Files: scope
+// changed a file outside the ticket's own Allowed-Files: scope, or
+// outside the repository's allowed_paths
 // (internal/policy's diff_scope gate) -- the operator's remedy is neither a redraft
 // nor a corrective round but widening the ticket's approved scope:
 // `factoryd amend-scope`. See cmd/factoryd's advanceBuilding (the
@@ -1781,7 +1786,7 @@ func (r *Request) quarantinedNextAction() string {
 		return fmt.Sprintf("review_reproduction quarantined -- the factory's run of a reviewer's reproduction test fails on the result (named above). Read the finding in the run's review evidence; if it is right, adopt the reproduction: rebuild with `factoryd retry %s`, or keep it as a test at pull-request review; if it is wrong, override the run: `factoryd override -run <run> -state accepted -by <you> -reason \"...\"`", r.ID)
 	}
 	if r.QuarantineCheck == QuarantineCheckDiffScope {
-		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files (named above). If a file is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())
+		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files, or outside the repository's allowed_paths in .factory.yml (named above). If a file outside Allowed-Files is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; a file outside allowed_paths is the repository owner's to allow in .factory.yml; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())
 	}
 	if r.QuarantineCheck == QuarantineCheckOracleGreenOnBase {
 		return fmt.Sprintf("oracle_green_on_base quarantined -- the acceptance oracle passes on the base commit, so it does not reproduce the bug and no model call was made; hand-write an oracle that fails on the current code: `factoryd reject -to spec -reason \"...\" %s`, then approve a failing oracle at oracle_review", r.ID)
