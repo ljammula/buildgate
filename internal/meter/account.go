@@ -307,14 +307,17 @@ func (a *Account) AddUsage(costInputTokens, meterInputTokens, cachedTokens, cach
 	// a running highest. input_tokens carries weightedMeterInput (the same
 	// figure feeding the limiters/ceiling above), and cachedTokens is
 	// carried alongside it as cached_input_tokens so an audit can see both
-	// the weighted figure and the raw cache-hit count behind it.
+	// the weighted figure and the raw cache-hit count behind it;
+	// costInputTokens is carried as uncached_input_tokens, the raw fresh
+	// input an audit of token use reads.
 	a.ledger.Append(LedgerRecord{
-		TS:                a.now().UTC().Format(time.RFC3339Nano),
-		InputTokens:       int64(weightedMeterInput),
-		OutputTokens:      int64(outputTokens),
-		CostMicroUSD:      int64(cost),
-		ReasoningEffort:   effort,
-		CachedInputTokens: int64(cachedTokens),
+		TS:                  a.now().UTC().Format(time.RFC3339Nano),
+		InputTokens:         int64(weightedMeterInput),
+		OutputTokens:        int64(outputTokens),
+		CostMicroUSD:        int64(cost),
+		ReasoningEffort:     effort,
+		CachedInputTokens:   int64(cachedTokens),
+		UncachedInputTokens: int64(costInputTokens),
 	})
 	if a.costLimiter != nil {
 		if costOverflow {

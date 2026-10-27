@@ -17,13 +17,13 @@ func TestLedgerAppendWritesTheDocumentedLineShape(t *testing.T) {
 	}
 	defer ledger.Close()
 	ledger.Append(LedgerRecord{TS: "2026-10-04T00:00:00Z", InputTokens: 7, OutputTokens: 3, CostMicroUSD: 11})
-	ledger.Append(LedgerRecord{TS: "2026-10-04T00:00:01Z", InputTokens: 1, OutputTokens: 2, CostMicroUSD: 0, ReasoningEffort: "high", CachedInputTokens: 9})
+	ledger.Append(LedgerRecord{TS: "2026-10-04T00:00:01Z", InputTokens: 1, OutputTokens: 2, CostMicroUSD: 0, ReasoningEffort: "high", CachedInputTokens: 9, UncachedInputTokens: 4})
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := `{"ts":"2026-10-04T00:00:00Z","input_tokens":7,"output_tokens":3,"cost_micro_usd":11}` + "\n" +
-		`{"ts":"2026-10-04T00:00:01Z","input_tokens":1,"output_tokens":2,"cost_micro_usd":0,"reasoning_effort":"high","cached_input_tokens":9}` + "\n"
+		`{"ts":"2026-10-04T00:00:01Z","input_tokens":1,"output_tokens":2,"cost_micro_usd":0,"reasoning_effort":"high","cached_input_tokens":9,"uncached_input_tokens":4}` + "\n"
 	if string(got) != want {
 		t.Fatalf("ledger = %q, want %q", got, want)
 	}
@@ -60,5 +60,29 @@ func TestReadLedgerMissingFileIsAnError(t *testing.T) {
 	records, err := ReadLedgerAll(filepath.Join(t.TempDir(), "absent.jsonl"))
 	if err == nil || records != nil {
 		t.Fatalf("ReadLedgerAll(absent) = %v, %v, want nil and an error", records, err)
+	}
+}
+
+// TestAddUsageRecordsTheRawInputSplit: the ledger's input_tokens is weighted,
+// so each usage line also carries the raw cached and uncached counts.
+func TestAddUsageRecordsTheRawInputSplit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	ledger, err := OpenLedger(path, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatalf("OpenLedger: %v", err)
+	}
+	defer ledger.Close()
+	account := NewAccount(AccountConfig{Ledger: ledger, Logger: log.New(io.Discard, "", 0)})
+	account.AddUsage(300, 1300, 1000, 0, 50, "high")
+	records, err := ReadLedgerAll(path)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("ReadLedgerAll = %+v, %v, want one record", records, err)
+	}
+	got := records[0]
+	if got.UncachedInputTokens != 300 || got.CachedInputTokens != 1000 {
+		t.Errorf("uncached, cached = %d, %d, want 300, 1000", got.UncachedInputTokens, got.CachedInputTokens)
+	}
+	if got.InputTokens != int64(WeightedInputTokens(1300, 1000)) {
+		t.Errorf("input_tokens = %d, want the weighted figure %d", got.InputTokens, WeightedInputTokens(1300, 1000))
 	}
 }
