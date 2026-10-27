@@ -129,7 +129,11 @@ func (l *Ledger) Close() error {
 // split behind it, without this relay needing to keep a second, unweighted
 // ledger. rec.UncachedInputTokens (the raw uncached input count the cost
 // is priced from) is recorded as "uncached_input_tokens" when > 0, so an
-// audit never has to back it out of the weighted input_tokens. rec.TS defaults to the current UTC time.
+// audit never has to back it out of the weighted input_tokens. Like
+// cached_input_tokens it is absent both when the count is 0 and on a line
+// written before the field existed, and on a response whose usage could not
+// be read it carries the conservative estimate, as input_tokens does (the
+// request's complete record says settled "estimate"). rec.TS defaults to the current UTC time.
 //
 // This exists for exactly the case the "usage: " log line cannot cover: that
 // line lives only in the meter's own stdout. The ledger file is on a host

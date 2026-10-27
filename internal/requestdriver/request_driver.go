@@ -1948,10 +1948,12 @@ func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket, reason error) 
 		log.Printf("request %s: keep refused plan: %v", id, err)
 		return
 	}
-	files := map[string]string{"reason.txt": DraftHaltNote(reason.Error()) + "\n"}
+	files := map[string]string{}
 	for _, ticket := range tickets {
 		files[filepath.Base(ticket.Filename)] = ticket.Content
 	}
+	// The reason wins over a drafted file of the same name: it is the record.
+	files["reason.txt"] = DraftHaltNote(reason.Error()) + "\n"
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 			log.Printf("request %s: keep refused plan: %v", id, err)
