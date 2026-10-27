@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1317,14 +1318,27 @@ func TestOpenEvidencePullRequestChecksFromTheRunsDiffBase(t *testing.T) {
 }
 
 // The pull request body lists the run's notes under one "## Notes" heading,
-// one line each, cleaned: a path with a backtick or a newline cannot break
-// out of the line. A run with no notes has no heading.
+// one line each, with every ticket-derived value in a code span: a path with
+// a backtick or a newline cannot break out of its line, and a scope name or
+// link syntax is never a mention, link or image. A run with no notes has no
+// heading.
 func TestEvidenceMarkdownListsNotesInOneSection(t *testing.T) {
-	r := &run.Run{ID: "r", Notes: []string{"required file not changed: a`b.go", "tests_red_on_base: no verdict (x)\n## injected"}}
+	r := &run.Run{ID: "r", Notes: []string{
+		"required file not changed: @acme/ui/index.ts",
+		"required content not newly present: \"[x](http://e) ![i](http://e/i.png)\"",
+		"required file not changed: a`b.go",
+		"tests_red_on_base: no verdict (x)\n## injected",
+	}}
 	md := renderEvidenceMarkdown(r, nil)
-	want := "## Notes\n\n- required file not changed: a'b.go\n- tests_red_on_base: no verdict (x) ## injected\n"
-	if !strings.Contains(md, want) {
-		t.Errorf("evidence markdown does not contain %q:\n%s", want, md)
+	for _, want := range []string{
+		"## Notes\n\n- required file not changed: `@acme/ui/index.ts`\n",
+		"- required content not newly present: `\"[x](http://e) ![i](http://e/i.png)\"`\n",
+		"- required file not changed: `a'b.go`\n",
+		"- tests_red_on_base: `no verdict (x) ## injected`\n",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("evidence markdown does not contain %q:\n%s", want, md)
+		}
 	}
 	if strings.Count(md, "## Notes") != 1 || strings.Contains(md, "\n## injected") {
 		t.Errorf("notes did not stay in one section of single lines:\n%s", md)
@@ -1332,5 +1346,17 @@ func TestEvidenceMarkdownListsNotesInOneSection(t *testing.T) {
 	r.Notes = nil
 	if md := renderEvidenceMarkdown(r, nil); strings.Contains(md, "## Notes") {
 		t.Errorf("evidence markdown has a Notes section for a run with none:\n%s", md)
+	}
+}
+
+// At most 20 notes are listed, then one line counts the rest.
+func TestEvidenceMarkdownCapsTheNotes(t *testing.T) {
+	r := &run.Run{ID: "r"}
+	for i := 0; i < 25; i++ {
+		r.Notes = append(r.Notes, "required file not changed: f"+strconv.Itoa(i)+".go")
+	}
+	md := renderEvidenceMarkdown(r, nil)
+	if strings.Count(md, "- required file not changed:") != 20 || !strings.Contains(md, "- … and 5 more\n") || strings.Contains(md, "f20.go") {
+		t.Errorf("notes not capped at 20 with a count of the rest:\n%s", md)
 	}
 }

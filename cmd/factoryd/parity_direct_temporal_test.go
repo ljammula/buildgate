@@ -699,7 +699,7 @@ func TestOnBranchTemporalPathChecksOutPRBranchNotSharedHEAD(t *testing.T) {
 // computed ChangedFiles against BaseSHA (the round's own checkout point)
 // instead of the cumulative diff -diff-base names. Found live: Flutter + Go app
 // Track M-E1, 2026-09-28, ticket 2, round
-// ...-002-conformity1-20260928-095354-95893 -- required_files_changed
+// ...-002-conformity1-20260928-095354-95893 -- the required-file check
 // failed because changed_files only listed the files THIS round touched,
 // not the ones an earlier round in the same ticket had already changed.
 //

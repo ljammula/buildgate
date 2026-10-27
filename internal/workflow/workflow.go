@@ -513,7 +513,6 @@ func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		RequestTicket:        input.RequestTicket,
 		SpecPath:             input.SpecPath,
 		LogDir:               input.LogDir,
-		Resumed:              input.ResumeFrom != nil,
 	}).Get(ctx, nil); err != nil {
 		return nil, wrapActivityFailure("preflight activity", err, nil, baseSHA, committed, worktreePath, branch)
 	}

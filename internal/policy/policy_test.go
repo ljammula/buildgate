@@ -231,21 +231,6 @@ func TestEvaluateRunNotesUnmetRequiredFilesAndContentAndRefusesNothing(t *testin
 	}
 }
 
-func TestRequiredFilesPreDirtyNoneDirty(t *testing.T) {
-	got := RequiredFilesPreDirty([]string{"unrelated.go"}, []string{"a.go", "a_test.go"})
-	if len(got) != 0 {
-		t.Errorf("got %v, want none dirty", got)
-	}
-}
-
-func TestRequiredFilesPreDirtyFindsPreExistingDirt(t *testing.T) {
-	got := RequiredFilesPreDirty([]string{"a.go", "unrelated.go"}, []string{"a.go", "a_test.go"})
-	want := []string{"a.go"}
-	if !slices.Equal(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
 func TestAbsentRequiredContentAllNew(t *testing.T) {
 	base := map[string]string{"a.dart": "class Widget {}\n"}
 	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
@@ -306,13 +291,6 @@ func TestAbsentRequiredContentDoesNotFabricateSeamMatch(t *testing.T) {
 	missing := AbsentRequiredContent(base, final, []string{"abcdef"})
 	if want := []string{"abcdef"}; !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v — no single file actually contains the marker", missing, want)
-	}
-}
-
-func TestRequiredFilesPreDirtyEmptyInitialIsFine(t *testing.T) {
-	got := RequiredFilesPreDirty(nil, []string{"a.go"})
-	if len(got) != 0 {
-		t.Errorf("got %v, want none dirty for a clean starting workspace", got)
 	}
 }
 

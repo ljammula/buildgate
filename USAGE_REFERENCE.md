@@ -1154,8 +1154,8 @@ file and it declares no `Tests-Required` opt-out.
 gates: a required file the run left unchanged, or a required string not newly
 present in a required file, becomes one line each under `## Notes` in the pull
 request (and in `run.json`'s `notes`), and the run is not refused for it. A
-required file already dirty in the workspace before the run still halts the run
-before its build.
+required file already dirty in the workspace before the run is no refusal
+either.
 
 The Ruby defaults include both `*_spec.rb` and `*_test.rb`, covering common
 RSpec and Minitest file names. Supply `test_patterns` for a repository whose

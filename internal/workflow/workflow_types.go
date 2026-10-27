@@ -725,12 +725,6 @@ type PreflightInput struct {
 	// Empty is a legitimate caller shape (no machine-readable spec file);
 	// the check is skipped, not failed, in that case.
 	SpecPath string `json:"spec_path,omitempty"`
-	// Resumed is true for a run that adopted a halted run's worktree
-	// (RunWorkflowInput.ResumeFrom): the uncommitted changes in it are that
-	// run's own work, so the pre-existing-dirty required-files refusal is
-	// skipped. The end-of-run required-file note still measures
-	// against the base commit.
-	Resumed bool `json:"resumed,omitempty"`
 }
 
 // CaptureBaseSHAInput is CaptureBaseSHAActivity's input.

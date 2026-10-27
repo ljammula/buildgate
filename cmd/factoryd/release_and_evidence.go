@@ -989,18 +989,39 @@ func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
 	}
 }
 
+// maxRenderedNotes caps the lines of the "## Notes" section.
+const maxRenderedNotes = 20
+
 // writeNotesSection lists the run's notes, one line each: facts that refuse
 // nothing (a required file or required content the run did not produce, a
-// tests_red_on_base check that reached no verdict).
+// tests_red_on_base check that reached no verdict). A note is the factory's
+// words, then ": ", then a value that comes from a ticket or a repository (a
+// file name, a required string): the value is rendered in a code span through
+// sanitizePRField, so a name like @scope/pkg or text like [x](http://e) is
+// never a mention, link or image. At most maxRenderedNotes lines are written,
+// then one line saying how many more there are.
 func writeNotesSection(b *strings.Builder, notes []string) {
 	if len(notes) == 0 {
 		return
 	}
 	b.WriteString("## Notes\n\n")
-	for _, n := range notes {
-		fmt.Fprintf(b, "- %s\n", sanitizePRField(n))
+	for i, n := range notes {
+		if i == maxRenderedNotes {
+			fmt.Fprintf(b, "- … and %d more\n", len(notes)-maxRenderedNotes)
+			break
+		}
+		fmt.Fprintf(b, "- %s\n", noteLine(n))
 	}
 	b.WriteString("\n")
+}
+
+// noteLine is one note with the value after its first ": " in a code span.
+func noteLine(n string) string {
+	words, value, ok := strings.Cut(n, ": ")
+	if !ok {
+		return "`" + sanitizePRField(n) + "`"
+	}
+	return sanitizePRField(words) + ": `" + sanitizePRField(value) + "`"
 }
 
 // writeNamedGatesSection lists every command gate and the repository's own

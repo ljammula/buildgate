@@ -396,8 +396,8 @@ func TestIntegrationRecordsDurableEventLog(t *testing.T) {
 // spec.md on every ticket while -ticket-file carries the actual per-ticket
 // Goal/Required changes/Allowed-Files:/Required-Changed-Files:. Since
 // ticketspec parses (and build_app.py receives) only -spec's own snapshot,
-// the ticket's declared scope silently never reaches diff_scope/
-// required_files_changed -- a build agent that changes nothing still gets
+// the ticket's declared scope silently never reaches diff_scope
+// and the required-file note -- a build agent that changes nothing still gets
 // accepted. This proves the run now halts before build_app.py is ever
 // invoked (FAKE_BUILD_APP_MODE deliberately left unset -- an invocation
 // would fail this test for running at all, not just for misbehaving).
@@ -487,7 +487,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatch(t *testing.T) {
 // layout (e.g. "internal/service/note.go"), not realizing the repo's real
 // application code lives under a backend/ subdirectory relative to the git
 // checkout root -- a real, correct ~25-minute sandboxed build was
-// quarantined only after the fact by diff_scope/required_files_changed,
+// quarantined only after the fact by diff_scope,
 // since the declared path was syntactically valid (invalidWorkspaceRelative
 // Paths has nothing to say about it) and simply never matched. This
 // preflight check catches it before build_app.py ever runs, the same
@@ -1096,8 +1096,7 @@ func TestIntegrationAllowsSpecTicketFileScopeMismatchWithOptOut(t *testing.T) {
 // Required-Content exclusively from -spec's own snapshot too -- a ticket
 // declaring a marker -spec omits or changes recreates the exact
 // false-accept condition this guard exists to close, just for the
-// required_content_present gate instead of diff_scope/
-// required_files_changed).
+// required-content note instead of diff_scope).
 func TestIntegrationRejectsSpecTicketFileRequiredContentMismatch(t *testing.T) {
 	ws := newFixtureRepo(t)
 

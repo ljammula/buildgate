@@ -1844,10 +1844,9 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // (errPlanInfeasible): one whose own declared Allowed-Files could
 // never pass the tests_red_on_base gate (policy.TicketTestsFeasible), and
 // one that names a path release always refuses (ticketProtectedPaths) --
-// found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
-// approved, and burned a full build round before quarantining on a
-// tests-added failure its own Allowed-Files made structurally
-// unavoidable. They are collected across every ticket rather than returned
+// a plan with the first kind reaches plan_review, is approved, and burns a full
+// build round before quarantining on tests_red_on_base, which its own
+// Allowed-Files made structurally unavoidable. They are collected across every ticket rather than returned
 // on the first hit, so a single re-plan is fed every one found. Every check
 // here reads a ticket's structure (headings, header lines, criterion
 // numbers), never the meaning of its prose: what the factory reads from

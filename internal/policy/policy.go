@@ -92,31 +92,6 @@ func stringSet(list []string) map[string]bool {
 	return set
 }
 
-// RequiredFilesPreDirty returns which of the ticket's required files
-// already had uncommitted changes before the run started. RequiredFilesChanged
-// only proves a required file's content differs from base by the end of
-// the run — it can't tell a change the agent actually made apart from an
-// edit that was already sitting uncommitted in the workspace before the
-// run began (base_sha captures only HEAD, and factoryd's own safety-net
-// commit sweeps up any uncommitted change regardless of who made it). A
-// required file that's dirty at the start recreates exactly the
-// false-accept condition RequiredFilesChanged exists to close, so the run
-// must not start at all in that case rather than let the gate pass on
-// unattributable evidence.
-func RequiredFilesPreDirty(initialDirty, required []string) []string {
-	dirtySet := make(map[string]bool, len(initialDirty))
-	for _, f := range initialDirty {
-		dirtySet[f] = true
-	}
-	var alreadyDirty []string
-	for _, f := range required {
-		if dirtySet[f] {
-			alreadyDirty = append(alreadyDirty, f)
-		}
-	}
-	return alreadyDirty
-}
-
 // AbsentRequiredContent returns the strings the ticket declared as required
 // that are not newly present in at least one required file's final content:
 // present now, and not already present in that same file at the run's base
@@ -276,8 +251,8 @@ func TestsRedOnBase(tests []string, optOutReason string, proof *TestsRedOnBaseIn
 // opt-out, and its own "Tests to add" prose said the route would be
 // exercised by a *different* ticket's test -- a ticket that, by its own
 // declared scope, could never touch a test file. A
-// human approved the plan anyway, the build ran (~$1+), every gate passed
-// except the then tests-added check, and the request quarantined for a defect planning
+// human approved the plan anyway, the build ran (~$1+), every other gate passed
+// but the plan's own Allowed-Files could never include a test file, and the request quarantined for a defect planning
 // itself could have caught for free. This function is that catch, run at
 // plan-drafting time (internal/requestdriver/request_driver.go's
 // writeAndValidateDraftedTickets) before the plan ever reaches

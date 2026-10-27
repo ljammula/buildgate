@@ -15,27 +15,21 @@ import (
 	"go.temporal.io/sdk/testsuite"
 )
 
-// TestPreflightActivityHaltsOnPreDirtyRequiredFile proves PreflightActivity
-// ports cmd/factoryd's realMain check into the Temporal path itself: a
-// ticket's declared Required-Changed-Files already dirty before the run
-// starts must halt before RunBuildActivity ever runs, not just when
-// cmd/factoryd happens to be the caller.
-func TestPreflightActivityHaltsOnPreDirtyRequiredFile(t *testing.T) {
+// TestPreflightActivityDoesNotHaltOnPreDirtyRequiredFile pins that a declared
+// Required-Changed-Files already dirty before the run is no refusal: the
+// required-file check is a note in the pull request, and a check that refuses
+// must execute something.
+func TestPreflightActivityDoesNotHaltOnPreDirtyRequiredFile(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	if err := os.WriteFile(filepath.Join(workspacePath, "content.txt"), []byte("pre-existing dirt\n"), 0o644); err != nil {
 		t.Fatalf("simulate pre-existing dirt: %v", err)
 	}
-
 	activities := &Activities{}
-	err := activities.PreflightActivity(context.Background(), PreflightInput{
+	if err := activities.PreflightActivity(context.Background(), PreflightInput{
 		WorkspacePath:        workspacePath,
 		RequiredChangedFiles: []string{"content.txt"},
-	})
-	if err == nil {
-		t.Fatal("PreflightActivity with a pre-dirty required file: want error, got nil")
-	}
-	if !hasApplicationErrorType(err, PreflightFailureType) {
-		t.Fatalf("PreflightActivity error does not carry application error type %q: %v", PreflightFailureType, err)
+	}); err != nil {
+		t.Fatalf("PreflightActivity with a pre-dirty required file: %v, want nil", err)
 	}
 }
 

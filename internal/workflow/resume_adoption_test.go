@@ -14,7 +14,6 @@ import (
 	"go.temporal.io/sdk/testsuite"
 
 	"buildgate/internal/run"
-	"buildgate/internal/testfixture"
 	wsisolation "buildgate/internal/workspace"
 )
 
@@ -152,24 +151,6 @@ func TestKeptWorktreeOfALostWorkerRevokesGroupWrite(t *testing.T) {
 	}
 	if *rollbacks != 0 || *disables != 1 {
 		t.Errorf("rollbacks = %d, revokes = %d; want 0 and 1", *rollbacks, *disables)
-	}
-}
-
-// A resumed run's own earlier changes do not trip the pre-dirty refusal.
-
-func TestPreflightActivitySkipsThePreDirtyRefusalForAResumedRun(t *testing.T) {
-	workspacePath := testfixture.NewGitRepo(t)
-	if err := os.WriteFile(filepath.Join(workspacePath, "content.txt"), []byte("the halted run's work\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	activities := &Activities{}
-	in := PreflightInput{WorkspacePath: workspacePath, RequiredChangedFiles: []string{"content.txt"}}
-	if err := activities.PreflightActivity(context.Background(), in); err == nil {
-		t.Fatal("a fresh run with a pre-dirty required file was not refused")
-	}
-	in.Resumed = true
-	if err := activities.PreflightActivity(context.Background(), in); err != nil {
-		t.Fatalf("a resumed run was refused for its own halted run's changes: %v", err)
 	}
 }
 

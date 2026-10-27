@@ -48,8 +48,9 @@ var bins = map[string]Bin{
 	"integration_tests": BinCorrective,
 	"diff_scope":        BinCorrective,
 	// The changed tests pass on the base commit (they do not exercise the
-	// change), a changed test fails on the result, or no test file changed: a
-	// build can fix each when told, in one line (SC-018).
+	// change), or no test file changed: a build can fix each when told, in one
+	// line (SC-018). Safe to tell: a test that passes on the base still fails
+	// the gate, so a token test does not get through.
 	policy.TestsRedOnBaseCheck: BinCorrective,
 	// The review fails only when the reviewer gave no verdict: there is
 	// nothing to tell a build, and the run's request waits in
