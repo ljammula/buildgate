@@ -208,6 +208,16 @@ const (
 	// retried by Temporal and the worktree is kept for a resume decision
 	// (unresolved.TemporalUnreachable).
 	TemporalUnreachableFailureType = "TemporalUnreachable"
+	// RouteCredentialFailureType marks a step whose model route's credential
+	// could not be used (sandbox.ErrRouteCredential: the Worker could not
+	// read it on the host, or it expires before the step's budget ends), so
+	// the step made no model request with it: no verdict on the work, not
+	// retried by Temporal (a retry reads the same credential), and the
+	// worktree is kept for a resume decision (unresolved.RouteCredential). A
+	// history recorded before the type existed holds
+	// RelayConfigurationFailureType or InfrastructureFailureType for the
+	// same failure and replays with what it recorded.
+	RouteCredentialFailureType = "RouteCredential"
 	// ComposeServicesRejectedFailureType marks a build whose target repo's
 	// compose file was rejected before any attempt ran (see
 	// sandbox.ErrComposeServicesRejected), kept distinct for the same

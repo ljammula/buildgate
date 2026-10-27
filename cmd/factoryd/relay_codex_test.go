@@ -273,3 +273,40 @@ func TestDoctorRouteCredentialFixNamesWhyNoRouteIsUsable(t *testing.T) {
 		t.Errorf("fix for an unrelated error = %q, want none", got)
 	}
 }
+
+// doctor fails a codex token builds already refuse, warns about one they
+// will refuse within codexTokenRunwayWarning (naming the local time they
+// start to), and passes one with more runway. It never prints the token.
+func TestDoctorChatGPTCodexCredentialWarnsBeforeBuildsRefuseTheToken(t *testing.T) {
+	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		expiresIn    time.Duration
+		wantErr      bool
+		wantAdvisory bool
+	}{
+		"plenty of runway":         {codexTokenExpiryMargin + codexTokenRunwayWarning + time.Hour, false, false},
+		"builds refuse it tonight": {codexTokenExpiryMargin + 4*time.Hour, true, true},
+		"inside the margin":        {codexTokenExpiryMargin - time.Minute, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			token := fakeCodexJWT(t, now.Add(tc.expiresIn))
+			path := writeCodexAuthFile(t, t.TempDir(), map[string]any{
+				"auth_mode": "chatgpt",
+				"tokens":    map[string]any{"access_token": token, "account_id": "acct-123"},
+			})
+			c := doctorCheckChatGPTCodexCredential(path, doctorRouteKeys{codexAuthFile: "codex_auth_file"}, now)
+			if (c.Err != nil) != tc.wantErr || c.Advisory != tc.wantAdvisory {
+				t.Fatalf("check = %+v, want error %v advisory %v", c, tc.wantErr, tc.wantAdvisory)
+			}
+			if c.Err != nil && (strings.Contains(c.Err.Error(), token) || !strings.Contains(c.Fix, "codex login")) {
+				t.Errorf("check = %+v: must name `codex login` and never the token", c)
+			}
+			if tc.wantAdvisory {
+				refuseFrom := now.Add(tc.expiresIn - codexTokenExpiryMargin).Local().Format("Mon 15:04 MST")
+				if !strings.Contains(c.Err.Error(), refuseFrom) {
+					t.Errorf("warning %q, want the local time builds stop taking the token, %s", c.Err, refuseFrom)
+				}
+			}
+		})
+	}
+}

@@ -42,12 +42,22 @@ func (e *OracleDraftJobFailure) Unwrap() error { return e.Err }
 // resume_review does not offer, so a failure that repeats on every pass (a
 // request the provider rejects, a script that crashes) never leaves cancel
 // as the only way out.
+//
+// An error that is not an OracleDraftJobFailure is one when its route's
+// credential could not be used (routeCredentialStep): the pass made no model
+// request, so it gave no verdict either.
 func firstOracleJobFailure(r *request.Request, jobErr error) *OracleDraftJobFailure {
-	var failure *OracleDraftJobFailure
-	if !errors.As(jobErr, &failure) || r.PendingResumeVerb() != "" {
+	if r.PendingResumeVerb() != "" {
 		return nil
 	}
-	return failure
+	var failure *OracleDraftJobFailure
+	if errors.As(jobErr, &failure) {
+		return failure
+	}
+	if step, lost := routeCredentialStep(jobErr); lost {
+		return &OracleDraftJobFailure{Cause: step.Cause, Err: jobErr}
+	}
+	return nil
 }
 
 // failedOracleDraft is the failed draft a drafting error leaves for

@@ -27,12 +27,15 @@ type ReadBackRunner func(ctx context.Context, dataDir string, r *request.Request
 // request.BuildInputApprovedSpec), since its answers would never reach a
 // build, and so is a read-back that already reads these
 // exact spec bytes (request.Request.ReplaceReadBack keeps its answers). The
-// read-back never stops the request: a job that is missing, over the spend
+// read-back does not stop the request: a job that is missing, over the spend
 // ceiling, failed, or wrote a refused read-back leaves a read-back with only
-// its Unavailable cause, which spec_review shows as one note. ok is false,
-// with r left as it is, when the request left spec_drafting while the job
-// ran; err is the context's when the step itself was stopped.
-func recordReadBack(ctx context.Context, dataDir string, r *request.Request, spec string, cfg WorkerConfig) (ok bool, err error) {
+// its Unavailable cause, which spec_review shows as one note. The one
+// exception is a job whose model route's credential could not be used
+// (routeCredentialStep): nothing was read, and a fresh credential would let
+// it read, so the request waits in resume_review instead and ok is false.
+// ok is false, with r left as it is, when the request left spec_drafting
+// while the job ran; err is the context's when the step itself was stopped.
+func recordReadBack(dp Deps, ctx context.Context, dataDir string, r *request.Request, spec string, cfg WorkerConfig) (ok bool, err error) {
 	if !r.SpecImported || r.BuildInput != request.BuildInputApprovedSpec {
 		return true, nil
 	}
@@ -53,6 +56,9 @@ func recordReadBack(ctx context.Context, dataDir string, r *request.Request, spe
 			log.Printf("request %s: the read-back finished but the request left spec_drafting while it ran -- discarding the pass", r.ID)
 		}
 		return false, err
+	}
+	if step, lost := routeCredentialStep(jobErr); lost {
+		return false, EnterResumeReview(dp, dataDir, r, step, time.Now())
 	}
 	rb.SpecSHA256 = specSHA
 	carryReadBackAnswers(r, r.ReplaceReadBack(rb))

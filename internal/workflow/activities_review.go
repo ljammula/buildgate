@@ -129,7 +129,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 	} else {
 		spec, err := a.relaySpecFor(input.RunWorkflowInput)
 		if err != nil {
-			return VerifyActivityResult{}, temporal.NewApplicationError(err.Error(), RelayConfigurationFailureType)
+			return VerifyActivityResult{}, temporal.NewApplicationError(err.Error(), relayFailureType(err))
 		}
 		baseRelaySpec = spec
 	}
@@ -163,7 +163,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil {
 			return VerifyActivityResult{}, temporal.NewApplicationError(
 				fmt.Sprintf("bind review route %q: %v", input.ReviewRelayPolicy.Route, err),
-				RelayConfigurationFailureType,
+				relayFailureType(err),
 			)
 		}
 		if err := input.ReviewRelayPolicy.ValidateUpstreamScheme(); err != nil {

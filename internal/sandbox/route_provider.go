@@ -16,6 +16,29 @@ import (
 	"buildgate/internal/meter"
 )
 
+// ErrRouteCredential is in the chain of every error that says a model
+// route's credential cannot be used: the host could not read it from its
+// source, it holds no value the route's access needs, or it expires before
+// the step's budget ends. The step then made no model request with it, and
+// its failure is no verdict on the work (unresolved.RouteCredential). A
+// credential the route's upstream must not carry (CredentialSafeForUpstream)
+// is a configuration fault and never wraps it.
+var ErrRouteCredential = errors.New("the model route's credential cannot be used")
+
+// RouteCredentialError is err with ErrRouteCredential added to its chain and
+// its message unchanged; nil stays nil.
+func RouteCredentialError(err error) error {
+	if err == nil || errors.Is(err, ErrRouteCredential) {
+		return err
+	}
+	return routeCredentialError{err}
+}
+
+type routeCredentialError struct{ err error }
+
+func (e routeCredentialError) Error() string   { return e.err.Error() }
+func (e routeCredentialError) Unwrap() []error { return []error{e.err, ErrRouteCredential} }
+
 // Environment names a route's provider supplies to the worker. Each holds a
 // placeholder the supervisor replaces with the secret on a request to the
 // route's endpoint; the worker never holds the secret.
@@ -236,7 +259,8 @@ func compactJSONObject(value string) (string, error) {
 // launch. expiresAt is the credential's own expiry, zero when it has none. A
 // credential that expires before now plus stepTimeout is refused: a sandbox
 // keeps the value it started with, so a step that outlives it would fail on
-// its next model call.
+// its next model call. That refusal and a missing value wrap
+// ErrRouteCredential.
 func (p RoutePolicy) RouteCredential(access RouteAccess, apiKey, githubToken, chatGPTToken, chatGPTAccountID RouteSecret, expiresAt, now time.Time, stepTimeout time.Duration) (RouteCredential, error) {
 	if access.Provider == "" {
 		return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q has no provider to push a credential to", p.Route)
@@ -253,15 +277,15 @@ func (p RoutePolicy) RouteCredential(access RouteAccess, apiKey, githubToken, ch
 	}
 	for _, name := range access.CredentialEnv {
 		if values[name] == "" {
-			return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q has no value for %s", p.Route, name)
+			return RouteCredential{}, RouteCredentialError(fmt.Errorf("sandbox runtime: route %q has no value for %s", p.Route, name))
 		}
 	}
 	if len(values) != len(access.CredentialEnv) {
 		return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q: credential does not match the route's access", p.Route)
 	}
 	if !expiresAt.IsZero() && expiresAt.Before(now.Add(stepTimeout)) {
-		return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q credential expires at %s, before this step's budget of %s ends; refresh it and retry",
-			p.Route, expiresAt.UTC().Format(time.RFC3339), stepTimeout)
+		return RouteCredential{}, RouteCredentialError(fmt.Errorf("sandbox runtime: route %q credential expires at %s, before this step's budget of %s ends; refresh it and retry",
+			p.Route, expiresAt.UTC().Format(time.RFC3339), stepTimeout))
 	}
 	return RouteCredential{Provider: access.Provider, ExpiresAt: expiresAt, values: values}, nil
 }

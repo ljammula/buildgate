@@ -885,6 +885,8 @@ func triageHalt(r *run.Run) string {
 		return factoryDirSentence(r)
 	case string(unresolved.TemporalUnreachable):
 		return temporalUnreachableTriage
+	case string(unresolved.RouteCredential):
+		return "halted: the model route's credential was missing or expired too soon, so no model request was made with it; refresh it (a chatgpt-codex route: `codex login` on the host) and resume"
 	case string(unresolved.ReproductionUnheld):
 		return "halted after the review: a reviewer's reproduction could not be held or mounted, so its finding was not judged and nothing was refused"
 	case run.HaltReasonOracleNotRunOnBase:

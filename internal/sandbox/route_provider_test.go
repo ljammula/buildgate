@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -240,10 +241,10 @@ func TestRouteCredentialRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, account, now.Add(59*time.Minute), now, time.Hour); err == nil || !strings.Contains(err.Error(), "expires at 2026-10-04T12:59:00Z") {
+	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, account, now.Add(59*time.Minute), now, time.Hour); err == nil || !strings.Contains(err.Error(), "expires at 2026-10-04T12:59:00Z") || !errors.Is(err, ErrRouteCredential) {
 		t.Errorf("a credential that expires inside the step: err = %v", err)
 	}
-	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "BG_CHATGPT_ACCOUNT") {
+	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "BG_CHATGPT_ACCOUNT") || !errors.Is(err, ErrRouteCredential) {
 		t.Errorf("a missing account id: err = %v", err)
 	}
 	if _, err := p.RouteCredential(access, NewRouteSecret("key"), RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil {
@@ -254,7 +255,7 @@ func TestRouteCredentialRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := local.RouteCredential(localAccess, RouteSecret{}, RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "no provider") {
+	if _, err := local.RouteCredential(localAccess, RouteSecret{}, RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "no provider") || errors.Is(err, ErrRouteCredential) {
 		t.Errorf("a route with no provider: err = %v", err)
 	}
 }

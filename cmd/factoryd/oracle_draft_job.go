@@ -377,7 +377,9 @@ func ecosystemSkipDraft(requestID, skipEco, logPath, oracleDir string, prev []st
 }
 
 // launchFailureCause is why a launch that returned no exit code gave no
-// verdict: unresolved.SandboxDisk when the launch was refused for want of
+// verdict: unresolved.RouteCredential when the runtime refused the route's
+// credential (sandbox.ErrRouteCredential); unresolved.SandboxDisk when the
+// launch was refused for want of
 // Docker's disk (sandbox.ErrSandboxDiskLow, also ErrSandboxNotStarted, so
 // read first); unresolved.SandboxLaunch when the sandbox never released the
 // script (sandbox.ErrSandboxNotStarted in the error's chain) and its removal
@@ -386,7 +388,12 @@ func ecosystemSkipDraft(requestID, skipEco, logPath, oracleDir string, prev []st
 // script started and its wait was lost or cut off, or the sandbox may still
 // exist).
 func launchFailureCause(err error) unresolved.Cause {
-	// Checked first: a launch refused for want of disk is also
+	// The runtime refused the route's credential before creating anything
+	// (it expires before the job's budget ends, or holds no value).
+	if errors.Is(err, sandbox.ErrRouteCredential) {
+		return unresolved.RouteCredential
+	}
+	// Checked before ErrSandboxNotStarted: a launch refused for want of disk is also
 	// sandbox.ErrSandboxNotStarted.
 	if errors.Is(err, sandbox.ErrSandboxDiskLow) && !errors.Is(err, sandbox.ErrCleanupUnconfirmed) {
 		return unresolved.SandboxDisk

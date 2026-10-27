@@ -1,11 +1,15 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/modelrole"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 )
 
@@ -169,5 +173,36 @@ func TestResolveRouteCredentialsErrorNeverEchoesSecretValue(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "sk-") {
 		t.Errorf("err = %v, must never contain a credential value", err)
+	}
+}
+
+// Every credential the resolver cannot use carries sandbox.ErrRouteCredential,
+// which is how a request learns its step ended for want of a credential
+// (unresolved.RouteCredential): a chatgpt-codex token inside the expiry
+// margin, a missing auth file, a missing GitHub token, an unset static key.
+// A static key its upstream must not carry is a configuration fault, not
+// one.
+func TestResolveRouteCredentialsMarksAnUnusableCredential(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_COPILOT_TOKEN", "")
+	t.Setenv("RC_MARK_UNSET", "")
+	t.Setenv("RC_MARK_SET", "sk-set")
+	expiring := writeCodexAuthFile(t, dir, map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens":    map[string]any{"access_token": fakeCodexJWT(t, time.Now().Add(codexTokenExpiryMargin-time.Minute)), "account_id": "acct"},
+	})
+	for name, r := range map[string]sessionconfig.Route{
+		"codex token inside the margin": {CredentialMode: "chatgpt-codex", CodexAuthFile: expiring},
+		"codex auth file missing":       {CredentialMode: "chatgpt-codex", CodexAuthFile: filepath.Join(dir, "absent.json")},
+		"copilot token missing":         {CredentialMode: "github-copilot", GitHubTokenFile: filepath.Join(dir, "absent-hosts.json")},
+		"static key unset":              {CredentialMode: "static", Upstream: "https://example.invalid", CredentialEnv: "RC_MARK_UNSET"},
+	} {
+		if _, err := resolveRouteCredentials(r); !errors.Is(err, sandbox.ErrRouteCredential) {
+			t.Errorf("%s: err = %v, want sandbox.ErrRouteCredential in its chain", name, err)
+		}
+	}
+	plaintext := sessionconfig.Route{CredentialMode: "static", Upstream: "http://models.example", CredentialEnv: "RC_MARK_SET", AllowPlaintextUpstream: true}
+	if _, err := resolveRouteCredentials(plaintext); err == nil || errors.Is(err, sandbox.ErrRouteCredential) {
+		t.Errorf("a key unsafe for a plaintext upstream: err = %v, want a refusal without ErrRouteCredential", err)
 	}
 }

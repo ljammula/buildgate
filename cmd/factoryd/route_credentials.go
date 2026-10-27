@@ -41,13 +41,19 @@ type routeCredentials struct {
 // function's own doc comment) -- so a route this resolver would fail on
 // is skipped before any relay ever launches, not only when the real
 // launch call below hits the same failure.
+//
+// A credential that cannot be read or is missing, or a ChatGPT token too
+// close to expiry, is returned with sandbox.ErrRouteCredential in its chain:
+// that is where the factory observes the fact unresolved.RouteCredential
+// names. A static key unsafe for its upstream is a configuration fault and
+// does not carry it.
 func resolveRouteCredentials(r sessionconfig.Route) (routeCredentials, error) {
 	mode := r.EffectiveCredentialMode()
 	switch mode {
 	case meter.CredentialModeChatGPTCodex:
 		token, accountID, err := resolveChatGPTCodexCredential(r.CodexAuthFile)
 		if err != nil {
-			return routeCredentials{}, err
+			return routeCredentials{}, sandbox.RouteCredentialError(err)
 		}
 		return routeCredentials{
 			chatGPTToken:     sandbox.NewRouteSecret(token),
@@ -56,10 +62,10 @@ func resolveRouteCredentials(r sessionconfig.Route) (routeCredentials, error) {
 	case meter.CredentialModeGitHubCopilot:
 		token, err := resolveGitHubCopilotToken(r.GitHubTokenFile, r.GitHubTokenKey)
 		if err != nil {
-			return routeCredentials{}, err
+			return routeCredentials{}, sandbox.RouteCredentialError(err)
 		}
 		if token == "" {
-			return routeCredentials{}, fmt.Errorf("route: github-copilot credential_mode requires a GitHub OAuth token: set github_token_file, or GITHUB_COPILOT_TOKEN")
+			return routeCredentials{}, sandbox.RouteCredentialError(fmt.Errorf("route: github-copilot credential_mode requires a GitHub OAuth token: set github_token_file, or GITHUB_COPILOT_TOKEN"))
 		}
 		return routeCredentials{githubToken: sandbox.NewRouteSecret(token)}, nil
 	default: // static
@@ -69,7 +75,7 @@ func resolveRouteCredentials(r sessionconfig.Route) (routeCredentials, error) {
 		}
 		value := os.Getenv(env)
 		if value == "" && !r.AllowNoCredential {
-			return routeCredentials{}, fmt.Errorf("route: static credential_mode requires %s in this process's environment, unless allow_no_credential: true is set for a model endpoint with no real credential to protect", env)
+			return routeCredentials{}, sandbox.RouteCredentialError(fmt.Errorf("route: static credential_mode requires %s in this process's environment, unless allow_no_credential: true is set for a model endpoint with no real credential to protect", env))
 		}
 		if value != "" && r.AllowPlaintextUpstream {
 			if err := sandbox.CredentialSafeForUpstream(r.Upstream, true, true); err != nil {

@@ -71,6 +71,13 @@ const (
 	// written, its hash no longer matched before a launch, or the launch
 	// refused its read-only mount. The reproduction was never judged.
 	ReproductionUnheld Cause = "reproduction_unheld"
+	// RouteCredential: the step's model route had no credential the factory
+	// could use: it could not be read from its source on the host (a missing
+	// or unparseable file, an unset variable), or it expires before the
+	// step's budget ends (for a chatgpt-codex route, within six hours). The
+	// factory reads it on the host before the launch, so no model request
+	// was made with it.
+	RouteCredential Cause = "route_credential"
 )
 
 // causes holds, for each cause, the operator's clause about what
@@ -89,6 +96,7 @@ var causes = map[Cause]string{
 
 	TemporalUnreachable: "factoryd lost contact with the Temporal server while the %s step ran",
 	ReproductionUnheld:  "the factory could not hold or mount the reviewer's reproduction for the %s step",
+	RouteCredential:     "the model route's credential was missing or expired too soon for the %s step, so the work was not judged; refresh it first (a chatgpt-codex route: `codex login` on the host)",
 }
 
 // Known reports whether c is a member of the closed set.

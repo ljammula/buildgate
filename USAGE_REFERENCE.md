@@ -157,6 +157,7 @@ each `daemon` child it runs.
 | Correct work waiting in `resume_review` after a review | A slow or local model's review can time out or return unparseable output; under `-code-review-policy required` that is a review with no verdict, which judges nothing and quarantines nothing: the request waits in `resume_review` with the cause, and `factoryd resume <id>` reviews the kept build again. Under `advisory` or `off` the run is not held. |
 | Docker's disk is nearly full, or a sandbox process is killed for want of memory | The factory reads Docker's free space (the meter container's `factoryd-meter statfs`) before each launch and refuses one under 2 GiB free (`sandbox_disk`, every step, the build included); a verify, baseline, full-suite or named-gate command that fails with under 1 GiB free after it exited, most of the space gone before it started, is `sandbox_disk` too, without a second run. A baseline verify that fails in a sandbox whose worker container Docker reports OOM-killed is `sandbox_memory`; a later step killed the same way is an ordinary failure, not run again, whose attempt records the reading and whose next build is told the kernel killed a process of it. The floors are constants, not config keys. The request waits in `resume_review` with the cause; a build only records the readings on its attempt (`sandbox_resources`). See USAGE.md's `resume_review` table |
 | The model provider's usage limit ran out mid-request | Nothing was judged, so nothing quarantines: the request waits in `resume_review` with cause `provider_quota` and the reason "the model provider refused the requests of the building step with its own rate or usage limit, so the work was not judged (it said to try again after ...)". The cause is read from the spend meter's record of the step's model requests (the provider answered them `429`), never from the worker's output. The time is the provider's `Retry-After` as the meter recorded it; when it sent none, a plain time of day in the codex CLI's usage-limit message is shown instead ("3:11 AM by the worker container's clock", UTC unless the image sets another), and otherwise no time. Run `factoryd resume <id>` after that time: a build it refused continues in its kept worktree, and a build whose review it refused is reviewed again without building. No session-config budget governs this limit. |
+| A model route's credential is missing or expires too soon | The factory reads the route's credential on the host before each launch (a chatgpt-codex token within 6h of its expiry, or expiring before the step's time budget ends, is refused). Nothing was sent to the model, so nothing is judged: the request waits in `resume_review` with cause `route_credential` from whichever step needed it (a spec, read-back, plan or oracle draft, or a build), and its run halts with that `HaltReasonCode` and keeps its worktree. Refresh the credential (`codex login` on the host for a chatgpt-codex route; `factoryd doctor` warns 8 hours ahead), then `factoryd resume <id>` |
 | Configured image is out of date with its own source | `factoryd doctor`/`quickstart` compare each configured image's stamped build-inputs label against the checkout named by `image_source_root` (session config, written by `factoryd configure-images`) and warn (never fail) when it's stale; `quickstart` offers to rebuild, `worker`/`serve` print one warning line at startup. Run `make install` in that checkout to rebuild. No `image_source_root` recorded (or the checkout is unreadable): nothing is checked. |
 
 ## Request lifecycle
@@ -1486,7 +1487,9 @@ roles:
 - Fails closed if `auth_mode` is not `"chatgpt"`, a token field is missing,
   or the access token expires within 6h or before the step's own time
   budget ends. Fix: `codex login` on the host; other `codex` commands leave a
-  token inside that margin as it is.
+  token inside that margin as it is. A step refused this way is no verdict on
+  the work: the request waits in `resume_review` with cause
+  `route_credential`.
 - Forces `Authorization` and `chatgpt-account-id` on every request and
   strips both from upstream error responses.
 - Pinned to `https://chatgpt.com/backend-api/codex/responses`: a leftover
@@ -1494,7 +1497,9 @@ roles:
   fails startup naming the key. `routes.<r>.credential_header` is rejected.
 - Strips `max_output_tokens` from the request body (the backend rejects
   it); everything else is forwarded unchanged.
-- `doctor` validates the auth file locally (no network call).
+- `doctor` validates the auth file locally (no network call): it fails inside
+  the 6h margin, and warns when builds will start refusing the token within
+  the next 8 hours, naming the local time they start.
 
 ### Model discovery
 

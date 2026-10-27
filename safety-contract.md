@@ -692,6 +692,24 @@ requires a new contract review and an updated machine-checkable test.
   When the pass a resume started fails so again, the request goes on to
   `oracle_review` with a failed draft, where the operator can also write
   the oracles by hand or approve without them.
+  `route_credential` is read on the host before any launch, by the
+  Worker's credential resolver and the sandbox runtime, and never from a
+  model's or the worker's output: the route's credential could not be read
+  from its source (a missing or unparseable file, an unset variable), it
+  holds no value the route's access needs, or it expires before the step's
+  budget ends (a chatgpt-codex token within 6 h of its expiry). Each
+  observing site puts one sentinel in the error's chain
+  (`sandbox.ErrRouteCredential`), and route selection adds it only when
+  every route of the role's model was skipped for that reason; a key unsafe
+  for its upstream and every other configuration fault do not carry it.
+  No model request was made with the credential, so the step gives no
+  verdict: a build or review Activity fails with its own non-retryable
+  type, the run halts with the cause and keeps its worktree, and a ticket
+  build refused before its run existed, a spec-drafting, read-back,
+  planning or oracle-drafting job wait in `resume_review` with the cause
+  instead of halting. The read-back otherwise never stops its request. An
+  oracle-drafting pass a resume started that fails so again goes on to
+  `oracle_review` as any job failure does.
   A bug request (`submit -bug`) whose first build of a ticket finds its
   reference oracle passing on the base commit halts the run before any model
   call with `oracle_passes_on_base`: a verdict on the oracle, not a lost

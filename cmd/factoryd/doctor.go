@@ -1188,7 +1188,7 @@ func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doc
 	}
 	if r.credentialMode == meter.CredentialModeChatGPTCodex {
 		if runCredentialChecks {
-			c := doctorCheckChatGPTCodexCredential(r.codexAuthFile, r.keys)
+			c := doctorCheckChatGPTCodexCredential(r.codexAuthFile, r.keys, time.Now())
 			c.Name = doctorRouteCheckName(r.label, c.Name)
 			checks = append(checks, c)
 		}
@@ -2384,14 +2384,32 @@ func effectiveCopilotUpstream(relayUpstream string) string {
 // time: auth_mode, both token fields, and the access token's own expiry
 // margin. No network call, and the token itself is never included in the
 // check's own output.
-func doctorCheckChatGPTCodexCredential(authFile string, keys doctorRouteKeys) doctorCheck {
+//
+// A token builds still take now, but will refuse within
+// codexTokenRunwayWarning, is a warning (Advisory) naming the local time
+// builds start refusing it (its expiry less codexTokenExpiryMargin): a long
+// walk started now would otherwise stop part-way with route_credential.
+func doctorCheckChatGPTCodexCredential(authFile string, keys doctorRouteKeys, now time.Time) doctorCheck {
 	name := "chatgpt codex credential"
 	fix := fmt.Sprintf("run `codex login` on the host for a new ChatGPT OAuth login, or set %s", keys.codexAuthFile)
-	if _, _, err := resolveChatGPTCodexCredential(authFile); err != nil {
+	_, _, expiresAt, err := resolveChatGPTCodexCredentialAt(authFile, now)
+	if err != nil {
 		return doctorCheck{Name: name, Err: err, Fix: fix}
+	}
+	if refuseFrom := expiresAt.Add(-codexTokenExpiryMargin); refuseFrom.Sub(now) < codexTokenRunwayWarning {
+		return doctorCheck{
+			Name:     name,
+			Err:      fmt.Errorf("builds stop taking the codex access token at %s, %s before it expires", refuseFrom.Local().Format("Mon 15:04 MST"), codexTokenExpiryMargin),
+			Fix:      "run `codex login` on the host before then",
+			Advisory: true,
+		}
 	}
 	return doctorCheck{Name: name}
 }
+
+// codexTokenRunwayWarning is how far ahead doctor warns that builds will
+// start refusing the chatgpt-codex access token: about one long walk.
+const codexTokenRunwayWarning = 8 * time.Hour
 
 // doctorCheckContextWindowConfigured is the regression check for the
 // other real bug found live 2026-09-08 (see
