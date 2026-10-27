@@ -2,11 +2,13 @@
 
 [![Publish release images](https://github.com/ljammula/buildgate/actions/workflows/publish-images.yml/badge.svg)](https://github.com/ljammula/buildgate/actions/workflows/publish-images.yml)
 
-**Hand a coding agent a ticket. Get back a pull request with the evidence
-attached. Keep the merge button.**
+**Hand your backlog to a coding agent safely: the same code you would get
+running the agent yourself, without watching it, and every pull request
+arrives with its proof. You keep the merge button.**
 
-Buildgate coordinates coding agents from a reviewed spec to a pull request,
-with sandboxed execution and independent checks.
+Buildgate runs a coding agent (Codex, pi or the Copilot CLI) from a spec you
+approve to a pull request. Every build runs in a sandbox, and every stage
+advances only on checks the factory ran itself.
 
 ## Why
 
@@ -16,10 +18,28 @@ only on factory-owned evidence.
 
 | An agent on its own | Buildgate |
 |---|---|
+| You watch it run, in your terminal | Requests queue and build unattended; you come back to pull requests and to the decisions that need you |
 | Runs on your machine with your network and credentials | Every build runs in a Docker container with **no network interface**, launched by the [OpenShell](https://github.com/NVIDIA/OpenShell) gateway |
 | "Done, all tests pass" | Nothing advances on the agent's say-so: each stage is a factory-owned policy decision against durable evidence (test results, diff shape, hashes) |
+| Breaks something it was not asked to touch | The repository's full suite (`full_suite_command`) runs in the sandbox before a pull request; a failure gets one corrective build, told what failed |
 | Spends until you notice | Model calls leave only through the sandbox's supervisor, under a per-run policy and buildgate's own spend meter |
 | Starts coding from a one-line prompt | You review the spec and the plan (and, opt-in, the acceptance tests) before code is written |
+
+**Measured against the agent alone** (`v0.0.18`): 10 requirements on five
+open-source repositories (Go, Java, Python, Ruby, TypeScript), two runs each,
+built by buildgate and by bare Codex on the same model (`gpt-6-luna`), then
+scored by tests neither had seen.
+
+| | Buildgate | Bare Codex |
+|---|---|---|
+| Runs passing the unseen tests | 17 of 20 | 19 of 20 |
+| Human interventions, spec to pull request | 0 | 0 |
+| Fresh tokens per run (uncached input + output), mean | 0.29 M | 0.28 M |
+| Minutes per run, mean | 19.8 | 24.3 |
+
+Correctness and cost are level within noise; buildgate is not a better model.
+What it adds is that the same work runs unattended, contained, and with its
+evidence on the pull request.
 
 ## What
 
