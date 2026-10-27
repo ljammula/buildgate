@@ -236,6 +236,12 @@ type Config struct {
 	// review_reproduction check is recorded. True holds and runs them.
 	ReviewReproductions *bool `yaml:"review_reproductions,omitempty"`
 
+	// ReviewAdviceRound is whether a request's accepted ticket run whose code
+	// review recorded a high-severity finding gets one advice round: a build
+	// on its pull request's branch given those findings, pushed only when it
+	// is accepted again and never refusing anything. Default false.
+	ReviewAdviceRound *bool `yaml:"review_advice_round,omitempty"`
+
 	// PlanReview, opt-in and false by default, makes every request submitted
 	// under this config wait at plan_review for a person to approve its
 	// tickets. Without it a one-ticket plan goes straight to building (the
@@ -532,6 +538,10 @@ type Settings struct {
 	// ReviewReproductions is set when the config says
 	// review_reproductions: true; the zero value holds no reproduction.
 	ReviewReproductions bool
+
+	// ReviewAdviceRound is set when the config says review_advice_round:
+	// true; the zero value starts no advice round.
+	ReviewAdviceRound bool
 
 	// PlanReview is set when the config says plan_review: true; Submit
 	// copies it onto each new request.
@@ -860,6 +870,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
 
 	boolean(&s.ReviewReproductions, c.ReviewReproductions)
+	boolean(&s.ReviewAdviceRound, c.ReviewAdviceRound)
 	boolean(&s.PlanReview, c.PlanReview)
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)

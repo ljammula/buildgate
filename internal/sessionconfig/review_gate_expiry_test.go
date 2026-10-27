@@ -99,3 +99,22 @@ func TestPlanReviewIsOffByDefaultAndTurnsOn(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewAdviceRoundDefaultsOffAndTurnsOn(t *testing.T) {
+	if DefaultSettings().ReviewAdviceRound || (Settings{}).ReviewAdviceRound {
+		t.Error("advice round on by default, want off")
+	}
+	for body, want := range map[string]bool{"review_advice_round: false\n": false, "review_advice_round: true\n": true, "review_reproductions: true\n": false} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.ReviewAdviceRound != want {
+			t.Errorf("%q: ReviewAdviceRound = %t err %v, want %t", body, s.ReviewAdviceRound, err, want)
+		}
+	}
+	if _, err := Load(writeConfig(t, "review_advice_round: 1\n")); err == nil {
+		t.Error("review_advice_round: 1 loaded, want a refusal")
+	}
+}

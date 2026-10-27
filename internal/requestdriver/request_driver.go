@@ -1117,7 +1117,7 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		// here, the one place this ticket's run is known to have reached
 		// accepted with its own Branch field populated.
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
-		return acceptTicketRun(dataDir, r, ticket, runRecord, cfg.OpenPullRequest, now)
+		return acceptAfterAdvice(dp, ctx, dataDir, r, ticket, runRecord, cfg, now)
 	case run.StateQuarantined:
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
@@ -1182,6 +1182,11 @@ func noteLostCause(dataDir, requestID, runID string) error {
 // resumeRunID is the run whose kept worktree the build continues, "" for a
 // build from scratch, and any kept run of the request has been reaped.
 func settlePriorRun(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (resumeRunID string, moved bool, err error) {
+	// The ticket's run was accepted and its advice round was left in
+	// flight: that round is settled, never followed by a build.
+	if ticket.Advice != nil {
+		return "", true, settleInterruptedAdviceRound(dp, ctx, dataDir, r, ticket, cfg, now)
+	}
 	// A human chose to continue the lost build in its kept worktree
 	// (`factoryd resume`, verb round): check it still can be, then adopt that
 	// worktree. A decision answering an earlier resume_review (a stale
@@ -1568,8 +1573,10 @@ type correctiveLaunch struct {
 // outcome. stop is true when the caller must return at once with err and
 // record nothing: the request left building while the round ran (err nil),
 // the worker was asked to stop mid-round (the round is unrecorded and its
-// budget unspent), or the outcome could not be read.
-func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf, stackBaseSHA string, escalated bool) (launched correctiveLaunch, stop bool, err error) {
+// budget unspent), or the outcome could not be read. noteRefusals is false
+// for an advice round, whose run never refuses anything: a reproduction
+// that refused it goes on no ticket's list.
+func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf, stackBaseSHA string, escalated, noteRefusals bool) (launched correctiveLaunch, stop bool, err error) {
 	var startedRunID string
 	runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
 		startedRunID = started.ID
@@ -1588,7 +1595,9 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 	})
 	// What refused the round goes on the ticket's list at once, whatever
 	// becomes of the request next.
-	noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
+	if noteRefusals {
+		noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
+	}
 	// stillInState: see AdvanceBuilding's own identical check and doc
 	// comment. A cancel that lands while this round built must not be
 	// resurrected by the caller's own r.Save calls.
@@ -1669,7 +1678,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if argValueOf(args, "-earlier-attempt") != "" {
 			recordOf = current.ID
 		}
-		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, run.StackBase(dataDir, current), executionEscalation(cfg) != nil)
+		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, run.StackBase(dataDir, current), executionEscalation(cfg) != nil, true)
 		if stop {
 			return true, err
 		}
@@ -1716,7 +1725,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 				return true, fmt.Errorf("request %s: ticket %d: load accepted %s run %q: %w", r.ID, ticket.Index, plan.label, loadID, err)
 			}
 			log.Printf("request %s: ticket %d/%d: %s %d/%d accepted, PR %s", r.ID, ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, correctiveRun.PullRequestURL)
-			return true, acceptTicketRun(dataDir, r, ticket, correctiveRun, cfg.OpenPullRequest, now)
+			return true, acceptAfterAdvice(dp, ctx, dataDir, r, ticket, correctiveRun, cfg, now)
 		}
 		if launched.unresolved != "" {
 			// No verdict on the round's work, so no quarantine: a human
@@ -1775,11 +1784,23 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 // PR-review round (runRoundAttempt) is not built here, and stays on the
 // role's model.
 func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string) ([]string, error) {
+	return correctiveBuildArgs(dataDir, r, ticket, cfg, specPath, roundID, branch, diffBase, false)
+}
+
+// correctiveBuildArgs is BuildCorrectiveArgs. onOpenPR is true for a build on
+// a branch whose pull request is already open (an advice round): like a
+// PR-review round (runRoundAttempt) it opens none, so -open-pull-request is
+// forced off and it gets no -pr-closes-issue or -pr-base.
+func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR bool) ([]string, error) {
 	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath, true)
 	if err != nil {
 		return nil, err
 	}
 	escalate(entry, cfg)
+	if onOpenPR {
+		cfg.OpenPullRequest = false
+		entry.IssueRef, entry.PRBase = "", ""
+	}
 	return append(BuildTicketRunArgs(dataDir, entry, cfg), "-on-branch", branch, "-diff-base", diffBase), nil
 }
 

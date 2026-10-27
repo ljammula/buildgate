@@ -28,6 +28,8 @@ const (
 	maxFilesListed = 50
 	// maxReviewItems bounds the unmet criteria and review findings carried.
 	maxReviewItems = 20
+	// maxAdviceFindings bounds the findings an advice round is given.
+	maxAdviceFindings = 5
 	// maxMarkdownBytes bounds Markdown's output: it goes into a prompt.
 	maxMarkdownBytes = 8000
 	// maxRounds bounds the rounds kept (the latest), maxBlockers the
@@ -114,6 +116,10 @@ type Document struct {
 	// review_reproduction failed: each one line, never the reproduction's
 	// content or the reviewer's failure scenario (SC-018).
 	ReproducedFindings []ReproducedFinding `json:"reproduced_findings,omitempty"`
+	// AdviceFindings are the high-severity findings of an accepted run's
+	// review, present only in the record an advice round's build is given
+	// (Advice): each value cut and cleaned like every other value here.
+	AdviceFindings []AdviceFinding `json:"advice_findings,omitempty"`
 	// AgentNotes are the build agent's own notes for whoever attempts the
 	// ticket next: its view, not the factory's record. They never decide
 	// Next or a bin, and Markdown puts them last (SC-018).
@@ -232,6 +238,64 @@ func reproducedFindings(r *run.Run) []ReproducedFinding {
 		out = append(out, rf)
 	}
 	return out
+}
+
+// AdviceFinding is one high-severity finding of an accepted run's review as
+// the advice round's build is told it: the reviewer's severity, the file and
+// line it names, its summary and its failure scenario. Every string is
+// cleaned.
+type AdviceFinding struct {
+	Severity        string `json:"severity"`
+	File            string `json:"file,omitempty"`
+	Line            int    `json:"line,omitempty"`
+	Summary         string `json:"summary"`
+	FailureScenario string `json:"failure_scenario,omitempty"`
+}
+
+// Advice is the record the advice round of accepted run r is given: the
+// run's end state, base, result and changed files, and its review's
+// high-severity findings (at most maxAdviceFindings, in the review's order).
+// It is built from the run record alone, and is never saved as the run's
+// handoff: an accepted run has none.
+func Advice(r *run.Run) Document {
+	doc := Document{
+		SchemaVersion: SchemaVersion, RunID: r.ID, Ticket: r.Ticket, State: string(r.State),
+		BaseSHA: clean(r.BaseSHA, maxNameLen), ResultSHA: clean(r.ResultSHA, maxNameLen),
+		ChangedFiles: cleanList(r.ChangedFiles, maxFilesListed, maxNameLen),
+	}
+	if r.CodeReview == nil {
+		return doc
+	}
+	for _, f := range r.CodeReview.Findings {
+		if f.Severity != "high" || len(doc.AdviceFindings) == maxAdviceFindings {
+			continue
+		}
+		doc.AdviceFindings = append(doc.AdviceFindings, AdviceFinding{
+			Severity: clean(f.Severity, maxWordLen), File: clean(f.File, maxNameLen), Line: max(f.Line, 0),
+			Summary: clean(f.Summary, maxSentenceLen), FailureScenario: clean(f.FailureScenario, maxSentenceLen),
+		})
+	}
+	return doc
+}
+
+// adviceIntro opens the advice section: what the findings are and what the
+// build is asked to do with them.
+const adviceIntro = "That attempt passed every check and was accepted. Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks. Check each one against the code. Fix each one that is real, with a test that fails without the fix; leave the code as it is for each one that is not. Every check, and a fresh review, runs again on what this build commits.\n\n"
+
+// line is the finding's one list line, the reviewer's words quoted.
+func (f AdviceFinding) line() string {
+	where := ""
+	switch {
+	case f.File != "" && f.Line > 0:
+		where = fmt.Sprintf(" at `%s:%d`", f.File, f.Line)
+	case f.File != "":
+		where = fmt.Sprintf(" in `%s`", f.File)
+	}
+	scenario := ""
+	if f.FailureScenario != "" {
+		scenario = "; how it would fail: " + quote(f.FailureScenario)
+	}
+	return fmt.Sprintf("- %s%s: %s%s\n", quote(f.Severity), where, quote(f.Summary), scenario)
 }
 
 // oomSentence is what a later build is told of a step whose worker Docker
@@ -505,6 +569,14 @@ func (d Document) Markdown() string {
 	if len(d.ReproducedFindings) > 0 {
 		b.WriteString("## Reproduced review findings\n\n")
 		for _, f := range d.ReproducedFindings {
+			b.WriteString(f.line())
+		}
+		b.WriteString("\n")
+	}
+	if len(d.AdviceFindings) > 0 {
+		b.WriteString("## A reviewer's concerns about the accepted change\n\n")
+		b.WriteString(adviceIntro)
+		for _, f := range d.AdviceFindings {
 			b.WriteString(f.line())
 		}
 		b.WriteString("\n")

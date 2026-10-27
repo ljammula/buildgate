@@ -11,14 +11,15 @@ import (
 const RoundRefPrefix = "refs/buildgate/rounds/"
 
 // RoundTag kinds, the Kind of a RoundTag: the first build of a ticket, then an
-// automatic corrective or conformity round, then a PR-review round, and a
-// replay run of the ticket's commits onto a new base.
+// automatic corrective or conformity round, then a PR-review round, a
+// replay run of the ticket's commits onto a new base, and an advice round.
 const (
 	RoundTagBuild      = "build"
 	RoundTagCorrective = CorrectiveRoundKind
 	RoundTagConformity = ConformityRoundKind
 	RoundTagPRReview   = "pr_review"
 	RoundTagRestack    = RestackRoundKind
+	RoundTagAdvice     = AdviceRoundKind
 )
 
 // RoundTag is one entry of a ticket's round ledger: the commit a build round
@@ -179,6 +180,28 @@ func (rs *TicketRestack) nextAction(index, count int, prURL string) string {
 		what += fmt.Sprintf(" and judged again by run %s", rs.RunID)
 	}
 	return what + "; the pull request is updated once every gate passes, and nothing is asked of you"
+}
+
+// TicketAdvice is Ticket.Advice: Of is the accepted run the advice round
+// follows, which stays the ticket's run unless the round's result is pushed;
+// Since is when the round was started.
+type TicketAdvice struct {
+	Of    string `json:"of"`
+	Since string `json:"since"`
+}
+
+// HadAdviceRound reports whether the ticket has had its one advice round:
+// one is recorded, or one is in flight.
+func (t *Ticket) HadAdviceRound() bool {
+	if t.Advice != nil {
+		return true
+	}
+	for _, rnd := range t.Rounds {
+		if rnd.Kind == AdviceRoundKind {
+			return true
+		}
+	}
+	return false
 }
 
 // TicketRestackHold is Ticket.RestackHold: since when whether the ticket

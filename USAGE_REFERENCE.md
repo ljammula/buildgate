@@ -1277,7 +1277,8 @@ build:
 | A bare `factoryd -ticket` run | Advice only: no reproduction is held or run, no `review_reproduction` check, no corrective round |
 | A restack's replay run | Advice only, the same |
 
-Severity orders the advice and nothing else. An answer without a parseable verdict is asked for
+Severity orders the advice, and with `review_advice_round` on picks what an
+advice round is given (below); nothing else. An answer without a parseable verdict is asked for
 again once at most, in the same sandbox, told nothing of the first and
 unable to read its transcript; the two calls share the 20 minutes one call
 gets, and the second is skipped when under 5 minutes are left. The evidence
@@ -1286,6 +1287,22 @@ nothing was. A call that failed is not made again in the sandbox: the factory
 launches the review once more when the spend meter's record shows its model
 served nothing, and a review that still gave no verdict leaves the request in
 `resume_review`.
+
+With the session key `review_advice_round: true` (default `false`), a
+request's ticket run that is accepted with at least one `high` finding in its
+review gets one advice round before the request moves on. It never refuses
+anything, and the request stays in `building` throughout:
+
+| | |
+|---|---|
+| When | The run (a ticket's first build, or its accepted corrective round) opened its pull request, and the ticket has had no advice round. Never with pull requests off. Skipped, with a log line, when the launch budget is reached |
+| Build | One build of the ticket on the run's branch (`-on-branch`, `-diff-base`), run `<request>-<ticket>-advice1`, with the ticket's unchanged spec and no pull request of its own. Its `-earlier-attempt` record (`rounds/<ticket>-advice/earlier-attempt.md`) says the attempt was accepted and lists its `high` findings, at most five (severity, file and line, summary, failure scenario, each one line, cut and cleaned): check each, fix each that is real with a test, leave the rest. Every gate and a fresh review run again |
+| Accepted | Its result is pushed to the pull request's branch under the checks a PR-review round's push takes (release decision allowed, same branch, the remote head an ancestor of the result, the pull request back to draft, push `<sha>:refs/heads/<branch>`, read back). Its run becomes the ticket's run, which a later ticket stacks on. Nothing is posted on the pull request; the round is on the ticket (`rounds`, kind `advice`, `pushed`) |
+| Anything else | Quarantined, halted, never started, no verdict, a release decision not allowed, a push check that refuses: nothing is pushed, the round is recorded with its reason, and the accepted run stays the ticket's. A reproduction that refused the round goes on no ticket's list |
+| Push failed | A push or read-back that fails once sent halts the request, as for a PR-review round: the commit may be on the remote |
+| Interrupted | A worker that stops mid-round leaves it in flight on the ticket (`advice`); the next pass settles it from its run, never building it again. A lost worker parks the request in `resume_review` as for any lost build; whatever is chosen there, the round is settled the same way |
+
+It counts against neither `review_corrective_rounds` nor `max_review_rounds`.
 
 A request's ticket build runs the reviewer's reproductions (the
 `review_reproduction` check, progress stage `review_reproduction`, attempt
@@ -2248,6 +2265,7 @@ limits for API-started runs.
 | `pr_budget_lines` | `400` -- the target size of one ticket's pull request, in changed lines: insertions plus deletions, as `git diff --shortstat` counts them. `0` is no budget. A negative value is refused. Planning writes one ticket when its estimate of the whole change is within the budget, and splits only a larger change, into the fewest tickets that each fit, each independently buildable and testable and never split by layer; with `0` it writes one ticket unless the spec's parts are independently shippable. The planner declares each ticket's estimate in an `Estimated-Changed-Lines:` header; the value the planning job ran under is recorded on the request (`plan_budget_lines`), and `plan_review` carries one note for each ticket whose estimate is over it. A planning target, not a cap: `release_max_insertions` and `release_max_files_changed` stay the hard limits. A running `worker` reads it at its next start (`factoryd restart`). |
 | `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, the oracle run-command edit and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
 | `review_reproductions` | `false` -- a request's ticket build's review still runs, but as advice on design, security, maintainability and risk (at most five findings, sent no spec and asked for no reproduction), so every finding is in the pull request's **Reviewer advice** and no `review_reproduction` check is recorded. `true` holds and runs each finding's reproduction (`review_reproduction`, SC-022), so a finding can block. A ticket that already has reproductions on its list still holds and runs them, and its review can still block, until the list is empty. A running `worker` reads it at its next start (`factoryd restart`). |
+| `review_advice_round` | `false` -- `true` follows a request's accepted ticket run whose review recorded a `high` finding with one advice round: a build on its pull request's branch given those findings, pushed only when accepted again, never refusing anything (the advice round, beside `-code-review-policy`). A running `worker` reads it at its next start (`factoryd restart`). |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
 | `registry_proxy_pypi_upstream` | `https://pypi.org/simple` |
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |

@@ -369,6 +369,10 @@
         "on": "every-field on",
         "reminded_at": "2026-09-10T09:00:00Z"
       },
+      "advice": {
+        "of": "every-field of",
+        "since": "every-field since"
+      },
       "retarget": {
         "from": "every-field from",
         "to": "every-field to",
