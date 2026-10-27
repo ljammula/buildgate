@@ -13,10 +13,11 @@ a wiring-only ticket has no test of its own to add and can never pass the
 tests rule below no matter what a later, differently-scoped ticket does.
 
 Tests rule: every ticket's own Allowed-Files and Required-Changed-Files
-must include at least one test file it will change. A ticket whose
-Allowed-Files names only non-test files can never pass the factory's
-tests_added gate, and the factory will reject the whole plan and ask you
-to redraft it before a human ever sees it. The one exception is a ticket
+must include at least one test file it will change, and that test must
+fail before the ticket's change and pass after it: the factory runs it on
+both. A ticket whose Allowed-Files names only non-test files can never pass
+the factory's tests_red_on_base gate, and the factory will reject the whole
+plan and ask you to redraft it before a human ever sees it. The one exception is a ticket
 that genuinely cannot be tested (e.g. a docs-only change): declare
 "Tests-Required: no -- <reason>" as an extra header line instead of
 adding a test file -- see the ticket format below.

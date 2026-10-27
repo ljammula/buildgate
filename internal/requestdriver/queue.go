@@ -115,12 +115,6 @@ type QueueEntry struct {
 	// earlier build's unmerged instruction text as genuine. Empty on a
 	// ticket's first build: the run then records its own base.
 	InstructionBase string `json:"instruction_base,omitempty"`
-	// ChangedByEarlierTickets is the files among this ticket's
-	// Required-Changed-Files that an earlier ticket of the same request
-	// changed (changedByEarlierTickets), forwarded as
-	// -changed-by-earlier-tickets. Empty for ticket 1 and every queue entry
-	// outside a request.
-	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request
 	// execution-role harness pick (request.Request.Harnesses["execution"],

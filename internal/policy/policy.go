@@ -21,7 +21,7 @@ var (
 )
 
 // AllGateChecks names every gate EvaluateRun can run, in the order it runs
-// them: the six built-in checks below, followed by CommandGateIDs()'s own
+// them: the four built-in checks below, followed by CommandGateIDs()'s own
 // registry order (policy.CommandGates) -- lint, security_audit,
 // unit_tests, integration_tests, reference_oracle today. A caller that
 // wants to require "the strong gates actually ran" rather than merely "no
@@ -40,9 +40,7 @@ var (
 var AllGateChecks = append([]string{
 	"canonical_verify",
 	"diff_scope",
-	"required_files_changed",
-	"required_content_present",
-	"tests_added",
+	TestsRedOnBaseCheck,
 	"full_suite_verify",
 }, CommandGateIDs()...)
 
@@ -68,53 +66,21 @@ func DiffScope(changed, allowed []string) (run.GateResult, []string) {
 	}, violations
 }
 
-// RequiredFilesChanged evaluates whether every file the ticket declared
-// as required actually appears in the changed-file inventory. A passing
-// canonical verification only proves the ticket's Verify-Command exited
-// 0 — it doesn't prove the required implementation change was made, since
-// a Verify-Command can pass against an unmodified file if the command
-// never depended on the missing change. This checks the same
-// already-collected changed-file inventory diff_scope uses, so a required
-// file that was never touched quarantines the run even though build and
-// verify both passed.
-//
-// changedEarlier is the files the earlier tickets of the same request
-// changed (nil for a request's first ticket and for every run outside a
-// request). Every ticket build sees the whole approved spec, so an earlier
-// ticket can do a later ticket's work in a file both may change; the later
-// ticket then has nothing left to change there. A required file this run
-// left untouched counts as changed when an earlier ticket changed it, on
-// one condition: this run itself changed at least one of its required
-// files. The obligation is then on the stack, and a ticket that did none of
-// its own required work, or a file no ticket of the stack touched, still
-// fails. The files counted that way are recorded on the gate
-// (ChangedByEarlierTickets). The rule reads only file lists.
-func RequiredFilesChanged(changed, required, changedEarlier []string) (run.GateResult, []string) {
+// UnchangedRequiredFiles returns the files the ticket declared as required
+// that do not appear in the changed-file inventory. A passing canonical
+// verification only proves the ticket's Verify-Command exited 0, not that the
+// required implementation change was made; the missing files are listed as a
+// note on the pull request. They refuse nothing: a check that refuses must
+// execute something, and this one reads only file lists.
+func UnchangedRequiredFiles(changed, required []string) []string {
 	changedSet := stringSet(changed)
 	var missing []string
-	ownChange := false
 	for _, f := range required {
-		if changedSet[f] {
-			ownChange = true
-		} else {
+		if !changedSet[f] {
 			missing = append(missing, f)
 		}
 	}
-	gate := run.GateResult{Check: "required_files_changed"}
-	if ownChange && len(missing) > 0 && len(changedEarlier) > 0 {
-		earlierSet := stringSet(changedEarlier)
-		var stillMissing []string
-		for _, f := range missing {
-			if earlierSet[f] {
-				gate.ChangedByEarlierTickets = append(gate.ChangedByEarlierTickets, f)
-			} else {
-				stillMissing = append(stillMissing, f)
-			}
-		}
-		missing = stillMissing
-	}
-	gate.Passed = len(missing) == 0
-	return gate, missing
+	return missing
 }
 
 // stringSet returns the members of list as a set.
@@ -126,51 +92,20 @@ func stringSet(list []string) map[string]bool {
 	return set
 }
 
-// RequiredFilesPreDirty returns which of the ticket's required files
-// already had uncommitted changes before the run started. RequiredFilesChanged
-// only proves a required file's content differs from base by the end of
-// the run — it can't tell a change the agent actually made apart from an
-// edit that was already sitting uncommitted in the workspace before the
-// run began (base_sha captures only HEAD, and factoryd's own safety-net
-// commit sweeps up any uncommitted change regardless of who made it). A
-// required file that's dirty at the start recreates exactly the
-// false-accept condition RequiredFilesChanged exists to close, so the run
-// must not start at all in that case rather than let the gate pass on
-// unattributable evidence.
-func RequiredFilesPreDirty(initialDirty, required []string) []string {
-	dirtySet := make(map[string]bool, len(initialDirty))
-	for _, f := range initialDirty {
-		dirtySet[f] = true
-	}
-	var alreadyDirty []string
-	for _, f := range required {
-		if dirtySet[f] {
-			alreadyDirty = append(alreadyDirty, f)
-		}
-	}
-	return alreadyDirty
-}
-
-// RequiredContentPresent evaluates whether every string the ticket
-// declared as required is newly present in at least one required file's
-// final content — present now, and not already present in that *same*
-// file at the run's base commit. RequiredFilesChanged alone only proves
-// a required file has *some* diff; a file touched only cosmetically
-// (whitespace, an unrelated line) still satisfies it. This closes that
-// gap by requiring a concrete marker of the real change (e.g. a new
-// widget's Key literal or a new test's function name) to actually
-// appear, the same way Verify-Command pins the real acceptance command
-// instead of trusting prose. baseContent and finalContent are keyed by
-// the same required file paths.
+// AbsentRequiredContent returns the strings the ticket declared as required
+// that are not newly present in at least one required file's final content:
+// present now, and not already present in that same file at the run's base
+// commit. A file touched only cosmetically still has a diff, so a concrete
+// marker of the real change (a new widget's Key literal, a new test's function
+// name) is what shows the change was made. baseContent and finalContent are
+// keyed by the same required file paths. The result is a note on the pull
+// request and refuses nothing.
 //
-// Checked per-file, not by concatenating every file's content into one
-// blob (found live, review): concatenation both discards the base/final
-// pairing a marker newly added to file B shouldn't be masked by that
-// same marker already existing in file A at base, and can fabricate a
-// match from fragments split across two files' concatenation seam that
-// exists in neither file individually — and since Go's map iteration
-// order is randomized, which seams could even form was unstable.
-func RequiredContentPresent(baseContent, finalContent map[string]string, required []string) (run.GateResult, []string) {
+// Checked per file, not by concatenating every file's content into one blob:
+// concatenation discards the base/final pairing (a marker newly added to file
+// B would be masked by the same marker already in file A at base) and can
+// fabricate a match from fragments split across the seam of two files.
+func AbsentRequiredContent(baseContent, finalContent map[string]string, required []string) []string {
 	var missing []string
 	for _, s := range required {
 		found := false
@@ -184,10 +119,7 @@ func RequiredContentPresent(baseContent, finalContent map[string]string, require
 			missing = append(missing, s)
 		}
 	}
-	return run.GateResult{
-		Check:  "required_content_present",
-		Passed: len(missing) == 0,
-	}, missing
+	return missing
 }
 
 // DefaultTestPatterns is used when the project's .factory.yml doesn't
@@ -212,7 +144,7 @@ var DefaultTestPatterns = []string{
 }
 
 // IsTestFile reports whether the repo-relative file counts as a test file
-// under patterns: the single matcher behind the tests_added gate and the
+// under patterns: the single matcher behind the tests_red_on_base gate and the
 // plan-time feasibility check. A pattern ending in "/" names a test
 // directory and matches any file with that directory as a path segment
 // sequence anywhere in its path ("__tests__/" matches "__tests__/a.js" and
@@ -240,45 +172,76 @@ func IsTestFile(file string, patterns []string) bool {
 	return false
 }
 
-// TestsAdded evaluates the tests_added gate: it passes when at least
-// one of changed matches one of patterns, matched with path.Match against
-// both the file's full (repo-relative) form and its bare basename -- so
-// the default pattern "*_test.go" matches "internal/foo/bar_test.go" via
-// the basename form, without every caller having to write "**/*_test.go"
-// (a shell-glob idiom path.Match doesn't itself support) -- or the ticket
-// declared an opt-out (optOutReason != "", ticketspec.
-// ParseTestsRequiredOptOut's return value), which always passes and is
-// reported back to the caller unchanged so it can be recorded on the
-// release decision as the reason no test was required.
-//
-// Unlike diff_scope/required_files_changed/required_content_present,
-// this gate has no "the ticket didn't declare a boundary, so skip it"
-// case: DefaultTestPatterns applies whenever patterns is empty, so the
-// gate always actually runs. A malformed pattern (path.Match's own
-// ErrBadPattern) is treated as "that one pattern never matches" rather
-// than failing the run outright -- patterns come from a repo-committed,
-// operator-authored .factory.yml, not runtime input, so a typo there
-// should show up as "no test file matched" (fixable by the repo owner),
-// not halt an unrelated run.
-func TestsAdded(changed []string, patterns []string, optOutReason string) run.GateResult {
-	if optOutReason != "" {
-		return run.GateResult{Check: "tests_added", Passed: true}
-	}
+// TestFiles returns the files of changed that count as tests under patterns
+// (DefaultTestPatterns when empty), after harness byproducts and the
+// factory-committed oracles are set aside: an oracle's own test file must not
+// satisfy the agent's obligation to add a test. A malformed pattern never
+// matches (patterns come from a committed .factory.yml, so a typo shows up as
+// "no test file changed", fixable by the repository owner, rather than
+// halting an unrelated run). These are the files the tests_red_on_base proof
+// runs.
+func TestFiles(changed, patterns []string, oracles *run.OracleEvidence) []string {
 	if len(patterns) == 0 {
 		patterns = DefaultTestPatterns
 	}
-	for _, f := range changed {
+	var tests []string
+	for _, f := range ExcludeFactoryOracles(ExcludeHarnessByproducts(changed), oracles) {
 		if IsTestFile(f, patterns) {
-			return run.GateResult{Check: "tests_added", Passed: true}
+			tests = append(tests, f)
 		}
 	}
-	return run.GateResult{Check: "tests_added", Passed: false}
+	return tests
 }
 
-// TicketTestsAddedFeasible reports whether a ticket declaring allowed as
-// its Allowed-Files could ever pass the tests_added gate (TestsAdded
-// above), given patterns (or DefaultTestPatterns when empty, mirroring
-// TestsAdded's own fallback) and the ticket's own declared Tests-Required
+// TestsRedOnBaseCheck is the check through which a change must prove it
+// changed behaviour: a test it adds or changes fails on the base commit and
+// passes on the result commit, shown by running it.
+const TestsRedOnBaseCheck = "tests_red_on_base"
+
+// TestsRedOnBaseInput is the factory's runs of the changed test files (the
+// proof): one of run.TestsRedProved, TestsRedNotExercised or
+// TestsRedNoVerdict, and a one-line reason.
+type TestsRedOnBaseInput struct {
+	Verdict string
+	Reason  string
+}
+
+// TestsRedOnBase evaluates the tests_red_on_base gate over tests (TestFiles),
+// the ticket's opt-out reason (ticketspec.ParseTestsRequiredOptOut's return
+// value; "" means none) and the proof, nil when the run took none. It
+// refuses, in order:
+//
+//   - with no opt-out and no test file changed;
+//   - a proof that every test that ran also passes on the base commit.
+//
+// An opt-out passes with no proof (the pull request names the reason). A
+// proof with no verdict, or none at all, passes and returns a note: a check
+// that executes something refuses only on what it saw run.
+func TestsRedOnBase(tests []string, optOutReason string, proof *TestsRedOnBaseInput) (run.GateResult, string) {
+	gate := run.GateResult{Check: TestsRedOnBaseCheck, Passed: true}
+	switch {
+	case optOutReason != "":
+		return gate, ""
+	case len(tests) == 0:
+		gate.Passed = false
+		return gate, ""
+	case proof == nil:
+		return gate, "tests_red_on_base: the changed tests were not run"
+	}
+	switch proof.Verdict {
+	case run.TestsRedProved:
+		return gate, ""
+	case run.TestsRedNotExercised:
+		gate.Passed = false
+		return gate, ""
+	}
+	return gate, "tests_red_on_base: no verdict (" + proof.Reason + ")"
+}
+
+// TicketTestsFeasible reports whether a ticket declaring allowed as
+// its Allowed-Files could ever pass the tests_red_on_base gate (it must be
+// able to change a test file), given patterns (or DefaultTestPatterns when
+// empty, as TestFiles does) and the ticket's own declared Tests-Required
 // opt-out reason (ticketspec.ParseTestsRequiredOptOut's return value; ""
 // means no opt-out).
 //
@@ -287,9 +250,9 @@ func TestsAdded(changed []string, patterns []string, optOutReason string) run.Ga
 // backend/internal/handler/dispatch_mux.go, it declared no Tests-Required
 // opt-out, and its own "Tests to add" prose said the route would be
 // exercised by a *different* ticket's test -- a ticket that, by its own
-// declared scope, could never touch a file TestsAdded would accept. A
-// human approved the plan anyway, the build ran (~$1+), every gate passed
-// except tests_added, and the request quarantined for a defect planning
+// declared scope, could never touch a test file. A
+// human approved the plan anyway, the build ran (~$1+), every other gate passed
+// but the plan's own Allowed-Files could never include a test file, and the request quarantined for a defect planning
 // itself could have caught for free. This function is that catch, run at
 // plan-drafting time (internal/requestdriver/request_driver.go's
 // writeAndValidateDraftedTickets) before the plan ever reaches
@@ -307,7 +270,7 @@ func TestsAdded(changed []string, patterns []string, optOutReason string) run.Ga
 // file the model hasn't named yet, so either makes a ticket feasible
 // without further checking; see matchesAllowed's own doc comment for why
 // those are the only two non-exact Allowed-Files forms.
-func TicketTestsAddedFeasible(allowed []string, patterns []string, optOutReason string) bool {
+func TicketTestsFeasible(allowed []string, patterns []string, optOutReason string) bool {
 	if optOutReason != "" {
 		return true
 	}
@@ -463,21 +426,19 @@ type EvaluateRunInput struct {
 	ChangedFiles         []string
 	AllowedFiles         []string
 	RequiredChangedFiles []string
-	// ChangedByEarlierTickets is the files the earlier tickets of the same
-	// request changed, nil outside a request's later tickets: see
-	// RequiredFilesChanged.
-	ChangedByEarlierTickets []string
 
 	RequiredContent           []string
 	RequiredContentBaseFiles  map[string]string
 	RequiredContentFinalFiles map[string]string
 
-	// TestPatterns/TestsRequiredOptOut feed the tests_added gate --
-	// see TestsAdded's own doc comment. Unlike AllowedFiles et al., this
-	// gate always runs (TestPatterns empty just means "use
-	// DefaultTestPatterns"), so there is no nil-skips-the-gate case here.
+	// TestPatterns/TestsRequiredOptOut/TestsRedOnBase feed the
+	// tests_red_on_base gate (TestsRedOnBase). Unlike AllowedFiles et al.,
+	// this gate always runs (TestPatterns empty just means "use
+	// DefaultTestPatterns"), so there is no nil-skips-the-gate case here;
+	// TestsRedOnBase is nil when the run took no proof.
 	TestPatterns        []string
 	TestsRequiredOptOut string
+	TestsRedOnBase      *TestsRedOnBaseInput
 
 	FullSuiteCommand    []string
 	FullSuiteExitCode   int
@@ -511,24 +472,24 @@ type EvaluateRunInput struct {
 
 	// Oracles is the host-collected committed-oracle evidence (nil for
 	// every run without one). It only ever REMOVES factory-authored,
-	// hash-verified paths from the diff_scope and tests_added inventories
-	// (ExcludeFactoryOracles); required_files_changed is unchanged.
+	// hash-verified paths from the diff_scope and test-file inventories
+	// (ExcludeFactoryOracles).
 	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
 }
 
 // EvaluateRunResult is EvaluateRun's outcome: every gate that actually ran
-// (in evaluation order: canonical_verify, then diff_scope,
-// required_files_changed, required_content_present, full_suite_verify,
-// each only if its input was declared), whether the run is accepted
-// overall, and — for a caller that wants to log specifics, as cmd/factoryd
-// does — the detail each non-passing check reported.
+// (in evaluation order: canonical_verify, then diff_scope, tests_red_on_base,
+// full_suite_verify, each only if its input was declared), whether the run is
+// accepted overall, the detail each non-passing check reported, and the
+// notes (one line each) the pull request lists: a required file or required
+// content the ticket declared and the run did not produce, and a
+// tests_red_on_base check that reached no verdict. Notes refuse nothing.
 type EvaluateRunResult struct {
-	GateResults            []run.GateResult
-	Accepted               bool
-	FailedChecks           []string
-	DiffScopeViolations    []string
-	MissingRequiredFiles   []string
-	MissingRequiredContent []string
+	GateResults         []run.GateResult
+	Accepted            bool
+	FailedChecks        []string
+	DiffScopeViolations []string
+	Notes               []string
 }
 
 // add records one gate's result, and its check as failed when it did not
@@ -570,36 +531,21 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	}
 
 	if input.RequiredChangedFiles != nil {
-		requiredGate, missing := RequiredFilesChanged(input.ChangedFiles, input.RequiredChangedFiles, input.ChangedByEarlierTickets)
-		result.GateResults = append(result.GateResults, requiredGate)
-		result.MissingRequiredFiles = missing
-		if !requiredGate.Passed {
-			accepted = false
-			result.FailedChecks = append(result.FailedChecks, "required_files_changed")
+		for _, f := range UnchangedRequiredFiles(input.ChangedFiles, input.RequiredChangedFiles) {
+			result.Notes = append(result.Notes, "required file not changed: "+f)
 		}
 	}
-
 	if input.RequiredContent != nil {
-		contentGate, missing := RequiredContentPresent(input.RequiredContentBaseFiles, input.RequiredContentFinalFiles, input.RequiredContent)
-		result.GateResults = append(result.GateResults, contentGate)
-		result.MissingRequiredContent = missing
-		if !contentGate.Passed {
-			accepted = false
-			result.FailedChecks = append(result.FailedChecks, "required_content_present")
+		for _, c := range AbsentRequiredContent(input.RequiredContentBaseFiles, input.RequiredContentFinalFiles, input.RequiredContent) {
+			result.Notes = append(result.Notes, fmt.Sprintf("required content not newly present: %q", c))
 		}
 	}
 
-	// tests_added always runs (see TestsAdded's own doc comment) --
-	// placed after required_content_present and before full_suite_verify,
-	// matching AllGateChecks' own ordering.
-	// The factory-committed oracle is excluded here too: otherwise its
-	// _test.go file would satisfy the agent's own obligation to add tests.
-	testsGate := TestsAdded(ExcludeFactoryOracles(ExcludeHarnessByproducts(input.ChangedFiles), input.Oracles), input.TestPatterns, input.TestsRequiredOptOut)
-	result.GateResults = append(result.GateResults, testsGate)
-	if !testsGate.Passed {
-		accepted = false
-		result.FailedChecks = append(result.FailedChecks, testsGate.Check)
+	testsGate, note := TestsRedOnBase(TestFiles(input.ChangedFiles, input.TestPatterns, input.Oracles), input.TestsRequiredOptOut, input.TestsRedOnBase)
+	if note != "" {
+		result.Notes = append(result.Notes, note)
 	}
+	accepted = result.add(testsGate) && accepted
 
 	if input.FullSuiteCommand != nil {
 		suiteGate := FullSuiteVerify(input.FullSuiteCommand, input.FullSuiteExitCode, input.FullSuiteDurationMs, input.FullSuiteLogSHA256)

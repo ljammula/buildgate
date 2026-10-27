@@ -48,27 +48,6 @@ import (
 // local ai-stack code-review pass on PR #92).
 var prClosesIssueRefPattern = regexp.MustCompile(`^[^/]+/[^/]+#[0-9]+$`)
 
-// parseChangedByEarlierTickets reads -changed-by-earlier-tickets: a
-// comma-separated list of workspace-relative paths, nil when empty. Only a
-// request's ticket build has earlier tickets, so a list without
-// -request-ticket is refused.
-func parseChangedByEarlierTickets(value string, requestTicket bool) ([]string, error) {
-	var files []string
-	for _, f := range strings.Split(value, ",") {
-		if f = strings.TrimSpace(f); f == "" {
-			continue
-		}
-		if !ticketspec.ValidWorkspaceRelativePath(f) {
-			return nil, fmt.Errorf("-changed-by-earlier-tickets: %q is not a workspace-relative path", f)
-		}
-		files = append(files, f)
-	}
-	if len(files) > 0 && !requestTicket {
-		return nil, errors.New("-changed-by-earlier-tickets is only for a request's ticket build: pass -request-ticket, or leave it out")
-	}
-	return files, nil
-}
-
 // fullSHAPattern is -diff-base's own accepted shape: a full 40-character
 // hex object ID, matching git's own canonical SHA-1 object ID length --
 // see -diff-base's flag help for why a short or symbolic ref is rejected
@@ -273,7 +252,6 @@ type runFlags struct {
 	onBranch                     *string
 	diffBase                     *string
 	instructionBase              *string
-	changedByEarlierTickets      *string
 	earlierAttempt               *string
 	resumeWorktreeOf             *string
 	replay                       *string
@@ -342,7 +320,6 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.allowSpecTicketScopeMismatch = flags.Bool("allow-spec-ticket-scope-mismatch", false, "continue when -spec and -ticket-file declare different file scopes or required content, instead of halting")
 	f.onBranch = flags.String("on-branch", "", "build on this existing branch of -workspace in a fresh worktree, instead of on a new branch from HEAD. The run never creates or deletes the branch")
 	f.instructionBase = flags.String("instruction-base", "", "commit whose instruction files the reviews read: a full 40-character id and an ancestor of the run's base commit. Empty uses the one a resumed run recorded, else the diff base")
-	f.changedByEarlierTickets = flags.String("changed-by-earlier-tickets", "", "internal: comma-separated required files an earlier ticket of the same request changed; each counts as changed when this ticket changes another required file")
 	f.earlierAttempt = flags.String("earlier-attempt", "", "file describing an earlier failed attempt at this ticket, given to the build's first prompt only and never to a review; at most 32 KiB")
 	f.diffBase = flags.String("diff-base", "", "commit the diff checks and pull request evidence measure from, instead of the run's starting commit: a full 40-character id and an ancestor of it. Build and verify still use the branch tip")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts to continue its build. Refused with -repository, -on-branch or -prior-run, or when the worktree was not kept intact")
@@ -528,7 +505,6 @@ type ticketRun struct {
 	effectiveFullSuiteCommand     string
 	allowedFiles                  []string
 	requiredChangedFiles          []string
-	changedByEarlierTickets       []string
 	testsRequiredOptOut           string
 	specTicketScopeMismatchFields []string
 	requiredContent               []string
@@ -1051,10 +1027,6 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 		return err
 	}
 	if err := validateFollowUpRunInputs(*tr.diffBase, *tr.instructionBase, *tr.earlierAttempt); err != nil {
-		return err
-	}
-	var err error
-	if tr.changedByEarlierTickets, err = parseChangedByEarlierTickets(*tr.rf.changedByEarlierTickets, *tr.rf.requestTicket); err != nil {
 		return err
 	}
 	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, replayConflicts(tr.rf))
@@ -1955,7 +1927,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	// A declared path missing a real prefix (e.g. "internal/service/note.go"
 	// for a repo whose real Go module root is backend/) is syntactically
 	// valid -- invalidWorkspaceRelativePaths above has nothing to say about
-	// it -- and so was never caught until diff_scope/required_files_changed
+	// it -- and so was never caught until diff_scope
 	// quarantined the run after a real build round had already paid its
 	// full cost (found live, 2026-09-11, against a Flutter + Go app repo:
 	// ~25 minutes of real sandboxed build time for entirely correct code,
@@ -1993,7 +1965,7 @@ func (tr *ticketRun) snapshotSpec() error {
 // checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
 func (tr *ticketRun) checkScope() error {
 	var err error
-	// The tests_added gate boundary: the ticket's own declared
+	// The tests_red_on_base gate boundary: the ticket's own declared
 	// exception, if any -- see ticketspec.ParseTestsRequiredOptOut's own
 	// doc comment.
 	tr.testsRequiredOptOut, err = ticketspec.ParseTestsRequiredOptOut(tr.specSnapshotPath)
@@ -2009,7 +1981,7 @@ func (tr *ticketRun) checkScope() error {
 	// (USAGE.md) passes an unchanging product spec.md as
 	// -spec on every ticket while -ticket-file changes per ticket, so a
 	// ticket's own declared scope silently never reaches build_app.py or
-	// the diff_scope/required_files_changed gates — a real ticket 2+ run
+	// the diff_scope gate and the required-file notes — a real ticket 2+ run
 	// against an existing repo was accepted with zero of its required
 	// changes made, because both scope gates were skipped as
 	// undeclared (input.AllowedFiles/RequiredChangedFiles == nil) rather
@@ -2167,9 +2139,9 @@ func (tr *ticketRun) checkScope() error {
 		return fmt.Errorf("ticket does not declare both Allowed-Files: and Required-Changed-Files: (required by -require-declared-scope)")
 	}
 
-	// required_files_changed alone only proves a required file has *some*
-	// diff — a file touched only cosmetically (whitespace, an unrelated
-	// line) still satisfies it. Required-Content: pins a concrete marker
+	// A required file that changed only proves it has *some* diff — a file
+	// touched only cosmetically (whitespace, an unrelated line) still
+	// counts. Required-Content: pins a concrete marker
 	// of the real change (a new widget's Key literal, a new test's
 	// function name) that must actually be newly present. Optional, like
 	// the other Required-* keys; skipped entirely when absent.
@@ -2240,7 +2212,6 @@ func (tr *ticketRun) createRunRecord() error {
 		ContractSHA256:                tr.contractSHA256,
 		SkipProjectCheck:              *tr.skipProjectCheck,
 		SpecTicketScopeMismatchFields: tr.specTicketScopeMismatchFields,
-		ChangedByEarlierTickets:       tr.changedByEarlierTickets,
 		State:                         run.StateReady,
 		Repository:                    *tr.repository,
 		ReferenceOracleDir:            *tr.referenceOracleDir,
@@ -2711,7 +2682,6 @@ func (tr *ticketRun) dispatch() error {
 			ComposeServices:          composeServicesOpts,
 			AllowedFiles:             tr.allowedFiles,
 			RequiredChangedFiles:     tr.requiredChangedFiles,
-			ChangedByEarlierTickets:  tr.changedByEarlierTickets,
 			RequiredContent:          tr.requiredContent,
 			TestPatterns:             tr.testPatterns,
 			TestsRequiredOptOut:      tr.r.TestsRequiredOptOut,

@@ -79,7 +79,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 		"-from scratch":                                     {failed: []string{"lint"}, fromScratch: true, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
 		"the attempt committed nothing":                     {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.ResultSHA = rr.BaseSHA }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
 		"the attempt recorded no branch":                    {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.Branch = "" }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
-		"a check a build is never told of":                  {failed: []string{"lint", "tests_added"}},
+		"a check a build is never told of":                  {failed: []string{"lint", "a_check_from_the_future"}},
 		"the run is another request's":                      {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.RequestID = "some-other-request" }},
 		"the ticket's spec changed since":                   {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.SpecSHA256 = strings.Repeat("0", 64) }},
 		"the handoff was changed after the run recorded it": {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.HandoffSHA256 = strings.Repeat("0", 64) }},
@@ -482,27 +482,5 @@ func assertRecordOf(t *testing.T, path, opens, attemptID string) {
 	}
 	if !strings.Contains(string(record), "(run "+attemptID+")") || !strings.Contains(string(record), "- `lint` failed (exit 2)") {
 		t.Errorf("the record is not of the quarantined attempt %s:\n%s", attemptID, record)
-	}
-}
-
-// -changed-by-earlier-tickets takes workspace-relative paths only, an empty
-// value is no list, and a list without -request-ticket is refused.
-func TestParseChangedByEarlierTickets(t *testing.T) {
-	for _, requestTicket := range []bool{true, false} {
-		if got, err := parseChangedByEarlierTickets("", requestTicket); err != nil || got != nil {
-			t.Errorf("empty, -request-ticket %v: got %v, %v; want nil, nil", requestTicket, got, err)
-		}
-	}
-	if _, err := parseChangedByEarlierTickets("main.go", false); err == nil || !strings.Contains(err.Error(), "-request-ticket") {
-		t.Errorf("a list without -request-ticket: err = %v, want a refusal naming -request-ticket", err)
-	}
-	got, err := parseChangedByEarlierTickets("main.go, docs/a.md", true)
-	if err != nil || strings.Join(got, "|") != "main.go|docs/a.md" {
-		t.Errorf("got %v, %v; want [main.go docs/a.md]", got, err)
-	}
-	for _, bad := range []string{"/etc/passwd", "../outside.go", "a/../../b"} {
-		if _, err := parseChangedByEarlierTickets(bad, true); err == nil {
-			t.Errorf("%q was accepted", bad)
-		}
 	}
 }

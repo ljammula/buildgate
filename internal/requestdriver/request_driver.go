@@ -623,7 +623,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 // One class of validation failure gets a single automatic re-plan rather
 // than an immediate halt: writeAndValidateDraftedTickets rejecting a plan
 // as infeasible (errPlanInfeasible). Found live (Flutter + Go app run 3,
-// 2026-09-28, twice in one day -- see policy.TicketTestsAddedFeasible's
+// 2026-09-28, twice in one day -- see policy.TicketTestsFeasible's
 // own doc comment): the planner (plan_tickets.py) split a ticket that
 // wires a route with no test file of its own and no Tests-Required
 // opt-out. #340 added the check that halts such a plan before it ever
@@ -674,7 +674,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		// A plan_review rejection's reason reaches plan_tickets.py the
 		// same way -- see AdvanceSpecDrafting's identical block. On a
 		// second attempt this also carries the factory-authored
-		// tests_added-infeasibility rejection appended below, exactly the
+		// tests-infeasibility rejection appended below, exactly the
 		// way a real plan_review rejection's reason would.
 		if err := writeDraftFeedback(request.PlanFeedbackPath(dataDir, r.ID), draftFeedbackText(r, request.StatePlanning, request.PlanFeedback(r), "## Plan rejected ")); err != nil {
 			return err
@@ -1822,7 +1822,7 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 // that gets a single automatic re-plan rather than an immediate halt --
 // see AdvancePlanning's own doc comment and maxPlanningAttempts. One check
 // wraps its failures with it: a ticket whose Allowed-Files could never
-// satisfy the tests_added gate (policy.TicketTestsAddedFeasible), which
+// satisfy the tests_red_on_base gate (policy.TicketTestsFeasible), which
 // reads the ticket's header lines and the project's test patterns and no
 // prose. Every other
 // validation failure this function can return (a bad heading, a missing
@@ -1842,12 +1842,11 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // to criteriaCount is claimed by at least one ticket
 // (request.ValidatePlanCoverage), then reports the infeasible tickets
 // (errPlanInfeasible): one whose own declared Allowed-Files could
-// never pass the tests_added gate (policy.TicketTestsAddedFeasible), and
+// never pass the tests_red_on_base gate (policy.TicketTestsFeasible), and
 // one that names a path release always refuses (ticketProtectedPaths) --
-// found live (Flutter + Go app run 3, 2026-09-28): a plan reached plan_review, was
-// approved, and burned a full build round before quarantining on a
-// tests_added failure its own Allowed-Files made structurally
-// unavoidable. They are collected across every ticket rather than returned
+// a plan with the first kind reaches plan_review, is approved, and burns a full
+// build round before quarantining on tests_red_on_base, which its own
+// Allowed-Files made structurally unavoidable. They are collected across every ticket rather than returned
 // on the first hit, so a single re-plan is fed every one found. Every check
 // here reads a ticket's structure (headings, header lines, criterion
 // numbers), never the meaning of its prose: what the factory reads from
@@ -1900,8 +1899,8 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		if err != nil {
 			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		}
-		if !policy.TicketTestsAddedFeasible(allowed, testPatterns, testsRequiredOptOut) {
-			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_added gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files and Required-Changed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
+		if !policy.TicketTestsFeasible(allowed, testPatterns, testsRequiredOptOut) {
+			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_red_on_base gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files and Required-Changed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
 		}
 		requestTickets = append(requestTickets, request.Ticket{Index: i + 1, SpecPath: ticketPath})
 		contents = append(contents, ticket.Content)
@@ -2207,10 +2206,6 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	changedEarlier, err := changedByEarlierTickets(dataDir, r, ticket, specPath)
-	if err != nil {
-		return nil, err
-	}
 	return &QueueEntry{
 		ID:                     id,
 		Workspace:              r.Workspace,
@@ -2252,8 +2247,6 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		PRBase: prBase,
 		// InstructionBase: see requestInstructionBase.
 		InstructionBase: instructionBase,
-		// ChangedByEarlierTickets: see changedByEarlierTickets.
-		ChangedByEarlierTickets: changedEarlier,
 		// RequestTicket: see QueueEntry.RequestTicket's own doc comment --
 		// every ticket built here is a ticketspec-format spec (the ticket's
 		// own file, or its conformity-corrective addendum), never a
@@ -2331,51 +2324,6 @@ func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
 		return "", fmt.Errorf("request %s: %s has changed since spec_review approved it -- re-approve before continuing", r.ID, requestSpecFile)
 	}
 	return filepath.Join(request.Dir(dataDir, r.ID), requestSpecFile), nil
-}
-
-// changedByEarlierTickets is the files among the ticket's
-// Required-Changed-Files (read from specPath, the spec the build is given)
-// that an earlier ticket of r changed, as of each earlier ticket's PR head
-// (its last accepted and pushed round's run, else its build's run,
-// Ticket.PRHeadRunID), as that run recorded them: the run's required_files_changed gate
-// may count such a file when this build leaves it untouched
-// (policy.RequiredFilesChanged). nil for ticket 1, for a ticket that declares
-// no required files, and when no earlier ticket changed one of them. An
-// earlier ticket with no run yet contributes nothing; a recorded run that
-// cannot be loaded is an error, so the build is not judged on a list that
-// silently lost a ticket.
-func changedByEarlierTickets(dataDir string, r *request.Request, ticket request.Ticket, specPath string) ([]string, error) {
-	if ticket.Index <= 1 {
-		return nil, nil
-	}
-	required, err := ticketspec.ParseRequiredChangedFiles(specPath)
-	if err != nil {
-		return nil, fmt.Errorf("request %s ticket %d: read required files: %w", r.ID, ticket.Index, err)
-	}
-	if len(required) == 0 {
-		return nil, nil
-	}
-	changed := map[string]bool{}
-	for i := 0; i < ticket.Index-1 && i < len(r.Tickets); i++ {
-		runID := r.Tickets[i].PRHeadRunID()
-		if runID == "" {
-			continue
-		}
-		earlier, err := run.Load(dataDir, runID)
-		if err != nil {
-			return nil, fmt.Errorf("request %s ticket %d: load ticket %d's run %s for the files it changed: %w", r.ID, ticket.Index, i+1, runID, err)
-		}
-		for _, f := range earlier.ChangedFiles {
-			changed[f] = true
-		}
-	}
-	var files []string
-	for _, f := range required {
-		if changed[f] {
-			files = append(files, f)
-		}
-	}
-	return files, nil
 }
 
 // requestInstructionBase is the commit a ticket build's reviews read the

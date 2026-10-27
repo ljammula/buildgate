@@ -198,7 +198,7 @@ func TestTriageRun(t *testing.T) {
 		{
 			// Matches a live walk's actual GateResults shape --
 			// canonical_verify is the first failing gate (diff_scope and
-			// required_files_changed also failed), so its sentence must
+			// tests_red_on_base also failed), so its sentence must
 			// name that instead of reading as the run's only problem.
 			name: "canonical_verify first names how many other gates also failed",
 			setup: func(t *testing.T, dataDir string) *run.Run {
@@ -210,7 +210,7 @@ func TestTriageRun(t *testing.T) {
 					GateResults: []run.GateResult{
 						{Check: "canonical_verify", Passed: false},
 						{Check: "diff_scope", Passed: false},
-						{Check: "required_files_changed", Passed: false},
+						{Check: "tests_red_on_base", Passed: false},
 					},
 					Attempts: []run.Attempt{
 						{Kind: "build", ExitCode: 0},
@@ -252,56 +252,28 @@ func TestTriageRun(t *testing.T) {
 			want: "diff_scope: changed internal/auth/x.go outside Allowed-Files",
 		},
 		{
-			name: "required_files_changed missing file",
-			setup: func(t *testing.T, dataDir string) *run.Run {
-				writeRunFile(t, dataDir, id, "spec.snapshot.md", "# Ticket\n\nRequired-Changed-Files: docs/CHANGELOG.md\n")
-				return &run.Run{
-					ID:           id,
-					State:        run.StateQuarantined,
-					ChangedFiles: []string{"internal/refund/refund.go"},
-					GateResults:  []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "required_files_changed", Passed: false}},
-				}
-			},
-			want: "required_files_changed: docs/CHANGELOG.md untouched",
-		},
-		{
-			name: "required_content_present missing marker",
-			setup: func(t *testing.T, dataDir string) *run.Run {
-				writeRunFile(t, dataDir, id, "spec.snapshot.md", "# Ticket\n\nRequired-Content: Key('reminder-quick-add')\n")
-				writeRunFile(t, dataDir, id, "diff.patch", "diff --git a/lib/main.dart b/lib/main.dart\n--- a/lib/main.dart\n+++ b/lib/main.dart\n+Widget build() {\n+  return Text('hi');\n+}\n")
-				return &run.Run{
-					ID:            id,
-					State:         run.StateQuarantined,
-					GateResults:   []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "required_content_present", Passed: false}},
-					DiffAvailable: true,
-				}
-			},
-			want: `required_content_present: missing "Key('reminder-quick-add')"`,
-		},
-		{
-			name: "tests_added no test file changed",
+			name: "tests_red_on_base no test file changed",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{
 					ID:           id,
 					State:        run.StateQuarantined,
 					ChangedFiles: []string{"internal/refund/refund.go"},
-					GateResults:  []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_added", Passed: false}},
+					GateResults:  []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_red_on_base", Passed: false}},
 				}
 			},
-			want: "tests_added: no test file changed",
+			want: "tests_red_on_base: no test file changed",
 		},
 		{
-			name: "tests_added opted out",
+			name: "tests_red_on_base tests pass on the base",
 			setup: func(t *testing.T, dataDir string) *run.Run {
 				return &run.Run{
-					ID:                  id,
-					State:               run.StateQuarantined,
-					ChangedFiles:        []string{"internal/refund/refund.go"},
-					GateResults:         []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_added", Passed: false}},
-					TestsRequiredOptOut: "pure config change, no behavior to test",
+					ID:             id,
+					State:          run.StateQuarantined,
+					GateResults:    []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_red_on_base", Passed: false}},
+					TestsRedOnBase: &run.TestsRedOnBase{Verdict: run.TestsRedNotExercised, Files: []run.TestsRedFile{{Path: "internal/refund/refund_test.go"}}},
 				}
 			},
-			want: "tests_added: opted out (pure config change, no behavior to test)",
+			want: `tests_red_on_base: the changed tests pass on the base commit, so they do not exercise the change ("internal/refund/refund_test.go")`,
 		},
 		{
 			name: "first failed gate wins over a later one",
@@ -314,7 +286,7 @@ func TestTriageRun(t *testing.T) {
 					GateResults: []run.GateResult{
 						{Check: "canonical_verify", Passed: true},
 						{Check: "diff_scope", Passed: false},
-						{Check: "tests_added", Passed: false},
+						{Check: "tests_red_on_base", Passed: false},
 					},
 				}
 			},
@@ -530,9 +502,9 @@ func TestTriageRunNeverDropsOrCutsSuffix(t *testing.T) {
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: false},
 			{Check: "diff_scope", Passed: false},
-			{Check: "required_files_changed", Passed: false},
-			{Check: "required_content_present", Passed: false},
-			{Check: "tests_added", Passed: false},
+			{Check: "lint", Passed: false},
+			{Check: "unit_tests", Passed: false},
+			{Check: "tests_red_on_base", Passed: false},
 			{Check: "spec_conformity", Passed: false},
 		},
 		Attempts: []run.Attempt{
@@ -574,7 +546,7 @@ func TestTriageRunQuotedMarkerAlwaysClosesItsQuoteAndKeepsTheSuffix(t *testing.T
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: false},
 			{Check: "diff_scope", Passed: false},
-			{Check: "required_files_changed", Passed: false},
+			{Check: "tests_red_on_base", Passed: false},
 		},
 		Attempts: []run.Attempt{
 			{Kind: "build", ExitCode: 0},
@@ -793,16 +765,15 @@ func TestTriageDiffScopeOracleHint(t *testing.T) {
 		// Only diff_scope failing plus a passing reference_oracle gate
 		// counts -- some other failing gate must not pick up the hint.
 		dataDir := t.TempDir()
-		writeRunFile(t, dataDir, id, "spec.snapshot.md", "# Ticket\n\nRequired-Changed-Files: docs/CHANGELOG.md\n")
 		r := &run.Run{
 			ID:                 id,
 			State:              run.StateQuarantined,
 			ChangedFiles:       []string{"internal/refund/refund.go"},
-			GateResults:        []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "required_files_changed", Passed: false}, {Check: "reference_oracle", Passed: true}},
+			GateResults:        []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_red_on_base", Passed: false}, {Check: "reference_oracle", Passed: true}},
 			ReferenceOracleDir: filepath.Join(dataDir, "oracle"),
 		}
 		got := Run(r, dataDir)
-		if got != "required_files_changed: docs/CHANGELOG.md untouched" {
+		if got != "tests_red_on_base: no test file changed" {
 			t.Errorf("Run() = %q", got)
 		}
 	})

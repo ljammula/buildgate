@@ -109,7 +109,7 @@
       "log_sha256": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
     },
     {
-      "check": "tests_added",
+      "check": "tests_red_on_base",
       "command": null,
       "passed": false,
       "exit_code": 0,
@@ -122,7 +122,7 @@
   "rescues": null,
   "request_id": "req-building",
   "triage": "The verify command failed on TestKeyScopedToAccount in every round.",
-  "handoff_sha256": "29fb43910e6634efe4aaa68de1bf6ded6a7b07fb7c9ca96eee331976bde71adc",
+  "handoff_sha256": "2233fc0c5996194fd6decbcdbb8512052a2f44cd3c36656dffb428d1840ba610",
   "created_at": "2026-09-10T09:31:00Z",
   "updated_at": "2026-09-10T09:40:00Z",
   "tokens_complete": false

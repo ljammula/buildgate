@@ -44,7 +44,7 @@ func TestIsTransientInfraErrorClassifiesNarrowly(t *testing.T) {
 
 	deterministic := []error{
 		errors.New(`prior run "r1" has not reached "accepted" (state is "quarantined"); cannot chain a new slice onto it`),
-		errors.New("policy gate did not pass: diff_scope, tests_added"),
+		errors.New("policy gate did not pass: diff_scope, tests_red_on_base"),
 		errors.New("ticket declares Required-Content: without Required-Changed-Files: — there is no required file set to search"),
 		errors.New("this run's base_sha \"abc\" does not match prior run \"r1\"'s result_sha \"def\""),
 	}

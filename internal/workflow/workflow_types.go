@@ -63,11 +63,6 @@ type RunWorkflowInput struct {
 	AllowedFiles         []string `json:"allowed_files,omitempty"`
 	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
 	RequiredContent      []string `json:"required_content,omitempty"`
-	// ChangedByEarlierTickets is the files the earlier tickets of the same
-	// request changed (-changed-by-earlier-tickets), passed to the
-	// required_files_changed gate (policy.RequiredFilesChanged). nil for a
-	// request's first ticket and every run outside a request.
-	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
 	// LogDir/CheckpointDir override Activities.LogDir/CheckpointDir for
 	// this execution when set, falling back to the Worker-static values
 	// otherwise (preserves every existing caller/test that only sets
@@ -138,7 +133,7 @@ type RunWorkflowInput struct {
 	// spec-conformity review when it was set (legacyReviewPlan). Nothing
 	// sets it.
 	SpecAcceptanceCriteria string `json:"spec_acceptance_criteria,omitempty"`
-	// TestPatterns/TestsRequiredOptOut feed the tests_added gate --
+	// TestPatterns/TestsRequiredOptOut feed the tests_red_on_base gate --
 	// see policy.EvaluateRunInput's own doc comment on the same two
 	// fields. No Worker-static fallback (like AllowedFiles/
 	// RequiredChangedFiles above, and unlike VerifyCommand): both come
@@ -453,7 +448,7 @@ type RunWorkflowInput struct {
 	// M-E1, 2026-09-28 -- a Temporal-routed corrective round (ticket 2,
 	// run ...-002-conformity1-20260928-095354-95893) recorded
 	// changed_files against BaseSHA (the round's own tiny delta)
-	// instead of the cumulative diff, so required_files_changed failed
+	// instead of the cumulative diff, so the required-file check failed
 	// even though an earlier round in the same ticket had already
 	// changed the required files -- this field, entirely absent from
 	// temporalSliceOptions/RunWorkflowInput before this fix, was the
@@ -730,12 +725,6 @@ type PreflightInput struct {
 	// Empty is a legitimate caller shape (no machine-readable spec file);
 	// the check is skipped, not failed, in that case.
 	SpecPath string `json:"spec_path,omitempty"`
-	// Resumed is true for a run that adopted a halted run's worktree
-	// (RunWorkflowInput.ResumeFrom): the uncommitted changes in it are that
-	// run's own work, so the pre-existing-dirty required-files refusal is
-	// skipped. The end-of-run required_files_changed gate still measures
-	// against the base commit.
-	Resumed bool `json:"resumed,omitempty"`
 }
 
 // CaptureBaseSHAInput is CaptureBaseSHAActivity's input.
@@ -1093,9 +1082,8 @@ type RunWorkflowResult struct {
 	DiffTruncated     bool                        `json:"diff_truncated,omitempty"`
 	DependencyChanges []evidence.DependencyChange `json:"dependency_changes"`
 	// GateResults holds every gate policy.EvaluateRun ran given the
-	// ticket's declared keys — canonical_verify always, plus diff_scope/
-	// required_files_changed/required_content_present when declared. Not
-	// a single Gate: cmd/factoryd's evaluates all of these,
+	// ticket's declared keys — canonical_verify and tests_red_on_base
+	// always, plus diff_scope when declared. Not a single Gate: cmd/factoryd's evaluates all of these,
 	// and a Temporal path evaluating only canonical_verify would be a
 	// strictly weaker acceptance oracle than the path it's meant to share
 	// logic with.
@@ -1146,6 +1134,12 @@ type RunWorkflowResult struct {
 	// ReviewReproduction.
 	ReviewReproductions        []run.FindingReproduction `json:"review_reproductions,omitempty"`
 	ReviewReproductionRechecks []run.ReviewReproduction  `json:"review_reproduction_rechecks,omitempty"`
+	// TestsRedOnBase is the factory's runs of the changed test files on the
+	// result and the base commit (run.Run.TestsRedOnBase); nil when the run
+	// took no proof. Notes are policy.EvaluateRunResult.Notes
+	// (run.Run.Notes).
+	TestsRedOnBase *run.TestsRedOnBase `json:"tests_red_on_base,omitempty"`
+	Notes          []string            `json:"notes,omitempty"`
 }
 
 // BaselineVerifyResult is RunBaselineVerifyActivity's result for a run that

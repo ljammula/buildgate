@@ -421,12 +421,12 @@ func TestIntegrationSliceChainAcceptsMatchingPriorRun(t *testing.T) {
 
 	// This test exercises prior-run chaining: the second run starts from
 	// the first run's result.
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state = %q, want %q", second.State, run.StateAccepted)
 	}
@@ -456,12 +456,12 @@ func TestIntegrationFullSuiteVerifyInvalidatesPriorRunOnRegression(t *testing.T)
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID, "-full-suite-command", "false"}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID, "-full-suite-command", "false"}, dataDir)
 	if second.State != run.StateQuarantined {
 		t.Fatalf("second run state = %q, want %q", second.State, run.StateQuarantined)
 	}
@@ -497,7 +497,7 @@ func TestIntegrationSliceChainDetectsProductSpecDrift(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
@@ -519,7 +519,7 @@ func TestIntegrationSliceChainDetectsProductSpecDrift(t *testing.T) {
 		t.Fatalf("revise spec.md: %v", err)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state = %q, want %q — a spec revision must never block or quarantine a chained run", second.State, run.StateAccepted)
 	}
@@ -556,12 +556,12 @@ func TestIntegrationSliceChainNoDriftWhenSpecUnchanged(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state = %q, want %q", second.State, run.StateAccepted)
 	}
@@ -591,12 +591,12 @@ func TestIntegrationSliceChainAcceptsIsolatedPriorRun(t *testing.T) {
 
 	// Deliberately no isolation flag on either run: the default
 	// is the whole point of this test.
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted || first.Branch == "" {
 		t.Fatalf("first run state=%q branch=%q, want accepted and isolated by default", first.State, first.Branch)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state = %q, want %q", second.State, run.StateAccepted)
 	}
@@ -637,12 +637,12 @@ func TestIntegrationSliceChainRejectsSupersededIsolatedPriorRun(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state = %q, want %q", second.State, run.StateAccepted)
 	}
@@ -651,7 +651,7 @@ func TestIntegrationSliceChainRejectsSupersededIsolatedPriorRun(t *testing.T) {
 	// skipping the second -- must be rejected even though the first run
 	// is itself perfectly valid (accepted, correct project, real
 	// result_sha), since it is no longer the chain tip.
-	third := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	third := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if third.State != run.StateHalted {
 		t.Fatalf("third run state = %q, want %q (a superseded prior run must not silently be chained onto)", third.State, run.StateHalted)
 	}
@@ -672,12 +672,12 @@ func TestIntegrationSliceChainRejectsMismatchedPriorRun(t *testing.T) {
 	wsB := newFixtureRepo(t) // a different repo entirely -> unrelated HEAD SHA
 	dataDir := t.TempDir()
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, wsA, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, wsA, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, wsB, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, wsB, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-prior-run", first.ID}, dataDir)
 	if second.State != run.StateHalted {
 		t.Fatalf("second run state = %q, want %q (base_sha must not silently accept an unrelated prior run's result_sha)", second.State, run.StateHalted)
 	}
@@ -712,7 +712,7 @@ func TestIntegrationSliceChainWithPlainTemporalAddressStillValidatesEagerly(t *t
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -771,12 +771,12 @@ func TestIntegrationSliceChainAcceptsIsolatedPriorRunViaPlainTemporal(t *testing
 		t.Fatalf("capture shared HEAD: %v", err)
 	}
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil,
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address}, dataDir)
 	if first.State != run.StateAccepted || first.Branch == "" {
 		t.Fatalf("first run state=%q branch=%q, want accepted isolated predecessor", first.State, first.Branch)
 	}
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil,
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address, "-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state=%q, want %q", second.State, run.StateAccepted)
@@ -812,13 +812,13 @@ func TestIntegrationSliceChainRejectsSupersededIsolatedPriorRunViaPlainTemporal(
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil,
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address}, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil,
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address, "-prior-run", first.ID}, dataDir)
 	if second.State != run.StateAccepted {
 		t.Fatalf("second run state = %q, want %q", second.State, run.StateAccepted)
@@ -827,7 +827,7 @@ func TestIntegrationSliceChainRejectsSupersededIsolatedPriorRunViaPlainTemporal(
 	// Third slice wrongly declares the first run as its predecessor,
 	// skipping the second -- must be rejected even though the first run is
 	// itself perfectly valid, since it is no longer the chain tip.
-	third := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil,
+	third := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address, "-prior-run", first.ID}, dataDir)
 	if third.State != run.StateHalted {
 		t.Fatalf("third run state = %q, want %q (a superseded prior run must not silently be chained onto via Temporal)", third.State, run.StateHalted)
@@ -847,7 +847,7 @@ func TestIntegrationSliceChainRejectsTraversalPriorRun(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -892,7 +892,7 @@ func TestIntegrationIsolateWorkspaceExecutesInSeparateWorktree(t *testing.T) {
 		t.Fatalf("git rev-parse HEAD: %v", err)
 	}
 
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -1030,7 +1030,7 @@ func TestIntegrationIsolateWorkspaceRollsBackOnHalt(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
-	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "rewind_and_commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{}, dataDir)
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "rewind_and_commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{}, dataDir)
 
 	if r.State != run.StateHalted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateHalted)
@@ -1096,7 +1096,7 @@ func TestIntegrationIsolateWorkspaceRejectsDataDirInsideWorkspace(t *testing.T) 
 	ws := newFixtureRepo(t)
 	dataDir := filepath.Join(ws, "factoryd-data")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1153,7 +1153,7 @@ func TestIntegrationRunRefusesWhenDataDirIsNotMountVisible(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1212,7 +1212,7 @@ func TestIntegrationRunSkipsDataDirMountCheckWhenDataDirDoesNotExistYet(t *testi
 	ws := newFixtureRepo(t)
 	dataDir := filepath.Join(t.TempDir(), "not-created-yet")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1274,7 +1274,7 @@ func TestIntegrationIsolateWorkspaceRejectsRelativeDataDirInsideWorkspace(t *tes
 	// panics if a test combines t.Setenv with t.Parallel().
 	ws := newFixtureRepo(t)
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1325,7 +1325,7 @@ func TestIntegrationIsolateWorkspaceDoesNotTouchSharedStaleEvidence(t *testing.T
 		t.Fatalf("write stale BUILD_EVIDENCE.json: %v", err)
 	}
 
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -1370,7 +1370,7 @@ func TestIntegrationIsolateWorkspaceClearsTrackedStaleEvidence(t *testing.T) {
 	// the "commit" mode writes a fresh one), so this run's isolated
 	// worktree would otherwise still carry the tracked stale copy checked
 	// out from baseSHA above.
-	r := runFactorydWithSpecAndFlags(t, ws, "commit_other", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit_other", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{})
 
 	if r.AgentEvidence != nil {
 		t.Errorf("AgentEvidence = %+v, want nil (build_app.py wrote no fresh evidence, and the tracked stale copy should have been removed from the isolated worktree before it ran)", r.AgentEvidence)
@@ -1409,7 +1409,7 @@ func TestIntegrationIsolateWorkspaceRollsBackWhenStaleEvidenceCleanupFails(t *te
 
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")

@@ -329,7 +329,7 @@ def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 # ## Commit) but never declared the separate Verify-Command:/
 # Allowed-Files:/Required-Changed-Files: keys internal/ticketspec parses
 # -- the format policy.EvaluateRun's real per-run gates (diff_scope,
-# canonical_verify, required_files_changed, required_content_present)
+# canonical_verify)
 # actually read. A generated ticket could pass every structural check
 # and still be useless to the gates that decide accept/quarantine.
 #
@@ -395,7 +395,7 @@ BACKTICK_SPAN_RE = re.compile(r"`([^`\s]+)`")
 # .graphql, .yml, ...) is anything but lowercase, so requiring that
 # excludes every CamelCase/PascalCase identifier shape without needing a
 # fixed extension allowlist. An unsatisfiable declaration like this one
-# quarantines an otherwise-correct run forever (required_files_changed
+# quarantines an otherwise-correct run forever (a required-file note
 # can never be satisfied by a path that can't appear in a real diff) --
 # the same failure class this function's own extraction rules already
 # guard against for routes/URLs/numeric examples.
@@ -439,7 +439,7 @@ def is_valid_workspace_relative_path(candidate: str) -> bool:
 	workspace-relative git diff path -- absolute, containing a `..`/`.`
 	segment, or an internal empty segment from a doubled `//` -- would
 	make the injected declaration itself unsatisfiable, quarantining an
-	otherwise-correct run forever (`required_files_changed` can never be
+	otherwise-correct run forever (a required-file note can never be
 	satisfied by a path that can't appear in a real diff). Also rejects a
 	URL (`://`) -- `internal/ticketspec`'s own check doesn't need this,
 	since a ticket author would never hand-write one, but a naive
@@ -616,8 +616,8 @@ def inject_ticketspec_keys(pilot_dir: Path, verify_command: str | None = None) -
 	all three (hand-edited, or a prior run of this same function --
 	idempotent, never double-injects), and a ticket whose `## Required
 	changes` names no extractable path at all (nothing concrete to
-	declare; leaving it undeclared skips diff_scope/required_files_changed
-	cleanly rather than risk a wrong, guessed declaration causing a false
+	declare; leaving it undeclared skips diff_scope and the
+	required-file note cleanly rather than risk a wrong, guessed declaration causing a false
 	quarantine later).
 
 	Checks each key independently (found via review): a ticket declaring

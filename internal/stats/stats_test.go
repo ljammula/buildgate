@@ -62,7 +62,7 @@ func TestComputeCountsByHand(t *testing.T) {
 	// c: quarantined on two checks after two failed rounds with different
 	// signatures, then a corrective round accepted after one failed round.
 	c1 := mk("c-001", run.StateQuarantined, "2026-10-01T02:00:00Z", failRound(1, "x"), failRound(2, "y"))
-	c1.GateResults = []run.GateResult{{Check: "canonical_verify"}, {Check: "tests_added"}, {Check: "tests_added"}, {Check: "lint", Passed: true}}
+	c1.GateResults = []run.GateResult{{Check: "canonical_verify"}, {Check: "tests_red_on_base"}, {Check: "tests_red_on_base"}, {Check: "lint", Passed: true}}
 	c2 := mk("c-001-corrective1", run.StateAccepted, "2026-10-01T03:00:00Z", failRound(1, ""), passRound(2))
 	d := mk("d-001", run.StateHalted, "2026-10-01T04:00:00Z")
 	d.HaltReasonCode = "relay_ceiling_exceeded"
@@ -91,7 +91,7 @@ func TestComputeCountsByHand(t *testing.T) {
 	if m.FailedRoundPairs != 2 || m.ComparablePairs != 2 || m.SameFailurePairs != 1 || m.NoChangePairs != 1 {
 		t.Errorf("pairs = %d/%d/%d/%d, want 2/2/1/1", m.FailedRoundPairs, m.ComparablePairs, m.SameFailurePairs, m.NoChangePairs)
 	}
-	wantQ := []Count{{"(verify_failed)", 1}, {"canonical_verify", 1}, {"tests_added", 1}}
+	wantQ := []Count{{"(verify_failed)", 1}, {"canonical_verify", 1}, {"tests_red_on_base", 1}}
 	if !equalCounts(m.QuarantinedBy, wantQ) {
 		t.Errorf("quarantined by = %v, want %v", m.QuarantinedBy, wantQ)
 	}
@@ -372,7 +372,7 @@ func TestParityBaselineRecordedSignatureAndStopFixtures(t *testing.T) {
 	}
 
 	q1 := mk("q1", run.StateQuarantined, "2026-10-01T00:00:00Z")
-	q1.GateResults = []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "code_review"}, {Check: "tests_added"}, {Check: "code_review"}}
+	q1.GateResults = []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "code_review"}, {Check: "tests_red_on_base"}, {Check: "code_review"}}
 	q2 := mk("q2", run.StateQuarantined, "2026-10-01T00:00:00Z")
 	q2.GateResults = []run.GateResult{{Check: "code_review"}}
 	q3 := mk("q3", run.StateQuarantined, "2026-10-01T00:00:00Z")
@@ -386,9 +386,9 @@ func TestParityBaselineRecordedSignatureAndStopFixtures(t *testing.T) {
 	a1 := mk("a1", run.StateAccepted, "2026-10-01T00:00:00Z")
 	a1.GateResults = []run.GateResult{{Check: "lint"}}
 	got := Compute([]*run.Run{q1, q2, q3, q4, h1, h2, h3, a1}, Options{}).Overall
-	// baseline: quarantine_checks {code_review 2, tests_added 1, (verify_failed) 1, none 1};
+	// baseline: quarantine_checks {code_review 2, tests_red_on_base 1, (verify_failed) 1, none 1};
 	// halt_reasons {relay_ceiling_exceeded 1, sandbox attempts exhausted 1, none 1}.
-	wantQ := []Count{{"code_review", 2}, {noFailedCheck, 1}, {"(verify_failed)", 1}, {"tests_added", 1}}
+	wantQ := []Count{{"code_review", 2}, {noFailedCheck, 1}, {"(verify_failed)", 1}, {"tests_red_on_base", 1}}
 	wantH := []Count{{noHaltReason, 1}, {"relay_ceiling_exceeded", 1}, {"sandbox attempts exhausted", 1}}
 	if !equalCounts(got.QuarantinedBy, wantQ) || !equalCounts(got.HaltedBy, wantH) {
 		t.Errorf("quarantined by %v, halted by %v", got.QuarantinedBy, got.HaltedBy)

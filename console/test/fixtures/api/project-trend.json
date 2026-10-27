@@ -27,7 +27,7 @@
         "runs": 1
       },
       {
-        "name": "tests_added",
+        "name": "tests_red_on_base",
         "runs": 1
       }
     ],
@@ -100,7 +100,7 @@
             "runs": 1
           },
           {
-            "name": "tests_added",
+            "name": "tests_red_on_base",
             "runs": 1
           }
         ],

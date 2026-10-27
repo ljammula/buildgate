@@ -38,7 +38,9 @@ test("a stopped run's card lists each failed check, its finding and how it is so
     within(checks[0]!).getByText("Failed (exit 1); the factory has no more to say about it."),
   ).toBeInTheDocument();
   // The attempt committed nothing, so the check on its diff was not judged.
-  expect(within(checks[1]!).getByText("tests_added: no test file changed")).toBeInTheDocument();
+  expect(
+    within(checks[1]!).getByText("tests_red_on_base: no test file changed"),
+  ).toBeInTheDocument();
   expect(
     within(checks[1]!).getByText(
       "Not judged: the attempt committed nothing, so there was no diff to check",

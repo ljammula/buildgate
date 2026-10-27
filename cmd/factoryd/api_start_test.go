@@ -105,7 +105,7 @@ func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 	dp := newTestDeps(t)
 	withFakeSandboxSettings(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
@@ -165,7 +165,7 @@ func TestAPIStartStarterUsesBoundedSupervisor(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -221,7 +221,7 @@ func TestAPIStartStarterPlumbsIsolateWorkspaceFlag(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -275,7 +275,7 @@ func TestAPIStartStarterPlumbsFullSuiteCadence(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -344,7 +344,7 @@ func TestAPIStartStarterAllowsIsolateWorkspaceWithTemporalAddress(t *testing.T) 
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -399,7 +399,7 @@ func TestAPIStartStarterPlumbsSkipProjectCheckFlag(t *testing.T) {
 	withFakeSandboxSettings(t)
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -466,7 +466,7 @@ func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testin
 	// not parallel-safe: newFixtureRepoWithoutBootstrapScaffold calls t.Setenv internally
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 
@@ -582,7 +582,7 @@ func TestAPIStartStarterPlumbsSandboxImageFlag(t *testing.T) {
 	withFakeSandboxSettings(t)
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -667,7 +667,7 @@ func TestAPIStartStarterForwardsServerConfiguredSandboxResourceLimits(t *testing
 	dp := newTestDeps(t)
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -755,7 +755,7 @@ func TestAPIStartStarterRejectsIsolatedRunIDInvalidAsGitRef(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
@@ -782,7 +782,7 @@ func TestAPIStartStarterRejectsInvalidGitRefIDWithoutExplicitIsolateWorkspace(t 
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
@@ -822,7 +822,7 @@ func TestAPIStartStarterRejectsSandboxDockerAndSandboxUser(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	for _, test := range []struct {
@@ -862,7 +862,7 @@ func TestAPIStartStarterRejectsNonAllowlistedSandboxImage(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
@@ -890,7 +890,7 @@ func TestAPIStartStarterRefusesAStartWithNoTemporalAddress(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	script, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -938,7 +938,7 @@ func TestAPIStartStarterResolvesAnEmptyTemporalAddress(t *testing.T) {
 		workspace := newFixtureRepo(t)
 		writeNativeTicketForAPI(t, workspace, "api-ticket")
 		spec := filepath.Join(t.TempDir(), "spec.md")
-		if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+		if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 			t.Fatalf("write spec: %v", err)
 		}
 		dataDir := t.TempDir()
@@ -1040,7 +1040,7 @@ func TestAPIStartStarterRunsWithExecutionRoleAlias(t *testing.T) {
 		"roles:\n  execution:\n    model: exec-alias\n")
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	sandboxImage := "operator-approved.example/worker@sha256:" + strings.Repeat("a", 64)
@@ -1128,7 +1128,7 @@ func TestAPIStartStarterForwardsEgressCABundleFlag(t *testing.T) {
 	tier2SettingsOverride.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "m"}}
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	badBundle := filepath.Join(t.TempDir(), "not-a-cert.pem")
@@ -1162,7 +1162,7 @@ func TestAPIStartStarterAllowsAllowlistedSandboxImage(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
@@ -1196,7 +1196,7 @@ func TestAPIStartStarterAppliesDefaultSandboxImage(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()
@@ -1227,7 +1227,7 @@ func TestAPIStartStarterExplicitSandboxImageWinsOverDefault(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	dataDir := t.TempDir()

@@ -110,6 +110,8 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	r.DiffAvailable = result.DiffAvailable
 	r.DiffTruncated = result.DiffTruncated
 	r.GateResults = result.GateResults
+	r.TestsRedOnBase = result.TestsRedOnBase
+	r.Notes = result.Notes
 	// Closes a known gap (see CLAIMS.md): result.Attempts carries every
 	// RunBuildActivity/RunVerifyActivity attempt, mirroring the direct
 	// path's own r.Attempts — previously left empty for every

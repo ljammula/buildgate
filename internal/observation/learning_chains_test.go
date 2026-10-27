@@ -19,7 +19,7 @@ func learningPair() (*run.Run, *run.Run) {
 		ProjectConfigSHA256: strings.Repeat("a", 64), SpecSHA256: strings.Repeat("b", 64),
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: false, Command: []string{"make", "verify"}},
-			{Check: "tests_added", Passed: false},
+			{Check: "tests_red_on_base", Passed: false},
 			{Check: "diff_scope", Passed: true},
 		},
 	}
@@ -30,7 +30,7 @@ func learningPair() (*run.Run, *run.Run) {
 		ProjectConfigCommitSHA: "base-b", ProjectConfigSHA256: strings.Repeat("a", 64), SpecSHA256: strings.Repeat("b", 64),
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: true, Command: []string{"make", "verify"}},
-			{Check: "tests_added", Passed: true},
+			{Check: "tests_red_on_base", Passed: true},
 		},
 	}
 	return failed, accepted
@@ -52,7 +52,7 @@ func TestLearningChainsUseOnlyDirectImmutableLinksAndStructuredFields(t *testing
 	if chain.RequestID != failed.RequestID || chain.Ticket != failed.Ticket || chain.FailedRunID != failed.ID || chain.AcceptedRunID != accepted.ID {
 		t.Errorf("chain identity = %+v", chain)
 	}
-	if !reflect.DeepEqual(chain.FailedCheckTypes, []string{"canonical_verify", "tests_added"}) {
+	if !reflect.DeepEqual(chain.FailedCheckTypes, []string{"canonical_verify", "tests_red_on_base"}) {
 		t.Errorf("failed checks = %v", chain.FailedCheckTypes)
 	}
 	if chain.FailedConfigCommitSHA != "base-a" || chain.AcceptedConfigCommitSHA != "base-b" ||

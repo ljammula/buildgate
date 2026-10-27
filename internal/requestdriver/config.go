@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"buildgate/internal/requestsubmit"
@@ -266,9 +265,6 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	}
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
-	}
-	if len(entry.ChangedByEarlierTickets) > 0 {
-		args = append(args, "-changed-by-earlier-tickets", strings.Join(entry.ChangedByEarlierTickets, ","))
 	}
 	// A request's ticket build holds and runs its review's reproductions
 	// (SC-022) only when review_reproductions is on (reproductionInputs); a

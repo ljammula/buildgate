@@ -90,7 +90,7 @@ type Config struct {
 	UnitTestCommand        string `yaml:"unit_test_command"`
 	IntegrationTestCommand string `yaml:"integration_test_command"`
 	ReferenceOracleCommand string `yaml:"reference_oracle_command"`
-	// TestPatterns is the tests_added gate boundary: glob patterns
+	// TestPatterns is the tests_red_on_base gate boundary: glob patterns
 	// (path.Match syntax) matched against a run's changed-file inventory,
 	// both the full repo-relative path and the bare basename, so
 	// "*_test.go" matches "internal/foo/bar_test.go" via the basename

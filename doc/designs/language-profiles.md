@@ -54,7 +54,7 @@ toolchains not derived by BuildGate belong in an operator-built worker image.
 The session config selects that image; a repository profile cannot name or
 replace it.
 
-Profile test patterns do not change the always-on `tests_added` gate. Copy
+Profile test patterns do not change the always-on `tests_red_on_base` gate. Copy
 appropriate patterns into committed `.factory.yml` when the repository's test
 names are not covered by the built-in defaults. Baseline named-failure parsing
 is currently limited to Go and pytest; other failing baseline formats are not

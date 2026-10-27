@@ -29,7 +29,7 @@ func TestIntegrationIsolateWorkspaceRollsBackWhenTerminalSaveFails(t *testing.T)
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -160,7 +160,7 @@ func TestIntegrationIsolateWorkspaceRequiresReachableTemporalServer(t *testing.T
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -217,7 +217,7 @@ func TestIntegrationIsolateWorkspaceRejectsPriorRun(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -264,7 +264,7 @@ func TestIntegrationIsolateWorkspaceRejectsSymlinkedDataDirInsideWorkspace(t *te
 	}
 	dataDir := filepath.Join(wsSymlink, "factoryd-data") // resolves inside ws via the symlink
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -316,7 +316,7 @@ func TestIntegrationIsolateWorkspaceRejectsSymlinkedWorkspacesChildInsideWorkspa
 		t.Fatalf("symlink data-dir's workspaces child into -workspace: %v", err)
 	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -361,7 +361,7 @@ func TestIntegrationIsolateWorkspaceRejectsGitUnsafeTicketName(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -463,7 +463,7 @@ func TestIntegrationRecordsPhase4Evidence(t *testing.T) {
 	if r.DiffStat == nil || r.DiffStat.FilesChanged != 1 {
 		t.Errorf("DiffStat = %+v, want FilesChanged=1", r.DiffStat)
 	}
-	// canonical_verify plus tests_added (which always runs -- see
+	// canonical_verify plus tests_red_on_base (which always runs -- see
 	// runFactoryd's own opt-out injection) plus full_suite_verify: no
 	// -full-suite-command/.factory.yml full_suite_command is configured
 	// here, so it's substituted with the resolved verify command -- see
@@ -481,7 +481,7 @@ func TestIntegrationRecordsPhase4Evidence(t *testing.T) {
 // that passes is recorded as its own gate and does not block acceptance.
 func TestIntegrationFullSuiteVerifyAcceptsWhenDeclaredCommandPasses(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-full-suite-command", "true"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-full-suite-command", "true"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -501,7 +501,7 @@ func TestIntegrationFullSuiteVerifyCadenceRunsEveryNthSlice(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	flags := []string{"-full-suite-command", "false", "-full-suite-cadence", "2"}
-	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, flags, dataDir)
+	first := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, flags, dataDir)
 	if first.State != run.StateAccepted {
 		t.Fatalf("first run state = %q, want %q because cadence starts at slice 1", first.State, run.StateAccepted)
 	}
@@ -515,7 +515,7 @@ func TestIntegrationFullSuiteVerifyCadenceRunsEveryNthSlice(t *testing.T) {
 	}
 
 	secondFlags := append(append([]string{}, flags...), "-prior-run", first.ID)
-	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, secondFlags, dataDir)
+	second := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, secondFlags, dataDir)
 	if second.State != run.StateQuarantined {
 		t.Fatalf("second run state = %q, want %q because cadence runs on slice 2", second.State, run.StateQuarantined)
 	}
@@ -541,7 +541,7 @@ func TestIntegrationFullSuiteVerifyCadenceRunsEveryNthSlice(t *testing.T) {
 // full_suite_verify is the only gate that can catch this.
 func TestIntegrationFullSuiteVerifyQuarantinesOnRegression(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-full-suite-command", "false"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-full-suite-command", "false"})
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -571,7 +571,7 @@ func TestIntegrationFullSuiteVerifyQuarantinesOnRegression(t *testing.T) {
 // ticket's own -verify-command passes; only the named gate fails.
 func TestIntegrationSecurityCommandQuarantinesWithGateName(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-security-command", "false"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-security-command", "false"})
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -601,7 +601,7 @@ func TestIntegrationSecurityCommandQuarantinesWithGateName(t *testing.T) {
 // integration_tests) are simply absent from GateResults.
 func TestIntegrationLintAndUnitTestCommandsBothRecordPassingGates(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-lint-command", "true", "-unit-test-command", "true"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-lint-command", "true", "-unit-test-command", "true"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -635,7 +635,7 @@ func TestIntegrationLintAndUnitTestCommandsBothRecordPassingGates(t *testing.T) 
 // verification's own output already uses and is reflected everywhere.
 func TestIntegrationFullSuiteVerifyMutationIsCapturedInEvidence(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-full-suite-command", "echo mutated > full_suite_side_effect.txt"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-full-suite-command", "echo mutated > full_suite_side_effect.txt"})
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -666,7 +666,7 @@ func TestIntegrationFullSuiteVerifyMutationIsCapturedInEvidence(t *testing.T) {
 // own baseline (gap 4 of the plan's 2026-08-28 readiness review).
 func TestIntegrationFullSuiteVerifyFailureDoesNotCommitMutation(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-full-suite-command", "echo mutated > full_suite_side_effect.txt; exit 1"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-full-suite-command", "echo mutated > full_suite_side_effect.txt; exit 1"})
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -701,7 +701,7 @@ func TestIntegrationFullSuiteVerifyFailureDoesNotCommitMutation(t *testing.T) {
 // all, the same convention every other optional EvaluateRun gate follows.
 func TestIntegrationFullSuiteVerifySkippedWhenNotDeclared(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, []string{"-full-suite-cadence", "2", "-full-suite-command", "none"})
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-full-suite-cadence", "2", "-full-suite-command", "none"})
 
 	for _, g := range r.GateResults {
 		if g.Check == "full_suite_verify" {
@@ -1108,100 +1108,50 @@ func TestIntegrationDiffScopeGateCatchesVerifyCommandChanges(t *testing.T) {
 	}
 }
 
-// TestIntegrationRequiredFilesChangedGateQuarantinesUnchangedFile is the
-// regression test for the false-accept gap tracked in CLAIMS.md: a
-// passing Verify-Command only proves the declared command exited 0, not
-// that the ticket's required implementation change was made. Here the
-// ticket declares content.txt as required, but the fake agent (mode
-// commit_other) only touches an unrelated scaffolding file, other.txt;
-// the verify command itself is trivially "true", so canonical_verify
-// passes, and only the required_files_changed gate must catch the gap.
-func TestIntegrationRequiredFilesChangedGateQuarantinesUnchangedFile(t *testing.T) {
+// noteWith reports whether the run recorded a note containing want.
+func noteWith(r *run.Run, want string) bool {
+	return slices.ContainsFunc(r.Notes, func(n string) bool { return strings.Contains(n, want) })
+}
+
+// gateRecorded reports whether the run recorded a gate result named check.
+func gateRecorded(r *run.Run, check string) bool {
+	return slices.ContainsFunc(r.GateResults, func(g run.GateResult) bool { return g.Check == check })
+}
+
+// TestIntegrationRequiredFilesNotChangedIsANoteNotARefusal: a passing
+// Verify-Command proves only that the declared command exited 0, not that the
+// ticket's required implementation change was made. Here the ticket declares
+// content.txt as required but the fake agent (mode commit_other) touches only
+// other.txt. A check that refuses must execute something, and a changed-file
+// list executes nothing, so the run is accepted and the pull request lists
+// the unmet file as a note; no required_files_changed gate is recorded.
+func TestIntegrationRequiredFilesNotChangedIsANoteNotARefusal(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
 
 	r := runFactorydWithSpec(t, ws, "commit_other", "true", specContent, "30s")
 
-	if r.State != run.StateQuarantined {
-		t.Fatalf("state = %q, want %q — an unchanged required file must quarantine the run even though verify passes", r.State, run.StateQuarantined)
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q (%s), want %q: an unchanged required file is a note", r.State, r.HaltError, run.StateAccepted)
 	}
-	var requiredGate, verifyGate *run.GateResult
-	for i := range r.GateResults {
-		switch r.GateResults[i].Check {
-		case "required_files_changed":
-			requiredGate = &r.GateResults[i]
-		case "canonical_verify":
-			verifyGate = &r.GateResults[i]
-		}
+	if !noteWith(r, "required file not changed: content.txt") {
+		t.Errorf("Notes = %q, want one naming content.txt", r.Notes)
 	}
-	if requiredGate == nil {
-		t.Fatalf("expected a required_files_changed gate result, got %v", r.GateResults)
-	}
-	if requiredGate.Passed {
-		t.Error("required_files_changed gate Passed = true, want false")
-	}
-	if verifyGate == nil || !verifyGate.Passed {
-		t.Errorf("expected canonical_verify to have run and passed (it's the required_files_changed gate that should fail), got %+v", verifyGate)
+	if gateRecorded(r, "required_files_changed") {
+		t.Errorf("GateResults = %+v, want no required_files_changed gate", r.GateResults)
 	}
 	if slices.Contains(r.ChangedFiles, "content.txt") {
 		t.Errorf("ChangedFiles = %v, want it to NOT include the never-touched required file", r.ChangedFiles)
 	}
 }
 
-// TestIntegrationRequiredFilesChangedCountsAnEarlierTicketsFile is a later
-// ticket of a request whose required content.txt an earlier ticket already
-// changed (-changed-by-earlier-tickets): the build changes only its other
-// required file, other.txt, and the run is accepted, with the gate and the
-// run record naming content.txt. The same build given no earlier ticket's
-// file, or a ticket requiring only content.txt, still quarantines.
-func TestIntegrationRequiredFilesChangedCountsAnEarlierTicketsFile(t *testing.T) {
-	requiredGateOf := func(r *run.Run) *run.GateResult {
-		for i := range r.GateResults {
-			if r.GateResults[i].Check == "required_files_changed" {
-				return &r.GateResults[i]
-			}
-		}
-		t.Fatalf("expected a required_files_changed gate result, got %v", r.GateResults)
-		return nil
-	}
-	// A request's ticket: -changed-by-earlier-tickets is refused without
-	// -request-ticket.
-	requestTicket := func(required string) string {
-		spec := strings.Replace(wellFormedRequestTicketspec, "Allowed-Files: content.txt\n", "Allowed-Files: content.txt, other.txt\n", 1)
-		return strings.Replace(spec, "Required-Changed-Files: content.txt\n", "Required-Changed-Files: "+required+"\n", 1)
-	}
-	both := requestTicket("content.txt, other.txt")
-	earlier := []string{"-request-ticket", "-changed-by-earlier-tickets", "content.txt"}
-
-	r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, earlier)
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q (%s), want accepted: content.txt was changed by an earlier ticket", r.State, r.HaltError)
-	}
-	if gate := requiredGateOf(r); !gate.Passed || !slices.Equal(gate.ChangedByEarlierTickets, []string{"content.txt"}) {
-		t.Errorf("required_files_changed = %+v, want passed naming content.txt", gate)
-	}
-	if !slices.Equal(r.ChangedByEarlierTickets, []string{"content.txt"}) {
-		t.Errorf("run ChangedByEarlierTickets = %v, want [content.txt]", r.ChangedByEarlierTickets)
-	}
-
-	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", both, "30s", nil, []string{"-request-ticket"}); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
-		t.Errorf("without the earlier ticket's file: state = %q, want quarantined on required_files_changed", r.State)
-	}
-	onlyEarlier := requestTicket("content.txt")
-	if r := runFactorydWithSpecAndFlags(t, newFixtureRepo(t), "commit_other", "true", onlyEarlier, "30s", nil, earlier); r.State != run.StateQuarantined || requiredGateOf(r).Passed {
-		t.Errorf("a ticket that changed none of its required files: state = %q, want quarantined on required_files_changed", r.State)
-	}
-}
-
-// TestIntegrationRequiredFilesChangedGateRejectsPreExistingDirt proves the
-// current rule: required_files_changed is checked against the run's own
-// worktree, which is cut from the base commit, so uncommitted state in the
-// operator's shared checkout never reaches a build. A required file dirty
-// there must not halt the run (no submitter-side check exists); the build
-// runs (mode commit_other touches only other.txt), and the gate fails
-// because content.txt is unchanged in the run's own worktree -- the shared
-// checkout's dirt is not attributed to the run.
-func TestIntegrationRequiredFilesChangedGateRejectsPreExistingDirt(t *testing.T) {
+// TestIntegrationRequiredFilesNoteIgnoresPreExistingDirt: the note is
+// computed against the run's own worktree, which is cut from the base
+// commit, so uncommitted state in the operator's shared checkout never
+// reaches a build. A required file dirty there must not halt the run (no
+// submitter-side check exists), and its dirt is not attributed to the run:
+// content.txt stays unchanged in the run, so the note names it.
+func TestIntegrationRequiredFilesNoteIgnoresPreExistingDirt(t *testing.T) {
 	ws := newFixtureRepo(t)
 	f, err := os.OpenFile(filepath.Join(ws, "content.txt"), os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -1215,8 +1165,8 @@ func TestIntegrationRequiredFilesChangedGateRejectsPreExistingDirt(t *testing.T)
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
 	r := runFactorydWithSpecAndFlags(t, ws, "commit_other", "true", specContent, "30s", nil, nil)
 
-	if r.State != run.StateQuarantined {
-		t.Fatalf("state = %q, want %q -- dirt in the shared checkout must not halt the run, and must not satisfy the gate", r.State, run.StateQuarantined)
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q (%s), want %q: dirt in the shared checkout must not halt the run", r.State, r.HaltError, run.StateAccepted)
 	}
 	var buildRan bool
 	for _, a := range r.Attempts {
@@ -1227,104 +1177,74 @@ func TestIntegrationRequiredFilesChangedGateRejectsPreExistingDirt(t *testing.T)
 	if !buildRan {
 		t.Error("no build attempt recorded, want the build to run")
 	}
-	var requiredGate *run.GateResult
-	for i := range r.GateResults {
-		if r.GateResults[i].Check == "required_files_changed" {
-			requiredGate = &r.GateResults[i]
-		}
-	}
-	if requiredGate == nil || requiredGate.Passed {
-		t.Errorf("required_files_changed gate = %+v, want present and failed", requiredGate)
+	if !noteWith(r, "required file not changed: content.txt") {
+		t.Errorf("Notes = %q, want one naming content.txt (the shared checkout's dirt is not this run's change)", r.Notes)
 	}
 	if slices.Contains(r.ChangedFiles, "content.txt") {
-		t.Errorf("ChangedFiles = %v, want no content.txt (the shared checkout's dirt is not this run's change)", r.ChangedFiles)
+		t.Errorf("ChangedFiles = %v, want no content.txt", r.ChangedFiles)
 	}
 }
 
-// TestIntegrationRequiredFilesChangedGateSkippedWithoutDeclaration confirms
-// that tickets without a Required-Changed-Files: key (the common case, and
-// every ticket that predates this feature) are entirely unaffected — the
-// same unchanged file that quarantines
-// TestIntegrationRequiredFilesChangedGateQuarantinesUnchangedFile above
-// must be accepted here since no required-files list was declared.
-func TestIntegrationRequiredFilesChangedGateSkippedWithoutDeclaration(t *testing.T) {
+// TestIntegrationRequiredFilesNoteSkippedWithoutDeclaration: a ticket without
+// a Required-Changed-Files: key has nothing required, so no note.
+func TestIntegrationRequiredFilesNoteSkippedWithoutDeclaration(t *testing.T) {
 	ws := newFixtureRepo(t)
 	r := runFactoryd(t, ws, "commit_other", "true")
 
 	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q — no Required-Changed-Files declared, so nothing required", r.State, run.StateAccepted)
+		t.Fatalf("state = %q, want %q: no Required-Changed-Files declared, so nothing required", r.State, run.StateAccepted)
 	}
-	for _, g := range r.GateResults {
-		if g.Check == "required_files_changed" {
-			t.Errorf("unexpected required_files_changed gate result %+v when the ticket declared no Required-Changed-Files", g)
-		}
+	if noteWith(r, "required file") {
+		t.Errorf("Notes = %q, want no required-file note when the ticket declared none", r.Notes)
 	}
 }
 
-// TestIntegrationRequiredContentPresentGatePasses confirms the passing
-// path: the ticket declares REQUIRED_MARKER_STRING as required content,
-// and the fake agent (mode commit_with_marker) actually writes it into
-// content.txt.
-func TestIntegrationRequiredContentPresentGatePasses(t *testing.T) {
+// TestIntegrationRequiredContentPresentRaisesNoNote: the ticket declares
+// REQUIRED_MARKER_STRING as required content and the fake agent (mode
+// commit_with_marker) writes it into content.txt, so there is nothing to note.
+func TestIntegrationRequiredContentPresentRaisesNoNote(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\nRequired-Content: REQUIRED_MARKER_STRING\n"
 
 	r := runFactorydWithSpec(t, ws, "commit_with_marker", "true", specContent, "30s")
 
 	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q — the required content was actually written", r.State, run.StateAccepted)
+		t.Fatalf("state = %q, want %q: the required content was actually written", r.State, run.StateAccepted)
 	}
-	var contentGate *run.GateResult
-	for i := range r.GateResults {
-		if r.GateResults[i].Check == "required_content_present" {
-			contentGate = &r.GateResults[i]
-		}
-	}
-	if contentGate == nil || !contentGate.Passed {
-		t.Fatalf("expected a passing required_content_present gate result, got %+v", contentGate)
+	if len(r.Notes) != 0 {
+		t.Errorf("Notes = %q, want none", r.Notes)
 	}
 }
 
-// TestIntegrationRequiredContentPresentGateQuarantinesCosmeticChange is
-// the regression test for the gap required_files_changed alone leaves
-// open: the ticket declares REQUIRED_MARKER_STRING as required content,
-// but the fake agent (mode commit) only appends unrelated text —
-// content.txt genuinely changed (required_files_changed passes), yet the
-// specific required marker never appeared, so required_content_present
-// must still catch it and quarantine.
-func TestIntegrationRequiredContentPresentGateQuarantinesCosmeticChange(t *testing.T) {
+// TestIntegrationRequiredContentCosmeticChangeIsANote: the ticket declares
+// REQUIRED_MARKER_STRING as required content, but the fake agent (mode
+// commit) only appends unrelated text. content.txt changed, yet the marker
+// never appeared: the run is accepted and the note says so.
+func TestIntegrationRequiredContentCosmeticChangeIsANote(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\nRequired-Content: REQUIRED_MARKER_STRING\n"
 
 	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
 
-	if r.State != run.StateQuarantined {
-		t.Fatalf("state = %q, want %q — content.txt changed but never contained the required marker", r.State, run.StateQuarantined)
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q (%s), want %q: unmet required content is a note", r.State, r.HaltError, run.StateAccepted)
 	}
-	var contentGate, requiredFilesGate *run.GateResult
-	for i := range r.GateResults {
-		switch r.GateResults[i].Check {
-		case "required_content_present":
-			contentGate = &r.GateResults[i]
-		case "required_files_changed":
-			requiredFilesGate = &r.GateResults[i]
-		}
+	if noteWith(r, "required file not changed") {
+		t.Errorf("Notes = %q, want no required-file note (content.txt did change)", r.Notes)
 	}
-	if requiredFilesGate == nil || !requiredFilesGate.Passed {
-		t.Errorf("expected required_files_changed to pass (content.txt did change), got %+v", requiredFilesGate)
+	if !noteWith(r, `required content not newly present: "REQUIRED_MARKER_STRING"`) {
+		t.Errorf("Notes = %q, want one naming the marker", r.Notes)
 	}
-	if contentGate == nil || contentGate.Passed {
-		t.Errorf("expected a failing required_content_present gate, got %+v", contentGate)
+	if gateRecorded(r, "required_content_present") {
+		t.Errorf("GateResults = %+v, want no required_content_present gate", r.GateResults)
 	}
 }
 
-// TestIntegrationRequiredContentPresentGateRejectsContentAlreadyAtBase
-// confirms required content already present before the run started
-// doesn't count as evidence of this run's own change — mirroring
-// RequiredFilesPreDirty's protection but for content instead of file
-// identity. The fixture pre-seeds content.txt with the marker at base;
-// the agent still only makes its normal unrelated edit (mode commit).
-func TestIntegrationRequiredContentPresentGateRejectsContentAlreadyAtBase(t *testing.T) {
+// TestIntegrationRequiredContentAlreadyAtBaseIsANote: required content
+// already present before the run started is not evidence of this run's own
+// change. The fixture pre-seeds content.txt with the marker at base; the
+// agent still only makes its normal unrelated edit (mode commit).
+func TestIntegrationRequiredContentAlreadyAtBaseIsANote(t *testing.T) {
 	ws := newFixtureRepo(t)
 	f, err := os.OpenFile(filepath.Join(ws, "content.txt"), os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -1343,35 +1263,27 @@ func TestIntegrationRequiredContentPresentGateRejectsContentAlreadyAtBase(t *tes
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\nRequired-Content: REQUIRED_MARKER_STRING\n"
 	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
 
-	if r.State != run.StateQuarantined {
-		t.Fatalf("state = %q, want %q — the marker was already present at base, not added by this run", r.State, run.StateQuarantined)
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q (%s), want %q", r.State, r.HaltError, run.StateAccepted)
 	}
-	var contentGate *run.GateResult
-	for i := range r.GateResults {
-		if r.GateResults[i].Check == "required_content_present" {
-			contentGate = &r.GateResults[i]
-		}
-	}
-	if contentGate == nil || contentGate.Passed {
-		t.Errorf("expected a failing required_content_present gate, got %+v", contentGate)
+	if !noteWith(r, `required content not newly present: "REQUIRED_MARKER_STRING"`) {
+		t.Errorf("Notes = %q, want a note: the marker was already present at base", r.Notes)
 	}
 }
 
-// TestIntegrationRequiredContentPresentGateSkippedWithoutDeclaration
-// confirms tickets without a Required-Content: key are unaffected.
-func TestIntegrationRequiredContentPresentGateSkippedWithoutDeclaration(t *testing.T) {
+// TestIntegrationRequiredContentNoteSkippedWithoutDeclaration: a ticket
+// without a Required-Content: key has nothing required, so no note.
+func TestIntegrationRequiredContentNoteSkippedWithoutDeclaration(t *testing.T) {
 	ws := newFixtureRepo(t)
 	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
 
 	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
 
 	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q — no Required-Content declared, so nothing required", r.State, run.StateAccepted)
+		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
 	}
-	for _, g := range r.GateResults {
-		if g.Check == "required_content_present" {
-			t.Errorf("unexpected required_content_present gate result %+v when the ticket declared no Required-Content", g)
-		}
+	if noteWith(r, "required content") {
+		t.Errorf("Notes = %q, want no required-content note when the ticket declared none", r.Notes)
 	}
 }
 
@@ -1431,7 +1343,7 @@ func TestIntegrationTimedOutBuildStillRecordsAttempt(t *testing.T) {
 	// before it will even start an attempt -- long enough that the real
 	// timeout-cancellation path this test means to exercise fires
 	// instead of that earlier "insufficient time remaining" pre-check.
-	r := runFactorydWithSpec(t, ws, "hang", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "15s")
+	r := runFactorydWithSpec(t, ws, "hang", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "15s")
 
 	if r.State != run.StateHalted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateHalted)
@@ -1459,7 +1371,7 @@ func TestIntegrationSignalCancellationHaltsAndReapsBuild(t *testing.T) {
 	dataDir := t.TempDir()
 	pidPath := filepath.Join(t.TempDir(), "hung-child.pid")
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
@@ -1628,7 +1540,7 @@ func TestIntegrationInfrastructureFailureRetriesVerify(t *testing.T) {
 	// The command's first invocation is the baseline verify, which passes;
 	// the second, canonical verification's first attempt, overflows.
 	verifyCommand := `count="` + t.TempDir() + `/fake-verify-invocations"; n=$(cat "$count" 2>/dev/null || echo 0); echo $((n + 1)) >"$count"; if [ "$n" = 1 ]; then awk 'BEGIN { for (i = 0; i < 1048577; i++) printf "x" }'; else exit 0; fi`
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", verifyCommand, "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n", "30s", nil, nil)
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", verifyCommand, "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil)
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)

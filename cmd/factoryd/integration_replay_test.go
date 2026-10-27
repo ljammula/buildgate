@@ -238,10 +238,11 @@ func TestIntegrationReplayRunRunsTheFullSuiteDespiteCadence(t *testing.T) {
 	}
 }
 
-// TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketDoesNotPass: the
+// TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketIsANote: the
 // diff is measured from the new base, so a required file that only the
-// earlier work (now part of the base) changed does not satisfy the ticket.
-func TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketDoesNotPass(t *testing.T) {
+// earlier work (now part of the base) changed is a note on the run, not a
+// change of this ticket's.
+func TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketIsANote(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	env := replayEnv(t)
@@ -252,8 +253,7 @@ func TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketDoesNotPass(t *te
 	spec := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, earlier.txt\nRequired-Changed-Files: earlier.txt\n"
 
 	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "fail", "true", spec, "30s", env, replayRunFlags(branch, onto, file), dataDir)
-	failed := slices.ContainsFunc(r.GateResults, func(g run.GateResult) bool { return g.Check == "required_files_changed" && !g.Passed })
-	if r.State != run.StateQuarantined || !failed {
-		t.Fatalf("replay run: state %q, gates %+v; want quarantined by required_files_changed", r.State, r.GateResults)
+	if r.State != run.StateAccepted || !noteWith(r, "required file not changed: earlier.txt") {
+		t.Fatalf("replay run: state %q, notes %q; want accepted with a note naming earlier.txt", r.State, r.Notes)
 	}
 }

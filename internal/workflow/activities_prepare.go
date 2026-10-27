@@ -114,22 +114,11 @@ func (a *Activities) CheckChainSuccessorActivity(_ context.Context, input CheckC
 // application code lives under backend/, not the checkout root -- see
 // ticketspec.MisprefixedWorkspacePaths's own doc comment for the real
 // incident that found this and why it's checked here, before the build,
-// rather than left to diff_scope/required_files_changed after it), then
-// checks whether any of the ticket's declared Required-Changed-Files
-// already has uncommitted changes in the workspace. required_files_changed
-// (evaluated after the run, against a diff from base_sha) can't tell an
-// edit the agent actually made apart from one that was already sitting
-// uncommitted before the run started — base_sha only captures HEAD, and the
-// safety-net commits PostBuildActivity/CollectEvidenceActivity make sweep
-// up any uncommitted change regardless of who made it. A required file
-// that's already dirty here would let that gate pass on unattributable
-// evidence, recreating the exact false-accept condition it exists to
-// close, so the run must not proceed at all. These checks run here (not only in cmd/factoryd) so a
-// caller that submits a run straight to RepositoryOwnerWorkflow, bypassing
-// cmd/factoryd, gets the same protection (found via adversarial review,
-// 2026-09-11, of the misprefixed-path check's own first version: it landed
-// in realMain only, silently leaving this path -- the one this doc comment
-// already exists to keep in sync with realMain -- without it).
+// rather than left to diff_scope after it). That check runs here (not only in
+// cmd/factoryd) so a caller that submits a run straight to
+// RepositoryOwnerWorkflow, bypassing cmd/factoryd, gets the same protection
+// (found via adversarial review, 2026-09-11, of the misprefixed-path check's
+// own first version: it landed in realMain only).
 //
 // No checkpoint needed: this is a read-only check with no side effect,
 // trivially safe to redo on redispatch.
@@ -218,19 +207,6 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 				PreflightFailureType,
 			)
 		}
-	}
-	if len(input.RequiredChangedFiles) == 0 || input.Resumed {
-		return nil
-	}
-	initialDirty, err := runner.GitStatusPaths(input.WorkspacePath)
-	if err != nil {
-		return temporal.NewApplicationErrorWithCause("check workspace for pre-existing uncommitted changes to required files", InfrastructureFailureType, err)
-	}
-	if alreadyDirty := policy.RequiredFilesPreDirty(initialDirty, input.RequiredChangedFiles); len(alreadyDirty) > 0 {
-		return temporal.NewApplicationError(
-			fmt.Sprintf("required file(s) already had uncommitted changes before this run started, so required_files_changed could not honestly attribute a change to this run: %v", alreadyDirty),
-			PreflightFailureType,
-		)
 	}
 	return nil
 }

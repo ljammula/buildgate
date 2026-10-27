@@ -614,7 +614,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	}
 	// The handoff the run's own save would have written, built from the
 	// record as seeded (the spec snapshot gives diff_scope nothing to say).
-	quarantined.GateResults = append(quarantined.GateResults, run.GateResult{Check: "tests_added", Passed: false})
+	quarantined.GateResults = append(quarantined.GateResults, run.GateResult{Check: "tests_red_on_base", Passed: false})
 	// The notes the build agent left, as the host copy keeps them: all five
 	// headings, so the console's decoder and card meet every list.
 	write(filepath.Join(run.Dir(dataDir, quarantined.ID), evidence.AgentNotesFileName),

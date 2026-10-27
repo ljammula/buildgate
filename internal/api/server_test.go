@@ -1382,14 +1382,14 @@ func TestOverrideRunToHaltedNotifies(t *testing.T) {
 // and until both compute it, an operator overriding a run to halted
 // through the HTTP API (rather than the CLI) gets a Triage-less record
 // even though the run's own GateResults have enough evidence to explain
-// why. Seeds a failing tests_added gate (evidence overrideRun's own
+// why. Seeds a failing tests_red_on_base gate (evidence overrideRun's own
 // triage.Run call can classify without any log file on disk) and asserts
 // the saved/returned run carries a non-empty Triage sentence.
 func TestOverrideRunToHaltedCarriesTriage(t *testing.T) {
 	dataDir := t.TempDir()
 	seedRun(t, dataDir, run.Run{
 		ID: "run-1", Ticket: "ticket-1", State: run.StateQuarantined, CreatedAt: "2026-08-26T10:00:00Z",
-		GateResults: []run.GateResult{{Check: "tests_added", Passed: false}},
+		GateResults: []run.GateResult{{Check: "tests_red_on_base", Passed: false}},
 	})
 
 	recorder := httptest.NewRecorder()

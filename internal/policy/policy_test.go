@@ -184,203 +184,113 @@ func TestDiffScopeViolationsGlobDoesNotCrossDirectories(t *testing.T) {
 	}
 }
 
-func TestRequiredFilesChangedAllPresent(t *testing.T) {
-	gate, missing := RequiredFilesChanged([]string{"a.go", "a_test.go", "b.go"}, []string{"a.go", "a_test.go"}, nil)
-	if len(missing) != 0 {
+func TestUnchangedRequiredFilesAllPresent(t *testing.T) {
+	if missing := UnchangedRequiredFiles([]string{"a.go", "a_test.go", "b.go"}, []string{"a.go", "a_test.go"}); len(missing) != 0 {
 		t.Errorf("got %v, want no missing files", missing)
 	}
-	if gate.Check != "required_files_changed" || !gate.Passed {
-		t.Errorf("RequiredFilesChanged() gate = %+v, want passing required_files_changed gate", gate)
-	}
 }
 
-func TestRequiredFilesChangedFindsMissingFile(t *testing.T) {
-	gate, missing := RequiredFilesChanged([]string{"a_test.go"}, []string{"a.go", "a_test.go"}, nil)
-	want := []string{"a.go"}
-	if !slices.Equal(missing, want) {
+func TestUnchangedRequiredFilesFindsMissingFile(t *testing.T) {
+	missing := UnchangedRequiredFiles([]string{"a_test.go"}, []string{"a.go", "a_test.go"})
+	if want := []string{"a.go"}; !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v", missing, want)
 	}
-	if gate.Passed {
-		t.Errorf("RequiredFilesChanged() Passed = true, want false")
-	}
 }
 
-func TestRequiredFilesChangedEmptyChangedFailsWhenFilesRequired(t *testing.T) {
-	gate, missing := RequiredFilesChanged(nil, []string{"a.go"}, nil)
-	want := []string{"a.go"}
-	if !slices.Equal(missing, want) {
+func TestUnchangedRequiredFilesEmptyChangedMissesEveryRequiredFile(t *testing.T) {
+	missing := UnchangedRequiredFiles(nil, []string{"a.go"})
+	if want := []string{"a.go"}; !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v", missing, want)
 	}
-	if gate.Passed {
-		t.Errorf("RequiredFilesChanged() Passed = true, want false for an empty changed-file list with required files declared")
-	}
 }
 
-// A later ticket of a request whose required file an earlier ticket already
-// changed (the earlier build did this ticket's work, having seen the whole
-// spec) passes, as long as it changed another of its required files itself,
-// and the gate names the file it counted.
-func TestRequiredFilesChangedCountsAFileAnEarlierTicketChanged(t *testing.T) {
-	gate, missing := RequiredFilesChanged([]string{"README.md"}, []string{"README.md", "main.go"}, []string{"main.go"})
-	if len(missing) != 0 || !gate.Passed {
-		t.Fatalf("RequiredFilesChanged() = %+v, missing %v; want a pass", gate, missing)
+// An unmet Required-Changed-Files or Required-Content declaration is a note,
+// never a refused run: the run is accepted and the pull request lists each
+// unmet fact on its own line.
+func TestEvaluateRunNotesUnmetRequiredFilesAndContentAndRefusesNothing(t *testing.T) {
+	got := EvaluateRun(EvaluateRunInput{
+		VerifyCommand:             []string{"make", "test"},
+		ChangedFiles:              []string{"README.md"},
+		RequiredChangedFiles:      []string{"README.md", "main.go"},
+		RequiredContent:           []string{"marker"},
+		RequiredContentBaseFiles:  map[string]string{"main.go": ""},
+		RequiredContentFinalFiles: map[string]string{"main.go": ""},
+		TestsRequiredOptOut:       "a documentation row",
+	})
+	if !got.Accepted || len(got.FailedChecks) != 0 {
+		t.Fatalf("EvaluateRun() = %+v, want accepted: required files and content refuse nothing", got)
 	}
-	if !slices.Equal(gate.ChangedByEarlierTickets, []string{"main.go"}) {
-		t.Errorf("ChangedByEarlierTickets = %v, want [main.go]", gate.ChangedByEarlierTickets)
+	want := []string{"required file not changed: main.go", `required content not newly present: "marker"`}
+	if !slices.Equal(got.Notes, want) {
+		t.Errorf("Notes = %q, want %q", got.Notes, want)
 	}
-}
-
-// A required file no ticket of the stack changed still fails, whatever the
-// earlier tickets changed.
-func TestRequiredFilesChangedFailsAFileNoTicketChanged(t *testing.T) {
-	gate, missing := RequiredFilesChanged([]string{"README.md"}, []string{"README.md", "main.go"}, []string{"other.go"})
-	if gate.Passed || !slices.Equal(missing, []string{"main.go"}) {
-		t.Errorf("RequiredFilesChanged() = %+v, missing %v; want main.go missing", gate, missing)
-	}
-	if len(gate.ChangedByEarlierTickets) != 0 {
-		t.Errorf("ChangedByEarlierTickets = %v, want none", gate.ChangedByEarlierTickets)
-	}
-}
-
-// A ticket that changed none of its required files fails even when earlier
-// tickets changed every one of them: the earlier work counts only beside some
-// of this ticket's own.
-func TestRequiredFilesChangedNeedsOneRequiredFileOfTheTicketsOwn(t *testing.T) {
-	for _, changed := range [][]string{nil, {"unrelated.go"}} {
-		gate, missing := RequiredFilesChanged(changed, []string{"README.md", "main.go"}, []string{"README.md", "main.go"})
-		if gate.Passed || !slices.Equal(missing, []string{"README.md", "main.go"}) {
-			t.Errorf("changed %v: RequiredFilesChanged() = %+v, missing %v; want both missing", changed, gate, missing)
+	for _, g := range got.GateResults {
+		if g.Check == "required_files_changed" || g.Check == "required_content_present" {
+			t.Errorf("gate %q recorded: required files and content are notes, not gates", g.Check)
 		}
 	}
 }
 
-// EvaluateRun passes the earlier tickets' files to the gate: the observed
-// case of a stacked request accepts, and the same run without them does not.
-func TestEvaluateRunCountsRequiredFilesChangedByEarlierTickets(t *testing.T) {
-	input := EvaluateRunInput{
-		VerifyCommand:           []string{"make", "test"},
-		ChangedFiles:            []string{"README.md"},
-		AllowedFiles:            []string{"README.md", "main.go"},
-		RequiredChangedFiles:    []string{"README.md", "main.go"},
-		TestsRequiredOptOut:     "a documentation row",
-		ChangedByEarlierTickets: []string{"main.go"},
-	}
-	if got := EvaluateRun(input); !got.Accepted {
-		t.Fatalf("EvaluateRun() with the earlier ticket's main.go = %+v, want accepted", got)
-	}
-	input.ChangedByEarlierTickets = nil
-	got := EvaluateRun(input)
-	if got.Accepted || !slices.Equal(got.MissingRequiredFiles, []string{"main.go"}) {
-		t.Errorf("EvaluateRun() without it = %+v, want main.go missing", got)
-	}
-}
-
-func TestRequiredFilesPreDirtyNoneDirty(t *testing.T) {
-	got := RequiredFilesPreDirty([]string{"unrelated.go"}, []string{"a.go", "a_test.go"})
-	if len(got) != 0 {
-		t.Errorf("got %v, want none dirty", got)
-	}
-}
-
-func TestRequiredFilesPreDirtyFindsPreExistingDirt(t *testing.T) {
-	got := RequiredFilesPreDirty([]string{"a.go", "unrelated.go"}, []string{"a.go", "a_test.go"})
-	want := []string{"a.go"}
-	if !slices.Equal(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestRequiredContentPresentAllNew(t *testing.T) {
+func TestAbsentRequiredContentAllNew(t *testing.T) {
 	base := map[string]string{"a.dart": "class Widget {}\n"}
 	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
-	gate, missing := RequiredContentPresent(base, final, []string{"Key('quick-time-chips')"})
-	if len(missing) != 0 {
+	if missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"}); len(missing) != 0 {
 		t.Errorf("got %v, want none missing", missing)
 	}
-	if gate.Check != "required_content_present" || !gate.Passed {
-		t.Errorf("RequiredContentPresent() gate = %+v, want passing", gate)
-	}
 }
 
-func TestRequiredContentPresentMissingFromFinal(t *testing.T) {
+func TestAbsentRequiredContentMissingFromFinal(t *testing.T) {
 	base := map[string]string{"a.dart": "class Widget {}\n"}
 	final := map[string]string{"a.dart": "class Widget {\n  // cosmetic change only\n}\n"}
-	gate, missing := RequiredContentPresent(base, final, []string{"Key('quick-time-chips')"})
-	want := []string{"Key('quick-time-chips')"}
-	if !slices.Equal(missing, want) {
+	missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"})
+	if want := []string{"Key('quick-time-chips')"}; !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v", missing, want)
 	}
-	if gate.Passed {
-		t.Error("RequiredContentPresent() Passed = true, want false")
-	}
 }
 
-func TestRequiredContentPresentAlreadyInBaseDoesNotCount(t *testing.T) {
+func TestAbsentRequiredContentAlreadyInBaseDoesNotCount(t *testing.T) {
 	base := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
 	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n  // untouched otherwise\n}\n"}
-	gate, missing := RequiredContentPresent(base, final, []string{"Key('quick-time-chips')"})
-	want := []string{"Key('quick-time-chips')"}
-	if !slices.Equal(missing, want) {
+	missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"})
+	if want := []string{"Key('quick-time-chips')"}; !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v — content already present at base isn't new evidence of this run's change", missing, want)
 	}
-	if gate.Passed {
-		t.Error("RequiredContentPresent() Passed = true, want false")
-	}
 }
 
-func TestRequiredContentPresentMatchesAcrossFiles(t *testing.T) {
+func TestAbsentRequiredContentMatchesAcrossFiles(t *testing.T) {
 	base := map[string]string{"a.dart": "", "a_test.dart": ""}
 	final := map[string]string{"a.dart": "no marker here\n", "a_test.dart": "func TestQuickTimeChips() {}\n"}
-	gate, missing := RequiredContentPresent(base, final, []string{"func TestQuickTimeChips("})
-	if len(missing) != 0 {
+	if missing := AbsentRequiredContent(base, final, []string{"func TestQuickTimeChips("}); len(missing) != 0 {
 		t.Errorf("got %v, want none missing — the string only needs to appear in one of the required files", missing)
-	}
-	if !gate.Passed {
-		t.Error("RequiredContentPresent() Passed = false, want true")
 	}
 }
 
-// TestRequiredContentPresentDoesNotMaskAcrossFiles is the regression test
+// TestAbsentRequiredContentDoesNotMaskAcrossFiles is the regression test
 // for a real finding from review: the marker is newly added to file B,
 // but that same marker already existed in file A at base — concatenating
 // every file into one blob before matching let A's pre-existing content
 // mask B's genuinely new addition. Checked per-file, A's pre-existing
 // marker must not affect B's independent pass.
-func TestRequiredContentPresentDoesNotMaskAcrossFiles(t *testing.T) {
+func TestAbsentRequiredContentDoesNotMaskAcrossFiles(t *testing.T) {
 	base := map[string]string{"a.dart": "Key('already-here')\n", "b.dart": ""}
 	final := map[string]string{"a.dart": "Key('already-here')\n", "b.dart": "Key('already-here')\n"}
-	gate, missing := RequiredContentPresent(base, final, []string{"Key('already-here')"})
-	if len(missing) != 0 {
+	if missing := AbsentRequiredContent(base, final, []string{"Key('already-here')"}); len(missing) != 0 {
 		t.Errorf("got %v, want none missing — b.dart newly added the marker, independent of a.dart already having it", missing)
-	}
-	if !gate.Passed {
-		t.Error("RequiredContentPresent() Passed = false, want true")
 	}
 }
 
-// TestRequiredContentPresentDoesNotFabricateSeamMatch is the regression
+// TestAbsentRequiredContentDoesNotFabricateSeamMatch is the regression
 // test for the other half of the same finding: concatenating file
 // content can fabricate a match at the seam between two files that
 // exists in neither file individually. "abc"+"def" naively concatenates
 // to "abcdef", which contains "cd" — a substring split across the seam —
 // even though no single file's content does.
-func TestRequiredContentPresentDoesNotFabricateSeamMatch(t *testing.T) {
+func TestAbsentRequiredContentDoesNotFabricateSeamMatch(t *testing.T) {
 	base := map[string]string{"a.dart": "", "b.dart": ""}
 	final := map[string]string{"a.dart": "xxxabc", "b.dart": "defxxx"}
-	gate, missing := RequiredContentPresent(base, final, []string{"abcdef"})
-	want := []string{"abcdef"}
-	if !slices.Equal(missing, want) {
+	missing := AbsentRequiredContent(base, final, []string{"abcdef"})
+	if want := []string{"abcdef"}; !slices.Equal(missing, want) {
 		t.Errorf("got %v, want %v — no single file actually contains the marker", missing, want)
-	}
-	if gate.Passed {
-		t.Error("RequiredContentPresent() Passed = true, want false — a seam artifact must not count")
-	}
-}
-
-func TestRequiredFilesPreDirtyEmptyInitialIsFine(t *testing.T) {
-	got := RequiredFilesPreDirty(nil, []string{"a.go"})
-	if len(got) != 0 {
-		t.Errorf("got %v, want none dirty for a clean starting workspace", got)
 	}
 }
 
@@ -389,17 +299,17 @@ func TestEvaluateRunAcceptsWhenOnlyCanonicalVerifyDeclared(t *testing.T) {
 		VerifyCommand:  []string{"sh", "-c", "make verify"},
 		BuildExitCode:  0,
 		VerifyExitCode: 0,
-		// tests_added always runs -- opted out here since this
+		// tests_red_on_base always runs -- opted out here since this
 		// fixture isn't exercising it, matching every other test in this
 		// file that declares no ChangedFiles.
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if !result.Accepted {
 		t.Errorf("Accepted = false, want true; FailedChecks = %v", result.FailedChecks)
 	}
-	wantChecks := []string{"canonical_verify", "tests_added"}
+	wantChecks := []string{"canonical_verify", "tests_red_on_base"}
 	if len(result.GateResults) != len(wantChecks) {
-		t.Errorf("GateResults = %+v, want exactly canonical_verify and tests_added (no other keys declared)", result.GateResults)
+		t.Errorf("GateResults = %+v, want exactly canonical_verify and tests_red_on_base (no other keys declared)", result.GateResults)
 	}
 }
 
@@ -414,7 +324,7 @@ func TestEvaluateRunCopiesVerifyRerunsToTheirGates(t *testing.T) {
 		FullSuiteCommand:    []string{"sh", "-c", "make test"},
 		FullSuiteExitCode:   1,
 		FullSuiteRerun:      suiteRerun,
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	byCheck := map[string]run.GateResult{}
 	for _, g := range result.GateResults {
@@ -436,7 +346,7 @@ func TestEvaluateRunRejectsOnFailingCanonicalVerify(t *testing.T) {
 		VerifyCommand:       []string{"sh", "-c", "make verify"},
 		BuildExitCode:       0,
 		VerifyExitCode:      1,
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false")
@@ -457,28 +367,26 @@ func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 		RequiredContent:           []string{"marker"},
 		RequiredContentBaseFiles:  map[string]string{"a.go": "", "b.go": ""},
 		RequiredContentFinalFiles: map[string]string{"a.go": "cosmetic change only", "b.go": ""},
-		TestsRequiredOptOut:       "not exercising tests_added in this fixture",
+		TestsRequiredOptOut:       "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false")
 	}
-	wantFailed := []string{"diff_scope", "required_files_changed", "required_content_present"}
+	wantFailed := []string{"diff_scope"}
 	if !slices.Equal(result.FailedChecks, wantFailed) {
 		t.Errorf("FailedChecks = %v, want %v", result.FailedChecks, wantFailed)
 	}
 	if !slices.Equal(result.DiffScopeViolations, []string{"out-of-scope.txt"}) {
 		t.Errorf("DiffScopeViolations = %v, want [out-of-scope.txt]", result.DiffScopeViolations)
 	}
-	if !slices.Equal(result.MissingRequiredFiles, []string{"b.go"}) {
-		t.Errorf("MissingRequiredFiles = %v, want [b.go]", result.MissingRequiredFiles)
+	wantNotes := []string{"required file not changed: b.go", `required content not newly present: "marker"`}
+	if !slices.Equal(result.Notes, wantNotes) {
+		t.Errorf("Notes = %q, want %q", result.Notes, wantNotes)
 	}
-	if !slices.Equal(result.MissingRequiredContent, []string{"marker"}) {
-		t.Errorf("MissingRequiredContent = %v, want [marker]", result.MissingRequiredContent)
+	wantChecks := []string{"canonical_verify", "diff_scope", "tests_red_on_base"}
+	if len(result.GateResults) != len(wantChecks) {
+		t.Fatalf("GateResults = %+v, want %v (tests_red_on_base always runs)", result.GateResults, wantChecks)
 	}
-	if len(result.GateResults) != 5 {
-		t.Fatalf("GateResults = %+v, want 5 (one per declared check, plus tests_added which always runs)", result.GateResults)
-	}
-	wantChecks := []string{"canonical_verify", "diff_scope", "required_files_changed", "required_content_present", "tests_added"}
 	for i, want := range wantChecks {
 		if result.GateResults[i].Check != want {
 			t.Errorf("GateResults[%d].Check = %q, want %q", i, result.GateResults[i].Check, want)
@@ -520,48 +428,43 @@ func TestEvaluateRunExemptsHarnessByproductsFromDiffScope(t *testing.T) {
 		VerifyExitCode:      0,
 		ChangedFiles:        []string{"a.go", ".gitignore", "BUILD_REPORT.md"},
 		AllowedFiles:        []string{"a.go"},
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if !result.Accepted {
 		t.Errorf("Accepted = false, want true; FailedChecks = %v, DiffScopeViolations = %v", result.FailedChecks, result.DiffScopeViolations)
 	}
 }
 
-func TestTestsAddedPassesWithADefaultPatternMatch(t *testing.T) {
-	got := TestsAdded([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, "")
-	if !got.Passed {
-		t.Errorf("TestsAdded() Passed = false, want true when a *_test.go file changed")
-	}
-	if got.Check != "tests_added" {
-		t.Errorf("Check = %q, want tests_added", got.Check)
+func TestTestFilesFindsADefaultPatternMatch(t *testing.T) {
+	got := TestFiles([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, nil)
+	if !slices.Equal(got, []string{"internal/foo/bar_test.go"}) {
+		t.Errorf("TestFiles() = %v, want the *_test.go file only", got)
 	}
 }
 
-func TestTestsAddedFailsWithNoTestFileChanged(t *testing.T) {
-	got := TestsAdded([]string{"internal/foo/bar.go"}, nil, "")
-	if got.Passed {
-		t.Error("TestsAdded() Passed = true, want false when no changed file matches a test pattern")
+func TestTestFilesIsEmptyWithNoTestFileChanged(t *testing.T) {
+	if got := TestFiles([]string{"internal/foo/bar.go"}, nil, nil); len(got) != 0 {
+		t.Errorf("TestFiles() = %v, want none when no changed file matches a test pattern", got)
 	}
 }
 
-func TestTestsAddedHonorsCustomPatterns(t *testing.T) {
-	got := TestsAdded([]string{"e2e/checkout.feature"}, []string{"*.feature"}, "")
-	if !got.Passed {
-		t.Error("TestsAdded() Passed = false, want true against a custom test_patterns match")
+func TestTestFilesHonorsCustomPatterns(t *testing.T) {
+	if got := TestFiles([]string{"e2e/checkout.feature"}, []string{"*.feature"}, nil); len(got) != 1 {
+		t.Error("TestFiles() found no test against a custom test_patterns match")
 	}
 	// The same changed file does not satisfy any default pattern, proving
 	// the custom pattern -- not a default -- is what matched.
-	if got2 := TestsAdded([]string{"e2e/checkout.feature"}, nil, ""); got2.Passed {
-		t.Error("TestsAdded() with default patterns unexpectedly passed against a non-test-convention file")
+	if got := TestFiles([]string{"e2e/checkout.feature"}, nil, nil); len(got) != 0 {
+		t.Error("TestFiles() with default patterns unexpectedly matched a non-test-convention file")
 	}
 }
 
-// TestTestsAddedDefaultPatternsCoverMultipleLanguages pins
+// TestTestFilesDefaultPatternsCoverMultipleLanguages pins
 // DefaultTestPatterns' own multi-language coverage (found live: a Python
-// repo's tests/test_product_lab.py change failed tests_added outright
+// repo's tests/test_product_lab.py change failed the tests check outright
 // against the old Go-only *_test.go default) -- one representative file
 // per covered ecosystem.
-func TestTestsAddedDefaultPatternsCoverMultipleLanguages(t *testing.T) {
+func TestTestFilesDefaultPatternsCoverMultipleLanguages(t *testing.T) {
 	for _, changed := range []string{
 		"internal/foo/bar_test.go",
 		"tests/test_product_lab.py",
@@ -578,106 +481,130 @@ func TestTestsAddedDefaultPatternsCoverMultipleLanguages(t *testing.T) {
 		"src/widget_test.rs",
 	} {
 		t.Run(changed, func(t *testing.T) {
-			got := TestsAdded([]string{changed}, nil, "")
-			if !got.Passed {
-				t.Errorf("TestsAdded([]string{%q}, nil, \"\") Passed = false, want true", changed)
+			if got := TestFiles([]string{changed}, nil, nil); len(got) != 1 {
+				t.Errorf("TestFiles([]string{%q}, nil, nil) = %v, want the file", changed, got)
 			}
 		})
 	}
 }
 
-func TestTestsAddedCustomPatternMatchesFullPathNotJustBasename(t *testing.T) {
-	got := TestsAdded([]string{"test/integration/foo.go"}, []string{"test/*/*.go"}, "")
-	if !got.Passed {
-		t.Error("TestsAdded() Passed = false, want true when the full path matches a custom pattern")
+func TestTestFilesCustomPatternMatchesFullPathNotJustBasename(t *testing.T) {
+	if got := TestFiles([]string{"test/integration/foo.go"}, []string{"test/*/*.go"}, nil); len(got) != 1 {
+		t.Error("TestFiles() found no test when the full path matches a custom pattern")
 	}
 }
 
-func TestTestsAddedOptOutPassesRegardlessOfChangedFiles(t *testing.T) {
-	got := TestsAdded([]string{"docs/README.md"}, nil, "docs-only change")
-	if !got.Passed {
-		t.Error("TestsAdded() Passed = false, want true when the ticket declared an opt-out reason")
+// The gate's verdict table: what a proof, an opt-out and the changed test
+// files make of the tests_red_on_base gate and its note.
+func TestTestsRedOnBaseVerdictTable(t *testing.T) {
+	tests := []string{"a_test.go"}
+	proof := func(verdict string) *TestsRedOnBaseInput {
+		return &TestsRedOnBaseInput{Verdict: verdict, Reason: "why"}
+	}
+	for _, c := range []struct {
+		name     string
+		tests    []string
+		optOut   string
+		proof    *TestsRedOnBaseInput
+		passed   bool
+		wantNote string
+	}{
+		{"red on base proved", tests, "", proof(run.TestsRedProved), true, ""},
+		{"every test passes on base", tests, "", proof(run.TestsRedNotExercised), false, ""},
+		{"no verdict passes with a note", tests, "", proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
+		{"no proof at all passes with a note", tests, "", nil, true, "tests_red_on_base: the changed tests were not run"},
+		{"no test file changed refuses", nil, "", nil, false, ""},
+		{"no test file changed refuses whatever the proof", nil, "", proof(run.TestsRedProved), false, ""},
+		{"opt-out passes without a test", nil, "docs-only change", nil, true, ""},
+		{"opt-out ignores a proof", tests, "docs-only change", proof(run.TestsRedNotExercised), true, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			gate, note := TestsRedOnBase(c.tests, c.optOut, c.proof)
+			if gate.Check != "tests_red_on_base" || gate.Passed != c.passed || note != c.wantNote {
+				t.Errorf("TestsRedOnBase() = %+v, %q; want passed %v, note %q", gate, note, c.passed, c.wantNote)
+			}
+		})
 	}
 }
 
-// TestTicketTestsAddedFeasibleCatchesTheLiveCase pins the exact shape found
+// TestTicketTestsFeasibleCatchesTheLiveCase pins the exact shape found
 // live (a Flutter + Go app repo run 3, 2026-09-28): a ticket's Allowed-Files/
 // Required-Changed-Files named only one concrete, non-test Go file, no
 // Tests-Required opt-out declared -- structurally unable to ever pass
-// tests_added, yet the plan reached plan_review and a build ran before
+// tests_red_on_base, yet the plan reached plan_review and a build ran before
 // quarantining on it.
-func TestTicketTestsAddedFeasibleCatchesTheLiveCase(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"backend/internal/handler/dispatch_mux.go"}, nil, "")
+func TestTicketTestsFeasibleCatchesTheLiveCase(t *testing.T) {
+	got := TicketTestsFeasible([]string{"backend/internal/handler/dispatch_mux.go"}, nil, "")
 	if got {
-		t.Error("TicketTestsAddedFeasible() = true, want false for Allowed-Files containing only a concrete non-test file with no opt-out")
+		t.Error("TicketTestsFeasible() = true, want false for Allowed-Files containing only a concrete non-test file with no opt-out")
 	}
 }
 
-func TestTicketTestsAddedFeasibleTrueWithATestFileInAllowedFiles(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, "")
+func TestTicketTestsFeasibleTrueWithATestFileInAllowedFiles(t *testing.T) {
+	got := TicketTestsFeasible([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, "")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true when Allowed-Files includes a file matching a test pattern")
+		t.Error("TicketTestsFeasible() = false, want true when Allowed-Files includes a file matching a test pattern")
 	}
 }
 
-func TestTicketTestsAddedFeasibleTrueWithRubyMinitestFile(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{
+func TestTicketTestsFeasibleTrueWithRubyMinitestFile(t *testing.T) {
+	got := TicketTestsFeasible([]string{
 		"lib/get_process_mem.rb",
 		"test/fixtures/heroku-bash-status-unsupported-unit",
 		"test/get_process_mem_test.rb",
 	}, nil, "")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true when Allowed-Files includes a Ruby Minitest *_test.rb file")
+		t.Error("TicketTestsFeasible() = false, want true when Allowed-Files includes a Ruby Minitest *_test.rb file")
 	}
 }
 
-func TestTicketTestsAddedFeasibleTrueWithOptOutReason(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"backend/internal/handler/dispatch_mux.go"}, nil, "route exercised by ticket 002's dispatch test")
+func TestTicketTestsFeasibleTrueWithOptOutReason(t *testing.T) {
+	got := TicketTestsFeasible([]string{"backend/internal/handler/dispatch_mux.go"}, nil, "route exercised by ticket 002's dispatch test")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true when the ticket declares a Tests-Required opt-out reason")
+		t.Error("TicketTestsFeasible() = false, want true when the ticket declares a Tests-Required opt-out reason")
 	}
 }
 
-func TestTicketTestsAddedFeasibleTrueWithDirectoryAllowedFilesEntry(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"backend/internal/handler/"}, nil, "")
+func TestTicketTestsFeasibleTrueWithDirectoryAllowedFilesEntry(t *testing.T) {
+	got := TicketTestsFeasible([]string{"backend/internal/handler/"}, nil, "")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true when Allowed-Files declares a whole directory that could contain a test file")
+		t.Error("TicketTestsFeasible() = false, want true when Allowed-Files declares a whole directory that could contain a test file")
 	}
 }
 
-func TestTicketTestsAddedFeasibleTrueWithGlobAllowedFilesEntry(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"backend/internal/handler/*.go"}, nil, "")
+func TestTicketTestsFeasibleTrueWithGlobAllowedFilesEntry(t *testing.T) {
+	got := TicketTestsFeasible([]string{"backend/internal/handler/*.go"}, nil, "")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true when Allowed-Files declares a glob that could match a test file")
+		t.Error("TicketTestsFeasible() = false, want true when Allowed-Files declares a glob that could match a test file")
 	}
 }
 
-func TestTicketTestsAddedFeasibleFalseWithMultipleConcreteNonTestFiles(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"backend/internal/handler/dispatch_mux.go", "backend/internal/handler/router.go"}, nil, "")
+func TestTicketTestsFeasibleFalseWithMultipleConcreteNonTestFiles(t *testing.T) {
+	got := TicketTestsFeasible([]string{"backend/internal/handler/dispatch_mux.go", "backend/internal/handler/router.go"}, nil, "")
 	if got {
-		t.Error("TicketTestsAddedFeasible() = true, want false when every Allowed-Files entry is a concrete non-test file")
+		t.Error("TicketTestsFeasible() = true, want false when every Allowed-Files entry is a concrete non-test file")
 	}
 }
 
-func TestTicketTestsAddedFeasibleHonorsCustomPatterns(t *testing.T) {
-	got := TicketTestsAddedFeasible([]string{"e2e/checkout.feature"}, []string{"*.feature"}, "")
+func TestTicketTestsFeasibleHonorsCustomPatterns(t *testing.T) {
+	got := TicketTestsFeasible([]string{"e2e/checkout.feature"}, []string{"*.feature"}, "")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true against a custom test_patterns match")
+		t.Error("TicketTestsFeasible() = false, want true against a custom test_patterns match")
 	}
 }
 
-func TestTicketTestsAddedFeasibleTrueWithEmptyAllowedFiles(t *testing.T) {
+func TestTicketTestsFeasibleTrueWithEmptyAllowedFiles(t *testing.T) {
 	// writeAndValidateDraftedTickets rejects a ticket with no Allowed-Files
 	// at all as its own, separate "missing Allowed-Files" error -- this
 	// function must not also flag it, or the two errors would race for
 	// which one a caller reports first.
-	got := TicketTestsAddedFeasible(nil, nil, "")
+	got := TicketTestsFeasible(nil, nil, "")
 	if !got {
-		t.Error("TicketTestsAddedFeasible() = false, want true for an empty Allowed-Files list")
+		t.Error("TicketTestsFeasible() = false, want true for an empty Allowed-Files list")
 	}
 }
 
-func TestEvaluateRunTestsAddedGateFailsAcceptedRun(t *testing.T) {
+func TestEvaluateRunTestsRedOnBaseRefusesWithNoTestFileChanged(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:  []string{"sh", "-c", "true"},
 		BuildExitCode:  0,
@@ -685,26 +612,44 @@ func TestEvaluateRunTestsAddedGateFailsAcceptedRun(t *testing.T) {
 		ChangedFiles:   []string{"a.go"},
 	})
 	if result.Accepted {
-		t.Error("Accepted = true, want false when tests_added has no matching changed file and no opt-out")
+		t.Error("Accepted = true, want false when no test file changed and there is no opt-out")
 	}
-	if !slices.Equal(result.FailedChecks, []string{"tests_added"}) {
-		t.Errorf("FailedChecks = %v, want [tests_added]", result.FailedChecks)
+	if !slices.Equal(result.FailedChecks, []string{"tests_red_on_base"}) {
+		t.Errorf("FailedChecks = %v, want [tests_red_on_base]", result.FailedChecks)
 	}
 }
 
-func TestEvaluateRunTestsAddedGatePassesWithMatchingTestFile(t *testing.T) {
+func TestEvaluateRunTestsRedOnBaseAcceptsAProvedTestAndNotesNoProof(t *testing.T) {
+	input := EvaluateRunInput{
+		VerifyCommand:  []string{"sh", "-c", "true"},
+		BuildExitCode:  0,
+		VerifyExitCode: 0,
+		ChangedFiles:   []string{"a.go", "a_test.go"},
+		TestsRedOnBase: &TestsRedOnBaseInput{Verdict: run.TestsRedProved},
+	}
+	if result := EvaluateRun(input); !result.Accepted || len(result.Notes) != 0 {
+		t.Errorf("proved: Accepted = %v, Notes = %q; want accepted with no notes", result.Accepted, result.Notes)
+	}
+	input.TestsRedOnBase = nil
+	if result := EvaluateRun(input); !result.Accepted || len(result.Notes) != 1 {
+		t.Errorf("no proof: Accepted = %v, Notes = %q; want accepted with one note", result.Accepted, result.Notes)
+	}
+}
+
+func TestEvaluateRunTestsRedOnBaseRefusesTestsThatPassOnTheBase(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:  []string{"sh", "-c", "true"},
 		BuildExitCode:  0,
 		VerifyExitCode: 0,
 		ChangedFiles:   []string{"a.go", "a_test.go"},
+		TestsRedOnBase: &TestsRedOnBaseInput{Verdict: run.TestsRedNotExercised},
 	})
-	if !result.Accepted {
-		t.Errorf("Accepted = false, want true; FailedChecks = %v", result.FailedChecks)
+	if result.Accepted || !slices.Equal(result.FailedChecks, []string{"tests_red_on_base"}) {
+		t.Errorf("Accepted = %v, FailedChecks = %v; want refused on tests_red_on_base", result.Accepted, result.FailedChecks)
 	}
 }
 
-func TestEvaluateRunTestsAddedGatePassesViaOptOutEvenWithoutRunningPatterns(t *testing.T) {
+func TestEvaluateRunTestsRedOnBasePassesViaOptOutEvenWithoutRunningPatterns(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:       []string{"sh", "-c", "true"},
 		BuildExitCode:       0,
@@ -716,8 +661,8 @@ func TestEvaluateRunTestsAddedGatePassesViaOptOutEvenWithoutRunningPatterns(t *t
 		t.Errorf("Accepted = false, want true; FailedChecks = %v", result.FailedChecks)
 	}
 	for _, g := range result.GateResults {
-		if g.Check == "tests_added" && !g.Passed {
-			t.Error("tests_added gate should have passed via the declared opt-out")
+		if g.Check == "tests_red_on_base" && !g.Passed {
+			t.Error("tests_red_on_base gate should have passed via the declared opt-out")
 		}
 	}
 }
@@ -769,7 +714,7 @@ func TestEvaluateRunQuarantinesOnFullSuiteRegression(t *testing.T) {
 		FullSuiteExitCode:   1,
 		FullSuiteDurationMs: 42,
 		FullSuiteLogSHA256:  "def456",
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false when full_suite_verify fails")
@@ -777,7 +722,7 @@ func TestEvaluateRunQuarantinesOnFullSuiteRegression(t *testing.T) {
 	if !slices.Equal(result.FailedChecks, []string{"full_suite_verify"}) {
 		t.Errorf("FailedChecks = %v, want [full_suite_verify]", result.FailedChecks)
 	}
-	wantChecks := []string{"canonical_verify", "diff_scope", "tests_added", "full_suite_verify"}
+	wantChecks := []string{"canonical_verify", "diff_scope", "tests_red_on_base", "full_suite_verify"}
 	if len(result.GateResults) != len(wantChecks) {
 		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
 	}
@@ -832,7 +777,7 @@ func TestEvaluateRunQuarantinesOnCodeReviewFailure(t *testing.T) {
 		CodeReviewExitCode:   1,
 		CodeReviewDurationMs: 42,
 		CodeReviewLogSHA256:  "abc123",
-		TestsRequiredOptOut:  "not exercising tests_added in this fixture",
+		TestsRequiredOptOut:  "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false when code_review fails")
@@ -840,7 +785,7 @@ func TestEvaluateRunQuarantinesOnCodeReviewFailure(t *testing.T) {
 	if !slices.Equal(result.FailedChecks, []string{"code_review"}) {
 		t.Errorf("FailedChecks = %v, want [code_review]", result.FailedChecks)
 	}
-	wantChecks := []string{"canonical_verify", "diff_scope", "tests_added", "code_review"}
+	wantChecks := []string{"canonical_verify", "diff_scope", "tests_red_on_base", "code_review"}
 	if len(result.GateResults) != len(wantChecks) {
 		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
 	}
@@ -882,7 +827,7 @@ func TestEvaluateRunQuarantinesOnFailingSecurityAudit(t *testing.T) {
 			{Check: "lint", Command: []string{"sh", "-c", "golangci-lint run ./..."}, ExitCode: 0, DurationMs: 10, LogSHA256: "abc"},
 			{Check: "security_audit", Command: []string{"sh", "-c", "govulncheck ./..."}, ExitCode: 1, DurationMs: 20, LogSHA256: "def"},
 		},
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false when security_audit fails")
@@ -890,7 +835,7 @@ func TestEvaluateRunQuarantinesOnFailingSecurityAudit(t *testing.T) {
 	if !slices.Equal(result.FailedChecks, []string{"security_audit"}) {
 		t.Errorf("FailedChecks = %v, want [security_audit]", result.FailedChecks)
 	}
-	wantChecks := []string{"canonical_verify", "tests_added", "lint", "security_audit"}
+	wantChecks := []string{"canonical_verify", "tests_red_on_base", "lint", "security_audit"}
 	if len(result.GateResults) != len(wantChecks) {
 		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
 	}
@@ -926,7 +871,7 @@ func TestEvaluateRunQuarantinesOnFailingReferenceOracle(t *testing.T) {
 		NamedGates: []NamedGateInput{
 			{Check: "reference_oracle", Command: []string{"sh", "-c", "go test ./verify/..."}, ExitCode: 1, DurationMs: 15, LogSHA256: "ghi"},
 		},
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false when reference_oracle fails")
@@ -934,7 +879,7 @@ func TestEvaluateRunQuarantinesOnFailingReferenceOracle(t *testing.T) {
 	if !slices.Equal(result.FailedChecks, []string{"reference_oracle"}) {
 		t.Errorf("FailedChecks = %v, want [reference_oracle]", result.FailedChecks)
 	}
-	wantChecks := []string{"canonical_verify", "tests_added", "reference_oracle"}
+	wantChecks := []string{"canonical_verify", "tests_red_on_base", "reference_oracle"}
 	if len(result.GateResults) != len(wantChecks) {
 		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
 	}
@@ -962,7 +907,7 @@ func TestEvaluateRunCarriesReferenceOracleSHA256Through(t *testing.T) {
 		NamedGates: []NamedGateInput{
 			{Check: "reference_oracle", Command: []string{"sh", "-c", "go test ./verify/..."}, ExitCode: 0, DurationMs: 15, LogSHA256: "ghi", ReferenceOracleSHA256: "deadbeef"},
 		},
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	var found bool
 	for _, g := range result.GateResults {
@@ -992,7 +937,7 @@ func TestEvaluateRunLeavesReferenceOracleSHA256EmptyForOtherGates(t *testing.T) 
 		NamedGates: []NamedGateInput{
 			{Check: "lint", Command: []string{"sh", "-c", "golangci-lint run ./..."}, ExitCode: 0, DurationMs: 10, LogSHA256: "abc"},
 		},
-		TestsRequiredOptOut: "not exercising tests_added in this fixture",
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	for _, g := range result.GateResults {
 		if g.Check == "lint" && g.ReferenceOracleSHA256 != "" {
@@ -1557,25 +1502,25 @@ func TestIsTestFile(t *testing.T) {
 	}
 }
 
-func TestTestsAddedAcceptsATestDirectoryPattern(t *testing.T) {
+func TestTestFilesAcceptsATestDirectoryPattern(t *testing.T) {
 	immer := []string{"*.test.js", "*.spec.ts", "__tests__/"}
-	if !TestsAdded([]string{"src/patch.ts", "__tests__/patch.js"}, immer, "").Passed {
-		t.Error("__tests__/patch.js should satisfy tests_added")
+	if got := TestFiles([]string{"src/patch.ts", "__tests__/patch.js"}, immer, nil); !slices.Equal(got, []string{"__tests__/patch.js"}) {
+		t.Errorf("TestFiles() = %v, want __tests__/patch.js", got)
 	}
-	if TestsAdded([]string{"__tests__/patch.js"}, []string{"*.test.js"}, "").Passed {
+	if got := TestFiles([]string{"__tests__/patch.js"}, []string{"*.test.js"}, nil); len(got) != 0 {
 		t.Error("without the directory entry the file is not a test")
 	}
 }
 
-func TestTicketTestsAddedFeasibleWithATestDirectory(t *testing.T) {
+func TestTicketTestsFeasibleWithATestDirectory(t *testing.T) {
 	allowed := []string{"src/patch.ts", "__tests__/patch.js"}
-	if !TicketTestsAddedFeasible(allowed, []string{"*.test.js", "__tests__/"}, "") {
+	if !TicketTestsFeasible(allowed, []string{"*.test.js", "__tests__/"}, "") {
 		t.Error("directory pattern should make the ticket feasible")
 	}
-	if !TicketTestsAddedFeasible(allowed, nil, "") {
+	if !TicketTestsFeasible(allowed, nil, "") {
 		t.Error("default patterns should make the ticket feasible")
 	}
-	if TicketTestsAddedFeasible(allowed, []string{"*.test.js", "*.test.ts"}, "") {
+	if TicketTestsFeasible(allowed, []string{"*.test.js", "*.test.ts"}, "") {
 		t.Error("patterns lacking the directory should be infeasible")
 	}
 }

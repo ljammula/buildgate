@@ -141,7 +141,7 @@
         "log_sha256": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
       },
       {
-        "check": "tests_added",
+        "check": "tests_red_on_base",
         "command": null,
         "passed": false,
         "exit_code": 0,
@@ -154,7 +154,7 @@
     "rescues": null,
     "request_id": "req-building",
     "triage": "The verify command failed on TestKeyScopedToAccount in every round.",
-    "handoff_sha256": "29fb43910e6634efe4aaa68de1bf6ded6a7b07fb7c9ca96eee331976bde71adc",
+    "handoff_sha256": "2233fc0c5996194fd6decbcdbb8512052a2f44cd3c36656dffb428d1840ba610",
     "created_at": "2026-09-10T09:31:00Z",
     "updated_at": "2026-09-10T09:40:00Z",
     "tokens_complete": false
@@ -355,9 +355,6 @@
     },
     "diff_base_sha": "every-field diff_base_sha",
     "instruction_base_sha": "every-field instruction_base_sha",
-    "changed_by_earlier_tickets": [
-      "every-field changed_by_earlier_tickets"
-    ],
     "result_sha": "every-field result_sha",
     "halt_confirmed": true,
     "kept_for_resume": true,
@@ -626,10 +623,7 @@
           "first_log_sha256": "every-field first_log_sha256",
           "exit_code": 3,
           "reason": "every-field reason"
-        },
-        "changed_by_earlier_tickets": [
-          "every-field changed_by_earlier_tickets"
-        ]
+        }
       }
     ],
     "notifications": [
@@ -675,6 +669,38 @@
     "earlier_attempt_of": "every-field earlier_attempt_of",
     "escalated": true,
     "tests_required_opt_out": "every-field tests_required_opt_out",
+    "tests_red_on_base": {
+      "verdict": "every-field verdict",
+      "reason": "every-field reason",
+      "files": [
+        {
+          "path": "every-field path",
+          "sha256": "every-field sha256",
+          "runner": "every-field runner",
+          "test_ids": [
+            "every-field test_ids"
+          ],
+          "runs": [
+            {
+              "pass": "every-field pass",
+              "commit": "every-field commit",
+              "outcome": "every-field outcome",
+              "tests": {
+                "every-field key": "every-field tests"
+              },
+              "exit_code": 3,
+              "log_path": "every-field log_path",
+              "report_sha256": "every-field report_sha256",
+              "reproduction_sha256": "every-field reproduction_sha256",
+              "cap_exceeded": true
+            }
+          ]
+        }
+      ]
+    },
+    "notes": [
+      "every-field notes"
+    ],
     "invalidated_by_run_id": "every-field invalidated_by_run_id",
     "invalidated_at": "2026-09-10T09:00:00Z",
     "invalidated_reason": "every-field invalidated_reason",

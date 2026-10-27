@@ -177,9 +177,9 @@ func reproductionContext(ctx, buildVerifyCtx temporalworkflow.Context) temporalw
 
 // runReproduction launches one pass of a held reproduction
 // (RunReviewReproductionActivity), records its attempts, and returns its run.
-func runReproductionPass(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, held run.HeldReproduction, id, pass, commit, worktreePath, branch string) (ReproductionRunResult, error) {
+func runReproductionPass(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, held run.HeldReproduction, id, pass, commit, kind, worktreePath, branch string) (ReproductionRunResult, error) {
 	var res ReproductionRunResult
-	in := ReproductionRunInput{RunWorkflowInput: input, Held: held, Pass: pass, Commit: commit}
+	in := ReproductionRunInput{RunWorkflowInput: input, Held: held, Pass: pass, Commit: commit, AttemptKind: kind}
 	if err := temporalworkflow.ExecuteActivity(ids.withRetries(rctx, id), RunReviewReproductionActivityName, in).Get(ctx, &res); err != nil {
 		return res, wrapActivityFailure("run review reproduction activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
@@ -214,7 +214,7 @@ func reproduceReviewFindings(ctx temporalworkflow.Context, ids *activityIDs, bui
 		current.Stage, current.StartedAt = reproductionAttemptKind, temporalworkflow.Now(ctx)
 		evidence := reproduction.Evidence{HoldsLiteral: h.HoldsLiteral}
 		launch := func(pass, commit string) (*reproduction.RunResult, error) {
-			res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-%d-%s", h.Finding, pass), pass, commit, worktreePath, branch)
+			res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-%d-%s", h.Finding, pass), pass, commit, "", worktreePath, branch)
 			if err != nil {
 				return nil, err
 			}
@@ -256,7 +256,7 @@ func recheckReproductions(ctx temporalworkflow.Context, ids *activityIDs, buildV
 	for k, e := range input.RecheckReproductions {
 		h := e.HeldReproduction
 		current.Stage, current.StartedAt = reproductionAttemptKind, temporalworkflow.Now(ctx)
-		res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-recheck-%d", k), run.ReproductionPassRecheck, result.ResultSHA, worktreePath, branch)
+		res, err := runReproductionPass(ctx, ids, rctx, input, result, h, fmt.Sprintf("repro-recheck-%d", k), run.ReproductionPassRecheck, result.ResultSHA, "", worktreePath, branch)
 		if err != nil {
 			return nil, err
 		}

@@ -56,14 +56,13 @@ type MergePolicy struct {
 	// meaningful for "full_suite_verify" via r.FullSuiteScheduled (found
 	// via a real local `codex review` pass on this same PR: an earlier
 	// version required it unconditionally, denying every valid
-	// non-cadence-boundary run under -full-suite-cadence). diff_scope/
-	// required_files_changed/required_content_present are deliberately
-	// NOT included in cmd/factoryd's own default list below: unlike
-	// full_suite_verify, whether a ticket declared the corresponding key
+	// non-cadence-boundary run under -full-suite-cadence). diff_scope is
+	// deliberately NOT included in cmd/factoryd's own default list below:
+	// unlike full_suite_verify, whether a ticket declared Allowed-Files
 	// is not currently recorded anywhere on run.Run, so this function has
 	// no way to distinguish "the ticket legitimately didn't declare one"
-	// from "a ticket-generation regression dropped it" for those three --
-	// requiring them unconditionally would deny release for every
+	// from "a ticket-generation regression dropped it" --
+	// requiring it unconditionally would deny release for every
 	// legitimately undeclared-scope ticket, the same class of bug the
 	// full_suite_verify fix above closes. Nil means no additional gate is
 	// required beyond whatever already ran -- the caller (cmd/factoryd) is

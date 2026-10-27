@@ -149,7 +149,7 @@ class BuildPromptTests(unittest.TestCase):
 		# Live evidence (example-app "reminders_streak MCP tool" and "habit
 		# insights", both 2026-09-28): the planner split a ticket that only
 		# wires a route, with no test file and no Tests-Required opt-out --
-		# a plan writeAndValidateDraftedTickets/policy.TicketTestsAddedFeasible
+		# a plan writeAndValidateDraftedTickets/policy.TicketTestsFeasible
 		# (cmd/factoryd) now catches before plan_review. The prompt must
 		# state the rule plainly so the planner stops drafting that shape in
 		# the first place, not just get caught after the fact.
@@ -160,7 +160,7 @@ class BuildPromptTests(unittest.TestCase):
 				VALID_SPEC, "Add idempotency keys", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR,
 			)
 		self.assertIn("Tests-Required: no -- <reason>", prompt)
-		self.assertIn("tests_added gate", prompt)
+		self.assertIn("tests_red_on_base gate", prompt)
 		self.assertIn("Required-Changed-Files", prompt)
 
 	def test_states_the_multi_file_criterion_rule(self):

@@ -70,7 +70,7 @@ func TestAPIStartStarterRunsInRoutesModeWithNoModelFields(t *testing.T) {
 
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	sandboxImage := "operator-approved.example/worker@sha256:" + strings.Repeat("a", 64)

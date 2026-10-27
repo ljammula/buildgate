@@ -51,7 +51,7 @@ func TestEvaluateDecisionSavesAuditableAllowedDecision(t *testing.T) {
 	}
 }
 
-// TestEvaluateDecisionRecordsTestsRequiredOptOut is the tests_added
+// TestEvaluateDecisionRecordsTestsRequiredOptOut is the tests_red_on_base
 // gate's own requirement that a ticket's opt-out is recorded on the
 // release decision itself, not only on the run record -- see
 // run.Run.TestsRequiredOptOut's own doc comment for why.

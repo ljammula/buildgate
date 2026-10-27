@@ -31,7 +31,7 @@ func fakeOfflineBuildAppScript(t *testing.T) string {
 func TestRegistryProxyRequiresImageWhenUnconfigured(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	cmd := factorydCommand(t,
@@ -65,7 +65,7 @@ func TestRegistryProxyRequiresImageWhenUnconfigured(t *testing.T) {
 func TestRegistryProxyComposesWithRelay(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	cmd := factorydCommand(t,
@@ -102,7 +102,7 @@ func TestRegistryProxyComposesWithRelay(t *testing.T) {
 func TestRegistryProxyRejectsMutableImage(t *testing.T) {
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_added\n"), 0o644); err != nil {
+	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
 	cmd := factorydCommand(t,

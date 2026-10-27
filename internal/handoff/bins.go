@@ -40,15 +40,18 @@ const (
 // TestEveryCheckTheFactoryRecordsHasABin: a new check must be placed
 // deliberately.
 var bins = map[string]Bin{
-	"canonical_verify":         BinCorrective,
-	"full_suite_verify":        BinCorrective,
-	"lint":                     BinCorrective,
-	"security_audit":           BinCorrective,
-	"unit_tests":               BinCorrective,
-	"integration_tests":        BinCorrective,
-	"diff_scope":               BinCorrective,
-	"required_files_changed":   BinCorrective,
-	"required_content_present": BinCorrective,
+	"canonical_verify":  BinCorrective,
+	"full_suite_verify": BinCorrective,
+	"lint":              BinCorrective,
+	"security_audit":    BinCorrective,
+	"unit_tests":        BinCorrective,
+	"integration_tests": BinCorrective,
+	"diff_scope":        BinCorrective,
+	// The changed tests pass on the base commit (they do not exercise the
+	// change), or no test file changed: a build can fix each when told, in one
+	// line (SC-018). Safe to tell: a test that passes on the base still fails
+	// the gate, so a token test does not get through.
+	policy.TestsRedOnBaseCheck: BinCorrective,
 	// The review fails only when the reviewer gave no verdict: there is
 	// nothing to tell a build, and the run's request waits in
 	// resume_review. A finding reaches a build only through
@@ -63,9 +66,6 @@ var bins = map[string]Bin{
 	// A bug request's oracle that passes on the base commit: the operator
 	// supplies a test that fails.
 	"oracle_red_on_base": BinOperator,
-
-	// Telling a build "add a test" trains a token test.
-	"tests_added": BinNever,
 }
 
 // BinOf returns the bin of a failed check. A repository's own gate

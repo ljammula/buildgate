@@ -40,7 +40,7 @@ func TestSaveKeepsTheHandoffInStepWithTheRun(t *testing.T) {
 
 	// The delayed result arrives: the run was in fact quarantined by a check.
 	r.State, r.Triage = run.StateQuarantined, ""
-	r.GateResults = []run.GateResult{{Check: "tests_added", Passed: false}, {Check: "lint", Passed: false, ExitCode: 2}}
+	r.GateResults = []run.GateResult{{Check: "tests_red_on_base", Passed: false}, {Check: "lint", Passed: false, ExitCode: 2}}
 	if err := save(r, dataDir); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestSaveKeepsTheHandoffInStepWithTheRun(t *testing.T) {
 		t.Error("the halted handoff still loads for a quarantined run")
 	}
 	doc, err = handoff.Load(run.Dir(dataDir, r.ID), r.HandoffSHA256, run.StateQuarantined)
-	if err != nil || doc.Next != handoff.BinNever || len(doc.Checks) != 2 || len(doc.Rounds) != 1 {
+	if err != nil || doc.Next != handoff.BinCorrective || len(doc.Checks) != 2 || len(doc.Rounds) != 1 {
 		t.Errorf("quarantined handoff = %+v, %v, want the two failed checks and the round", doc, err)
 	}
 

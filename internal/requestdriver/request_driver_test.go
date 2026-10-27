@@ -1444,7 +1444,7 @@ func TestAdvancePlanningUnclaimedCriteriaHalts(t *testing.T) {
 // declares an Allowed-Files/Required-Changed-Files that names only one
 // concrete, non-test Go file and no Tests-Required opt-out -- the exact
 // live shape (Flutter + Go app run 3, 2026-09-28) that could never pass the
-// tests_added gate no matter what a build round does, since TestsAdded
+// tests_red_on_base gate no matter what a build round does, since TestsAdded
 // only ever looks at ChangedFiles and a run's diff_scope gate already
 // confines those to Allowed-Files.
 func infeasibleTestsAddedTicket(verifyCommand string, criteria ...int) string {
@@ -1486,7 +1486,7 @@ Nothing else.
 
 // TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket covers the live
 // bug (Flutter + Go app run 3, 2026-09-28): a drafted ticket whose own Allowed-Files
-// could never satisfy the tests_added gate must halt planning before the
+// could never satisfy the tests_red_on_base gate must halt planning before the
 // plan ever reaches plan_review -- not be approved, built (burning a real
 // round), and only THEN quarantined on a gate it was structurally unable
 // to pass. See policy.TicketTestsAddedFeasible's own doc comment for the
@@ -1510,8 +1510,8 @@ func TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket(t *testing.T) {
 	if loaded.State != request.StateHalted {
 		t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
 	}
-	if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, "tests_added") {
-		t.Errorf("Error = %q, want it to name the infeasible ticket and the tests_added gate", loaded.Error)
+	if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, "tests_red_on_base") {
+		t.Errorf("Error = %q, want it to name the infeasible ticket and the tests_red_on_base gate", loaded.Error)
 	}
 }
 
@@ -1565,8 +1565,8 @@ func TestAdvancePlanningRefusesATicketNamingAProtectedPath(t *testing.T) {
 			if loaded.State != request.StateHalted {
 				t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
 			}
-			if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, entry) || strings.Contains(loaded.Error, "tests_added") {
-				t.Errorf("Error = %q, want it to name the ticket and %s, and not the tests_added gate", loaded.Error, entry)
+			if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, entry) || strings.Contains(loaded.Error, "tests_red_on_base") {
+				t.Errorf("Error = %q, want it to name the ticket and %s, and not the tests_red_on_base gate", loaded.Error, entry)
 			}
 		})
 	}
@@ -1599,7 +1599,7 @@ func sequencedPlanTicketsRunner(t *testing.T, dataDir string, calls ...func() ([
 // TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds covers the
 // automatic re-plan (advancePlanning's own bounded retry, see its doc
 // comment and maxPlanningAttempts): a first drafted plan that is
-// tests_added-infeasible must not halt outright -- it triggers exactly
+// tests_red_on_base-infeasible must not halt outright -- it triggers exactly
 // one more planning launch, fed the ticket/gate name as plan_review-style
 // feedback, and a feasible second plan reaches plan_review normally.
 func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
@@ -1631,8 +1631,8 @@ func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
 		t.Errorf("first launch's plan-feedback.md = %q, want empty (no prior rejection)", got)
 	}
 	second := (*feedbackByCall)[1]
-	if !strings.Contains(second, "001.spec.md") || !strings.Contains(second, "tests_added") {
-		t.Errorf("second launch's plan-feedback.md = %q, want it to name the infeasible ticket and the tests_added gate", second)
+	if !strings.Contains(second, "001.spec.md") || !strings.Contains(second, "tests_red_on_base") {
+		t.Errorf("second launch's plan-feedback.md = %q, want it to name the infeasible ticket and the tests_red_on_base gate", second)
 	}
 
 	loaded, err := request.Load(dataDir, id)
@@ -1655,14 +1655,14 @@ func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
 	if rej.Stage() != request.StatePlanReview {
 		t.Errorf("Rejections[0].Stage() = %q, want %q (routes into PlanFeedback)", rej.Stage(), request.StatePlanReview)
 	}
-	if !strings.Contains(rej.Reason, "001.spec.md") || !strings.Contains(rej.Reason, "tests_added") {
-		t.Errorf("Rejections[0].Reason = %q, want it to name the infeasible ticket and the tests_added gate", rej.Reason)
+	if !strings.Contains(rej.Reason, "001.spec.md") || !strings.Contains(rej.Reason, "tests_red_on_base") {
+		t.Errorf("Rejections[0].Reason = %q, want it to name the infeasible ticket and the tests_red_on_base gate", rej.Reason)
 	}
 }
 
 // TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches covers
 // the bound on advancePlanning's automatic re-plan: a second
-// tests_added-infeasible plan halts exactly like today, after exactly two
+// tests_red_on_base-infeasible plan halts exactly like today, after exactly two
 // launches -- never a third, unbounded retry.
 func TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches(t *testing.T) {
 	dp := newFakeDeps(t)
@@ -1697,8 +1697,8 @@ func TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches(t *testin
 	if loaded.State != request.StateHalted {
 		t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
 	}
-	if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, "tests_added") {
-		t.Errorf("Error = %q, want it to name the infeasible ticket and the tests_added gate", loaded.Error)
+	if !strings.Contains(loaded.Error, "001.spec.md") || !strings.Contains(loaded.Error, "tests_red_on_base") {
+		t.Errorf("Error = %q, want it to name the infeasible ticket and the tests_red_on_base gate", loaded.Error)
 	}
 	if len(loaded.Rejections) != 1 {
 		t.Fatalf("Rejections = %+v, want exactly one factory-authored rejection (from the first, auto-replanned attempt)", loaded.Rejections)
@@ -1863,7 +1863,7 @@ func TestAdvancePlanningLeavesNoNoteWhenEveryOwningTicketListsTheCriterion(t *te
 }
 
 // TestAdvancePlanningRefusesForTheTestsRuleAndNotForACriterionsFile: a plan
-// with a ticket whose Allowed-Files can never pass tests_added (a check of
+// with a ticket whose Allowed-Files can never pass tests_red_on_base (a check of
 // header lines) and a criterion naming a file no covering ticket may change
 // (a reading of prose) is refused, and re-planned once, for the first only:
 // the refusal's reason does not mention the criterion.
@@ -1898,8 +1898,8 @@ func TestAdvancePlanningRefusesForTheTestsRuleAndNotForACriterionsFile(t *testin
 		t.Fatalf("Rejections = %+v, want exactly one factory-authored rejection", loaded.Rejections)
 	}
 	reason := loaded.Rejections[0].Reason
-	if !strings.Contains(reason, "tests_added") || strings.Contains(reason, "criterion 2") || strings.Contains(reason, "refunds.go") {
-		t.Errorf("Rejections[0].Reason = %q, want the tests_added infeasibility and nothing of criterion 2", reason)
+	if !strings.Contains(reason, "tests_red_on_base") || strings.Contains(reason, "criterion 2") || strings.Contains(reason, "refunds.go") {
+		t.Errorf("Rejections[0].Reason = %q, want the tests_red_on_base infeasibility and nothing of criterion 2", reason)
 	}
 }
 
@@ -2079,14 +2079,14 @@ func TestAdvanceBuildingQuarantineReportedViaRunnerErrorStillQuarantinesRequest(
 		if onReady != nil {
 			onReady(&run.Run{ID: ticket, State: run.StateReady})
 		}
-		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_added"}
+		rr := &run.Run{ID: ticket, State: run.StateQuarantined, HaltError: "gate failed: tests_red_on_base"}
 		if err := rr.Save(dataDir); err != nil {
 			return err
 		}
 		// Mirrors runMainWithReady's own final lines: it returns a
 		// non-nil error whenever the run's terminal state isn't Accepted,
 		// even though the quarantine above is already durable.
-		return fmt.Errorf("run quarantined: gate failed: tests_added")
+		return fmt.Errorf("run quarantined: gate failed: tests_red_on_base")
 	}
 	earlierPROpenAt(dp, fmt.Sprintf("%040d", 2))
 
@@ -2103,7 +2103,7 @@ func TestAdvanceBuildingQuarantineReportedViaRunnerErrorStillQuarantinesRequest(
 	if loaded.State != request.StateQuarantined {
 		t.Fatalf("State = %q, want %q (runErr != nil must not override the run's own recorded quarantine)", loaded.State, request.StateQuarantined)
 	}
-	if !strings.Contains(loaded.Error, "ticket 2/3") || !strings.Contains(loaded.Error, "quarantined") || !strings.Contains(loaded.Error, "gate failed: tests_added") {
+	if !strings.Contains(loaded.Error, "ticket 2/3") || !strings.Contains(loaded.Error, "quarantined") || !strings.Contains(loaded.Error, "gate failed: tests_red_on_base") {
 		t.Errorf("Error = %q, want it to name ticket 2/3, quarantined, and the run's own reason", loaded.Error)
 	}
 	if got := loaded.Tickets[0].RunID; got != requestdrivertest.TicketRunID(id, 1) {

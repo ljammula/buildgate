@@ -537,10 +537,6 @@ type GateResult struct {
 	// it is set, ExitCode, Passed and LogSHA256 are the rerun's. nil for
 	// every other check, and for a run that was not rerun.
 	Rerun *VerifyRerun `json:"rerun,omitempty"`
-	// ChangedByEarlierTickets is set on required_files_changed only: the
-	// required files this run left untouched that an earlier ticket of the
-	// same request changed, counted as changed (policy.RequiredFilesChanged).
-	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
 }
 
 // The outcomes of a GateBaseCheck.
@@ -865,6 +861,57 @@ type ReproductionRun struct {
 	ReportSHA256       string            `json:"report_sha256,omitempty"`
 	ReproductionSHA256 string            `json:"reproduction_sha256,omitempty"`
 	CapExceeded        bool              `json:"cap_exceeded,omitempty"`
+}
+
+// The verdicts of the tests_red_on_base proof (TestsRedOnBase.Verdict).
+const (
+	// TestsRedProved: at least one changed test fails on the base commit and
+	// passes on the result commit.
+	TestsRedProved = "red_on_base"
+	// TestsRedNotExercised: every test that ran passes on the base commit
+	// too, so the changed tests do not exercise the change.
+	TestsRedNotExercised = "not_exercised"
+	// TestsRedNoVerdict: the proof could not be run or read (no runner
+	// applies, no report, no base commit, a sandbox that never started). It
+	// refuses nothing.
+	TestsRedNoVerdict = "no_verdict"
+)
+
+// The passes of a tests_red_on_base launch: the result commit and the base.
+const (
+	TestsRedPassResult = "result"
+	TestsRedPassBase   = "base"
+)
+
+// TestsRedOnBaseDirName is the directory, in the run directory, that holds
+// the host copies of the changed test files the proof runs.
+const TestsRedOnBaseDirName = "tests-red-held"
+
+// TestsRedOnBaseDir is the directory, in the run directory runDir, holding
+// the host copy of each changed test file, one subdirectory per file index.
+func TestsRedOnBaseDir(runDir string) string {
+	return filepath.Join(runDir, TestsRedOnBaseDirName)
+}
+
+// TestsRedOnBase is what the run record keeps of the tests_red_on_base proof
+// (SC-008): the verdict, a one-line reason, and for each changed test file
+// the factory ran, the hash of the copy it ran and its launches. Never the
+// files' content.
+type TestsRedOnBase struct {
+	Verdict string         `json:"verdict"`
+	Reason  string         `json:"reason,omitempty"`
+	Files   []TestsRedFile `json:"files,omitempty"`
+}
+
+// TestsRedFile is one changed test file of the proof: its path, the SHA-256
+// of the host copy taken from the result commit, the runner and test IDs the
+// factory chose, and its launches on the result and the base commit.
+type TestsRedFile struct {
+	Path    string            `json:"path"`
+	SHA256  string            `json:"sha256"`
+	Runner  string            `json:"runner,omitempty"`
+	TestIDs []string          `json:"test_ids,omitempty"`
+	Runs    []ReproductionRun `json:"runs,omitempty"`
 }
 
 // The dispositions of a finding (CodeReviewFinding.Disposition), and the
@@ -1522,8 +1569,8 @@ type Run struct {
 	// (see Replay). Written once, when the run's record is created.
 	Replay *Replay `json:"replay,omitempty"`
 	// DiffBaseSHA is set only when -diff-base overrode the range the
-	// diff-shape gates (diff_scope, required_files_changed,
-	// required_content, tests_added) and the PR-body evidence were
+	// diff-shape checks (diff_scope, tests_red_on_base, the required-file
+	// and required-content notes) and the PR-body evidence were
 	// computed from: cmd/factoryd's own -on-branch corrective-PR-review
 	// rounds, whose BaseSHA is the round's own small starting point (the
 	// branch tip it checked out), not the ticket's original base -- see
@@ -1539,12 +1586,7 @@ type Run struct {
 	// recorded, else the run's effective diff base (DiffBaseSHA, else
 	// BaseSHA). Empty only in a record written before the field existed.
 	InstructionBaseSHA string `json:"instruction_base_sha,omitempty"`
-	// ChangedByEarlierTickets is -changed-by-earlier-tickets: the files the
-	// earlier tickets of the same request changed, which required_files_changed
-	// may count for a required file this run left untouched. Empty for a
-	// request's first ticket and every run outside a request.
-	ChangedByEarlierTickets []string `json:"changed_by_earlier_tickets,omitempty"`
-	ResultSHA               string   `json:"result_sha,omitempty"`
+	ResultSHA          string `json:"result_sha,omitempty"`
 	// HaltConfirmed is true only once a StateHalted run's real outcome is
 	// positively known: either its own best-effort in-progress-child
 	// termination (or, for a still-queued request, cancellation) actually
@@ -1732,13 +1774,23 @@ type Run struct {
 	// one runs on the escalation too.
 	Escalated bool `json:"escalated,omitempty"`
 	// TestsRequiredOptOut is the ticket's declared reason (ticketspec's
-	// "Tests-Required: no -- <reason>") for skipping the tests_added
+	// "Tests-Required: no -- <reason>") for skipping the tests_red_on_base
 	// gate on this run, or "" when the gate ran normally (no opt-out
-	// declared). Recorded on the run so a passing tests_added gate that
-	// only passed via opt-out is distinguishable from one a real test
-	// file actually satisfied, and so release.Decision can carry the
+	// declared). Recorded on the run so a passing tests_red_on_base gate that
+	// only passed via opt-out is distinguishable from one a test that
+	// fails on the base actually satisfied, and so release.Decision can carry the
 	// reason forward.
 	TestsRequiredOptOut string `json:"tests_required_opt_out,omitempty"`
+	// TestsRedOnBase is the factory's proof for the tests_red_on_base gate:
+	// which changed test files it ran on the base and the result commits and
+	// what each run showed. Nil when the gate took no launches (an opt-out,
+	// no test file changed, or a run that never reached the proof).
+	TestsRedOnBase *TestsRedOnBase `json:"tests_red_on_base,omitempty"`
+	// Notes are facts about the run that refuse nothing and that the pull
+	// request body lists under "Notes": a required file or required content
+	// the ticket declared and the run did not produce, and a tests_red_on_base
+	// check that reached no verdict. One line each.
+	Notes []string `json:"notes,omitempty"`
 	// InvalidatedByRunID/InvalidatedAt/InvalidatedReason are the
 	// cross-run half of gap 3's regression oracle (the plan's 2026-08-28
 	// readiness review): set on THIS run's record when a later run that

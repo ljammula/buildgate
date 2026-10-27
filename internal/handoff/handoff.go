@@ -88,9 +88,7 @@ type Check struct {
 // DiffChecks are the checks computed from the attempt's committed diff.
 var DiffChecks = map[string]bool{
 	"diff_scope":               true,
-	"required_files_changed":   true,
-	"required_content_present": true,
-	"tests_added":              true,
+	policy.TestsRedOnBaseCheck: true,
 }
 
 // Document is the facts half of a ticket's handoff for one attempt.

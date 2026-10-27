@@ -42,7 +42,7 @@ var sentences = func(r *run.Run) map[string]string {
 }
 
 func TestCheckFixedThroughARetryGivenTheRecordIsFromTheRun(t *testing.T) {
-	q := quarantinedOn("q1", "t-1", "canonical_verify", "tests_added")
+	q := quarantinedOn("q1", "t-1", "canonical_verify", "tests_red_on_base")
 	a := acceptedAfter("a1", "t-1", "q1", "key.go", "key_test.go")
 	report := FromRuns("app", []*run.Run{q, a}, nil, Sources{Sentences: sentences})
 	got := ofKind(report.Observations, KindCheckFixed)
@@ -53,14 +53,14 @@ func TestCheckFixedThroughARetryGivenTheRecordIsFromTheRun(t *testing.T) {
 	if o.Source != SourceRun || o.RunID != "q1" || o.AcceptedRunID != "a1" || o.At != a.UpdatedAt {
 		t.Errorf("observation = %+v", o)
 	}
-	want := []CheckNote{{Check: "canonical_verify", Sentence: "The verify command failed on TestKey."}, {Check: "tests_added"}}
+	want := []CheckNote{{Check: "canonical_verify", Sentence: "The verify command failed on TestKey."}, {Check: "tests_red_on_base"}}
 	if !reflect.DeepEqual(o.Checks, want) {
 		t.Errorf("Checks = %+v, want %+v", o.Checks, want)
 	}
 	if !reflect.DeepEqual(o.ChangedFiles, []string{"key.go", "key_test.go"}) {
 		t.Errorf("ChangedFiles = %v", o.ChangedFiles)
 	}
-	if want := handID(KindCheckFixed, "q1,a1", "", "canonical_verify,tests_added"); o.ID != want {
+	if want := handID(KindCheckFixed, "q1,a1", "", "canonical_verify,tests_red_on_base"); o.ID != want {
 		t.Errorf("ID = %s, want %s", o.ID, want)
 	}
 }
@@ -237,10 +237,10 @@ var idPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 func TestIDsAreWellFormedUniqueAndStable(t *testing.T) {
 	runs := func() []*run.Run {
 		multi := finished("m1", run.StateQuarantined, failed(1, "a"), failed(2, "a", "no changes made to the workspace"), failed(3, "b"))
-		multi.GateResults = []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "tests_added"}, {Check: "diff_scope", ExitCode: 2}}
+		multi.GateResults = []run.GateResult{{Check: "canonical_verify", ExitCode: 1}, {Check: "tests_red_on_base"}, {Check: "diff_scope", ExitCode: 2}}
 		fixed := finished("f1", run.StateAccepted, failed(1, "a"), passed(2, "a.go"), failed(3, "c"), passed(4, "b.go"))
 		q := quarantinedOn("q1", "t-1", "canonical_verify")
-		q2 := quarantinedOn("q2", "t-1", "tests_added")
+		q2 := quarantinedOn("q2", "t-1", "tests_red_on_base")
 		return []*run.Run{multi, fixed, q, q2, acceptedAfter("a1", "t-1", "q1"), acceptedAfter("a2", "t-1", "q2"), finished("h1", run.StateHalted)}
 	}
 	derive := func() []Observation {

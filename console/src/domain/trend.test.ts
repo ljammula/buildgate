@@ -19,7 +19,7 @@ test("the contract fixture decodes", () => {
   expect(trend.overall.oneShotRate).toBeCloseTo(0.3333);
   expect(trend.overall.quarantinedBy.map((c) => c.name)).toEqual([
     "canonical_verify",
-    "tests_added",
+    "tests_red_on_base",
   ]);
   expect(trend.overall.spendCostMicroUsd).toBeGreaterThan(0);
   expect(trend.buckets.length).toBeGreaterThan(0);

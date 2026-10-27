@@ -53,12 +53,12 @@ class ClassifyTest(unittest.TestCase):
 
     def test_unexpected_quarantine_wrong_gate_vs_expected(self):
         # expect=quarantine:reference_oracle but the run actually quarantined
-        # on required_files_changed -- not the expected gate, so this is
+        # on tests_red_on_base -- not the expected gate, so this is
         # unexpected, not quarantined_as_expected.
         run = {"state": "quarantined", "gate_results": [
-            {"check": "required_files_changed", "passed": False},
+            {"check": "tests_red_on_base", "passed": False},
         ]}
-        self.assertEqual(("quarantined", "unexpected_quarantine:required_files_changed"),
+        self.assertEqual(("quarantined", "unexpected_quarantine:tests_red_on_base"),
                          pg.classify(run, "quarantine:reference_oracle"))
 
     def test_quarantine_with_no_failing_gate_recorded(self):
@@ -100,7 +100,7 @@ class CauseBucketTest(unittest.TestCase):
         self.assertEqual("factoryd_bug_suspect", pg.cause_bucket({}, "false_accept"))
 
     def test_scope_gate_is_ticket_spec(self):
-        for gate in ("diff_scope", "required_files_changed", "required_content_present", "tests_added"):
+        for gate in ("diff_scope", "tests_red_on_base"):
             self.assertEqual("ticket_spec", pg.cause_bucket({}, "unexpected_quarantine:%s" % gate), gate)
 
     def test_build_quality_gate_is_model_quality(self):
@@ -391,11 +391,11 @@ class ExpectAlternativesTest(unittest.TestCase):
         run = {"state": "quarantined", "gate_results": [
             {"check": "canonical_verify", "passed": False},
             {"check": "diff_scope", "passed": True},
-            {"check": "tests_added", "passed": False},
+            {"check": "tests_red_on_base", "passed": False},
         ]}
         self.assertEqual(("quarantined", "quarantined_as_expected"),
                          pg.classify(run, "quarantine:diff_scope|canonical_verify"))
-        self.assertEqual(("quarantined", "unexpected_quarantine:tests_added"),
+        self.assertEqual(("quarantined", "unexpected_quarantine:tests_red_on_base"),
                          pg.classify(run, "quarantine:diff_scope"))
 
 

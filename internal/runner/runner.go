@@ -518,7 +518,7 @@ func GitTreeFilesNamed(dir, sha, name string) ([]string, error) {
 // Found live (review): a required file's content was read via a plain
 // os.ReadFile, which follows symlinks — a run that replaced a required
 // path with a symlink to any other readable file containing the required
-// marker could satisfy required_content_present without the required
+// marker could satisfy the required-content note without the required
 // path itself ever containing it, since the filesystem read silently
 // dereferenced to the link's target. Returns (empty, false, nil) for a
 // path that doesn't exist at all, matching GitShowFile's convention for
