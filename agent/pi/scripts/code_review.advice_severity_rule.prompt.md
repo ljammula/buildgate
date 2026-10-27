@@ -1,0 +1,1 @@
+Severity: "high" is likely real harm (a security hole, data loss, a broken contract another component relies on). "medium" should be fixed before merge. "low" is worth knowing. Severity only orders the advice; no finding blocks the change.

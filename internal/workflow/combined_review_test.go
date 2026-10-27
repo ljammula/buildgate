@@ -144,3 +144,32 @@ func TestReviewStepNoRelayErrorNamesTheCombinedStep(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewStepArgsCarryTheSpecAndReproductionsOnlyWhenTheBuildHoldsThem
+// proves the review launch is given --reproductions and the approved spec
+// exactly when RunWorkflowInput.ReviewReproduction is set (the condition
+// holdReproductions runs on), and neither otherwise.
+func TestReviewStepArgsCarryTheSpecAndReproductionsOnlyWhenTheBuildHoldsThem(t *testing.T) {
+	input := fixtureInput()
+	input.ReviewSpecPath = "/fixture/approved.md"
+	has := func(args []string, flag string) bool {
+		for _, a := range args {
+			if a == flag {
+				return true
+			}
+		}
+		return false
+	}
+	off := reviewStepArgs(ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}, "/s.py")
+	if has(off, "--reproductions") || has(off, "--approved-spec") {
+		t.Errorf("args %v carry --reproductions or --approved-spec with reproductions off", off)
+	}
+	if got := withReviewSpec(context.Background(), input); got != context.Background() {
+		t.Errorf("withReviewSpec staged the approved spec with reproductions off")
+	}
+	input.ReviewReproduction = true
+	on := reviewStepArgs(ReviewStepInput{RunWorkflowInput: input, Step: reviewstep.Combined}, "/s.py")
+	if !has(on, "--reproductions") || !has(on, "--approved-spec") {
+		t.Errorf("args %v lack --reproductions or --approved-spec with reproductions on", on)
+	}
+}

@@ -107,8 +107,11 @@ func ReviewExitCode(exit int) int {
 // argv for the sandbox staging's exact-string substitution to translate it to
 // the in-container path). approvedSpecHostPath, baseSHA and thinking are
 // omitted from the argv entirely when empty, so an unset value never appears
-// as an empty flag.
-func CombinedArgs(script, workspace, specHostPath, approvedSpecHostPath, reviewPolicy, baseSHA, thinking, harness string) []string {
+// as an empty flag. reproductions adds --reproductions: the build holds the
+// reproductions the review's findings carry (SC-022), so the review is asked
+// for spec lines and reproductions; without it the review is advice on design,
+// security, maintainability and risk, and approvedSpecHostPath should be empty.
+func CombinedArgs(script, workspace, specHostPath, approvedSpecHostPath, reviewPolicy, baseSHA, thinking, harness string, reproductions bool) []string {
 	args := []string{
 		script,
 		"--workspace", workspace,
@@ -116,6 +119,9 @@ func CombinedArgs(script, workspace, specHostPath, approvedSpecHostPath, reviewP
 	}
 	if approvedSpecHostPath != "" {
 		args = append(args, "--approved-spec", approvedSpecHostPath)
+	}
+	if reproductions {
+		args = append(args, "--reproductions")
 	}
 	args = append(args, "--review-policy", reviewPolicy)
 	if baseSHA != "" {

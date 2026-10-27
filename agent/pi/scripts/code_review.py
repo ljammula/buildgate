@@ -3,7 +3,8 @@ only review step the factory launches): the finding parser
 (parse_code_review_findings, with each finding's spec_line and
 reproduction), the reproduction caps (MAX_REPRODUCTIONS,
 MAX_REPRODUCTION_BYTES, cap_reproductions), the rule texts the review prompt
-embeds (SCOPE_RULE, SEVERITY_RULE, REPRODUCTION_RULE, COMMAND_OUTCOME_RULE),
+embeds (SCOPE_RULE, SEVERITY_RULE, REPRODUCTION_RULE, COMMAND_OUTCOME_RULE, and the
+advice path's ADVICE_SCOPE_RULE, ADVICE_SEVERITY_RULE),
 and the CODE_REVIEW_EVIDENCE.json builder and writer (code_review_evidence,
 write_code_review_evidence_json). It has no command line and runs no model
 turn.
@@ -41,6 +42,14 @@ REPRODUCTION_RULE = (
 	prompt_templates.load_text("code_review.reproduction_rule")
 )
 
+ADVICE_SCOPE_RULE = prompt_templates.load_text("code_review.advice_scope_rule")
+
+ADVICE_SEVERITY_RULE = prompt_templates.load_text("code_review.advice_severity_rule")
+
+# Without reproductions every finding is advice, and the review reports at
+# most this many (the advice scope rule says so; cap_advice enforces it).
+MAX_ADVICE_FINDINGS = 5
+
 COMMAND_OUTCOME_RULE = (
 	prompt_templates.load_text("code_review.command_outcome_rule")
 )
@@ -49,7 +58,7 @@ COMMAND_OUTCOME_RULE = (
 # reuses one wording instead of a driftable copy.
 
 
-def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
+def parse_code_review_findings(output: str, *, reproductions: bool = True) -> tuple[bool, list[dict]]:
 	"""Extracts the reviewer's findings from its final response text.
 	Returns (available, findings): available is False when no candidate
 	JSON object with a "findings" list was found at all (an unreachable
@@ -68,7 +77,10 @@ def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
 	defaults to "" when missing/not a string. "severity" is lowercased;
 	anything missing or not one of high/medium/low defaults to "medium"
 	-- a reviewer that flags something but garbles its own severity label
-	should never have that finding silently disappear."""
+	should never have that finding silently disappear. reproductions False
+	(a review of a build that holds none) drops every spec_line and
+	reproduction: the answer format never asks for them, and a model that
+	sends them anyway cannot make a finding block."""
 	candidate_findings = None
 	for candidate in build_app._iter_json_objects(output):
 		if not isinstance(candidate, dict):
@@ -106,10 +118,10 @@ def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
 			"summary": summary,
 			"failure_scenario": failure_scenario,
 		}
-		spec_line = _parse_spec_line(entry.get("spec_line"))
+		spec_line = _parse_spec_line(entry.get("spec_line")) if reproductions else None
 		if spec_line:
 			finding["spec_line"] = spec_line
-		reproduction = _parse_reproduction(entry.get("reproduction"))
+		reproduction = _parse_reproduction(entry.get("reproduction")) if reproductions else None
 		if reproduction:
 			finding["reproduction"] = reproduction
 		parsed.append(finding)
@@ -164,6 +176,17 @@ def cap_reproductions(findings: list[dict]) -> list[str]:
 			continue
 		del finding["reproduction"]
 	return notes
+
+
+def cap_advice(findings: list[dict]) -> list[str]:
+	"""Keeps the first MAX_ADVICE_FINDINGS findings, in place, and returns one
+	note saying how many were dropped (none when none were). A cap never fails
+	a review."""
+	dropped = len(findings) - MAX_ADVICE_FINDINGS
+	if dropped <= 0:
+		return []
+	del findings[MAX_ADVICE_FINDINGS:]
+	return [f"{dropped} further finding(s) dropped, an advice review carries at most {MAX_ADVICE_FINDINGS}"]
 
 
 def _unavailable_stopped_reason(error: str, *, advisory: bool, diff_fetch_failed: bool = False) -> str:

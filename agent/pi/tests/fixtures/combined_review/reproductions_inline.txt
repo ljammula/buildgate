@@ -1,0 +1,49 @@
+Independent code review.
+
+The diff below is complete for this ticket -- do NOT re-run `git diff` or `git show` to fetch it again. Open other files only when needed to confirm a suspected defect, and keep tool use to a minimum.
+
+On a hunk line `@@ -a,b +c,d @@ text`, the text after the second `@@` is git's guess at the enclosing function or heading, copied from an earlier line of the file. It is not part of the change and can name the wrong section. When a finding depends on where in a file a change sits, open the file and read the lines around it.
+
+--- diff --stat against abc123 ---
+stat text--- end diff --stat ---
+
+--- diff against abc123 ---
+diff text
+--- end diff ---
+[instr]
+
+--- ticket spec (context for the change's intent) ---
+Add a widget to the app.
+
+--- end ticket spec ---
+
+--- approved spec, numbered (cite a line by its number and its text) ---
+L1: # Widget
+L2: 
+L3: The widget is `rounded` to two places.
+L4: It never panics.
+--- end approved spec ---
+
+=== Code review ===
+
+Report only concrete correctness, security, data-loss, or concurrency defects. Before reporting one, inspect the relevant implementation and trace the triggering input or state through its actual control flow to the observable wrong result. Check the types, function contracts, call sites, and error handling that determine that behavior; account for every relevant return value and branch instead of inferring semantics from a name or one value alone. A concern that depends on an assumption you cannot verify from the repository is not a finding.
+
+Each finding must describe a concrete failure scenario: the input or state that triggers it, the code path it takes, and the wrong result it produces. Do NOT report style, formatting, naming, lint, or missing-comment issues -- those are not this review's concern and must never appear as a finding.
+
+Severity: "high" is a finding that breaks a behaviour the approved spec states: cite that spec line in "spec_line". A defect that no spec line states is "medium" (real, non-blocking) or "low" (minor), whatever its consequence. Severity orders the advice only; a finding blocks through its reproduction alone.
+
+A finding blocks the change only through a reproduction: a test, written out in the finding's "reproduction" object, that the factory runs itself on the result commit. You write no file in the workspace; the reproduction exists only in your answer. A finding without both a spec line and a reproduction is advice: it is listed for the reviewer of the pull request and refuses nothing.
+
+Give "spec_line" as the number and the exact text of ONE numbered line of the approved spec above ("L<n>: <text>" is shown; give n and the text after the colon, byte for byte) that the finding says the change breaks. If no spec line states the behaviour, give none.
+
+Give "reproduction" as {"path": "<new test file>", "content": "<the whole file>"}:
+- The path is relative, has no `..`, matches the repository's test file naming, and is a file that does NOT exist in the repository yet. A reproduction at an existing path is advice.
+- The file holds only tests for this finding, written in the repository's own test framework, importing only what the repository already has. Each test fails when the defect is present and passes when the behaviour the cited spec line states holds. A test that hangs or raises an exception counts as a failure; a test that passes counts as no defect.
+- The test must fail because of the cited behaviour and nothing else: no network, clocks, randomness, ordering between tests or files outside the repository. Do not name a command, flag or timeout; the factory chooses them.
+- At most 3 findings carry a reproduction, each file at most 32 KiB. Keep each as small as it can be.
+
+IMPORTANT rule for command-outcome findings: this review sandbox has no network and only a partial, read-only dependency cache, so build, lint, and test commands (`make verify`, `make lint`, `go test ./...`) cannot run to completion here. Do NOT run them, and do NOT report their failure (or that you could not run them) as a finding.
+
+=== Answer format ===
+
+Respond with ONLY a single JSON object of the form {"findings": [{"severity": "high"|"medium"|"low", "file": "<path>", "line": <int>, "summary": "<what is wrong>", "failure_scenario": "<inputs/state that trigger it and the wrong result>", "spec_line": {"number": <int>, "text": "<the spec line's text>"}, "reproduction": {"path": "<new test file>", "content": "<the whole file>"}}]} -- or {"findings": []} when there are none. "spec_line" and "reproduction" are optional on each finding; leave them out when the finding has none. No prose outside the JSON.

@@ -294,23 +294,36 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 // input.SpecPath is already unconditionally staged by
 // a.runSandboxWithRetries (specPath) for every review-step launch; the
 // approved spec (input.ReviewSpecPath, a run with -review-spec) is staged
-// beside it by withReviewSpec. Without one no spec line can be cited, so
-// every finding is advice. input.effectiveDiffBase(), not
+// beside it by withReviewSpec, and --reproductions is passed, only when the
+// build holds reproductions (input.ReviewReproduction): the spec is sent to
+// the reviewer only to be cited. Otherwise every finding is advice and the
+// reviewer sees neither the numbered spec nor the reproduction rules. input.effectiveDiffBase(), not
 // input.BaseSHA: see RunWorkflowInput.DiffBaseSHA's own doc comment -- a
 // corrective round's own BaseSHA is just its checkout point, not the
 // cumulative diff a -diff-base override names for this review to read.
 func reviewStepArgs(input ReviewStepInput, script string) []string {
-	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, input.ReviewSpecPath, input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
+	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, reviewSpecPathFor(input.RunWorkflowInput), input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness), input.ReviewReproduction)
 }
 
-// withReviewSpec stages the approved spec (RunWorkflowInput.ReviewSpecPath)
-// beside the ticket's spec for the review launch, which reads it as
-// --approved-spec; ctx unchanged for a run without one.
+// reviewSpecPathFor is the approved spec the review launch is given: the
+// run's snapshot when the build holds reproductions (the reviewer cites its
+// lines), empty otherwise (nothing to cite).
+func reviewSpecPathFor(input RunWorkflowInput) string {
+	if !input.ReviewReproduction {
+		return ""
+	}
+	return input.ReviewSpecPath
+}
+
+// withReviewSpec stages the approved spec (reviewSpecPathFor) beside the
+// ticket's spec for the review launch, which reads it as --approved-spec; ctx
+// unchanged when there is none.
 func withReviewSpec(ctx context.Context, input RunWorkflowInput) context.Context {
-	if input.ReviewSpecPath == "" {
+	path := reviewSpecPathFor(input)
+	if path == "" {
 		return ctx
 	}
-	return withExtraRunInputs(ctx, input.ReviewSpecPath)
+	return withExtraRunInputs(ctx, path)
 }
 
 // retiredReviewStep reports whether input is a review a retired plan
