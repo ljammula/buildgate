@@ -12,6 +12,7 @@ export interface NewRequestValues {
   readonly fullSuiteCommand: string;
   readonly preflightProfile: string;
   readonly draftOracles: boolean;
+  readonly planReview: boolean;
 }
 
 const emptyValues: NewRequestValues = {
@@ -21,6 +22,7 @@ const emptyValues: NewRequestValues = {
   fullSuiteCommand: "",
   preflightProfile: "",
   draftOracles: false,
+  planReview: false,
 };
 
 export interface NewRequestErrors {
@@ -55,6 +57,7 @@ export function useNewRequestForm() {
         fullSuiteCommand: values.fullSuiteCommand.trim(),
         preflightProfile: values.preflightProfile.trim(),
         draftOracles: values.draftOracles,
+        planReview: values.planReview,
         by,
       },
       { onSuccess: (request) => void navigate(requestPath(request.id), { replace: true }) },

@@ -39,6 +39,7 @@ describe("NewRequestScreen", () => {
     await user.type(await screen.findByLabelText("Workspace path"), "/repos/app");
     await user.type(screen.getByLabelText("Request"), "Add idempotency keys to POST /refunds");
     await user.click(screen.getByRole("checkbox", { name: "Draft oracles" }));
+    await user.click(screen.getByRole("checkbox", { name: "Review the plan even for one ticket" }));
     await user.click(screen.getByRole("button", { name: "Advanced" }));
     await user.type(screen.getByLabelText("Verify command"), "make ci-verify");
     await user.type(screen.getByLabelText("Preflight profile"), "brownfield");
@@ -55,6 +56,7 @@ describe("NewRequestScreen", () => {
       verify_command: "make ci-verify",
       preflight_profile: "brownfield",
       draft_oracles: true,
+      plan_review: true,
       by: "operator",
     });
   });

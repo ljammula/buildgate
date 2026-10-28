@@ -389,6 +389,7 @@ test("request-every-field decodes with every optional field populated", () => {
   // Every field set includes resume.reason, which makes the wait a park.
   expect(r.nextAction).toContain("`factoryd resume req-every-field` checks again");
   expect(r.draftOracles).toBe(true);
+  expect(r.planReview).toBe(true);
   expect(r.quarantineCheck).toBe("every-field quarantine_check");
   expect(r.oracleSkipWarning).toBe("every-field oracle_skip_warning");
   expect(r.reviewNotes).toEqual(["every-field review_notes"]);

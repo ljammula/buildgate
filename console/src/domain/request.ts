@@ -748,6 +748,11 @@ export interface RequestSummary {
    */
   readonly draftOracles: boolean;
   /**
+   * Submitted with `-plan-review` (or the `plan_review` session key): the
+   * request waits at plan review even when its plan is one ticket.
+   */
+  readonly planReview: boolean;
+  /**
    * Whether sending this request back to planning or spec drafting is legal
    * right now. Only GET /requests/{id} computes it.
    */
@@ -904,6 +909,7 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     canSendBackToPlan: optBoolean(o, "can_send_back_to_plan", at),
     approveNextState: optString(o, "approve_next_state", at),
     draftOracles: optBoolean(o, "draft_oracles", at),
+    planReview: optBoolean(o, "plan_review", at),
     wait: optObject(o, "wait", at, decodeRequestWait),
     quarantineCheck: stringOrNull(o, "quarantine_check", at),
     build: optObject(o, "build", at, decodeRequestBuild),

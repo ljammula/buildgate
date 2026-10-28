@@ -143,6 +143,7 @@ describe("writes", () => {
         fullSuiteCommand: "make test",
         preflightProfile: "go",
         draftOracles: true,
+        planReview: true,
         by: "jane",
       }),
     );
@@ -151,7 +152,7 @@ describe("writes", () => {
     expect(sent.headers).toEqual(WRITE);
     expect(sent.body).toBe(
       '{"workspace":"/repos/app","text":"add a thing","verify_command":"make verify",' +
-        '"full_suite_command":"make test","preflight_profile":"go","draft_oracles":true,"by":"jane"}',
+        '"full_suite_command":"make test","preflight_profile":"go","draft_oracles":true,"plan_review":true,"by":"jane"}',
     );
 
     const minimal = await sentBy((http) =>
@@ -160,6 +161,7 @@ describe("writes", () => {
         text: "t",
         verifyCommand: "",
         draftOracles: false,
+        planReview: false,
         by: "",
       }),
     );

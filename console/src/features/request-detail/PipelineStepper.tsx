@@ -24,6 +24,8 @@ function glyphFor(
   switch (status) {
     case "done":
       return { icon: "circle_check", text: "text-tone-success", word: "done" };
+    case "skipped":
+      return { icon: "circle_dashed", text: "text-fg-subtle", word: "skipped" };
     case "current":
       return {
         icon: "circle_dot",
@@ -54,7 +56,8 @@ function StepWhen({ at, by }: { readonly at: string; readonly by: string }) {
 function StepView({ step, request }: { step: PipelineStep; request: RequestSummary }) {
   const glyph = glyphFor(step.status, statusForToken(request.state) === "needsHuman");
   const Icon = statusIcons[glyph.icon];
-  const emphasize = step.status !== "done" && step.status !== "pending";
+  const emphasize =
+    step.status !== "done" && step.status !== "pending" && step.status !== "skipped";
   const entry = step.entry;
   const detail = stepShowsDetail(step);
   return (
