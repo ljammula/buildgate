@@ -254,6 +254,33 @@ describe("pipelineSteps", () => {
     expect(steps[3]?.entry).toBeNull();
   });
 
+  test("a plan the factory approved itself shows plan review as skipped, one a person approved as done", () => {
+    const skipped = pipelineSteps(
+      req("building", {
+        history: [historyWire({ from: "planning", to: "building", at: at(0), by: "factoryd" })],
+      }),
+    );
+    expect(skipped.map((s) => [s.step, s.status])).toEqual([
+      ["submitted", "done"],
+      ["spec_drafting", "done"],
+      ["spec_review", "done"],
+      ["planning", "done"],
+      ["plan_review", "skipped"],
+      ["building", "current"],
+      ["pr_review", "pending"],
+      ["done", "pending"],
+    ]);
+    const reviewed = pipelineSteps(
+      req("building", {
+        history: [
+          historyWire({ from: "planning", to: "plan_review", at: at(0), by: "factoryd" }),
+          historyWire({ from: "plan_review", to: "building", at: at(1), by: "jane" }),
+        ],
+      }),
+    );
+    expect(reviewed.find((s) => s.step === "plan_review")?.status).toBe("done");
+  });
+
   test("a terminal request fails the step it moved out of, with the terminal entry as its detail", () => {
     const steps = pipelineSteps(
       req("halted", {

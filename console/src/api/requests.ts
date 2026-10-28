@@ -51,6 +51,7 @@ export interface CreateRequestOptions {
   readonly fullSuiteCommand?: string;
   readonly preflightProfile?: string;
   readonly draftOracles?: boolean;
+  readonly planReview?: boolean;
   readonly by?: string | null;
 }
 
@@ -65,7 +66,7 @@ export interface CreateRequestOptions {
  * enforces the actual workspace allowlist (see internal/api's
  * workspaceAllowed doc comment); this function just sends the operator's
  * choice and surfaces whatever the server decides through ApiError. An
- * empty optional string, or a false `draftOracles`, is omitted from the
+ * empty optional string, or a false `draftOracles` or `planReview`, is omitted from the
  * body.
  */
 export async function createRequest(
@@ -81,6 +82,7 @@ export async function createRequest(
     ...(options.fullSuiteCommand ? { full_suite_command: options.fullSuiteCommand } : {}),
     ...(options.preflightProfile ? { preflight_profile: options.preflightProfile } : {}),
     ...(options.draftOracles ? { draft_oracles: true } : {}),
+    ...(options.planReview ? { plan_review: true } : {}),
     ...(options.by ? { by: options.by } : {}),
   };
   return decodeRequestSummary(

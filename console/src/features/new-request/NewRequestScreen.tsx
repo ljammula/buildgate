@@ -30,6 +30,7 @@ export function NewRequestScreen() {
   // listing never offered.
   const [selected, setSelected] = useState("");
   const draftId = useId();
+  const planId = useId();
   const { values, set, errors } = form;
 
   const hints = workspaces.data ?? [];
@@ -132,6 +133,25 @@ export function NewRequestScreen() {
                   <p id={`${draftId}-desc`} className="text-xs text-fg-subtle">
                     Adds an oracle-review stage between spec approval and planning, to
                     approve/hand-write/skip acceptance-test oracles before any ticket is planned.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id={planId}
+                  aria-describedby={`${planId}-desc`}
+                  className="mt-0.5"
+                  checked={values.planReview}
+                  onChange={(event) => {
+                    set({ planReview: event.target.checked });
+                  }}
+                />
+                <div className="flex flex-col">
+                  <label htmlFor={planId} className="text-sm font-medium text-fg">
+                    Review the plan even for one ticket
+                  </label>
+                  <p id={`${planId}-desc`} className="text-xs text-fg-subtle">
+                    A one-ticket plan otherwise goes straight to building without a plan review.
                   </p>
                 </div>
               </div>

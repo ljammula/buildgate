@@ -293,7 +293,8 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
   done: "Done",
 };
 
-export type StepStatus = "done" | "current" | "pending" | "failed" | "needsYou" | "stopped";
+export type StepStatus =
+  "done" | "skipped" | "current" | "pending" | "failed" | "needsYou" | "stopped";
 
 export interface PipelineStep {
   readonly step: string;
@@ -306,6 +307,22 @@ export interface PipelineStep {
 }
 
 const TERMINAL_STATES: ReadonlySet<string> = new Set(["quarantined", "halted", "cancelled"]);
+
+/**
+ * Whether the factory approved this request's plan itself: the latest move out
+ * of planning went straight to building, with no plan review in between. The
+ * same test as the server's `planSkippedReview`, which is why its review
+ * notes outlive plan review only while the request is building.
+ */
+export function planReviewSkipped(request: RequestSummary): boolean {
+  for (let i = request.history.length - 1; i >= 0; i--) {
+    const entry = request.history[i];
+    if (entry?.from === "planning" && (entry.to === "plan_review" || entry.to === "building")) {
+      return entry.to === "building";
+    }
+  }
+  return false;
+}
 
 /**
  * Where the request is in the pipeline: each step's glyph status and the
@@ -336,8 +353,9 @@ export function pipelineSteps(request: RequestSummary): PipelineStep[] {
         : request.state;
   const currentIndex = steps.findIndex((s) => s === activeState);
 
+  const planSkipped = planReviewSkipped(request);
   const statusAt = (i: number): StepStatus => {
-    if (i < currentIndex) return "done";
+    if (i < currentIndex) return steps[i] === "plan_review" && planSkipped ? "skipped" : "done";
     if (i > currentIndex) return "pending";
     if (resumeReview) return "needsYou";
     if (!terminal) return "current";
@@ -429,6 +447,7 @@ export function isAutomatedActor(by: string): boolean {
  */
 export function stepShowsDetail(step: Pick<PipelineStep, "status" | "entry">): boolean {
   if (step.status === "pending") return false;
+  if (step.status === "skipped") return false;
   if (step.status !== "done") return true;
   return step.entry !== null && !isAutomatedActor(step.entry.by);
 }

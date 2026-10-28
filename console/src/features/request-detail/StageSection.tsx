@@ -7,6 +7,7 @@ import { Panel } from "./Panel";
 import { ReadBackPanel } from "./ReadBackPanel";
 import { RecoveryCallout } from "./RecoveryCallout";
 import { ResumeCallout } from "./ResumeCallout";
+import { ReviewNotes } from "./ReviewNotes";
 import { ReviewSection } from "./ReviewSection";
 import type { RequestDialogs } from "./useRequestDialogs";
 
@@ -29,8 +30,9 @@ function WorkingNotice() {
 /**
  * What the request's state puts above its documents: a recovery callout, the
  * review controls (and a handed-over spec's read-back), the drafting notice. The one place that selects by state;
- * building, pr_review, done and cancelled have no section of their own (their
- * tickets and the pipeline are the content).
+ * pr_review, done and cancelled have no section of their own (their
+ * tickets and the pipeline are the content). A build shows only the notes
+ * on a plan the factory approved itself.
  */
 export function StageSection({ request, dialogs, detailLoaded, anyEditorOpen }: StageSectionProps) {
   switch (request.state) {
@@ -96,6 +98,9 @@ export function StageSection({ request, dialogs, detailLoaded, anyEditorOpen }: 
           }}
         />
       );
+    case "building":
+      // Notes on a plan the factory approved itself; nothing for any other build.
+      return <ReviewNotes request={request} />;
     default:
       return null;
   }
