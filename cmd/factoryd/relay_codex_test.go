@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -286,6 +287,8 @@ func TestDoctorChatGPTCodexCredentialWarnsBeforeBuildsRefuseTheToken(t *testing.
 	}{
 		"plenty of runway":         {codexTokenExpiryMargin + codexTokenRunwayWarning + time.Hour, false, false},
 		"builds refuse it tonight": {codexTokenExpiryMargin + 4*time.Hour, true, true},
+		"exactly the runway":       {codexTokenExpiryMargin + codexTokenRunwayWarning, false, false},
+		"a second inside it":       {codexTokenExpiryMargin + codexTokenRunwayWarning - time.Second, true, true},
 		"inside the margin":        {codexTokenExpiryMargin - time.Minute, true, false},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -308,5 +311,35 @@ func TestDoctorChatGPTCodexCredentialWarnsBeforeBuildsRefuseTheToken(t *testing.
 				}
 			}
 		})
+	}
+}
+
+// The warning names the local time builds stop taking the token, computed
+// here by hand: a token expiring at 23:00 UTC is refused from 17:00 UTC, 6 h
+// before. doctor's route checks judge it against the clock doctorInputs
+// carries.
+func TestDoctorRouteChecksWarnAgainstTheInjectedClock(t *testing.T) {
+	now := time.Date(2026, 10, 27, 9, 0, 1, 0, time.UTC) // 7h59m59s before 17:00
+	path := writeCodexAuthFile(t, t.TempDir(), map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens":    map[string]any{"access_token": fakeCodexJWT(t, time.Date(2026, 10, 27, 23, 0, 0, 0, time.UTC)), "account_id": "acct-123"},
+	})
+	want := time.Date(2026, 10, 27, 17, 0, 0, 0, time.UTC).Local().Format("Mon 15:04 MST")
+	route := doctorRoute{label: "codex", credentialMode: meter.CredentialModeChatGPTCodex, codexAuthFile: path}
+	find := func(in doctorInputs) doctorCheck {
+		t.Helper()
+		for _, c := range doctorRouteChecks(context.Background(), in, "", route, true, false) {
+			if strings.Contains(c.Name, "chatgpt codex credential") {
+				return c
+			}
+		}
+		t.Fatal("no chatgpt codex credential check")
+		return doctorCheck{}
+	}
+	if c := find(doctorInputs{now: now}); !c.Advisory || c.Err == nil || !strings.Contains(c.Err.Error(), want+" at the latest") {
+		t.Errorf("at %s: check = %+v, want a warning naming %s", now, c, want)
+	}
+	if c := find(doctorInputs{now: now.Add(-time.Second)}); c.Err != nil {
+		t.Errorf("exactly 8h ahead: check = %+v, want it to pass", c)
 	}
 }

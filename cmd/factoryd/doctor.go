@@ -511,6 +511,14 @@ func doctorRefreshInputsAfterFix(in doctorInputs, dataDirExplicit bool, dataDir,
 // even be attempted; every per-check failure -- including -fix's own
 // engine-resolution failure, which doctorFixAbsentImages already reports
 // as a doctorCheck -- lives in the returned slice's own Err field instead.
+// clock is in.now, or the current time when it is unset.
+func (in doctorInputs) clock() time.Time {
+	if in.now.IsZero() {
+		return time.Now()
+	}
+	return in.now
+}
+
 func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]doctorCheck, error) {
 	var built []doctorCheck
 	if fix {
@@ -823,6 +831,10 @@ type doctorInputs struct {
 	// handful of cherry-picked fields, which could never have carried
 	// enough information for the legacy-key-mix case to be caught at all.
 	settings sessionconfig.Settings
+	// now is the time doctor's checks judge expiries against; zero reads
+	// the clock (clock), so a caller that builds doctorInputs for other
+	// checks need not set it.
+	now time.Time
 	// presenceOnly marks a doctor call that only wants to know whether
 	// images are present locally (quickstartPullDoctorInputs, run before
 	// this quickstart invocation's own config is finalized -- see its own
@@ -1188,7 +1200,7 @@ func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doc
 	}
 	if r.credentialMode == meter.CredentialModeChatGPTCodex {
 		if runCredentialChecks {
-			c := doctorCheckChatGPTCodexCredential(r.codexAuthFile, r.keys, time.Now())
+			c := doctorCheckChatGPTCodexCredential(r.codexAuthFile, r.keys, in.clock())
 			c.Name = doctorRouteCheckName(r.label, c.Name)
 			checks = append(checks, c)
 		}
@@ -2387,8 +2399,12 @@ func effectiveCopilotUpstream(relayUpstream string) string {
 //
 // A token builds still take now, but will refuse within
 // codexTokenRunwayWarning, is a warning (Advisory) naming the local time
-// builds start refusing it (its expiry less codexTokenExpiryMargin): a long
-// walk started now would otherwise stop part-way with route_credential.
+// builds start refusing it at the latest: its expiry less
+// codexTokenExpiryMargin. A step is also refused when its own time budget
+// runs past the expiry, but those budgets are the worker's flags, not
+// session-config keys doctor can read, so the time is said as "at the
+// latest". A long walk started now would otherwise stop part-way with
+// route_credential.
 func doctorCheckChatGPTCodexCredential(authFile string, keys doctorRouteKeys, now time.Time) doctorCheck {
 	name := "chatgpt codex credential"
 	fix := fmt.Sprintf("run `codex login` on the host for a new ChatGPT OAuth login, or set %s", keys.codexAuthFile)
@@ -2399,7 +2415,7 @@ func doctorCheckChatGPTCodexCredential(authFile string, keys doctorRouteKeys, no
 	if refuseFrom := expiresAt.Add(-codexTokenExpiryMargin); refuseFrom.Sub(now) < codexTokenRunwayWarning {
 		return doctorCheck{
 			Name:     name,
-			Err:      fmt.Errorf("builds stop taking the codex access token at %s, %s before it expires", refuseFrom.Local().Format("Mon 15:04 MST"), codexTokenExpiryMargin),
+			Err:      fmt.Errorf("builds stop taking the codex access token at %s at the latest (%s before it expires; a step whose own time budget is longer is refused sooner)", refuseFrom.Local().Format("Mon 15:04 MST"), codexTokenExpiryMargin),
 			Fix:      "run `codex login` on the host before then",
 			Advisory: true,
 		}

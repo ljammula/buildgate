@@ -705,11 +705,16 @@ requires a new contract review and an updated machine-checkable test.
   No model request was made with the credential, so the step gives no
   verdict: a build or review Activity fails with its own non-retryable
   type, the run halts with the cause and keeps its worktree, and a ticket
-  build refused before its run existed, a spec-drafting, read-back,
-  planning or oracle-drafting job wait in `resume_review` with the cause
-  instead of halting. The read-back otherwise never stops its request. An
-  oracle-drafting pass a resume started that fails so again goes on to
-  `oracle_review` as any job failure does.
+  build refused before its run existed, a corrective, PR-review or restack
+  round refused before its run existed (uncounted, as any unresolved
+  round), and a spec-drafting, read-back, planning or oracle-drafting job
+  wait in `resume_review` with the cause instead of halting, quarantining
+  or starting again on the next poll. A refused resume of a kept build
+  keeps that build as the one `resume` continues. The read-back otherwise
+  never stops its request, and a resume after it reruns the whole spec
+  drafting pass. Unlike any other oracle-drafting job failure, one a
+  resumed pass hits again waits in `resume_review` again rather than going
+  on to `oracle_review`: only a fresh credential gets it further.
   A bug request (`submit -bug`) whose first build of a ticket finds its
   reference oracle passing on the base commit halts the run before any model
   call with `oracle_passes_on_base`: a verdict on the oracle, not a lost

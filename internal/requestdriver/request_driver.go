@@ -521,7 +521,7 @@ func AdvanceOracleDrafting(dp Deps, ctx context.Context, dataDir string, r *requ
 		if ctx.Err() != nil {
 			return jobErr
 		}
-		if failure := firstOracleJobFailure(r, jobErr); failure != nil {
+		if failure := oracleJobFailure(r, jobErr); failure != nil {
 			return unresolvedOracleDrafting(dp, dataDir, r, failure, now)
 		}
 		draft = failedOracleDraft(jobErr)
@@ -1289,9 +1289,15 @@ func baseOracleQuarantineCheck(runRecord *run.Run) string {
 
 // ticketStartFailed moves r on after its ticket build failed before its run
 // existed: to resume_review when the build's route credential could not be
-// used (no verdict on the work), halted otherwise.
+// used (no verdict on the work), halted otherwise. When that build was the
+// operator's resume of a kept build (a pending ResumeRound decision, still
+// unconsumed since no run started), the kept run stays the one a resume
+// continues, as parkRequest keeps it.
 func ticketStartFailed(dp Deps, dataDir string, r *request.Request, idx int, runErr error, onBranch bool, now time.Time) error {
 	if step, lost := routeCredentialStep(runErr); lost {
+		if r.PendingResumeVerb() == request.ResumeRound && r.Resume.LostRunID != "" {
+			step.RunID = r.Resume.LostRunID
+		}
 		return EnterResumeReview(dp, dataDir, r, step, now)
 	}
 	return HaltRequest(dataDir, r, startFailedReason(idx, r.TicketCount, runErr, onBranch), now)

@@ -33,7 +33,7 @@ type OracleDraftJobFailure struct {
 func (e *OracleDraftJobFailure) Error() string { return e.Err.Error() }
 func (e *OracleDraftJobFailure) Unwrap() error { return e.Err }
 
-// firstOracleJobFailure is jobErr's OracleDraftJobFailure when the pass that
+// oracleJobFailure is jobErr's OracleDraftJobFailure when the pass that
 // returned it was not itself started by a resume decision, nil otherwise.
 // The first job failure waits in resume_review, where a resume drafts again.
 // When the resumed pass fails as a job too, the request goes on to
@@ -43,21 +43,24 @@ func (e *OracleDraftJobFailure) Unwrap() error { return e.Err }
 // request the provider rejects, a script that crashes) never leaves cancel
 // as the only way out.
 //
-// An error that is not an OracleDraftJobFailure is one when its route's
-// credential could not be used (routeCredentialStep): the pass made no model
-// request, so it gave no verdict either.
-func firstOracleJobFailure(r *request.Request, jobErr error) *OracleDraftJobFailure {
-	if r.PendingResumeVerb() != "" {
+// A pass whose route credential could not be used (routeCredentialStep) is
+// a job failure with that cause on every pass, resumed or not, as for every
+// other drafting job: it made no model request, a fresh credential is the
+// way out, and resume_review is where the operator gives it one.
+func oracleJobFailure(r *request.Request, jobErr error) *OracleDraftJobFailure {
+	var failure *OracleDraftJobFailure
+	found := errors.As(jobErr, &failure)
+	if step, lost := routeCredentialStep(jobErr); lost {
+		credential := &OracleDraftJobFailure{Cause: step.Cause, Err: jobErr}
+		if found {
+			credential.Spend = failure.Spend
+		}
+		return credential
+	}
+	if !found || r.PendingResumeVerb() != "" {
 		return nil
 	}
-	var failure *OracleDraftJobFailure
-	if errors.As(jobErr, &failure) {
-		return failure
-	}
-	if step, lost := routeCredentialStep(jobErr); lost {
-		return &OracleDraftJobFailure{Cause: step.Cause, Err: jobErr}
-	}
-	return nil
+	return failure
 }
 
 // failedOracleDraft is the failed draft a drafting error leaves for

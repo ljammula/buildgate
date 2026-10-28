@@ -250,6 +250,21 @@ func TestRouteCredentialRefuses(t *testing.T) {
 	if _, err := p.RouteCredential(access, NewRouteSecret("key"), RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil {
 		t.Error("an API key for a chatgpt route was accepted")
 	}
+	// Access naming keys the credential mode does not supply is a
+	// configuration fault, never a credential to refresh, whether or not
+	// the values are present.
+	for name, env := range map[string][]string{
+		"fewer keys":      {EnvModelKey},
+		"a different key": {EnvModelKey, EnvChatGPTAccount},
+	} {
+		mismatched := access
+		mismatched.CredentialEnv = env
+		for _, tok := range []RouteSecret{token, {}} {
+			if _, err := p.RouteCredential(mismatched, RouteSecret{}, RouteSecret{}, tok, account, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "does not match") || errors.Is(err, ErrRouteCredential) {
+				t.Errorf("%s (token set %v): err = %v, want an untagged mismatch", name, tok.Configured(), err)
+			}
+		}
+	}
 	local := localModelPolicy()
 	localAccess, err := local.RouteAccess(t.TempDir(), piBinaries)
 	if err != nil {
