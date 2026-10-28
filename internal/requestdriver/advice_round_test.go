@@ -858,3 +858,60 @@ func TestAReproductionThatRefusedTheAdviceRoundGoesOnNoList(t *testing.T) {
 		t.Errorf("the ticket's list = %+v, want empty: the advice round refuses nothing", got)
 	}
 }
+
+// TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn: with
+// round_session_continuity on, a corrective round's and an advice round's
+// build name the run they follow (always a run of the same ticket) as the
+// one whose build session they continue; a ticket's first build, and a
+// later ticket's, never do; with the key off no build does.
+func TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		t.Run(fmt.Sprintf("key %t", on), func(t *testing.T) {
+			// An advice round, after ticket 1's accepted build; then ticket 2.
+			f := newAdviceFixtureOf(t, 2, adviceFindings)
+			f.cfg.Settings.RoundSessionContinuity = on
+			_, lastArgs := f.acceptingRounds(t)
+			for pass := 0; pass < 2; pass++ {
+				if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
+					t.Fatalf("drive %d: %v", pass, err)
+				}
+			}
+			// The last advice round is ticket 2's, after ticket 2's own run.
+			want := ""
+			if on {
+				want = requestdrivertest.TicketRunID(f.id, 2)
+			}
+			if got := requestdrivertest.ArgValue(*lastArgs, "-resume-session-of"); got != want {
+				t.Errorf("the advice round's -resume-session-of = %q, want %q", got, want)
+			}
+			for i, args := range f.buildArgs {
+				if requestdrivertest.HasFlag(args, "-resume-session-of") {
+					t.Errorf("ticket build %d carries -resume-session-of: %v", i+1, args)
+				}
+			}
+
+			// A corrective round, after a quarantined build.
+			dp := newFakeDeps(t)
+			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+			branch := "factoryd/" + id + "-001"
+			calls, roundArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
+			})
+			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
+			cfg.Settings.RoundSessionContinuity = on
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")); err != nil {
+				t.Fatalf("drive: %v", err)
+			}
+			if *calls != 1 {
+				t.Fatalf("corrective round builds = %d, want 1", *calls)
+			}
+			want = ""
+			if on {
+				want = id + "-001"
+			}
+			if got := requestdrivertest.ArgValue(*roundArgs, "-resume-session-of"); got != want {
+				t.Errorf("the corrective round's -resume-session-of = %q, want %q", got, want)
+			}
+		})
+	}
+}

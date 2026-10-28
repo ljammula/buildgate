@@ -810,6 +810,25 @@ requires a new contract review and an updated machine-checkable test.
   copied to the run directory first, where only the operator's prompts route
   and `factoryd logs -prompt` read them); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it.
+  With the session key `round_session_continuity` on (off by default), a
+  request ticket build's session is first also copied to the run directory
+  (`build-session/`, `keepBuildSession`): only regular files, no link, never
+  its saved prompts, its rounds' output, the agent's notes or a file named
+  `auth.json`, `.credentials.json`, `.tmp` or `tmp`, at most 64 MiB or
+  nothing. A corrective or advice round of the same ticket, and nothing
+  else, is given that copy of the run it follows (`-resume-session-of`,
+  refused unless the round is a request ticket build and the run a request's
+  run): the build Activity alone copies it, under the same rules, into the
+  round's worktree session folder before the build and passes
+  `--resume-session`, and the build script continues it only when it was
+  made by the same harness and model, holds at most 4 MiB of session state
+  and the harness can continue it, else removes it and starts fresh with
+  the written record (`session` in `BUILD_EVIDENCE.json` says which). That
+  session holds what the build it follows was told, an earlier attempt's
+  record included: it reaches only a later build of the same ticket, as the
+  record itself does, and is removed from the round's worktree when its
+  build step returns like any build session. No review, verify or gate step
+  is given it.
   A line the worker prints in the progress feed's protocol can never carry a
   `log` path or begin or end a start-up step: the feed drops a log from every
   line but the factory's, and the worker parser accepts only the `round` and

@@ -127,3 +127,22 @@ func TestReviewAdviceRoundsDefaultsOffAndIsBounded(t *testing.T) {
 		t.Error("the retired review_advice_round key loaded, want a refusal")
 	}
 }
+
+func TestRoundSessionContinuityDefaultsOffAndTurnsOn(t *testing.T) {
+	if DefaultSettings().RoundSessionContinuity || (Settings{}).RoundSessionContinuity {
+		t.Error("session continuity on by default, want off")
+	}
+	for body, want := range map[string]bool{"round_session_continuity: false\n": false, "round_session_continuity: true\n": true, "review_reproductions: true\n": false} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.RoundSessionContinuity != want {
+			t.Errorf("%q: RoundSessionContinuity = %t err %v, want %t", body, s.RoundSessionContinuity, err, want)
+		}
+	}
+	if _, err := Load(writeConfig(t, "round_session_continuity: sometimes\n")); err == nil {
+		t.Error("round_session_continuity: sometimes loaded, want a refusal")
+	}
+}

@@ -47,7 +47,8 @@ func runInputGoldenConfig(t *testing.T) string {
 		"release_protected_paths: \"deploy/,.github/\"\n" +
 		"release_max_files_changed: 7\n" +
 		"release_max_insertions: 77\n" +
-		"release_rollback_plan: revert it\n"
+		"release_rollback_plan: revert it\n" +
+		"round_session_continuity: true\n"
 }
 
 // runInputGoldenFlags is the full flag set of the golden runs: the run flags
@@ -61,6 +62,7 @@ func runInputGoldenConfig(t *testing.T) string {
 // -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
 // covers it), and the
 // spec's Required-Content and the config's skills, test patterns and allowed paths.
+// -resume-session-of names the quarantined run, which kept no session.
 // inputs is the directory the flag files (spec, criteria, oracle) are written to.
 func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, address string) []string {
 	t.Helper()
@@ -132,6 +134,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-review-reproduction",
 		"-review-spec", write("approved-spec.md", "# Approved spec\n\n- `Parse` returns a map.\n"),
 		"-recheck-reproductions", write("recheck.json", manifest),
+		"-resume-session-of", "golden-quarantined",
 	}
 }
 
@@ -316,14 +319,14 @@ func TestRepositoryOwnerRunWorkflowInputFromFullFlagSetMatchesGolden(t *testing.
 }
 
 // TestReplayRunWorkflowInputMatchesGolden is the same comparison for a replay
-// run: the full flag set without -earlier-attempt and -run-id (both refused
+// run: the full flag set without -earlier-attempt, -resume-session-of and -run-id (each refused
 // with -replay), plus -on-branch, -diff-base and -replay for a commit
 // replayed onto the workspace's head.
 func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 	var dataDir string
 	address, placeholders := runInputGoldenRunWith(t, "unused", func(workspace, inputs string, flags []string) ([]string, [][2]string) {
 		onto, head := replayedBranch(t, workspace, "buildgate/req-golden/t2-restack1")
-		for _, refused := range []string{"-earlier-attempt", "-run-id", "-review-spec", "-recheck-reproductions"} {
+		for _, refused := range []string{"-earlier-attempt", "-run-id", "-review-spec", "-recheck-reproductions", "-resume-session-of"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
 			}

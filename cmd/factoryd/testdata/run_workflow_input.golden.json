@@ -38,6 +38,7 @@
   "isolate_workspace": true,
   "isolated_parent_dir": "<DATA_DIR>/workspaces",
   "isolated_repo_dir": "<WORKSPACE>",
+  "keep_build_session": true,
   "log_dir": "<DATA_DIR>/runs/<RUN_ID>",
   "max_rounds": 7,
   "no_commit_oracles": true,
@@ -136,6 +137,7 @@
   "required_changed_files": [
     "content.txt"
   ],
+  "resume_session_path": "<DATA_DIR>/runs/golden-quarantined/build-session",
   "review_harness": "pi",
   "review_relay_policy": {
     "allow_plaintext_upstream": false,

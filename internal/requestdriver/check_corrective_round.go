@@ -68,10 +68,22 @@ func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *re
 			if err != nil {
 				return nil, "", err
 			}
-			return append(argv, "-earlier-attempt", recordPath), "failed " + failedCheckNames(doc), nil
+			return withRoundSession(append(argv, "-earlier-attempt", recordPath), cfg, current), "failed " + failedCheckNames(doc), nil
 		},
 	}
 	return runCorrectiveRounds(dp, ctx, dataDir, r, ticket, runRecord, cfg, now, plan)
+}
+
+// withRoundSession adds -resume-session-of followed to a corrective or advice
+// round's build argv when round_session_continuity is on: the round's build
+// continues the harness session of the build of the run it follows, always a
+// run of the same ticket (a session is never carried across tickets or
+// requests).
+func withRoundSession(argv []string, cfg WorkerConfig, followed *run.Run) []string {
+	if !cfg.Settings.RoundSessionContinuity {
+		return argv
+	}
+	return append(argv, "-resume-session-of", followed.ID)
 }
 
 // handoffForABuild loads a quarantined run's handoff when a build may be

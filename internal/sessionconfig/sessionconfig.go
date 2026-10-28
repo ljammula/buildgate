@@ -244,6 +244,12 @@ type Config struct {
 	// default) is off; at most MaxReviewAdviceRounds.
 	ReviewAdviceRounds *int `yaml:"review_advice_rounds,omitempty"`
 
+	// RoundSessionContinuity is whether a corrective or advice round's build
+	// continues the harness session of the build of the run it follows,
+	// instead of starting a fresh one with only the written record. Default
+	// false.
+	RoundSessionContinuity *bool `yaml:"round_session_continuity,omitempty"`
+
 	// PlanReview, opt-in and false by default, makes every request submitted
 	// under this config wait at plan_review for a person to approve its
 	// tickets. Without it a one-ticket plan goes straight to building (the
@@ -544,6 +550,10 @@ type Settings struct {
 	// ReviewAdviceRounds mirrors Config.ReviewAdviceRounds; 0 starts no
 	// advice round.
 	ReviewAdviceRounds int
+
+	// RoundSessionContinuity is set when the config says
+	// round_session_continuity: true; the zero value carries no session.
+	RoundSessionContinuity bool
 
 	// PlanReview is set when the config says plan_review: true; Submit
 	// copies it onto each new request.
@@ -879,6 +889,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
 
 	boolean(&s.ReviewReproductions, c.ReviewReproductions)
+	boolean(&s.RoundSessionContinuity, c.RoundSessionContinuity)
 	boolean(&s.PlanReview, c.PlanReview)
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)

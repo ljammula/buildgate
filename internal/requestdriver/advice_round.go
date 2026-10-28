@@ -170,7 +170,7 @@ func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	return append(argv, "-earlier-attempt", recordPath), nil
+	return withRoundSession(append(argv, "-earlier-attempt", recordPath), cfg, current), nil
 }
 
 // concludeAdviceRound records the advice round that followed current (ended
