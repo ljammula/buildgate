@@ -16,6 +16,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/unresolved"
 )
@@ -913,5 +914,26 @@ func TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn(t *testing.T) {
 				t.Errorf("the corrective round's -resume-session-of = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// TestAnAdviceRoundRefusedForItsRouteCredentialLeavesTheAcceptedRunStanding:
+// a round refused before its run existed because its route credential could
+// not be used records that cause (unresolved.RouteCredential, from
+// correctiveRoundOutcome), and, refusing nothing, leaves the accepted run as
+// the ticket's: the request moves on, not to resume_review.
+func TestAnAdviceRoundRefusedForItsRouteCredentialLeavesTheAcceptedRunStanding(t *testing.T) {
+	f := newAdviceFixture(t, adviceFindings)
+	orig := requestdriver.ReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+	requestdriver.ReviewCorrectiveRunner = func(context.Context, []string, func(*run.Run)) error {
+		return sandbox.RouteCredentialError(errors.New("codex route's credential did not resolve"))
+	}
+	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	f.assertOriginalStands(t, request.RoundHalted)
+	if got := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0].Rounds[0]; got.Unresolved != unresolved.RouteCredential || !got.StartFailure {
+		t.Errorf("round %+v, want a start failure with cause %s", got, unresolved.RouteCredential)
 	}
 }

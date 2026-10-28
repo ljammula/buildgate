@@ -44,16 +44,24 @@ const (
 )
 
 // followUpRun matches the suffix of a run that follows a ticket's own run: a
-// PR-review, conformity or corrective round, each possibly with -fix<N>. The
-// suffix follows the ticket's three-digit index, so a ticket merely named
-// "api-review1" keeps its name (the same rule as scripts/baseline.py).
-var followUpRun = regexp.MustCompile(`(-\d{3})-(review|conformity|corrective)\d+(?:-fix\d+)?$`)
+// PR-review, conformity, corrective or advice round, each possibly with
+// -fix<N>. The suffix follows the ticket's three-digit index, so a ticket
+// merely named "api-review1" keeps its name (the same rule as
+// scripts/baseline.py).
+var followUpRun = regexp.MustCompile(`(-\d{3})-(review|conformity|corrective|advice)\d+(?:-fix\d+)?$`)
 
-// isPRReviewRound reports whether r is a PR-review round of its ticket.
+// isPRReviewRound reports whether r is a PR-review round of its ticket. An
+// advice round is not one: it is never a pull request sent back.
 func isPRReviewRound(r *run.Run) bool {
 	m := followUpRun.FindStringSubmatch(ticketName(r))
 	return m != nil && m[2] == "review"
 }
+
+// adviceRun matches an advice round's run (<request>-<ticket>-advice<k>): it
+// follows an accepted run and never refuses it, so it is counted apart
+// (Metrics.AdviceRounds) and decides nothing of its ticket's outcome, its
+// pull request's opening or its being sent back.
+var adviceRun = regexp.MustCompile(`-\d{3}-advice\d+$`)
 
 // Options narrows and shapes a report.
 type Options struct {
@@ -166,7 +174,10 @@ type Metrics struct {
 	// PullRequests is the series that reached a pull request and those sent
 	// back after it. scripts/baseline.py has no such number.
 	PullRequests PullRequests `json:"pull_requests"`
-	Spend        Spend        `json:"spend"`
+	// AdviceRounds counts the advice rounds' runs: ran and accepted (whether
+	// an accepted one was pushed is on the request, not the run).
+	AdviceRounds Corrective `json:"advice_rounds"`
+	Spend        Spend      `json:"spend"`
 }
 
 // Bucket is Metrics over the tickets whose first run began in [Start, End).
@@ -363,6 +374,24 @@ func metricsOf(list []series) Metrics {
 	return m
 }
 
+// withoutAdviceRounds counts s's advice-round runs in m.AdviceRounds and
+// returns s without them: the ticket's outcome is its other runs'.
+func (m *Metrics) withoutAdviceRounds(s series) series {
+	kept := make([]*run.Run, 0, len(s.runs))
+	for _, r := range s.runs {
+		if !adviceRun.MatchString(ticketName(r)) {
+			kept = append(kept, r)
+			continue
+		}
+		m.AdviceRounds.Ran++
+		if r.State == run.StateAccepted {
+			m.AdviceRounds.Accepted++
+		}
+	}
+	s.runs = kept
+	return s
+}
+
 func roundCount(r *run.Run) int {
 	if r.AgentEvidence == nil {
 		return 0
@@ -373,6 +402,10 @@ func roundCount(r *run.Run) int {
 // addSeries counts one series' one-shot and accepted outcome, its rounds to
 // green and the runs that followed its first.
 func (m *Metrics) addSeries(s series, rounds *[]int) {
+	s = m.withoutAdviceRounds(s)
+	if len(s.runs) == 0 {
+		return
+	}
 	first, last := s.runs[0], s.runs[len(s.runs)-1]
 	if len(s.runs) == 1 && first.State == run.StateAccepted && len(first.Overrides) == 0 && len(first.Rescues) == 0 && roundCount(first) <= 1 {
 		m.OneShot++
