@@ -482,6 +482,20 @@ type RunWorkflowInput struct {
 	// never an input of a review, and never part of the spec a review is
 	// given.
 	EarlierAttemptPath string `json:"earlier_attempt_path,omitempty"`
+	// KeepBuildSession makes the build step keep a copy of the build's
+	// harness session in the run's own directory (BuildSessionDirName,
+	// keepBuildSession) before it removes the session from the worktree,
+	// so a corrective or advice round that follows can continue it
+	// (round_session_continuity). Set only for a request's ticket build.
+	KeepBuildSession bool `json:"keep_build_session,omitempty"`
+	// ResumeSessionPath is the kept build session (keepBuildSession) of the
+	// run this round follows, a host directory under that run's own
+	// directory: RunBuildActivity copies it into the worktree's session
+	// folder before the build and passes --resume-session, and build_app.py
+	// continues it when it can. Set only for a corrective or advice round of
+	// a request's ticket, from the run it follows. No other Activity reads
+	// it: a review never sees a builder session.
+	ResumeSessionPath string `json:"resume_session_path,omitempty"`
 	// Replay, when set, makes this run judge commits the host replayed onto
 	// a new base instead of building any: ApplyReplayActivity replaces
 	// RunBuildActivity (see replayRunChange) and every later step runs

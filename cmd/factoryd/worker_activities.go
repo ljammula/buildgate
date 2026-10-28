@@ -379,19 +379,25 @@ func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bo
 		return false, ""
 	}
 	ticket, err := requestdriver.TicketAt(r, max(r.TicketIndex, 1))
-	if err != nil || ticket.RunID == "" {
+	// An advice round in flight runs while Ticket.RunID stays the accepted
+	// run it follows.
+	runID := ""
+	if err == nil {
+		runID = ticket.LiveRunID()
+	}
+	if runID == "" {
 		return false, ""
 	}
-	rec, err := run.Load(a.dataDir, ticket.RunID)
+	rec, err := run.Load(a.dataDir, runID)
 	if err != nil || rec.State == run.StateAccepted || rec.State == run.StateQuarantined || rec.State == run.StateHalted {
 		return false, ""
 	}
 	if n := countOf(currentActiveRequests(), r.ID); n > self {
-		return true, fmt.Sprintf("a step of this process is still running run %s", ticket.RunID)
+		return true, fmt.Sprintf("a step of this process is still running run %s", runID)
 	}
-	pid, ok := sandbox.OwnerPID(a.dataDir, ticket.RunID)
-	if ok && pid != os.Getpid() && !runOwnerDead(a.dataDir, ticket.RunID) && sandbox.OwnerHeartbeatFresh(a.dataDir, ticket.RunID) {
-		return true, fmt.Sprintf("process %d is supervising run %s (fresh owner heartbeat)", pid, ticket.RunID)
+	pid, ok := sandbox.OwnerPID(a.dataDir, runID)
+	if ok && pid != os.Getpid() && !runOwnerDead(a.dataDir, runID) && sandbox.OwnerHeartbeatFresh(a.dataDir, runID) {
+		return true, fmt.Sprintf("process %d is supervising run %s (fresh owner heartbeat)", pid, runID)
 	}
 	return false, ""
 }

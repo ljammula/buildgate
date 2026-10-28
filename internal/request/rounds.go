@@ -11,14 +11,15 @@ import (
 const RoundRefPrefix = "refs/buildgate/rounds/"
 
 // RoundTag kinds, the Kind of a RoundTag: the first build of a ticket, then an
-// automatic corrective or conformity round, then a PR-review round, and a
-// replay run of the ticket's commits onto a new base.
+// automatic corrective or conformity round, then a PR-review round, a
+// replay run of the ticket's commits onto a new base, and an advice round.
 const (
 	RoundTagBuild      = "build"
 	RoundTagCorrective = CorrectiveRoundKind
 	RoundTagConformity = ConformityRoundKind
 	RoundTagPRReview   = "pr_review"
 	RoundTagRestack    = RestackRoundKind
+	RoundTagAdvice     = AdviceRoundKind
 )
 
 // RoundTag is one entry of a ticket's round ledger: the commit a build round
@@ -179,6 +180,49 @@ func (rs *TicketRestack) nextAction(index, count int, prURL string) string {
 		what += fmt.Sprintf(" and judged again by run %s", rs.RunID)
 	}
 	return what + "; the pull request is updated once every gate passes, and nothing is asked of you"
+}
+
+// TicketAdvice is Ticket.Advice: Of is the accepted run the advice round
+// follows, which stays the ticket's run (Ticket.RunID) while the round is in
+// flight and after it unless the round's result is pushed; RunID is the
+// round's own run once it has started, "" before; Since is when the round
+// was started.
+type TicketAdvice struct {
+	Of    string `json:"of"`
+	RunID string `json:"run_id,omitempty"`
+	Since string `json:"since"`
+}
+
+// LiveRunID is the run of the ticket's that may be running now: its advice
+// round's while one is in flight and has started, else Ticket.RunID.
+func (t *Ticket) LiveRunID() string {
+	if t.Advice != nil && t.Advice.RunID != "" {
+		return t.Advice.RunID
+	}
+	return t.RunID
+}
+
+// AdviceRounds counts the ticket's recorded advice rounds, and reports
+// whether the last of them was pushed. A round in flight (Advice) is not
+// recorded yet.
+func (t *Ticket) AdviceRounds() (n int, lastPushed bool) {
+	for _, rnd := range t.Rounds {
+		if rnd.Kind == AdviceRoundKind {
+			n++
+			lastPushed = rnd.Pushed
+		}
+	}
+	return n, lastPushed
+}
+
+// NextRoundIndex is one past the highest Index among the ticket's rounds, so
+// Index keeps increasing in the order rounds are recorded.
+func (t *Ticket) NextRoundIndex() int {
+	n := 0
+	for _, rnd := range t.Rounds {
+		n = max(n, rnd.Index)
+	}
+	return n + 1
 }
 
 // TicketRestackHold is Ticket.RestackHold: since when whether the ticket

@@ -311,6 +311,13 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 	// (SC-018): copied for the operator before the session goes.
 	if info, err := os.Lstat(filepath.Join(input.WorkspacePath, buildSessionDir)); err == nil && info.IsDir() {
 		a.retainLaunchPrompts(ctx, input, "build", activity.GetInfo(ctx).Attempt, buildPromptSessions)
+		// A round of the ticket that follows may continue this session
+		// (round_session_continuity): a copy is kept in the run's own
+		// directory, never in the worktree. Best-effort: the round then
+		// starts fresh.
+		if logDir := a.logDirFor(input); input.KeepBuildSession && logDir != "" {
+			a.keepFinishedBuildSession(ctx, input, logDir)
+		}
 	}
 	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {
 		return fmt.Errorf("remove the finished build's harness session before any later step: %w", err)

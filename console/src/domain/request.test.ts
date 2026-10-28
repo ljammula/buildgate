@@ -448,6 +448,8 @@ test("request-every-field decodes with every optional field populated", () => {
       // neither a review round nor a restack.
       reviewRounds: [],
       restackRounds: [],
+      adviceRounds: [],
+      advice: { of: "every-field of", runId: "every-field run_id", since: "every-field since" },
       restack: {
         n: 3,
         branch: "every-field branch",
@@ -688,6 +690,8 @@ test("a ticket's PR-review rounds are decoded; conformity rounds are left out", 
   expect(r.tickets[1]).toMatchObject({
     reviewRounds: [],
     restackRounds: [],
+    adviceRounds: [],
+    advice: null,
     restack: null,
     activeRoundRunId: "",
     mergeReadiness: null,

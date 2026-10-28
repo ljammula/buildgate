@@ -41,6 +41,9 @@ func (impl realForge) pushWithLease(ctx context.Context, dir, sha, branch, expec
 func (impl realForge) moveBranch(dir, branch, sha string) error {
 	return workspace.MoveBranch(dir, branch, sha)
 }
+func (impl realForge) restoreBranch(dir, branch, sha string) (bool, error) {
+	return workspace.RestoreBranch(dir, branch, sha)
+}
 func (impl realForge) hostGitVersion(ctx context.Context) (string, error) {
 	return workspace.HostGitVersion(ctx)
 }

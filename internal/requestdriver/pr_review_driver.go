@@ -184,6 +184,17 @@ func ParsePullRequestOwnerRepo(prURL string) (owner, repo string, number int, er
 	return m[1], m[2], number, nil
 }
 
+// RealCommentOnPullRequest posts body as a comment on prURL's pull request
+// (`gh pr comment <url> --body-file -`, the body on stdin).
+func RealCommentOnPullRequest(ctx context.Context, prURL, body string) error {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "comment", prURL, "--body-file", "-")
+	cmd.Stdin = strings.NewReader(body)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh pr comment %s: %w: %s", prURL, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // ReplyToReviewCommentPath is GitHub's REST "reply to a review comment"
 // endpoint, which is scoped by pull number:
 // POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies.
@@ -370,6 +381,11 @@ func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket) bool {
 func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, now time.Time) error {
 	if len(r.Tickets) == 0 {
 		return fmt.Errorf("request %s: in pr_review with no tickets", r.ID)
+	}
+	// An advice round left in flight when the request left building is
+	// recorded as not pushed before anything reads a ticket's PR head.
+	if stop, err := abandonInFlightAdvice(dp, dataDir, r, now); stop || err != nil {
+		return err
 	}
 	// awaitingHalt is r.AwaitingPRTicket() (internal/request), the SAME
 	// selection Retry uses to pick which ticket a `factoryd retry` acts
@@ -1333,17 +1349,44 @@ func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, 
 
 // pushAcceptedRoundAndReply pushes an accepted corrective round's branch
 // (never force -- see forge.pushExistingBranch's own doc comment) and replies
-// on each thread the round addressed, naming the commit. A push failure is
-// logged, not escalated to halted: the round itself succeeded (a real,
-// accepted, evidence-backed commit exists on the branch), only the network
-// push didn't land -- the same best-effort posture openEvidencePullRequest
-// already takes for an ordinary accepted run's own PR-open call.
+// on each thread the round addressed, naming the commit. The checks before
+// the push, the push and its read-back are pushRoundResult's; a check that
+// refuses the push, and a push or read-back that fails, halt the request
+// with the reason, so a human reconciles the branch.
 func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, roundSliceIndex int, roundRunID, branch string, includedThreads []forge.Thread, now time.Time) error {
 	roundRun, err := run.Load(dataDir, roundRunID)
 	if err != nil {
 		return fmt.Errorf("request %s: ticket %d: load accepted round run %q: %w", r.ID, ticket.Index, roundRunID, err)
 	}
+	if refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, branch, "review round"); refused != "" || failed != "" {
+		return HaltRequest(dataDir, r, refused+failed, now)
+	}
+	afterRoundPushed(dp, ctx, r, ticket, roundSliceIndex, roundRun)
 
+	replyCtx, cancelReply := context.WithTimeout(ctx, 30*time.Second)
+	for _, t := range includedThreads {
+		body := fmt.Sprintf("Addressed in %s.", roundRun.ResultSHA)
+		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, body); err != nil {
+			log.Printf("request %s: ticket %d: reply on thread %s: %v", r.ID, ticket.Index, t.ID, err)
+			continue
+		}
+		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
+	}
+	cancelReply()
+	return r.Save(dataDir)
+}
+
+// pushRoundResult pushes an accepted round's result (roundRun, a PR-review
+// round's or an advice round's, named label in the reasons) to branch, the
+// ticket's pull request branch, under every check a factory push to an open
+// pull request takes, and reads the remote back. refused is the reason a
+// check refused the push before anything was sent to the remote; failed is
+// the reason the push, or its read-back, failed once it had been sent, when
+// the commit may be on the remote. Both are "" for a push confirmed on the
+// remote. It records nothing: what a refusal or a failure means is the
+// caller's.
+func pushRoundResult(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, roundRun *run.Run, branch, label string) (refused, failed string) {
+	roundRunID := roundRun.ID
 	// A corrective round is itself a full accepted run and gets its own
 	// release.Decision recorded (recordReleaseDecision runs unconditionally
 	// for every accepted run, not only when -open-pull-request is set --
@@ -1361,13 +1404,13 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	decision, decisionErr := release.LoadDecision(dataDir, release.ProjectOf(roundRun), roundRunID)
 	switch {
 	case decisionErr != nil:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: load release decision for accepted review round %s: %v", ticket.Index, r.TicketCount, roundRunID, decisionErr), now)
+		return fmt.Sprintf("ticket %d/%d: load release decision for accepted %s %s: %v", ticket.Index, r.TicketCount, label, roundRunID, decisionErr), ""
 	case decision == nil:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s has no recorded release decision; withholding push to %s -- a human must review before this can land on the PR branch", ticket.Index, r.TicketCount, roundRunID, branch), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s has no recorded release decision; withholding push to %s -- a human must review before this can land on the PR branch", ticket.Index, r.TicketCount, label, roundRunID, branch), ""
 	case decision.Invalidated:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s's release decision was invalidated; withholding push to %s -- a human must review before this can land on the PR branch", ticket.Index, r.TicketCount, roundRunID, branch), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s's release decision was invalidated; withholding push to %s -- a human must review before this can land on the PR branch", ticket.Index, r.TicketCount, label, roundRunID, branch), ""
 	case !decision.Allowed:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s denied by release policy (%s); withholding push to %s -- a human must review before this can land on the PR branch", ticket.Index, r.TicketCount, roundRunID, strings.Join(decision.Reasons, "; "), branch), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s denied by release policy (%s); withholding push to %s -- a human must review before this can land on the PR branch", ticket.Index, r.TicketCount, label, roundRunID, strings.Join(decision.Reasons, "; "), branch), ""
 	}
 
 	// Refused before ever touching the remote, not just logged: found
@@ -1380,7 +1423,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	// catches that class of bug even after the root cause above is fixed,
 	// for any future path that reintroduces it.
 	if roundRun.Branch != branch {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s built on branch %q, not the PR branch %q -- refusing to push", ticket.Index, r.TicketCount, roundRunID, roundRun.Branch, branch), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s built on branch %q, not the PR branch %q -- refusing to push", ticket.Index, r.TicketCount, label, roundRunID, roundRun.Branch, branch), ""
 	}
 
 	// The round's result must actually descend from the PR branch's own
@@ -1400,19 +1443,19 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	// through some other route).
 	prHeadSHA, headErr := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch)
 	if headErr != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s: read current head of PR branch %q before push: %v", ticket.Index, r.TicketCount, roundRunID, branch, headErr), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s: read current head of PR branch %q before push: %v", ticket.Index, r.TicketCount, label, roundRunID, branch, headErr), ""
 	}
 	if isAncestor, ancErr := dp.RoundResultDescendsFromHead(r.Workspace, prHeadSHA, roundRun.ResultSHA); ancErr != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s: check %s is an ancestor of round result %s: %v", ticket.Index, r.TicketCount, roundRunID, prHeadSHA, roundRun.ResultSHA, ancErr), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s: check %s is an ancestor of round result %s: %v", ticket.Index, r.TicketCount, label, roundRunID, prHeadSHA, roundRun.ResultSHA, ancErr), ""
 	} else if !isAncestor {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s: PR branch %q's current head %s is not an ancestor of round result %s -- refusing to push", ticket.Index, r.TicketCount, roundRunID, branch, prHeadSHA, roundRun.ResultSHA), now)
+		return fmt.Sprintf("ticket %d/%d: accepted %s %s: PR branch %q's current head %s is not an ancestor of round result %s -- refusing to push", ticket.Index, r.TicketCount, label, roundRunID, branch, prHeadSHA, roundRun.ResultSHA), ""
 	}
 
 	// No ready state crosses a head the factory changed: a ready pull
 	// request goes back to draft before the push, and the ready flip runs
 	// again on the new head (draftBeforeFactoryPush, as for a restack).
 	if err := draftBeforeFactoryPush(dp, ctx, ticket); err != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: turn pull request %s back to draft before pushing accepted review round %s: %v; nothing was pushed", ticket.Index, r.TicketCount, ticket.PRURL, roundRunID, err), now)
+		return fmt.Sprintf("ticket %d/%d: turn pull request %s back to draft before pushing accepted %s %s: %v; nothing was pushed", ticket.Index, r.TicketCount, ticket.PRURL, label, roundRunID, err), ""
 	}
 
 	pushCtx, cancelPush := context.WithTimeout(ctx, 2*time.Minute)
@@ -1427,7 +1470,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 		// Pushed left false (its zero value) -- exactly the state
 		// Ticket.PRHeadRunID's own doc comment says a reader must not
 		// mistake for "this round's commit is the PR's current head."
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s could not be pushed to %s: %v", ticket.Index, r.TicketCount, roundRunID, branch, pushErr), now)
+		return "", fmt.Sprintf("ticket %d/%d: accepted %s %s could not be pushed to %s: %v", ticket.Index, r.TicketCount, label, roundRunID, branch, pushErr)
 	}
 	// A push reporting success is not itself proof the remote branch now
 	// points where this round intended (found live, Flutter + Go app run 3,
@@ -1438,11 +1481,20 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	remoteHeadAfterPush, verifyErr := dp.RemoteBranchHeadSHA(verifyCtx, roundRun.WorkspacePath, branch)
 	cancelVerify()
 	if verifyErr != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s: verify push to %s: %v", ticket.Index, r.TicketCount, roundRunID, branch, verifyErr), now)
+		return "", fmt.Sprintf("ticket %d/%d: accepted %s %s: verify push to %s: %v", ticket.Index, r.TicketCount, label, roundRunID, branch, verifyErr)
 	}
 	if remoteHeadAfterPush != roundRun.ResultSHA {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: accepted review round %s: pushed %s to %s but the remote branch now reads %s -- push did not land as expected", ticket.Index, r.TicketCount, roundRunID, roundRun.ResultSHA, branch, remoteHeadAfterPush), now)
+		return "", fmt.Sprintf("ticket %d/%d: accepted %s %s: pushed %s to %s but the remote branch now reads %s -- push did not land as expected", ticket.Index, r.TicketCount, label, roundRunID, roundRun.ResultSHA, branch, remoteHeadAfterPush)
 	}
+	return "", ""
+}
+
+// afterRoundPushed records what a confirmed push of roundRun, the round at
+// ticket.Rounds[roundSliceIndex], leaves: the round is the pull request's
+// head (Round.Pushed), the pull request is polled at once and turned back to
+// draft if someone marked it ready meanwhile, and the round's worktree is
+// removed.
+func afterRoundPushed(dp Deps, ctx context.Context, r *request.Request, ticket *request.Ticket, roundSliceIndex int, roundRun *run.Run) {
 	// Confirmed pushed -- see Round.Pushed's own doc comment for why
 	// Outcome == RoundAccepted alone (already true on this entry, set
 	// before this function was ever called) is not sufficient.
@@ -1459,18 +1511,6 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	if err := workspace.RemoveWorktreeOnly(r.Workspace, roundRun.WorkspacePath); err != nil {
 		log.Printf("request %s: ticket %d: remove round worktree: %v", r.ID, ticket.Index, err)
 	}
-
-	replyCtx, cancelReply := context.WithTimeout(ctx, 30*time.Second)
-	for _, t := range includedThreads {
-		body := fmt.Sprintf("Addressed in %s.", roundRun.ResultSHA)
-		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, body); err != nil {
-			log.Printf("request %s: ticket %d: reply on thread %s: %v", r.ID, ticket.Index, t.ID, err)
-			continue
-		}
-		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
-	}
-	cancelReply()
-	return r.Save(dataDir)
 }
 
 // priorRoundRefusal returns ticket's most recent counted PR-review round's

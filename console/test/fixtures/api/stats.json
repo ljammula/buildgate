@@ -42,6 +42,10 @@
         "sent_back": 0,
         "sent_back_rate": 0
       },
+      "advice_rounds": {
+        "ran": 0,
+        "accepted": 0
+      },
       "spend": {
         "tokens": 478306,
         "cost_micro_usd": 1500003,
@@ -88,6 +92,10 @@
             "sent_back": 0,
             "sent_back_rate": 0
           },
+          "advice_rounds": {
+            "ran": 0,
+            "accepted": 0
+          },
           "spend": {
             "tokens": 478306,
             "cost_micro_usd": 1500003,
@@ -124,6 +132,10 @@
             "opened": 0,
             "sent_back": 0,
             "sent_back_rate": null
+          },
+          "advice_rounds": {
+            "ran": 0,
+            "accepted": 0
           },
           "spend": {
             "tokens": 0,
@@ -162,6 +174,10 @@
             "sent_back": 0,
             "sent_back_rate": null
           },
+          "advice_rounds": {
+            "ran": 0,
+            "accepted": 0
+          },
           "spend": {
             "tokens": 0,
             "cost_micro_usd": 0,
@@ -199,6 +215,10 @@
             "sent_back": 0,
             "sent_back_rate": null
           },
+          "advice_rounds": {
+            "ran": 0,
+            "accepted": 0
+          },
           "spend": {
             "tokens": 0,
             "cost_micro_usd": 0,
@@ -235,6 +255,10 @@
             "opened": 0,
             "sent_back": 0,
             "sent_back_rate": null
+          },
+          "advice_rounds": {
+            "ran": 0,
+            "accepted": 0
           },
           "spend": {
             "tokens": 0,
@@ -290,6 +314,10 @@
           "sent_back": 0,
           "sent_back_rate": 0
         },
+        "advice_rounds": {
+          "ran": 0,
+          "accepted": 0
+        },
         "spend": {
           "tokens": 478306,
           "cost_micro_usd": 1500003,
@@ -336,6 +364,10 @@
               "sent_back": 0,
               "sent_back_rate": 0
             },
+            "advice_rounds": {
+              "ran": 0,
+              "accepted": 0
+            },
             "spend": {
               "tokens": 478306,
               "cost_micro_usd": 1500003,
@@ -372,6 +404,10 @@
               "opened": 0,
               "sent_back": 0,
               "sent_back_rate": null
+            },
+            "advice_rounds": {
+              "ran": 0,
+              "accepted": 0
             },
             "spend": {
               "tokens": 0,
@@ -410,6 +446,10 @@
               "sent_back": 0,
               "sent_back_rate": null
             },
+            "advice_rounds": {
+              "ran": 0,
+              "accepted": 0
+            },
             "spend": {
               "tokens": 0,
               "cost_micro_usd": 0,
@@ -447,6 +487,10 @@
               "sent_back": 0,
               "sent_back_rate": null
             },
+            "advice_rounds": {
+              "ran": 0,
+              "accepted": 0
+            },
             "spend": {
               "tokens": 0,
               "cost_micro_usd": 0,
@@ -483,6 +527,10 @@
               "opened": 0,
               "sent_back": 0,
               "sent_back_rate": null
+            },
+            "advice_rounds": {
+              "ran": 0,
+              "accepted": 0
             },
             "spend": {
               "tokens": 0,

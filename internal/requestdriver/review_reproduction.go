@@ -240,6 +240,10 @@ func ticketRecheck(dataDir string, r *request.Request, ticket *request.Ticket, b
 func renoteTicketRuns(dataDir string, r *request.Request, ticket *request.Ticket) {
 	ids := []string{ticket.RunID}
 	for _, rnd := range ticket.Rounds {
+		// An advice round's run refuses nothing (launchCorrectiveRound).
+		if rnd.Kind == request.AdviceRoundKind {
+			continue
+		}
 		ids = append(append(ids, rnd.PriorRunIDs...), rnd.RunID)
 	}
 	seen := map[string]bool{}

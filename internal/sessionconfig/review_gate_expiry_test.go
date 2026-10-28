@@ -99,3 +99,50 @@ func TestPlanReviewIsOffByDefaultAndTurnsOn(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewAdviceRoundsDefaultsOffAndIsBounded(t *testing.T) {
+	if DefaultSettings().ReviewAdviceRounds != 0 || (Settings{}).ReviewAdviceRounds != 0 {
+		t.Error("advice rounds on by default, want 0")
+	}
+	for body, want := range map[string]int{"review_advice_rounds: 0\n": 0, "review_advice_rounds: 1\n": 1, "review_advice_rounds: 3\n": 3, "review_reproductions: true\n": 0} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.ReviewAdviceRounds != want {
+			t.Errorf("%q: ReviewAdviceRounds = %d err %v, want %d", body, s.ReviewAdviceRounds, err, want)
+		}
+	}
+	for _, body := range []string{"review_advice_rounds: 4\n", "review_advice_rounds: -1\n"} {
+		cfg, err := Load(writeConfig(t, body))
+		if err == nil {
+			_, err = cfg.ApplySettings(DefaultSettings())
+		}
+		if err == nil || !strings.Contains(err.Error(), "review_advice_rounds") {
+			t.Errorf("%q: %v, want a refusal naming review_advice_rounds", body, err)
+		}
+	}
+	if _, err := Load(writeConfig(t, "review_advice_round: true\n")); err == nil {
+		t.Error("the retired review_advice_round key loaded, want a refusal")
+	}
+}
+
+func TestRoundSessionContinuityDefaultsOffAndTurnsOn(t *testing.T) {
+	if DefaultSettings().RoundSessionContinuity || (Settings{}).RoundSessionContinuity {
+		t.Error("session continuity on by default, want off")
+	}
+	for body, want := range map[string]bool{"round_session_continuity: false\n": false, "round_session_continuity: true\n": true, "review_reproductions: true\n": false} {
+		cfg, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load %q: %v", body, err)
+		}
+		s, err := cfg.ApplySettings(DefaultSettings())
+		if err != nil || s.RoundSessionContinuity != want {
+			t.Errorf("%q: RoundSessionContinuity = %t err %v, want %t", body, s.RoundSessionContinuity, err, want)
+		}
+	}
+	if _, err := Load(writeConfig(t, "round_session_continuity: sometimes\n")); err == nil {
+		t.Error("round_session_continuity: sometimes loaded, want a refusal")
+	}
+}

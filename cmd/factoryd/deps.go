@@ -116,6 +116,11 @@ type forgeBoundary interface {
 	replayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	pushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	moveBranch(dir string, branch string, sha string) error
+	// restoreBranch points a local branch ahead of sha back at it, and
+	// commentOnPullRequest posts a comment on a pull request: an advice
+	// round's, when its result is not pushed and when it is.
+	restoreBranch(dir string, branch string, sha string) (bool, error)
+	commentOnPullRequest(ctx context.Context, prURL string, body string) error
 	// hostGitVersion is the host's `git version` output, which a restack
 	// checks against workspace.GitFloor.
 	hostGitVersion(ctx context.Context) (string, error)

@@ -73,6 +73,12 @@ type temporalSliceOptions struct {
 	// EarlierAttempt carries -earlier-attempt (an absolute path) onto
 	// RunWorkflowInput.EarlierAttemptPath.
 	EarlierAttempt string
+	// ResumeSession carries -resume-session-of's kept session onto
+	// RunWorkflowInput.ResumeSessionPath; KeepBuildSession is
+	// round_session_continuity for a request's ticket build, onto
+	// RunWorkflowInput.KeepBuildSession.
+	ResumeSession    string
+	KeepBuildSession bool
 	// Replay carries -replay's record onto RunWorkflowInput.Replay
 	// (replayInputOf); nil for every run that builds.
 	Replay       *workflow.ReplayInput
@@ -355,6 +361,8 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		DiffBaseSHA:        o.Slice.DiffBase,
 		InstructionBaseSHA: o.Slice.InstructionBase,
 		EarlierAttemptPath: o.Slice.EarlierAttempt,
+		ResumeSessionPath:  o.Slice.ResumeSession,
+		KeepBuildSession:   o.Slice.KeepBuildSession,
 		Replay:             o.Slice.Replay,
 		ResumeFrom:         o.Slice.ResumeFrom,
 		// Carried per-execution, not left to Activities' own Worker-static

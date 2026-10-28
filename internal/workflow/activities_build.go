@@ -297,6 +297,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 	args = append(args, autofixArgs(input.AutofixCommands)...)
 	runCtx, args := withEarlierWorkArgs(ctx, args, resumed.NotePath, input.EarlierAttemptPath, input.BaselineNotePath)
 	args = append(args, resumeFromStateArgs(input)...)
+	args = append(args, a.resumeSessionArgs(ctx, input, resumed.NotePath != "")...)
 	buildAppInterpreter := a.buildAppInterpreterFor(input)
 	// Computed before recording intent (not after, as originally written)
 	// so the intent record itself can carry the real command about to run

@@ -463,3 +463,37 @@ func TestPullRequestsRateIsNullWithNoneOpened(t *testing.T) {
 		t.Errorf("pull requests = %+v, want zeros and a nil rate", m.PullRequests)
 	}
 }
+
+// TestAdviceRoundsAreCountedApartFromTheirTicket: an advice round's run is in
+// its ticket's series but decides nothing of its outcome: a one-shot ticket
+// followed by an advice round (pushed or not) is still one-shot and
+// accepted, and the advice runs count only under advice_rounds, never under
+// corrective_builds.
+func TestAdviceRoundsAreCountedApartFromTheirTicket(t *testing.T) {
+	a := mk("req-1-001", run.StateAccepted, "2026-10-01T00:00:00Z", passRound(1))
+	a.RequestID = "req-1"
+	a1 := mk("req-1-001-advice1", run.StateAccepted, "2026-10-01T01:00:00Z", passRound(1))
+	a1.RequestID = "req-1"
+	a2 := mk("req-1-001-advice2", run.StateQuarantined, "2026-10-01T02:00:00Z", failRound(1, "x"))
+	a2.RequestID = "req-1"
+	m := Compute([]*run.Run{a, a1, a2}, Options{Project: "app"}).Overall
+	if m.Tickets != 1 || m.OneShot != 1 || m.Accepted != 1 {
+		t.Errorf("tickets %d one-shot %d accepted %d, want 1 1 1", m.Tickets, m.OneShot, m.Accepted)
+	}
+	if m.CorrectiveBuilds != (Corrective{}) || m.AdviceRounds != (Corrective{Ran: 2, Accepted: 1}) {
+		t.Errorf("corrective %+v advice %+v, want none and {2 1}", m.CorrectiveBuilds, m.AdviceRounds)
+	}
+	// The advice runs carry no weight on pull requests either: a series
+	// whose only run with a pull request URL is an advice round opened none,
+	// and one opened by its build and followed by an advice round was not
+	// sent back.
+	runs := []*run.Run{
+		withPR(mk("h-001", run.StateAccepted, "2026-10-01T00:00:00Z")),
+		withPR(mk("h-001-advice1", run.StateAccepted, "2026-10-01T01:00:00Z")),
+		mk("i-001", run.StateAccepted, "2026-10-01T00:00:00Z"),
+		withPR(mk("i-001-advice1", run.StateAccepted, "2026-10-01T01:00:00Z")),
+	}
+	if pr := Compute(runs, Options{}).Overall.PullRequests; pr.Opened != 1 || pr.SentBack != 0 {
+		t.Errorf("opened/sent back = %d/%d, want 1/0", pr.Opened, pr.SentBack)
+	}
+}

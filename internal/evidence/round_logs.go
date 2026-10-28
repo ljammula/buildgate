@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -302,4 +303,14 @@ func RetainBuildEvidence(workspace, dstPath string) (bool, error) {
 		err = errors.Join(err, rmErr)
 	}
 	return false, err
+}
+
+// IsBuildSessionSideFile reports whether rel, a path in a build's session
+// folder, is something the build script keeps there beside the harness's
+// own session state: the failed rounds' output, the saved prompts, or the
+// agent's notes for the next attempt. Each leaves the session by its own
+// copy (RetainRoundLogs, RetainPrompts, RetainAgentNotes).
+func IsBuildSessionSideFile(rel string) bool {
+	first := strings.Split(filepath.ToSlash(rel), "/")[0]
+	return first == path.Base(roundLogsSource) || first == PromptsDirName || first == path.Base(agentNotesSource)
 }

@@ -67,6 +67,12 @@ func (dp *deps) PushWithLease(ctx context.Context, dir string, sha string, branc
 func (dp *deps) MoveBranch(dir string, branch string, sha string) error {
 	return dp.forge.moveBranch(dir, branch, sha)
 }
+func (dp *deps) RestoreBranch(dir string, branch string, sha string) (bool, error) {
+	return dp.forge.restoreBranch(dir, branch, sha)
+}
+func (dp *deps) CommentOnPullRequest(ctx context.Context, prURL string, body string) error {
+	return dp.forge.commentOnPullRequest(ctx, prURL, body)
+}
 func (dp *deps) HostGitVersion(ctx context.Context) (string, error) {
 	return dp.forge.hostGitVersion(ctx)
 }
@@ -97,6 +103,9 @@ func (impl realForge) remoteBranchHeadSHA(ctx context.Context, workspaceDir, bra
 }
 func (impl realForge) roundResultDescendsFromHead(dir, ancestor, descendant string) (bool, error) {
 	return requestdriver.RealRoundResultDescendsFromHead(dir, ancestor, descendant)
+}
+func (impl realForge) commentOnPullRequest(ctx context.Context, prURL string, body string) error {
+	return requestdriver.RealCommentOnPullRequest(ctx, prURL, body)
 }
 func (impl realForge) replyToReviewComment(ctx context.Context, prURL string, commentID int64, body string) error {
 	return requestdriver.RealReplyToReviewComment(ctx, prURL, commentID, body)

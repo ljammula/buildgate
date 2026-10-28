@@ -55,3 +55,41 @@ func TestCreateBranchAtIsIdempotentAndNeverMovesABranch(t *testing.T) {
 		t.Error("a branch name starting with - was accepted")
 	}
 }
+
+// TestRestoreBranchMovesOnlyADescendantBack: a branch ahead of the commit is
+// moved back to it; one already there is left; one elsewhere (not a
+// descendant) is left as it is with an error and not reported ahead.
+func TestRestoreBranchMovesOnlyADescendantBack(t *testing.T) {
+	repo := newFixtureRepo(t)
+	base := headOf(t, repo)
+	commit := func(msg string) string {
+		if out, err := exec.Command("git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-m", msg).CombinedOutput(); err != nil {
+			t.Fatalf("commit: %v: %s", err, out)
+		}
+		return headOf(t, repo)
+	}
+	branchAt := func(name string) string {
+		out, err := exec.Command("git", "-C", repo, "rev-parse", "refs/heads/"+name).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	ahead := commit("round")
+	if err := CreateBranchAt(repo, "pr-branch", ahead); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := RestoreBranch(repo, "pr-branch", base); err != nil || moved || branchAt("pr-branch") != base {
+		t.Fatalf("RestoreBranch from a descendant = ahead %t, %v; branch %s, want %s", moved, err, branchAt("pr-branch"), base)
+	}
+	if moved, err := RestoreBranch(repo, "pr-branch", base); err != nil || moved {
+		t.Errorf("RestoreBranch at the commit = ahead %t, %v, want a no-op", moved, err)
+	}
+	// A branch at the commit's parent does not descend from the commit.
+	if moved, err := RestoreBranch(repo, "pr-branch", ahead); err == nil || moved || branchAt("pr-branch") != base {
+		t.Errorf("RestoreBranch from a non-descendant = ahead %t, %v; branch %s, want it left at %s", moved, err, branchAt("pr-branch"), base)
+	}
+	if _, err := RestoreBranch(repo, "no-such-branch", base); err == nil {
+		t.Error("RestoreBranch of a missing branch succeeded")
+	}
+}

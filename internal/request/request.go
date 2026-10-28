@@ -209,6 +209,12 @@ type Ticket struct {
 	// request is then neither retargeted nor marked ready. Cleared once a
 	// poll can tell.
 	RestackHold *TicketRestackHold `json:"restack_hold,omitempty"`
+	// Advice is set while the ticket's advice round (AdviceRoundKind) is in
+	// flight: from just before its build starts until its round is recorded
+	// (internal/requestdriver's advice_round.go). A pass that finds it set
+	// learns the round was interrupted and settles it before anything else,
+	// never starting a second one.
+	Advice *TicketAdvice `json:"advice,omitempty"`
 	// Retarget is the last retarget of the ticket's pull request the factory
 	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
 	// changed on its own is never recorded here.
@@ -268,6 +274,16 @@ const CorrectiveRoundKind = "corrective"
 // pre-PR kinds).
 const RestackRoundKind = "restack"
 
+// AdviceRoundKind marks a Round as an advice round of an accepted ticket
+// run: one build on the run's own branch, given the high-severity findings
+// of the run's code review as advice, whose result replaces the run on its
+// pull request only once every gate passed again and the push to that
+// branch is confirmed (Pushed). It never refuses anything: any other
+// outcome leaves the accepted run as the ticket's. At most
+// review_advice_rounds per ticket, each after a pushed one, counted against
+// neither round budget.
+const AdviceRoundKind = "advice"
+
 // Round is one corrective build run against a ticket's own branch, in
 // response either to a batch of newly-surfaced unresolved PR review
 // threads (Kind "") or to a quarantined run before any PR exists (Kind
@@ -284,8 +300,8 @@ type Round struct {
 	Index int `json:"index"`
 	// Kind is "" (the zero value, so every round recorded before this
 	// field existed reads as a PR-review round, preserving their
-	// historical meaning), ConformityRoundKind, CorrectiveRoundKind or
-	// RestackRoundKind. See
+	// historical meaning), ConformityRoundKind, CorrectiveRoundKind,
+	// RestackRoundKind or AdviceRoundKind. See
 	// this type's own doc comment.
 	Kind      string   `json:"kind,omitempty"`
 	ThreadIDs []string `json:"thread_ids"`
@@ -357,8 +373,8 @@ type Round struct {
 
 // Counted reports whether the round uses up one of its budget's rounds
 // (max_review_rounds for a PR-review round, review_corrective_rounds for the
-// two pre-PR kinds). A RestackRoundKind round is in neither budget: each
-// budget's reader also filters by Kind. A round whose run never started, or ended with no
+// two pre-PR kinds). A RestackRoundKind or AdviceRoundKind round is in
+// neither budget: each budget's reader also filters by Kind. A round whose run never started, or ended with no
 // verdict on the work, does not: neither says anything about the work, and
 // counting them let an outage spend the whole budget.
 func (rnd Round) Counted() bool {

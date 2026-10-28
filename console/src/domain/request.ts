@@ -100,12 +100,29 @@ export interface RequestTicket {
   readonly restack: TicketRestack | null;
   /** The restacks that have ended on this ticket, oldest first. */
   readonly restackRounds: readonly ReviewRound[];
+  /**
+   * The advice round under way on this ticket (Go's request.TicketAdvice):
+   * a build given the high-severity review findings of the accepted run it
+   * follows. null when none is.
+   */
+  readonly advice: TicketAdvice | null;
+  /** The advice rounds that have ended on this ticket, oldest first. */
+  readonly adviceRounds: readonly ReviewRound[];
   /** The round ledger: every build round that ended in a commit, oldest first. */
   readonly roundTags: readonly RoundTag[];
   /** The planner's declared `Estimated-Changed-Lines`; 0 when the ticket declares none. */
   readonly estimatedChangedLines: number;
   /** Changed lines (insertions plus deletions) of the ticket's built run; 0 until one is recorded. */
   readonly builtChangedLines: number;
+}
+
+/** An advice round under way on a ticket (Go's request.TicketAdvice). */
+export interface TicketAdvice {
+  /** The run it follows, which stays the ticket's run while it builds. */
+  readonly of: string;
+  /** The round's own run; "" until it starts. */
+  readonly runId: string;
+  readonly since: string;
 }
 
 /** A restack under way on a ticket (Go's request.TicketRestack). */
@@ -130,7 +147,7 @@ export interface RoundTag {
   /** The round number, per ticket, from 1. */
   readonly n: number;
   readonly runId: string;
-  /** "build", "corrective", "conformity" or "pr_review"; server-owned, so a string. */
+  /** "build", "corrective", "conformity", "pr_review", "restack" or "advice"; server-owned, so a string. */
   readonly kind: string;
   readonly sha: string;
   readonly ref: string;
@@ -207,9 +224,16 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
   }));
   return {
     // A round with another kind is a corrective round before any pull
-    // request exists (the build's business, not the review's), or a restack.
+    // request exists (the build's business, not the review's), a restack,
+    // or an advice round.
     reviewRounds: rounds.filter((entry) => entry.kind === "").map((entry) => entry.round),
     restackRounds: rounds.filter((entry) => entry.kind === "restack").map((entry) => entry.round),
+    adviceRounds: rounds.filter((entry) => entry.kind === "advice").map((entry) => entry.round),
+    advice: optObject(o, "advice", at, (a, aAt) => ({
+      of: optString(a, "of", aAt),
+      runId: optString(a, "run_id", aAt),
+      since: optString(a, "since", aAt),
+    })),
     restack: optObject(o, "restack", at, (rs, rsAt) => ({
       n: numberOr(rs, "n", rsAt, 0),
       branch: optString(rs, "branch", rsAt),

@@ -103,6 +103,8 @@ type fakeForge struct {
 	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
+	restoreBranchFn               func(dir, branch, sha string) (bool, error)
+	commentOnPullRequestFn        func(ctx context.Context, prURL, body string) error
 	hostGitVersionFn              func(ctx context.Context) (string, error)
 	userLoginFn                   func() (string, error)
 }
@@ -168,6 +170,12 @@ func (f *fakeForge) pushWithLease(ctx context.Context, dir, sha, branch, expecte
 }
 func (f *fakeForge) moveBranch(dir, branch, sha string) error {
 	return f.moveBranchFn(dir, branch, sha)
+}
+func (f *fakeForge) restoreBranch(dir, branch, sha string) (bool, error) {
+	return f.restoreBranchFn(dir, branch, sha)
+}
+func (f *fakeForge) commentOnPullRequest(ctx context.Context, prURL, body string) error {
+	return f.commentOnPullRequestFn(ctx, prURL, body)
 }
 func (f *fakeForge) hostGitVersion(ctx context.Context) (string, error) {
 	return f.hostGitVersionFn(ctx)
@@ -385,6 +393,12 @@ func newTestDeps(t testing.TB) *deps {
 			return errors.New("test forge: nothing is pushed with a lease")
 		},
 		moveBranchFn: func(string, string, string) error { return errors.New("test forge: no branch is moved") },
+		restoreBranchFn: func(string, string, string) (bool, error) {
+			return false, errors.New("test forge: no branch is restored")
+		},
+		commentOnPullRequestFn: func(context.Context, string, string) error {
+			return errors.New("test forge: no pull request is commented on")
+		},
 		hostGitVersionFn: func(context.Context) (string, error) {
 			return "", errors.New("test forge: no git version is read")
 		},
