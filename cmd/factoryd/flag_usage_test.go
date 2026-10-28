@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/codereview"
 	"flag"
 	"regexp"
 	"strings"
@@ -42,5 +43,14 @@ func TestFlagUsageIsShort(t *testing.T) {
 				t.Errorf("factoryd %s -%s: the usage string contains %q: say what the flag does, without naming the source or another flag's help", c.name, f.Name, m)
 			}
 		})
+	}
+}
+
+// Both -code-review-policy flags default to the one codereview.DefaultPolicy.
+func TestCodeReviewPolicyFlagsShareTheOneDefault(t *testing.T) {
+	_, run := newRunFlags()
+	_, worker := newWorkerFlags()
+	if *run.codeReviewPolicy != codereview.DefaultPolicy || *worker.codeReviewPolicy != codereview.DefaultPolicy {
+		t.Fatalf("defaults: run %q, worker %q, want %q", *run.codeReviewPolicy, *worker.codeReviewPolicy, codereview.DefaultPolicy)
 	}
 }

@@ -1929,16 +1929,12 @@ func quickstartBuildConfig(dp *deps, opts *quickstartOptions, p *quickstartPromp
 	b.cfg.ReleaseMaxInsertions = &maxInsertions
 	b.cfg.ReleaseRollbackPlan = &rollbackPlan
 
-	// A freshly written config turns the standalone AI code-review pass on
-	// by default (worker's own bare -code-review-policy flag default is
-	// "off", kept that way for an operator already running without a
-	// config -- see that flag's own doc comment) -- quickstart is the
-	// setup path for a NEW factory, so its own defaults are the ones an
-	// operator should actually run with. Only set here, in
-	// quickstartWriteNewConfig's own path: a config quickstart is REUSING
-	// (quickstartEnsureConfig's early return above) is never rewritten
-	// with this, so an operator who already chose "off" keeps it.
-	codeReviewPolicy := codereview.PolicyRequired
+	// A freshly written config states the default review policy
+	// (codereview.DefaultPolicy) so the operator can see and change it. A
+	// config quickstart is REUSING (quickstartEnsureConfig's early return
+	// above) is never rewritten with this, so an operator who chose "off"
+	// keeps it.
+	codeReviewPolicy := codereview.DefaultPolicy
 	b.cfg.CodeReviewPolicy = &codeReviewPolicy
 
 	if err := b.applyHarness(route); err != nil {

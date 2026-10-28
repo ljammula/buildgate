@@ -30,6 +30,12 @@ const (
 	PolicyRequired = "required"
 )
 
+// DefaultPolicy is the policy every path uses when none is chosen: the
+// -code-review-policy flags of worker and of a single-ticket run, and what
+// quickstart writes. It is the configuration the review advice rounds were
+// measured with; with PolicyOff those rounds do nothing.
+const DefaultPolicy = PolicyRequired
+
 // ValidPolicy reports whether p is one of the three recognized policy
 // values.
 func ValidPolicy(p string) bool {

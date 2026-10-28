@@ -252,6 +252,7 @@ func TestIntegrationDaemonReclaimHoldsRepositoryOwnershipAfterSubmitterCrash(t *
 		"-verify-command", "true",
 		"-data-dir", t.TempDir(),
 		"-skip-project-check",
+		"-code-review-policy", "off",
 		"-temporal-address", address,
 	)
 	secondDirect.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")

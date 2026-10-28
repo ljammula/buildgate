@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"buildgate/internal/api"
+	"buildgate/internal/codereview"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
@@ -40,6 +41,7 @@ func withFakeSandboxSettings(t *testing.T) {
 	settings.SandboxDocker = fakeSandboxDockerBinary(t)
 	settings.SandboxImage = fakeSandboxImage
 	settings.SandboxWorkerUID = testSandboxWorkerUID()
+	settings.CodeReviewPolicy = codereview.PolicyOff // the default, required, needs a model relay
 	tier2SettingsOverride = &settings
 	t.Cleanup(func() {
 		tier2SettingsOverride = nil

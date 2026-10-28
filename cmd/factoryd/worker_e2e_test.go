@@ -30,7 +30,7 @@ func workerEndToEndArgs(t *testing.T, dataDir string) (args, env []string, confi
 		return path
 	}
 	configPath = filepath.Join(t.TempDir(), "config.yml")
-	writeSessionConfig(t, configPath, "sandbox_docker: "+abs("docker.sh")+"\n"+
+	writeSessionConfig(t, configPath, "sandbox_docker: "+abs("docker.sh")+"\ncode_review_policy: off\n"+
 		"routes:\n  fixture:\n    credential_mode: static\n    upstream: https://model.example.invalid\n    credential_env: WORKER_E2E_TEST_KEY\n"+
 		"models:\n  fixture-model:\n    id: fixture-model-id\n    api: openai-completions\n    routes: [fixture]\n"+
 		"roles:\n  planning: { model: fixture-model }\n  execution: { model: fixture-model }\n  review: { model: fixture-model, allow_shared_model: true }\n")

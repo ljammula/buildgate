@@ -137,9 +137,8 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	f.advanceOn = flags.String("advance-on", requestdriver.AdvanceOnAccepted, `when a request moves on to its next ticket: "accepted" as soon as the ticket's run is accepted, or "pr_approved" only once its pull request is approved`)
 
 	// codeReviewPolicy mirrors factoryd <run>'s own -code-review-policy
-	// flag exactly, defaulting to "off" like the bare CLI, so it stays off
-	// until an operator opts a drained entry into it.
-	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after every other gate passes: off never runs it, advisory records findings without blocking, required quarantines the run when the review gives no verdict")
+	// flag exactly, with the one default (codereview.DefaultPolicy).
+	f.codeReviewPolicy = flags.String("code-review-policy", codereview.DefaultPolicy, "AI code review after every other gate passes: off never runs it, advisory records findings without blocking, required quarantines the run when the review gives no verdict")
 
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts Temporal with Docker if it is down; with FACTORYD_AUTOSTART=0 an address is required.")
 	finishFlags(flags)
