@@ -3,6 +3,8 @@ package main
 import (
 	"buildgate/internal/unresolved"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +212,55 @@ func TestHaltLostRequestStepLeavesPRReviewPolling(t *testing.T) {
 	}
 	if r, _ := request.Load(dataDir, "req-pr"); r.State != request.StatePRReview {
 		t.Fatalf("state = %s, want pr_review", r.State)
+	}
+}
+
+// TestAdvanceRequestActivityPrunesBuildSessionsOnceTheTicketLeavesBuilding:
+// the step that takes a one-ticket request from building to pr_review
+// removes the build session its ticket's build kept, and nothing else of
+// the run's directory.
+func TestAdvanceRequestActivityPrunesBuildSessionsOnceTheTicketLeavesBuilding(t *testing.T) {
+	dp := newTestDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	runID := requestdrivertest.TicketRunID(id, 1)
+	session := filepath.Join(run.Dir(dataDir, runID), run.BuildSessionDirName)
+	notes := filepath.Join(run.Dir(dataDir, runID), "agent-notes.md")
+	accept := requestdrivertest.AcceptingBuildRunner(t, dataDir)
+	// The build leaves what a real request ticket build does: a run of the
+	// request's ticket 1 with its session kept.
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		if err := accept(ctx, args, onReady); err != nil {
+			return err
+		}
+		rr, err := run.Load(dataDir, runID)
+		if err != nil {
+			return err
+		}
+		rr.RequestID, rr.TicketIndex = id, 1
+		if err := rr.Save(dataDir); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(session, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(session, "own.jsonl"), []byte("{}\n"), 0o644); err != nil {
+			return err
+		}
+		return os.WriteFile(notes, []byte("notes\n"), 0o644)
+	}
+	acts := &requestActivities{dp: dp, dataDir: dataDir, cfg: requestdriver.WorkerConfig{OpenPullRequest: true}, buildRunner: runner}
+
+	after, err := acts.AdvanceRequest(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != string(request.StatePRReview) {
+		t.Fatalf("returned %q, want pr_review", after)
+	}
+	if _, err := os.Lstat(session); !os.IsNotExist(err) {
+		t.Errorf("the ticket's kept build session survived pr_review (lstat err = %v)", err)
+	}
+	if _, err := os.Stat(notes); err != nil {
+		t.Errorf("another file of the run's directory was removed: %v", err)
 	}
 }

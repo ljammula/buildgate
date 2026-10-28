@@ -139,7 +139,7 @@ type resumeSessionRun struct {
 }
 
 // resumeSessionPathOf is the kept build session of run id
-// (workflow.BuildSessionDirName in its run directory, absolute) for
+// (run.BuildSessionDirName in its run directory, absolute) for
 // -resume-session-of, "" when id is "". It is refused unless this run is a
 // request's ticket build and id names a run of the same request ticket on
 // the same workspace: its RequestID and TicketIndex are the ones this run's
@@ -170,7 +170,7 @@ func resumeSessionPathOf(dataDir, id string, this resumeSessionRun) (string, err
 	if !sameDir(rec.ProjectPath, this.workspace) {
 		return "", fmt.Errorf("-resume-session-of %s: a run on %s, not this build's workspace %s", id, rec.ProjectPath, this.workspace)
 	}
-	return filepath.Abs(filepath.Join(run.Dir(dataDir, id), workflow.BuildSessionDirName))
+	return filepath.Abs(filepath.Join(run.Dir(dataDir, id), run.BuildSessionDirName))
 }
 
 // sameDir reports whether a and b name the same directory path once made

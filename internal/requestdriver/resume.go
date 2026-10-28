@@ -172,6 +172,13 @@ func ClearKeptRunsOfRequest(dataDir, requestID string) error {
 	return release.ClearKeptRunsOfRequest(dataDir, requestID)
 }
 
+// PruneBuildSessions removes the kept build sessions of r's runs that no
+// corrective or advice round can follow in r's current state; see
+// release.PruneBuildSessions.
+func PruneBuildSessions(dataDir string, r *request.Request) error {
+	return release.PruneBuildSessions(dataDir, r)
+}
+
 // DefaultMaxRounds is `factoryd run -max-rounds`' default: the round limit a
 // request's ticket build runs with (worker forwards no -max-rounds), and so
 // the limit a resume of it is checked against.

@@ -2151,6 +2151,11 @@ func FindChainSuccessor(dataDir, projectPath, priorID string) (string, error) {
 	return "", nil
 }
 
+// BuildSessionDirName is the folder, in a run's own directory, that holds the
+// copy of its build's harness session a later round of the same ticket may
+// continue (round_session_continuity).
+const BuildSessionDirName = "build-session"
+
 // Dir returns the durable-record directory for a run under dataDir.
 func Dir(dataDir, id string) string {
 	return filepath.Join(dataDir, "runs", id)

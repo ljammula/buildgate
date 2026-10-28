@@ -483,7 +483,7 @@ type RunWorkflowInput struct {
 	// given.
 	EarlierAttemptPath string `json:"earlier_attempt_path,omitempty"`
 	// KeepBuildSession makes the build step keep a copy of the build's
-	// harness session in the run's own directory (BuildSessionDirName,
+	// harness session in the run's own directory (run.BuildSessionDirName,
 	// keepBuildSession) before it removes the session from the worktree,
 	// so a corrective or advice round that follows can continue it
 	// (round_session_continuity). Set only for a request's ticket build.

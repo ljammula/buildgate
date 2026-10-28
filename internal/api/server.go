@@ -4324,6 +4324,9 @@ func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request) {
 	if err := clearKeptRunsOfRequest(s.dataDir, id); err != nil {
 		log.Printf("request %s: could not discard a kept worktree on cancel: %v", id, err)
 	}
+	if err := pruneBuildSessions(s.dataDir, loaded); err != nil {
+		log.Printf("request %s: could not remove a kept build session on cancel: %v", id, err)
+	}
 	s.wakeRequest(r.Context(), id)
 	writeJSON(w, http.StatusOK, s.buildRequestDetailView(s.dataDir, id, loaded))
 }
@@ -4332,6 +4335,12 @@ func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request) {
 // kept for a resume decision; see release.ClearKeptRunsOfRequest.
 func clearKeptRunsOfRequest(dataDir, requestID string) error {
 	return release.ClearKeptRunsOfRequest(dataDir, requestID)
+}
+
+// pruneBuildSessions removes the kept build sessions of r's runs that no round
+// can follow any more; see release.PruneBuildSessions.
+func pruneBuildSessions(dataDir string, r *request.Request) error {
+	return release.PruneBuildSessions(dataDir, r)
 }
 
 // maxRequestContentBytes caps the JSON body updateRequestSpec/
