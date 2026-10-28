@@ -2084,6 +2084,7 @@ oldest first, empty ones kept, at most 26 (the newest).
 | `quarantined_by` | Quarantined runs per failed check, a run once per check; a run with none counts under its reason code in brackets; at most 10, largest first | baseline lists every check |
 | `halted_by` | Halted runs per reason code, else the first line of the triage sentence; at most 10 | baseline lists every reason |
 | `corrective_builds` | `ran`: runs after a series' first; `accepted`: how many of them ended accepted | Not in baseline |
+| `pull_requests` | `opened`: series with an accepted run that recorded a pull request URL (a PR-review round does not count as the opener); `sent_back`: of those, series with a PR-review round (`-review<N>`) run after the first such run; `sent_back_rate`: `sent_back` over `opened`, null with none opened. Lower is better | Not in baseline |
 | `spend` | Relay tokens and micro-USD summed over the runs' attempts, `runs_with_spend`, and cost per accepted series. Not drafting: `factoryd cost` is the full account | Not in baseline |
 | `excluded_runs` | Runs whose ticket (or id) starts with `live-smoke-`; counted only without `-all` / `all=1` | baseline counts every record |
 | `unfinished` | Runs still in progress, left out | Same |

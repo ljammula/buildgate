@@ -40,6 +40,10 @@ export interface TrendMetrics {
   readonly haltedBy: readonly TrendCount[];
   readonly correctiveRan: number;
   readonly correctiveAccepted: number;
+  readonly pullRequestsOpened: number;
+  readonly pullRequestsSentBack: number;
+  /** null when no series reached a pull request. */
+  readonly sentBackRate: number | null;
   readonly spendTokens: number;
   readonly spendCostMicroUsd: number;
   readonly perAcceptedTicketMicroUsd: number;
@@ -84,6 +88,7 @@ function nested(o: JsonObject, key: string, at: string): JsonObject {
 function decodeMetrics(o: JsonObject, at: string): TrendMetrics {
   const corrective = nested(o, "corrective_builds", at);
   const spend = nested(o, "spend", at);
+  const pulls = nested(o, "pull_requests", at);
   return {
     tickets: reqNumber(o, "tickets", at),
     oneShot: numberOr(o, "one_shot", at, 0),
@@ -99,6 +104,9 @@ function decodeMetrics(o: JsonObject, at: string): TrendMetrics {
     haltedBy: objectList(o, "halted_by", at, decodeCount),
     correctiveRan: numberOr(corrective, "ran", `${at}.corrective_builds`, 0),
     correctiveAccepted: numberOr(corrective, "accepted", `${at}.corrective_builds`, 0),
+    pullRequestsOpened: numberOr(pulls, "opened", `${at}.pull_requests`, 0),
+    pullRequestsSentBack: numberOr(pulls, "sent_back", `${at}.pull_requests`, 0),
+    sentBackRate: optNumber(pulls, "sent_back_rate", `${at}.pull_requests`),
     spendTokens: numberOr(spend, "tokens", `${at}.spend`, 0),
     spendCostMicroUsd: numberOr(spend, "cost_micro_usd", `${at}.spend`, 0),
     perAcceptedTicketMicroUsd: numberOr(spend, "per_accepted_ticket_micro_usd", `${at}.spend`, 0),

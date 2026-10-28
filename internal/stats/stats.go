@@ -47,7 +47,13 @@ const (
 // PR-review, conformity or corrective round, each possibly with -fix<N>. The
 // suffix follows the ticket's three-digit index, so a ticket merely named
 // "api-review1" keeps its name (the same rule as scripts/baseline.py).
-var followUpRun = regexp.MustCompile(`(-\d{3})-(?:review|conformity|corrective)\d+(?:-fix\d+)?$`)
+var followUpRun = regexp.MustCompile(`(-\d{3})-(review|conformity|corrective)\d+(?:-fix\d+)?$`)
+
+// isPRReviewRound reports whether r is a PR-review round of its ticket.
+func isPRReviewRound(r *run.Run) bool {
+	m := followUpRun.FindStringSubmatch(ticketName(r))
+	return m != nil && m[2] == "review"
+}
 
 // Options narrows and shapes a report.
 type Options struct {
@@ -90,6 +96,18 @@ type Corrective struct {
 	Ran int `json:"ran"`
 	// Accepted is how many of them ended accepted.
 	Accepted int `json:"accepted"`
+}
+
+// PullRequests counts the series that reached a pull request and how many of
+// them a human reviewer then sent back.
+type PullRequests struct {
+	// Opened is the series with an accepted run that recorded a pull request
+	// URL (a PR-review round is not the run that opened it).
+	Opened int `json:"opened"`
+	// SentBack is the opened series with a PR-review round run after the
+	// first such run.
+	SentBack     int      `json:"sent_back"`
+	SentBackRate *float64 `json:"sent_back_rate"`
 }
 
 // Spend is what the finished runs consumed through the relay: the sums
@@ -145,7 +163,10 @@ type Metrics struct {
 	// of their triage sentence. Largest first, ties by name, at most TopN.
 	HaltedBy         []Count    `json:"halted_by"`
 	CorrectiveBuilds Corrective `json:"corrective_builds"`
-	Spend            Spend      `json:"spend"`
+	// PullRequests is the series that reached a pull request and those sent
+	// back after it. scripts/baseline.py has no such number.
+	PullRequests PullRequests `json:"pull_requests"`
+	Spend        Spend        `json:"spend"`
 }
 
 // Bucket is Metrics over the tickets whose first run began in [Start, End).
@@ -333,6 +354,7 @@ func metricsOf(list []series) Metrics {
 		}
 	}
 	m.OneShotRate, m.AcceptedRate = rate(m.OneShot, m.Tickets), rate(m.Accepted, m.Tickets)
+	m.PullRequests.SentBackRate = rate(m.PullRequests.SentBack, m.PullRequests.Opened)
 	m.RoundsToGreen = spread(rounds)
 	m.QuarantinedBy, m.HaltedBy = top(quarantined), top(halted)
 	if m.Accepted > 0 {
@@ -365,10 +387,33 @@ func (m *Metrics) addSeries(s series, rounds *[]int) {
 			*rounds = append(*rounds, total)
 		}
 	}
+	m.addPullRequest(s)
 	for _, r := range s.runs[1:] {
 		m.CorrectiveBuilds.Ran++
 		if r.State == run.StateAccepted {
 			m.CorrectiveBuilds.Accepted++
+		}
+	}
+}
+
+// addPullRequest counts a series that reached a pull request, and whether a
+// PR-review round ran after the run that did.
+func (m *Metrics) addPullRequest(s series) {
+	opened := -1
+	for i, r := range s.runs {
+		if r.State == run.StateAccepted && r.PullRequestURL != "" && !isPRReviewRound(r) {
+			opened = i
+			break
+		}
+	}
+	if opened < 0 {
+		return
+	}
+	m.PullRequests.Opened++
+	for _, r := range s.runs[opened+1:] {
+		if isPRReviewRound(r) {
+			m.PullRequests.SentBack++
+			return
 		}
 	}
 }

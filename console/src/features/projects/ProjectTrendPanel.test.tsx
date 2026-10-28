@@ -27,6 +27,7 @@ const metrics = (over: Record<string, unknown> = {}) => ({
   quarantined_by: [{ name: "tests_red_on_base <b>x</b>", runs: 3 }],
   halted_by: [],
   corrective_builds: { ran: 2, accepted: 1 },
+  pull_requests: { opened: 0, sent_back: 0, sent_back_rate: null },
   spend: {
     tokens: 10,
     cost_micro_usd: 1000,

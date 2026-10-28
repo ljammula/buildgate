@@ -419,3 +419,47 @@ func TestParseSinceAndBucketDays(t *testing.T) {
 		}
 	}
 }
+
+func withPR(r *run.Run) *run.Run {
+	r.PullRequestURL = "https://example.test/pull/1"
+	return r
+}
+
+// TestPullRequestsCountSeriesSentBackAfterTheirPR: opened and sent back are
+// worked out per series below.
+func TestPullRequestsCountSeriesSentBackAfterTheirPR(t *testing.T) {
+	runs := []*run.Run{
+		// a: accepted, no pull request: not opened.
+		mk("a-001", run.StateAccepted, "2026-10-01T00:00:00Z"),
+		// b: pull request, nothing after: opened.
+		withPR(mk("b-001", run.StateAccepted, "2026-10-01T00:00:00Z")),
+		// c: pull request, then a review round that did not pass: sent back.
+		withPR(mk("c-001", run.StateAccepted, "2026-10-01T00:00:00Z")),
+		mk("c-001-review1", run.StateQuarantined, "2026-10-01T01:00:00Z"),
+		// d: two review rounds, one with a fix: sent back once, not twice.
+		withPR(mk("d-001", run.StateAccepted, "2026-10-01T00:00:00Z")),
+		withPR(mk("d-001-review1", run.StateAccepted, "2026-10-01T01:00:00Z")),
+		withPR(mk("d-001-review2-fix1", run.StateAccepted, "2026-10-01T02:00:00Z")),
+		// e: the only run with a pull request is a review round: not opened.
+		mk("e-001", run.StateQuarantined, "2026-10-01T00:00:00Z"),
+		withPR(mk("e-001-review1", run.StateAccepted, "2026-10-01T01:00:00Z")),
+		// f: a pull request URL on a run that was not accepted: not opened.
+		withPR(mk("f-001", run.StateQuarantined, "2026-10-01T00:00:00Z")),
+		mk("f-001-review1", run.StateAccepted, "2026-10-01T01:00:00Z"),
+		// g: a corrective round after the pull request is not a review round.
+		withPR(mk("g-001", run.StateAccepted, "2026-10-01T00:00:00Z")),
+		mk("g-001-corrective1", run.StateAccepted, "2026-10-01T01:00:00Z"),
+	}
+	pr := Compute(runs, Options{}).Overall.PullRequests
+	if pr.Opened != 4 || pr.SentBack != 2 {
+		t.Errorf("opened/sent back = %d/%d, want 4/2", pr.Opened, pr.SentBack)
+	}
+	equalRate(t, "sent_back_rate", pr.SentBackRate, 0.5)
+}
+
+func TestPullRequestsRateIsNullWithNoneOpened(t *testing.T) {
+	m := Compute([]*run.Run{mk("a-001", run.StateAccepted, "2026-10-01T00:00:00Z")}, Options{}).Overall
+	if m.PullRequests.Opened != 0 || m.PullRequests.SentBack != 0 || m.PullRequests.SentBackRate != nil {
+		t.Errorf("pull requests = %+v, want zeros and a nil rate", m.PullRequests)
+	}
+}

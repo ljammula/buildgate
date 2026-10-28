@@ -36,6 +36,11 @@
       "ran": 0,
       "accepted": 0
     },
+    "pull_requests": {
+      "opened": 2,
+      "sent_back": 0,
+      "sent_back_rate": 0
+    },
     "spend": {
       "tokens": 478306,
       "cost_micro_usd": 1500003,
@@ -67,6 +72,11 @@
         "corrective_builds": {
           "ran": 0,
           "accepted": 0
+        },
+        "pull_requests": {
+          "opened": 0,
+          "sent_back": 0,
+          "sent_back_rate": null
         },
         "spend": {
           "tokens": 0,
@@ -108,6 +118,11 @@
         "corrective_builds": {
           "ran": 0,
           "accepted": 0
+        },
+        "pull_requests": {
+          "opened": 2,
+          "sent_back": 0,
+          "sent_back_rate": 0
         },
         "spend": {
           "tokens": 478306,

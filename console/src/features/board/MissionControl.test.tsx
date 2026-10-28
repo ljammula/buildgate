@@ -636,6 +636,7 @@ describe("numbers", () => {
     quarantined_by: [],
     halted_by: [],
     corrective_builds: { ran: 0, accepted: 0 },
+    pull_requests: { opened: 0, sent_back: 0, sent_back_rate: null },
     spend: { tokens: 0, cost_micro_usd: 0, per_accepted_ticket_micro_usd: 0 },
   };
   const report = (project: string) => ({
@@ -1338,6 +1339,7 @@ describe("numbers and activity follow the project filter, not the search box", (
     quarantined_by: [],
     halted_by: [],
     corrective_builds: { ran: 0, accepted: 0 },
+    pull_requests: { opened: 0, sent_back: 0, sent_back_rate: null },
     spend: { tokens: 0, cost_micro_usd: 0, per_accepted_ticket_micro_usd: 0 },
   });
   const report = (project: string, tickets: number) => ({
