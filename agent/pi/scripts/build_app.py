@@ -608,10 +608,13 @@ def continued_attempt_preamble(record_text: str) -> str:
 # that session was made with, so a later build continues it only on the same.
 SESSION_ORIGIN_FILE = "session-origin.json"
 # The most a carried session's own files (its transcript and state, not the
-# feedback logs or saved prompts) may hold for a build to continue it: past
-# this the transcript is taken to be near the model's context window, and the
-# build starts a fresh session with the written record instead.
-MAX_RESUMED_SESSION_BYTES = 4 << 20
+# feedback logs or saved prompts) may hold for a build to continue it, or the
+# build starts a fresh session with the written record instead. A sanity
+# bound, not a measure of the context: the harness compacts its own context.
+# A ten-minute Codex build leaves about 11 MB (two SQLite write-ahead logs of
+# about 4 MB each and a 1.5-2.5 MB transcript), so the bound sits well above
+# that and below the 64 MiB a kept session may hold.
+MAX_RESUMED_SESSION_BYTES = 32 << 20
 # Folders of a session that are not the harness's own state.
 _SESSION_SIDE_FOLDERS = ("feedback", "prompts")
 # Where the notes turn sets the session's state aside while it runs, inside

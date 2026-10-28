@@ -829,7 +829,7 @@ requires a new contract review and an updated machine-checkable test.
   Activity alone copies it, under the same rules, into the
   round's worktree session folder before the build and passes
   `--resume-session`, and the build script continues it only when it was
-  made by the same harness and model, holds at most 4 MiB of session state
+  made by the same harness and model, holds at most 32 MiB of session state
   and the harness can continue it, else removes it and starts fresh with
   the written record (`session` in `BUILD_EVIDENCE.json` says which). That
   session holds what the build it follows was told, an earlier attempt's
