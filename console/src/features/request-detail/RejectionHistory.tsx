@@ -1,5 +1,5 @@
 import type { Rejection } from "@/domain/request";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { Disclosure } from "@/ui/Disclosure";
 
 import { rejectionHeading } from "./requestDetailLogic";

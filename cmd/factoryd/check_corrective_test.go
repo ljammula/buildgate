@@ -94,7 +94,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 0}
 			drive := func() {
 				t.Helper()
-				if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+				if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 					t.Fatalf("driveRequests: %v", err)
 				}
 			}
@@ -163,7 +163,7 @@ func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 	cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &requestdrivertest.FakeResumePreconditions{T: t, OK: true}}}
 	drive := func() {
 		t.Helper()
-		if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -230,7 +230,7 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 	}
 	drive := func() *request.Request {
 		t.Helper()
-		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		r, err := request.Load(dataDir, id)
@@ -355,7 +355,7 @@ func TestABuildThatFollowsAnUnfinishedOneIsGivenTheSameRecord(t *testing.T) {
 			cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &requestdrivertest.FakeResumePreconditions{T: t, OK: true}}}
 			drive := func() *request.Request {
 				t.Helper()
-				if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+				if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 					t.Fatalf("driveRequests: %v", err)
 				}
 				r, err := request.Load(dataDir, id)

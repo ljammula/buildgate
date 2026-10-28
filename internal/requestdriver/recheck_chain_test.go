@@ -110,7 +110,7 @@ func retryFromRoundOne(t *testing.T, unreadable bool) (dataDir, id string, args 
 		onReady(&run.Run{ID: runID})
 		return quarantinedRun(t, dataDir, runID, sha40(0xa1), sha40(0xa3), "canonical_verify")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	return dataDir, id, args
@@ -128,7 +128,7 @@ func TestEveryBuildOfATicketRechecksItsList(t *testing.T) {
 			_, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: "factoryd/" + id + "-001", PullRequestURL: "https://github.com/acme/app/pull/9"}
 			})
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			return dataDir, id, 1, *lastArgs
@@ -139,7 +139,7 @@ func TestEveryBuildOfATicketRechecksItsList(t *testing.T) {
 			var builds [][]string
 			buildRunner := refusedBuildRunner(t, dataDir, id, &builds)
 			drive := func() {
-				if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+				if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 					t.Fatalf("driveRequests: %v", err)
 				}
 			}
@@ -340,7 +340,7 @@ func TestARefusalSurvivesAWorkerStoppedInTheCorrectiveRound(t *testing.T) {
 		return errors.New("context canceled")
 	}
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := requestdrivertest.DriveRequests(dp, ctx, dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err == nil {
+	if err := requestdrivertest.DriveRequests(dp, ctx, dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err == nil {
 		t.Fatal("driveRequests: want the stopped round's error")
 	}
 	e := requestdrivertest.HeldEntry(t, dataDir, id+"-001")
@@ -353,7 +353,7 @@ func TestARefusalSurvivesAWorkerStoppedInTheCorrectiveRound(t *testing.T) {
 		return requestdrivertest.AcceptingBuildRunner(t, dataDir)(c, args, onReady)
 	}
 	requestdriver.ReviewCorrectiveRunner = next
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), next); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), next); err != nil {
 		t.Fatalf("driveRequests after the restart: %v", err)
 	}
 	if len(builds) == 0 || !manifestHas(t, builds[0], e) {
@@ -371,7 +371,7 @@ func TestARefusalNeverNotedIsRecheckedByTheNextBuild(t *testing.T) {
 	buildRunner := refusedBuildRunner(t, dataDir, id, &builds)
 	drive := func() {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -417,7 +417,7 @@ func TestARefusalIsNotedWhenTheRequestLeftBuilding(t *testing.T) {
 		rr := requestdrivertest.ReproductionRefusedOn(t, dataDir, ticket, "factoryd/"+ticket, sha40(1), sha40(2))
 		return saveAsBuiltFrom(t, dataDir, id, args, rr)
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
@@ -436,7 +436,7 @@ func TestARetryDropIsNotAddedBack(t *testing.T) {
 	refused := refusedBuildRunner(t, dataDir, id, &builds)
 	drive := func(runner requestdriver.TicketRunner) {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -578,7 +578,7 @@ func TestASendBackDropDoesNotCoverTheNewTicketsRefusals(t *testing.T) {
 	var builds [][]string
 	drive := func(runner requestdriver.TicketRunner) {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}

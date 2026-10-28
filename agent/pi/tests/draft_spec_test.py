@@ -286,10 +286,10 @@ class BuildPromptTests(unittest.TestCase):
 		self.assertNotIn("OPERATOR FEEDBACK", prompt)
 
 	def test_instructs_carrying_over_named_files_and_functions_verbatim(self):
-		# Onboarding P4: the approved spec is the only input later oracle
-		# drafting sees, so a spec that abstracts "sub.py's
-		# subtract_numbers" into "a subtraction operation" leaves later,
-		# independently-drafted oracles to guess the module name themselves
+		# Onboarding P4: the approved spec is the only input later
+		# stages see, so a spec that abstracts "sub.py's
+		# subtract_numbers" into "a subtraction operation" leaves later
+		# stages to guess the module name themselves
 		# (live defect, 2026-09-24: four criteria guessed four different
 		# modules for the same two functions).
 		with tempfile.TemporaryDirectory() as directory:
@@ -300,9 +300,9 @@ class BuildPromptTests(unittest.TestCase):
 		self.assertIn("carry that name over verbatim here rather than abstracting it", flat)
 		self.assertIn("sub.py", flat)
 		self.assertIn("subtract_numbers", flat)
-		# ...and in each criterion, since oracles are drafted from the
+		# ...and in each criterion, since later stages work from the
 		# criteria alone (live, 2026-09-24: Scope named sub.py, the
-		# criteria did not, and the drafted oracles invented modules).
+		# criteria did not, and the stages invented modules).
 		self.assertIn("put it IN each criterion that exercises it", flat)
 		self.assertIn("`subtract_numbers(a, b)` in `sub.py`", flat)
 		self.assertIn("carry over verbatim any file, module, or function/API name the request itself states", flat)

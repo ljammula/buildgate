@@ -91,14 +91,8 @@ func withRoundSession(argv []string, cfg WorkerConfig, followed *run.Run) []stri
 // describes the state the run is in (handoff.Load), and what its failed
 // checks allow is "corrective".
 //
-// A failed reference oracle (handoff.BinCorrectiveIfOracleInLoop) counts as
-// corrective here: a request's ticket only has an oracle when it was
-// approved at plan review, and every such ticket's build is already run
-// with the oracle mounted and -reference-oracle-in-loop-retry
-// (BuildTicketRunArgs), so the build given the record sees nothing the
-// first one did not. Everything else is not: a check a build is never told
-// about (a review with no verdict, an unknown check), a halt,
-// and a run with no handoff.
+// Not given: a check a build is never told about (a review with no verdict,
+// an unknown check), a halt, and a run with no handoff.
 func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
 	if quarantined.State != run.StateQuarantined || quarantined.HandoffSHA256 == "" {
 		return handoff.Document{}, false
@@ -107,7 +101,7 @@ func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, b
 	if err != nil {
 		return handoff.Document{}, false
 	}
-	if doc.Next != handoff.BinCorrective && doc.Next != handoff.BinCorrectiveIfOracleInLoop {
+	if doc.Next != handoff.BinCorrective {
 		return handoff.Document{}, false
 	}
 	return doc, true

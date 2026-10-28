@@ -87,7 +87,7 @@ func TestReviewReproductionCorrectiveRoundAccepted(t *testing.T) {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/999"}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {
@@ -196,7 +196,7 @@ func TestReviewReproductionStillFailingQuarantines(t *testing.T) {
 		return requestdrivertest.StillFailingAfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 2), fmt.Sprintf("%040d", 3))
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {
@@ -246,7 +246,7 @@ func TestReviewReproductionNewFindingInARoundRunsTheNextRound(t *testing.T) {
 		return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if callCount != 2 {
@@ -303,7 +303,7 @@ func TestHighSeverityFindingWithoutReproductionStartsNoCorrectiveRound(t *testin
 				return &run.Run{ID: roundRunID, State: run.StateAccepted}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if *calls != 0 {
@@ -331,7 +331,7 @@ func TestBlockingFindingReachesBuildAsOneLineWithoutContent(t *testing.T) {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	assertToldOnlyTheLine(t, dataDir, id+"-001", *lastArgs, true)
@@ -365,13 +365,13 @@ func TestARetryAfterAReproductionRechecksIt(t *testing.T) {
 		return rr.Save(dataDir)
 	}
 	// No corrective budget: the first build quarantines the request.
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if _, err := request.Retry(dataDir, id, "alice", "", time.Now(), nil); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests after retry: %v", err)
 	}
 	if len(builds) != 2 {
@@ -447,7 +447,7 @@ func TestARetryAfterAStillFailingRecheckRechecksTheFirstRunsCopy(t *testing.T) {
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
 	drive := func() {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -488,7 +488,7 @@ func TestARoundAfterAPassingRecheckStillRechecksIt(t *testing.T) {
 		return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if len(rounds) != 2 {
@@ -507,7 +507,7 @@ func TestARetryWithTheHeldCopyGoneIsRefused(t *testing.T) {
 	buildRunner := refusedBuildRunner(t, dataDir, id, &builds)
 	drive := func() {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -546,7 +546,7 @@ func TestCodeReviewWithNoVerdictStartsNoRoundAndWaitsInResumeReview(t *testing.T
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 0 {
@@ -566,7 +566,7 @@ func TestReviewReproductionWithNoBudgetQuarantinesOnTheCheck(t *testing.T) {
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}
 	})
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 0 {
@@ -607,7 +607,7 @@ func TestCorrectiveRoundCancelledMidRoundDoesNotResurrectRequest(t *testing.T) {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/999"}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
@@ -630,7 +630,7 @@ func TestCorrectiveRoundCtxCancelledLeavesRequestBuilding(t *testing.T) {
 		return errors.New("context canceled")
 	}
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := requestdrivertest.DriveRequests(dp, ctx, dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err == nil {
+	if err := requestdrivertest.DriveRequests(dp, ctx, dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err == nil {
 		t.Fatal("driveRequests: want the cancelled round's own error propagated")
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
@@ -654,7 +654,7 @@ func TestCorrectiveRoundRecordsItsRunWhileRunning(t *testing.T) {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, RequestID: id, PullRequestURL: "https://github.com/acme/app/pull/1"}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if want := id + "-001-corrective1"; onDisk != want || requestIDOnRun != id {

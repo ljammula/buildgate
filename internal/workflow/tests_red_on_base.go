@@ -61,7 +61,7 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 	if !earlierGatesPassed(result, gates) || input.TestsRequiredOptOut != "" {
 		return testsRedOutcome{}, nil
 	}
-	tests := policy.TestFiles(result.ChangedFiles, input.TestPatterns, result.Oracles)
+	tests := policy.TestFiles(result.ChangedFiles, input.TestPatterns)
 	if len(tests) == 0 || temporalworkflow.GetVersion(ctx, testsRedOnBaseChange, temporalworkflow.DefaultVersion, 1) != 1 {
 		return testsRedOutcome{}, nil
 	}

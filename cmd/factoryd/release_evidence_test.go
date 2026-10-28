@@ -112,50 +112,6 @@ func TestRenderEvidenceMarkdownNamedGatesRenderPassFailNotConfigured(t *testing.
 	}
 }
 
-// TestRenderEvidenceMarkdownShowsReferenceOracleContentHash is the
-// SC-012 follow-up's PR-body regression test (PR #151 review, round 2):
-// when a reference_oracle run recorded a content hash, it must be
-// visible in the rendered evidence, not just persisted in run.json.
-// Confirmed live (2026-09-15) against a real run: the rendered hash
-// matched an independent evidence.SHA256Tree recomputation of the same
-// -reference-oracle-dir.
-func TestRenderEvidenceMarkdownShowsReferenceOracleContentHash(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		GateResults: []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "reference_oracle", Passed: true, ExitCode: 0, ReferenceOracleSHA256: "deadbeef"},
-		},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if !strings.Contains(body, "- `reference_oracle`: pass") {
-		t.Errorf("evidence body missing reference_oracle pass line:\n%s", body)
-	}
-	if !strings.Contains(body, "reference-oracle content: `sha256:deadbeef`") {
-		t.Errorf("evidence body missing reference-oracle content hash:\n%s", body)
-	}
-}
-
-// TestRenderEvidenceMarkdownOmitsReferenceOracleHashWhenNotComputed
-// confirms the converse: a reference_oracle gate that ran WITHOUT
-// -reference-oracle-dir configured (the pre-existing, weaker behavior)
-// shows no hash line at all, rather than an empty or misleading one.
-func TestRenderEvidenceMarkdownOmitsReferenceOracleHashWhenNotComputed(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		GateResults: []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "reference_oracle", Passed: true, ExitCode: 0},
-		},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if strings.Contains(body, "reference-oracle content:") {
-		t.Errorf("evidence body shows a reference-oracle content hash line despite none being computed:\n%s", body)
-	}
-}
-
 // TestRenderEvidenceMarkdownShowsTestsAddedOptOutReason is the tests_red_on_base
 // gate's PR-body requirement: a pass via the ticket's declared opt-out must
 // show the reason, not read identically to a real test file satisfying it.
@@ -1142,24 +1098,6 @@ func TestOpenEvidencePullRequestRecordsTheFailureOnTheRun(t *testing.T) {
 	}
 	if r.PROpenError != "pull request create failed: branch has no history in common with main" {
 		t.Errorf("PROpenError = %q, want the first line of the opener's error", r.PROpenError)
-	}
-}
-
-func TestRenderEvidenceMarkdownOracleOptOutOnlyClaimsGatingWhenTheGatePassed(t *testing.T) {
-	r := &run.Run{ID: "r1", OraclesNotCommittedByRequest: true}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); !strings.Contains(body, "no reference oracle ran") || strings.Contains(body, "gated this run") {
-		t.Errorf("no oracle gate ran but the evidence claims otherwise:\n%s", body)
-	}
-	r.GateResults = []run.GateResult{{Check: "reference_oracle", Passed: true}}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); !strings.Contains(body, "the oracle gated this run and no factory oracle commit is recorded") {
-		t.Errorf("passed oracle gate not reflected:\n%s", body)
-	}
-}
-
-func TestRenderEvidenceMarkdownOracleOptOutSaysPlainlyWhenOraclesWereCommitted(t *testing.T) {
-	r := &run.Run{ID: "r1", OraclesNotCommittedByRequest: true, Oracles: &run.OracleEvidence{Authored: []run.OracleFile{{Path: "a_test.go", SHA256: "h"}}}}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); !strings.Contains(body, "oracles WERE committed") {
-		t.Errorf("committed oracles under a requested opt-out not called out:\n%s", body)
 	}
 }
 

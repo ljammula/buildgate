@@ -17,7 +17,7 @@ func requestAt(state State, entered time.Time) *Request {
 
 func TestExpiringGatesAreTheFourDecisionStatesAndNotPRReview(t *testing.T) {
 	for _, s := range AllStates() {
-		want := s == StateSpecReview || s == StateOracleReview || s == StatePlanReview || s == StateResumeReview
+		want := s == StateSpecReview || s == StatePlanReview || s == StateResumeReview
 		if got := ExpiringGate(s); got != want {
 			t.Errorf("ExpiringGate(%s) = %v, want %v", s, got, want)
 		}
@@ -62,7 +62,7 @@ func TestExpireIfDueHaltsOnlyAGatePastItsExpiry(t *testing.T) {
 
 func TestReopenReviewFromGateExpiredHaltOnly(t *testing.T) {
 	now := time.Now()
-	for _, gate := range []State{StateSpecReview, StateOracleReview, StatePlanReview} {
+	for _, gate := range []State{StateSpecReview, StatePlanReview} {
 		r := requestAt(gate, now.Add(-5*time.Hour))
 		r.NotifyCount, r.LastAsk = 3, "review"
 		if err := r.HaltGateExpired(time.Hour, now); err != nil {

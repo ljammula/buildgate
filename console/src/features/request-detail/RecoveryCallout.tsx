@@ -6,7 +6,7 @@ import { useApi } from "@/api/ApiProvider";
 import { digestText } from "@/domain/digest";
 import type { RequestSummary } from "@/domain/request";
 import { runOverridePath, runPath } from "@/routes/paths";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { Button } from "@/ui/Button";
 import { Callout } from "@/ui/Feedback";
 import { CompactId } from "@/ui/CompactId";

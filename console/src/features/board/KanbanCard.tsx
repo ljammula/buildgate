@@ -68,10 +68,9 @@ const foldedControls =
 
 /**
  * The states whose card carries Review and Request changes. Review is a link
- * to the request page: an approval is made there, with the spec, plan or
- * oracle files on screen. A card never offers Approve.
+ * to the request page: an approval is made there, with the spec or plan on screen. A card never offers Approve.
  */
-const REVIEW_STATES: ReadonlySet<string> = new Set(["spec_review", "plan_review", "oracle_review"]);
+const REVIEW_STATES: ReadonlySet<string> = new Set(["spec_review", "plan_review"]);
 
 /**
  * One request on the board. The title is the link and stretches over the

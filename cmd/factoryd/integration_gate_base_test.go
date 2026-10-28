@@ -268,3 +268,14 @@ func TestIntegrationSilentGateRedOnTheBaseStaysCorrective(t *testing.T) {
 		t.Errorf("repo-house_rule is sorted %q, next %q; want both %q", check.Bin, doc.Next, handoff.BinCorrective)
 	}
 }
+
+// gatePassed reports whether the gate named check passed on r, and whether r
+// recorded such a gate at all.
+func gatePassed(r *run.Run, check string) (passed, found bool) {
+	for _, g := range r.GateResults {
+		if g.Check == check {
+			return g.Passed, true
+		}
+	}
+	return false, false
+}

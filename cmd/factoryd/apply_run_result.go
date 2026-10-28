@@ -100,9 +100,6 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	r.ResultSHA = result.ResultSHA
 	r.CommittedByFactoryd = result.CommittedByWorker
 	r.ChangedFiles = result.ChangedFiles
-	r.Oracles = result.Oracles
-	r.FailedAfterOracleCommit = result.FailedAfterOracleCommit
-	r.OracleCanary = result.OracleCanary
 	r.Install = result.Install
 	r.DependencyLockfilesTouched = evidence.DependencyLockfilesTouched(result.ChangedFiles)
 	recordComposeEvidence(r, dataDir)
@@ -181,11 +178,6 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		loadCodeReview(r, dataDir, id)
 		mergeReviewReproductions(r, result.ReviewReproductions, result.ReviewReproductionRechecks)
 	}
-
-	// Outside the attributeWorkspaceEvidence gate above: this reads only
-	// r.ReferenceOracleDir from the run record itself, never workspace
-	// evidence, so a reclaimed run gets its oracle coverage too.
-	loadOracleCoverage(r, id)
 
 	// Before the release decision below reads it, and before the one save
 	// that persists it. isolatedWorkspacePath shares the repository's object

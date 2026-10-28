@@ -147,24 +147,6 @@
       "want": {}
     }
   ],
-  "oracle_approvals": [
-    {
-      "name": "each shown file is keyed oracle/NAME",
-      "shown": {
-        "RUN_COMMAND.txt": "c0a49acb4301c97efaaeec70d48193978e42875bda42f75c6f2df90c864e12e7",
-        "a_test.go": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438"
-      },
-      "want": {
-        "oracle/RUN_COMMAND.txt": "c0a49acb4301c97efaaeec70d48193978e42875bda42f75c6f2df90c864e12e7",
-        "oracle/a_test.go": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438"
-      }
-    },
-    {
-      "name": "nothing shown binds nothing",
-      "shown": {},
-      "want": {}
-    }
-  ],
   "read_back_answers": [
     {
       "name": "no read-back",

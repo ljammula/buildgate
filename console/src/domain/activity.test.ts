@@ -84,7 +84,7 @@ test("the feed is capped", () => {
 test("the fixture list yields its moves; a request with no history yields none", () => {
   const requests = decodeRequestList(readFixtureJson("api/requests.json"), "GET /requests");
   const entries = recentActivity(requests, 100);
-  expect(entries).toHaveLength(15);
+  expect(entries).toHaveLength(13);
   expect(entries[0]?.at).toBe("2026-09-10T09:50:00Z");
   expect(
     recentActivity([decodeRequestSummary(requestJson({ id: "x", state: "done" }), "t")]),

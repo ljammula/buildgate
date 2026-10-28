@@ -530,13 +530,6 @@ export interface Run {
    * figures may over-state.
    */
   readonly estimated: boolean;
-  /**
-   * The -reference-oracle-dir this run was launched with: "" for a run with
-   * no oracle stage or one predating the field. Hides the commit_oracles and
-   * post_oracle_commit_verify timeline rows when there is no oracle stage to
-   * report on.
-   */
-  readonly referenceOracleDir: string;
 }
 
 export function decodeRun(o: JsonObject, at: string): Run {
@@ -582,7 +575,6 @@ export function decodeRun(o: JsonObject, at: string): Run {
     byModel: objectList(o, "by_model", at, decodeModelUsage),
     tokensComplete: optBoolean(o, "tokens_complete", at, true),
     estimated: optBoolean(o, "estimated", at),
-    referenceOracleDir: optString(o, "reference_oracle_dir", at),
     composePhases: objectList(o, "compose_phases", at, decodeComposePhase),
   };
 }

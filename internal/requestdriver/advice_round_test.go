@@ -129,7 +129,7 @@ func (f *adviceFixture) adviceRun(t *testing.T, id string, state run.State, allo
 
 func (f *adviceFixture) drive(t *testing.T, ctx context.Context, buildRunner requestdriver.TicketRunner) error {
 	t.Helper()
-	return requestdrivertest.DriveRequests(f.dp, ctx, f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner)
+	return requestdrivertest.DriveRequests(f.dp, ctx, f.dataDir, f.cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner)
 }
 
 // acceptingRounds installs a stand-in for the advice rounds' builds that
@@ -815,7 +815,7 @@ func TestAdviceRoundCountsAgainstNeitherBudget(t *testing.T) {
 			return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("drive: %v", err)
 		}
 		if *calls != 1 {
@@ -913,7 +913,7 @@ func TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn(t *testing.T) {
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
 			cfg.Settings.RoundSessionContinuity = on
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")); err != nil {
 				t.Fatalf("drive: %v", err)
 			}
 			if *calls != 1 {

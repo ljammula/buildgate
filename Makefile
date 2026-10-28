@@ -1,4 +1,4 @@
-.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test bar bar-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
 
 # source remains the default for development checkouts. Release users can
 # install the published, digest-pinned images with IMAGE_SOURCE=ghcr.
@@ -216,8 +216,7 @@ checks-test:
 # logic (the LIVE_SMOKE_RESULTS_FILE JSONL append, and --results) -- no
 # Docker, no real factoryd, no network; drives the real live-smoke.sh against
 # a throwaway git fixture repo and a stub FACTORYD_BIN. See
-# scripts/tests/test_live_smoke_recording.py. Not folded into bar-test, which
-# is scoped to bar's own summariser/verdict logic.
+# scripts/tests/test_live_smoke_recording.py.
 live-smoke-test:
 	python3 -m unittest discover -s scripts/tests -p 'test_live_smoke_recording.py' -v
 
@@ -265,20 +264,6 @@ install-prereqs-test:
 # plain path, and the terminal path under a pty). No Docker.
 with-spinner-test:
 	python3 -m unittest scripts/tests/test_with_spinner.py -v
-
-# bar measures the staged-oracle default-on bar (`-draft-oracles`): BAR_ROUNDS
-# rounds (default 2) of scripts/bar/fixtures.json, each flag off then on, one
-# run at a time, pausing at oracle_review for the operator, then a dated
-# markdown results table and a verdict on the four bar criteria. Hours, a
-# human in the loop, Docker + model + Temporal -- never part of verify. See
-# scripts/bar.sh's top-of-file comment; `scripts/bar.sh --list` needs nothing.
-bar:
-	scripts/bar.sh
-
-# bar-test: offline unit tests for bar's summariser/verdict logic (no Docker,
-# no model). Not folded into verify, which is the Go toolchain only.
-bar-test:
-	python3 -m unittest discover -s scripts/tests
 
 # proving-ground: the standing corpus of pre-approved ticket specs on
 # testdata/fixtures (scripts/proving-ground/fixtures.json, plus an operator's

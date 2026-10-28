@@ -86,12 +86,6 @@ type submitParams struct {
 	verifyCommand string
 	// fullSuiteCommand is stored on the request as-is (empty means none).
 	fullSuiteCommand string
-	// noCommitOracles is `factoryd submit -no-commit-oracles`; see
-	// request.Request.NoCommitOracles.
-	noCommitOracles bool
-	// draftOracles is `factoryd submit -draft-oracles`: stored on the request
-	// as-is; see request.Request.DraftOracles.
-	draftOracles bool
 	// planReview is `factoryd submit -plan-review`; see request.Request.PlanReview.
 	planReview bool
 	// bug is `factoryd submit -bug`; see request.Request.Bug.
@@ -202,8 +196,6 @@ func submitRequest(dp *deps, ctx context.Context, p submitParams) (submitResult,
 		VerifyCommand:              p.verifyCommand,
 		VerifyCommandExplicit:      p.verifyCommandExplicit,
 		FullSuiteCommand:           p.fullSuiteCommand,
-		NoCommitOracles:            p.noCommitOracles,
-		DraftOracles:               p.draftOracles,
 		PlanReview:                 p.planReview,
 		Bug:                        p.bug,
 		ImportedSpec:               importedSpec,
@@ -353,10 +345,8 @@ func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, p
 	flags.String("full-suite-command", "", "Repo-wide regression command that must pass before a pull request opens. Empty uses .factory.yml's full_suite_command, else the verify command. \"none\" runs no full suite, which denies release.")
 	flags.String("spec-file", "", "Hand over your own spec instead of drafting one. Without an acceptance criteria section, its top-level list items become the criteria. The request text is optional.")
 	flags.String("plan-dir", "", "With -spec-file (required), hand over the plan too: a directory of tickets 001.spec.md, 002.spec.md, ... in dependency order, in the ticket format, covering every acceptance criterion of the spec.")
-	flags.Bool("no-commit-oracles", false, "Keep accepted oracles out of the target repository. The oracle still gates every build, but it is not committed into the result and no verify runs after a commit.")
-	flags.Bool("bug", false, "The request fixes a bug. Adds the oracle stage and requires a test that fails on the current code: a build whose oracle passes before any change is quarantined without a model call.")
+	flags.Bool("bug", false, "The request fixes a bug. Ticket 1 must add a test that fails on the base commit and passes on the result, and may not declare Tests-Required: no.")
 	flags.Bool("plan-review", false, "Wait at plan_review for you to approve the tickets even when the plan is one ticket. A plan of several tickets always waits.")
-	flags.Bool("draft-oracles", false, "Add the oracle stage: after spec approval, acceptance-test oracles are drafted and wait at oracle_review for you to approve, hand-write or skip before planning.")
 	flags.Var(&roleChoiceFlag{name: "harness", example: "pifork"}, "harness", "Coding-agent harness for one role of this request, as role=name (e.g. -harness execution=pifork), within roles.<role>.allowed_harnesses. The role is planning or execution. Repeatable.")
 	flags.Var(&roleChoiceFlag{name: "model", example: "sonnet"}, "model", "Model for one role of this request, as role=model (e.g. -model execution=sonnet), within roles.<role>.allowed. The role is planning or execution. Repeatable.")
 	flags.String("config", "", "Session config file or profile name. Empty uses the active profile, then the default paths. Its roles block is validated and bounds -model and -harness.")
@@ -423,8 +413,6 @@ func submitMain(dp *deps, args []string) error {
 		planDir:                    flags.Lookup("plan-dir").Value.String(),
 		verifyCommand:              *verifyCommand,
 		fullSuiteCommand:           flags.Lookup("full-suite-command").Value.String(),
-		noCommitOracles:            flags.Lookup("no-commit-oracles").Value.String() == "true",
-		draftOracles:               flags.Lookup("draft-oracles").Value.String() == "true",
 		planReview:                 flags.Lookup("plan-review").Value.String() == "true",
 		bug:                        flags.Lookup("bug").Value.String() == "true",
 		verifyCommandExplicit:      explicit["verify-command"],

@@ -231,52 +231,6 @@ func TestGetRequestIncludesQuarantineCheck(t *testing.T) {
 	}
 }
 
-// TestGetRequestIncludesOracleDraftCriteria covers the per-criterion
-// verdicts cmd/factoryd's oracle-drafting job records on
-// request.OracleDraft.Criteria must reach GET /requests/{id} through the
-// existing "oracle_draft" field -- the console's only way to show WHICH
-// criterion was judged untestable and WHY, not just the aggregate detail.
-func TestGetRequestIncludesOracleDraftCriteria(t *testing.T) {
-	dataDir := t.TempDir()
-	seedApprovableRequest(t, dataDir, "req-1", request.StateOracleReview, true)
-	r, err := request.Load(dataDir, "req-1")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	r.OracleDraft = &request.OracleDraft{
-		Status: request.OracleNoneEligible,
-		Detail: "the model judged no acceptance criterion checkable by a deterministic test",
-		Criteria: []request.OracleCriterionVerdict{
-			{Number: 1, Eligible: false, Reason: "no deterministic reference"},
-		},
-	}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithReadToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodGet, "/requests/req-1", "test-token", ""))
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	var got struct {
-		OracleDraft struct {
-			Criteria []struct {
-				Number   int    `json:"number"`
-				Eligible bool   `json:"eligible"`
-				Reason   string `json:"reason"`
-			} `json:"criteria"`
-		} `json:"oracle_draft"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(got.OracleDraft.Criteria) != 1 || got.OracleDraft.Criteria[0].Number != 1 || got.OracleDraft.Criteria[0].Eligible || got.OracleDraft.Criteria[0].Reason != "no deterministic reference" {
-		t.Errorf("oracle_draft.criteria = %+v, want the one verdict", got.OracleDraft.Criteria)
-	}
-}
-
 // TestGetRequestIncludesSpecAndTicketContent covers the console request
 // board's detail-view fields: spec.md's content under "spec", and each
 // ticket's own plan file content under its "content" -- both read at

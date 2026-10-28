@@ -63,8 +63,7 @@ How each number is counted:
   reason) and BUILD_REPORT.md (model route errors, a stall). The blocker
   names are the build loop's own (agent/pi/scripts/build_app.py,
   round_blockers). The round-end line names one reason only, so a round that
-  timed out and changed nothing is rebuilt as timed out, and a failed
-  reference oracle is rebuilt only when it was the round's first blocker.
+  timed out and changed nothing is rebuilt as timed out.
 - "The same failure" compares the round's recorded `failure_signature`. A
   record without one gets a signature derived by the build loop's function
   (agent/pi/scripts/round_feedback.py) from the rebuilt blockers, the failing

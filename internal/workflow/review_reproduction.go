@@ -100,17 +100,6 @@ func legacyConformityGates(namedGates []policy.NamedGateInput, reviews reviewOut
 	})
 }
 
-// legacyConformityBlocksOracleCommit is the retired oracle-commit clause: a
-// ticket that declared acceptance criteria commits its oracle only when the
-// spec-conformity review ran and passed. It applies only to a history
-// recorded before reviewReproductionChange.
-func legacyConformityBlocksOracleCommit(input RunWorkflowInput, reviews reviewOutcome) bool {
-	if !reviews.legacy || input.SpecAcceptanceCriteria == "" {
-		return false
-	}
-	return reviews.legacyConformity == nil || reviews.legacyConformity.Result.ExitCode != 0
-}
-
 // RunReviewReproductionActivityName runs one held reviewer's reproduction
 // once on one commit (RunReviewReproductionActivity, SC-022).
 const RunReviewReproductionActivityName = "RunReviewReproductionActivity"

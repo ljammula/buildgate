@@ -30,7 +30,7 @@ func TestPlanRedraftOnAnotherModelKeepsEachModelsSpend(t *testing.T) {
 				return plan, &request.PlanEvidence{Model: spend.Model, Spend: spend}, nil
 			},
 		)
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}

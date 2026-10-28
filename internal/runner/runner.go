@@ -160,7 +160,7 @@ func Run(ctx context.Context, dir, logPath string, name string, args ...string) 
 // host-execution escape hatch) -- an unsandboxed subprocess's environment
 // is exactly this fixed set, always.
 //
-// The request driver's own spec/plan/oracle-drafting jobs run every real
+// The request driver's own spec/plan-drafting jobs run every real
 // invocation through the same Docker sandbox a ticket build uses
 // (runSandboxWithRetries, cmd/factoryd); each also keeps an unsandboxed
 // fallback branch reachable only under workerConfig.allowUnsandboxedSpecDraft,
@@ -849,7 +849,7 @@ func GitStatusPaths(dir string) ([]string, error) {
 //
 // --no-renames: a moved file is listed under both its old and its new path.
 // With rename detection (git's default) only the new path is listed, and a
-// build that moved `.factory.yml`, a committed oracle or any other protected
+// build that moved `.factory.yml`, or any other protected
 // or out-of-scope file away had not, by this list, touched it.
 // --ignore-submodules=none: a `.gitmodules` the build wrote (`ignore = all`)
 // cannot hide a changed submodule entry. --no-ext-diff: the workspace's own

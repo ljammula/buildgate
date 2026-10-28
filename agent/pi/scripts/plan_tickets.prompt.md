@@ -81,7 +81,7 @@ IDs ("N. AC-N: ..."), end each step that serves a criterion with
 (A list of the tests this ticket adds. When the spec's criteria carry IDs,
 end each test with the IDs of the criteria it checks, as "(AC-N)" or
 "(AC-N, AC-M)": every criterion this ticket covers is cited by at least one
-test unless the approved oracle already checks it.)
+test unless another ticket's tests already check it.)
 
 ### Acceptance criteria covered
 

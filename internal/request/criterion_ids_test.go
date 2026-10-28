@@ -1,12 +1,9 @@
 package request
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 // specWithCriteria returns a structurally valid spec whose criteria section
@@ -159,7 +156,7 @@ func TestPlanReviewNotesNameACriterionWithNoTest(t *testing.T) {
 		citingTicket("001.spec.md", "- a_test.go: covers the b case (AC-1)\n", 1, 2),
 		citingTicket("002.spec.md", "- c_test.go: covers AC-30 only\n", 3),
 	}
-	got := PlanReviewNotes(criteria, tickets, "", nil, 0)
+	got := PlanReviewNotes(criteria, tickets, "", 0)
 	want := []string{
 		"criterion 2 has no test: no covering ticket's Tests to add cites AC-2",
 		"criterion 3 has no test: no covering ticket's Tests to add cites AC-3",
@@ -167,70 +164,16 @@ func TestPlanReviewNotesNameACriterionWithNoTest(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("notes = %q, want %q", got, want)
 	}
-	// An approved oracle covering criterion 2 removes its note, and the
-	// notes then say an oracle was looked at.
-	got = PlanReviewNotes(criteria, tickets, "", map[int]bool{2: true}, 0)
-	want = []string{"criterion 3 has no test: no covering ticket's Tests to add cites AC-3 and no approved oracle covers it"}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("with an oracle: notes = %q, want %q", got, want)
-	}
 }
 
 func TestNoTestNoteOnlyForASpecWithIDs(t *testing.T) {
 	t.Parallel()
 	tickets := []PlanTicket{citingTicket("001.spec.md", "- a_test.go\n", 1, 2)}
-	if got := PlanReviewNotes([]string{"1. It works.", "2. It also works."}, tickets, "", nil, 0); len(got) != 0 {
+	if got := PlanReviewNotes([]string{"1. It works.", "2. It also works."}, tickets, "", 0); len(got) != 0 {
 		t.Errorf("a spec without IDs: notes = %q", got)
 	}
-	if got := PlanReviewNotes([]string{"1. AC-1: It works.", "2. It also works."}, tickets, "", nil, 0); len(got) != 0 {
+	if got := PlanReviewNotes([]string{"1. AC-1: It works.", "2. It also works."}, tickets, "", 0); len(got) != 0 {
 		t.Errorf("a spec with some IDs: notes = %q", got)
-	}
-}
-
-func TestOracleCoveredCriteriaReadsThePinnedManifest(t *testing.T) {
-	dataDir := t.TempDir()
-	r := New("req-1", "/repo", "app", Source{Kind: SourceText}, time.Now())
-	if got := OracleCoveredCriteria(dataDir, r); got != nil {
-		t.Fatalf("no oracle: %v", got)
-	}
-	dir := filepath.Join(Dir(dataDir, r.ID), RequestOracleDirName)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	manifest := []byte(`[{"criterion":"x","oracle_file":"a_test.go","criterion_index":2},{"criterion":"y","oracle_file":null,"criterion_index":1}]`)
-	if err := os.WriteFile(filepath.Join(dir, ManifestFileName), manifest, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r.ApprovedSHA256 = map[string]string{RequestOracleDirName + "/" + ManifestFileName: sha256Hex(manifest)}
-	got := OracleCoveredCriteria(dataDir, r)
-	if len(got) != 1 || !got[2] {
-		t.Fatalf("covered = %v, want only criterion 2", got)
-	}
-}
-
-// TestOracleManifestMatchesACriterionWithOrWithoutItsLabel: a drafter that
-// quotes the criterion with or without its "AC-N:" label is accepted; other
-// text is not.
-func TestOracleManifestMatchesACriterionWithOrWithoutItsLabel(t *testing.T) {
-	t.Parallel()
-	criteria := []string{"1. AC-1: When x, the system shall y."}
-	files := map[string]bool{"a_test.go": true}
-	for text, wantOK := range map[string]bool{
-		"When x, the system shall y.":             true,
-		"AC-1: When x, the system shall y.":       true,
-		"1. AC-1: When x, the system shall y.":    true,
-		"1. When x, the system shall y.":          true,
-		"AC-1: When x, the system shall do else.": false,
-	} {
-		manifest := `[{"criterion":"` + text + `","oracle_file":"a_test.go","criterion_index":1}]`
-		problems := validateOracleManifest([]byte(manifest), criteria, files)
-		mismatch := false
-		for _, p := range problems {
-			mismatch = mismatch || strings.Contains(p, "does not match spec criterion")
-		}
-		if mismatch == wantOK {
-			t.Errorf("criterion %q: problems = %q, want a match = %v", text, problems, wantOK)
-		}
 	}
 }
 
@@ -266,20 +209,5 @@ func TestAFencedNumberedLineIsNotACriterion(t *testing.T) {
 		if err != nil || len(criteria) != 2 {
 			t.Errorf("%s: criteria = %d (%v), want 2", fence, len(criteria), err)
 		}
-	}
-}
-
-func TestOracleManifestLabelMustBeItsCriterionIndex(t *testing.T) {
-	t.Parallel()
-	criteria := []string{"1. AC-1: When x, the system shall y.", "2. AC-2: When z, the system shall w."}
-	files := map[string]bool{"a_test.go": true}
-	manifest := `[{"criterion":"AC-2: When x, the system shall y.","oracle_file":"a_test.go","criterion_index":1}]`
-	problems := validateOracleManifest([]byte(manifest), criteria, files)
-	found := false
-	for _, p := range problems {
-		found = found || strings.Contains(p, "labelled AC-2 but its criterion_index is 1")
-	}
-	if !found {
-		t.Errorf("problems = %q, want the label/index mismatch", problems)
 	}
 }

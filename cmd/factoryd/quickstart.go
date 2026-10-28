@@ -2909,16 +2909,11 @@ var quickstartInFlightStates = map[request.State]bool{
 	request.StateSubmitted:    true,
 	request.StateSpecDrafting: true,
 	request.StateSpecReview:   true,
-	// The oracle stage is opt-in (submit -draft-oracles) and quickstart never
-	// opts in, but a request submitted that way against the same repo is
-	// still in flight and must not be duplicated.
-	request.StateOracleDrafting: true,
-	request.StateOracleReview:   true,
-	request.StatePlanning:       true,
-	request.StatePlanReview:     true,
-	request.StateBuilding:       true,
-	request.StatePRReview:       true,
-	request.StateResumeReview:   true,
+	request.StatePlanning:     true,
+	request.StatePlanReview:   true,
+	request.StateBuilding:     true,
+	request.StatePRReview:     true,
+	request.StateResumeReview: true,
 }
 
 // quickstartFindInFlightRequest returns the most recently submitted
@@ -3169,12 +3164,6 @@ func quickstartReportRequestState(dataDir string, r *request.Request, w io.Write
 		fmt.Fprintf(w, "Spec drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, request.SpecPath(dataDir, r.ID), arg, r.ID)
 		printReviewNotes(w, dataDir, r)
 		printReadBack(w, r)
-		return nil
-	case request.StateOracleReview:
-		fmt.Fprintf(w, "Oracle stage for request %s is waiting on you: %s/%s\nReview or hand-write it (absent or empty skips), then run: factoryd approve%s %s\n", r.ID, request.Dir(dataDir, r.ID), request.RequestOracleDirName, arg, r.ID)
-		if notice := request.OracleReviewNotice(dataDir, r); notice != "" {
-			fmt.Fprintf(w, "ACTION NEEDED before approve: %s\n", notice)
-		}
 		return nil
 	case request.StatePlanReview:
 		fmt.Fprintf(w, "Plan drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, filepath.Join(request.Dir(dataDir, r.ID), "tickets"), arg, r.ID)

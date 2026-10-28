@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"buildgate/internal/evidence"
-	"buildgate/internal/oraclecommit"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"context"
@@ -172,12 +171,6 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 		ResultSHA:    resultSHA,
 		ChangedFiles: evidence.UnionSorted(committedChanged, uncommittedChanged),
 		Committed:    committed,
-	}
-	// The base commit's oracle index (nil when it has none) protects earlier
-	// committed oracles from agent edits; see oraclecommit.CollectEvidence.
-	result.Oracles, err = oraclecommit.CollectEvidence(input.WorkspacePath, input.BaseSHA, resultSHA, result.ChangedFiles, nil, nil)
-	if err != nil {
-		return CollectedEvidence{}, temporal.NewApplicationErrorWithCause("collect committed-oracle evidence", InfrastructureFailureType, err)
 	}
 	packageLockChanges, err := runner.PackageLockDependencyChanges(input.WorkspacePath, input.BaseSHA, result.ChangedFiles)
 	if err != nil {

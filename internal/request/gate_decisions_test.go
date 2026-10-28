@@ -59,10 +59,6 @@ func TestDecisionsRefuseALapsedGateAtomically(t *testing.T) {
 			_, err := ResumeRequest(d, "req-5", ResumeScratch, "alice", now, nil, expiry)
 			return err
 		}},
-		"oracle run command": {StateOracleReview, func(d string) error {
-			_, err := SetOracleRunCommand(d, "req-5", TicketOracleRunCommandFilename, "go test ./...\n", "", expiry)
-			return err
-		}},
 	}
 	for name, c := range decisions {
 		t.Run(name, func(t *testing.T) {

@@ -3,6 +3,8 @@ package policy
 import (
 	"slices"
 	"testing"
+
+	"buildgate/internal/run"
 )
 
 func scopeInput(scope Scope, changed ...string) EvaluateRunInput {
@@ -65,16 +67,25 @@ func TestEvaluateRunRepositoryPathsApplyWithoutAnAllowedFilesList(t *testing.T) 
 	}
 }
 
-func TestEvaluateRunRepositoryPathsStillExcludeByproductsAndOracles(t *testing.T) {
-	in := scopeInput(Scope{AllowedPaths: []string{"internal/mood/"}}, "internal/mood/mood.go", ".gitignore", "BUILD_REPORT.md", oraclePath, ".buildgate/oracles.json")
-	in.Oracles = oracleEvidence()
+func TestEvaluateRunRepositoryPathsStillExcludeByproducts(t *testing.T) {
+	in := scopeInput(Scope{AllowedPaths: []string{"internal/mood/"}}, "internal/mood/mood.go", ".gitignore", "BUILD_REPORT.md")
 	if res := EvaluateRun(in); !res.Accepted {
-		t.Errorf("by-products and hash-verified oracles must not fail allowed_paths: failed=%v violations=%v", res.FailedChecks, res.DiffScopeViolations)
+		t.Errorf("by-products must not fail allowed_paths: failed=%v violations=%v", res.FailedChecks, res.DiffScopeViolations)
 	}
-	in.Oracles = nil
-	if res := EvaluateRun(in); res.Accepted || !slices.Contains(res.DiffScopeViolations, ".buildgate/oracles.json") {
-		t.Errorf("without oracle evidence .buildgate/oracles.json is an ordinary change outside allowed_paths: %v", res.DiffScopeViolations)
+	in = scopeInput(Scope{AllowedPaths: []string{"internal/mood/"}}, "internal/mood/mood.go", ".buildgate/x.json")
+	if res := EvaluateRun(in); res.Accepted || !slices.Contains(res.DiffScopeViolations, ".buildgate/x.json") {
+		t.Errorf(".buildgate/x.json is an ordinary change outside allowed_paths: %v", res.DiffScopeViolations)
 	}
+}
+
+// gateByName returns the gate of res named check.
+func gateByName(res EvaluateRunResult, check string) (run.GateResult, bool) {
+	for _, g := range res.GateResults {
+		if g.Check == check {
+			return g, true
+		}
+	}
+	return run.GateResult{}, false
 }
 
 func TestPathAllowedIsAnchoredAtTheRepositoryRoot(t *testing.T) {

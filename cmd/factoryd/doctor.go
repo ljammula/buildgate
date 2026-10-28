@@ -93,7 +93,7 @@ type doctorCheck struct {
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy *bool, registryProxyImage *string, composeServices, fix *bool, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand, referenceOracleCommand, referenceOracleDir *string, hitlReminderInterval *time.Duration, configPath *string) {
+func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy *bool, registryProxyImage *string, composeServices, fix *bool, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand *string, hitlReminderInterval *time.Duration, configPath *string) {
 	flags = flag.NewFlagSet("doctor", flag.ContinueOnError)
 	// configPath resolves every session-config-derived value below
 	// (settings, -hitl-reminder-interval, -data-dir): `doctor` had no
@@ -116,8 +116,6 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	securityCommand = flags.String("security-command", "", "Security-audit gate command whose first executable must exist in the sandbox image. Empty skips this check.")
 	unitTestCommand = flags.String("unit-test-command", "", "Unit-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
 	integrationTestCommand = flags.String("integration-test-command", "", "Integration-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	referenceOracleCommand = flags.String("reference-oracle-command", "", "Reference-oracle gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	referenceOracleDir = flags.String("reference-oracle-dir", "", "Host directory of reference-oracle content to check Docker can see inside a container: an unshared path mounts empty with no error. Empty skips this check.")
 	hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "How often the worker re-reminds a request waiting at a review gate. Doctor prints it and checks nothing against it. Unset uses the session config's hitl_reminder_interval.")
 	finishFlags(flags)
 	return
@@ -132,7 +130,7 @@ func doctorMain(dp *deps, args []string) error {
 		fmt.Printf("factoryd doctor: running %s (%s)\n\n", selfPath, factoryVersionOf(selfPath))
 	}
 
-	flags, sandboxImage, registryProxy, registryProxyImage, composeServices, fix, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand, referenceOracleCommand, referenceOracleDir, hitlReminderInterval, configPath := newDoctorFlags()
+	flags, sandboxImage, registryProxy, registryProxyImage, composeServices, fix, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand, hitlReminderInterval, configPath := newDoctorFlags()
 	// Registered directly on flags rather than threaded through
 	// newDoctorFlags' own already-long return tuple -- see
 	// doctorRegisterNotifyTestFlag's own doc comment (cmd/factoryd/
@@ -265,8 +263,6 @@ func doctorMain(dp *deps, args []string) error {
 		securityCommand:        *securityCommand,
 		unitTestCommand:        *unitTestCommand,
 		integrationTestCommand: *integrationTestCommand,
-		referenceOracleCommand: *referenceOracleCommand,
-		referenceOracleDir:     *referenceOracleDir,
 		composeServices:        *composeServices,
 		targetRepo:             *targetRepo,
 		removeSandbox:          *removeSandbox,
@@ -793,8 +789,6 @@ type doctorInputs struct {
 	securityCommand             string
 	unitTestCommand             string
 	integrationTestCommand      string
-	referenceOracleCommand      string
-	referenceOracleDir          string
 	composeServices             bool
 	// targetRepo is -target-repo: see doctorTargetRepoChecks.
 	targetRepo string
@@ -993,15 +987,6 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	if in.checkRequestSourceRepos && in.dataDir != "" {
 		checks = append(checks, doctorChecksRequestSourceRepos(ctx, in.sandboxDocker, image, in.dataDir, in.workspace)...)
 	}
-	if in.referenceOracleDir != "" {
-		// Reuses -workspace's own mount-visibility probe unchanged (same
-		// underlying failure mode: a host path the Docker backend doesn't
-		// actually share into its VM produces a silently empty mount, not
-		// an error) -- its "-workspace" wording in the reported name/Fix
-		// text is accurate about the mechanism, just not about which flag
-		// this particular call is checking.
-		checks = append(checks, doctorCheckMountVisibility(ctx, in.sandboxDocker, image, in.referenceOracleDir))
-	}
 	if in.temporalAddress != "" {
 		checks = append(checks, doctorCheckTemporalReachable(ctx, in.temporalAddress))
 		checks = append(checks, doctorCheckStaleTemporalWorkflows(ctx, in.temporalAddress))
@@ -1026,7 +1011,6 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		{"-security-command", in.securityCommand},
 		{"-unit-test-command", in.unitTestCommand},
 		{"-integration-test-command", in.integrationTestCommand},
-		{"-reference-oracle-command", in.referenceOracleCommand},
 	} {
 		if gate.command != "" {
 			checks = append(checks, doctorCheckExecutableInImage(ctx, in.sandboxDocker, image, gate.label, gate.command))
@@ -1794,8 +1778,7 @@ func doctorCheckImagePresent(ctx context.Context, dockerBinary, label, image, fi
 
 // doctorCheckExecutableInImage confirms command's leading executable is on
 // PATH inside image -- the named-gate commands (lint_command,
-// security_command, unit_test_command, integration_test_command,
-// reference_oracle_command) are only useful if their tool is actually
+// security_command, unit_test_command, integration_test_command) are only useful if their tool is actually
 // installed in the sandbox image a real
 // run will execute them in; a missing one otherwise surfaces as a
 // confusing gate failure deep inside a run instead of naming it here,
@@ -2503,9 +2486,7 @@ func doctorCheckMountVisibility(ctx context.Context, dockerBinary, image, worksp
 // -sandbox-image forces it
 // out of -workspace, per USAGE.md's own gotcha table) only found out
 // minutes into a real run, deep inside build_app.py/draft_spec.py.
-// Unlike the referenceOracleDir call site just below, which deliberately
-// keeps doctorCheckMountVisibility's "-workspace" wording for a rarer
-// flag, -data-dir is checked on every worker/`factoryd <run>`
+// -data-dir is checked on every worker/`factoryd <run>`
 // invocation, common enough that the reported name/Fix text should name
 // the right flag.
 func doctorCheckDataDirMountVisibility(ctx context.Context, dockerBinary, image, dataDir string) doctorCheck {

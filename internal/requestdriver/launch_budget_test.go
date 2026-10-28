@@ -301,33 +301,6 @@ func TestAdvancePlanningQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	}
 }
 
-// TestAdvanceOracleDraftingQuarantinesWhenRequestBudgetExhausted covers
-// the oracle-drafting launch point.
-func TestAdvanceOracleDraftingQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
-	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	r := requestdrivertest.LoadRequest(t, dataDir, id)
-	r.SpecEvidence = &request.SpecEvidence{Spend: &request.JobSpend{InputTokens: 1000, At: time.Now()}}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := requestdrivertest.NoOracleScriptCfg
-	cfg.Settings = sessionconfig.Settings{RequestTokenBudget: 1}
-	runner := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		t.Fatal("oracleDraftRunner must not be called once the request budget is already exhausted")
-		return request.OracleDraft{}, nil
-	}
-	if err := requestdriver.AdvanceOracleDrafting(newFakeDeps(t), context.Background(), dataDir, r, cfg, runner, time.Now()); err != nil {
-		t.Fatalf("advanceOracleDrafting: %v", err)
-	}
-	if r.State != request.StateQuarantined {
-		t.Fatalf("State = %q, want %q", r.State, request.StateQuarantined)
-	}
-	if r.QuarantineCheck != request.QuarantineCheckBudgetRequest {
-		t.Errorf("QuarantineCheck = %q, want %q", r.QuarantineCheck, request.QuarantineCheckBudgetRequest)
-	}
-}
-
 // TestAdvanceBuildingQuarantinesWhenRequestBudgetExhausted covers the
 // per-ticket build launch point: no build runner call at all once the
 // request's own spend already reached its budget.
@@ -341,7 +314,7 @@ func TestAdvanceBuildingQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 1000}}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -365,7 +338,7 @@ func TestAdvanceBuildingLaunchesWhenUnderBudget(t *testing.T) {
 	runner := requestdrivertest.AcceptingBuildRunner(t, dataDir)
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 1_000_000, RequestCostBudgetMicroUSD: 1_000_000}}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 

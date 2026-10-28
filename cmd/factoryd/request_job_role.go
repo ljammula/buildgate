@@ -89,8 +89,7 @@ func resolveRequestJobRole(cfg requestdriver.WorkerConfig, stage modelrole.Stage
 	return requestJobRoleOverride{Thinking: sel.Thinking, Harness: sel.Harness, WorkerEnv: harnessDescriptor.WorkerEnv, RouteSelection: &sel, Role: effectiveRole, Skills: skills}, nil
 }
 
-// jobSpendFromResult builds the request.JobSpend a drafting job (spec/plan/
-// oracle) records from its own runner.Result, or nil per JobSpend's own
+// jobSpendFromResult builds the request.JobSpend a drafting job (spec/plan) records from its own runner.Result, or nil per JobSpend's own
 // "nil when the job had no relay" contract. RelayImageDigest/
 // RelayNetworkName/RelayContainerName/RelayUpstream are the sandbox's own
 // evidence that a relay was actually launched for this attempt (see

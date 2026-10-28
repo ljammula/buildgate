@@ -433,7 +433,6 @@ def round_blockers(
 	no_changes: bool = False,
 	fast_check_ran: bool = False,
 	fast_check_passed: bool | None = None,
-	oracle_passed: bool | None = None,
 	setup_failed: str | None = None,
 	autofix_failed: str | None = None,
 ) -> tuple[list[str], ReviewSignal]:
@@ -471,13 +470,6 @@ def round_blockers(
 		blockers.append("fast check failed")
 	elif verify_passed is not True:
 		blockers.append("canonical verification failed")
-	elif oracle_passed is False:
-		# Only reachable when verify_passed is True (run_build's own
-		# run_reference_oracle call site is gated on that) -- an
-		# additional correctness bar beyond canonical verify, not a
-		# substitute for it, so it's checked only once verify itself has
-		# already cleared this round.
-		blockers.append("reference oracle failed")
 	if autofix_failed:
 		blockers.append(autofix_failed)
 	review = review_signal(traces)
@@ -510,28 +502,6 @@ class Round:
 	# verify_passed's own None-means-"not resolved" convention.
 	fast_check_ran: bool = False
 	fast_check_passed: bool | None = None
-	# oracle_passed is None when no --reference-oracle-command was given,
-	# or when it wasn't run this round because verify itself didn't pass
-	# (run_reference_oracle's own call site in run_build gates on
-	# verify_passed is True) -- same None-means-"not resolved" convention
-	# fast_check_passed already uses.
-	#
-	# Advisory only -- never authoritative (found in adversarial review):
-	# this in-loop check runs inside the SAME writable build-phase container
-	# the worker controls for the rest of the round (its own tmpfs $HOME,
-	# PATH, any test helpers the oracle command itself invokes) -- a
-	# worker could in principle shape its own environment to spoof a
-	# pass, the same way it already could for in-loop --verify-command.
-	# The separate, one-shot, fresh-container, snapshotted-and-hashed
-	# post-build reference_oracle named gate (run_ticket.go,
-	# sandboxedForReferenceOracle) remains the sole authoritative check
-	# an accepted run's evidence/release decision depends on -- nothing
-	# reads oracle_passed for that. Keep it that way: this field is for
-	# operator visibility and driving the in-loop retry, not for gating
-	# acceptance.
-	oracle_command: str | None = None
-	oracle_passed: bool | None = None
-	oracle_output_tail: str = ""
 	# What the next round is told about this one (round_feedback.py): why it
 	# did not earn completion, the files its agent turn changed, an id for
 	# "this failure" so a repeat is recognised, where the failing command's
@@ -1054,7 +1024,7 @@ def _feedback_log(log_dir: Path | None, name: str) -> Path | None:
 	return log_dir / name if log_dir is not None else None
 
 
-FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG = "fast-check.log", "verify.log", "oracle.log"
+FAST_CHECK_LOG, VERIFY_LOG = "fast-check.log", "verify.log"
 SETUP_LOG = "setup.log"
 # Each repository setup command (`.factory.yml` setup:) gets this long.
 SETUP_TIMEOUT_SECONDS = 10 * 60
@@ -1621,63 +1591,9 @@ def gofmt_changed_files(workspace: Path, base_sha: str | None) -> list[str]:
 	return drifted if fixed.returncode == 0 else []
 
 
-def run_reference_oracle(workspace: Path, *, oracle_command: str, log_dir: Path | None = None) -> tuple[bool, str]:
-	"""Runs oracle_command (an operator-authored check against a host
-	directory already bind-mounted read-only into this container by the
-	Go launcher -- see internal/sandbox.LaunchSpec.ReferenceOracleDir's
-	own doc comment; this function has no say over what's mounted or
-	where, only over invoking whatever command was configured), exactly
-	like run_verification's own canonical-verify shell-out. Only called
-	once verify_passed is True this round (see run_build's own call
-	site) -- the oracle is an additional correctness bar on top of
-	canonical verify, not a replacement for it, mirroring the existing
-	post-build reference_oracle named gate's own
-	`buildRes.ExitCode == 0 && verifyRes.ExitCode == 0` gating
-	(run_ticket.go) at the per-round level instead of once at the end.
-
-	Returns (passed, tail) -- tail is the redacted command output,
-	included in a failing round's corrective prompt the same way
-	verify_tail already is."""
-	try:
-		completed = sh(["bash", "-o", "pipefail", "-lc", oracle_command], cwd=workspace, timeout=20 * 60)
-		combined = f"{completed.stdout}\n{completed.stderr}"
-		if completed.returncode == 0:
-			return True, redact(combined)
-		return False, failure_output(combined, _feedback_log(log_dir, ORACLE_LOG))
-	except subprocess.TimeoutExpired as exc:
-		header = f"reference-oracle command timed out after 20 minutes: {oracle_command}"
-		return False, timeout_output(header, exc, _feedback_log(log_dir, ORACLE_LOG))
-
-
-def maybe_run_reference_oracle(
-	workspace: Path, *, oracle_command: str | None, verify_passed: bool | None, log_dir: Path | None = None,
-) -> tuple[str | None, bool | None, str]:
-	"""Shared gating for run_reference_oracle's call site (the local
-	round loop): only run once
-	verify itself has passed -- an additional correctness bar on top of
-	canonical verify, not a substitute for it (see run_reference_oracle's
-	own doc comment). Returns (None, None, "") -- oracle_passed's own
-	"not resolved" convention, the same one fast_check_passed already
-	uses -- when no oracle is configured or verify didn't pass this
-	round/pass. Pulled out so a future change to this gating condition
-	can't land in one call site and not the other (found via review).
-
-	Returns the command actually recorded (None when it didn't run) as
-	its first element, not just (passed, tail): both call sites need
-	this for their own Round(...)'s oracle_command field, and re-deriving
-	it there via `oracle_command if oracle_passed is not None else None`
-	in two places is exactly the kind of duplicated gating-condition
-	logic this function itself exists to avoid (found via review)."""
-	if oracle_command and verify_passed is True:
-		extra = {"log_dir": log_dir} if log_dir is not None else {}
-		passed, tail = run_reference_oracle(workspace, oracle_command=oracle_command, **extra)
-		return oracle_command, passed, tail
-	return None, None, ""
-
 CORRECTIVE_INTRO = prompt_templates.load("build_corrective.intro", ("round_index", "max_rounds", "blockers"))
 CORRECTIVE_VERIFY = prompt_templates.load("build_corrective.verify", ("verify_command", "verify_tail"))
 CORRECTIVE_EXCERPT = prompt_templates.load("build_corrective.excerpt", ("verify_tail",))
-CORRECTIVE_ORACLE = prompt_templates.load("build_corrective.oracle", ("oracle_command", "oracle_tail"))
 CORRECTIVE_REVIEWER = prompt_templates.load("build_corrective.reviewer", ("detail",))
 CORRECTIVE_CLOSING = prompt_templates.load_text("build_corrective.closing")
 CORRECTIVE_HISTORY = prompt_templates.load("build_corrective.history", ("history",))
@@ -1732,8 +1648,6 @@ def corrective_prompt(
 	blockers: list[str],
 	reviewer: ReviewSignal,
 	review_policy: str,
-	oracle_command: str | None = None,
-	oracle_tail: str = "",
 	history: str = "",
 	failure_log: str = "",
 	failing: list[str] | None = None,
@@ -1754,12 +1668,6 @@ def corrective_prompt(
 		# (see run_verification's "[FAST CHECK] `<cmd>`..." tail), just
 		# without mislabeling it as the canonical command.
 		parts.append(CORRECTIVE_EXCERPT.format(verify_tail=verify_tail))
-	# oracle_tail only ever arrives non-empty when the oracle actually ran
-	# (run_build only calls run_reference_oracle once verify_passed is
-	# True this round), so unlike verify_tail there's no "ran but empty
-	# output" ambiguity to disambiguate with a command label.
-	if oracle_command and oracle_tail:
-		parts.append(CORRECTIVE_ORACLE.format(oracle_command=oracle_command, oracle_tail=oracle_tail))
 	if failure_log:
 		parts.append(CORRECTIVE_LOG.format(failure_log=failure_log, failing=", ".join(failing or []) or "none recognised"))
 	if review_policy != "advisory" and reviewer.outcome == "flagged" and reviewer.detail:
@@ -1993,17 +1901,15 @@ _CRITERION_EDGE_SPACE = " \t\r\n\f"
 def criterion_key(text: str) -> str:
 	"""Comparison key for an echoed criterion, shared by every check that
 	matches a model's echo of a criterion back to the declared one
-	(validate_manifest in draft_acceptance_oracles.py). The number prefix (ASCII digits then a
+	(the echo check of the reviewer and spec jobs). The number prefix (ASCII digits then a
 	mandatory "." or ")" and whitespace: a list marker only, so "1.2.3 is
 	supported" keeps its "1.2"), backticks, ASCII edge whitespace and
 	trailing ".;:," are the only things not part of its identity -- no
-	substring, prefix, interior or fuzzy match. Mirrors criterionKey in
-	cmd/factoryd/oracle_draft_job.go; both are pinned by
-	cmd/factoryd/testdata/criterion_key_vectors.json. Found live: 2026-09-17,
+	substring, prefix, interior or fuzzy match. Found live: 2026-09-17,
 	a reviewer dropped the leading "N. "; 2026-09-20, a model dropped only a
 	final period; 2026-09-24 (codex-route bar run), a model echoed `"all"`
 	as "all" -- each time an otherwise-valid response was discarded (a
-	whole oracle draft, or a correct build quarantined on "unavailable")."""
+	correct build quarantined on "unavailable")."""
 	text = text.replace("`", "")
 	text = _CRITERION_NUMBER_PREFIX.sub("", text).strip(_CRITERION_EDGE_SPACE)
 	return text.rstrip(_CRITERION_EDGE_SPACE + ".;:,")
@@ -2251,9 +2157,6 @@ def round_from_state(item: dict, position: int) -> Round:
 		duration_s=float(_typed(item, "duration_s", (int, float), 0.0)),
 		fast_check_ran=_typed(item, "fast_check_ran", (bool,), False),
 		fast_check_passed=_typed(item, "fast_check_passed", (bool, type(None)), None),
-		oracle_command=_typed(item, "oracle_command", (str, type(None)), None, cap=text),
-		oracle_passed=_typed(item, "oracle_passed", (bool, type(None)), None),
-		oracle_output_tail=_typed(item, "oracle_output_tail", (str,), "", cap=text),
 		blockers=_typed_strings(item, "blockers"),
 		changed_files=_typed_strings(item, "changed_files"),
 		failure_signature=_typed(item, "failure_signature", (str,), "", cap=64),
@@ -2381,7 +2284,7 @@ def round_failure_log(log_dir: Path, workspace: Path, setup_failed: bool = False
 	left in log_dir, in the order the checks run, or "" when none did.
 	setup.log is a failing command's log only when setup_failed: a passing
 	setup leaves one too."""
-	for name in (SETUP_LOG, FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG):
+	for name in (SETUP_LOG, FAST_CHECK_LOG, VERIFY_LOG):
 		if (log_dir / name).is_file() and not (name == SETUP_LOG and not setup_failed):
 			return (log_dir / name).relative_to(workspace).as_posix()
 	return ""
@@ -2685,10 +2588,9 @@ def _settle_tree_after_notes(workspace: Path, before, copies: dict[str, str]) ->
 
 def verify_again_after_pass(
 	result: "BuildResult", workspace: Path, *, cause: str, log_dir: Path, setup_commands: list[str],
-	verify_command_override: str | None, fast_check_command: str | None, oracle_command: str | None,
+	verify_command_override: str | None, fast_check_command: str | None,
 ) -> bool:
-	"""Runs the build's own checks (setup, fast check, verify, reference
-	oracle) on a tree that passed them and can no longer be shown to be that
+	"""Runs the build's own checks (setup, fast check, verify) on a tree that passed them and can no longer be shown to be that
 	tree (cause says why), so the build is never reported as passed for a tree
 	this script did not verify. Returns whether they passed.
 
@@ -2709,27 +2611,22 @@ def verify_again_after_pass(
 			workspace, setup_commands=setup_commands, verify_command_override=verify_command_override,
 			fast_check_command=fast_check_command, log_dir=log_dir,
 		)
-		recorded_oracle_command, oracle_passed, oracle_tail = maybe_run_reference_oracle(
-			workspace, oracle_command=oracle_command, verify_passed=verify_passed, log_dir=log_dir,
-		)
 	except Exception as exc:
 		setup_failed, verify_command, verify_passed, verify_timed_out = None, rnd.verify_command, False, False
 		verify_tail = f"the checks could not be run again: {type(exc).__name__}"
 		fast_check_ran, fast_check_passed = False, None
-		recorded_oracle_command, oracle_passed, oracle_tail = None, None, ""
 	blockers, _ = round_blockers(
 		verify_passed=verify_passed, pi_failed=False, pi_timed_out=False, traces=[], review_policy="advisory",
-		fast_check_ran=fast_check_ran, fast_check_passed=fast_check_passed, oracle_passed=oracle_passed, setup_failed=setup_failed,
+		fast_check_ran=fast_check_ran, fast_check_passed=fast_check_passed, setup_failed=setup_failed,
 	)
 	result.notes_turn["reverify_passed"] = not blockers
 	if not blockers:
 		return True
 	rnd.verify_command, rnd.verify_passed, rnd.verify_timed_out, rnd.verify_output_tail = verify_command, verify_passed, verify_timed_out, verify_tail
 	rnd.fast_check_ran, rnd.fast_check_passed = fast_check_ran, fast_check_passed
-	rnd.oracle_command, rnd.oracle_passed, rnd.oracle_output_tail = recorded_oracle_command, oracle_passed, oracle_tail
 	rnd.blockers = list(blockers)
 	rnd.failure_signature = round_feedback.failure_signature(
-		blockers, "\n".join(part for part in (verify_tail if verify_passed is not True else "", oracle_tail if oracle_passed is False else "") if part), "",
+		blockers, verify_tail if verify_passed is not True else "", "",
 	)
 	try:
 		rnd.failure_log = round_failure_log(log_dir, workspace, setup_failed is not None)
@@ -2770,7 +2667,6 @@ def _run_build(
 	fast_check_command: str | None = None,
 	setup_commands: list[str] | None = None,
 	autofix_commands: list[str] | None = None,
-	oracle_command: str | None = None,
 	handoff: Path | None = None,
 	resume_from_state: Path | None = None,
 	earlier_attempt: Path | None = None,
@@ -2800,7 +2696,7 @@ def _run_build(
 	# A file from an earlier run of this script is not this build's notes.
 	_clear_notes_path(notes.path)
 	last_turn: dict | None = None
-	# How long the last round's setup, verify and oracle took: what running
+	# How long the last round's setup and verify took: what running
 	# them once more after a notes turn would cost.
 	last_checks_s = 0.0
 
@@ -2900,7 +2796,7 @@ def _run_build(
 		if verify_again_after_pass(
 			result, workspace, cause=cause, log_dir=session_dir / "feedback" / f"round-{rnd.index}",
 			setup_commands=setup_commands or [], verify_command_override=verify_command_override,
-			fast_check_command=fast_check_command, oracle_command=oracle_command,
+			fast_check_command=fast_check_command,
 		):
 			return
 		persist(rnd.index, state_prompt)
@@ -3010,9 +2906,6 @@ def _run_build(
 			reformatted = gofmt_changed_files(workspace, review_base_sha)
 			if reformatted:
 				print(f"gofmt reformatted {len(reformatted)} changed file(s): {', '.join(reformatted)}", file=sys.stderr)
-		recorded_oracle_command, oracle_passed, oracle_tail = maybe_run_reference_oracle(
-			workspace, oracle_command=oracle_command, verify_passed=verify_passed, log_dir=feedback_dir,
-		)
 		last_checks_s = _monotonic() - checks_started
 
 		agent_returncode = completed.returncode if completed else -1
@@ -3066,7 +2959,6 @@ def _run_build(
 			no_changes=no_changes,
 			fast_check_ran=fast_check_ran,
 			fast_check_passed=fast_check_passed,
-			oracle_passed=oracle_passed,
 			setup_failed=setup_failed,
 			autofix_failed=autofix_blocker(autofix_record),
 		)
@@ -3102,13 +2994,10 @@ def _run_build(
 			duration_s=duration,
 			fast_check_ran=fast_check_ran,
 			fast_check_passed=fast_check_passed,
-			oracle_command=recorded_oracle_command,
-			oracle_passed=oracle_passed,
-			oracle_output_tail=oracle_tail,
 			blockers=list(blockers),
 			changed_files=changed_files,
 			failure_signature=round_feedback.failure_signature(
-				blockers, "\n".join(part for part in (verify_tail if verify_passed is not True else "", oracle_tail if oracle_passed is False else "") if part),
+				blockers, verify_tail if verify_passed is not True else "",
 				reviewer.detail if reviewer.outcome == "flagged" else "",
 			),
 			failure_log=round_failure_log(feedback_dir, workspace, setup_failed is not None) if blockers else "",
@@ -3166,11 +3055,9 @@ def _run_build(
 			blockers=blockers,
 			reviewer=reviewer,
 			review_policy=review_policy,
-			oracle_command=oracle_command,
-			oracle_tail=oracle_tail,
 			history=round_history(result.rounds),
 			failure_log=rnd.failure_log,
-			failing=round_feedback.failing_names("\n".join((verify_tail, oracle_tail))) if rnd.failure_log else None,
+			failing=round_feedback.failing_names(verify_tail) if rnd.failure_log else None,
 			agent_notes=rnd.agent_notes,
 			streak=streak,
 		)
@@ -3390,15 +3277,6 @@ def write_evidence_json(result: BuildResult) -> Path:
 				# round and, if so, whether it passed (null when none ran).
 				"fast_check_ran": rnd.fast_check_ran,
 				"fast_check_passed": rnd.fast_check_passed,
-				# Additive, same convention as fast_check_ran/fast_check_passed
-				# above: whether an in-loop --reference-oracle-command ran
-				# this round and, if so, whether it passed (both null when
-				# none was configured, or when it wasn't reached because
-				# verify itself didn't pass this round -- see
-				# run_reference_oracle's own doc comment).
-				"oracle_command": rnd.oracle_command,
-				"oracle_passed": rnd.oracle_passed,
-				"oracle_output_tail": rnd.oracle_output_tail,
 				# Additive, same convention: what the next round was told
 				# about this one (see Round's own fields). blockers is []
 				# for a round that passed, so a reader tells "passed" from
@@ -3496,18 +3374,6 @@ def main() -> int:
 		"already changed; any other change is reverted. Omitted (the default) runs nothing extra.",
 	)
 	parser.add_argument(
-		"--reference-oracle-command",
-		default=None,
-		help="Operator-authored check (same trust model as factoryd's own -reference-oracle-command: "
-		"never ticket/agent-authored) run every round once --verify-command has already passed, "
-		"against a host directory the Go launcher has already bind-mounted read-only into this "
-		"container -- an additional correctness bar beyond canonical verify, not a substitute for "
-		"it. A failing round gets the same targeted-retry treatment (corrective_prompt, "
-		"continue_session) a canonical-verify failure already gets, instead of only being caught "
-		"by the separate, one-shot post-build reference_oracle named gate. Omitted (the default) "
-		"runs no in-loop oracle check at all -- prior behavior exactly.",
-	)
-	parser.add_argument(
 		"--handoff",
 		type=Path,
 		default=None,
@@ -3565,7 +3431,6 @@ def main() -> int:
 			fast_check_command=args.fast_check_command,
 			setup_commands=args.setup_command,
 			autofix_commands=args.autofix_command,
-			oracle_command=args.reference_oracle_command,
 			handoff=args.handoff,
 			resume_from_state=args.resume_from_state,
 			earlier_attempt=args.earlier_attempt,

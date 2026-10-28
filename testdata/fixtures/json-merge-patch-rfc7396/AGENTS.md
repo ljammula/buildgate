@@ -9,8 +9,7 @@ dependencies outside the standard library, and no README.
 - Setup: none beyond Go. `go.mod` names the version.
 - Build: `go build ./...`
 - Vet: `go vet ./...`
-- Test: `go test .`
-- Reference oracle: `go test ./verify/... -run TestRFC7396MergePatchOracle -v`
-  (`.factory.yml`). It fails while `MergePatch` is unimplemented.
+- Test: `go test ./...`. The `verify/` suite fails while `MergePatch` is
+  unimplemented.
 
-Do not edit `verify/`: it is the oracle an implementation is judged by.
+Do not edit `verify/`: it is the conformance suite an implementation is judged by.

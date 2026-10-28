@@ -6,7 +6,7 @@ import type { RequestSummary, RequestTicket } from "@/domain/request";
 import { type Run, runIsTerminalForDisplay } from "@/domain/run";
 import { runStop } from "@/domain/runStop";
 import { safeHttpUrl } from "@/domain/safeUrl";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { runPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";

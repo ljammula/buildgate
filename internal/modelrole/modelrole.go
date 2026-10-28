@@ -27,11 +27,10 @@ const (
 type Stage string
 
 const (
-	StageSpecDrafting   Stage = "spec_drafting"
-	StagePlanning       Stage = "planning"
-	StageOracleDrafting Stage = "oracle_drafting"
-	StageBuilding       Stage = "building"
-	StagePRCorrective   Stage = "pr_corrective"
+	StageSpecDrafting Stage = "spec_drafting"
+	StagePlanning     Stage = "planning"
+	StageBuilding     Stage = "building"
+	StagePRCorrective Stage = "pr_corrective"
 )
 
 // ForStage maps a pipeline stage to the Role that governs its model
@@ -41,20 +40,12 @@ const (
 // a typo or this table fell out of sync with a new stage, either of which
 // should fail loudly at the call site rather than silently resolve no
 // role.
-//
-// StageOracleDrafting maps to RoleReview, not RoleExecution, by operator
-// decision: an oracle is an independent check of the builder's own work
-// (the same reason a review is review, not execution), so drafting
-// one belongs with review rather than with the stages that write the
-// ticket's actual diff.
 func ForStage(stage Stage) Role {
 	switch stage {
 	case StageSpecDrafting, StagePlanning:
 		return RolePlanning
 	case StageBuilding, StagePRCorrective:
 		return RoleExecution
-	case StageOracleDrafting:
-		return RoleReview
 	default:
 		panic(fmt.Sprintf("modelrole: unknown stage %q", stage))
 	}

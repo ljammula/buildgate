@@ -197,25 +197,6 @@ func TestFailedGateThatPassesOnTheBaseCommitRecordsThatItPasses(t *testing.T) {
 	f.assertRunUntouched()
 }
 
-// The green path costs nothing: a passing gate launches once and records no
-// base check; neither does the reference oracle, whose gate is not rerun.
-func TestPassingGateAndReferenceOracleAreNotRerunOnTheBaseCommit(t *testing.T) {
-	t.Run("a passing gate", func(t *testing.T) {
-		f := newGateBaseFixture(t, 0, 9)
-		res := f.runGate("lint", "")
-		if res.BaseCheck != nil || len(f.launched) != 1 {
-			t.Errorf("base check = %+v after %d launch(es), want none after one", res.BaseCheck, len(f.launched))
-		}
-	})
-	t.Run("a failed reference oracle", func(t *testing.T) {
-		f := newGateBaseFixture(t, 1, 9)
-		res := f.runGate(policy.ReferenceOracleGateID, "")
-		if res.BaseCheck != nil || len(f.launched) != 1 {
-			t.Errorf("base check = %+v after %d launch(es), want none after one", res.BaseCheck, len(f.launched))
-		}
-	})
-}
-
 // Whatever stops the rerun from reaching an exit code leaves the gate the
 // failure it was, with "not checked" and the reason on the record; the
 // Activity itself does not fail.
@@ -601,5 +582,15 @@ func TestBaseRerunOfAResumedRunThatCarriesADiffBaseUsesIt(t *testing.T) {
 	res := f.runGate("lint", "")
 	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base {
 		t.Errorf("base check = %+v, want passes on the carried diff base %s", bc, f.base)
+	}
+}
+
+// The green path costs nothing: a passing gate launches once and records no
+// base check.
+func TestAPassingGateIsNotRerunOnTheBaseCommit(t *testing.T) {
+	f := newGateBaseFixture(t, 0, 9)
+	res := f.runGate("lint", "")
+	if res.BaseCheck != nil || len(f.launched) != 1 {
+		t.Errorf("base check = %+v after %d launch(es), want none after one", res.BaseCheck, len(f.launched))
 	}
 }

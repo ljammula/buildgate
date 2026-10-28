@@ -208,7 +208,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 			sandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
 			cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
 			nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-			"", "", roleOverride.WorkerEnv, roleOverride.Skills, cfg.PlanTicketsInterpreter, args[1:]...,
+			roleOverride.WorkerEnv, roleOverride.Skills, cfg.PlanTicketsInterpreter, args[1:]...,
 		)
 	} else {
 		outDir := filepath.Join(scratchDir, "tickets")
@@ -288,7 +288,7 @@ const quotedLogReasonMaxLen = 200
 // words specifically.
 var quotedLogReasonScriptPrefixes = []string{"plan_tickets:", "draft_spec:"}
 
-// quotedLogReason reads logPath's tail (via readTail, oracle_draft_job.go
+// quotedLogReason reads logPath's tail (via readTail
 // -- already sanitises control characters and secrets) and returns the
 // bare reason text -- not pre-quoted, no ": " prefix -- or "" if the log
 // is empty/missing/has nothing to say. Callers present it explicitly as
@@ -445,7 +445,7 @@ const specAnswersFileName = "spec-answers.md"
 // stageSpecAnswers writes the read-back questions the operator answered and
 // approved with the spec (requestdriver.AnsweredReadBackBlock, the rendering
 // every reader of the approved spec gets) into scratchDir for the
-// --spec-answers-file of plan_tickets.py and draft_acceptance_oracles.py,
+// --spec-answers-file of plan_tickets.py,
 // and returns its path; "" when no question was answered.
 func stageSpecAnswers(r *request.Request, scratchDir, sandboxUser string) (string, error) {
 	block := requestdriver.AnsweredReadBackBlock(r.ReadBack.Answered())
@@ -507,4 +507,30 @@ func readPlanTicketsOutputs(scratchDir string) ([]requestdriver.DraftedTicket, *
 	}
 	sort.Slice(tickets, func(i, j int) bool { return tickets[i].Filename < tickets[j].Filename })
 	return tickets, evidence, nil
+}
+
+// readTail returns the last n bytes of the regular file at path, cleaned
+// (sanitize.Text: control characters, bidi characters and credentials
+// dropped) and trimmed, "" when the file is missing or not a regular file.
+func readTail(path string, n int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	offset := info.Size() - n
+	if offset < 0 {
+		offset = 0
+	}
+	buf := make([]byte, info.Size()-offset)
+	read, _ := f.ReadAt(buf, offset)
+	clean := sanitize.Text(string(buf[:read]))
+	if len(clean) > int(n) {
+		clean = strings.ToValidUTF8(clean[len(clean)-int(n):], "")
+	}
+	return strings.TrimSpace(clean)
 }

@@ -181,7 +181,7 @@ func emptyCommitDirMount(commitSHA, name, dst string) (CommitDirMount, error) {
 		return fail(err)
 	}
 	mask := WorkspaceMask{Source: root, Target: name, Dir: true}
-	if err := validateWorkspaceMask(mask, ""); err != nil {
+	if err := validateWorkspaceMask(mask); err != nil {
 		return fail(err)
 	}
 	sum, err := hashSnapshot(root, []WorkspaceMask{mask})

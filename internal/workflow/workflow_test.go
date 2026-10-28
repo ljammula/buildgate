@@ -820,26 +820,6 @@ func newWorkflowEnvironment(
 	gate func(context.Context, EvaluateGateInput) (run.GateResult, error),
 ) *testsuite.TestWorkflowEnvironment {
 	t.Helper()
-	env := newWorkflowEnvironmentSansCommitOracles(t, build, verify, gate)
-	// Default no-op mock: no fixture below has an oracle manifest with a
-	// target_path, so the Activity reports Active=false and the workflow keeps
-	// CollectEvidenceActivity's values, as before it existed.
-	env.RegisterActivityWithOptions(
-		func(context.Context, CommitOraclesInput) (CommittedOracles, error) { return CommittedOracles{}, nil },
-		activity.RegisterOptions{Name: CommitOraclesActivityName},
-	)
-	return env
-}
-
-// newWorkflowEnvironmentSansCommitOracles is newWorkflowEnvironment without the
-// default CommitOraclesActivity mock, for tests that register their own.
-func newWorkflowEnvironmentSansCommitOracles(
-	t *testing.T,
-	build func(context.Context, RunWorkflowInput) (BuildActivityResult, error),
-	verify func(context.Context, RunWorkflowInput) (VerifyActivityResult, error),
-	gate func(context.Context, EvaluateGateInput) (run.GateResult, error),
-) *testsuite.TestWorkflowEnvironment {
-	t.Helper()
 	return newWorkflowEnvironmentWithBaseline(t, build, verify, gate, passingBaselineVerify)
 }
 
@@ -849,7 +829,7 @@ func passingBaselineVerify(context.Context, RunWorkflowInput) (BaselineVerifyRes
 	return BaselineVerifyResult{Record: run.BaselineVerify{Passed: true}}, nil
 }
 
-// newWorkflowEnvironmentWithBaseline is newWorkflowEnvironmentSansCommitOracles
+// newWorkflowEnvironmentWithBaseline is newWorkflowEnvironment
 // with the test's own RunBaselineVerifyActivity.
 func newWorkflowEnvironmentWithBaseline(
 	t *testing.T,
@@ -958,7 +938,7 @@ func fixtureInputForTicket(ticket string) RunWorkflowInput {
 // setGateCommand sets input.GateCommands[id] = command, initializing the
 // map on first use -- GateCommands (keyed by policy.CommandGate.ID)
 // replaced RunWorkflowInput's old individual LintCommand/SecurityCommand/
-// UnitTestCommand/IntegrationTestCommand/ReferenceOracleCommand fields;
+// UnitTestCommand/IntegrationTestCommand fields;
 // this is the direct-assignment equivalent the many fixtures across this
 // package's tests used those fields for.
 func setGateCommand(input *RunWorkflowInput, id, command string) {

@@ -556,7 +556,7 @@ func (sv *serveRun) resolveTokens() error {
 		log.Printf("serving API on %s (override endpoint enabled)", *sv.addr)
 	case addrIsLoopback:
 		// No token configured, but bound to loopback -- the override-class write
-		// routes (approve, reject, spec/ticket/oracle edits, retry,
+		// routes (approve, reject, spec/ticket edits, retry,
 		// cancel) still work for a real same-origin request (the embedded
 		// console, or a same-machine curl with no Origin header at all);
 		// see api.WithListenAddr's own doc comment for exactly which

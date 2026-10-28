@@ -84,7 +84,7 @@ func TestRunSandboxWithRetriesRejectsExtraRunInputWithoutSpecPath(t *testing.T) 
 		context.Background(), workspace, "", extraRunInput, "", logPath, 1,
 		"worker@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "docker-should-never-run", sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"run-id", t.TempDir(), "4g", "2", "256m", nil, nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", nil, nil, "python3", "--request", extraRunInput,
+		nil, nil, "python3", "--request", extraRunInput,
 	)
 	if err == nil {
 		t.Fatal("runSandboxWithRetries(extraRunInput set, specPath empty) = nil error, want a refusal")
@@ -133,7 +133,7 @@ func TestRunSandboxWithRetriesStagesAndTranslatesBothSpecAndExtraRunInput(t *tes
 		context.Background(), workspace, specPath, extraRunInput, "", logPath, 1,
 		"worker@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", docker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"run-id", t.TempDir(), "4g", "2", "256m", nil, nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", nil, nil, "python3", "--spec", specPath, "--request", extraRunInput,
+		nil, nil, "python3", "--spec", specPath, "--request", extraRunInput,
 	)
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries: %v", err)
@@ -255,7 +255,7 @@ func TestRunSandboxWithRetriesWiresComposeServicesIntoWorkerLaunch(t *testing.T)
 		"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", docker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		runID, t.TempDir(), "4g", "2", "256m", nil,
 		nil, nil, sandbox.RegistryProxyHooks{}, &composeSpec, composeHooks,
-		"", "", nil, nil, "sh", "-c", "true",
+		nil, nil, "sh", "-c", "true",
 	)
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries: %v (result %+v)", err, res)

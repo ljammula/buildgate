@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"buildgate/internal/policy"
-	"buildgate/internal/projectconfig"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"context"
@@ -204,11 +203,10 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 func TestRunWorkflowRunsAFakeSixthRegistryGate(t *testing.T) {
 	original := policy.CommandGates
 	policy.CommandGates = append(append([]policy.CommandGate{}, original...), policy.CommandGate{
-		ID:                     "a_hypothetical_sixth_gate",
-		Flag:                   "sixth-gate-command",
-		ProjectKey:             "sixth_gate_command",
-		Help:                   "test-only fake registry entry",
-		RerunAfterOracleCommit: true,
+		ID:         "a_hypothetical_sixth_gate",
+		Flag:       "sixth-gate-command",
+		ProjectKey: "sixth_gate_command",
+		Help:       "test-only fake registry entry",
 	})
 	t.Cleanup(func() { policy.CommandGates = original })
 
@@ -237,66 +235,6 @@ func TestRunWorkflowRunsAFakeSixthRegistryGate(t *testing.T) {
 	}
 	if !slices.Equal(calls, []string{"a_hypothetical_sixth_gate"}) {
 		t.Fatalf("named gate Activity calls = %v, want [a_hypothetical_sixth_gate]", calls)
-	}
-}
-
-// TestRunWorkflowThreadsReferenceOracleDirAndSHA256 is the workflow-level
-// counterpart to TestRunNamedGateActivityComputesReferenceOracleHash --
-// it checks RunWorkflow's own wiring (ReferenceOracleDir/MountPath reach
-// NamedGateActivityInput, and the Activity's returned
-// ReferenceOracleSHA256 lands in the final GateResults), with the
-// Activity itself mocked, mirroring TestRunWorkflowRunsNamedGates' own
-// style rather than re-testing the Activity's real snapshot/hash logic
-// (already covered directly in activities_test.go).
-func TestRunWorkflowThreadsReferenceOracleDirAndSHA256(t *testing.T) {
-	input := fixtureInput()
-	setGateCommand(&input, policy.ReferenceOracleGateID, "go test ./verify/... -run TestOracle")
-	input.ReferenceOracleDir = "/oracle/store"
-	input.ReferenceOracleMountPath = "verify"
-	var gotDir, gotMountPath string
-	env := newWorkflowEnvironment(t,
-		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
-			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
-		},
-		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: 0}}, nil
-		},
-		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
-			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
-		},
-	)
-	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
-		gotDir = in.ReferenceOracleDir
-		gotMountPath = in.ReferenceOracleMountPath
-		return VerifyActivityResult{
-			Result:                runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: 0},
-			ReferenceOracleSHA256: "deadbeef",
-		}, nil
-	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
-
-	env.ExecuteWorkflow(RunWorkflow, input)
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow error: %v", err)
-	}
-	var result RunWorkflowResult
-	if err := env.GetWorkflowResult(&result); err != nil {
-		t.Fatalf("workflow result: %v", err)
-	}
-	if gotDir != "/oracle/store" || gotMountPath != "verify" {
-		t.Errorf("NamedGateActivityInput carried ReferenceOracleDir=%q ReferenceOracleMountPath=%q, want /oracle/store and verify", gotDir, gotMountPath)
-	}
-	var found bool
-	for _, g := range result.GateResults {
-		if g.Check != "reference_oracle" {
-			continue
-		}
-		found = true
-		if g.ReferenceOracleSHA256 != "deadbeef" {
-			t.Errorf("GateResults reference_oracle.ReferenceOracleSHA256 = %q, want %q", g.ReferenceOracleSHA256, "deadbeef")
-		}
-	}
-	if !found {
-		t.Fatal("no reference_oracle GateResult in the workflow result")
 	}
 }
 
@@ -415,26 +353,6 @@ func TestHistoryRecordedBeforeRepoDefinedGatesReplaysWithoutThem(t *testing.T) {
 	}
 }
 
-// After an oracle commit a repository's own gates run again against the
-// committed tree, as lint does.
-func TestPostOracleCommitGatesIncludeRepoDefinedGates(t *testing.T) {
-	input := fixtureInput()
-	setGateCommand(&input, "lint", "golangci-lint run")
-	setGateCommand(&input, policy.ReferenceOracleGateID, "python3 oracle.py")
-	setGateCommand(&input, "repo-zeta", "z")
-	setGateCommand(&input, "repo-alpha", "a")
-	var got []string
-	for _, g := range postOracleCommitGates(input) {
-		got = append(got, g.Check+"="+g.Command)
-	}
-	if want := []string{"lint=golangci-lint run", "repo-alpha=a", "repo-zeta=z"}; !slices.Equal(got, want) {
-		t.Errorf("post-oracle-commit gates = %v, want %v", got, want)
-	}
-	if !isPostOracleCommitAttemptKind("repo-alpha"+postOracleCommitGateSuffix) || isPostOracleCommitAttemptKind("reference_oracle"+postOracleCommitGateSuffix) {
-		t.Error("a repo gate's post-oracle-commit attempt kind must be recognised, and reference_oracle's must not")
-	}
-}
-
 // A repo-defined gate that exits non-zero quarantines the run and is named
 // in its gate results, like a registry gate.
 func TestRunWorkflowQuarantinesOnAFailingRepoDefinedGate(t *testing.T) {
@@ -481,9 +399,7 @@ func TestRunWorkflowQuarantinesOnAFailingRepoDefinedGate(t *testing.T) {
 	}
 }
 
-// A history recorded before repo-defined-gates hands the post-oracle-commit
-// rerun no repo gate either: one that never ran in the main pass has no
-// result for a failed rerun to replace.
+// A history recorded before repo-defined-gates is handed no repo gate.
 func TestGateCommandsLoseRepoGatesWhenTheChangeIsOff(t *testing.T) {
 	input := fixtureInput()
 	setGateCommand(&input, "lint", "golangci-lint run")
@@ -505,11 +421,5 @@ func TestGateCommandsLoseRepoGatesWhenTheChangeIsOff(t *testing.T) {
 		if hasRepo != wantRepo || slices.Contains(checks, "repo-alpha") != wantRepo || commands["lint"] == "" {
 			t.Errorf("version %d: checks %v, commands %v; want repo gate present = %v and lint kept", version, checks, commands, wantRepo)
 		}
-		if got := postOracleCommitGates(RunWorkflowInput{GateCommands: commands}); (len(got) == 2) != wantRepo {
-			t.Errorf("version %d: post-oracle-commit gates = %v", version, got)
-		}
-	}
-	if projectconfig.RepoGateReservedSuffix != postOracleCommitGateSuffix {
-		t.Errorf("projectconfig.RepoGateReservedSuffix = %q, want the rerun kind suffix %q", projectconfig.RepoGateReservedSuffix, postOracleCommitGateSuffix)
 	}
 }

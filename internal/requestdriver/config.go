@@ -92,7 +92,7 @@ type WorkerConfig struct {
 	ReviewCorrectiveRounds int
 	// hitlReminderInterval is how often the worker's reminder ticker
 	// (RemindIfDue) re-reminds a request waiting in spec_review,
-	// oracle_review or plan_review. See -hitl-reminder-interval's own
+	// plan_review. See -hitl-reminder-interval's own
 	// help text.
 	HitlReminderInterval time.Duration
 	// advanceOn is the request driver's own ticket-sequencing policy: "accepted"
@@ -166,14 +166,6 @@ type WorkerConfig struct {
 	PlanTicketsInterpreter    string
 	PlanTicketsTimeoutMinutes int
 
-	// oracleDraftScript/oracleDraftInterpreter/oracleDraftTimeoutMinutes are
-	// the same trio for the request driver's oracle-drafting job
-	// (cmd/factoryd/oracle_draft_job.go); allowUnsandboxedSpecDraft above is
-	// reused, exactly as for the plan job.
-	OracleDraftScript         string
-	OracleDraftInterpreter    string
-	OracleDraftTimeoutMinutes int
-
 	// temporalAddress is worker's resolved -temporal-address (see
 	// resolveTemporalAddress). Every drained entry's child invocation is
 	// given the address explicitly, so the child never re-probes and picks
@@ -238,9 +230,6 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.FullSuiteSource != "" {
 		args = append(args, "-full-suite-source", entry.FullSuiteSource)
 	}
-	if entry.NoCommitOracles {
-		args = append(args, "-no-commit-oracles")
-	}
 	if entry.Bug {
 		args = append(args, "-bug")
 	}
@@ -280,23 +269,6 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	}
 	if entry.RecheckReproductions != "" {
 		args = append(args, "-recheck-reproductions", entry.RecheckReproductions)
-	}
-	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
-	// own output (Phase 2) -- both set together or neither (see that
-	// function's own doc comment), so checking one is sufficient. The
-	// mount path and in-loop-retry opt-in are always the same fixed
-	// values for an auto-wired oracle -- TicketOracleMountPath, and
-	// -reference-oracle-in-loop-retry unconditionally, since resolving
-	// an oracle at all already means it was plan_review-approved and
-	// hash-verified moments ago; there is no "resolved but don't use it
-	// in-loop" case for this path the way the standalone CLI flag has.
-	if entry.ReferenceOracleDir != "" {
-		args = append(args,
-			"-reference-oracle-dir", entry.ReferenceOracleDir,
-			"-reference-oracle-mount-path", TicketOracleMountPath,
-			"-reference-oracle-command", entry.ReferenceOracleCommand,
-			"-reference-oracle-in-loop-retry",
-		)
 	}
 	if cfg.OpenPullRequest {
 		args = append(args, "-open-pull-request")

@@ -9,7 +9,7 @@ and [`USAGE.md`](../../USAGE.md).
 
 | Script | Role | `factoryd` flag |
 |---|---|---|
-| `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only oracles, the read-only `.factory/`, no history rewrites). Every later round continues the same harness session and is told what the round before it left (see "What a failed round hands the next one") | `-build-app-script` |
+| `build_app.py` | Bounded corrective-round build loop. Round 1 prompt: the ticket, then a fixed "before you end your turn" checklist (`build_round_checklist`: verify command, Allowed/Required files, tests, criteria evidence, read-only tests, the read-only `.factory/`, no history rewrites). Every later round continues the same harness session and is told what the round before it left (see "What a failed round hands the next one") | `-build-app-script` |
 | `round_feedback.py` | Pure helpers for that: the excerpt of a failing command's output, the names it reports failing, an id for "the same failure", the per-round history, and the note for a failure of the agent process itself | imported by `build_app.py` |
 | `saved_prompts.py` | `save_prompt(session_dir, name, text)`: writes a prompt handed to the harness to `<session folder>/prompts/<name>.md`, which the host empties before each launch and copies after it (the agent can write there too, so the copy is what the folder held) (0600; at most 2 MiB, 50 per launch; a failure never changes the turn). The host copies the folder into the run's or request's directory and redacts it there | imported by `build_app.py` |
 | `tree_guard.py` | Records a directory tree (every path: kind, permission bits, content hash or link target; bounded in entries, bytes and seconds), compares two records, and puts a changed tree back from copies. Used around the notes turn of a build that passed | imported by `build_app.py` |
@@ -19,7 +19,6 @@ and [`USAGE.md`](../../USAGE.md).
 | `read_back.py` | Request driver's one-shot read-back of a handed-over spec, shown at spec review: a summary and up to 7 questions as JSON, refused whole (exit 3) when not that shape or over its byte limits | read from beside `worker -draft-spec-script` |
 | `plan_tickets.py` | Request driver's one-shot ticket plan; given the read-back answers approved with the spec (`--spec-answers-file`) after the spec | `worker -plan-tickets-script` |
 | `draft_agents.py` | Doctor's one-shot root `AGENTS.md` draft; the factory supplies the shared refusal instructions and copies the successful scratch output to the repository root | `doctor -target-repo <repo> -fix` |
-| `draft_acceptance_oracles.py` | Oracle drafter (requests submitted with `-draft-oracles`); given the read-back answers approved with the spec (`--spec-answers-file`) after the criteria | `worker -draft-oracles-script` |
 | `code_review.py` | The code review's finding parser and evidence writer, shared with `combined_review.py` (`spec_line` and `reproduction` per finding, at most 3 reproductions of 32 KiB each) and the evidence builder and writer. It has no command line. A finding never fails the review: it fails only with no verdict | — |
 | `combined_review.py` | The review step: one launch, one model turn, a code review of the diff. Without `--reproductions` it is advice on what tests cannot show (design, security, maintainability, risk): no spec, no `spec_line` or `reproduction` (the parser drops them), at most 5 findings. With `--reproductions` (the build holds reproductions) the approved spec is shown numbered (`--approved-spec`, `L<n>: <line>`) and a finding may cite one spec line and carry a reproduction the factory runs itself (SC-022); the reviewer writes no file. Writes `CODE_REVIEW_EVIDENCE.json` only. Exit 40 when the review gave a verdict under its policy, 42 when it did not; findings never change it. An answer with no parseable findings list is asked for once more with the same prompt, in `.pi-combined-review-session/retry`: the two turns share 20 minutes, the retry is skipped under 5, the first turn's evidence is written first and its transcript removed (no link followed). The evidence then carries a `retry` line, and the retry's prompt is saved as `review-combined-retry`. A turn that failed is not run again here (the host launches the review again when the spend meter's record shows its model served nothing) | — |
 
@@ -44,16 +43,10 @@ freely, headings only together with their validator.
 | `draft_spec.scoped_sections.prompt.md`, `plan_tickets.scoped_sections.prompt.md` | `draft_spec.py`, `plan_tickets.py` (the sections of the previous draft a review commented on, given with `--rewrite-sections-file`; buildgate takes only those from the redraft) | `{sections}` |
 | `plan_tickets.previous_draft.prompt.md` | `plan_tickets.py` (handed-over tickets to revise, given with `--previous-draft-file`) | `{tickets}` |
 | `draft_spec.design_guide.prompt.md`, `plan_tickets.design_guide.prompt.md` | `draft_spec.py`, `plan_tickets.py` (the team design guide part given with `--design-guide-file`) | `{guide}` |
-| `draft_acceptance_oracles.qualification.prompt.md` | `draft_acceptance_oracles.py` (start of both language prompts) | none |
-| `draft_acceptance_oracles.go.prompt.md`, `.python.prompt.md` | `draft_acceptance_oracles.py` | `{draft_dir}`, `{max_files}`, `{manifest_name}` |
-| `draft_acceptance_oracles.feedback.prompt.md` | `draft_acceptance_oracles.py` | `{draft_dir}`, `{feedback}` |
-| `draft_acceptance_oracles.prior_imports.prompt.md` | `draft_acceptance_oracles.py` | `{imports}` |
-| `draft_acceptance_oracles.answers.prompt.md` | `draft_acceptance_oracles.py` (after the criteria, when `--spec-answers-file` is given) | `{answers}` |
-| `draft_acceptance_oracles.criterion_index.prompt.md` | `draft_acceptance_oracles.py` | `{index}`, `{total}`, `{oracle_filename}`, `{default_filename}` |
 
 | `combined_review.prompt.md`, `.advice`, `.diff_self`, `.diff_inline` | `combined_review.py` | `{diff_block}`, `{spec_text}`, `{approved_spec}`, four rule texts (the advice prompt: no `{approved_spec}`, three rule texts); `{base}`; `{diff}` |
 | `build_round_checklist.prompt.md` | `build_app.py` (the definition of done after the ticket in round 1) | `{verify}` |
-| `build_corrective.intro`, `.verify`, `.excerpt`, `.oracle`, `.reviewer` | `build_app.py` (`corrective_prompt`, one part each, joined by blank lines) | `{round_index}`, `{max_rounds}`, `{blockers}`; `{verify_command}`, `{verify_tail}`; `{verify_tail}`; `{oracle_command}`, `{oracle_tail}`; `{detail}` |
+| `build_corrective.intro`, `.verify`, `.excerpt`, `.reviewer` | `build_app.py` (`corrective_prompt`, one part each, joined by blank lines) | `{round_index}`, `{max_rounds}`, `{blockers}`; `{verify_command}`, `{verify_tail}`; `{verify_tail}`; `{detail}` |
 | `build_corrective.closing` | `build_app.py` (last part of the corrective prompt) | none: literal text |
 | `build_corrective.history`, `.agent`, `.log`, `.stuck` | `build_app.py` (`corrective_prompt`: the rounds so far, a failure of the agent process, where the failing command's whole output is, the diagnose-first steps) | `{history}`; `{agent_notes}`; `{failure_log}`, `{failing}`; `{streak}` |
 | `build_handoff_notes` | `build_app.py` (`run_notes_turn`: the one extra turn of a build that ends without passing) | none: literal text |
@@ -173,37 +166,6 @@ harness: `pi`/`pifork` get `--skill <dir>` per skill, plus the repo's own `.agen
 in `<home>/skills/<name>` each round (Codex's bundled skills are off). Parsers are pinned to real recorded output in
 `tests/fixtures/` (`tests/codex_copilot_adapters_test.py`).
 
-## The oracle drafter
-
-`draft_acceptance_oracles.py` reads an approved spec's acceptance
-criteria (`--criteria`, one per line, flat file, read by
-`build_app.read_acceptance_criteria`), runs one headless `pi` pass that writes a
-`MANIFEST.json` plus oracle test files, validates the manifest, copies
-everything to `--out-dir` and writes `--evidence`. Feedback from an
-`oracle_review` rejection arrives via `--feedback` as guidance only.
-
-- **Ecosystem.** `--ecosystem go|python` (default `go`); `factoryd`
-  always passes it (`classifyDraftEcosystem` /
-  `requireDraftableEcosystem` in `cmd/factoryd/oracle_draft_job.go`
-  decline other ecosystems before any model pass). Go: `*_test.go` with
-  `TestOracle*`. Python: plain-function `test_oracle_NNN.py` files run by
-  a stdlib-only loader (the sandbox image has no pytest).
-- **Manifest.** One entry per criterion, in order: `criterion_index`,
-  `oracle_file` (null for a judgment call), `rationale`, `target_path`
-  (repo-relative or null; unsafe values become null), `supersedes`. A
-  criterion echoed back with different text is a mismatch.
-- **Caps.** 16 KiB per file, 64 KiB total per ticket, 15 files per
-  request. Over a cap, later entries become null with a `dropped: ...`
-  rationale. The Go materializer re-enforces the same caps.
-- **Exit codes.** `0` for a well-formed manifest (all-null is valid). `2`
-  for timeout, route failure, criterion mismatch or malformed manifest;
-  `--evidence` is still written, and partial drafts are kept on timeout.
-- **Bounded output.** pi's stream is folded into a bounded digest, not
-  buffered whole.
-- **Not authoritative.** Drafts are proposals until a human approves them
-  at `oracle_review`; then they are pinned, read-only build inputs. See
-  [`USAGE_REFERENCE.md`](../../USAGE_REFERENCE.md), "Staged oracles".
-
 ## Prerequisites
 
 - [pi](https://pi.dev) installed.
@@ -241,7 +203,7 @@ No round ends in failure without the next one being told what failed and why.
 
 | Failure | What the next round's prompt holds |
 |---|---|
-| Fast check, verify or reference oracle failed | The block around the first reported failure plus the end of the output (8,000 characters, never less than the last 3,000; `round_feedback.failure_excerpt`); a timeout keeps the line that says so first; the failing tests or targets it names, and the path of the whole output: `.pi-build-session/feedback/round-<n>/{fast-check,verify,oracle}.log` |
+| Fast check or verify failed | The block around the first reported failure plus the end of the output (8,000 characters, never less than the last 3,000; `round_feedback.failure_excerpt`); a timeout keeps the line that says so first; the failing tests or targets it names, and the path of the whole output: `.pi-build-session/feedback/round-<n>/{fast-check,verify}.log` |
 | The agent changed nothing | That it changed nothing, and its own final message |
 | The agent timed out, stalled, or its CLI exited non-zero | How it ended and the CLI's last error |
 | The model route returned errors | The route's messages |

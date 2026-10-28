@@ -14,7 +14,7 @@ import {
 import { readFixtureJson } from "@/test/fixtures";
 import { apiErrorResponse, json, renderApp } from "@/test/render";
 
-import { nextStateAfterApprove, oracleSkipWarningFor } from "./approvalText";
+import { nextStateAfterApprove } from "./approvalText";
 import { ApproveDialog } from "./ApproveDialog";
 import { CancelDialog } from "./CancelDialog";
 import type { FlowProps } from "./flowTypes";
@@ -248,56 +248,9 @@ test("the confirm button is disabled while the write is in flight", async () => 
   });
 });
 
-test("an oracle_review approval sends the shown oracle hashes; empty states the consequence", async () => {
-  const request = fixture("request-oracle-review.json", {
-    oracle_draft: { status: "none_eligible" },
-  });
-  const { server } = renderApp(
-    <Host request={request} render={(props) => <ApproveDialog {...props} expectedSha256={{}} />} />,
-    {
-      server: [
-        {
-          on: "POST /requests/req-oracle-review/approve",
-          reply: json(rawFixture("request-oracle-review.json")),
-        },
-      ],
-    },
-  );
-  expect(
-    await screen.findByText(
-      "No oracle files: the build will have no request-level acceptance test.",
-    ),
-  ).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Approve" }));
-  await waitFor(() => {
-    expect(server.sent("POST /requests/req-oracle-review/approve")).toHaveLength(1);
-  });
-  expect(server.sent("POST /requests/req-oracle-review/approve")[0]?.body).toEqual({
-    by: "operator",
-  });
-});
-
-test("an oracle approval that skips a failed draft shows the warning instead", async () => {
-  const request = fixture("request-oracle-review.json", {
-    oracle_draft: { status: "failed", detail: "model timed out" },
-  });
-  renderApp(
-    <Host request={request} render={(props) => <ApproveDialog {...props} expectedSha256={{}} />} />,
-  );
-  expect(
-    await screen.findByText(/Approving skips the oracle stage: the draft ended "failed"/),
-  ).toHaveTextContent("(model timed out)");
-  expect(screen.queryByText(/^No oracle files:/)).not.toBeInTheDocument();
-});
-
-test("oracleSkipWarningFor and nextStateAfterApprove", () => {
-  const request = fixture("request-oracle-review.json", { oracle_draft: { status: "failed" } });
-  expect(oracleSkipWarningFor(request, { "oracle/a_test.go": "x" })).toBeNull();
-  expect(oracleSkipWarningFor(request, null)).toBeNull();
-  expect(oracleSkipWarningFor(specReview(), {})).toBeNull();
-  expect(oracleSkipWarningFor(request, {})).toContain('ended "failed"');
+test("nextStateAfterApprove", () => {
   expect(nextStateAfterApprove("plan_review")).toBe("building");
-  expect(nextStateAfterApprove("oracle_review")).toBe("planning");
+  expect(nextStateAfterApprove("spec_review")).toBe("planning");
   expect(nextStateAfterApprove("building")).toBeNull();
 });
 
@@ -678,7 +631,7 @@ describe("Request changes with notes on specific places", () => {
     setOperatorName("jane");
     renderApp(
       <Host
-        request={{ ...specReview(), state: "oracle_review" }}
+        request={{ ...specReview(), state: "building" }}
         render={(props) => <RejectDialog {...props} />}
       />,
     );

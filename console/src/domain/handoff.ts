@@ -15,7 +15,7 @@ import {
  */
 export interface HandoffCheck {
   readonly check: string;
-  /** corrective, corrective_if_oracle_in_loop, never or operator. */
+  /** corrective, never or operator. */
   readonly bin: string;
   readonly exitCode: number | null;
   readonly finding: string;
@@ -115,7 +115,6 @@ export function handoffNoteSections(notes: HandoffNotes | null): readonly Handof
  */
 const binLabels: Readonly<Record<string, string>> = {
   corrective: "Of a kind a build can fix when told what failed",
-  corrective_if_oracle_in_loop: "May be told to a build only where it may see the reference oracle",
   never: "Of a kind a build is never told about",
   operator: "Needs a change outside the build",
 };
@@ -134,8 +133,6 @@ export const HANDOFF_NOT_JUDGED =
  */
 const nextSentences: Readonly<Record<string, string>> = {
   corrective: "Every failed check is of a kind a build can fix when it is told what failed.",
-  corrective_if_oracle_in_loop:
-    "The reference oracle failed. Telling a build what it asserted would expose it, so this may be told to a build only on a run that already lets the build see the oracle.",
   never:
     "At least one failed check is of a kind a build is never told about, so this is not handed back to a build.",
   operator: "The build cannot fix this. Something outside it has to change before another attempt.",

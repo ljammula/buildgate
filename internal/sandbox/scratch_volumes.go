@@ -13,7 +13,7 @@ import (
 
 // scratchVolumeRecordlessGrace is how old a scratch volume must be before it
 // is treated as stale when no run record names its sandbox. A request job
-// (spec, plan, oracle) launches with its request id as the run id and has
+// (spec, plan) launches with its request id as the run id and has
 // no run record, so age is the only signal. A volume no container references
 // is only that young between the volume's creation and its container's, or
 // after a failed Delete; an hour is longer than any such window (an image

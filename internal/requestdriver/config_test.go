@@ -127,17 +127,6 @@ func TestBuildTicketRunArgsIncludesFullSuiteCommandOnlyWhenSet(t *testing.T) {
 	}
 }
 
-func TestBuildTicketRunArgsForwardsNoCommitOraclesOnlyWhenSet(t *testing.T) {
-	with := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", NoCommitOracles: true}
-	if !containsFlag(requestdriver.BuildTicketRunArgs("data", with, requestdriver.WorkerConfig{}), "-no-commit-oracles") {
-		t.Error("an opted-out entry must forward -no-commit-oracles")
-	}
-	without := &requestdriver.QueueEntry{ID: "t2", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-	if containsFlag(requestdriver.BuildTicketRunArgs("data", without, requestdriver.WorkerConfig{}), "-no-commit-oracles") {
-		t.Error("an entry that did not opt out must not forward the flag")
-	}
-}
-
 // TestBuildTicketRunArgsNeverPassesAProjectID: the run derives its own id
 // from -workspace (release.ProjectFromWorkspace), the same derivation
 // `submit` recorded on the entry, so nothing on the argv can ever name a

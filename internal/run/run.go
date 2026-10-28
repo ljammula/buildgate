@@ -288,20 +288,6 @@ type Attempt struct {
 	// Nil for an attempt with no sandbox launch, and when nothing could be
 	// read.
 	Resources *AttemptResources `json:"sandbox_resources,omitempty"`
-	// ReferenceOracleSHA256 mirrors GateResult.ReferenceOracleSHA256 (see
-	// its own doc comment), recorded on the attempt itself too -- found
-	// via review, PR #152 round 2: the gate's own hash computation runs
-	// before the sandboxed launch it protects, but a launch failure after
-	// that (a halt, not a quarantine) never reaches the point where a
-	// GateResult is built at all, so without this the hash a real
-	// attempt was launched with -- even one that then failed -- would be
-	// silently dropped rather than durably recorded anywhere. Set for a
-	// "reference_oracle" attempt with -reference-oracle-dir configured;
-	// also set on a "build" attempt when -reference-oracle-in-loop-retry
-	// is additionally configured -- found via review: this doc comment
-	// previously claimed "reference_oracle" exclusively, which this
-	// second case now contradicts. Empty otherwise.
-	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
 	// Role is the session-config role (internal/modelrole.RoleExecution/
 	// RoleReview, recorded here as a plain string -- internal/run stays a
 	// leaf package modelrole itself is never imported into, per
@@ -309,7 +295,7 @@ type Attempt struct {
 	// was driven under: "execution" for a "build" attempt (every round,
 	// corrective retries included -- they are still Kind "build"), and
 	// "review" for a "spec_conformity" attempt. Empty for any other Kind
-	// (verify/full_suite_verify/reference_oracle/...), which never
+	// (verify/full_suite_verify/...), which never
 	// resolve a roles: entry at all, and for an attempt recorded before
 	// this field existed.
 	Role string `json:"role,omitempty"`
@@ -516,17 +502,6 @@ type GateResult struct {
 	// Phase 4 evidence list. It makes the evidence tamper-evident: the
 	// verify.log on disk can be checked against this hash after the fact.
 	LogSHA256 string `json:"log_sha256"`
-	// ReferenceOracleSHA256 is the "reference_oracle" gate's own
-	// content-hash counterpart to LogSHA256, added per PR #151's review
-	// (round 2: safety-contract.md SC-012 requires the oracle hash
-	// itself be recorded, not only the command's output) — the
-	// evidence.SHA256Tree digest of -reference-oracle-dir's content at
-	// the moment this gate ran, computed only when that flag is set
-	// (empty for every other named gate, and for a reference_oracle run
-	// that never configured -reference-oracle-dir at all). Proves WHICH
-	// oracle content produced this specific result, independent of
-	// whatever that host directory contains later.
-	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
 	// BaseCheck is what rerunning a failed command gate on the commit the
 	// ticket's work started from showed (see GateBaseCheck). nil for a gate
 	// that passed, for a check that is not a named or repository command
@@ -596,98 +571,6 @@ func (g GateResult) FailsSameOnBase() bool {
 // failing on the base commit, in another way.
 func (g GateResult) FailedDifferentlyOnBase() bool {
 	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsDifferently
-}
-
-// OracleCanaryEvidence records one runtime-canary check of a RUN_COMMAND.txt:
-// the verdict (oraclecanary.Verdict as a string) and the two exit codes it was
-// judged from. Ecosystem is empty when no snapshot could be built, in which
-// case Verdict is "UNSUPPORTED" and CanaryExitCode is -1.
-type OracleCanaryEvidence struct {
-	Verdict        string `json:"verdict"`
-	Ecosystem      string `json:"ecosystem,omitempty"`
-	RealExitCode   int    `json:"real_exit_code"`
-	CanaryExitCode int    `json:"canary_exit_code"`
-	Message        string `json:"message,omitempty"`
-}
-
-// OracleFile is one file the factory host authored into a run's result
-// commit (an accepted acceptance oracle, or the .buildgate/oracles.json
-// index) together with the SHA-256 of the exact bytes it committed.
-type OracleFile struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
-}
-
-// OracleEvidence is the host-collected record that lets the gates treat a
-// committed acceptance oracle differently from an ordinary changed file.
-// nil (and therefore absent from the JSON) for every run in a repository
-// with no .buildgate/oracles.json at its base commit and no oracle commit
-// of its own, so all pre-existing run records and gate behaviour are
-// unchanged.
-//
-// Every exemption it grants is keyed on a content hash, never on a path
-// alone: two writers (the factory host and the sandboxed agent) can both
-// touch the same path, and only the factory's bytes are pinned.
-type OracleEvidence struct {
-	// Authored is what factoryd itself committed this run: oracle files
-	// and the index, each with the hash of the committed bytes.
-	Authored []OracleFile `json:"authored,omitempty"`
-	// Deleted is the manifest-declared supersession deletions factoryd
-	// itself committed this run.
-	Deleted []string `json:"deleted,omitempty"`
-	// BaseIndexPaths is every target_path listed in .buildgate/oracles.json
-	// as read from BaseSHA. These are protected from agent edits.
-	BaseIndexPaths []string `json:"base_index_paths,omitempty"`
-	// BaseIndexSHA256 maps each of those paths to the sha256 the base
-	// commit's index pinned for it (see MatchesBaseIndexPin).
-	BaseIndexSHA256 map[string]string `json:"base_index_sha256,omitempty"`
-	// ResultSHA256 and BaseSHA256 are the SHA-256 of the blob at ResultSHA
-	// / BaseSHA for every candidate path (authored, deleted, base-index and
-	// changed .buildgate/ paths) that is actually changed by this run. A
-	// path absent from the map is absent from that commit.
-	ResultSHA256 map[string]string `json:"result_sha256,omitempty"`
-	BaseSHA256   map[string]string `json:"base_sha256,omitempty"`
-}
-
-// FactoryAuthoredIntact reports whether path p is a factory-authored
-// oracle write whose blob at ResultSHA still hashes to the pinned hash, or
-// a manifest-declared supersession deletion that is in fact absent at
-// ResultSHA. Path membership alone never suffices.
-func (o *OracleEvidence) FactoryAuthoredIntact(p string) bool {
-	if o == nil {
-		return false
-	}
-	got, present := o.ResultSHA256[p]
-	for _, a := range o.Authored {
-		if a.Path == p && a.SHA256 != "" && present && got == a.SHA256 {
-			return true
-		}
-	}
-	if !present {
-		for _, d := range o.Deleted {
-			if d == p {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// MatchesBaseIndexPin reports whether the blob at ResultSHA for p hashes to
-// the sha256 the base commit's .buildgate/oracles.json PINNED for it. This is
-// what exempts a path that only appears in a cumulative -diff-base inventory
-// because an earlier round committed it. It is deliberately keyed on the
-// index's pinned hash and NOT on "unchanged from the round's base bytes":
-// after a quarantined review round advances the branch, the round base can
-// itself contain a tampered oracle, and byte-equality with that base would
-// then wave the tampering through (found via adversarial review).
-func (o *OracleEvidence) MatchesBaseIndexPin(p string) bool {
-	if o == nil {
-		return false
-	}
-	pin, ok := o.BaseIndexSHA256[p]
-	got, present := o.ResultSHA256[p]
-	return ok && pin != "" && present && got == pin
 }
 
 // DiffStat summarizes the size of the accepted diff between BaseSHA and
@@ -1485,7 +1368,7 @@ type Run struct {
 	TemporalTaskQueue  string `json:"temporal_task_queue,omitempty"`
 	TemporalAddress    string `json:"temporal_address,omitempty"`
 	// SpecSHA256 is the hash of the ticket spec file's content at the
-	// moment factoryd read it — the "acceptance-oracle hash" from the
+	// moment factoryd read it — the spec hash from the
 	// plan's Phase 4 evidence list. Ticket specs are mutable prose files;
 	// this pins exactly which version of the ticket a run was judged
 	// against.
@@ -1653,8 +1536,7 @@ type Run struct {
 	// code is wrong". Values: HaltReasonRelayCeilingExceeded,
 	// HaltReasonComposeServicesRejected, HaltReasonReviewInstructionsFailed,
 	// HaltReasonFactoryDirFailed, HaltReasonBaselineVerifyFailed,
-	// HaltReasonOraclePassesOnBase, and an
-	// UnresolvedCause for a halt that is no verdict on the work.
+	// an UnresolvedCause for a halt that is no verdict on the work.
 	// Empty for every halt cause that predates this field or has no such
 	// need -- most halts already carry enough signal in their own
 	// structured evidence (GateResults, Attempts, ...).
@@ -1680,15 +1562,6 @@ type Run struct {
 	// touched no AGENTS.md and has no proposal (nothing was read), and in a
 	// record written before the field existed.
 	MemoryEdit *MemoryEdit `json:"memory_edit,omitempty"`
-	// Oracles is the committed-acceptance-oracle evidence (see
-	// OracleEvidence); nil unless the base commit carries an oracle index
-	// or this run's factory host committed oracles.
-	Oracles *OracleEvidence `json:"oracles,omitempty"`
-	// FailedAfterOracleCommit names the checks (a GateResult.Check) that
-	// passed on the build's tree and failed only when the factory host reran
-	// them on the tree with the committed oracle files. Empty for a run with
-	// no such check.
-	FailedAfterOracleCommit []string `json:"failed_after_oracle_commit,omitempty"`
 	// DependencyLockfilesTouched is filename-based evidence only and never
 	// affects run state or a gate. Like ChangedFiles, it deliberately has no
 	// `omitempty`: a genuinely computed empty result must serialize as `[]`,
@@ -1869,27 +1742,6 @@ type Run struct {
 	// Evidence only: what a later build rechecks is the ticket's list on the
 	// request (request.Ticket.Reproductions).
 	ReviewReproductionRechecksGiven []RecheckEntry `json:"review_reproduction_rechecks_given,omitempty"`
-	// ReferenceOracleDir is the -reference-oracle-dir this run was
-	// configured with, recorded so any finalization site -- including a
-	// reclaimed run, which sees only this record -- can find the oracle's
-	// MANIFEST.json to learn which criteria the oracle covers. Empty when
-	// none was configured. A path, not content: the content hash is
-	// recorded separately on the attempts that ran against it.
-	ReferenceOracleDir string `json:"reference_oracle_dir,omitempty"`
-	// OraclesNotCommittedByRequest records the request's explicit
-	// -no-commit-oracles opt-out: the oracle gated the build but the host
-	// wrote nothing to the target repository.
-	OraclesNotCommittedByRequest bool `json:"oracles_not_committed_by_request,omitempty"`
-	// OracleCoveredCriteria is the acceptance criteria MANIFEST.json says
-	// the oracle checks deterministically (entries with a non-null
-	// oracle_file), so the release evidence can say which criteria had a
-	// second, non-LLM check. Empty when there is no oracle or no manifest.
-	OracleCoveredCriteria []string `json:"oracle_covered_criteria,omitempty"`
-	// OracleCanary is the outcome of the reference_oracle gate's runtime
-	// canary: after the real oracle command passed, the SAME command ran
-	// against a known-failing snapshot of the oracle. nil when the gate never
-	// got that far (no oracle, or the real command failed).
-	OracleCanary *OracleCanaryEvidence `json:"oracle_canary,omitempty"`
 	// BaselineVerify is the verify command's result on the base commit,
 	// run before the build's first round (see BaselineVerify's own doc
 	// comment). Read from the run's baseline record by cmd/factoryd's save,
@@ -2431,16 +2283,4 @@ func (r *Run) DiffBase() string {
 		return r.DiffBaseSHA
 	}
 	return r.BaseSHA
-}
-
-// FailedOnlyAfterOracleCommit reports whether check passed on the build's
-// tree and failed only on the tree with the committed oracle files
-// (FailedAfterOracleCommit).
-func (r *Run) FailedOnlyAfterOracleCommit(check string) bool {
-	for _, c := range r.FailedAfterOracleCommit {
-		if c == check {
-			return true
-		}
-	}
-	return false
 }

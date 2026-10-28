@@ -55,11 +55,8 @@ type QueueEntry struct {
 	// decision text needs to know it was a substitution, not just what
 	// the substituted value is.
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
-	// NoCommitOracles is forwarded as -no-commit-oracles when set (a
-	// request's own `factoryd submit -no-commit-oracles`).
-	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
-	// Bug is forwarded as -bug when set (a request's own `factoryd submit
-	// -bug`).
+	// Bug is forwarded as -bug when set: ticket 1 of a request submitted with
+	// `factoryd submit -bug`.
 	Bug bool `json:"bug,omitempty"`
 	// PreflightProfile is passed through to runMainWithReady's own
 	// -preflight-profile verbatim; empty means "let it resolve its own
@@ -144,14 +141,4 @@ type QueueEntry struct {
 	// (-execution-thinking): the level of roles.execution.escalation, set
 	// with ExecutionModel by escalate. Empty leaves the role's own.
 	ExecutionThinking string `json:"execution_thinking,omitempty"`
-	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
-	// own output: an operator-reviewed, plan_review-approved,
-	// hash-pinned reference oracle for this ticket, threaded through to
-	// runMainWithReady's own -reference-oracle-dir/-reference-oracle-command
-	// (and, whenever ReferenceOracleDir is set, -reference-oracle-mount-path
-	// TicketOracleMountPath and -reference-oracle-in-loop-retry) verbatim.
-	// Both empty (the common case) means this ticket has no oracle and
-	// every one of those flags stays unset, identical to today.
-	ReferenceOracleDir     string `json:"reference_oracle_dir,omitempty"`
-	ReferenceOracleCommand string `json:"reference_oracle_command,omitempty"`
 }

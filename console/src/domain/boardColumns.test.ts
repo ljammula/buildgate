@@ -55,8 +55,6 @@ describe("columnForRequest", () => {
       submitted: "spec",
       spec_drafting: "spec",
       spec_review: "spec",
-      oracle_drafting: "spec",
-      oracle_review: "spec",
       planning: "plan",
       plan_review: "plan",
       building: "building",
@@ -75,8 +73,6 @@ describe("columnForRequest", () => {
       "submitted",
       "spec_drafting",
       "spec_review",
-      "oracle_drafting",
-      "oracle_review",
       "planning",
       "plan_review",
       "building",
@@ -107,7 +103,7 @@ describe("columnForRequest", () => {
     // resume_review names the lost step itself.
     expect(
       columnForRequest(
-        movedFrom("r", "oracle_drafting", "resume_review", {
+        movedFrom("r", "spec_drafting", "resume_review", {
           resume: { from_state: "planning" },
         }),
       ),
@@ -274,13 +270,10 @@ describe("buildBoard", () => {
         requestSummary({ id: "late", state: "spec_review", waitingSince: "2026-09-10T10:00:00Z" }),
         requestSummary({
           id: "early",
-          state: "oracle_review",
+          state: "spec_review",
           waitingSince: "2026-09-10T08:00:00Z",
         }),
-        wire(
-          { id: "third", state: "oracle_drafting" },
-          { wait: { kind: "job_slot", position: 2 } },
-        ),
+        wire({ id: "third", state: "spec_drafting" }, { wait: { kind: "job_slot", position: 2 } }),
         wire({ id: "second", state: "submitted" }, { wait: { kind: "job_slot", position: 1 } }),
         wire({ id: "running", state: "spec_drafting" }, {}),
       ],
@@ -288,8 +281,7 @@ describe("buildBoard", () => {
     );
     const groups = columnGroups("spec", board.lanes[0]!.cells.spec.requests);
     expect(groups.map((g) => [g.label, g.requests.map((r) => r.id)])).toEqual([
-      ["Spec review", ["late"]],
-      ["Oracle review", ["early"]],
+      ["Spec review", ["early", "late"]],
       ["Drafting", ["running", "second", "third"]],
     ]);
   });
@@ -328,19 +320,17 @@ describe("columnGroups", () => {
   const pr = (id: string, prState: string) =>
     requestSummary({ id, state: "pr_review", tickets: [ticketJson({ index: 1, prState })] });
 
-  test("Spec is Stuck, the reviews, then drafting", () => {
+  test("Spec is Stuck, Spec review, then drafting", () => {
     expect(
       shape("spec", [
         movedFrom("h", "spec_drafting", "halted"),
         requestSummary({ id: "d", state: "spec_drafting" }),
-        requestSummary({ id: "o", state: "oracle_review" }),
         requestSummary({ id: "s", state: "spec_review" }),
         requestSummary({ id: "x", state: "security_review" }),
       ]),
     ).toEqual([
       ["Stuck", ["h"]],
       ["Spec review", ["s"]],
-      ["Oracle review", ["o"]],
       ["Drafting", ["d"]],
       ["Other", ["x"]],
     ]);
@@ -470,7 +460,7 @@ describe("density and chips", () => {
     expect(activeGroup("Spec review", chips)).toBe("Spec review");
     expect(activeGroup(null, chips)).toBeNull();
     // Its last request moved on: every group is shown again.
-    expect(activeGroup("Oracle review", chips)).toBeNull();
+    expect(activeGroup("Drafting", chips)).toBeNull();
   });
 
   test("a group shows its first three and counts the rest behind +N more", () => {

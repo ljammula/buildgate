@@ -1,2 +1,1 @@
-verify_command: "go build ./... && go vet ./... && go test ."
-reference_oracle_command: "go test ./verify/... -run TestRFC7396MergePatchOracle -v"
+verify_command: "go build ./... && go vet ./... && go test ./..."

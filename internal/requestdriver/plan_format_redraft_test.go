@@ -40,7 +40,7 @@ func TestAdvancePlanningRedraftsAMalformedPlanOnceWithTheParsersMessage(t *testi
 			return valid, &request.PlanEvidence{}, nil
 		},
 	)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *callCount != 2 {
@@ -75,7 +75,7 @@ func TestAdvancePlanningMalformedPlanTwiceHaltsAfterTwoLaunches(t *testing.T) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: malformedCoverageTicket(t)}}, &request.PlanEvidence{}, nil
 	}
 	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir, malformed, malformed)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *callCount != 2 {
@@ -110,7 +110,7 @@ func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _, _ := sequencedPlanTicketsRunner(t, dataDir, malformed, malformed)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if entries, err := os.ReadDir(existing); err != nil || len(entries) != 0 {
@@ -150,7 +150,7 @@ func TestAdvancePlanningAcceptsAnEmptyOutOfScopeSection(t *testing.T) {
 			return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: empty}}, &request.PlanEvidence{}, nil
 		},
 	)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *callCount != 1 {

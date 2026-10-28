@@ -143,11 +143,9 @@ describe("computeTimeline", () => {
     };
   }
 
-  test("omits the oracle stages for a run with no reference oracle dir, and falls back to gate results", () => {
+  test("falls back to gate results", () => {
     const rows = computeTimeline([], new Date("2026-09-29T14:00:10Z"), run);
     const keys = rows.map((r) => r.rowKey);
-    expect(keys).not.toContain("commit_oracles");
-    expect(keys).not.toContain("post_oracle_commit_verify");
     expect(keys).toContain("finished");
     const gate = rows.find((r) => r.rowKey === "gate");
     expect(gate?.glyph).toBe("passed");

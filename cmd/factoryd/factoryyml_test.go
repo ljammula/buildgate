@@ -20,8 +20,7 @@ func TestFactoryYMLContentSharedByInitAndOnboard(t *testing.T) {
 	const commentedGateDefaults = "# lint_command: \"golangci-lint run ./...\"\n" +
 		"# security_command: \"govulncheck ./...\"\n" +
 		"# unit_test_command: \"go test ./...\"\n" +
-		"# integration_test_command: \"go test -tags=integration ./...\"\n" +
-		"# reference_oracle_command: \"\" # e.g. a script diffing candidate output against an independent oracle -- must NOT be agent-authored or editable via the ticket's Allowed-Files\n"
+		"# integration_test_command: \"go test -tags=integration ./...\"\n"
 	if got, want := factoryYMLContent("go test ./...", "brownfield"), "verify_command: \"go test ./...\"\npreflight_profile: brownfield\n"+commentedGateDefaults; got != want {
 		t.Errorf("factoryYMLContent = %q, want %q", got, want)
 	}

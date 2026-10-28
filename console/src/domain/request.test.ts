@@ -85,7 +85,7 @@ test("only a halted request with the accepted_no_pr kind awaits a PR", () => {
   const of = (state: string, haltKind: string) => request({ state, halt_kind: haltKind });
   expect(requestAwaitingPullRequest(of("halted", "accepted_no_pr"))).toBe(true);
   expect(requestAwaitingPullRequest(of("halted", ""))).toBe(false);
-  expect(requestAwaitingPullRequest(of("halted", "oracle_materialize"))).toBe(false);
+  expect(requestAwaitingPullRequest(of("halted", "other_kind"))).toBe(false);
   expect(requestAwaitingPullRequest(of("building", "accepted_no_pr"))).toBe(false);
   expect(requestAwaitingPullRequestLabel(of("halted", "accepted_no_pr"))).toContain(
     "factoryd retry req-1",
@@ -140,27 +140,6 @@ test("review_notes are the server's list, empty when absent", () => {
   expect(request({ review_notes: null }).reviewNotes).toEqual([]);
 });
 
-test("oracle_skip_warning parses tolerantly", () => {
-  expect(request({ oracle_skip_warning: "warn" }).oracleSkipWarning).toBe("warn");
-  expect(request({ oracle_skip_warning: 42 }).oracleSkipWarning).toBe("");
-  expect(request({ oracle_skip_warning: null }).oracleSkipWarning).toBe("");
-});
-
-test("oracle_draft parses tolerantly: a non-object or wrong-typed field reads as absent", () => {
-  expect(request({ oracle_draft: "drafted" }).oracleDraftStatus).toBe("");
-  expect(request({ oracle_draft: { status: 3, detail: "d" } }).oracleDraftStatus).toBe("");
-  expect(request({ oracle_draft: { status: 3, detail: "d" } }).oracleDraftDetail).toBe("d");
-  expect(request({ oracle_draft: { criteria: "none" } }).oracleDraftCriteria).toEqual([]);
-  const mixed = request({
-    oracle_draft: { criteria: [7, { number: 2, eligible: true }, { reason: "r" }] },
-  });
-  expect(mixed.oracleDraftCriteria).toEqual([
-    { number: 2, eligible: true, reason: "" },
-    { number: 0, eligible: false, reason: "r" },
-  ]);
-  expect(request({ active_job: "running" }).activeJob).toBeNull();
-});
-
 test("a rejection's stage is its send-back stage, else the state it was rejected in", () => {
   const r = detail("request-plan-review");
   expect(rejectionStage(r.rejections[0]!)).toBe("plan_review");
@@ -212,7 +191,6 @@ test("GET /requests decodes every fixture row", () => {
     "req-done",
     "req-every-field",
     "req-halted",
-    "req-oracle-review",
     "req-plan-review",
     "req-quarantined",
     "req-spec-review",
@@ -230,7 +208,6 @@ test("GET /requests decodes every fixture row", () => {
   expect(list.every((r) => r.enteredAt !== "")).toBe(true);
   expect(detail("request-spec-review").enteredAt).toBe("2026-09-10T09:05:00Z");
   expect(list[1]!.tickets[0]!.prState).toBe("merged");
-  expect(list[4]!.oracleDraftStatus).toBe("drafted");
 });
 
 test("GET /requests carries the running build of a building request, and no queue position while it runs", () => {
@@ -287,19 +264,6 @@ test("request-spec-review decodes", () => {
   expect(r.history[0]!.reason).toBe("");
   expect(r.history[1]!.reason).toBe("spec drafted");
   expect(r.costSummary?.total).toBe(0.012);
-});
-
-test("request-oracle-review decodes", () => {
-  const r = detail("request-oracle-review");
-  expect(r.state).toBe("oracle_review");
-  expect(r.draftOracles).toBe(true);
-  expect(r.oracleDraftStatus).toBe("drafted");
-  expect(r.oracleDraftDetail).toBe("one criterion is covered");
-  expect(r.oracleDraftCriteria).toEqual([
-    { number: 1, eligible: true, reason: "" },
-    { number: 2, eligible: false, reason: "needs a second account" },
-  ]);
-  expect(r.waitingSince).toBe("2026-09-10T09:09:00Z");
 });
 
 test("request-plan-review decodes", () => {
@@ -388,17 +352,10 @@ test("request-every-field decodes with every optional field populated", () => {
   expect(r.specFullPath).toBe("/data/requests/req-every-field/spec.md");
   // Every field set includes resume.reason, which makes the wait a park.
   expect(r.nextAction).toContain("`factoryd resume req-every-field` checks again");
-  expect(r.draftOracles).toBe(true);
   expect(r.planReview).toBe(true);
   expect(r.quarantineCheck).toBe("every-field quarantine_check");
-  expect(r.oracleSkipWarning).toBe("every-field oracle_skip_warning");
   expect(r.reviewNotes).toEqual(["every-field review_notes"]);
   expect(r.planBudgetLines).toBe(3);
-  expect(r.oracleDraftStatus).toBe("drafted");
-  expect(r.oracleDraftDetail).toBe("every-field detail");
-  expect(r.oracleDraftCriteria).toEqual([
-    { number: 3, eligible: true, reason: "every-field reason" },
-  ]);
   expect(r.resume).toEqual({
     fromState: "building",
     lostRunId: "every-field lost_run_id",
@@ -525,7 +482,7 @@ test("request-events.sse frames decode as requests", () => {
     .split("\n")
     .filter((line) => line.startsWith("data: "))
     .map((line) => JSON.parse(line.slice("data: ".length)) as unknown);
-  expect(frames).toHaveLength(8);
+  expect(frames).toHaveLength(7);
   const decoded = frames.map((frame, i) =>
     decodeRequestSummary(asObject(frame, "event"), `event ${i}`),
   );
@@ -534,7 +491,6 @@ test("request-events.sse frames decode as requests", () => {
     "req-done",
     "req-every-field",
     "req-halted",
-    "req-oracle-review",
     "req-plan-review",
     "req-quarantined",
     "req-spec-review",

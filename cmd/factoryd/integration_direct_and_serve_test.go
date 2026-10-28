@@ -184,54 +184,6 @@ func TestIntegrationProjectBootstrapPreflightSkippedWithFlag(t *testing.T) {
 	}
 }
 
-// TestIntegrationReferenceOracleCommandNotForwardedToBuildWithoutInLoopFlag
-// is the regression test for a real backward-compatibility bug (found via
-// review): an operator who already configured the full
-// -reference-oracle-dir/-reference-oracle-mount-path/-reference-oracle-
-// command trio solely for the existing post-build reference_oracle gate
-// (the exact pairing -reference-oracle-command's own flag help
-// recommends) must see byte-for-byte identical behavior after this
-// binary added its in-loop reference-oracle check -- not have that
-// oracle content silently start reaching build_app.py, which requires
-// the new, explicit
-// -reference-oracle-in-loop-retry opt-in. testdata/fake_build_app.sh
-// records the --reference-oracle-command it received in its own log
-// banner, so this reads the build log directly: an earlier version of
-// this test relied on the fixture exiting 2 for any flag it didn't
-// recognize, which stopped proving anything the moment the fixture
-// learned this one.
-func TestIntegrationReferenceOracleCommandNotForwardedToBuildWithoutInLoopFlag(t *testing.T) {
-	// not parallel-safe: newFixtureRepo calls t.Setenv, which panics if
-	// the test also calls t.Parallel.
-	ws := newFixtureRepo(t)
-	// A real oracle whose command demonstrably executes it: the reference_oracle
-	// gate's runtime canary quarantines anything else.
-	oracleDir := writeTrustworthyOracle(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "", "30s", canaryDockerEnv(t), []string{
-		"-reference-oracle-dir", oracleDir,
-		"-reference-oracle-mount-path", "verify",
-		"-reference-oracle-command", trustworthyOracleCommand,
-	})
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
-	}
-	attempts := afterBaselineAttempt(t, r.Attempts)
-	if len(attempts) == 0 || attempts[0].Kind != "build" {
-		t.Fatalf("Attempts = %+v, want the build attempt right after the baseline", r.Attempts)
-	}
-	log, err := os.ReadFile(attempts[0].LogPath)
-	if err != nil {
-		t.Fatalf("read build log: %v", err)
-	}
-	if !strings.Contains(string(log), "fake_build_app: reference_oracle_command=\n") {
-		t.Errorf("build_app.py received a --reference-oracle-command without -reference-oracle-in-loop-retry; build log:\n%s", log)
-	}
-	if r.Attempts[0].ReferenceOracleSHA256 != "" {
-		t.Errorf("build attempt carries oracle hash %q without the in-loop opt-in", r.Attempts[0].ReferenceOracleSHA256)
-	}
-}
-
 // TestIntegrationRunRejectsMalformedPRClosesIssueFlag proves -pr-closes-issue
 // gets the same fail-fast startup validation -preflight-profile already
 // has, on the trusted `factoryd <run>` CLI path where nothing else (unlike

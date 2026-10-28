@@ -117,7 +117,7 @@ func (r *Request) retryFromRoundCheck(n int) error {
 		return fmt.Errorf("request %s: no ticket is being built, so there is no round %d to retry from %w", r.ID, n, ErrIllegalTransition)
 	}
 	ticket := &r.Tickets[r.TicketIndex-1]
-	if r.HaltKind == HaltAcceptedNoPR || r.HaltKind == HaltOracleMaterialize || r.HaltKind == HaltGateExpired {
+	if r.HaltKind == HaltAcceptedNoPR || r.HaltKind == HaltGateExpired {
 		return fmt.Errorf("request %s: a request halted as %q rebuilds nothing, so it cannot retry from round %d %w", r.ID, r.HaltKind, n, ErrIllegalTransition)
 	}
 	if ticket.Pushed() {

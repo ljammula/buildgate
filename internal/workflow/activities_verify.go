@@ -3,7 +3,6 @@ package workflow
 import (
 	"buildgate/internal/baseline"
 	"buildgate/internal/evidence"
-	"buildgate/internal/oraclecanary"
 	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
@@ -169,7 +168,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 				// never gets the relay's network -- it launches with
 				// Network "none" even on a relay-contained run (unless a
 				// registry proxy gives it that proxy's network instead).
-				nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+				nil, registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 		})
 	})
 	verifyResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
@@ -381,7 +380,7 @@ func (a *Activities) runFullSuiteVerifyActivity(ctx context.Context, input RunWo
 			return a.runSandboxWithRetries(ctx, input, logPath, a.verifyMaxAttemptsFor(input), before, after,
 				// nil, for the same reason canonical verification passes
 				// nil: the full-suite gate never calls a model.
-				nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+				nil, registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 		})
 	})
 	fullSuiteResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
@@ -426,12 +425,6 @@ type NamedGateActivityInput struct {
 	RunWorkflowInput
 	Check   string `json:"check"`
 	Command string `json:"command"`
-	// OracleCanary is set by the workflow only for the reference_oracle gate when
-	// its "reference-oracle-canary-timeout" marker resolved to >= 1. Only then does
-	// the Activity run the runtime canary and halve its deadline between the two
-	// runs; unset (an Activity scheduled before the canary existed, with the old
-	// single-command timeout) it behaves exactly as it did: one run, full budget.
-	OracleCanary bool `json:"oracle_canary,omitempty"`
 }
 
 // RunNamedGateActivity invokes input.Command through runner.RunWithRetries
@@ -519,82 +512,6 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	inherited := a.earlierAttemptsFor(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.Check)
 	attempts := []run.Attempt{}
 
-	// Temporal-path counterpart to cmd/factoryd's runGate (PR #151/#152's
-	// review-driven fixes): only for the "reference_oracle" check, and
-	// only when ReferenceOracleDir is configured, snapshot it into an
-	// immutable, Activity-owned copy before either hashing or mounting --
-	// see evidence.SnapshotTree's own doc comment for the TOCTOU gap this
-	// closes. Whichever Worker actually executes this Activity needs
-	// ReferenceOracleDir reachable on its own filesystem (inherent to a
-	// shared task queue, same as -workspace itself), which is exactly
-	// what's true here: this Worker is the one about to launch the
-	// container that mounts it.
-	// referenceOracleDir and referenceOracleMountPath are both local,
-	// gated together on the SAME condition, and never read from
-	// input.ReferenceOracleMountPath directly anywhere below -- found via
-	// review: an earlier version passed input.ReferenceOracleMountPath
-	// unconditionally into runSandboxWithRetries while only
-	// referenceOracleDir was check-gated, so every OTHER named gate
-	// (lint, security_audit, unit_tests, integration_tests) got a
-	// mismatched ReferenceOracleDir=""/ReferenceOracleMountPath=<set>
-	// pair whenever the oracle-mount feature was configured at all --
-	// LaunchSpec.Validate's "must be set together" rule then rejected
-	// every one of them, halting the run. cmd/factoryd
-	// never had this risk: it dispatches to an entirely separate
-	// closure (sandboxedForReferenceOracle) only for the reference_oracle
-	// check, rather than sharing one call for every gate the way this
-	// Activity does.
-	var referenceOracleDir, referenceOracleMountPath, referenceOracleSHA256 string
-	if isOracleMountingCheck(input.Check) {
-		// Set for this check UNCONDITIONALLY, not gated on
-		// input.ReferenceOracleDir != "" -- found via review, round 2:
-		// the previous version skipped this whole assignment whenever
-		// ReferenceOracleDir was empty, so -reference-oracle-mount-path
-		// configured WITHOUT -reference-oracle-dir passed BOTH fields
-		// through as empty, which LaunchSpec.Validate reads as plain
-		// "not configured" rather than the actual misconfiguration --
-		// silently running with no mount at all instead of failing
-		// loudly. Setting it here unconditionally lets a mismatched
-		// pair reach Validate's "must be set together" rule for real.
-		referenceOracleMountPath = input.ReferenceOracleMountPath
-	}
-	if isOracleMountingCheck(input.Check) && input.ReferenceOracleDir != "" {
-		snapshotDir, absErr := filepath.Abs(filepath.Join(a.logDirFor(input.RunWorkflowInput), "reference-oracle-snapshot"))
-		if absErr != nil {
-			return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("resolve reference-oracle snapshot path", InfrastructureFailureType, absErr)
-		}
-		// Containment check, stale-snapshot clearing (a Temporal Activity
-		// attempt can be retried after a crash between snapshotting and
-		// its own durable checkpoint), snapshot, and hash all live in
-		// sandbox.SnapshotReferenceOracle -- shared with this Activity file's own build Activity, see its doc comment.
-		referenceOracleSHA256, err = sandbox.SnapshotReferenceOracle(input.WorkspacePath, input.ReferenceOracleDir, snapshotDir)
-		if err != nil {
-			return VerifyActivityResult{}, temporal.NewApplicationErrorWithCause("reference-oracle snapshot", InfrastructureFailureType, err)
-		}
-		defer os.RemoveAll(snapshotDir)
-		referenceOracleDir = snapshotDir
-	}
-
-	// A run with an oracle also runs the runtime canary (see runCanary below)
-	// inside this same Activity execution, so its single checkpoint covers both
-	// runs. Each of the two runs gets at most half of this Activity's deadline
-	// (the workflow doubles the gate's StartToCloseTimeout for exactly this
-	// check), so a hung real run cannot consume the canary's time.
-	canaryEligible := input.OracleCanary && input.Check == "reference_oracle" && referenceOracleDir != ""
-	// half is a DURATION fixed once at Activity start; each run gets its own
-	// fresh context.WithTimeout(ctx, half). Sharing one absolute deadline would
-	// leave the canary only what the real run did not use and time it out.
-	var half time.Duration
-	gateCtx := ctx
-	if canaryEligible {
-		if deadline, ok := ctx.Deadline(); ok {
-			half = time.Until(deadline) / 2
-			var cancel context.CancelFunc
-			gateCtx, cancel = context.WithTimeout(ctx, half)
-			defer cancel()
-		}
-	}
-
 	beforeAttempt := func(attempt int) error {
 		_, err := recordActivityAttemptIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), attempt, input.Check, command, time.Now().UTC().Format(time.RFC3339))
 		return err
@@ -606,13 +523,12 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 			Command:          res.Command,
 			SetupSHA256:      run.SetupDigest(input.SetupCommands),
 			FactoryDirSHA256: res.FactoryDirSHA256, FactoryDirCommit: res.FactoryDirCommit, FactoryDirError: res.FactoryDirError,
-			StartedAt:             res.StartedAt.Format(time.RFC3339),
-			FinishedAt:            res.FinishedAt.Format(time.RFC3339),
-			ExitCode:              res.ExitCode,
-			LogPath:               logPath(attempt),
-			ImageDigest:           res.ImageDigest,
-			Resources:             attemptResources(res),
-			ReferenceOracleSHA256: referenceOracleSHA256,
+			StartedAt:   res.StartedAt.Format(time.RFC3339),
+			FinishedAt:  res.FinishedAt.Format(time.RFC3339),
+			ExitCode:    res.ExitCode,
+			LogPath:     logPath(attempt),
+			ImageDigest: res.ImageDigest,
+			Resources:   attemptResources(res),
 		})
 		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.Check, attempts)
 	}
@@ -622,7 +538,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
-				gateCtx,
+				ctx,
 				input.WorkspacePath,
 				logPath,
 				1,
@@ -631,34 +547,15 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 				command[0], command[1:]...,
 			)
 		}
-		return failOnEnvironment(relaunchUnstartedOnly(gateCtx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
+		return failOnEnvironment(relaunchUnstartedOnly(ctx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
 			return a.runSandboxWithRetries(ctx, input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after,
 				// nil, for the same reason canonical verification passes
 				// nil: a named gate never calls a model.
-				nil, registrySpec, composeSpec, referenceOracleDir, referenceOracleMountPath, nil, nil, command[0], command[1:]...)
+				nil, registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 		})
 	})
 
-	// Runtime canary: a passing oracle command is only believed when the SAME
-	// command, same sandbox and mount path, fails against a known-failing
-	// snapshot of the oracle. Anything else (the command never executed the
-	// oracle, the canary died of an environment error, no canary could be
-	// built) fails the gate, closed.
-	var canary *run.OracleCanaryEvidence
-	if runErr == nil && canaryEligible && result.ExitCode == 0 {
-		var ev run.OracleCanaryEvidence
-		var trusted bool
-		ev, trusted, runErr = a.runReferenceOracleCanary(ctx, half, input, &attempts, referenceOracleDir, referenceOracleMountPath, registrySpec, command)
-		if runErr == nil {
-			canary = &ev
-			if err = oraclecanary.AppendNote(result.LogPath, ev); err == nil && !trusted {
-				// A distinct non-zero code: policy sees a failed gate.
-				result.ExitCode = 1
-			}
-		}
-	}
-	gateResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts), ReferenceOracleSHA256: referenceOracleSHA256, OracleCanary: canary}
-	gateResult.NotRun = oracleCheckRanNothing(input.Check, runErr, result)
+	gateResult := VerifyActivityResult{Result: result, Attempts: withInherited(inherited, attempts)}
 	if runErr == nil && err == nil {
 		gateResult.DurationMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 		gateResult.LogSHA256, err = evidence.SHA256File(result.LogPath)

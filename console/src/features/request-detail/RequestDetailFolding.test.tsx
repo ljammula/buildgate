@@ -1,12 +1,8 @@
 // The spec and each ticket plan are what an approval is bound to: whole and open
-// in the three review states, one closed line once the decision is behind them.
+// in the review states, one closed line once the decision is behind them.
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { oracleServer } from "@/shared/oracle/oracleTestKit";
-import { json, renderApp } from "@/test/render";
-
-import { RequestDetailScreen } from "./RequestDetailScreen";
 import { openRequest, seedOperator } from "./testHarness";
 import { requestWire, ticketWire } from "./testRequests";
 import { foldsContent, planSummary, specSummary } from "./requestDetailLogic";
@@ -46,25 +42,6 @@ describe("review states keep what is being approved whole and open", () => {
     const raw = screen.getByTestId("markdown-raw-content");
     expect(raw).toBeVisible();
     expect(raw.textContent).toContain("END-OF-PLAN");
-  });
-
-  test("oracle_review: the spec stays open beside the oracle files", async () => {
-    const oracle = oracleServer({ "a_test.go": "package a\n" });
-    oracle.state = "oracle_review";
-    oracle.server.set("GET /requests/req-1", () =>
-      json(requestWire({ state: "oracle_review", title: "T", spec: longSpec })),
-    );
-    renderApp(<RequestDetailScreen />, {
-      server: oracle.server,
-      path: "/requests/req-1",
-      pattern: "/requests/:id",
-    });
-    await screen.findByRole("button", { name: "Reload oracle files" });
-
-    expect(foldedBlocks()).toHaveLength(0);
-    expect(screen.getByRole("region", { name: "Spec" })).toBeInTheDocument();
-    expect(screen.getByTestId("markdown-raw-content").textContent).toContain("END-OF-SPEC");
-    expect(screen.getByTestId("oracle-review-panel")).toBeVisible();
   });
 });
 
@@ -174,7 +151,7 @@ describe("the Tickets card", () => {
 
 describe("foldsContent", () => {
   test("never folds a review state", () => {
-    for (const state of ["spec_review", "oracle_review", "plan_review"]) {
+    for (const state of ["spec_review", "plan_review"]) {
       expect(foldsContent(state)).toBe(false);
     }
   });

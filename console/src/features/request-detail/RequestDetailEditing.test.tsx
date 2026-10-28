@@ -157,12 +157,12 @@ test("the approve confirm dialog uses the server-supplied approve_next_state ins
       state: "spec_review",
       title: "Add idempotency keys",
       spec: "# Spec",
-      approve_next_state: "oracle_drafting",
+      approve_next_state: "planning",
     }),
   );
   await ready();
   await userEvent.click(approveButton());
-  expect(await screen.findByText("Spec review → Oracle drafting")).toBeInTheDocument();
+  expect(await screen.findByText("Spec review → Planning")).toBeInTheDocument();
 });
 
 test("a 409 conflict on saving a spec edit fetches and diffs the current server content, and 'Discard mine and reload' drops the unsaved edit", async () => {
@@ -318,7 +318,6 @@ describe("a ticket plan file at plan_review", () => {
   test("Approve stays off while its editor is open", async () => {
     openRequest(planReview());
     await screen.findByRole("heading", { level: 1, name: "Plan" });
-    // No oracle files: the panel reports complete once it has listed.
     await waitFor(() => {
       expect(approveButton()).toBeEnabled();
     });

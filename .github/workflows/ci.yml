@@ -176,11 +176,10 @@ jobs:
           # a fixture with a fake secret and confirms it never appears in
           # the saved image's own layer data.
           DOCKER_SANDBOX_LIVE=1 go test -race -count=1 -v ./internal/sandbox/... -run 'TestDockerfileProjectBakesMissingDependency|TestDockerfileProjectDoesNotLeakProjectSecrets' 2>&1 | tee /tmp/live-project-image.log
-          DOCKER_SANDBOX_LIVE=1 go test -race -count=1 -v ./cmd/factoryd/... -run TestLiveDockerBuildPhaseMountsTheOracleSnapshot 2>&1 | tee /tmp/live-oracle-snapshot.log
           # Same false-green risk as the make-verify step above: a silent
           # t.Skip (Docker unreachable, an image pull failing) must fail
           # this job explicitly rather than report a vacuous pass.
-          if grep -qE "^--- SKIP" /tmp/live-sandbox.log /tmp/live-project-image.log /tmp/live-oracle-snapshot.log; then
+          if grep -qE "^--- SKIP" /tmp/live-sandbox.log /tmp/live-project-image.log; then
             echo "a live Docker test skipped instead of running -- failing explicitly, see the log above" >&2
             exit 1
           fi

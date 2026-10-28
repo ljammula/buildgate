@@ -47,8 +47,6 @@ def test_inventory_has_stable_unique_ids_and_does_not_expose_prompt_text():
 		"prompt-source:draft-spec.context",
 		"prompt-source:draft-agents.context",
 		"prompt-source:plan-tickets.context",
-		"prompt-source:draft-oracles.criteria-context",
-		"prompt-source:draft-oracles.criterion-index",
 		"prompt-source:build-corrective.context",
 		"prompt-source:combined-review",
 		"prompt-source:review-instructions-diff",

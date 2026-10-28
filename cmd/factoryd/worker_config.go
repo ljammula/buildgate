@@ -33,10 +33,6 @@ const defaultSpecDraftTimeoutMinutes = 10
 // may write several tickets in one pi invocation, not one spec.md.
 const defaultPlanTicketsTimeoutMinutes = 15
 
-// defaultOracleDraftTimeoutMinutes is runOracleDraftJob's own default: one
-// pi invocation that may write several test files, like a plan pass.
-const defaultOracleDraftTimeoutMinutes = 15
-
 // defaultMaxReviewRounds is -max-review-rounds' own default: 3 corrective
 // review rounds.
 const defaultMaxReviewRounds = 3
@@ -59,8 +55,6 @@ type workerFlags struct {
 	specDraftTimeoutMinutes   *int
 	planTicketsScript         *string
 	planTicketsTimeoutMinutes *int
-	oracleDraftScript         *string
-	oracleDraftTimeoutMinutes *int
 	buildAppMaxAttempts       *int
 	verifyMaxAttempts         *int
 	sandboxImage              *string
@@ -99,8 +93,6 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	f.specDraftTimeoutMinutes = flags.Int("spec-draft-timeout-minutes", defaultSpecDraftTimeoutMinutes, "minutes allowed for drafting a request's spec")
 	f.planTicketsScript = flags.String("plan-tickets-script", "", "path to a plan_tickets.py to run for plan drafting in place of the built-in one")
 	f.planTicketsTimeoutMinutes = flags.Int("plan-tickets-timeout-minutes", defaultPlanTicketsTimeoutMinutes, "minutes allowed for drafting a request's plan")
-	f.oracleDraftScript = flags.String("draft-oracles-script", "", "path to a draft_acceptance_oracles.py to run for oracle drafting in place of the built-in one")
-	f.oracleDraftTimeoutMinutes = flags.Int("draft-oracles-timeout-minutes", defaultOracleDraftTimeoutMinutes, "minutes allowed for drafting a request's acceptance oracles")
 	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", sessionconfig.DefaultBuildAppMaxAttempts, "total build attempts allowed when a build fails for an infrastructure reason")
 	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "total canonical-verification attempts allowed on an infrastructure failure, and total launches of a review, full-suite or gate step whose sandbox never started")
 	f.sandboxImage = flags.String("sandbox-image", "", "Docker image that builds and verification run in; must be digest-pinned (name@sha256:...). Empty uses the session config's sandbox_image, which 'make install' records.")
@@ -308,9 +300,6 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 		PlanTicketsScript:         *planTicketsScript,
 		PlanTicketsInterpreter:    "python3",
 		PlanTicketsTimeoutMinutes: *planTicketsTimeoutMinutes,
-		OracleDraftScript:         *qf.oracleDraftScript,
-		OracleDraftInterpreter:    "python3",
-		OracleDraftTimeoutMinutes: *qf.oracleDraftTimeoutMinutes,
 		TemporalAddress:           *temporalAddress,
 		SessionConfigPath:         sessionConfigPath,
 	}

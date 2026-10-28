@@ -253,7 +253,7 @@ func requiredGateReasons(r run.Run, cfg MergePolicy) []string {
 		// PR): FullSuiteScheduled is also false whenever
 		// -full-suite-command was never configured at all, not
 		// just when cadence skipped a configured one -- exempting
-		// on that alone let a run that never enabled the oracle in
+		// on that alone let a run that never enabled the suite in
 		// the first place satisfy this requirement with no
 		// result, silently reopening the exact canonical-only
 		// release path this fix exists to close. Only a

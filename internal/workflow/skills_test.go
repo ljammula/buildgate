@@ -43,7 +43,7 @@ func TestSkillsHashFromActivityResult(t *testing.T) {
 		Skills:        skills,
 	}
 	logPath := func(int) string { return filepath.Join(activities.LogDir, "build.log") }
-	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, input.Skills, "sh", "-c", "true")
+	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, nil, nil, nil, nil, input.Skills, "sh", "-c", "true")
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries: %v", err)
 	}

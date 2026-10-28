@@ -28,7 +28,7 @@ func planUnderBudget(t *testing.T, c planCorpusCase, budget int) *request.Reques
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(c.tickets, &request.PlanEvidence{}, nil)
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
 	cfg.Settings.PRBudgetLines = budget
-	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := request.Load(dataDir, id)

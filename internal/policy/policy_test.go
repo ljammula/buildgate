@@ -436,25 +436,25 @@ func TestEvaluateRunExemptsHarnessByproductsFromDiffScope(t *testing.T) {
 }
 
 func TestTestFilesFindsADefaultPatternMatch(t *testing.T) {
-	got := TestFiles([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, nil)
+	got := TestFiles([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil)
 	if !slices.Equal(got, []string{"internal/foo/bar_test.go"}) {
 		t.Errorf("TestFiles() = %v, want the *_test.go file only", got)
 	}
 }
 
 func TestTestFilesIsEmptyWithNoTestFileChanged(t *testing.T) {
-	if got := TestFiles([]string{"internal/foo/bar.go"}, nil, nil); len(got) != 0 {
+	if got := TestFiles([]string{"internal/foo/bar.go"}, nil); len(got) != 0 {
 		t.Errorf("TestFiles() = %v, want none when no changed file matches a test pattern", got)
 	}
 }
 
 func TestTestFilesHonorsCustomPatterns(t *testing.T) {
-	if got := TestFiles([]string{"e2e/checkout.feature"}, []string{"*.feature"}, nil); len(got) != 1 {
+	if got := TestFiles([]string{"e2e/checkout.feature"}, []string{"*.feature"}); len(got) != 1 {
 		t.Error("TestFiles() found no test against a custom test_patterns match")
 	}
 	// The same changed file does not satisfy any default pattern, proving
 	// the custom pattern -- not a default -- is what matched.
-	if got := TestFiles([]string{"e2e/checkout.feature"}, nil, nil); len(got) != 0 {
+	if got := TestFiles([]string{"e2e/checkout.feature"}, nil); len(got) != 0 {
 		t.Error("TestFiles() with default patterns unexpectedly matched a non-test-convention file")
 	}
 }
@@ -481,15 +481,15 @@ func TestTestFilesDefaultPatternsCoverMultipleLanguages(t *testing.T) {
 		"src/widget_test.rs",
 	} {
 		t.Run(changed, func(t *testing.T) {
-			if got := TestFiles([]string{changed}, nil, nil); len(got) != 1 {
-				t.Errorf("TestFiles([]string{%q}, nil, nil) = %v, want the file", changed, got)
+			if got := TestFiles([]string{changed}, nil); len(got) != 1 {
+				t.Errorf("TestFiles([]string{%q}, nil) = %v, want the file", changed, got)
 			}
 		})
 	}
 }
 
 func TestTestFilesCustomPatternMatchesFullPathNotJustBasename(t *testing.T) {
-	if got := TestFiles([]string{"test/integration/foo.go"}, []string{"test/*/*.go"}, nil); len(got) != 1 {
+	if got := TestFiles([]string{"test/integration/foo.go"}, []string{"test/*/*.go"}); len(got) != 1 {
 		t.Error("TestFiles() found no test when the full path matches a custom pattern")
 	}
 }
@@ -505,21 +505,27 @@ func TestTestsRedOnBaseVerdictTable(t *testing.T) {
 		name     string
 		tests    []string
 		optOut   string
+		refused  bool
 		proof    *TestsRedOnBaseInput
 		passed   bool
 		wantNote string
 	}{
-		{"red on base proved", tests, "", proof(run.TestsRedProved), true, ""},
-		{"every test passes on base", tests, "", proof(run.TestsRedNotExercised), false, ""},
-		{"no verdict passes with a note", tests, "", proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
-		{"no proof at all passes with a note", tests, "", nil, true, "tests_red_on_base: the changed tests were not run"},
-		{"no test file changed refuses", nil, "", nil, false, ""},
-		{"no test file changed refuses whatever the proof", nil, "", proof(run.TestsRedProved), false, ""},
-		{"opt-out passes without a test", nil, "docs-only change", nil, true, ""},
-		{"opt-out ignores a proof", tests, "docs-only change", proof(run.TestsRedNotExercised), true, ""},
+		{"red on base proved", tests, "", false, proof(run.TestsRedProved), true, ""},
+		{"every test passes on base", tests, "", false, proof(run.TestsRedNotExercised), false, ""},
+		{"no verdict passes with a note", tests, "", false, proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
+		{"no proof at all passes with a note", tests, "", false, nil, true, "tests_red_on_base: the changed tests were not run"},
+		{"no test file changed refuses", nil, "", false, nil, false, ""},
+		{"no test file changed refuses whatever the proof", nil, "", false, proof(run.TestsRedProved), false, ""},
+		{"opt-out passes without a test", nil, "docs-only change", false, nil, true, ""},
+		{"opt-out ignores a proof", tests, "docs-only change", false, proof(run.TestsRedNotExercised), true, ""},
+		{"a bug ticket 1 may not opt out", tests, "docs-only change", true, proof(run.TestsRedProved), false, ""},
+		{"a bug ticket 1 may not opt out of having no test", nil, "docs-only change", true, nil, false, ""},
+		{"a bug ticket 1 with a test that fails on the base passes", tests, "", true, proof(run.TestsRedProved), true, ""},
+		{"a bug ticket 1 whose tests all pass on the base is refused", tests, "", true, proof(run.TestsRedNotExercised), false, ""},
+		{"a bug ticket 1 with no verdict passes with a note", tests, "", true, proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			gate, note := TestsRedOnBase(c.tests, c.optOut, c.proof)
+			gate, note := TestsRedOnBase(c.tests, c.optOut, c.refused, c.proof)
 			if gate.Check != "tests_red_on_base" || gate.Passed != c.passed || note != c.wantNote {
 				t.Errorf("TestsRedOnBase() = %+v, %q; want passed %v, note %q", gate, note, c.passed, c.wantNote)
 			}
@@ -849,100 +855,6 @@ func TestEvaluateRunQuarantinesOnFailingSecurityAudit(t *testing.T) {
 	}
 	if result.GateResults[3].Passed {
 		t.Errorf("security_audit gate should have failed: %+v", result.GateResults[3])
-	}
-}
-
-// TestEvaluateRunQuarantinesOnFailingReferenceOracle is the
-// reference_oracle counterpart to
-// TestEvaluateRunQuarantinesOnFailingSecurityAudit, added alongside the
-// gate itself rather than relying on the generic NamedGate mechanism's
-// other coverage to stand in for it: a failing reference-oracle command
-// must quarantine the run the same way any other failing named gate does, and this pins that
-// specifically by name rather than only by analogy. Confirmed live
-// (2026-09-15): three real sandboxed builds against a real local model
-// all passed this gate legitimately; this test is the fast, deterministic
-// regression guard for the failure path those live runs didn't happen to
-// exercise.
-func TestEvaluateRunQuarantinesOnFailingReferenceOracle(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
-			{Check: "reference_oracle", Command: []string{"sh", "-c", "go test ./verify/..."}, ExitCode: 1, DurationMs: 15, LogSHA256: "ghi"},
-		},
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	})
-	if result.Accepted {
-		t.Error("Accepted = true, want false when reference_oracle fails")
-	}
-	if !slices.Equal(result.FailedChecks, []string{"reference_oracle"}) {
-		t.Errorf("FailedChecks = %v, want [reference_oracle]", result.FailedChecks)
-	}
-	wantChecks := []string{"canonical_verify", "tests_red_on_base", "reference_oracle"}
-	if len(result.GateResults) != len(wantChecks) {
-		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
-	}
-	for i, want := range wantChecks {
-		if result.GateResults[i].Check != want {
-			t.Errorf("GateResults[%d].Check = %q, want %q", i, result.GateResults[i].Check, want)
-		}
-	}
-	if result.GateResults[2].Passed {
-		t.Errorf("reference_oracle gate should have failed: %+v", result.GateResults[2])
-	}
-}
-
-// TestEvaluateRunCarriesReferenceOracleSHA256Through is the regression
-// test for the SC-012 follow-up (PR #151 review, round 2): the oracle
-// content hash cmd/factoryd computes must survive EvaluateRun/NamedGate
-// unchanged into the persisted GateResult, the same way LogSHA256 already
-// does -- policy.NamedGate copies it through verbatim rather than
-// recomputing or dropping it.
-func TestEvaluateRunCarriesReferenceOracleSHA256Through(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
-			{Check: "reference_oracle", Command: []string{"sh", "-c", "go test ./verify/..."}, ExitCode: 0, DurationMs: 15, LogSHA256: "ghi", ReferenceOracleSHA256: "deadbeef"},
-		},
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	})
-	var found bool
-	for _, g := range result.GateResults {
-		if g.Check != "reference_oracle" {
-			continue
-		}
-		found = true
-		if g.ReferenceOracleSHA256 != "deadbeef" {
-			t.Errorf("ReferenceOracleSHA256 = %q, want %q to survive unchanged", g.ReferenceOracleSHA256, "deadbeef")
-		}
-	}
-	if !found {
-		t.Fatal("no reference_oracle GateResult found")
-	}
-}
-
-// TestEvaluateRunLeavesReferenceOracleSHA256EmptyForOtherGates confirms
-// the field stays empty for every gate that isn't reference_oracle, so a
-// reviewer reading GateResults never mistakes an unrelated gate's zero
-// value for "no oracle content was hashed" vs. "this gate isn't the
-// oracle gate at all".
-func TestEvaluateRunLeavesReferenceOracleSHA256EmptyForOtherGates(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
-			{Check: "lint", Command: []string{"sh", "-c", "golangci-lint run ./..."}, ExitCode: 0, DurationMs: 10, LogSHA256: "abc"},
-		},
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	})
-	for _, g := range result.GateResults {
-		if g.Check == "lint" && g.ReferenceOracleSHA256 != "" {
-			t.Errorf("lint gate's ReferenceOracleSHA256 = %q, want empty", g.ReferenceOracleSHA256)
-		}
 	}
 }
 
@@ -1504,10 +1416,10 @@ func TestIsTestFile(t *testing.T) {
 
 func TestTestFilesAcceptsATestDirectoryPattern(t *testing.T) {
 	immer := []string{"*.test.js", "*.spec.ts", "__tests__/"}
-	if got := TestFiles([]string{"src/patch.ts", "__tests__/patch.js"}, immer, nil); !slices.Equal(got, []string{"__tests__/patch.js"}) {
+	if got := TestFiles([]string{"src/patch.ts", "__tests__/patch.js"}, immer); !slices.Equal(got, []string{"__tests__/patch.js"}) {
 		t.Errorf("TestFiles() = %v, want __tests__/patch.js", got)
 	}
-	if got := TestFiles([]string{"__tests__/patch.js"}, []string{"*.test.js"}, nil); len(got) != 0 {
+	if got := TestFiles([]string{"__tests__/patch.js"}, []string{"*.test.js"}); len(got) != 0 {
 		t.Error("without the directory entry the file is not a test")
 	}
 }

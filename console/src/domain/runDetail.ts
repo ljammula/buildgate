@@ -100,8 +100,6 @@ const stageOrder: readonly string[] = [
   "code_review",
   "review",
   "review_reproduction",
-  "commit_oracles",
-  "post_oracle_commit_verify",
   "evaluate",
   "finished",
 ];
@@ -122,8 +120,6 @@ export const stageLabels: Readonly<Record<string, string>> = {
   review: "Review",
   tests_red_on_base: "Changed tests on base and result",
   review_reproduction: "Reviewer reproduction",
-  commit_oracles: "Commit oracles",
-  post_oracle_commit_verify: "Re-verify after oracle commit",
   evaluate: "Evaluate",
   finished: "Finished",
 };
@@ -246,12 +242,6 @@ export function overallGlyph(glyphs: readonly StageGlyph[], finished: boolean): 
   if (glyphs.every((g) => g === "passed")) return "passed";
   return "pending";
 }
-
-/** The two oracle-commit stages that only ever run for a request launched with `-draft-oracles`. */
-const optionalOracleStages: ReadonlySet<string> = new Set([
-  "commit_oracles",
-  "post_oracle_commit_verify",
-]);
 
 /** The run the Timeline is computed for. */
 export type TimelineRun = Run;
@@ -558,19 +548,6 @@ export function computeTimeline(
   const finished = (byStage.get("finished") ?? []).some((e) => e.event === "end");
   const rows: TimelineRow[] = [];
   for (const stage of stageOrder) {
-    // A run launched with no -reference-oracle-dir never visits the two
-    // oracle-commit stages -- omit them rather than showing a
-    // pending/skipped row for a stage this run will never reach (operator
-    // demo, 2026-09-26). A run that DID emit events for one (an older
-    // record, or a race with the field landing) still shows it, so real
-    // evidence is never hidden.
-    if (
-      run.referenceOracleDir === "" &&
-      optionalOracleStages.has(stage) &&
-      (byStage.get(stage)?.length ?? 0) === 0
-    ) {
-      continue;
-    }
     if (stage === "build") rows.push(buildStageRow(events, finished, now, run));
     else if (stage === "gate") rows.push(gateRow(byStage.get("gate") ?? [], finished, now, run));
     else rows.push(simpleStageRow(stage, byStage.get(stage) ?? [], finished, now));

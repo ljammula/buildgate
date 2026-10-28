@@ -621,7 +621,7 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 		mounted := withWorkspaceMasks(withInputMounts(relaunchUnstartedOnly(launchCtx), sandbox.InputMount{Source: l.helpers, Target: "reproduction"}),
 			[]sandbox.WorkspaceMask{{Source: l.staged, Target: input.Held.Path}})
 		// nil relay: a reproduction calls no model and carries no credential.
-		return a.runSandboxWithRetries(mounted, onScratch, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after, nil, registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+		return a.runSandboxWithRetries(mounted, onScratch, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after, nil, registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 	})
 	if runErr != nil {
 		if ranPastLaunchCap(ctx, launchCtx, runErr) {

@@ -13,7 +13,7 @@ import (
 )
 
 // CheckLaunchBudget is the one gate every job-launch point in the request
-// driver (AdvanceSpecDrafting, AdvancePlanning, AdvanceOracleDrafting,
+// driver (AdvanceSpecDrafting, AdvancePlanning,
 // AdvanceBuilding, runCorrectiveRounds in request_driver.go, plus
 // RunCorrectiveRound in pr_review_driver.go) calls immediately before
 // starting a container -- see this file's own package doc comment on M3-C2
@@ -109,7 +109,7 @@ func budgetExhaustedReason(scope string, tokens, costMicroUSD int64, key string,
 
 // MonthToDateSpend sums every relay-measured spend recorded anywhere under
 // dataDir whose own timestamp falls within now's calendar month (UTC):
-// drafting JobSpend (spec/plan/oracle) across every request in
+// drafting JobSpend (spec/plan) across every request in
 // <data-dir>/requests, keyed by JobSpend.At, plus every run attempt's own
 // RelayConsumed* figures across every run in <data-dir>/runs, keyed by
 // Attempt.StartedAt -- including a bare run with no RequestID at all,
@@ -150,9 +150,6 @@ func MonthToDateSpend(dataDir string, now time.Time) (tokens int64, costMicroUSD
 		}
 		if req.PlanEvidence != nil {
 			addJobSpend(req.PlanEvidence.Spend)
-		}
-		if req.OracleDraft != nil {
-			addJobSpend(req.OracleDraft.Spend)
 		}
 	}
 

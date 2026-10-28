@@ -935,7 +935,6 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	// "tests_red_on_base: pass" with no changed test file otherwise has no
 	// way to tell "a test that fails on the base satisfied this" apart from
 	// "the ticket opted out and why".
-	writeOracleOptOutLine(&b, r)
 	if r.TestsRequiredOptOut != "" {
 		fmt.Fprintf(&b, "`tests_red_on_base` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
 	}
@@ -965,28 +964,6 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 		fmt.Fprintf(&b, "\nCloses %s\n", r.PRCloses)
 	}
 	return b.String()
-}
-
-// writeOracleOptOutLine says what became of a `-no-commit-oracles` request.
-func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
-	if r.OraclesNotCommittedByRequest {
-		switch {
-		case r.Oracles != nil && len(r.Oracles.Authored) > 0:
-			b.WriteString("Oracle commit opt-out requested (`-no-commit-oracles`) but oracles WERE committed by the factory: the worker that ran this did not honour it (mixed-version deployment).\n\n")
-		default:
-			oracleGated := false
-			for _, g := range r.GateResults {
-				if g.Check == "reference_oracle" && g.Passed {
-					oracleGated = true
-				}
-			}
-			if oracleGated {
-				b.WriteString("Oracle commit opt-out requested (`-no-commit-oracles`; honoured on single-binary deploys): the oracle gated this run and no factory oracle commit is recorded.\n\n")
-			} else {
-				b.WriteString("Oracle commit opt-out requested (`-no-commit-oracles`; honoured on single-binary deploys); no reference oracle ran.\n\n")
-			}
-		}
-	}
 }
 
 // maxRenderedNotes caps the lines of the "## Notes" section.
@@ -1043,14 +1020,6 @@ func writeNamedGatesSection(b *strings.Builder, r *run.Run) {
 			}
 		}
 		fmt.Fprintf(b, "- `%s`: %s\n", check, status)
-		// The reference-oracle content hash (SC-012, PR #151 review
-		// round-2 follow-up) only exists when -reference-oracle-dir was
-		// configured -- empty otherwise, including for every other named
-		// gate, so this line is added only when there's something real
-		// to show.
-		if check == gatepolicy.ReferenceOracleGateID && gateResult.ReferenceOracleSHA256 != "" {
-			fmt.Fprintf(b, "  - reference-oracle content: `sha256:%s`\n", gateResult.ReferenceOracleSHA256)
-		}
 	}
 	writeRepoGateLines(b, r.GateResults)
 	b.WriteString("\n")

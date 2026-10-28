@@ -311,10 +311,7 @@ func SHA256Bytes(content []byte) string {
 }
 
 // SHA256Tree returns a single hex-encoded SHA-256 digest over every
-// regular file under dir, added for the reference-oracle content hash
-// (safety-contract.md SC-012: "oracle ... hashes are recorded with the
-// attempt" -- follow-up from the reference_oracle gate's PR #151 review,
-// round 2). Deterministic regardless of the filesystem's own directory
+// regular file under dir. Deterministic regardless of the filesystem's own directory
 // iteration order: every relative path is collected first, sorted, then
 // each file's path and content are fed into one running hash in that
 // fixed order — the same two-pass shape SHA256File already uses per
@@ -441,7 +438,7 @@ func SHA256Tree(dir string) (string, error) {
 // lifetime, where an external host-side process could change src's
 // content out from under either operation. A hash proven against one
 // set of bytes and a mount exposing a different set could then both be
-// true of the same nominal "-reference-oracle-dir" at once, silently
+// true of the same nominal directory at once, silently
 // breaking the guarantee this whole mechanism exists to provide. The
 // caller hashes and mounts the COPY SnapshotTree produces, not src, so
 // both operations act on one fixed, immutable snapshot instead of two
@@ -466,7 +463,7 @@ func SHA256Tree(dir string) (string, error) {
 // review, PR #152 round 2: the original 0700/0600 modes left the
 // snapshot readable only by factoryd's own UID, so the container -- a
 // different UID by deliberate worker/host separation -- got a
-// permission-denied reading its own reference-oracle mount on every
+// permission-denied reading its own snapshot mount on every
 // real run).
 func SnapshotTree(src, dst string) error {
 	const (
@@ -488,7 +485,7 @@ func SnapshotTree(src, dst string) error {
 		// exactly once for src itself, which the path == src branch
 		// then skips (that branch exists to skip re-creating the root
 		// as a child of itself) -- producing an empty dst and a nil
-		// error instead of any indication -reference-oracle-dir named
+		// error instead of any indication the directory named
 		// the wrong kind of thing (found via review, PR #152 round 2).
 		return fmt.Errorf("%s is not a directory", src)
 	}

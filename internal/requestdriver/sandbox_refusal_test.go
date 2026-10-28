@@ -20,7 +20,7 @@ func TestAdvanceBuildingHaltsWithTheSandboxApprovalRefusal(t *testing.T) {
 	refusal := &projectconfig.SandboxNotApprovedError{Hash: strings.Repeat("ab", 32), Commit: strings.Repeat("c", 40), Repo: "/work/repo", Store: "/data/sandbox-approvals/repo.json"}
 	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error { return refusal }
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)

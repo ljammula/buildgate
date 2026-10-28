@@ -270,14 +270,10 @@ type runFlags struct {
 	fullSuiteSource     *string
 	fullSuiteCadence    *int
 	// gateCommands holds one flag per policy.CommandGate, keyed by its
-	// ID ("lint", "security_audit", "unit_tests", "integration_tests",
-	// "reference_oracle") -- see newRunFlags' own registration loop.
+	// ID ("lint", "security_audit", "unit_tests", "integration_tests") --
+	// see newRunFlags' own registration loop.
 	gateCommands                 map[string]*string
-	referenceOracleDir           *string
-	noCommitOracles              *bool
 	bug                          *bool
-	referenceOracleMountPath     *string
-	referenceOracleInLoopRetry   *bool
 	sandboxImage                 *string
 	executionModel               *string
 	executionThinking            *string
@@ -343,11 +339,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	for _, g := range policy.CommandGates {
 		f.gateCommands[g.ID] = flags.String(g.Flag, "", g.Help)
 	}
-	f.referenceOracleDir = flags.String("reference-oracle-dir", "", "host directory mounted read-only at -reference-oracle-mount-path for the reference-oracle gate. Must be outside -workspace, which the agent can write. Set both flags or neither")
-	f.bug = flags.Bool("bug", false, "internal: the request fixes a bug, so the reference oracle must fail on the base commit before the build starts")
-	f.noCommitOracles = flags.Bool("no-commit-oracles", false, "do not commit accepted oracles to the target repository. The oracle still gates the build, and the run record and evidence say it was not committed")
-	f.referenceOracleMountPath = flags.String("reference-oracle-mount-path", "", "path inside the workspace where -reference-oracle-dir is mounted, such as verify; set both flags or neither")
-	f.referenceOracleInLoopRetry = flags.Bool("reference-oracle-in-loop-retry", false, "also run the reference oracle in every build round, so a failing round is retried. The build agent can then read the oracle. Needs the other three -reference-oracle flags")
+	f.bug = flags.Bool("bug", false, "internal: ticket 1 of a bug request, whose Tests-Required: no opt-out is not honoured")
 	f.sandboxImage = flags.String("sandbox-image", "", "Docker image the build and checks run in, pinned by digest (name@sha256:...); a tag is refused. Empty uses the session config's sandbox_image, which make install records")
 	f.executionModel = flags.String("execution-model", "", "model for this run's build: one of roles.execution.allowed in the session config. Empty uses roles.execution.model")
 	f.executionThinking = flags.String("execution-thinking", "", "reasoning effort for this run's build: the level of roles.execution.escalation, passed with -execution-model naming the escalation's model. Empty uses roles.execution.thinking")
@@ -423,12 +415,7 @@ type ticketRun struct {
 	fullSuiteCommand             *string
 	fullSuiteCadence             *int
 	fullSuiteSource              *string
-	referenceOracleCommand       *string
-	referenceOracleDir           *string
-	noCommitOracles              *bool
 	bug                          *bool
-	referenceOracleMountPath     *string
-	referenceOracleInLoopRetry   *bool
 	sandboxImage                 *string
 	executionModel               *string
 	executionHarness             *string
@@ -625,18 +612,8 @@ func (tr *ticketRun) parseFlags() error {
 	tr.maxRounds, tr.timeoutMinutes, tr.timeout, tr.verifyCommand = tr.rf.maxRounds, tr.rf.timeoutMinutes, tr.rf.timeout, tr.rf.verifyCommand
 	tr.fastCheckCommand, tr.verifyMaxAttempts, tr.fullSuiteCommand, tr.fullSuiteCadence = tr.rf.fastCheckCommand, tr.rf.verifyMaxAttempts, tr.rf.fullSuiteCommand, tr.rf.fullSuiteCadence
 	tr.fullSuiteSource = tr.rf.fullSuiteSource
-	// referenceOracleCommand alone, of policy.CommandGates' per-gate flags
-	// (rf.gateCommands, keyed by gate ID), needs an individual local name
-	// below: reference_oracle has several special uses beyond the generic
-	// command-gate plumbing (the in-loop retry checks, the build-phase
-	// oracle mount). Every gate's resolved command, including this one,
-	// also flows through the registry-order gateCommands map built below
-	// (post applyProjectConfigDefaults).
-	tr.referenceOracleCommand = tr.rf.gateCommands[policy.ReferenceOracleGateID]
-	tr.referenceOracleDir = tr.rf.referenceOracleDir
-	tr.noCommitOracles = tr.rf.noCommitOracles
 	tr.bug = tr.rf.bug
-	tr.referenceOracleMountPath, tr.referenceOracleInLoopRetry, tr.sandboxImage = tr.rf.referenceOracleMountPath, tr.rf.referenceOracleInLoopRetry, tr.rf.sandboxImage
+	tr.sandboxImage = tr.rf.sandboxImage
 	tr.executionModel, tr.executionHarness, tr.executionThinkingChoice = tr.rf.executionModel, tr.rf.executionHarness, tr.rf.executionThinking
 	tr.registryProxy, tr.registryProxyImage, tr.composeServices, tr.egressCABundle, tr.dataDir = tr.rf.registryProxy, tr.rf.registryProxyImage, tr.rf.composeServices, tr.rf.egressCABundle, tr.rf.dataDir
 	tr.requireDeclaredScope, tr.temporalAddress, tr.repository, tr.runID, tr.priorRun = tr.rf.requireDeclaredScope, tr.rf.temporalAddress, tr.rf.repository, tr.rf.runID, tr.rf.priorRun
@@ -936,7 +913,7 @@ func (tr *ticketRun) applyProjectDefaults() error {
 	// gateCommands is rf.gateCommands' resolved values (post-
 	// applyProjectConfigDefaults, its one mutator), keyed by
 	// policy.CommandGate.ID -- the form every command-gate call site
-	// below (namedGateInputs, the post-oracle-commit re-run, the
+	// below (namedGateInputs, the
 	// Temporal/-repository positional args, the evidence render) now
 	// takes, in registry order, instead of five individually-named
 	// commands.
@@ -1216,16 +1193,6 @@ func (tr *ticketRun) prepareSandbox() error {
 	// checkout's HEAD. Direct and Temporal paths validate the predecessor
 	// metadata before preparation, then validate chain cleanliness against
 	// the newly-created worktree.
-	// Fail fast rather than silently no-op (found via review): the
-	// build-phase gating below is
-	// `*referenceOracleInLoopRetry && *referenceOracleDir != "" &&
-	// *referenceOracleCommand != ""` -- an operator who sets this flag
-	// but forgets one of the other three would otherwise get no error
-	// and no in-loop retry, exactly the same silent-no-op shape as the
-	// Temporal case, just from a different missing precondition.
-	if *tr.referenceOracleInLoopRetry && (*tr.referenceOracleDir == "" || *tr.referenceOracleCommand == "" || *tr.referenceOracleMountPath == "") {
-		return fmt.Errorf("-reference-oracle-in-loop-retry requires -reference-oracle-dir, -reference-oracle-mount-path, and -reference-oracle-command to all be set")
-	}
 	// Resolved to an absolute path here, once, before it's ever carried
 	// into a RunWorkflowInput — found via review: -repository's own shared
 	// task queue already let a run's Activities be dispatched to any
@@ -2218,7 +2185,7 @@ func (tr *ticketRun) createRunRecord() error {
 	var err error
 	// Hashed from the snapshot, not the original path: ticket specs are
 	// mutable prose files, and this pins exactly which version of the
-	// ticket this run was judged against (the "acceptance-oracle hash"
+	// ticket this run was judged against (the spec hash
 	// from the plan's Phase 4 evidence list) to the same bytes every other
 	// step below actually reads.
 	var specSHA256 string
@@ -2272,8 +2239,6 @@ func (tr *ticketRun) createRunRecord() error {
 		SpecTicketScopeMismatchFields: tr.specTicketScopeMismatchFields,
 		State:                         run.StateReady,
 		Repository:                    *tr.repository,
-		ReferenceOracleDir:            *tr.referenceOracleDir,
-		OraclesNotCommittedByRequest:  *tr.noCommitOracles,
 		// The reproductions this run was given to pass again: evidence.
 		ReviewReproductionRechecksGiven: tr.rechecks,
 		// Persisted here so applyRunWorkflowResult's own accepted branch
@@ -2641,25 +2606,23 @@ func (tr *ticketRun) dispatch() error {
 	if dialErr == nil {
 		defer temporalClient.Close()
 		sliceOpts := temporalSliceOptions{
-			PriorRun:                   tr.priorRunSnapshot,
-			IsolatedRepoDir:            tr.isolatedRepoDir,
-			IsolatedParentDir:          tr.isolatedParentDir,
-			OnBranch:                   *tr.onBranch,
-			DiffBase:                   tr.r.DiffBaseSHA,
-			InstructionBase:            tr.r.InstructionBaseSHA,
-			EarlierAttempt:             absolutePathOrEmpty(*tr.earlierAttempt),
-			ResumeSession:              tr.resumeSession,
-			KeepBuildSession:           tr.settings.RoundSessionContinuity && *tr.requestTicket && tr.replay == nil,
-			Replay:                     replayInputOf(tr.replay),
-			TicketPath:                 temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
-			TicketNumber:               tr.piTicketNumber,
-			RequestTicket:              *tr.requestTicket,
-			ReferenceOracleInLoopRetry: *tr.referenceOracleInLoopRetry,
-			NoCommitOracles:            *tr.noCommitOracles,
-			Bug:                        *tr.bug,
-			ResumeFrom:                 tr.resumeFrom,
-			ExecutionRouteSkips:        routeSkipsOf(tr.execSelection),
-			ReviewRouteSkips:           routeSkipsOf(tr.reviewSelection),
+			PriorRun:            tr.priorRunSnapshot,
+			IsolatedRepoDir:     tr.isolatedRepoDir,
+			IsolatedParentDir:   tr.isolatedParentDir,
+			OnBranch:            *tr.onBranch,
+			DiffBase:            tr.r.DiffBaseSHA,
+			InstructionBase:     tr.r.InstructionBaseSHA,
+			EarlierAttempt:      absolutePathOrEmpty(*tr.earlierAttempt),
+			ResumeSession:       tr.resumeSession,
+			KeepBuildSession:    tr.settings.RoundSessionContinuity && *tr.requestTicket && tr.replay == nil,
+			Replay:              replayInputOf(tr.replay),
+			TicketPath:          temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
+			TicketNumber:        tr.piTicketNumber,
+			RequestTicket:       *tr.requestTicket,
+			Bug:                 *tr.bug,
+			ResumeFrom:          tr.resumeFrom,
+			ExecutionRouteSkips: routeSkipsOf(tr.execSelection),
+			ReviewRouteSkips:    routeSkipsOf(tr.reviewSelection),
 		}
 		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxInsertions, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)
 		relayOpts := modelRouteOptions{Policy: tr.relayPolicy, CABundlePath: *tr.egressCABundle}
@@ -2696,68 +2659,66 @@ func (tr *ticketRun) dispatch() error {
 			WorkerEnvironment: tr.settings.ComposeServicesWorkerEnv,
 		}
 		opts := runOptions{
-			DataDir:                  *tr.dataDir,
-			ID:                       tr.id,
-			Ticket:                   *tr.ticket,
-			WorkspacePath:            *tr.workspace,
-			SpecSnapshotPath:         tr.specSnapshotPath,
-			BaseSHA:                  tr.baseSHA,
-			Repository:               *tr.repository,
-			TemporalAddress:          *tr.temporalAddress,
-			BuildAppInterpreter:      *tr.buildAppInterpreter,
-			BuildAppScript:           *tr.buildAppScript,
-			Harness:                  tr.executionHarnessName,
-			ReviewHarness:            tr.reviewHarnessName,
-			CodeReviewPolicy:         *tr.codeReviewPolicy,
-			VerifyCommand:            tr.verifyCmd,
-			FastCheckCommand:         *tr.fastCheckCommand,
-			FullSuiteCommand:         tr.effectiveFullSuiteCommand,
-			BaselineCheck:            *tr.rf.baselineCheck,
-			GateCommands:             tr.gateCommands,
-			SetupCommands:            tr.setup,
-			AutofixCommands:          tr.autofix,
-			ProjectConfigCommitSHA:   tr.projectConfigCommitSHA,
-			Sandbox:                  tr.sandbox,
-			SandboxRepoKey:           memory.StoreKey(tr.project, tr.repositoryRoot),
-			ConfiguredSandboxImage:   tr.configuredSandboxImage,
-			ApprovalDataDir:          firstNonEmptyString(tr.approvalDataDir, tr.sandboxDataDir),
-			InstallCacheImages:       tr.settings.SandboxInstallCacheImages,
-			Skills:                   roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
-			ReferenceOracleDir:       *tr.referenceOracleDir,
-			ReferenceOracleMountPath: *tr.referenceOracleMountPath,
-			MaxRounds:                *tr.maxRounds,
-			TimeoutMinutes:           *tr.timeoutMinutes,
-			BuildAppMaxAttempts:      *tr.buildAppMaxAttempts,
-			VerifyMaxAttempts:        *tr.verifyMaxAttempts,
-			OverallTimeout:           *tr.timeout,
-			SandboxImage:             *tr.sandboxImage,
-			SandboxDocker:            *tr.sandboxDocker,
-			SandboxUser:              *tr.sandboxUser,
-			SandboxWorkerUID:         *tr.sandboxWorkerUID,
-			SandboxMemory:            *tr.sandboxMemory,
-			SandboxCPUs:              *tr.sandboxCPUs,
-			SandboxTmpfsSize:         *tr.sandboxTmpfsSize,
-			ModelHostConcurrency:     tr.settings.ModelHostConcurrency,
-			Relay:                    relayOpts,
-			RegistryProxyPolicy:      tr.registryProxyPolicy,
-			GoModuleDir:              repositoryGoModuleDir(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, tr.baseSHA, tr.registryProxyPolicy),
-			ComposeServices:          composeServicesOpts,
-			AllowedFiles:             tr.allowedFiles,
-			RequiredChangedFiles:     tr.requiredChangedFiles,
-			RequiredContent:          tr.requiredContent,
-			TestPatterns:             tr.testPatterns,
-			AllowedPaths:             tr.allowedPaths,
-			ScopeUnapproved:          tr.scopeUnapproved,
-			TestsRequiredOptOut:      tr.r.TestsRequiredOptOut,
-			Slice:                    sliceOpts,
-			ReleasePolicy:            releasePolicy,
-			Thinking:                 tr.executionThinking,
-			ReviewThinking:           tr.reviewThinking,
-			ReviewRelayPolicy:        reviewRelayPolicy,
-			ReviewReproduction:       *tr.rf.reviewReproduction,
-			ReviewSpecPath:           tr.reviewSpecSnapshot,
-			ReviewSpecSHA256:         tr.reviewSpecSHA256,
-			RecheckReproductions:     tr.rechecks,
+			DataDir:                *tr.dataDir,
+			ID:                     tr.id,
+			Ticket:                 *tr.ticket,
+			WorkspacePath:          *tr.workspace,
+			SpecSnapshotPath:       tr.specSnapshotPath,
+			BaseSHA:                tr.baseSHA,
+			Repository:             *tr.repository,
+			TemporalAddress:        *tr.temporalAddress,
+			BuildAppInterpreter:    *tr.buildAppInterpreter,
+			BuildAppScript:         *tr.buildAppScript,
+			Harness:                tr.executionHarnessName,
+			ReviewHarness:          tr.reviewHarnessName,
+			CodeReviewPolicy:       *tr.codeReviewPolicy,
+			VerifyCommand:          tr.verifyCmd,
+			FastCheckCommand:       *tr.fastCheckCommand,
+			FullSuiteCommand:       tr.effectiveFullSuiteCommand,
+			BaselineCheck:          *tr.rf.baselineCheck,
+			GateCommands:           tr.gateCommands,
+			SetupCommands:          tr.setup,
+			AutofixCommands:        tr.autofix,
+			ProjectConfigCommitSHA: tr.projectConfigCommitSHA,
+			Sandbox:                tr.sandbox,
+			SandboxRepoKey:         memory.StoreKey(tr.project, tr.repositoryRoot),
+			ConfiguredSandboxImage: tr.configuredSandboxImage,
+			ApprovalDataDir:        firstNonEmptyString(tr.approvalDataDir, tr.sandboxDataDir),
+			InstallCacheImages:     tr.settings.SandboxInstallCacheImages,
+			Skills:                 roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
+			MaxRounds:              *tr.maxRounds,
+			TimeoutMinutes:         *tr.timeoutMinutes,
+			BuildAppMaxAttempts:    *tr.buildAppMaxAttempts,
+			VerifyMaxAttempts:      *tr.verifyMaxAttempts,
+			OverallTimeout:         *tr.timeout,
+			SandboxImage:           *tr.sandboxImage,
+			SandboxDocker:          *tr.sandboxDocker,
+			SandboxUser:            *tr.sandboxUser,
+			SandboxWorkerUID:       *tr.sandboxWorkerUID,
+			SandboxMemory:          *tr.sandboxMemory,
+			SandboxCPUs:            *tr.sandboxCPUs,
+			SandboxTmpfsSize:       *tr.sandboxTmpfsSize,
+			ModelHostConcurrency:   tr.settings.ModelHostConcurrency,
+			Relay:                  relayOpts,
+			RegistryProxyPolicy:    tr.registryProxyPolicy,
+			GoModuleDir:            repositoryGoModuleDir(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, tr.baseSHA, tr.registryProxyPolicy),
+			ComposeServices:        composeServicesOpts,
+			AllowedFiles:           tr.allowedFiles,
+			RequiredChangedFiles:   tr.requiredChangedFiles,
+			RequiredContent:        tr.requiredContent,
+			TestPatterns:           tr.testPatterns,
+			AllowedPaths:           tr.allowedPaths,
+			ScopeUnapproved:        tr.scopeUnapproved,
+			TestsRequiredOptOut:    tr.r.TestsRequiredOptOut,
+			Slice:                  sliceOpts,
+			ReleasePolicy:          releasePolicy,
+			Thinking:               tr.executionThinking,
+			ReviewThinking:         tr.reviewThinking,
+			ReviewRelayPolicy:      reviewRelayPolicy,
+			ReviewReproduction:     *tr.rf.reviewReproduction,
+			ReviewSpecPath:         tr.reviewSpecSnapshot,
+			ReviewSpecSHA256:       tr.reviewSpecSHA256,
+			RecheckReproductions:   tr.rechecks,
 		}
 		if opts.Repository != "" {
 			return runViaRepositoryOwner(tr.dp, tr.lifecycleCtx, temporalClient, tr.r, opts)

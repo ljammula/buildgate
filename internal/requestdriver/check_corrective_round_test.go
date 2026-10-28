@@ -49,7 +49,7 @@ func TestAdvanceBuildingCheckCorrectiveRoundGivesTheBuildTheHandoff(t *testing.T
 		return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/7"}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {
@@ -117,7 +117,6 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 		{"a command gate failed", result, []string{"lint"}, 1, true},
 		{"a repository's own gate failed", result, []string{"repo-docs"}, 1, true},
 		{"the diff left Allowed-Files", result, []string{"diff_scope"}, 1, true},
-		{"the reference oracle failed: a request's build already sees it", result, []string{"reference_oracle"}, 1, true},
 		{"a gate and a review failed together", result, []string{"lint", "code_review"}, 1, false}, // the review gave no verdict in this fixture
 		{"tests_red_on_base failed on a committed diff", result, []string{"lint", "tests_red_on_base"}, 1, true},
 		{"only tests_red_on_base failed: the build is told the tests do not exercise the change", result, []string{"tests_red_on_base"}, 1, true},
@@ -138,7 +137,7 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: tc.budget}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if got := *calls == 1; got != tc.wantRound {
@@ -198,7 +197,7 @@ func TestCheckCorrectiveRoundIsNotSpentOnAGateThatFailsTheSameWayOnTheBaseCommit
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if got := *calls == 1; got != tc.wantRound {
@@ -249,7 +248,7 @@ func TestCheckCorrectiveRoundNeedsAHandoffTheRunVouchesFor(t *testing.T) {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if *calls != 0 {
@@ -280,7 +279,7 @@ func TestCorrectiveRoundsShareOneBudget(t *testing.T) {
 			return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, "lint")
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		if *calls != 1 {
@@ -300,7 +299,7 @@ func TestCorrectiveRoundsShareOneBudget(t *testing.T) {
 			return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, "unit_tests")
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		if *calls != 2 {
@@ -365,7 +364,7 @@ func TestCheckCorrectiveRoundEligibilityFromTheRunRecord(t *testing.T) {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if *calls != 0 {
@@ -393,7 +392,7 @@ func TestCheckCorrectiveRoundKeepsTheDiffScopeCheckOnTheRequest(t *testing.T) {
 				return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, checks...)
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: budget}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			loaded, err := request.Load(dataDir, id)

@@ -1,7 +1,7 @@
 """The read-back answers the operator approved with the spec reach every
 reader of the approved spec inside the build: factoryd writes them after the
 criteria in the criteria file (requestdriver.AnsweredReadBackBlock), and the
-planner and the oracle drafter get them labelled as the operator's answers to questions about the spec."""
+planner gets them labelled as the operator's answers to questions about the spec."""
 
 import importlib.util
 import subprocess
@@ -26,7 +26,6 @@ def _load(name: str):
 combined_review = _load("combined_review")
 build_app = combined_review.build_app
 plan_tickets = _load("plan_tickets")
-draft_acceptance_oracles = _load("draft_acceptance_oracles")
 
 # The block as factoryd renders it: the heading, a sentence, then each
 # question and answer in a tilde fence. A line inside a fence that repeats
@@ -102,61 +101,6 @@ class PlannerPromptTests(unittest.TestCase):
 			_init_repo(workspace)
 			prompt, _ = plan_tickets.build_prompt("# Spec\n\nKeys.\n", "Add keys", workspace, "make verify", plan_tickets.DRAFT_RELATIVE_DIR)
 		self.assertNotIn("Questions answered at spec review", prompt)
-
-
-class OracleDrafterPromptTests(unittest.TestCase):
-	def test_the_oracle_drafter_reads_the_answers_after_the_criteria(self):
-		with tempfile.TemporaryDirectory() as directory:
-			workspace = Path(directory)
-			_init_repo(workspace)
-			prompt, _ = draft_acceptance_oracles.build_prompt(
-				["1. Keys are honoured"], workspace, draft_acceptance_oracles.DRAFT_RELATIVE_DIR, spec_answers=ANSWERS,
-			)
-		criteria_at = prompt.index("## Acceptance criteria")
-		label_at = prompt.index("## Questions about the spec the operator answered")
-		self.assertLess(criteria_at, label_at)
-		self.assertLess(label_at, prompt.index("# Questions answered at spec review"))
-		self.assertIn("They are not criteria and get no oracle of their own", prompt)
-		self.assertIn("24 hours.", prompt)
-
-	def test_no_answers_adds_nothing(self):
-		with tempfile.TemporaryDirectory() as directory:
-			workspace = Path(directory)
-			_init_repo(workspace)
-			prompt, _ = draft_acceptance_oracles.build_prompt(["1. Keys are honoured"], workspace, draft_acceptance_oracles.DRAFT_RELATIVE_DIR)
-		self.assertNotIn("Questions about the spec the operator answered", prompt)
-
-	def test_every_criterion_is_drafted_with_the_staged_answers(self):
-		class Stop(Exception):
-			pass
-
-		seen = []
-
-		def draft_one(*args, **kwargs):
-			seen.append(kwargs.get("spec_answers"))
-			raise Stop()
-
-		with tempfile.TemporaryDirectory() as directory:
-			root = Path(directory)
-			workspace = root / "repo"
-			workspace.mkdir()
-			_init_repo(workspace)
-			criteria = root / "criteria.md"
-			criteria.write_text("1. Keys are honoured\n2. Keys expire\n", encoding="utf-8")
-			answers = root / "spec-answers.md"
-			answers.write_text(ANSWERS, encoding="utf-8")
-			with mock.patch.object(draft_acceptance_oracles, "draft_one_criterion", side_effect=draft_one):
-				with self.assertRaises(Stop):
-					draft_acceptance_oracles.run_draft_oracles(
-						workspace, criteria, root / "out", root / "evidence.json", 10, spec_answers_path=answers,
-					)
-		self.assertEqual(seen, [ANSWERS])
-
-	def test_a_named_answers_file_that_cannot_be_read_fails_the_job(self):
-		with tempfile.TemporaryDirectory() as directory:
-			with self.assertRaises(OSError):
-				draft_acceptance_oracles.read_spec_answers(Path(directory) / "missing.md")
-		self.assertIsNone(draft_acceptance_oracles.read_spec_answers(None))
 
 
 if __name__ == "__main__":

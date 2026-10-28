@@ -600,7 +600,7 @@ func (a *Activities) sandboxRelaunch(ctx context.Context, input RunWorkflowInput
 		after := func(int, runner.Result, error) error { return nil }
 		return failOnEnvironment(ctx, logPath, before, after, step.baseline, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
 			// nil relay: the rerun calls no model, as its first run does not.
-			return a.runSandboxWithRetries(ctx, input, logPath, 1, before, after, nil, step.registrySpec, composeSpec, "", "", nil, nil, command[0], command[1:]...)
+			return a.runSandboxWithRetries(ctx, input, logPath, 1, before, after, nil, step.registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 		})
 	}}, nil
 }

@@ -28,23 +28,7 @@ type CommandGate struct {
 	// cmd/factoryd/run_ticket.go's own flags.String calls so the CLI
 	// registers every gate's flag from one loop over this table.
 	Help string
-	// RerunAfterOracleCommit is true for every command gate except
-	// reference_oracle: after factoryd commits an accepted oracle, the
-	// canonical/full-suite verification and every OTHER named gate
-	// re-run against the committed tree (a formatter or codegen step the
-	// oracle commit triggered could otherwise go unverified).
-	// reference_oracle itself doesn't re-run here -- it already gated the
-	// oracle commit itself, against the oracle's own content, not the
-	// tree the commit produced.
-	RerunAfterOracleCommit bool
 }
-
-// ReferenceOracleGateID is CommandGates' one entry with special-cased
-// handling elsewhere (the read-only sandbox mount, the opt-in in-loop
-// retry during build, the committed tree-hash pin CommitOraclesActivity
-// verifies against) -- see cmd/factoryd's runGate and
-// internal/workflow's RunBuildActivity/RunNamedGateActivity.
-const ReferenceOracleGateID = "reference_oracle"
 
 // CommandGates is every operator-configured command gate, in the order
 // they run and the order AllGateChecks lists them (EvaluateRun's own
@@ -52,39 +36,28 @@ const ReferenceOracleGateID = "reference_oracle"
 // doc comment.
 var CommandGates = []CommandGate{
 	{
-		ID:                     "lint",
-		Flag:                   "lint-command",
-		ProjectKey:             "lint_command",
-		Help:                   `lint command, run in the sandbox after verification passes as the "lint" gate. Empty uses lint_command from .factory.yml; with neither, the gate is not configured and never blocks`,
-		RerunAfterOracleCommit: true,
+		ID:         "lint",
+		Flag:       "lint-command",
+		ProjectKey: "lint_command",
+		Help:       `lint command, run in the sandbox after verification passes as the "lint" gate. Empty uses lint_command from .factory.yml; with neither, the gate is not configured and never blocks`,
 	},
 	{
-		ID:                     "security_audit",
-		Flag:                   "security-command",
-		ProjectKey:             "security_command",
-		Help:                   `optional security-audit command (e.g. govulncheck), same gating as -lint-command; becomes the "security_audit" gate (default: security_command from .factory.yml)`,
-		RerunAfterOracleCommit: true,
+		ID:         "security_audit",
+		Flag:       "security-command",
+		ProjectKey: "security_command",
+		Help:       `optional security-audit command (e.g. govulncheck), same gating as -lint-command; becomes the "security_audit" gate (default: security_command from .factory.yml)`,
 	},
 	{
-		ID:                     "unit_tests",
-		Flag:                   "unit-test-command",
-		ProjectKey:             "unit_test_command",
-		Help:                   `optional unit-test command, same gating as -lint-command; becomes the "unit_tests" gate (default: unit_test_command from .factory.yml)`,
-		RerunAfterOracleCommit: true,
+		ID:         "unit_tests",
+		Flag:       "unit-test-command",
+		ProjectKey: "unit_test_command",
+		Help:       `optional unit-test command, same gating as -lint-command; becomes the "unit_tests" gate (default: unit_test_command from .factory.yml)`,
 	},
 	{
-		ID:                     "integration_tests",
-		Flag:                   "integration-test-command",
-		ProjectKey:             "integration_test_command",
-		Help:                   `optional integration-test command, same gating as -lint-command; becomes the "integration_tests" gate (default: integration_test_command from .factory.yml)`,
-		RerunAfterOracleCommit: true,
-	},
-	{
-		ID:                     ReferenceOracleGateID,
-		Flag:                   "reference-oracle-command",
-		ProjectKey:             "reference_oracle_command",
-		Help:                   `command for the "reference_oracle" gate, gated as -lint-command is. Empty uses reference_oracle_command from .factory.yml. Use a check the build cannot edit, with -reference-oracle-dir`,
-		RerunAfterOracleCommit: false,
+		ID:         "integration_tests",
+		Flag:       "integration-test-command",
+		ProjectKey: "integration_test_command",
+		Help:       `optional integration-test command, same gating as -lint-command; becomes the "integration_tests" gate (default: integration_test_command from .factory.yml)`,
 	},
 }
 

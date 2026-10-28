@@ -1168,9 +1168,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	roundCfg.OpenPullRequest = false
 	// The same QueueEntry builder as the ticket's first build and its
 	// automatic review round (ticketQueueEntry), so a PR-review round gets
-	// what they get: the approved oracle (without its factory-authored
-	// records the always-protected .buildgate/ directory would quarantine
-	// every otherwise-successful round), the request's full-suite command
+	// what they get: the request's full-suite command
 	// and its source, harness, model and preflight profile. SpecPath is the
 	// round's addendum: the
 	// ticket's own spec plus this round's appended sections.

@@ -61,7 +61,7 @@ func TestAnUnresolvedCorrectiveRoundIsNotCountedAndWaitsInResumeReview(t *testin
 				return unresolvedHalts(roundRunID)[cause]
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if *calls != 1 {

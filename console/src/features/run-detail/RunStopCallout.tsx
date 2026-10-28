@@ -1,6 +1,6 @@
 import type { Run } from "@/domain/run";
 import { runStop } from "@/domain/runStop";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { Disclosure } from "@/ui/Disclosure";
 import { Callout } from "@/ui/Feedback";
 

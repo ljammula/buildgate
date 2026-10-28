@@ -1,9 +1,7 @@
 import { Loader2 } from "lucide-react";
 
 import type { RequestSummary } from "@/domain/request";
-import { OracleDraftingSection } from "@/shared/oracle/OracleDraftingSection";
 
-import { Panel } from "./Panel";
 import { ReadBackPanel } from "./ReadBackPanel";
 import { RecoveryCallout } from "./RecoveryCallout";
 import { ResumeCallout } from "./ResumeCallout";
@@ -40,30 +38,21 @@ export function StageSection({ request, dialogs, detailLoaded, anyEditorOpen }: 
     case "spec_drafting":
     case "planning":
       return <WorkingNotice />;
-    case "oracle_drafting":
-      return (
-        <Panel title="Oracle drafting">
-          <OracleDraftingSection request={request} />
-        </Panel>
-      );
     case "spec_review":
       return (
         <>
           <ReviewSection
             request={request}
-            dialogs={dialogs}
             detailLoaded={detailLoaded}
             anyEditorOpen={anyEditorOpen}
           />
           <ReadBackPanel request={request} onDraftChanged={dialogs.onAnswerDraftChanged} />
         </>
       );
-    case "oracle_review":
     case "plan_review":
       return (
         <ReviewSection
           request={request}
-          dialogs={dialogs}
           detailLoaded={detailLoaded}
           anyEditorOpen={anyEditorOpen}
         />

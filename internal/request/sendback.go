@@ -2,9 +2,6 @@ package request
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -35,7 +32,7 @@ func (t SendBackTarget) Valid() bool {
 // cycle (#295, the 2026-09-26 operator demo on a Flutter + Go app repo).
 //
 // Reject (approve.go) is this function's own sibling for the
-// forward-review case (spec_review/oracle_review/plan_review); SendBack is
+// forward-review case (spec_review/plan_review); SendBack is
 // the one for the terminal quarantined/halted case Reject explicitly
 // refuses. Kept separate rather than folded into Reject's own switch: the
 // two check different preconditions (an accepted ticket, an approved
@@ -46,12 +43,6 @@ func (t SendBackTarget) Valid() bool {
 // same sentinel Approve/Reject/Retry's own refusals wrap, so a caller can
 // map it to 409) or a plain error for a caller-input problem, when:
 //   - r is not quarantined or halted;
-//   - r halted with HaltOracleMaterialize -- that halt has its own,
-//     narrower recovery (ReturnToOracleReview, Retry's own first case),
-//     which keeps the drafted request-level oracle files for editing;
-//     SendBack would go further back and drop the spec/ticket pins
-//     ReturnToOracleReview is designed to leave alone, so it stays out of
-//     scope here -- `factoryd retry` names the right command instead;
 //   - reason is empty, exactly like Reject;
 //   - target is neither SendBackToPlan nor SendBackToSpec;
 //   - any ticket has already been accepted (AnyTicketAccepted) -- v1
@@ -117,23 +108,11 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	if r.State != StateQuarantined && r.State != StateHalted {
 		return nil, fmt.Errorf("request %s: cannot send back from state %q (must be %q or %q) %w", id, r.State, StateQuarantined, StateHalted, ErrIllegalTransition)
 	}
-	if r.State == StateHalted && r.HaltKind == HaltOracleMaterialize {
-		return nil, fmt.Errorf("request %s: halted while materializing the oracle -- `factoryd retry %s` returns it to oracle_review instead, keeping the drafted oracle files %w", id, id, ErrIllegalTransition)
-	}
 	if r.AnyTicketAccepted() {
 		return nil, fmt.Errorf("request %s: cannot send back -- ticket work has already been accepted; `factoryd cancel %s` and resubmit instead %w", id, id, ErrIllegalTransition)
 	}
 	if target == SendBackToPlan && r.ApprovedSHA256[specFileName] == "" {
 		return nil, fmt.Errorf("request %s: no approved spec.md to plan from -- send back to spec instead %w", id, ErrIllegalTransition)
-	}
-	if target == SendBackToPlan && !r.oracleStageApprovedForCurrentSpec() {
-		// A -draft-oracles request that stopped before its oracle review
-		// was approved would otherwise reach planning with no oracle pins,
-		// so MaterializeTicketOracles is a no-op and its tickets build with
-		// no acceptance oracle and no OracleSkipWarning: a silent skip of a
-		// stage the operator opted into (adversarial review of this change,
-		// 2026-09-26). Retry already resumes oracle drafting for this case.
-		return nil, fmt.Errorf("request %s: its oracle stage was never approved for the current spec -- `factoryd retry %s` resumes oracle drafting, or send it back to spec %w", id, id, ErrIllegalTransition)
 	}
 
 	leftState := r.State
@@ -180,9 +159,7 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 		endPlanImport(r)
 	}
 	if target == SendBackToSpec {
-		if err := r.dropSpecApproval(dataDir, id); err != nil {
-			return nil, err
-		}
+		r.dropSpecApproval()
 	}
 	if err := r.ResumeDrafting(targetState, by, reason, now); err != nil {
 		return nil, err
@@ -199,59 +176,15 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 
 // dropSpecApproval drops what a spec approval pinned, for a send-back to
 // spec: the spec's own pin, every downstream pin and the read-back answers'
-// pin, and moves the oracle files drafted against the old spec aside.
-func (r *Request) dropSpecApproval(dataDir, id string) error {
-	// Every downstream pin goes with the spec: tickets/* and the
-	// request-level oracle/* (a redrafted spec redrafts the oracle,
-	// replacing oracle/, so a surviving oracle pin would fail every
-	// later VerifyApprovedHashes and leave cancel as the only exit --
-	// adversarial review of this change, 2026-09-26), exactly as
-	// ReturnToOracleReview drops the oracle pins.
+// pin.
+func (r *Request) dropSpecApproval() {
 	delete(r.ApprovedSHA256, specFileName)
 	r.pruneTicketApprovals()
-	for rel := range r.ApprovedSHA256 {
-		if strings.HasPrefix(rel, requestOracleRelPrefix) {
-			delete(r.ApprovedSHA256, rel)
-		}
-	}
-	r.OracleSkipWarning = ""
-	// The oracle files drafted against the old spec move aside too:
-	// only their pins went above, and OracleFeedback is empty after a
-	// send-back to spec by design, so a failed redraft would never
-	// quarantine them itself, leaving them in oracle/ to be approved
-	// and pinned as if drafted from the new spec (adversarial review,
-	// round 2). Same destination a rejected draft uses.
-	if err := supersedeRequestOracle(dataDir, id); err != nil {
-		return err
-	}
-	r.OracleDraft = nil
 	r.ApprovedReadBackSHA256 = ""
-	return nil
 }
 
 func endPlanImport(r *Request) {
 	if r.PlanImported {
 		r.PlanImportEnded = true
 	}
-}
-
-// supersedeRequestOracle moves the request-level oracle/ directory to
-// oracle-rejected/ (replacing any earlier one), the same place a rejected
-// draft's files go, so nothing drafted against a superseded spec can be
-// approved later. A missing oracle/ is fine.
-func supersedeRequestOracle(dataDir, id string) error {
-	dir := filepath.Join(Dir(dataDir, id), RequestOracleDirName)
-	if _, err := os.Lstat(dir); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("request %s: supersede oracle/: %w", id, err)
-	}
-	rejected := filepath.Join(Dir(dataDir, id), RequestOracleDirName+"-rejected")
-	if err := os.RemoveAll(rejected); err != nil {
-		return fmt.Errorf("request %s: clear oracle-rejected/: %w", id, err)
-	}
-	if err := os.Rename(dir, rejected); err != nil {
-		return fmt.Errorf("request %s: supersede oracle/: %w", id, err)
-	}
-	return nil
 }

@@ -53,14 +53,6 @@ func TestStalledScalesWithTheLongestCompletedVerify(t *testing.T) {
 			wantQuietFor: 6 * time.Minute,
 		},
 		{
-			name:         "post-oracle-commit verify open 10 min after an 8 min baseline",
-			events:       append(slices.Clone(baselineDone), factory(at("11:08:00"), "post_oracle_commit_verify", "start")),
-			now:          at("11:18:00"),
-			wantLongest:  8 * time.Minute,
-			wantStalled:  false,
-			wantQuietFor: 10 * time.Minute,
-		},
-		{
 			name:         "first verify stage quiet 6 min has no reference",
 			events:       []Event{factory(at("11:00:00"), "baseline_verify", "start")},
 			now:          at("11:06:00"),

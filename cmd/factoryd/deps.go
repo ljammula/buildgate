@@ -22,12 +22,9 @@ import (
 // a long-lived struct (ticketRun, daemonRun, serveRun, requestActivities)
 // holds it. A test builds its own with newTestDeps (deps_test.go).
 //
-// Seven package-level function variables remain, none of them one of these
-// boundaries. Four are here:
+// Four package-level function variables remain, none of them one of these
+// boundaries. One is here:
 //
-//	launchOracleDraft, resolveOracleRelaySpec, oracleDraftClock
-//	                           the oracle-draft job's sandbox launch, relay
-//	                           spec and clock, stubbed by its own tests
 //	listGitHubCopilotModelsFn  doctor's model listing over HTTP
 //
 // and three in internal/requestdriver:

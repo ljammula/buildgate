@@ -4,7 +4,7 @@ synthetic run.json fixtures), the fixtures file's own schema and every
 referenced ticket spec's parse-ability, and the shell script's own
 result-recording plumbing against a stub FACTORYD_BIN. No Docker, no real
 model route, no real fixture repos -- the mirror image of
-scripts/tests/test_live_smoke_recording.py and scripts/tests/test_bar_lib.py.
+scripts/tests/test_live_smoke_recording.py.
 
 Run: python3 -m unittest discover -s scripts/tests -p 'test_proving_ground.py'
 (or `make proving-ground-test`).
@@ -52,14 +52,14 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(("quarantined", "unexpected_quarantine:canonical_verify"), pg.classify(run, "accept"))
 
     def test_unexpected_quarantine_wrong_gate_vs_expected(self):
-        # expect=quarantine:reference_oracle but the run actually quarantined
+        # expect=quarantine:diff_scope but the run actually quarantined
         # on tests_red_on_base -- not the expected gate, so this is
         # unexpected, not quarantined_as_expected.
         run = {"state": "quarantined", "gate_results": [
             {"check": "tests_red_on_base", "passed": False},
         ]}
         self.assertEqual(("quarantined", "unexpected_quarantine:tests_red_on_base"),
-                         pg.classify(run, "quarantine:reference_oracle"))
+                         pg.classify(run, "quarantine:diff_scope"))
 
     def test_quarantine_with_no_failing_gate_recorded(self):
         run = {"state": "quarantined", "gate_results": []}
@@ -177,7 +177,7 @@ class FixturesFileTest(unittest.TestCase):
     # come from PROVING_GROUND_EXTRA_FIXTURES.
     def test_loads_and_validates(self):
         fixtures = pg.load_fixtures(FIXTURES_FILE, REPO_ROOT)
-        self.assertGreaterEqual(len(fixtures), 4)
+        self.assertGreaterEqual(len(fixtures), 3)
 
     def test_every_tracked_fixture_repo_is_in_testdata(self):
         for f in pg.load_fixtures(FIXTURES_FILE, REPO_ROOT):
@@ -211,27 +211,14 @@ class FixturesFileTest(unittest.TestCase):
             del os.environ["PROVING_GROUND_EXTRA_FIXTURES"]
             os.unlink(extra)
 
-    def test_at_least_two_quarantine_fixtures(self):
+    def test_at_least_one_quarantine_fixture(self):
         fixtures = pg.load_fixtures(FIXTURES_FILE, REPO_ROOT)
         quarantine = [f for f in fixtures if f["expect"].startswith("quarantine:")]
-        self.assertGreaterEqual(len(quarantine), 2, quarantine)
-
-    def test_reference_oracle_and_diff_scope_both_covered(self):
-        fixtures = pg.load_fixtures(FIXTURES_FILE, REPO_ROOT)
-        expects = {f["expect"] for f in fixtures}
-        self.assertIn("quarantine:reference_oracle", expects)
-        self.assertTrue(any(e.startswith("quarantine:") and e != "quarantine:reference_oracle" for e in expects))
+        self.assertGreaterEqual(len(quarantine), 1, quarantine)
 
     def test_every_spec_file_exists(self):
         for f in pg.load_fixtures(FIXTURES_FILE, REPO_ROOT):
             self.assertTrue(os.path.isfile(f["spec"]), "%s: %s" % (f["label"], f["spec"]))
-
-    def test_every_declared_oracle_dir_has_manifest_and_run_command(self):
-        for f in pg.load_fixtures(FIXTURES_FILE, REPO_ROOT):
-            if not f.get("oracle_dir"):
-                continue
-            self.assertTrue(os.path.isfile(os.path.join(f["oracle_dir"], "MANIFEST.json")), f["label"])
-            self.assertTrue(os.path.isfile(os.path.join(f["oracle_dir"], "RUN_COMMAND.txt")), f["label"])
 
     def test_rejects_duplicate_labels(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:

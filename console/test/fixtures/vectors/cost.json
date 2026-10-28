@@ -323,7 +323,6 @@
         "complete": true,
         "tokens": 478300,
         "tokens_complete": true,
-        "oracle": 0.25,
         "by_model": [
           {
             "role": "execution",

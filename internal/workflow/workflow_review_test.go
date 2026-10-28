@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"buildgate/internal/policy"
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
@@ -217,50 +216,13 @@ func TestRunWorkflowRunsOneReviewLaunchAndDecodesItsExitStatus(t *testing.T) {
 	}
 }
 
-// TestRunWorkflowSkipsCommitOraclesWhenCodeReviewFails: CommitOraclesActivity must never run for a
-// run whose declared CodeReviewPolicy's own review failed, mirroring
-// run_ticket.go's identical predicate.
-func TestRunWorkflowSkipsCommitOraclesWhenCodeReviewFails(t *testing.T) {
-	input := fixtureInput()
-	input.CodeReviewPolicy = "required"
-	setGateCommand(&input, policy.ReferenceOracleGateID, "go test ./.oracle/...")
-	input.ReferenceOracleDir = "/oracle/store"
-	input.AllowedFiles = []string{"pkg/x.go"}
-
-	env := newWorkflowEnvironmentSansCommitOracles(t,
-		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
-			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
-		},
-		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: 0}}, nil
-		},
-		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
-			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
-		},
-	)
-	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
-		return VerifyActivityResult{
-			Result:                runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: 0},
-			ReferenceOracleSHA256: "treehash",
-		}, nil
-	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
-	env.RegisterActivityWithOptions(func(context.Context, CollectEvidenceInput) (CollectedEvidence, error) {
-		return CollectedEvidence{ResultSHA: "collect-sha", ChangedFiles: []string{"pkg/x.go"}}, nil
-	}, activity.RegisterOptions{Name: CollectEvidenceActivityName})
-	env.RegisterActivityWithOptions(func(context.Context, ReviewStepInput) (VerifyActivityResult, error) {
-		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "code_review.py"}, ExitCode: 1}}, nil
-	}, activity.RegisterOptions{Name: RunReviewStepActivityName})
-	commitCalled := false
-	env.RegisterActivityWithOptions(func(context.Context, CommitOraclesInput) (CommittedOracles, error) {
-		commitCalled = true
-		return CommittedOracles{}, nil
-	}, activity.RegisterOptions{Name: CommitOraclesActivityName})
-
-	env.ExecuteWorkflow(RunWorkflow, input)
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow error: %v", err)
+func gateByCheck(t *testing.T, gates []run.GateResult, check string) run.GateResult {
+	t.Helper()
+	for _, g := range gates {
+		if g.Check == check {
+			return g
+		}
 	}
-	if commitCalled {
-		t.Fatal("CommitOraclesActivity called, want it skipped: the declared code review failed")
-	}
+	t.Fatalf("no %s gate in %+v", check, gates)
+	return run.GateResult{}
 }

@@ -301,7 +301,7 @@ func (p mutationPlan) notes(n int, text, owned string) []string {
 	if owned != "" {
 		tickets = append(append([]request.PlanTicket{}, tickets...), request.PlanTicket{Name: otherTicket, Content: "a ticket that covers no criterion", Allowed: []string{owned}})
 	}
-	return request.PlanReviewNotes(criteria, tickets, p.workspace, nil, 0)
+	return request.PlanReviewNotes(criteria, tickets, p.workspace, 0)
 }
 
 // mutationStride thins the mutations: of every mutationStride (clause,
@@ -619,7 +619,7 @@ func drivePlan(t *testing.T, criteria, files []string, tickets []requestdriver.D
 		}
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := request.Load(dataDir, id)

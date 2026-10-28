@@ -73,7 +73,7 @@ func TestAutomaticCorrectiveRoundsRunOnTheEscalation(t *testing.T) {
 				ReviewCorrectiveRounds: 1, OpenPullRequest: true,
 				Settings: escalationSettings(&sessionconfig.Escalation{Model: "sol", Thinking: "high"}),
 			}
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			if *calls != 1 {

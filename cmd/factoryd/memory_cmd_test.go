@@ -821,7 +821,7 @@ func driveMemoryRequest(t *testing.T, f *memFix, id string, want request.State) 
 		if loaded.State == want || i == 4 {
 			return loaded.State
 		}
-		if err := driveRequests(f.dp, context.Background(), f.data, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		if err := driveRequests(f.dp, context.Background(), f.data, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}

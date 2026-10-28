@@ -7,8 +7,7 @@ deterministic stand-ins so gate and state-machine mechanisms can be
 exercised without a model.
 
 Not the release smoke test. That is `make live-smoke`
-([`AGENTS.md`](../../AGENTS.md), "Live validation"), which also covers the
-approved-oracle fixtures. For a first look at buildgate, start with
+([`AGENTS.md`](../../AGENTS.md), "Live validation"). For a first look at buildgate, start with
 [`README.md`](../../README.md) and [`DEMO.md`](../../DEMO.md).
 
 ## Phase runners
@@ -42,8 +41,7 @@ interpreter). The spec/plan mocks create their own output directories,
 since the drafting scratch directory is removed before each attempt.
 
 The stand-ins cover the default request path (`spec_review` ->
-`plan_review` -> `building`). None drafts oracles; the
-`-draft-oracles` stage is covered by `make live-smoke` and the Go tests.
+`plan_review` -> `building`).
 
 ## Not scripted, deliberately
 

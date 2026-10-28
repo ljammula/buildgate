@@ -23,7 +23,7 @@ var (
 // AllGateChecks names every gate EvaluateRun can run, in the order it runs
 // them: the four built-in checks below, followed by CommandGateIDs()'s own
 // registry order (policy.CommandGates) -- lint, security_audit,
-// unit_tests, integration_tests, reference_oracle today. A caller that
+// unit_tests, integration_tests today. A caller that
 // wants to require "the strong gates actually ran" rather than merely "no
 // recorded gate failed" (internal/release.MergePolicy.RequiredGates
 // exists for exactly that -- see its doc comment) uses this as its
@@ -109,8 +109,7 @@ func (v ScopeVerdict) Refused() []string {
 	return out
 }
 
-// Judge sorts changed (already stripped of harness byproducts and factory
-// oracles by the caller) against s.
+// Judge sorts changed (already stripped of harness byproducts by the caller) against s.
 func (s Scope) Judge(changed []string) ScopeVerdict {
 	var v ScopeVerdict
 	if s.AllowedFiles != nil {
@@ -275,19 +274,17 @@ func IsTestFile(file string, patterns []string) bool {
 }
 
 // TestFiles returns the files of changed that count as tests under patterns
-// (DefaultTestPatterns when empty), after harness byproducts and the
-// factory-committed oracles are set aside: an oracle's own test file must not
-// satisfy the agent's obligation to add a test. A malformed pattern never
+// (DefaultTestPatterns when empty), after harness byproducts are set aside. A malformed pattern never
 // matches (patterns come from a committed .factory.yml, so a typo shows up as
 // "no test file changed", fixable by the repository owner, rather than
 // halting an unrelated run). These are the files the tests_red_on_base proof
 // runs.
-func TestFiles(changed, patterns []string, oracles *run.OracleEvidence) []string {
+func TestFiles(changed, patterns []string) []string {
 	if len(patterns) == 0 {
 		patterns = DefaultTestPatterns
 	}
 	var tests []string
-	for _, f := range ExcludeFactoryOracles(ExcludeHarnessByproducts(changed), oracles) {
+	for _, f := range ExcludeHarnessByproducts(changed) {
 		if IsTestFile(f, patterns) {
 			tests = append(tests, f)
 		}
@@ -310,18 +307,23 @@ type TestsRedOnBaseInput struct {
 
 // TestsRedOnBase evaluates the tests_red_on_base gate over tests (TestFiles),
 // the ticket's opt-out reason (ticketspec.ParseTestsRequiredOptOut's return
-// value; "" means none) and the proof, nil when the run took none. It
-// refuses, in order:
+// value; "" means none), whether the ticket may opt out at all (optOutRefused:
+// ticket 1 of a bug request may not) and the proof, nil when the run took
+// none. It refuses, in order:
 //
+//   - an opt-out the ticket may not make;
 //   - with no opt-out and no test file changed;
 //   - a proof that every test that ran also passes on the base commit.
 //
-// An opt-out passes with no proof (the pull request names the reason). A
+// An opt-out the ticket may make passes with no proof (the pull request names the reason). A
 // proof with no verdict, or none at all, passes and returns a note: a check
 // that executes something refuses only on what it saw run.
-func TestsRedOnBase(tests []string, optOutReason string, proof *TestsRedOnBaseInput) (run.GateResult, string) {
+func TestsRedOnBase(tests []string, optOutReason string, optOutRefused bool, proof *TestsRedOnBaseInput) (run.GateResult, string) {
 	gate := run.GateResult{Check: TestsRedOnBaseCheck, Passed: true}
 	switch {
+	case optOutReason != "" && optOutRefused:
+		gate.Passed = false
+		return gate, ""
 	case optOutReason != "":
 		return gate, ""
 	case len(tests) == 0:
@@ -476,13 +478,6 @@ type NamedGateInput struct {
 	ExitCode   int
 	DurationMs int64
 	LogSHA256  string
-	// ReferenceOracleSHA256 is meaningful only for the "reference_oracle"
-	// check -- see run.GateResult.ReferenceOracleSHA256's own doc
-	// comment. Left empty for every other named gate, and copied through
-	// verbatim (never computed here; policy stays pure/deterministic
-	// over already-collected evidence, the same reason LogSHA256 is
-	// passed in rather than hashed by this function).
-	ReferenceOracleSHA256 string
 	// BaseCheck is the gate's rerun on the base commit, copied through to
 	// run.GateResult.BaseCheck. It never decides Passed.
 	BaseCheck *run.GateBaseCheck
@@ -490,15 +485,14 @@ type NamedGateInput struct {
 
 // NamedGate evaluates one NamedGateInput the same way FullSuiteVerify
 // evaluates the full-suite gate: pass iff the command exited zero.
-func NamedGate(check string, cmd []string, exitCode int, durationMs int64, logSHA256, referenceOracleSHA256 string) run.GateResult {
+func NamedGate(check string, cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
 	return run.GateResult{
-		Check:                 check,
-		Command:               cmd,
-		Passed:                exitCode == 0,
-		ExitCode:              exitCode,
-		DurationMs:            durationMs,
-		LogSHA256:             logSHA256,
-		ReferenceOracleSHA256: referenceOracleSHA256,
+		Check:      check,
+		Command:    cmd,
+		Passed:     exitCode == 0,
+		ExitCode:   exitCode,
+		DurationMs: durationMs,
+		LogSHA256:  logSHA256,
 	}
 }
 
@@ -546,7 +540,10 @@ type EvaluateRunInput struct {
 	// TestsRedOnBase is nil when the run took no proof.
 	TestPatterns        []string
 	TestsRequiredOptOut string
-	TestsRedOnBase      *TestsRedOnBaseInput
+	// TestsOptOutRefused is set for ticket 1 of a bug request: its
+	// Tests-Required opt-out is not honoured, and the gate fails on it.
+	TestsOptOutRefused bool
+	TestsRedOnBase     *TestsRedOnBaseInput
 
 	FullSuiteCommand    []string
 	FullSuiteExitCode   int
@@ -577,12 +574,6 @@ type EvaluateRunInput struct {
 	// phase (a run without -review-reproduction, or one that never reached
 	// the review), and EvaluateRun then skips the review_reproduction check.
 	ReviewReproduction *ReviewReproductionInput
-
-	// Oracles is the host-collected committed-oracle evidence (nil for
-	// every run without one). It only ever REMOVES factory-authored,
-	// hash-verified paths from the diff_scope and test-file inventories
-	// (ExcludeFactoryOracles).
-	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
 }
 
 // EvaluateRunResult is EvaluateRun's outcome: every gate that actually ran
@@ -630,7 +621,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		// ExcludeHarnessByproducts' own doc comment for why DiffScope must
 		// stay a neutral matcher for internal/release's differently-scoped
 		// reuse of it.
-		verdict := scope.Judge(ExcludeFactoryOracles(ExcludeHarnessByproducts(input.ChangedFiles), input.Oracles))
+		verdict := scope.Judge(ExcludeHarnessByproducts(input.ChangedFiles))
 		refused := verdict.Refused()
 		scopeGate := run.GateResult{Check: "diff_scope", Passed: len(refused) == 0}
 		result.GateResults = append(result.GateResults, scopeGate)
@@ -655,7 +646,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		}
 	}
 
-	testsGate, note := TestsRedOnBase(TestFiles(input.ChangedFiles, input.TestPatterns, input.Oracles), input.TestsRequiredOptOut, input.TestsRedOnBase)
+	testsGate, note := TestsRedOnBase(TestFiles(input.ChangedFiles, input.TestPatterns), input.TestsRequiredOptOut, input.TestsOptOutRefused, input.TestsRedOnBase)
 	if note != "" {
 		result.Notes = append(result.Notes, note)
 	}
@@ -672,7 +663,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	}
 
 	for _, g := range input.NamedGates {
-		gate := NamedGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256, g.ReferenceOracleSHA256)
+		gate := NamedGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256)
 		gate.BaseCheck = g.BaseCheck
 		result.GateResults = append(result.GateResults, gate)
 		if !gate.Passed {
@@ -1264,28 +1255,6 @@ func ExcludeHarnessByproducts(changed []string) []string {
 	filtered := make([]string, 0, len(changed))
 	for _, f := range changed {
 		if !isHarnessByproduct(f) {
-			filtered = append(filtered, f)
-		}
-	}
-	return filtered
-}
-
-// ExcludeFactoryOracles returns changed with every path the factory host
-// itself committed as an accepted acceptance oracle (or its index, or a
-// manifest-declared supersession deletion) removed -- but only where o
-// proves the blob at ResultSHA still hashes to the pinned hash (or the
-// deleted path is really absent). A path the agent also wrote, with
-// different bytes, therefore stays in the inventory. Like
-// ExcludeHarnessByproducts it is a sibling filter applied at EvaluateRun's
-// ticket-scope call sites, never inside DiffScope. nil o returns changed
-// untouched, which is every run that has no committed oracles.
-func ExcludeFactoryOracles(changed []string, o *run.OracleEvidence) []string {
-	if o == nil || (len(o.Authored) == 0 && len(o.Deleted) == 0) {
-		return changed
-	}
-	filtered := make([]string, 0, len(changed))
-	for _, f := range changed {
-		if !o.FactoryAuthoredIntact(f) {
 			filtered = append(filtered, f)
 		}
 	}

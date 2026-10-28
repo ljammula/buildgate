@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -2979,45 +2978,15 @@ func TestAdvancePRReviewHaltReasonNamesTheRecordedPROpenFailure(t *testing.T) {
 	}
 }
 
-// A corrective round must carry the ticket's approved oracle and the
-// request's full-suite command. Without the oracle, the round has no factory-
-// authored record for the committed oracle files and .buildgate/oracles.json
-// that its cumulative -diff-base inventory lists, and the always-protected
-// .buildgate/ directory quarantines every round; without the full-suite
-// command the round has no full_suite_verify gate (Codex review of #202).
-func TestRunCorrectiveRoundCarriesTheTicketOracleAndFullSuiteCommand(t *testing.T) {
+// A corrective round must carry the request's full-suite command: without it
+// the round has no full_suite_verify gate (Codex review of #202).
+func TestRunCorrectiveRoundCarriesTheFullSuiteCommand(t *testing.T) {
 	dp := newFakeDeps(t)
 	threads := []forge.Thread{
 		{ID: "thread-1", Path: "a.go", Line: 10, Author: "alice", Body: "please rename this", CommentID: 111},
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	r.FullSuiteCommand = "go test ./..."
-	r.NoCommitOracles = true
-	oracleDir := request.TicketOracleDir(r.Tickets[0].SpecPath)
-	if err := os.MkdirAll(oracleDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if r.ApprovedSHA256 == nil {
-		r.ApprovedSHA256 = map[string]string{}
-	}
-	for name, content := range map[string]string{
-		"oracle_001.go": "package x\n",
-		requestdriver.TicketOracleRunCommandFilename: "go test ./.oracle/...\n",
-	} {
-		path := filepath.Join(oracleDir, name)
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		relPath, err := filepath.Rel(request.Dir(dataDir, r.ID), path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		hash, err := request.HashFile(dataDir, r.ID, relPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.ApprovedSHA256[relPath] = hash
-	}
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedArgs []string
@@ -3043,17 +3012,8 @@ func TestRunCorrectiveRoundCarriesTheTicketOracleAndFullSuiteCommand(t *testing.
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
-	if got := requestdrivertest.ArgValue(capturedArgs, "-reference-oracle-dir"); got != oracleDir {
-		t.Errorf("-reference-oracle-dir = %q, want %q", got, oracleDir)
-	}
-	if got := requestdrivertest.ArgValue(capturedArgs, "-reference-oracle-command"); got != "go test ./.oracle/..." {
-		t.Errorf("-reference-oracle-command = %q, want the ticket's RUN_COMMAND.txt", got)
-	}
 	if got := requestdrivertest.ArgValue(capturedArgs, "-full-suite-command"); got != "go test ./..." {
 		t.Errorf("-full-suite-command = %q, want %q (from r.FullSuiteCommand)", got, "go test ./...")
-	}
-	if !containsFlag(capturedArgs, "-no-commit-oracles") {
-		t.Errorf("args = %v, want -no-commit-oracles carried from r.NoCommitOracles", capturedArgs)
 	}
 }
 

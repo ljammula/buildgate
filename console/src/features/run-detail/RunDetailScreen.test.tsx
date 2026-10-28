@@ -155,23 +155,6 @@ test("attempt card shows no clamp hint when a declared thinkingLevelMap translat
   expect(screen.queryByText(/\(sent:/)).not.toBeInTheDocument();
 });
 
-// A run with no reference_oracle_dir (no -draft-oracles) never visits the two
-// oracle-commit stages, so the timeline must not list them (operator demo, 2026-09-26).
-test("timeline omits commit_oracles/post_oracle_commit_verify for a run with no oracle stage", async () => {
-  renderRun(acceptedRun());
-
-  await screen.findByTestId("timeline-row-prepare_workspace");
-  expect(screen.queryByTestId("timeline-row-commit_oracles")).not.toBeInTheDocument();
-  expect(screen.queryByTestId("timeline-row-post_oracle_commit_verify")).not.toBeInTheDocument();
-});
-
-test("timeline shows commit_oracles/post_oracle_commit_verify for a run with an oracle stage", async () => {
-  renderRun({ ...acceptedRun(), reference_oracle_dir: "/data/requests/req-1/oracle" });
-
-  expect(await screen.findByTestId("timeline-row-commit_oracles")).toBeInTheDocument();
-  expect(screen.getByTestId("timeline-row-post_oracle_commit_verify")).toBeInTheDocument();
-});
-
 // A quarantined run is not terminal: an operator override can still move it
 // later, so the page keeps watching it. The stream is a streamed fetch, so a
 // served event reaches the page through the same parsing a real server's

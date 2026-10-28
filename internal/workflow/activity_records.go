@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"buildgate/internal/oraclecanary"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -316,12 +315,12 @@ func readAttemptJournals(checkpointDir string) map[string][]run.Attempt {
 				continue
 			}
 			var journal activityAttemptJournal
-			if json.Unmarshal(b, &journal) != nil || journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID == "" || journal.RunID == "" || journal.ActivityID == "" || !journaledKind(journal.Kind) || strings.TrimSuffix(name, ".json") != activityAttemptKey(journal.WorkflowID, journal.RunID, journal.ActivityID, journal.ActivityAttempt) {
+			if json.Unmarshal(b, &journal) != nil || journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID == "" || journal.RunID == "" || journal.ActivityID == "" || !commandKind(journal.Kind) || strings.TrimSuffix(name, ".json") != activityAttemptKey(journal.WorkflowID, journal.RunID, journal.ActivityID, journal.ActivityAttempt) {
 				continue
 			}
 			valid := true
 			for _, attempt := range journal.Attempts {
-				if !attemptKindFitsJournal(journal.Kind, attempt.Kind) || attempt.StartedAt == "" || attempt.LogPath == "" {
+				if attempt.Kind != journal.Kind || attempt.StartedAt == "" || attempt.LogPath == "" {
 					valid = false
 					break
 				}
@@ -366,7 +365,7 @@ func inFlightAttempts(dir string, entries []os.DirEntry, covered func(recordKey 
 		// a kind run.Attempt's own contract never promises, on a client
 		// timeout that catches one of those two intents unmatched by a
 		// checkpoint.
-		if !commandKind(intent.Kind) && !isPostOracleCommitAttemptKind(intent.Kind) {
+		if !commandKind(intent.Kind) {
 			continue
 		}
 		completedCount := len(journaled[key])
@@ -459,12 +458,6 @@ func commandKind(kind string) bool {
 	return false
 }
 
-// journaledKind is every kind an attempt journal may carry: commandKind's,
-// and the post-oracle-commit verify's own journal.
-func journaledKind(kind string) bool {
-	return commandKind(kind) || kind == postOracleCommitJournalKind
-}
-
 // attemptKindRank orders run.Attempt.Kind values the same way a real run
 // produces them (baseline_verify, build, then verify, then full_suite_verify) for
 // RecoverAttemptsFromCheckpointDir's tiebreak above. An unrecognized kind
@@ -480,12 +473,8 @@ func attemptKindRank(kind string) int {
 		return 1
 	case "full_suite_verify":
 		return 2
-	case postOracleCommitVerifyKind:
-		return 3
-	case postOracleCommitFullSuiteKind:
-		return 4
 	default:
-		return 5
+		return 3
 	}
 }
 
@@ -640,11 +629,11 @@ func loadActivityAttemptJournalForExecution(logDir, workflowID, runID, activityI
 	if err := json.Unmarshal(b, &journal); err != nil {
 		return activityAttemptJournal{}, false, fmt.Errorf("unmarshal attempt journal: %w", err)
 	}
-	if journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID != workflowID || journal.RunID != runID || journal.ActivityID != activityID || journal.ActivityAttempt != activityAttempt || !journaledKind(journal.Kind) {
+	if journal.SchemaVersion != activityAttemptJournalSchemaVersion || journal.WorkflowID != workflowID || journal.RunID != runID || journal.ActivityID != activityID || journal.ActivityAttempt != activityAttempt || !commandKind(journal.Kind) {
 		return activityAttemptJournal{}, false, fmt.Errorf("attempt journal does not identify a valid Activity execution")
 	}
 	for _, attempt := range journal.Attempts {
-		if !attemptKindFitsJournal(journal.Kind, attempt.Kind) || attempt.StartedAt == "" || attempt.LogPath == "" {
+		if attempt.Kind != journal.Kind || attempt.StartedAt == "" || attempt.LogPath == "" {
 			return activityAttemptJournal{}, false, fmt.Errorf("attempt journal contains an invalid attempt")
 		}
 	}
@@ -843,13 +832,9 @@ func (a *Activities) earlierAttemptsFor(ctx context.Context, logDir, journalKind
 }
 
 // intentKindFitsJournal: an intent describes an attempt of the Activity that
-// journals under journalKind: its own kind, the post-oracle verify's phase
-// kinds, or the reference-oracle canary a named gate runs.
+// journals under journalKind: its own kind.
 func intentKindFitsJournal(journalKind, intentKind string) bool {
-	if journalKind == postOracleCommitJournalKind {
-		return isPostOracleCommitAttemptKind(intentKind)
-	}
-	return intentKind == journalKind || intentKind == oraclecanary.AttemptKind
+	return intentKind == journalKind
 }
 
 // loadActivityAttemptJournalOfKind reads one attempt's journal for the

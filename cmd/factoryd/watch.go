@@ -775,13 +775,6 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 			printReviewNotes(out, dataDir, r)
 			printReadBack(out, r)
 			return nil
-		case request.StateOracleReview:
-			fmt.Fprintf(out, "Review or hand-write %s/%s (leave it absent or empty to skip), then run: factoryd approve %s\n", request.Dir(dataDir, r.ID), request.RequestOracleDirName, r.ID)
-			fmt.Fprintf(out, "%s\n", request.OracleReviewChecklistHint)
-			if notice := request.OracleReviewNotice(dataDir, r); notice != "" {
-				fmt.Fprintf(out, "ACTION NEEDED before approve: %s\n", notice)
-			}
-			return nil
 		case request.StatePlanReview:
 			fmt.Fprintf(out, "Review the drafted plan, then run: factoryd approve %s\n", r.ID)
 			printReviewNotes(out, dataDir, r)

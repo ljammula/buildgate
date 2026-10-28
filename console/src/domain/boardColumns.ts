@@ -34,8 +34,6 @@ const COLUMN_OF_STATE: Readonly<Record<string, BoardColumn>> = {
   submitted: "spec",
   spec_drafting: "spec",
   spec_review: "spec",
-  oracle_drafting: "spec",
-  oracle_review: "spec",
   planning: "plan",
   plan_review: "plan",
   building: "building",
@@ -147,7 +145,6 @@ function newestFirst(a: RequestSummary, b: RequestSummary): number {
 const JOB_STATES: ReadonlySet<string> = new Set([
   "submitted",
   "spec_drafting",
-  "oracle_drafting",
   "planning",
   "building",
 ]);
@@ -279,17 +276,10 @@ const GROUP_RULES: Readonly<Record<BoardColumn, readonly GroupRule[]>> = {
       holds: inState("spec_review"),
     },
     {
-      label: "Oracle review",
-      short: "Oracle",
-      order: 2,
-      oneState: true,
-      holds: inState("oracle_review"),
-    },
-    {
       label: "Drafting",
       short: "Drafting",
-      order: 3,
-      holds: inState("submitted", "spec_drafting", "oracle_drafting"),
+      order: 2,
+      holds: inState("submitted", "spec_drafting"),
     },
     other,
   ],

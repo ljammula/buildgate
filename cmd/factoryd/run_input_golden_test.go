@@ -63,7 +63,7 @@ func runInputGoldenConfig(t *testing.T) string {
 // covers it), and the
 // spec's Required-Content and the config's skills, test patterns and allowed paths.
 // -resume-session-of names the quarantined run, which kept no session.
-// inputs is the directory the flag files (spec, criteria, oracle) are written to.
+// inputs is the directory the flag files (spec, criteria) are written to.
 func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, address string) []string {
 	t.Helper()
 	write := func(name, content string) string {
@@ -72,13 +72,6 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 			t.Fatalf("write %s: %v", name, err)
 		}
 		return path
-	}
-	oracleDir := filepath.Join(inputs, "oracle")
-	if err := os.MkdirAll(oracleDir, 0o755); err != nil {
-		t.Fatalf("create oracle dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(oracleDir, "check.sh"), []byte("exit 0\n"), 0o644); err != nil {
-		t.Fatalf("write oracle check: %v", err)
 	}
 	// A quarantined run's held reproduction, for -recheck-reproductions.
 	held := filepath.Join(dataDir, "runs", "golden-quarantined", "review-repro", "0", "held_test.go")
@@ -123,11 +116,6 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-security-command", "echo security",
 		"-unit-test-command", "echo unit",
 		"-integration-test-command", "echo integration",
-		"-reference-oracle-command", "sh verify/check.sh",
-		"-reference-oracle-dir", oracleDir,
-		"-reference-oracle-mount-path", "verify",
-		"-reference-oracle-in-loop-retry",
-		"-no-commit-oracles",
 		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",

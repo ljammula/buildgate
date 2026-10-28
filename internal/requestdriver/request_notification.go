@@ -91,14 +91,12 @@ func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requ
 	approve := fmt.Sprintf("factoryd approve %s (or `factoryd reject -reason ... %s`)", r.ID, r.ID)
 	var notice requestNotice
 	switch {
-	case r.State == request.StateOracleReview:
-		notice = requestNotice{Ask: "Acceptance tests ready for your review", Detail: "Read them, then approve, edit or skip them.", Next: approve}
 	case r.State == request.StatePlanReview:
 		detail := "Read the tickets, then approve or request changes."
 		if n := len(r.Tickets); n > 0 {
 			detail = fmt.Sprintf("%d ticket(s). %s", n, detail)
 		}
-		notice = requestNotice{Ask: "Plan ready for your review", Detail: detail + PlanReviewOracleNote(dataDir, r), Next: approve}
+		notice = requestNotice{Ask: "Plan ready for your review", Detail: detail, Next: approve}
 	case r.State == request.StateBuilding && r.StackedWait != nil:
 		// A stacked ticket waits on the earlier ticket's pull request; the
 		// sentence names what is wrong and what to do (stackHold.wait).
@@ -125,9 +123,6 @@ func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requ
 		}
 	default: // request.StateSpecReview, and any state that ends up here.
 		notice = requestNotice{Ask: "Spec ready for your review", Detail: "Read it, then approve or request changes.", Next: approve}
-	}
-	if note := request.OracleReviewNotice(dataDir, r); note != "" {
-		notice.Detail += " -- NOTE: " + note
 	}
 	if n := len(r.ReviewNotes); n > 0 && (r.State == request.StateSpecReview || r.State == request.StatePlanReview) {
 		notice.Detail += fmt.Sprintf(" The factory left %d note(s) on it.", n)

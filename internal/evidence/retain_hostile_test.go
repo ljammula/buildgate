@@ -215,7 +215,7 @@ func TestRetainAgentNotesRefusesHostileShapesAndNeverWritesThroughALink(t *testi
 func TestRetainRoundLogsRefusesADirectoryAnOversizedLogAndALinkedDestination(t *testing.T) {
 	t.Run("the log is a directory", func(t *testing.T) {
 		workspace, dst := t.TempDir(), filepath.Join(t.TempDir(), RoundLogsDirName)
-		writeRoundLog(t, workspace, "round-1", "oracle.log", "real\n")
+		writeRoundLog(t, workspace, "round-1", "fast-check.log", "real\n")
 		if err := os.Mkdir(filepath.Join(workspace, ".pi-build-session", "feedback", "round-1", "verify.log"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -226,11 +226,11 @@ func TestRetainRoundLogsRefusesADirectoryAnOversizedLogAndALinkedDestination(t *
 		if _, statErr := os.Lstat(filepath.Join(dst, "round-1", "verify.log")); !os.IsNotExist(statErr) {
 			t.Error("something was retained for the directory")
 		}
-		assertRegularCopy(t, filepath.Join(dst, "round-1", "oracle.log"), "real\n")
+		assertRegularCopy(t, filepath.Join(dst, "round-1", "fast-check.log"), "real\n")
 	})
 	t.Run("the log is over one file's limit", func(t *testing.T) {
 		workspace, dst := t.TempDir(), filepath.Join(t.TempDir(), RoundLogsDirName)
-		writeRoundLog(t, workspace, "round-1", "oracle.log", "real\n")
+		writeRoundLog(t, workspace, "round-1", "fast-check.log", "real\n")
 		sparseFile(t, filepath.Join(workspace, ".pi-build-session", "feedback", "round-1", "verify.log"), maxRetainFileSize+1)
 		copied, err := RetainRoundLogs(workspace, dst)
 		if copied != 1 || err == nil || !strings.Contains(err.Error(), "round-1/verify.log") || !strings.Contains(err.Error(), "exceeding") {

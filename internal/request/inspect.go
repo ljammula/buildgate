@@ -90,14 +90,14 @@ func (i Inspection) Empty() bool {
 }
 
 // Inspect returns the commands for r in its current state: the drafted
-// files at spec, oracle and plan review; each built ticket's latest work at
+// files at spec and plan review; each built ticket's latest work at
 // pr_review, quarantined, halted and resume_review; nothing otherwise.
 func Inspect(dataDir string, r *Request) Inspection {
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
 	switch r.State {
-	case StateSpecReview, StateOracleReview, StatePlanReview:
+	case StateSpecReview, StatePlanReview:
 		return Inspection{Commands: draftCommands(dataDir, r), Note: InspectDraftNote}
 	case StatePRReview, StateQuarantined, StateHalted, StateResumeReview:
 		var out Inspection
@@ -160,8 +160,6 @@ func draftCommands(dataDir string, r *Request) []InspectCommand {
 	dir := Dir(dataDir, r.ID)
 	cmds := []InspectCommand{{Label: "The spec", Command: "less " + ShellPath(SpecPath(dataDir, r.ID))}}
 	switch r.State {
-	case StateOracleReview:
-		cmds = append(cmds, InspectCommand{Label: "The drafted oracle files", Command: "ls -R " + ShellPath(filepath.Join(dir, RequestOracleDirName))})
 	case StatePlanReview:
 		tickets := filepath.Join(dir, "tickets")
 		cmds = append(cmds, InspectCommand{Label: "The drafted tickets", Command: "ls " + ShellPath(tickets)})

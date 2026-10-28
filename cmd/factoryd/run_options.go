@@ -62,9 +62,6 @@ type runOptions struct {
 	// InstallCacheImages is sandbox_install_cache_images.
 	InstallCacheImages int
 
-	ReferenceOracleDir       string
-	ReferenceOracleMountPath string
-
 	MaxRounds           int
 	TimeoutMinutes      int
 	BuildAppMaxAttempts int

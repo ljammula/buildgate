@@ -108,7 +108,7 @@ func TestDriveRequestsIsANoOpWhenNothingIsInADrivenState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestDriveRequestsPicksOldestSubmittedFirst(t *testing.T) {
 		}
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestAdvanceSpecDraftingJobFailureHaltsWithReasonAndNotification(t *testing.
 	}
 
 	runner, _ := stubSpecDraftRunner("", nil, errUnreachableRelay)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -226,7 +226,7 @@ func TestAdvanceSpecDraftingMalformedSkeletonHaltsNamingHeading(t *testing.T) {
 
 	malformed := "# Spec\n\n## Problem\n\nx\n" // missing every later heading
 	runner, _ := stubSpecDraftRunner(malformed, &request.SpecEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -267,7 +267,7 @@ func TestAdvanceSpecDraftingKeepsACommitMessageCriterionAndNotesIt(t *testing.T)
 		"2. AC-2: The system shall have the consumer commit the offset and log the message id.\n\n" +
 		"## Risks\n\nNone known.\n\n## Open questions\n\nNone.\n"
 	runner, _ := stubSpecDraftRunner(draft, &request.SpecEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	persisted, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, "req-1"))
@@ -537,222 +537,6 @@ func TestBuildRequestBuildArgsCarriesRequestHarness(t *testing.T) {
 	}
 }
 
-// newApprovedOracleFixture writes a ticket spec plus a populated,
-// plan_review-approved <NNN>.oracle/ directory (oracle_001.go +
-// RUN_COMMAND.txt, both hash-recorded in r.ApprovedSHA256 the same way
-// a real Approve call would) -- the well-formed baseline
-// TestResolveTicketOracle*'s individual cases each perturb one way.
-func newApprovedOracleFixture(t *testing.T, dataDir string) (*request.Request, request.Ticket) {
-	t.Helper()
-	r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app"}
-	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.spec.md")
-	if err := os.MkdirAll(filepath.Dir(ticketPath), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ticketPath, []byte("Verify-Command: true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	oracleDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	if err := os.MkdirAll(oracleDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	r.ApprovedSHA256 = map[string]string{}
-	for name, content := range map[string]string{
-		"oracle_001.go": "package x\n",
-		requestdriver.TicketOracleRunCommandFilename: "go test ./.oracle/...\n",
-	} {
-		path := filepath.Join(oracleDir, name)
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		relPath := filepath.Join("tickets", "001.oracle", name)
-		hash, err := request.HashFile(dataDir, r.ID, relPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.ApprovedSHA256[relPath] = hash
-	}
-	return r, request.Ticket{Index: 1, SpecPath: ticketPath}
-}
-
-func TestResolveTicketOracleReturnsEmptyWhenNoOracleDirectory(t *testing.T) {
-	dataDir := t.TempDir()
-	r := &request.Request{ID: "req-1"}
-	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.spec.md")
-	if err := os.MkdirAll(filepath.Dir(ticketPath), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ticketPath, []byte("Verify-Command: true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	oracleDir, command, err := requestdriver.ResolveTicketOracle(dataDir, r, request.Ticket{Index: 1, SpecPath: ticketPath})
-	if err != nil {
-		t.Fatalf("resolveTicketOracle: %v", err)
-	}
-	if oracleDir != "" || command != "" {
-		t.Fatalf("resolveTicketOracle = (%q, %q), want empty (no oracle directory exists)", oracleDir, command)
-	}
-}
-
-func TestResolveTicketOracleReturnsDirAndCommandWhenApproved(t *testing.T) {
-	dataDir := t.TempDir()
-	r, ticket := newApprovedOracleFixture(t, dataDir)
-
-	oracleDir, command, err := requestdriver.ResolveTicketOracle(dataDir, r, ticket)
-	if err != nil {
-		t.Fatalf("resolveTicketOracle: %v", err)
-	}
-	wantDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	if oracleDir != wantDir {
-		t.Errorf("oracleDir = %q, want %q", oracleDir, wantDir)
-	}
-	if command != "go test ./.oracle/..." {
-		t.Errorf("command = %q, want %q", command, "go test ./.oracle/...")
-	}
-}
-
-func TestResolveTicketOracleRefusesUnapprovedFile(t *testing.T) {
-	dataDir := t.TempDir()
-	r, ticket := newApprovedOracleFixture(t, dataDir)
-	// A file added to the oracle directory after approval -- never
-	// hash-recorded, must not be silently trusted.
-	oracleDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	if err := os.WriteFile(filepath.Join(oracleDir, "sneaked_in.go"), []byte("package x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, _, err := requestdriver.ResolveTicketOracle(dataDir, r, ticket); err == nil {
-		t.Fatal("resolveTicketOracle with an unapproved file present: want an error, got nil")
-	}
-}
-
-func TestResolveTicketOracleRefusesHashMismatch(t *testing.T) {
-	dataDir := t.TempDir()
-	r, ticket := newApprovedOracleFixture(t, dataDir)
-	oracleDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	// Edited after approval -- the exact tamper VerifyApprovedHashes-style
-	// re-verification exists to catch.
-	if err := os.WriteFile(filepath.Join(oracleDir, "oracle_001.go"), []byte("package x // tampered\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, err := requestdriver.ResolveTicketOracle(dataDir, r, ticket)
-	if err == nil {
-		t.Fatal("resolveTicketOracle with a tampered file: want an error, got nil")
-	}
-	if !strings.Contains(err.Error(), "changed since plan_review approved") {
-		t.Errorf("error = %v, want it to name the tamper", err)
-	}
-}
-
-// TestResolveTicketOracleRefusesASubdirectory is the regression test for
-// a real finding (found via review): the actual build-time mount
-// (evidence.SnapshotTree, run_ticket.go's snapshotAndHashReferenceOracle)
-// walks a ticket's own oracle directory RECURSIVELY, so silently
-// skipping a subdirectory here (as an earlier version did) would let
-// content that was never hash-verified reach a real build. A
-// subdirectory must refuse resolution outright.
-func TestResolveTicketOracleRefusesASubdirectory(t *testing.T) {
-	dataDir := t.TempDir()
-	r, ticket := newApprovedOracleFixture(t, dataDir)
-	oracleDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	if err := os.MkdirAll(filepath.Join(oracleDir, "nested"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, err := requestdriver.ResolveTicketOracle(dataDir, r, ticket)
-	if err == nil {
-		t.Fatal("resolveTicketOracle with a subdirectory present: want an error, got nil")
-	}
-	if !strings.Contains(err.Error(), "subdirectory") {
-		t.Errorf("error = %v, want it to name the subdirectory", err)
-	}
-}
-
-func TestResolveTicketOracleRefusesMissingRunCommand(t *testing.T) {
-	dataDir := t.TempDir()
-	r := &request.Request{ID: "req-1"}
-	ticketPath := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.spec.md")
-	if err := os.MkdirAll(filepath.Dir(ticketPath), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ticketPath, []byte("Verify-Command: true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	oracleDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	if err := os.MkdirAll(oracleDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(oracleDir, "oracle_001.go")
-	if err := os.WriteFile(path, []byte("package x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	relPath := filepath.Join("tickets", "001.oracle", "oracle_001.go")
-	hash, err := request.HashFile(dataDir, r.ID, relPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.ApprovedSHA256 = map[string]string{relPath: hash}
-	// RUN_COMMAND.txt deliberately never written.
-
-	_, _, err = requestdriver.ResolveTicketOracle(dataDir, r, request.Ticket{Index: 1, SpecPath: ticketPath})
-	if err == nil {
-		t.Fatal("resolveTicketOracle with no RUN_COMMAND.txt: want an error, got nil")
-	}
-	if !strings.Contains(err.Error(), requestdriver.TicketOracleRunCommandFilename) {
-		t.Errorf("error = %v, want it to name %s", err, requestdriver.TicketOracleRunCommandFilename)
-	}
-}
-
-// TestBuildRequestBuildArgsForwardsReferenceOracleFlags is the
-// end-to-end regression: an approved, hash-verified ticket oracle
-// reaches the child factoryd <run> invocation's own reference-oracle
-// flags, all four together.
-func TestBuildRequestBuildArgsForwardsReferenceOracleFlags(t *testing.T) {
-	dataDir := t.TempDir()
-	r, ticket := newApprovedOracleFixture(t, dataDir)
-
-	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
-	if err != nil {
-		t.Fatalf("buildRequestBuildArgs: %v", err)
-	}
-	got := map[string]string{}
-	inLoopRetry := false
-	for i, a := range args {
-		switch a {
-		case "-reference-oracle-dir", "-reference-oracle-mount-path", "-reference-oracle-command":
-			got[a] = args[i+1]
-		case "-reference-oracle-in-loop-retry":
-			inLoopRetry = true
-		}
-	}
-	wantDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets", "001.oracle")
-	if got["-reference-oracle-dir"] != wantDir {
-		t.Errorf("-reference-oracle-dir = %q, want %q", got["-reference-oracle-dir"], wantDir)
-	}
-	if got["-reference-oracle-mount-path"] != requestdriver.TicketOracleMountPath {
-		t.Errorf("-reference-oracle-mount-path = %q, want %q", got["-reference-oracle-mount-path"], requestdriver.TicketOracleMountPath)
-	}
-	if got["-reference-oracle-command"] != "go test ./.oracle/..." {
-		t.Errorf("-reference-oracle-command = %q, want %q", got["-reference-oracle-command"], "go test ./.oracle/...")
-	}
-	if !inLoopRetry {
-		t.Error("-reference-oracle-in-loop-retry was not set")
-	}
-	if containsFlag(args, "-no-commit-oracles") {
-		t.Error("-no-commit-oracles forwarded although the request did not opt out")
-	}
-	r.NoCommitOracles = true
-	args, err = requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
-	if err != nil {
-		t.Fatalf("buildRequestBuildArgs: %v", err)
-	}
-	if !containsFlag(args, "-no-commit-oracles") {
-		t.Error("-no-commit-oracles not forwarded for an opted-out request")
-	}
-}
-
 // TestBuildRequestBuildArgsOmitsReferenceOracleFlagsWhenTicketHasNone is
 // the converse: the ordinary case (no <NNN>.oracle/ directory at all)
 // must not emit any reference-oracle flag, identical to a ticket built
@@ -776,40 +560,6 @@ func TestBuildRequestBuildArgsOmitsReferenceOracleFlagsWhenTicketHasNone(t *test
 		if strings.HasPrefix(a, "-reference-oracle") {
 			t.Fatalf("args = %v, want no -reference-oracle* flag for a ticket with no oracle directory", args)
 		}
-	}
-}
-
-// The auto-wired oracle mounts inside the workspace, so its directory name
-// must be one Go's ./... wildcard and pytest skip (leading "." or "_"),
-// or a flat-module repo's in-loop `go vet ./... && go test ./...` fails on
-// the mounted oracle itself (found live on todo-service, 2026-09-19).
-func TestTicketOracleMountPathIsHiddenFromWildcardsAndCollectors(t *testing.T) {
-	if !strings.HasPrefix(requestdriver.TicketOracleMountPath, ".") && !strings.HasPrefix(requestdriver.TicketOracleMountPath, "_") {
-		t.Fatalf("ticketOracleMountPath = %q; it must start with '.' or '_' so `go ./...` and pytest skip it", requestdriver.TicketOracleMountPath)
-	}
-}
-
-// Defense in depth for the approval-time check: even an approved (hash-
-// pinned) RUN_COMMAND.txt that never names the mount is refused at run
-// start, so it can never be launched as a vacuous "oracle".
-func TestResolveTicketOracleRefusesRunCommandThatNeverNamesTheMount(t *testing.T) {
-	dataDir := t.TempDir()
-	r, ticket := newApprovedOracleFixture(t, dataDir)
-	path := filepath.Join(request.TicketOracleDir(ticket.SpecPath), requestdriver.TicketOracleRunCommandFilename)
-	if err := os.WriteFile(path, []byte("go test ./...\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	relPath, err := filepath.Rel(request.Dir(dataDir, r.ID), path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hash, err := request.HashFile(dataDir, r.ID, relPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.ApprovedSHA256[relPath] = hash
-	if _, _, err := requestdriver.ResolveTicketOracle(dataDir, r, ticket); err == nil || !strings.Contains(err.Error(), request.TicketOracleMountPath) {
-		t.Fatalf("resolveTicketOracle with a repo-wide RUN_COMMAND: error = %v, want a refusal naming %q", err, request.TicketOracleMountPath)
 	}
 }
 
@@ -847,33 +597,6 @@ func TestCapFeedbackCutsOnlyAtALineStartHeading(t *testing.T) {
 	}
 }
 
-// End to end through the driver: >12 KiB of cumulative rejections still hand
-// the drafter the NEWEST reason.
-func TestDriverFeedbackFileCarriesNewestReasonWhenOversize(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	r := requestdrivertest.LoadRequest(t, dataDir, id)
-	for i := 1; i <= 30; i++ {
-		reason := fmt.Sprintf("reason-%d %s", i, strings.Repeat("x", 1000))
-		r.Rejections = append(r.Rejections, request.Rejection{By: "op", At: "2026-09-20T00:00:00Z", Reason: reason, FromState: request.StateOracleReview})
-	}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	var fed string
-	stub := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		b, _ := os.ReadFile(in.FeedbackPath)
-		fed = string(b)
-		return request.OracleDraft{Status: request.OracleNoneEligible}, nil
-	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), stub, requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(fed, "reason-30 ") || len(fed) > requestdriver.MaxFeedbackBytes {
-		t.Errorf("feedback file: len=%d, has newest=%v", len(fed), strings.Contains(fed, "reason-30 "))
-	}
-}
-
 // TestDriveRequestsAdvancesSubmittedToSpecReview covers the full
 // submitted -> spec_drafting -> spec_review move across two
 // driveRequests calls (the worker's loop calls this once per poll
@@ -892,7 +615,7 @@ func TestDriveRequestsAdvancesSubmittedToSpecReview(t *testing.T) {
 
 	runner, calls := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0, DurationS: 1.5}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (1st call): %v", err)
 	}
 	loaded, err := request.Load(dataDir, "req-1")
@@ -903,7 +626,7 @@ func TestDriveRequestsAdvancesSubmittedToSpecReview(t *testing.T) {
 		t.Fatalf("State after 1st call = %q, want %q", loaded.State, request.StateSpecDrafting)
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (2nd call): %v", err)
 	}
 	if *calls != 1 {
@@ -952,7 +675,7 @@ func TestAdvanceSpecDraftingStampsCompletionAfterJobReturns(t *testing.T) {
 		time.Sleep(jobDuration)
 		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1053,7 +776,7 @@ func TestAdvanceSpecDraftingWritesFeedbackFileFromSpecRejection(t *testing.T) {
 	}
 
 	runner, _ := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1084,10 +807,10 @@ func TestAdvanceSpecDraftingWritesNoFeedbackFileWithoutASpecRejection(t *testing
 	}
 
 	runner, _ := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (1st call): %v", err)
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (2nd call): %v", err)
 	}
 
@@ -1120,7 +843,7 @@ func TestRequestFromEachSourceReachesSpecReviewWithValidSpec(t *testing.T) {
 			}
 
 			runner, _ := stubSpecDraftRunner(requestdrivertest.DraftedSpec, &request.SpecEvidence{}, nil)
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 
@@ -1270,7 +993,7 @@ func TestAdvancePlanningUsesRequestVerifyCommandWithoutFactoryYML(t *testing.T) 
 	}
 	runner, gotVerifyCommand := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *gotVerifyCommand != "python3 -m unittest tests/test_product_lab.py" {
@@ -1309,7 +1032,7 @@ func TestAdvancePlanningWritesFeedbackFileFromPlanRejection(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1332,7 +1055,7 @@ func TestAdvancePlanningHaltsWhenNoVerifyCommandAnywhere(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "")
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1358,7 +1081,7 @@ func TestAdvancePlanningSinglePackageYieldsOneTicket(t *testing.T) {
 	}
 	runner, gotVerifyCommand := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{AgentExitCode: 0, DurationS: 2.5}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *gotVerifyCommand != "make verify" {
@@ -1392,7 +1115,7 @@ func TestAdvancePlanningTwoServiceYieldsTwoTicketsInOrder(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1424,7 +1147,7 @@ func TestAdvancePlanningUnclaimedCriteriaHalts(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1499,7 +1222,7 @@ func TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1548,7 +1271,7 @@ func TestAdvancePlanningRefusesATicketNamingAProtectedPath(t *testing.T) {
 				"Allowed-Files: "+allowed+"\nRequired-Changed-Files: "+required+"\n", 1)
 			tickets := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}
 			runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			loaded, err := request.Load(dataDir, id)
@@ -1620,7 +1343,7 @@ func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
 		},
 	)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1682,7 +1405,7 @@ func TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches(t *testin
 		},
 	)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -1811,7 +1534,7 @@ func TestAdvancePlanningNotesACriterionListedUnderOneOfItsTickets(t *testing.T) 
 	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir, func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return plan, &request.PlanEvidence{}, nil
 	})
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -1849,7 +1572,7 @@ func TestAdvancePlanningLeavesNoNoteWhenEveryOwningTicketListsTheCriterion(t *te
 		dp := newFakeDeps(t)
 		dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
 		runner, _ := requestdrivertest.StubPlanTicketsRunner(habitPlan(insights, []int{1, 2}, []int{1, 2}, []int{1, 2}), &request.PlanEvidence{}, nil)
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		loaded, err := request.Load(dataDir, id)
@@ -1887,7 +1610,7 @@ func TestAdvancePlanningRefusesForTheTestsRuleAndNotForACriterionsFile(t *testin
 			[]string{"internal/payments/other.go"}, 2)},
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -1916,7 +1639,7 @@ func TestAdvancePlanningHashMismatchHaltsNamingSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -2091,7 +1814,7 @@ func TestAdvanceBuildingQuarantineReportedViaRunnerErrorStillQuarantinesRequest(
 	earlierPROpenAt(dp, fmt.Sprintf("%040d", 2))
 
 	for i := 1; i <= 2; i++ {
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests (ticket %d): %v", i, err)
 		}
 	}
@@ -2135,7 +1858,7 @@ func TestAdvanceBuildingHaltedRunWithEmptyRecordFallsBackToRunnerError(t *testin
 		return errors.New("capture base SHA: git rev-parse HEAD: exit status 128")
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -2163,7 +1886,7 @@ func TestAdvanceBuildingRunnerErrorWithNoRunIDStillHalts(t *testing.T) {
 		return errors.New("sandbox image pull failed")
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -2193,7 +1916,7 @@ func TestStartNextTicketOrFinishPRApprovedMovesToPRReviewAfterEveryTicket(t *tes
 	defer func() { requestdriver.RequestAdvanceOn = previous }()
 
 	runner := requestdrivertest.AcceptingBuildRunner(t, dataDir)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -2230,7 +1953,7 @@ func TestAdvanceBuildingHashMismatchHaltsNamingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -2257,7 +1980,7 @@ func TestAdvancePlanningSendsImmediatePlanReviewReminder(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -2285,7 +2008,7 @@ func TestAdvancePlanningHaltDoesNotStartReminders(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -2766,7 +2489,7 @@ func TestDriveRequestsDoesNotLetAPRReviewRequestStarveNewerOnes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	got, err := request.Load(dataDir, newID)
@@ -2819,7 +2542,7 @@ func TestAdvanceSpecDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing
 		cancelRequestForTest(t, dataDir, "req-1")
 		return requestdrivertest.DraftedSpec, &request.SpecEvidence{AgentExitCode: 0}, nil
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -2827,29 +2550,6 @@ func TestAdvanceSpecDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.State != request.StateCancelled {
-		t.Fatalf("State = %q, want %q (a cancel mid-job must survive the job's own save)", loaded.State, request.StateCancelled)
-	}
-}
-
-// TestAdvanceOracleDraftingCancelledDuringJobDoesNotResurrectRequest covers
-// the same cancel-during-job finding above, for the oracle-drafting job.
-func TestAdvanceOracleDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != request.StateOracleDrafting {
-		t.Fatalf("State after spec approval = %q, want oracle_drafting", got.State)
-	}
-
-	runner := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		cancelRequestForTest(t, dataDir, id)
-		return request.OracleDraft{Status: request.OracleNotImplemented}, nil
-	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdrivertest.NoOracleScriptCfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
 	if loaded.State != request.StateCancelled {
 		t.Fatalf("State = %q, want %q (a cancel mid-job must survive the job's own save)", loaded.State, request.StateCancelled)
 	}
@@ -2868,7 +2568,7 @@ func TestAdvancePlanningCancelledDuringJobDoesNotResurrectRequest(t *testing.T) 
 		cancelRequestForTest(t, dataDir, id)
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}, &request.PlanEvidence{}, nil
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2896,7 +2596,7 @@ func TestAdvanceBuildingCancelledDuringJobDoesNotResurrectRequest(t *testing.T) 
 		cancelRequestForTest(t, dataDir, id)
 		return nil
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2932,7 +2632,7 @@ func TestAdvanceBuildingStampsCompletionAfterRunReturns(t *testing.T) {
 		}
 		return nil
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -2966,7 +2666,7 @@ func TestAdvanceBuildingAcceptedWithoutPRRecordsNoPRState(t *testing.T) {
 		}
 		return nil
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -2996,7 +2696,7 @@ func TestAdvancePlanningRemovesStalePlanFeedbackFile(t *testing.T) {
 	}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -3093,7 +2793,7 @@ const malformedSpec = "# Spec\n\n## Problem\n\nx\n"
 func haltOnMalformedSpec(t *testing.T, dp *fakeDeps, dataDir string) *request.Request {
 	t.Helper()
 	runner, _ := stubSpecDraftRunner(malformedSpec, &request.SpecEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	return loadHalted(t, dataDir, "req-1")
@@ -3104,7 +2804,7 @@ func TestPlanningHaltReasonReachesTheRetriedPlanner(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
 	bad := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make wrong-command-xyz", 1, 2)}}
 	badRunner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), badRunner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), badRunner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	halted := loadHalted(t, dataDir, id)
@@ -3115,7 +2815,7 @@ func TestPlanningHaltReasonReachesTheRetriedPlanner(t *testing.T) {
 
 	var seen string
 	good := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), readFeedbackRunner(dataDir, good, &seen), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), readFeedbackRunner(dataDir, good, &seen), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests after retry: %v", err)
 	}
 	// The first refusal was redrafted once (a factory rejection); the second
@@ -3146,7 +2846,7 @@ func TestSpecDraftingHaltReasonReachesTheRetriedDrafter(t *testing.T) {
 		t.Fatalf("Retry: %v", err)
 	}
 	var seen string
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, readSpecFeedbackRunner(dataDir, &seen), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, readSpecFeedbackRunner(dataDir, &seen), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests after retry: %v", err)
 	}
 	if !strings.HasPrefix(seen, "## Previous draft refused by the factory (") || !strings.Contains(seen, "## Scope") {
@@ -3166,7 +2866,7 @@ func TestDraftJobFailureLeavesNoDraftNote(t *testing.T) {
 	for _, text := range []string{"agent exited 2: 401 Unauthorized", "model route error: Connection error.", "draft_spec.py exited 3 (see /some/log)"} {
 		dataDir := savedSpecDraftingRequest(t)
 		runner, _ := stubSpecDraftRunner("", nil, errors.New(text))
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 		if halted := loadHalted(t, dataDir, "req-1"); halted.DraftHalt != nil || len(halted.Rejections) != 0 {
@@ -3175,7 +2875,7 @@ func TestDraftJobFailureLeavesNoDraftNote(t *testing.T) {
 	}
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
 	planRunner, _ := requestdrivertest.StubPlanTicketsRunner(nil, nil, errors.New("agent exited 2: 401 Unauthorized"))
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), planRunner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), planRunner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if halted := loadHalted(t, dataDir, id); halted.DraftHalt != nil {
@@ -3190,7 +2890,7 @@ func TestTicketWriteErrorLeavesNoDraftNote(t *testing.T) {
 	// writing it fails with an I/O error, not a content refusal.
 	bad := []requestdriver.DraftedTicket{{Filename: "no-such-dir/001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	halted := loadHalted(t, dataDir, id)
@@ -3222,7 +2922,7 @@ func TestInfrastructureHaltLeavesNoDraftNote(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dataDir, id := tc.setup(t)
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 				t.Fatalf("driveRequests: %v", err)
 			}
 			halted := loadHalted(t, dataDir, id)
@@ -3236,7 +2936,7 @@ func TestInfrastructureHaltLeavesNoDraftNote(t *testing.T) {
 func TestImportedPlanHaltStaysHandedOver(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": requestdrivertest.ValidBrownfieldTicket("make something-else", 1, 2)})
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	halted := loadHalted(t, dataDir, id)
@@ -3254,7 +2954,7 @@ func TestBuildingHaltLeavesNoDraftNote(t *testing.T) {
 	startFailure := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		return errors.New("sandbox image pull failed")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), startFailure); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), startFailure); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	halted := loadHalted(t, dataDir, id)
@@ -3272,7 +2972,7 @@ func TestDraftHaltNoteReplacesTheEarlierOne(t *testing.T) {
 	}
 	second := "# Spec\n\n## Problem\n\ny\n\n## Scope\n\nz\n" // stops before ## Non-goals
 	runner, _ := stubSpecDraftRunner(second, &request.SpecEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, runner, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	halted := loadHalted(t, dataDir, "req-1")
@@ -3297,7 +2997,7 @@ func TestDraftHaltNoteDoesNotEvictOperatorFeedback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen string
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, readSpecFeedbackRunner(dataDir, &seen), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, readSpecFeedbackRunner(dataDir, &seen), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if !strings.Contains(seen, "newest complaint: name the retry limit") {

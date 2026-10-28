@@ -1,7 +1,7 @@
 import { formatLocalTimestamp } from "@/domain/elapsed";
 import { stopText } from "@/domain/runStop";
 import type { RequestSummary } from "@/domain/request";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 
 import { EditHistory } from "./EditHistory";
 import { Panel } from "./Panel";

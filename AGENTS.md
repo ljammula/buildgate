@@ -68,7 +68,7 @@ security boundary, not a bug.
 | `console/` | React + TypeScript operator console (Vite; Node 20+ and npm). Its own `README.md` is the module map and conventions |
 | `internal/operatorskill/buildgate/SKILL.md` | The `buildgate` agent skill operators install with `factoryd install-skill`: an allowlist of `factoryd` commands their Copilot/Claude Code/Codex may run. Embedded in the binary, so it must match the CLI of the same commit |
 | `doc/designs/` | Living design docs for shipped subsystems (e.g. the pifork harness) |
-| `scripts/` | What the `Makefile` targets run: the sharded test runner, install steps, and the live checks (`live-smoke.sh`, `live_round.py`, `proving-ground.sh`, `bar.sh`). Their own tests are `scripts/tests/` (the `*-test` make targets). `scripts/validation/` has its own `README.md` |
+| `scripts/` | What the `Makefile` targets run: the sharded test runner, install steps, and the live checks (`live-smoke.sh`, `live_round.py`, `proving-ground.sh`). Their own tests are `scripts/tests/` (the `*-test` make targets). `scripts/validation/` has its own `README.md` |
 | `testdata/fixtures/` | The small target repositories the live checks and integration tests build in. Not this module's source: the `internal/claims` scans of Go code skip every `testdata` directory. `TestNoPrivateNotesReferences` still reads every tracked file |
 | `embed.go`, `docker-compose.temporal.yml`, `docker-compose.openshell.yml`, `openshell-gateway.toml.tmpl` | The stack files at the repository root, embedded in the binary (`embed.go`) so `factoryd` can start Temporal and the OpenShell gateway from an installed binary |
 | `demo/`, `DEMO.md`, `assets/` | The demo page, recording and script README links to, and the brand images |
@@ -186,7 +186,6 @@ Test gotchas that have broken `main` before:
   upgrade repeats it with `OPENSHELL_LIVE_RESTART=1`).
 - Known flakes that fail only under full-suite load and pass alone: the
   Temporal owner-signal tests (5 s timeouts),
-  `TestIntegrationReferenceOracleCommandNotForwardedToBuildWithoutInLoopFlag`,
   `TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy`,
   `TestIntegrationTemporalTimeoutStillRecoversAttemptsFromCheckpoint`, and
   `TestTemporalLiveRepositoryOwnerWorkflowProcessesRunsInOrder`.
@@ -207,7 +206,7 @@ Test gotchas that have broken `main` before:
 | A CLI verb, flag or request state the operator skill names | `internal/operatorskill/buildgate/SKILL.md` in the same PR |
 | A runtime dependency a command should start for itself | `internal/hostcontrol/autostart.go` (probe, start, wait behind `internal/spinner`, one-line reason on failure), honouring `FACTORYD_AUTOSTART`; it reaches the outside through a `deps` boundary method (`cmd/factoryd/deps.go`), whose fake default in `newTestDeps` (`deps_test.go`) must not leave the test process |
 | A run input (a value a build needs from a flag or the session config) | Its flag in `newRunFlags` and its resolution in the `ticketRun` stage that owns it (`cmd/factoryd/run_ticket.go`); one field on `runOptions` (`run_options.go`), set in `ticketRun.dispatch` and read in `runOptions.workflowInput()` (`run_temporal.go`) into its `RunWorkflowInput` field (`internal/workflow/workflow_types.go`). If the worker must forward it to a request's ticket build, one argument in `BuildTicketRunArgs` (`internal/requestdriver/config.go`). Add the flag to `runInputGoldenFlags` and regenerate the goldens (`FACTORYD_UPDATE_GOLDEN=1 go test ./cmd/factoryd -run WorkflowInputFromFullFlagSet`): a field that does not reach the workflow leaves the golden unchanged, which is the sign it is mis-wired. `TestWorkerEndToEndRequestReachesAcceptedRun` covers the worker's argv |
-| A workflow activity | The method on `Activities` in the `internal/workflow/activities_<phase>.go` file of its phase (prepare, build, verify, review, oracle commit, evidence, rollback, sandbox), its name constant in `workflow.go`, its input and result types in `workflow_types.go`, and its call in `RunWorkflow`. Version-marker rule: a call added to, removed from or reordered in `RunWorkflow` changes workflow history, so it goes behind `GetVersion` with a new change ID (as `requireIsolatedWorkspaceChange` and `keepWorktreeWhenLostChange` do); never reuse or renumber an ID, and add a replay test (`TestHistoryRecordedBeforeTheIsolationGuardReplaysUnchanged` is the pattern). Moving code between files changes nothing |
+| A workflow activity | The method on `Activities` in the `internal/workflow/activities_<phase>.go` file of its phase (prepare, build, verify, review, evidence, rollback, sandbox), its name constant in `workflow.go`, its input and result types in `workflow_types.go`, and its call in `RunWorkflow`. Version-marker rule: a call added to, removed from or reordered in `RunWorkflow` changes workflow history, so it goes behind `GetVersion` with a new change ID (as `requireIsolatedWorkspaceChange` and `keepWorktreeWhenLostChange` do); never reuse or renumber an ID, and add a replay test (`TestHistoryRecordedBeforeTheIsolationGuardReplaysUnchanged` is the pattern). Moving code between files changes nothing |
 | A new external dependency (a process, binary or service the code calls) | One method on the boundary interface it belongs to in `cmd/factoryd/deps.go` (`host`, `forge`, `temporal`, `docker`), its real body as a method of `realHost`/`realForge`/`realTemporal`/`realDocker` beside the code that uses it, and its field and method on the fake in `deps_test.go`, with a default in `newTestDeps` that cannot leave the test process. Called from `internal/hostcontrol` or `internal/requestdriver`: also one method on that package's `Deps` interface and its one-line wrapper on `*deps` (`deps_hostcontrol.go`, `deps_requestdriver.go`). Pass `dp` down; never add a package-level function variable |
 | An operator-visible behaviour | `USAGE.md` (walkthrough) or `USAGE_REFERENCE.md` (what a command does, keys); `README.md` if it changes what works or a known limit |
 | A CLI flag | Its usage string, which is the flag's documentation: one or two plain sentences, at most 200 characters, about what it does for the person passing it, with no function, type or file name and no history (`TestFlagUsageIsShort`). A flag only the worker, `serve` or a test sets has a usage string beginning `internal: `, which keeps it out of `-h`, `factoryd help -json` and the usage docs. `USAGE_REFERENCE.md`'s "The flags used most" table holds at most 25 (`TestUsageReferenceFlagTableIsShortAndReal`): a new flag goes there only by replacing one, and is named in a section only where that section explains what it changes |
@@ -261,7 +260,7 @@ Its diff may only remove lines, lower numbers, or rename a moved function.
 
 `internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `install-service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
 
-`internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `resume`, `approve`, `reject`, `cancel`, `worker`, the oracle, spec and plan jobs, the real ticket build), which use the same fixtures.
+`internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `resume`, `approve`, `reject`, `cancel`, `worker`, the spec and plan jobs, the real ticket build), which use the same fixtures.
 
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as
@@ -354,18 +353,6 @@ meant to move one of those numbers, and compare like with like (see its doc
 comment). `factoryd stats` shows the same numbers per repository for the
 current data dir (USAGE_REFERENCE's "Is it getting better");
 `make baseline` stays for several data dirs and older record shapes.
-
-`make bar` (`scripts/bar.sh`) is the separate, standing measurement of the
-`-draft-oracles` default-on bar: `BAR_ROUNDS` (default 2) rounds of
-`scripts/bar/fixtures.json`, each flag off then on, strictly one run at a time
-(the local model is single-instance) on a binary built from a clean tree and
-recorded by SHA. It pauses at `oracle_review` for a human (never auto-approved;
-`BAR_ORACLE_HOOK` automates a hand-written oracle) and reports each of the four
-criteria as MET, UNMET or UNPROVEN. Run it only when asked to re-measure the
-bar, not per PR; `scripts/bar.sh --list` and `make bar-test` need no Docker or
-model. Its mutation check executes agent-built code, so it runs only inside
-Docker, never on the host. Record the dated result outside this repo, like the
-live-validation runs.
 
 ## Conventions
 

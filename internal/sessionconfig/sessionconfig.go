@@ -214,7 +214,7 @@ type Config struct {
 	HITLReminderInterval *string `yaml:"hitl_reminder_interval,omitempty"`
 
 	// ReviewGateExpiry is how long a request may wait in spec_review,
-	// oracle_review, plan_review or resume_review for a decision before it
+	// plan_review or resume_review for a decision before it
 	// is halted with halt kind gate_expired (`factoryd retry` reopens the
 	// same review). 0 or absent: a gate never expires. pr_review has no
 	// expiry: merging is a human act and a long-open pull request is normal.
@@ -294,7 +294,7 @@ type Config struct {
 
 	// RequestTokenBudget/RequestCostBudgetMicroUSD cap one request's own
 	// total spend across every stage it can launch a relay-backed job
-	// through: spec/plan/oracle drafting plus every ticket build and
+	// through: spec/plan drafting plus every ticket build and
 	// every corrective round (review or PR-review). Unlike
 	// MeterTokenCeiling/MeterCostCeilingMicroUSD above (a per-job ceiling
 	// the relay itself enforces mid-job), these are checked host-side,

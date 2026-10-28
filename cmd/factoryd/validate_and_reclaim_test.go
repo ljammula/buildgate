@@ -931,51 +931,16 @@ func TestApplyRunWorkflowResultSkipsEvidenceWhenNotAttributable(t *testing.T) {
 	}
 }
 
-// TestApplyRunWorkflowResultLoadsOracleCoverageIntoTheRunRecord is a
-// Temporal-path regression: the oracle's MANIFEST.json coverage must be read
-// from the directory the run record names, so a Temporal-routed run's
-// record carries it exactly like any other run's.
-func TestApplyRunWorkflowResultLoadsOracleCoverageIntoTheRunRecord(t *testing.T) {
-	dataDir := t.TempDir()
-	workspace := t.TempDir()
-	oracleDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(oracleDir, "MANIFEST.json"),
-		[]byte(`[{"criterion":"1. Returns 200.","oracle_file":"o.go","rationale":"x"},{"criterion":"2. Clean code.","oracle_file":null,"rationale":"y"}]`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r := &run.Run{ID: "run-verdicts", Ticket: "fixture-ticket", ReferenceOracleDir: oracleDir, CreatedAt: time.Now().Format(time.RFC3339Nano)}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-
-	result := workflow.RunWorkflowResult{State: run.StateQuarantined}
-	_ = applyRunWorkflowResult(newTestDeps(t), r, dataDir, r.ID, r.Ticket, workspace, "basesha", "task-queue", result, true, &release.MergePolicy{}, forge.GHPullRequestOpener{}, false)
-
-	reloaded, err := run.Load(dataDir, r.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(reloaded.OracleCoveredCriteria) != 1 || reloaded.OracleCoveredCriteria[0] != "1. Returns 200." {
-		t.Fatalf("persisted OracleCoveredCriteria = %v, want only the oracle-backed criterion", reloaded.OracleCoveredCriteria)
-	}
-}
-
 // A reclaimed run (attributeWorkspaceEvidence=false) must not attribute
-// workspace review evidence to itself -- but it still knows its own oracle
-// directory from the run record, so coverage is still recorded.
-func TestApplyRunWorkflowResultReclaimedRunLoadsCoverageButNotReviewEvidence(t *testing.T) {
+// workspace review evidence to itself.
+func TestApplyRunWorkflowResultReclaimedRunDoesNotAttributeReviewEvidence(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, codereview.EvidenceFile),
 		[]byte(`{"schema_version":1,"review_policy":"required","available":true,"findings":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	oracleDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(oracleDir, "MANIFEST.json"),
-		[]byte(`[{"criterion":"1. x","oracle_file":"o.go","rationale":"x"}]`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r := &run.Run{ID: "run-reclaimed", Ticket: "fixture-ticket", ReferenceOracleDir: oracleDir, CreatedAt: time.Now().Format(time.RFC3339Nano)}
+	r := &run.Run{ID: "run-reclaimed", Ticket: "fixture-ticket", CreatedAt: time.Now().Format(time.RFC3339Nano)}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -989,9 +954,6 @@ func TestApplyRunWorkflowResultReclaimedRunLoadsCoverageButNotReviewEvidence(t *
 	}
 	if reloaded.CodeReview != nil {
 		t.Errorf("reclaimed run attributed workspace review evidence to itself: %+v", reloaded.CodeReview)
-	}
-	if len(reloaded.OracleCoveredCriteria) != 1 {
-		t.Errorf("reclaimed run OracleCoveredCriteria = %v, want its coverage from the run record's own oracle dir", reloaded.OracleCoveredCriteria)
 	}
 }
 

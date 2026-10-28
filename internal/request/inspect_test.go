@@ -67,11 +67,6 @@ func TestInspectDraftGatesOpenTheirFiles(t *testing.T) {
 		t.Errorf("spec command = %q", c)
 	}
 
-	r.State = StateOracleReview
-	if c := command(t, Inspect(dataDir, r).Commands, "The drafted oracle files"); !strings.HasSuffix(c, "/requests/req-1/oracle") {
-		t.Errorf("oracle command = %q", c)
-	}
-
 	r.State = StatePlanReview
 	tickets := filepath.Join(Dir(dataDir, "req-1"), "tickets")
 	if err := os.MkdirAll(tickets, 0o755); err != nil {

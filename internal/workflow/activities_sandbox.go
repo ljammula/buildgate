@@ -188,7 +188,7 @@ const sandboxAttemptTeardownMargin = 10 * time.Second
 // the Activity's own hooks (beforeAttempt/afterAttempt returning errors
 // that abort the loop), per-attempt daemon-heartbeat divergence checks,
 // and checkpoint-relative staging specific to this loop; its lifecycle ordering is kept in step with cmd/factoryd by sandbox.RegistryProxyLifecycle.
-func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflowInput, logPath func(int) string, maxAttempts int, beforeAttempt func(int) error, afterAttempt func(int, runner.Result, error) error, relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
+func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflowInput, logPath func(int) string, maxAttempts int, beforeAttempt func(int) error, afterAttempt func(int, runner.Result, error) error, relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -581,7 +581,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		if factoryDirErr != nil {
 			return refusedFactoryDirAttempt(afterAttempt, attempt, command, factoryDirErr)
 		}
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...),
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...),
 			RestoreInstall: restoresInstall(ctx, input, image)}
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.

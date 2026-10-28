@@ -22,7 +22,7 @@ import (
 // API's approve/reject/retry/cancel handlers) can map it to a precondition-
 // failed HTTP status (409) without string-matching advance's own free-text
 // message, and without confusing it for an unrelated caller-input problem
-// (Reject's own "reject requires a reason" check, an oracle validation
+// (Reject's own "reject requires a reason" check, a validation
 // failure, ...) that isn't about the request's current state at all.
 var ErrIllegalTransition = errors.New("illegal state transition")
 
@@ -40,15 +40,6 @@ const (
 	// StateSpecReview is set once spec.md exists and is waiting on the
 	// operator to edit and approve it.
 	StateSpecReview State = "spec_review"
-	// StateOracleDrafting is set while the factory drafts request-level
-	// acceptance-test oracles (oracle/) from an approved spec. Only requests
-	// submitted with `factoryd submit -draft-oracles` ever enter it (see
-	// Approve, which routes spec approval by Request.DraftOracles).
-	StateOracleDrafting State = "oracle_drafting"
-	// StateOracleReview is set once oracle drafting has finished (or failed,
-	// or was not implemented) and the operator must approve, hand-write, or
-	// skip the request-level oracle before planning.
-	StateOracleReview State = "oracle_review"
 	// StatePlanning is set while the factory is decomposing an approved
 	// spec into tickets.
 	StatePlanning State = "planning"
@@ -89,7 +80,6 @@ const (
 // of -- every state except the five terminal ones themselves.
 var nonTerminalStates = []State{
 	StateSubmitted, StateSpecDrafting, StateSpecReview,
-	StateOracleDrafting, StateOracleReview,
 	StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
 	StateResumeReview,
 }
@@ -103,7 +93,6 @@ var nonTerminalStates = []State{
 // final outcome, not a dead end, and must stay immutable.
 var cancellableStates = []State{
 	StateSubmitted, StateSpecDrafting, StateSpecReview,
-	StateOracleDrafting, StateOracleReview,
 	StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
 	StateResumeReview, StateQuarantined, StateHalted,
 }
@@ -496,7 +485,7 @@ type Request struct {
 	// on to build its next ticket does not carry it over.
 	RetryTicket int `json:"retry_ticket,omitempty"`
 	// HaltKind is a typed marker for a halt whose recovery is not the default
-	// one (see HaltOracleMaterialize); empty for every other halt. Cleared by
+	// one (see HaltGateExpired); empty for every other halt. Cleared by
 	// every transition, so it is only ever set while State is halted.
 	HaltKind HaltKind `json:"halt_kind,omitempty"`
 	// QuarantineCheck names the one check that quarantined this request
@@ -568,12 +557,6 @@ type Request struct {
 	// own Verify-Command as the full suite instead of FullSuiteCommand, the
 	// verify command as it was at submit (ticketQueueEntry).
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
-	// NoCommitOracles is `factoryd submit -no-commit-oracles`: an explicit,
-	// recorded per-request opt-out from the host commit of accepted oracles.
-	// The oracle still gates every build (pinned, mounted read-only, canary
-	// and reference_oracle gate unchanged); the factory just writes nothing
-	// into the target repository and runs no post-commit verify.
-	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
 	// PreflightProfile mirrors VerifyCommand's own reasoning exactly, for
 	// `factoryd submit`'s -preflight-profile flag instead of
 	// -verify-command: recorded here so an operator who passed it
@@ -599,21 +582,14 @@ type Request struct {
 	// each one's Diff to the drafter (stageFeedback).
 	Edits []Edit `json:"edits,omitempty"`
 
-	// DraftOracles is `factoryd submit -draft-oracles`: opt this request into
-	// the staged oracle stage (spec_review -> oracle_drafting -> oracle_review
-	// -> planning). False (the zero value, omitted from JSON) keeps spec
-	// approval going straight to planning, byte-for-byte as before this field
-	// existed. Read only by Approve's routing, never by advance.
-	DraftOracles bool `json:"draft_oracles,omitempty"`
 	// PlanReview is `factoryd submit -plan-review` or the session key
 	// plan_review: the request waits at plan_review even when its plan is one
 	// ticket. Read only by the planning step (advancePlanning), never by advance.
 	PlanReview bool `json:"plan_review,omitempty"`
 	// Bug is `factoryd submit -bug`: the request fixes a bug, so it needs a
-	// test that fails before the change. Submit sets DraftOracles with it; an
-	// oracle_review approval with no oracle files is refused, and a build
-	// whose reference oracle passes on the base commit is halted before any
-	// model call (workflow bug-oracle-red-on-base).
+	// test that fails before the change. Plan approval refuses a plan whose
+	// ticket 1 declares Tests-Required: no, and ticket 1's tests_red_on_base
+	// gate takes no opt-out.
 	Bug bool `json:"bug,omitempty"`
 	// SpecImported is `factoryd submit -spec-file`: the operator handed over
 	// a finished spec (ImportedSpecPath). The first spec_drafting pass takes
@@ -669,13 +645,6 @@ type Request struct {
 	// clears it (the operator's own feedback then drives the redraft). It is
 	// not an input to SpecAsHandedOver/PlanAsHandedOver.
 	DraftHalt *DraftHalt `json:"draft_halt,omitempty"`
-	// OracleDraft records how the oracle drafting stage last ended. Nil for a
-	// request that never ran it.
-	OracleDraft *OracleDraft `json:"oracle_draft,omitempty"`
-	// OracleSkipWarning is set when oracle_review was approved with a failed
-	// draft and no oracle files: the request proceeds with no acceptance
-	// oracle. A skip is legitimate but must never be silent.
-	OracleSkipWarning string `json:"oracle_skip_warning,omitempty"`
 
 	// Models is `factoryd submit -model role=model` / the API's own
 	// "models" body field: a per-request model pick for the "planning"
@@ -701,14 +670,14 @@ type Request struct {
 
 // ActiveJob describes the drafting job running for a request right now:
 // which role, model and effort is working, before the job's own evidence
-// (SpecEvidence/PlanEvidence/OracleDraft) exists. It lives in its own
+// (SpecEvidence/PlanEvidence) exists. It lives in its own
 // file beside request.json (WriteActiveJob/ClearActiveJob), never in the
 // request record, so recording it can never race or revert another
 // writer of request.json. Display only: a crash can leave the file
 // behind, so readers show it only while the request's State equals Stage.
 type ActiveJob struct {
-	// Stage is the request state the job runs in: spec_drafting,
-	// planning or oracle_drafting.
+	// Stage is the request state the job runs in: spec_drafting
+	// or planning.
 	Stage     string `json:"stage"`
 	Role      string `json:"role"`
 	Model     string `json:"model,omitempty"`
@@ -719,108 +688,6 @@ type ActiveJob struct {
 	StartedAt string `json:"started_at"`
 }
 
-// OracleDraftStatus is the outcome of one oracle-drafting pass.
-type OracleDraftStatus string
-
-const (
-	OracleDrafted        OracleDraftStatus = "drafted"
-	OracleNoneEligible   OracleDraftStatus = "none_eligible"
-	OracleDraftFailed    OracleDraftStatus = "failed"
-	OracleDraftOverCap   OracleDraftStatus = "over_cap"
-	OracleNotImplemented OracleDraftStatus = "not_implemented"
-)
-
-// OracleDraft is the status record of the oracle-drafting stage: what the
-// pass concluded plus a short human-readable detail. Any status lands the
-// request in oracle_review; none of them halts it.
-type OracleDraft struct {
-	Status OracleDraftStatus `json:"status"`
-	Detail string            `json:"detail,omitempty"`
-	// ProposedCommand is a RUN_COMMAND the drafting job computed from the
-	// drafted files (Go only today), shown to the operator at oracle_review.
-	// For a single Go file it is a suggestion, not a file: never written to
-	// oracle/, never hash-pinned, and never run (RUN_COMMAND.txt stays
-	// operator-authored). For a multi-file Go oracle the host also writes it as
-	// oracle/RUN_COMMAND.txt when none exists (see GeneratedRunCommandSHA256);
-	// the operator reviews and may edit it before approval pins it.
-	ProposedCommand string `json:"proposed_command,omitempty"`
-	// Files are the oracle/ file names this pass installed (excluding
-	// MANIFEST.json). A re-draft replaces exactly these, never whatever an
-	// operator-editable manifest happens to name.
-	Files []string `json:"files,omitempty"`
-	// CompileProblems are what the host's type self-check found in the drafted
-	// Go files (see oraclecanary.TypeCheckGoOracles: only errors that do not
-	// depend on the not-yet-built target package). Advisory: oracle_review
-	// still decides, and approval does not consult them.
-	CompileProblems []string `json:"compile_problems,omitempty"`
-	// SpecWarnings are heuristic warnings that a drafted test asserts the
-	// opposite of an example its criterion quotes (see
-	// oraclecanary.SpecExampleWarnings). Advisory and possibly wrong.
-	SpecWarnings []string `json:"spec_warnings,omitempty"`
-	// AutoRedrafted is set when the draft is the second pass, run once
-	// automatically with the first pass's compile problems as feedback.
-	AutoRedrafted bool `json:"auto_redrafted,omitempty"`
-	// GeneratedRunCommandSHA256 is the hash of the RUN_COMMAND.txt the drafting
-	// job itself wrote for a multi-file Go oracle. A re-draft replaces that file
-	// only while it still has this hash: an operator's edit (or their own file)
-	// is carried across untouched, as always.
-	GeneratedRunCommandSHA256 string `json:"generated_run_command_sha256,omitempty"`
-	// Criteria carries the drafting evidence's own per-criterion verdicts:
-	// one entry per acceptance criterion the drafter judged, in criterion
-	// order. Empty
-	// when no drafting evidence named individual criteria (a job failure
-	// before any manifest existed). Field names are exactly "number",
-	// "eligible", "reason" -- pinned by cmd/factoryd's own JSON decoding of
-	// draft_acceptance_oracles.py's MANIFEST.json/evidence.json, so this is
-	// not just cosmetic: a rename here silently breaks the operator's own
-	// receipt of why a none_eligible draft judged every criterion
-	// untestable.
-	Criteria []OracleCriterionVerdict `json:"criteria,omitempty"`
-	// Model mirrors SpecEvidence.Model/PlanEvidence.Model: the worker model
-	// id configured for this drafting pass's relay (RouteLaunchFacts.
-	// WorkerModelID), set by factoryd itself after the job runs, never read
-	// from anything draft_acceptance_oracles.py writes. Empty when the pass
-	// had no relay or no model id was configured.
-	Model string `json:"model,omitempty"`
-	// Thinking is the review role's Pi reasoning-effort level
-	// (requestJobRoleOverride.Thinking) this pass ran with, or "" when
-	// roles: is absent or the review role is unset. Mirrors SpecEvidence.
-	// Thinking/PlanEvidence.Thinking.
-	Thinking string `json:"thinking,omitempty"`
-	// Spend mirrors SpecEvidence.Spend -- see its doc comment. A
-	// re-draft (RejectOracle) replaces the whole *OracleDraft record
-	// (CompleteOracleDrafting: r.OracleDraft = &draft), so the call site
-	// accumulates the previous draft's own Spend the same way
-	// advanceSpecDrafting does.
-	Spend *JobSpend `json:"spend,omitempty"`
-}
-
-// OracleCriterionVerdict is one acceptance criterion's own eligibility
-// verdict from an oracle-drafting pass -- see OracleDraft.Criteria.
-type OracleCriterionVerdict struct {
-	// Number is the criterion's 1-based position in the approved spec's
-	// own numbered acceptance-criteria list.
-	Number int `json:"number"`
-	// Eligible is true only when this criterion got a drafted oracle file
-	// installed under oracle/ -- false for a criterion judged not
-	// deterministically testable, or whose own pi invocation failed.
-	Eligible bool `json:"eligible"`
-	// Reason is the drafter's own rationale for this verdict (from
-	// MANIFEST.json's per-entry "rationale"), or, for a criterion whose own
-	// invocation failed outright, the failure reason from evidence.json's
-	// "failures" list.
-	Reason string `json:"reason,omitempty"`
-}
-
-// Valid reports whether s is one of the recorded oracle-draft statuses.
-func (s OracleDraftStatus) Valid() bool {
-	switch s {
-	case OracleDrafted, OracleNoneEligible, OracleDraftFailed, OracleDraftOverCap, OracleNotImplemented:
-		return true
-	}
-	return false
-}
-
 // Rejection is one entry of Request.Rejections -- a structured record of a
 // single reject action, so an API/console caller can render rejection
 // history without parsing prose out of request.md.
@@ -829,7 +696,7 @@ type Rejection struct {
 	At     string `json:"at"`
 	Reason string `json:"reason"`
 	// FromState is the state the request was actually in when this
-	// rejection was recorded: spec_review, oracle_review or plan_review
+	// rejection was recorded: spec_review or plan_review
 	// for Reject, quarantined or halted for SendBack (sendback.go). Always
 	// the literal state, so the rejection history stays a truthful audit
 	// trail.
@@ -872,7 +739,7 @@ func (rej Rejection) Stage() State {
 // JobSpend is a drafting job's own relay-measured spend: the same figures
 // run.Attempt.RelayConsumed*/RelaySpendPartial record for a ticket build,
 // carried onto a drafting job's evidence instead -- before this, a spec/
-// plan/oracle drafting pass's real relay cost was measured (runner.Result
+// plan drafting pass's real relay cost was measured (runner.Result
 // carries it) but then discarded at the call site, which kept only
 // res.RelayWorkerModelID. Role/Model together are what a cost rollup groups
 // by (see internal/api's modelUsage); the token/cost fields are exactly
@@ -882,8 +749,8 @@ func (rej Rejection) Stage() State {
 // why a re-draft accumulates rather than overwrites).
 type JobSpend struct {
 	// Role is the session-config role this job actually ran as
-	// (modelrole.Role: "planning" for spec/plan drafting, "review" for
-	// oracle drafting -- see resolveRequestJobRole's own doc comment),
+	// (modelrole.Role: "planning" for spec/plan drafting -- see
+	// resolveRequestJobRole's own doc comment),
 	// recorded as a plain string for the same leaf-package reason
 	// run.Attempt.Role is (internal/request must not import
 	// internal/modelrole to stay a leaf package modelrole is never
@@ -1168,8 +1035,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	// Only re-entering planning drops the per-ticket pins (the re-plan
 	// rewrites or deletes those files). Pruning on every transition would
 	// drop them while a multi-ticket request is still building, so a later
-	// ticket's spec and oracle would no longer be tamper-checked, and an
-	// oracle ticket's retry would halt with "never approved".
+	// ticket's spec would no longer be tamper-checked.
 	if to == StatePlanning {
 		r.pruneTicketApprovals()
 	}
@@ -1227,79 +1093,6 @@ func (r *Request) ApproveSpec(by string, now time.Time) error {
 	return advance(r, []State{StateSpecReview}, StatePlanning, by, "approved", now)
 }
 
-// ApproveSpecToOracles moves a request from spec_review to oracle_drafting:
-// the spec-approval move for a request submitted with -draft-oracles. Approve
-// (not this function) decides between it and ApproveSpec.
-func (r *Request) ApproveSpecToOracles(by string, now time.Time) error {
-	return advance(r, []State{StateSpecReview}, StateOracleDrafting, by, "approved", now)
-}
-
-// CompleteOracleDrafting moves a request from oracle_drafting to oracle_review
-// and records how the drafting pass ended. Every status, including failed,
-// lands in review: the operator can retry (reject), hand-write oracle/, or
-// skip -- a failed drafter never halts the request.
-func (r *Request) CompleteOracleDrafting(draft OracleDraft, now time.Time) error {
-	if !draft.Status.Valid() {
-		return fmt.Errorf("request %s: invalid oracle draft status %q", r.ID, draft.Status)
-	}
-	reason := "oracle drafting: " + string(draft.Status)
-	if err := advance(r, []State{StateOracleDrafting}, StateOracleReview, factoryActor, reason, now); err != nil {
-		return err
-	}
-	r.OracleDraft = &draft
-	r.OracleSkipWarning = ""
-	return nil
-}
-
-// ApproveOracle moves a request from oracle_review to planning. Recording
-// what was approved (the hash pin of oracle/*) is Approve's concern.
-func (r *Request) ApproveOracle(by string, now time.Time) error {
-	if err := advance(r, []State{StateOracleReview}, StatePlanning, by, "approved", now); err != nil {
-		return err
-	}
-	r.OracleSkipWarning = ""
-	return nil
-}
-
-// OracleSkipsSilently reports whether an oracle_review approval that pins no
-// oracle files needs no warning: the stage's own outcome already said there is
-// nothing to check (none_eligible, or no drafter available). Every other
-// outcome with zero pinned files -- failed, or a draft whose files were
-// deleted -- is a skip the operator must be told about.
-func OracleSkipsSilently(status OracleDraftStatus) bool {
-	return status == OracleNoneEligible || status == OracleNotImplemented
-}
-
-// OracleSkippedWarning is the text recorded when oracle_review is approved
-// with no oracle files to pin after a draft that was not a deliberate
-// "nothing to check".
-func OracleSkippedWarning(status OracleDraftStatus) string {
-	return fmt.Sprintf("the oracle stage is being skipped: the draft ended %q and oracle/ holds no files, so this request will be built with no acceptance oracle", status)
-}
-
-// ApproveOracleSkipped is ApproveOracle for an approval that skips the oracle
-// stage without a deliberate none_eligible: the transition history and
-// OracleSkipWarning both say so.
-func (r *Request) ApproveOracleSkipped(by string, now time.Time) error {
-	warning := OracleSkippedWarning(r.OracleDraft.Status)
-	if err := advance(r, []State{StateOracleReview}, StatePlanning, by, "approved; "+warning, now); err != nil {
-		return err
-	}
-	r.OracleSkipWarning = warning
-	return nil
-}
-
-// RejectOracle moves a request from oracle_review back to oracle_drafting so
-// a redraft can use the operator's feedback. The reason travels on
-// Request.Rejections (never request.md); see Reject.
-func (r *Request) RejectOracle(by, reason string, now time.Time) error {
-	if err := advance(r, []State{StateOracleReview}, StateOracleDrafting, by, reason, now); err != nil {
-		return err
-	}
-	r.OracleSkipWarning = ""
-	return nil
-}
-
 // RejectSpec moves a request from spec_review back to spec_drafting, so a
 // redraft can incorporate the operator's feedback. Recording that
 // feedback on request.md is the approve/reject flow's concern
@@ -1325,13 +1118,9 @@ func (r *Request) CompletePlanning(now time.Time) error {
 // or "" when the factory may approve it itself (ApprovePlanByFactory): the
 // plan has more than one ticket, the request opted in (PlanReview), the
 // repository's .factory.yml did (repoOptIn), or a person already sent a plan
-// of this request back, or the ticket oracles supersede committed paths
-// (supersedes of them), which the host deletes on commit and only a person's
-// approval may allow. r.TicketCount must be set.
-func (r *Request) PlanReviewReason(repoOptIn bool, supersedes int) string {
+// of this request back. r.TicketCount must be set.
+func (r *Request) PlanReviewReason(repoOptIn bool) string {
 	switch {
-	case supersedes > 0:
-		return fmt.Sprintf("the ticket oracles supersede %d committed path(s), which the build deletes", supersedes)
 	case r.TicketCount > 1:
 		return fmt.Sprintf("the plan has %d tickets", r.TicketCount)
 	case r.PlanReview:
@@ -1481,27 +1270,9 @@ const QuarantineCheckBudgetRequest = "budget_exhausted:request"
 // (monthly_token_budget/monthly_cost_budget_micro_usd).
 const QuarantineCheckBudgetMonthly = "budget_exhausted:monthly"
 
-// QuarantineCheckOracleGreenOnBase is set when a bug request's build was
-// halted before any model call because its reference oracle passes on the
-// base commit (run.HaltReasonOraclePassesOnBase): the test does not
-// reproduce the bug. See quarantinedNextAction's branch for it.
-const QuarantineCheckOracleGreenOnBase = "oracle_green_on_base"
-
-// QuarantineCheckOracleNotRun is set when a bug request's build was halted
-// before any model call because its reference oracle ran no test on the base
-// commit (run.HaltReasonOracleNotRunOnBase).
-const QuarantineCheckOracleNotRun = "oracle_not_run_on_base"
-
 // HaltKind names why a request halted when the recovery differs from the
 // default (resume the stage that failed).
 type HaltKind string
-
-// HaltOracleMaterialize marks a halt raised while planning could not derive the
-// per-ticket oracle directories from the approved request-level oracle (a
-// per-ticket cap, a run command that names a file across a ticket split, ...).
-// Planning would fail identically on retry while oracle/ stays pinned, so the
-// recovery is ReturnToOracleReview.
-const HaltOracleMaterialize HaltKind = "oracle_materialize"
 
 // HaltAcceptedNoPR marks a halt raised from pr_review because a ticket's run
 // was accepted but has no pull request (worker -open-pull-request=false, a
@@ -1662,8 +1433,6 @@ func (r *Request) NextAction() string {
 	switch r.State {
 	case StateSpecReview:
 		return fmt.Sprintf("review the drafted spec: `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
-	case StateOracleReview:
-		return fmt.Sprintf("review the drafted oracle (or leave it absent/empty to skip): `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
 	case StatePlanReview:
 		return fmt.Sprintf("review the drafted tickets: `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)
 	case StateBuilding:
@@ -1804,12 +1573,6 @@ func (r *Request) quarantinedNextAction() string {
 	if r.QuarantineCheck == QuarantineCheckDiffScope {
 		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files, or outside the repository's allowed_paths in .factory.yml (named above). If a file outside Allowed-Files is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; a file outside allowed_paths is the repository owner's to allow in .factory.yml; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())
 	}
-	if r.QuarantineCheck == QuarantineCheckOracleGreenOnBase {
-		return fmt.Sprintf("oracle_green_on_base quarantined -- the acceptance oracle passes on the base commit, so it does not reproduce the bug and no model call was made; hand-write an oracle that fails on the current code: `factoryd reject -to spec -reason \"...\" %s`, then approve a failing oracle at oracle_review", r.ID)
-	}
-	if r.QuarantineCheck == QuarantineCheckOracleNotRun {
-		return fmt.Sprintf("oracle_not_run_on_base quarantined -- the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected) and no model call was made; fix the oracle's RUN_COMMAND.txt so it runs the oracle: `factoryd reject -to spec -reason \"...\" %s`, then approve a corrected oracle at oracle_review", r.ID)
-	}
 	if r.QuarantineCheck == QuarantineCheckBudgetRequest {
 		return fmt.Sprintf("budget exhausted -- %s; raise request_token_budget/request_cost_budget_micro_usd in the session config, then `factoryd retry %s`", r.Error, r.ID)
 	}
@@ -1824,8 +1587,6 @@ func (r *Request) quarantinedNextAction() string {
 // piece of advice, easy to read top to bottom.
 func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
-	case HaltOracleMaterialize:
-		return fmt.Sprintf("`factoryd retry %s` returns this request to oracle_review, where oracle/ can be edited and approved again", r.ID)
 	case HaltRecheckUnheld:
 		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is still missing (recorded on the request) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltGateExpired:
@@ -1866,84 +1627,18 @@ func (r *Request) sendBackHint() string {
 }
 
 // SendBackPlanAllowed reports whether SendBack would accept the "plan"
-// target for r's current approvals: an approved spec.md to re-plan from,
-// and no oracle stage skipped (oracleStageApprovedForCurrentSpec). The one
+// target for r's current approvals: an approved spec.md to re-plan from. The one
 // rule sendBackHint, SendBack itself and the API's can_send_back_to_plan
 // all read, so the console never defaults to a target the server refuses.
 // Says nothing about r's state or accepted tickets -- see SendBack.
 func (r *Request) SendBackPlanAllowed() bool {
-	return r.ApprovedSHA256[specFileName] != "" && r.oracleStageApprovedForCurrentSpec()
-}
-
-// oracleStageApprovedForCurrentSpec reports whether planning may run on
-// the strength of the current spec approval without skipping an oracle
-// stage the operator opted into: always true without DraftOracles;
-// otherwise true only when an oracle_review -> planning transition
-// (approved with oracle files, skipped with a warning, or a deliberate
-// none_eligible -- none of which is visible from ApprovedSHA256 alone)
-// comes after the most recent spec_review approval. An oracle approval
-// from before a send-back to spec does not count: the redrafted spec
-// needs its own oracle review.
-func (r *Request) oracleStageApprovedForCurrentSpec() bool {
-	if !r.DraftOracles {
-		return true
-	}
-	approved := false
-	for _, t := range r.History {
-		switch {
-		case t.From == StateSpecReview && (t.To == StateOracleDrafting || t.To == StatePlanning):
-			approved = false
-		case t.From == StateOracleReview && t.To == StatePlanning:
-			approved = true
-		}
-	}
-	return approved
-}
-
-// HaltOracleMaterialization is Halt for that failure, recording the typed kind.
-func (r *Request) HaltOracleMaterialization(reason string, now time.Time) error {
-	if err := r.Halt(reason, now); err != nil {
-		return err
-	}
-	r.HaltKind = HaltOracleMaterialize
-	return nil
-}
-
-// ReturnToOracleReview is the recovery transition halted -> oracle_review, legal
-// only for a request halted with HaltOracleMaterialize: it drops the oracle/*
-// pins (the files stay on disk, so the operator can edit them and approve
-// again; the spec pin is kept) and clears the error and reminder state. Reached
-// through `factoryd retry <id>` or POST /requests/{id}/retry. by names the
-// operator or process driving the retry (factoryActor for an unattended path, an
-// operator identity for a human-triggered one), recorded on the appended
-// History entry the same way Approve/Reject's own by parameter is. reason
-// is the operator's own stated reason for retrying (may be empty), folded
-// into the History entry's own text by retryReason -- see its own doc
-// comment.
-func (r *Request) ReturnToOracleReview(by, reason string, now time.Time) error {
-	if r.State != StateHalted || r.HaltKind != HaltOracleMaterialize {
-		return fmt.Errorf("request %s: only a request halted while materializing the oracle can return to %s (state %q, halt kind %q)", r.ID, StateOracleReview, r.State, r.HaltKind)
-	}
-	historyReason := retryReason(r, reason)
-	if err := advance(r, []State{StateHalted}, StateOracleReview, by, historyReason, now); err != nil {
-		return err
-	}
-	r.OracleSkipWarning = ""
-	for rel := range r.ApprovedSHA256 {
-		if strings.HasPrefix(rel, requestOracleRelPrefix) {
-			delete(r.ApprovedSHA256, rel)
-		}
-	}
-	r.Error = ""
-	r.ClearReminderState()
-	return nil
+	return r.ApprovedSHA256[specFileName] != ""
 }
 
 // Cancel moves a request from any non-terminal state, or from
 // quarantined/halted, to cancelled -- see cancellableStates' own doc
 // comment for why those two dead-end terminal states are included. by
-// names the operator (see ReturnToOracleReview's own doc comment on why
-// this now takes one, for the recovery actions). reason is recorded on
+// names the operator. reason is recorded on
 // the appended History entry verbatim when given; empty falls back to
 // "cancelled", the prior
 // unconditional text, so an existing caller that has no reason to give
@@ -1968,11 +1663,11 @@ func (r *Request) Cancel(by, reason string, now time.Time) error {
 // comment) -- this only enforces the state move itself, exactly like
 // every other transition function in this file.
 // ResumeDrafting moves a halted request that never reached a ticket back
-// to a drafting stage: StateSpecDrafting, StateOracleDrafting or
+// to a drafting stage: StateSpecDrafting or
 // StatePlanning only (see the package-level Retry function). Clears the
 // recorded error like the Retry method.
 func (r *Request) ResumeDrafting(target State, by, reason string, now time.Time) error {
-	if target != StateSpecDrafting && target != StateOracleDrafting && target != StatePlanning {
+	if target != StateSpecDrafting && target != StatePlanning {
 		return fmt.Errorf("request %s: cannot resume drafting into %q", r.ID, target)
 	}
 	historyReason := retryReason(r, reason)
@@ -2010,8 +1705,7 @@ func (r *Request) Retry(by, reason string, now time.Time) error {
 
 // HaltedFrom returns the state r was in when it last moved into its current
 // state, from History. Empty when History has no such entry (a request
-// predating History). cmd/factoryd's retryRequest uses it to resume a request
-// halted in an oracle stage into oracle_drafting.
+// predating History).
 func (r *Request) HaltedFrom() State {
 	for i := len(r.History) - 1; i >= 0; i-- {
 		if r.History[i].To == r.State {
@@ -2026,7 +1720,7 @@ func (r *Request) HaltedFrom() State {
 // one -- so a later operator reading the pipeline stepper sees not just
 // "retried" but what it was retried after.
 // retryReason builds the History entry text a retry-shaped transition
-// (ReturnToOracleReview, ResumeDrafting, ResumeReview, Retry) records: the
+// (ResumeDrafting, ResumeReview, Retry) records: the
 // existing "retried"/"retried after: <halt error>" auto-text, plus, when
 // the operator gave one, their own stated reason appended after " -- "
 // (an adversarial review, 2026-09-24, found: the console already
@@ -2069,7 +1763,6 @@ func (r *Request) InStateSince() (since time.Time, ok bool) {
 func AllStates() []State {
 	return []State{
 		StateSubmitted, StateSpecDrafting, StateSpecReview,
-		StateOracleDrafting, StateOracleReview,
 		StatePlanning, StatePlanReview, StateBuilding, StatePRReview,
 		StateResumeReview, StateDone, StateClosed,
 		StateQuarantined, StateHalted, StateCancelled,
@@ -2095,7 +1788,7 @@ func (s State) Finished() bool {
 // are human waits and never block anything.
 func (s State) RunsJob() bool {
 	switch s {
-	case StateSubmitted, StateSpecDrafting, StateOracleDrafting, StatePlanning, StateBuilding:
+	case StateSubmitted, StateSpecDrafting, StatePlanning, StateBuilding:
 		return true
 	default:
 		return false

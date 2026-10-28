@@ -29,7 +29,6 @@ export function NewRequestScreen() {
   // mirrors into the field, but the operator can still hand-edit a path the
   // listing never offered.
   const [selected, setSelected] = useState("");
-  const draftId = useId();
   const planId = useId();
   const { values, set, errors } = form;
 
@@ -116,26 +115,6 @@ export function NewRequestScreen() {
                   }}
                 />
               </Field>
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  id={draftId}
-                  aria-describedby={`${draftId}-desc`}
-                  className="mt-0.5"
-                  checked={values.draftOracles}
-                  onChange={(event) => {
-                    set({ draftOracles: event.target.checked });
-                  }}
-                />
-                <div className="flex flex-col">
-                  <label htmlFor={draftId} className="text-sm font-medium text-fg">
-                    Draft oracles
-                  </label>
-                  <p id={`${draftId}-desc`} className="text-xs text-fg-subtle">
-                    Adds an oracle-review stage between spec approval and planning, to
-                    approve/hand-write/skip acceptance-test oracles before any ticket is planned.
-                  </p>
-                </div>
-              </div>
               <div className="flex items-start gap-2">
                 <Checkbox
                   id={planId}

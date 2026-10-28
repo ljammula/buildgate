@@ -67,7 +67,6 @@ func TestBinOf(t *testing.T) {
 		"code_review":                BinNever,
 		"diff_scope":                 BinCorrective,
 		policy.RepoGateCheck("docs"): BinCorrective,
-		"reference_oracle":           BinCorrectiveIfOracleInLoop,
 		"tests_red_on_base":          BinCorrective,
 		"a_check_from_the_future":    BinNever,
 		"":                           BinNever,
@@ -92,8 +91,7 @@ func TestNextIsTheMostRestrictiveBin(t *testing.T) {
 		want   Bin
 	}{
 		{false, c(BinCorrective, BinCorrective), BinCorrective},
-		{false, c(BinCorrective, BinCorrectiveIfOracleInLoop), BinCorrectiveIfOracleInLoop},
-		{false, c(BinCorrectiveIfOracleInLoop, BinNever, BinCorrective), BinNever},
+		{false, c(BinCorrective, BinNever, BinCorrective), BinNever},
 		{false, nil, BinNever},
 		{true, c(BinCorrective), BinOperator},
 		{true, nil, BinOperator},
@@ -340,31 +338,6 @@ func TestBuildBinsFromWhatTheRunRecordShows(t *testing.T) {
 	r.GateResults = []run.GateResult{{Check: "spec_conformity", Passed: false}}
 	if doc = Build(r, dataDir); binOf(doc, "spec_conformity") != BinNever {
 		t.Errorf("a retired spec_conformity failure: %+v, want never", doc.Checks)
-	}
-}
-
-// A failed reference oracle is named and binned, and nothing about what it
-// asserted is carried: its log's failing line is the oracle's own.
-func TestBuildCarriesNothingOfAFailedReferenceOracle(t *testing.T) {
-	dataDir := t.TempDir()
-	logPath := filepath.Join(run.Dir(dataDir, "r"), "oracle.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(logPath, []byte("--- FAIL: TestOracleSecretExpectation\n    want 13\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r := &run.Run{ID: "r", State: run.StateQuarantined,
-		GateResults: []run.GateResult{{Check: "reference_oracle", Passed: false, ExitCode: 1}},
-		Attempts:    []run.Attempt{{Kind: "reference_oracle", ExitCode: 1, LogPath: logPath}},
-	}
-	doc := Build(r, dataDir)
-	if len(doc.Checks) != 1 || doc.Checks[0].Bin != BinCorrectiveIfOracleInLoop || doc.Checks[0].Finding != "" {
-		t.Errorf("Checks = %+v, want the oracle check binned and without a finding", doc.Checks)
-	}
-	md := doc.Markdown()
-	if !strings.Contains(md, "- `reference_oracle` failed (exit 1)") || strings.Contains(md, "TestOracleSecretExpectation") {
-		t.Errorf("Markdown:\n%s", md)
 	}
 }
 

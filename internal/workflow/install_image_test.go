@@ -360,7 +360,7 @@ func TestWorkerWrapperRestoresInstallOnlyForRepositoryCommandSteps(t *testing.T)
 	input.InstallImage = testInstallWorkerImage
 	launch := func(ctx context.Context, in RunWorkflowInput) bool {
 		t.Helper()
-		if _, err := acts.runSandboxWithRetries(ctx, in, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true"); err != nil {
+		if _, err := acts.runSandboxWithRetries(ctx, in, logPath, 1, nil, nil, nil, nil, nil, nil, nil, "sh", "-c", "true"); err != nil {
 			t.Fatal(err)
 		}
 		return strings.Contains(commands[len(commands)-1], sandbox.InstallDir+"; if")

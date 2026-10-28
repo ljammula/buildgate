@@ -91,16 +91,8 @@ type temporalSliceOptions struct {
 	// instead of policy.TicketStructure -- see -request-ticket's own flag
 	// help and QueueEntry.RequestTicket's doc comment.
 	RequestTicket bool
-	// ReferenceOracleInLoopRetry carries -reference-oracle-in-loop-retry
-	// onto RunWorkflowInput.ReferenceOracleInLoopRetry (see that field's
-	// doc comment) for both runViaTemporal and runViaRepositoryOwner --
-	// the oracle dir/mount path/command themselves already travel as
-	// their own positional parameters, since the post-build gate needs
-	// them regardless of this opt-in.
-	ReferenceOracleInLoopRetry bool
-	// NoCommitOracles carries -no-commit-oracles onto RunWorkflowInput.NoCommitOracles.
-	NoCommitOracles bool
-	// Bug carries -bug onto RunWorkflowInput.Bug.
+	// Bug carries -bug onto RunWorkflowInput.Bug: ticket 1 of a bug request,
+	// whose Tests-Required opt-out is not honoured.
 	Bug bool
 	// ResumeFrom carries -resume-worktree-of onto RunWorkflowInput.ResumeFrom:
 	// the halted run whose kept worktree this run adopts.
@@ -400,10 +392,6 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		InstallRegistries:                o.sandboxBlock().Registries,
 		InstallRepoKey:                   o.sandboxRepoKey(),
 		ConfiguredSandboxImage:           o.ConfiguredSandboxImage,
-		ReferenceOracleDir:               o.ReferenceOracleDir,
-		ReferenceOracleMountPath:         o.ReferenceOracleMountPath,
-		ReferenceOracleInLoopRetry:       o.Slice.ReferenceOracleInLoopRetry,
-		NoCommitOracles:                  o.Slice.NoCommitOracles,
 		Bug:                              o.Slice.Bug,
 		SandboxImage:                     o.SandboxImage,
 		SandboxDocker:                    o.SandboxDocker,

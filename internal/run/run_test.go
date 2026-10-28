@@ -1317,11 +1317,11 @@ func TestRetainBuildArtifactsCopiesTheReportAndTheRoundLogs(t *testing.T) {
 	if err := RetainBuildArtifacts(workspace, runDir); err != nil {
 		t.Fatalf("a workspace with neither: %v, want no error", err)
 	}
-	roundLog := filepath.Join(workspace, ".pi-build-session", "feedback", "round-3", "oracle.log")
+	roundLog := filepath.Join(workspace, ".pi-build-session", "feedback", "round-3", "verify.log")
 	if err := os.MkdirAll(filepath.Dir(roundLog), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for path, content := range map[string]string{roundLog: "oracle said no\n", filepath.Join(workspace, AgentReportFileName): "# report\n"} {
+	for path, content := range map[string]string{roundLog: "verify said no\n", filepath.Join(workspace, AgentReportFileName): "# report\n"} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1331,7 +1331,7 @@ func TestRetainBuildArtifactsCopiesTheReportAndTheRoundLogs(t *testing.T) {
 	}
 	for path, want := range map[string]string{
 		filepath.Join(runDir, AgentReportFileName):                                "# report\n",
-		filepath.Join(runDir, evidence.RoundLogsDirName, "round-3", "oracle.log"): "oracle said no\n",
+		filepath.Join(runDir, evidence.RoundLogsDirName, "round-3", "verify.log"): "verify said no\n",
 	} {
 		if got, err := os.ReadFile(path); err != nil || string(got) != want {
 			t.Errorf("%s = %q, %v, want %q", path, got, err, want)

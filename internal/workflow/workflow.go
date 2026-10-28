@@ -61,14 +61,6 @@ const (
 	// uses.
 	RunNamedGateActivityName    = "RunNamedGateActivity"
 	CollectEvidenceActivityName = "CollectEvidenceActivity"
-	// CommitOraclesActivityName is the host oracle commit
-	// (internal/oraclecommit). It runs after the review -- which can only
-	// run after CollectEvidenceActivity, so the commit cannot live inside it --
-	// and it re-derives every piece of evidence CollectEvidenceActivity
-	// derived from ResultSHA (ChangedFiles, DiffStat, diff text) for the new
-	// result commit. Inert (Active=false, nothing touched) unless the approved
-	// oracle manifest declares a target_path.
-	CommitOraclesActivityName = "CommitOraclesActivity"
 	// RunReviewStepActivityName is the model-backed review step
 	// (reviewstep.CombinedStep), called once per run whose review is on.
 	// It runs as its own sandboxed launch after CollectEvidenceActivity's
@@ -417,8 +409,8 @@ const repoDefinedGatesChange = "repo-defined-gates"
 // the order RunWorkflow runs them: policy.CommandGates' order, then the
 // repository's own gates by name. It also returns the gate commands every
 // later step must use: input's own, or, when this history predates
-// repo-defined-gates, a copy without the repository's gates, so the
-// post-oracle-commit rerun cannot run (and then lose the failure of) a gate
+// repo-defined-gates, a copy without the repository's gates, so a later
+// rerun cannot run (and then lose the failure of) a gate
 // the main pass never ran.
 func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) ([]string, map[string]string) {
 	var checks []string
@@ -442,6 +434,15 @@ func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) ([]st
 	}
 	return checks, registryOnly
 }
+
+// referenceOracleRemovedChange is the GetVersion change ID recorded where
+// RunWorkflow used to commit a reference oracle's bytes into the result and
+// verify the committed tree, and, before the build, to run the oracle on the
+// base commit of a bug request. A history that records it is one made after
+// that path was deleted. Every one of those steps ran only for a run whose
+// input named an oracle directory, which no request can now carry: a run
+// with an oracle must finish before the upgrade.
+const referenceOracleRemovedChange = "reference-oracle-removed"
 
 // requireIsolatedWorkspaceChange is the GetVersion change ID under which
 // RunWorkflow refuses an input with IsolateWorkspace false. A history
@@ -595,7 +596,7 @@ func baselineChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	if input.BaselineCheck && temporalworkflow.GetVersion(ctx, baselineCheckChange, temporalworkflow.DefaultVersion, 1) == 1 {
 		return runBaselineCheck(ctx, ids, buildVerifyCtx, *input, current, baseline.Attempts, baseSHA, committed, worktreePath, branch)
 	}
-	return bugOracleRedOnBase(ctx, ids, buildVerifyCtx, *input, current, baseline.Attempts, baseSHA, committed, worktreePath, branch)
+	return baseline.Attempts, nil
 }
 
 // errBaselineCheckPassed is how preBuildChecks reports a BaselineCheck run

@@ -112,10 +112,9 @@ cost_ceiling_micro_usd: 99
 }
 
 // TestApplyProjectConfigDefaultsFillsNamedGateCommands is the
-// regression test for the named-gate keys (four original, plus
-// reference_oracle_command added later): unset flags pick up
+// regression test for the named-gate keys: unset flags pick up
 // .factory.yml's lint_command/security_command/
-// unit_test_command/integration_test_command/reference_oracle_command,
+// unit_test_command/integration_test_command,
 // and an explicit flag still wins over any one of them individually --
 // same "explicit flag wins" contract
 // TestApplyProjectConfigDefaultsExplicitFlagAlwaysWins already proves for
@@ -126,7 +125,6 @@ func TestApplyProjectConfigDefaultsFillsNamedGateCommands(t *testing.T) {
 security_command: "govulncheck ./..."
 unit_test_command: "go test ./..."
 integration_test_command: "go test -tags=integration ./..."
-reference_oracle_command: "python3 check_reference_oracle.py"
 `)
 	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse([]string{"-unit-test-command", "make my-own-unit-tests"}); err != nil {
@@ -143,9 +141,6 @@ reference_oracle_command: "python3 check_reference_oracle.py"
 	}
 	if *gateCommands["integration_tests"] != "go test -tags=integration ./..." {
 		t.Errorf("integrationTestCommand = %q", *gateCommands["integration_tests"])
-	}
-	if *gateCommands[policy.ReferenceOracleGateID] != "python3 check_reference_oracle.py" {
-		t.Errorf("referenceOracleCommand = %q", *gateCommands[policy.ReferenceOracleGateID])
 	}
 	// -unit-test-command was passed explicitly, so the config's own value
 	// must not override it.

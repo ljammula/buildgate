@@ -71,8 +71,7 @@ type Check struct {
 	Finding string `json:"finding,omitempty"`
 	// Output is the lines of the gate's command output that report the
 	// failure (observation.Excerpt of its log's end), each cleaned and cut
-	// like every other value here. Present for a failed command gate; never
-	// for the reference oracle.
+	// like every other value here. Present for a failed command gate.
 	Output []string `json:"output,omitempty"`
 	// Environment is a sentence the factory writes from a reading taken
 	// outside the sandbox (never from the check's log): the step's worker was
@@ -142,8 +141,8 @@ func Build(r *run.Run, dataDir string) Document {
 		ChangedFiles: cleanList(r.ChangedFiles, maxFilesListed, maxNameLen),
 	}
 	// Only a halt gets the run's one-line reason. A quarantine's is the
-	// operator's sentence about its first failed check, which may name an
-	// oracle or quote its log; the checks below say the same without that.
+	// operator's sentence about its first failed check, which may quote its
+	// log; the checks below say the same without that.
 	if r.State == run.StateHalted {
 		doc.Stopped = clean(firstNonEmpty(r.Triage, triage.Run(r, dataDir)), maxSentenceLen)
 		if r.HaltReasonCode == run.HaltReasonReviewInstructionsFailed {
@@ -339,8 +338,7 @@ func environmentSentence(r *run.Run, check string) string {
 //     build can make it pass, so it is the operator's (BinOperator) and no
 //     corrective build is spent on it. A rerun that failed in another way
 //     (the ticket's job may be to fix that gate), that passed, or that could
-//     not be made, leaves the gate where BinOf puts it. The reference oracle
-//     is never rerun.
+//     not be made, leaves the gate where BinOf puts it.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case failsOnBase(r, finding.Check):

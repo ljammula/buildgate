@@ -32,7 +32,7 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 	})
 
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {

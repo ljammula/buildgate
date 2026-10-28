@@ -226,7 +226,7 @@ func TestRunSandboxWithRetriesRefusesSupersededAttemptBeforeAnyLifecycle(t *test
 		if err := takeActivityLease(checkpointDir, info.WorkflowExecution.ID, info.WorkflowExecution.RunID, info.ActivityID, 2); err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(ctx, in, func(int) string { return filepath.Join(dataDir, "log") }, 1, nil, nil, nil, nil, &sandbox.ComposeServicesSpec{}, "", "", nil, nil, "python3")
+		return a.runSandboxWithRetries(ctx, in, func(int) string { return filepath.Join(dataDir, "log") }, 1, nil, nil, nil, nil, &sandbox.ComposeServicesSpec{}, nil, nil, "python3")
 	}
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestActivityEnvironment()

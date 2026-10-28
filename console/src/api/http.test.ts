@@ -40,7 +40,7 @@ test("each route's token goes in the Authorization header, never the URL", async
   await http.getJson("/daemons", "start");
   await http.sendJson("POST", "/runs/run-1/override", "override", { by: "alice" });
   await http.sendJson("POST", "/requests/req-1/approve", "gate", { by: "alice" });
-  await http.getBytes("/requests/req-1/oracle/x", "read");
+  await http.getBytes("/requests/req-1/files/x", "read");
   await http.openStream("/requests/stream", "read", new AbortController().signal);
   expect(calls.map((c) => c.init.headers)).toEqual([
     { Authorization: "Bearer read-secret" },
@@ -170,7 +170,7 @@ test("no request asks for text/html, which would return the console shell", asyn
   const { fetch, calls } = recording(() => new Response("{}"));
   const http = createHttp({ baseUrl: "", ...tokens, fetch });
   await http.getJson("/requests/req-1", "read");
-  await http.getBytes("/requests/req-1/oracle/RUN_COMMAND.txt", "read");
+  await http.getBytes("/requests/req-1/files/RUN_COMMAND.txt", "read");
   for (const call of calls) expect(JSON.stringify(call.init.headers)).not.toMatch(/accept/i);
 });
 
@@ -203,7 +203,7 @@ test("the body is decoded as UTF-8 whatever charset the response declares", asyn
 test("getBytes returns the bytes as received, undecoded", async () => {
   const { fetch } = recording(() => new Response(new Uint8Array([0xff, 0xfe, 0x00])));
   const http = createHttp({ baseUrl: "", ...tokens, fetch });
-  expect(Array.from(await http.getBytes("/requests/r/oracle/x", "read"))).toEqual([
+  expect(Array.from(await http.getBytes("/requests/r/files/x", "read"))).toEqual([
     0xff, 0xfe, 0x00,
   ]);
 });

@@ -85,7 +85,7 @@ func TestEachTicketRoundGetsARefAndLedgerEntry(t *testing.T) {
 		}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded := requestdrivertest.LoadRequest(t, dataDir, id)
@@ -152,7 +152,7 @@ func TestARoundWithNoCommitOfItsOwnIsNotTagged(t *testing.T) {
 		onReady(&run.Run{ID: requestdrivertest.ArgValue(args, "-ticket")})
 		return quarantinedWithCommit(t, dataDir, args, sha40(1), sha40(1), "canonical_verify")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if tags := requestdrivertest.LoadRequest(t, dataDir, id).Tickets[0].RoundTags; len(tags) != 0 || len(rec.refs) != 0 {
@@ -170,7 +170,7 @@ func quarantinedAfterOneRound(t *testing.T, dp *fakeDeps) (dataDir, id string, r
 		onReady(&run.Run{ID: requestdrivertest.ArgValue(args, "-ticket")})
 		return quarantinedWithCommit(t, dataDir, args, sha40(1), sha40(0xa1), "canonical_verify")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != request.StateQuarantined || len(got.Tickets[0].RoundTags) != 1 {
@@ -192,7 +192,7 @@ func TestRetryFromRoundNBuildsOnABranchAtThatRound(t *testing.T) {
 		onReady(&run.Run{ID: runID})
 		return quarantinedRun(t, dataDir, runID, sha40(0xa1), sha40(0xa3), "canonical_verify")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	wantBranch := "buildgate/" + id + "/t1-from-r1"
@@ -231,7 +231,7 @@ func TestRetryFromRoundTakesANewBranchWhenAnEarlierOneMovedOn(t *testing.T) {
 		onReady(&run.Run{ID: runID})
 		return quarantinedRun(t, dataDir, runID, sha40(0xa1), sha40(0xa3), "canonical_verify")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if got, want := requestdrivertest.ArgValue(args, "-on-branch"), "buildgate/"+id+"/t1-from-r1-2"; got != want {

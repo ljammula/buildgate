@@ -106,8 +106,8 @@ func sandboxAttemptMargin(hasRegistryProxy bool, composeReadyTimeout time.Durati
 
 // runSandboxWithRetries is runSandboxWithRetriesVia with no sandbox runtime:
 // the worker is launched with `docker run`.
-func runSandboxWithRetries(ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (runner.Result, error) {
-	return runSandboxWithRetriesVia(nil, "", ctx, workspace, specPath, extraRunInput, script, logPath, maxAttempts, image, dockerBinary, user, workerUID, runID, dataDir, memory, cpus, tmpfsSize, onAttempt, relaySpec, registrySpec, registryHooks, composeSpec, composeHooks, referenceOracleDir, referenceOracleMountPath, workerEnv, skills, interpreter, args...)
+func runSandboxWithRetries(ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (runner.Result, error) {
+	return runSandboxWithRetriesVia(nil, "", ctx, workspace, specPath, extraRunInput, script, logPath, maxAttempts, image, dockerBinary, user, workerUID, runID, dataDir, memory, cpus, tmpfsSize, onAttempt, relaySpec, registrySpec, registryHooks, composeSpec, composeHooks, workerEnv, skills, interpreter, args...)
 }
 
 // runSandboxWithRetriesVia launches one sandboxed worker through rt,
@@ -134,7 +134,7 @@ func runSandboxWithRetries(ctx context.Context, workspace, specPath, extraRunInp
 // worker environment (harness.Descriptor.WorkerEnv, resolved by the caller from
 // the job's own role); nil for a job with no model-backed harness (verify,
 // gates).
-func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
+func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
 	maxAttempts = max(maxAttempts, 1)
 	var last runner.Result
 	var lastErr error
@@ -305,7 +305,7 @@ func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx co
 			}
 			return last, fmt.Errorf("insufficient time remaining for a sandboxed attempt (less than the %s margin left before the run's own deadline)", margin)
 		}
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: absoluteLogPath, Name: fmt.Sprintf("factoryd-worker-%d", time.Now().UnixNano()), User: user, Command: cmd, Environment: workerEnv, Memory: memory, CPUs: cpus, TmpfsSize: tmpfsSize, Timeout: timeout, Network: "none", Inputs: mounts, RunID: runID, DataDir: dataDir, WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.Path(dataDir, runID)}
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: absoluteLogPath, Name: fmt.Sprintf("factoryd-worker-%d", time.Now().UnixNano()), User: user, Command: cmd, Environment: workerEnv, Memory: memory, CPUs: cpus, TmpfsSize: tmpfsSize, Timeout: timeout, Network: "none", Inputs: mounts, RunID: runID, DataDir: dataDir, WorkerUmask: workerUmask, ProgressPath: progress.Path(dataDir, runID)}
 		var res sandbox.Result
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.

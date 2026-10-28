@@ -23,10 +23,6 @@ const (
 	// BinCorrective: the build agent can fix it, and being told what failed
 	// does not weaken the check.
 	BinCorrective Bin = "corrective"
-	// BinCorrectiveIfOracleInLoop: telling a build what failed exposes the
-	// reference oracle, so it is corrective only when the operator already
-	// lets the build see the oracle (-reference-oracle-in-loop-retry).
-	BinCorrectiveIfOracleInLoop Bin = "corrective_if_oracle_in_loop"
 	// BinNever: feeding it back would defeat the check, or there is nothing
 	// a build can do about it.
 	BinNever Bin = "never"
@@ -60,12 +56,6 @@ var bins = map[string]Bin{
 	// A reviewer's finding whose reproduction the factory ran and saw
 	// fail (SC-022): one corrective build is told the finding in one line.
 	policy.ReviewReproductionCheck: BinCorrective,
-
-	policy.ReferenceOracleGateID: BinCorrectiveIfOracleInLoop,
-
-	// A bug request's oracle that passes on the base commit: the operator
-	// supplies a test that fails.
-	"oracle_red_on_base": BinOperator,
 }
 
 // BinOf returns the bin of a failed check. A repository's own gate
@@ -112,11 +102,9 @@ func rank(b Bin) int {
 	switch b {
 	case BinCorrective:
 		return 0
-	case BinCorrectiveIfOracleInLoop:
-		return 1
 	case BinNever:
-		return 2
+		return 1
 	default:
-		return 3
+		return 2
 	}
 }

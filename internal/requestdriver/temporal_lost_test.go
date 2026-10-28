@@ -42,7 +42,7 @@ func TestABuildLostToTemporalEntersResumeReviewOnceAndNeverRebuilds(t *testing.T
 			t.Fatal(err)
 		}
 		if requestdriver.RequestDriverOwnsState(r.State) {
-			if err := requestdriver.AdvanceRequest(dp, ctx, dataDir, r, requestdriver.WorkerConfig{}, nil, nil, nil, runner); err != nil {
+			if err := requestdriver.AdvanceRequest(dp, ctx, dataDir, r, requestdriver.WorkerConfig{}, nil, nil, runner); err != nil {
 				t.Fatalf("AdvanceRequest: %v", err)
 			}
 		}

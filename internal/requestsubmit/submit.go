@@ -167,13 +167,11 @@ type Params struct {
 	VerifyCommand         string
 	VerifyCommandExplicit bool
 	FullSuiteCommand      string
-	NoCommitOracles       bool
-	DraftOracles          bool
 	// PlanReview is `factoryd submit -plan-review`; Settings.PlanReview
 	// (the session key plan_review) opts in too.
 	PlanReview bool
-	// Bug is `factoryd submit -bug`: stored on the request, which then drafts
-	// oracles whether or not DraftOracles is set.
+	// Bug is `factoryd submit -bug`: stored on the request, whose ticket 1
+	// must add a test that fails on the base commit and passes on the result.
 	Bug bool
 	// ImportedSpec is the content of `factoryd submit -spec-file`: a
 	// finished spec the operator hands over. It must contain at least one
@@ -574,14 +572,6 @@ func validateDraftingInputs(workspace string, p Params) error {
 	return validateImportedTickets(p.ImportedSpec, p.ImportedTickets)
 }
 
-// recordOracleOptions stores the request's oracle options: a bug request
-// always has the oracle stage, since it needs a test that fails first.
-func recordOracleOptions(req *request.Request, p Params) {
-	req.NoCommitOracles = p.NoCommitOracles
-	req.Bug = p.Bug
-	req.DraftOracles = p.DraftOracles || p.Bug
-}
-
 // ImportedTicket is one handed-over ticket: its file name (NNN.spec.md)
 // and full text.
 type ImportedTicket struct {
@@ -799,7 +789,7 @@ func Submit(p Params) (Result, error) {
 		return Result{}, err
 	}
 	req.FullSuiteCommand, req.FullSuiteSource = fullSuiteCommand, fullSuiteSource
-	recordOracleOptions(req, p)
+	req.Bug = p.Bug
 	req.PlanReview = p.PlanReview || p.Settings.PlanReview
 	req.PlanImported = len(p.ImportedTickets) > 0
 	if err := recordHandedOverPlanCriteria(req, p.ImportedSpec); err != nil {

@@ -16,7 +16,6 @@ func TestForStageCoversEveryStage(t *testing.T) {
 		{StagePlanning, RolePlanning},
 		{StageBuilding, RoleExecution},
 		{StagePRCorrective, RoleExecution},
-		{StageOracleDrafting, RoleReview},
 	}
 	for _, c := range cases {
 		if got := ForStage(c.stage); got != c.want {

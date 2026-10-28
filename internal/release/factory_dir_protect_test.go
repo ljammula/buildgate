@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"buildgate/internal/projectconfig"
-	"buildgate/internal/run"
 )
 
 var factoryDirProtected = []string{
@@ -48,15 +47,6 @@ func TestProtectedFilesTouchedByRunNeverExemptsTheFactoryDir(t *testing.T) {
 	for _, p := range []string{".factory/lint.sh", ".Factory/lint.sh", ".FACTORY/a/b"} {
 		r := cleanRun()
 		r.ChangedFiles = []string{p}
-		// Evidence that lists the path as authored, hash-equal, and pinned by
-		// the base index, and as a declared deletion: none of it exempts.
-		r.Oracles = &run.OracleEvidence{
-			Authored:       []run.OracleFile{{Path: p, SHA256: "pinned"}},
-			ResultSHA256:   map[string]string{p: "pinned"},
-			BaseIndexPaths: []string{p},
-			BaseSHA256:     map[string]string{p: "pinned"},
-			Deleted:        []string{p},
-		}
 		if got := (MergePolicy{}).ProtectedFilesTouchedByRun(r); !reflect.DeepEqual(got, []string{p}) {
 			t.Errorf("%s: got %v, want it refused", p, got)
 		}

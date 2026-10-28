@@ -420,32 +420,6 @@ func TestWorkspaceMasksAreReadOnlyBindsBelowTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestWorkspaceMasksFollowTheReferenceOracleBind(t *testing.T) {
-	spec, launch := sandboxRequestFixture(t)
-	root := filepath.Dir(spec.WorkDir)
-	oracle := filepath.Join(root, "oracle")
-	mask := filepath.Join(root, "mask")
-	for _, d := range []string{oracle, mask} {
-		if err := os.Mkdir(d, 0o750); err != nil {
-			t.Fatal(err)
-		}
-	}
-	spec.ReferenceOracleDir, spec.ReferenceOracleMountPath = oracle, "verify"
-	spec.WorkspaceMasks = []WorkspaceMask{{Source: mask, Target: ".codex", Dir: true}}
-	req, err := spec.SandboxRequest(launch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var targets []string
-	for _, m := range req.Mounts {
-		targets = append(targets, m.Target)
-	}
-	joined := strings.Join(targets, " ")
-	if strings.Index(joined, "/workspace/verify") > strings.Index(joined, "/workspace/.codex") {
-		t.Fatalf("mask is bound before the oracle: %v", targets)
-	}
-}
-
 func TestWorkspaceMaskValidation(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "f")
@@ -465,39 +439,33 @@ func TestWorkspaceMaskValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name   string
-		mask   WorkspaceMask
-		oracle string
-		ok     bool
+		name string
+		mask WorkspaceMask
+		ok   bool
 	}{
-		{"valid file", WorkspaceMask{Source: file, Target: "AGENTS.md"}, "verify", true},
-		{"valid dir", WorkspaceMask{Source: dir, Target: ".codex", Dir: true}, "verify", true},
-		{"git", WorkspaceMask{Source: dir, Target: ".git", Dir: true}, "", false},
-		{"under git", WorkspaceMask{Source: file, Target: ".git/config"}, "", false},
-		{"parent", WorkspaceMask{Source: file, Target: "../x"}, "", false},
-		{"absolute", WorkspaceMask{Source: file, Target: "/etc/passwd"}, "", false},
-		{"empty", WorkspaceMask{Source: file, Target: ""}, "", false},
-		{"unclean", WorkspaceMask{Source: file, Target: "a//b"}, "", false},
-		{"oracle itself", WorkspaceMask{Source: dir, Target: "verify", Dir: true}, "verify", false},
-		{"under oracle", WorkspaceMask{Source: file, Target: "verify/run.sh"}, "verify", false},
-		{"over oracle", WorkspaceMask{Source: dir, Target: ".pi", Dir: true}, ".pi/verify", false},
-		{"symlink source", WorkspaceMask{Source: link, Target: "AGENTS.md"}, "", false},
-		{"file source with Dir", WorkspaceMask{Source: file, Target: ".codex", Dir: true}, "", false},
-		{"dir source without Dir", WorkspaceMask{Source: dir, Target: "AGENTS.md"}, "", false},
-		{"colon", WorkspaceMask{Source: file, Target: "a:b/AGENTS.md"}, "", false},
-		{"comma", WorkspaceMask{Source: file, Target: "a,b/AGENTS.md"}, "", false},
-		{"newline", WorkspaceMask{Source: file, Target: "a\nb/AGENTS.md"}, "", false},
-		{"quote", WorkspaceMask{Source: file, Target: "a\"b/AGENTS.md"}, "", false},
-		{"upper-case git", WorkspaceMask{Source: file, Target: ".GIT/config"}, "", false},
-		{"colon in source", WorkspaceMask{Source: colonFile, Target: "AGENTS.md"}, "", false},
-		{"git below the first component", WorkspaceMask{Source: file, Target: "sub/.GIT/x"}, "", false},
-		{"oracle in another case", WorkspaceMask{Source: dir, Target: "VERIFY", Dir: true}, "verify", false},
-		{"under the oracle in another case", WorkspaceMask{Source: file, Target: "Verify/run.sh"}, "verify", false},
-		{"relative source", WorkspaceMask{Source: "f", Target: "AGENTS.md"}, "", false},
+		{"valid file", WorkspaceMask{Source: file, Target: "AGENTS.md"}, true},
+		{"valid dir", WorkspaceMask{Source: dir, Target: ".codex", Dir: true}, true},
+		{"git", WorkspaceMask{Source: dir, Target: ".git", Dir: true}, false},
+		{"under git", WorkspaceMask{Source: file, Target: ".git/config"}, false},
+		{"parent", WorkspaceMask{Source: file, Target: "../x"}, false},
+		{"absolute", WorkspaceMask{Source: file, Target: "/etc/passwd"}, false},
+		{"empty", WorkspaceMask{Source: file, Target: ""}, false},
+		{"unclean", WorkspaceMask{Source: file, Target: "a//b"}, false},
+		{"symlink source", WorkspaceMask{Source: link, Target: "AGENTS.md"}, false},
+		{"file source with Dir", WorkspaceMask{Source: file, Target: ".codex", Dir: true}, false},
+		{"dir source without Dir", WorkspaceMask{Source: dir, Target: "AGENTS.md"}, false},
+		{"colon", WorkspaceMask{Source: file, Target: "a:b/AGENTS.md"}, false},
+		{"comma", WorkspaceMask{Source: file, Target: "a,b/AGENTS.md"}, false},
+		{"newline", WorkspaceMask{Source: file, Target: "a\nb/AGENTS.md"}, false},
+		{"quote", WorkspaceMask{Source: file, Target: "a\"b/AGENTS.md"}, false},
+		{"upper-case git", WorkspaceMask{Source: file, Target: ".GIT/config"}, false},
+		{"colon in source", WorkspaceMask{Source: colonFile, Target: "AGENTS.md"}, false},
+		{"git below the first component", WorkspaceMask{Source: file, Target: "sub/.GIT/x"}, false},
+		{"relative source", WorkspaceMask{Source: "f", Target: "AGENTS.md"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateWorkspaceMasks([]WorkspaceMask{tc.mask}, tc.oracle)
+			err := validateWorkspaceMasks([]WorkspaceMask{tc.mask})
 			if tc.ok && err != nil {
 				t.Fatalf("refused: %v", err)
 			}
@@ -506,10 +474,10 @@ func TestWorkspaceMaskValidation(t *testing.T) {
 			}
 		})
 	}
-	if err := validateWorkspaceMasks([]WorkspaceMask{{Source: dir, Target: ".pi", Dir: true}, {Source: file, Target: ".pi/AGENTS.md"}}, ""); err == nil {
+	if err := validateWorkspaceMasks([]WorkspaceMask{{Source: dir, Target: ".pi", Dir: true}, {Source: file, Target: ".pi/AGENTS.md"}}); err == nil {
 		t.Fatal("nested masks accepted")
 	}
-	if err := validateWorkspaceMasks([]WorkspaceMask{{Source: dir, Target: ".pi", Dir: true}, {Source: file, Target: ".PI/AGENTS.md"}}, ""); err == nil {
+	if err := validateWorkspaceMasks([]WorkspaceMask{{Source: dir, Target: ".pi", Dir: true}, {Source: file, Target: ".PI/AGENTS.md"}}); err == nil {
 		t.Fatal("masks overlapping only by case accepted")
 	}
 

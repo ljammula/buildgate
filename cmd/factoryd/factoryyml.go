@@ -32,7 +32,6 @@ func factoryYMLContent(verifyCommand, preflightProfile string) string {
 	body.WriteString("# security_command: \"govulncheck ./...\"\n")
 	body.WriteString("# unit_test_command: \"go test ./...\"\n")
 	body.WriteString("# integration_test_command: \"go test -tags=integration ./...\"\n")
-	body.WriteString("# reference_oracle_command: \"\" # e.g. a script diffing candidate output against an independent oracle -- must NOT be agent-authored or editable via the ticket's Allowed-Files\n")
 	return body.String()
 }
 

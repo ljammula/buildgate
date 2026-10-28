@@ -32,8 +32,7 @@ import (
 const FileName = ".factory.yml"
 
 // DirName is the repository directory a project keeps the scripts its
-// FileName commands call in. Like FileName it is protected at release, and no
-// oracle may be committed under it.
+// FileName commands call in. Like FileName it is protected at release.
 const DirName = ".factory"
 
 // PreflightProfileBrownfield mirrors cmd/factoryd's own preflightProfileBrownfield
@@ -56,31 +55,15 @@ type Config struct {
 	// before VerifyCommand each round, short-circuiting it on failure --
 	// see -fast-check-command in cmd/factoryd.
 	FastCheckCommand string `yaml:"fast_check_command"`
-	// LintCommand/SecurityCommand/UnitTestCommand/IntegrationTestCommand/
-	// ReferenceOracleCommand are optional named gates, extended
-	// for reference-oracle diffing, each run in the sandbox after canonical
+	// LintCommand/SecurityCommand/UnitTestCommand/IntegrationTestCommand
+	// are optional named gates, each run in the sandbox after canonical
 	// verification passes and recorded as its own pass/fail/not-configured
 	// gate in the release decision --
-	// "lint"/"security_audit"/"unit_tests"/"integration_tests"/
-	// "reference_oracle" respectively. Threaded exactly the way
+	// "lint"/"security_audit"/"unit_tests"/"integration_tests"
+	// respectively. Threaded exactly the way
 	// FastCheckCommand already is (projectconfig -> -lint-command/etc. ->
 	// applyProjectConfigDefaults -> run). Unset means the gate never runs
 	// and is recorded as "not configured", never as passed.
-	//
-	// ReferenceOracleCommand specifically: unlike the other three, which
-	// check the *implementation's own declared tests*, this one is meant
-	// to run a check that is NOT agent-authored -- a script checked into
-	// the repo outside the ticket's Allowed-Files, comparing the
-	// candidate's output against an independent, pre-existing oracle
-	// (published test vectors, an existing reference implementation) --
-	// so its pass/fail is evidence the agent's own self-authored tests
-	// cannot fabricate. See that note's "Worth it" verdict for #5: proven
-	// in the sense that differential/reference testing against a known-
-	// good oracle is a demonstrated technique (Carlini's C-compiler
-	// project used GCC this way), but this specific gate is a new,
-	// unvalidated mechanism -- exercise it on a real ticket with a real
-	// oracle before trusting its result the way canonical_verify's is
-	// trusted.
 	LintCommand     string `yaml:"lint_command"`
 	SecurityCommand string `yaml:"security_command"`
 	// FullSuiteCommand is the repo-wide regression command the "full_suite_verify"
@@ -91,7 +74,6 @@ type Config struct {
 	FullSuiteCommand       string `yaml:"full_suite_command"`
 	UnitTestCommand        string `yaml:"unit_test_command"`
 	IntegrationTestCommand string `yaml:"integration_test_command"`
-	ReferenceOracleCommand string `yaml:"reference_oracle_command"`
 	// TestPatterns is the tests_red_on_base gate boundary: glob patterns
 	// (path.Match syntax) matched against a run's changed-file inventory,
 	// both the full repo-relative path and the bare basename, so
@@ -216,10 +198,6 @@ const MaxRepoGates = 16
 
 var repoGateIDRE = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
-// RepoGateReservedSuffix mirrors internal/workflow's post-oracle-commit
-// attempt-kind suffix (TestRepoGateReservedSuffixMatchesTheRerunKind).
-const RepoGateReservedSuffix = "_after_oracle_commit"
-
 // RepoGateCommands returns Config.Gates keyed by policy.RepoGateCheck(id),
 // the form a run's gate commands take.
 func (c Config) RepoGateCommands() map[string]string {
@@ -242,12 +220,6 @@ func (c *Config) validateGates() error {
 	for i, g := range c.Gates {
 		if !repoGateIDRE.MatchString(g.ID) {
 			return fmt.Errorf("gates[%d].id %q must match %s", i, g.ID, repoGateIDRE)
-		}
-		// "<check>_after_oracle_commit" is the attempt kind and log name of
-		// a gate's rerun on the committed tree: an id ending in it would
-		// share them with another gate's rerun.
-		if strings.HasSuffix(g.ID, RepoGateReservedSuffix) {
-			return fmt.Errorf("gates[%d].id %q must not end in %q", i, g.ID, RepoGateReservedSuffix)
 		}
 		if seen[g.ID] {
 			return fmt.Errorf("gates[%d].id %q is listed twice", i, g.ID)
@@ -275,7 +247,6 @@ func (c Config) GateCommands() map[string]string {
 		"security_command":         c.SecurityCommand,
 		"unit_test_command":        c.UnitTestCommand,
 		"integration_test_command": c.IntegrationTestCommand,
-		"reference_oracle_command": c.ReferenceOracleCommand,
 	}
 	out := make(map[string]string, len(policy.CommandGates))
 	for _, g := range policy.CommandGates {

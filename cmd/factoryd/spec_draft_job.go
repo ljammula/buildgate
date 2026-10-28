@@ -385,7 +385,7 @@ func launchSandboxedSpecStageJob(ctx context.Context, dataDir string, r *request
 		cfg.SandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
 		cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
 		nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", roleOverride.WorkerEnv, roleOverride.Skills, cfg.DraftSpecInterpreter, args...,
+		roleOverride.WorkerEnv, roleOverride.Skills, cfg.DraftSpecInterpreter, args...,
 	)
 }
 

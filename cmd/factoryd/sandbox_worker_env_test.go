@@ -47,7 +47,7 @@ func TestRunSandboxWithRetriesPassesTheWorkerEnvironmentItIsGiven(t *testing.T) 
 				"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", docker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 				"worker-env-run", t.TempDir(), "4g", "2", "256m", nil,
 				nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-				"", "", tc.env, nil, "sh", "-c", "true",
+				tc.env, nil, "sh", "-c", "true",
 			)
 			if err != nil {
 				t.Fatalf("runSandboxWithRetries: %v", err)

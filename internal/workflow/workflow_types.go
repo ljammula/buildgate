@@ -18,16 +18,14 @@ import (
 // runs as the same user as the rest of the run and can edit
 // spec.snapshot.md; parsing these declarations only after the build
 // would let it silently strip any of them and defeat the gate that
-// depends on it, even though factoryd's own hashed acceptance-oracle
+// depends on it, even though factoryd's own hashed spec
 // record still points at the original (now-tampered) spec bytes. nil
 // means the ticket declared no such key — same optional-key convention
 // cmd/factoryd's uses, each check skipped entirely rather
 // than evaluated against an empty list.
 type RunWorkflowInput struct {
 	// ReleaseProtectedPaths is the run's configured release protected-path list
-	// (-release-protected-paths). The host commit of accepted oracles validates
-	// each manifest target_path against it BEFORE modifying the checkout, without it a manifest could commit a file under a
-	// protected path and only be caught later at release (Codex review of #203).
+	// (-release-protected-paths).
 	ReleaseProtectedPaths []string `json:"release_protected_paths,omitempty"`
 	Ticket                string   `json:"ticket"`
 	WorkspacePath         string   `json:"workspace_path"`
@@ -168,7 +166,7 @@ type RunWorkflowInput struct {
 	BaselineCheck bool `json:"baseline_check,omitempty"`
 	// GateCommands is every operator-configured command gate (see
 	// policy.CommandGates -- "lint", "security_audit", "unit_tests",
-	// "integration_tests", "reference_oracle" today, keyed by
+	// "integration_tests" today, keyed by
 	// policy.CommandGate.ID), ported to the Temporal path the same way
 	// FullSuiteCommand was: carried per-execution, no Worker-static
 	// fallback, doubling as RunWorkflow's own deterministic decision of
@@ -216,48 +214,8 @@ type RunWorkflowInput struct {
 	// AutofixCommands is the committed .factory.yml `autofix:` list, with
 	// the same source as SetupCommands; no Activity reads it.
 	AutofixCommands []string `json:"autofix_commands,omitempty"`
-	// ReferenceOracleDir/ReferenceOracleMountPath provide the read-only oracle mount (and the content hash it makes
-	// possible) to the Temporal/-repository path -- the parity follow-up
-	// from PR #151/#152's reviews. Same empty-means-not-configured
-	// convention as GateCommands[policy.ReferenceOracleGateID]: whichever
-	// Worker actually executes RunNamedGateActivity for the
-	// "reference_oracle" check needs ReferenceOracleDir reachable on ITS
-	// OWN filesystem (the same inherent constraint -WorkspacePath already
-	// has on a shared task queue -- see this struct's own doc comment on
-	// Worker-static vs. per-execution fields), which is why these travel
-	// with the rest of RunWorkflowInput rather than as a Worker-static
-	// a.Activities field.
-	ReferenceOracleDir       string `json:"reference_oracle_dir,omitempty"`
-	ReferenceOracleMountPath string `json:"reference_oracle_mount_path,omitempty"`
-	// ReferenceOracleInLoopRetry ports cmd/factoryd's
-	// -reference-oracle-in-loop-retry (Phase 0.5) to this path: when
-	// set together with ReferenceOracleDir/ReferenceOracleMountPath/
-	// ReferenceOracleCommand, RunBuildActivity also mounts the (snapshotted,
-	// hashed) oracle read-only into the BUILD container and passes the
-	// command to build_app.py's own --reference-oracle-command, so a failing
-	// round gets the same targeted-retry treatment a canonical-verify
-	// failure gets, instead of only the one-shot post-build gate. Purely an
-	// Activity-side decision -- RunWorkflow's own control flow never reads
-	// it. Off by default: exposing oracle content to the writable, agent-controlled
-	// build container is new exposure an operator must opt into. A Worker
-	// running a build older than this field ignores it (unknown JSON
-	// fields are dropped), i.e. silently gets no in-loop retry -- the one
-	// gap mixed-version deployments have here, same as any other new
-	// per-run field.
-	// ReferenceOracleDir must be reachable on whichever Worker executes the
-	// build (the same constraint WorkspacePath already has on a shared task
-	// queue); when it is not, RunBuildActivity fails before launching
-	// anything -- fail-closed by design, never a silent skip of an oracle
-	// the operator explicitly opted into.
-	ReferenceOracleInLoopRetry bool `json:"reference_oracle_in_loop_retry,omitempty"`
-	// NoCommitOracles is the request's explicit opt-out from the host oracle
-	// commit: CommitOraclesActivity runs validate-only (nothing written or
-	// committed, so no post-commit verify follows).
-	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
-	// Bug is a bug request's run: with a ReferenceOracleDir, preBuildChecks
-	// runs the reference-oracle command on the base commit and halts the run
-	// when it passes, since a test that already passes does not reproduce the
-	// bug (workflow change bug-oracle-red-on-base).
+	// Bug is the first ticket of a bug request: its tests_red_on_base gate
+	// takes no Tests-Required opt-out.
 	Bug           bool   `json:"bug,omitempty"`
 	SandboxImage  string `json:"sandbox_image,omitempty"`
 	SandboxDocker string `json:"sandbox_docker,omitempty"`
@@ -649,26 +607,11 @@ type VerifyActivityResult struct {
 	DurationMs int64         `json:"duration_ms"`
 	LogSHA256  string        `json:"log_sha256"`
 	Attempts   []run.Attempt `json:"attempts"`
-	// ReferenceOracleSHA256 is RunNamedGateActivity's own Temporal-path
-	// counterpart to cmd/factoryd's GateResult.ReferenceOracleSHA256 --
-	// see its doc comment. Meaningful only when this result came from the
-	// "reference_oracle" named-gate Activity with ReferenceOracleDir
-	// configured; empty for every other Activity that shares this result
-	// shape (RunVerifyActivity, RunFullSuiteVerifyActivity, every other
-	// named gate).
-	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
-	// OracleCanary is the reference_oracle gate's runtime-canary outcome (see
-	// run.OracleCanaryEvidence); nil for every other Activity and when the real
-	// oracle command did not pass (the canary only runs after it did).
-	OracleCanary *run.OracleCanaryEvidence `json:"oracle_canary,omitempty"`
 	// BaseCheck is a failed named or repository gate's rerun on the base
 	// commit (run.GateBaseCheck), made inside the gate's own Activity; nil
-	// for a gate that passed, for the reference oracle and for every other
+	// for a gate that passed and for every other
 	// Activity.
 	BaseCheck *run.GateBaseCheck `json:"base_check,omitempty"`
-	// NotRun is set by the base-commit check of a bug request (oracle_red_on_base)
-	// when the command exited 0 but its log shows that no test ran.
-	NotRun bool `json:"not_run,omitempty"`
 	// Rerun is the second run of RunVerifyActivity's, RunFullSuiteVerify-
 	// Activity's or the baseline's command after a first run whose failure
 	// qualified (verify_rerun.go); when it reached an exit code, Result,
@@ -981,44 +924,6 @@ type CollectedEvidence struct {
 	DependencyChanges         []evidence.DependencyChange `json:"dependency_changes"`
 	RequiredContentBaseFiles  map[string]string           `json:"required_content_base_files,omitempty"`
 	RequiredContentFinalFiles map[string]string           `json:"required_content_final_files,omitempty"`
-	// Oracles is the committed-oracle evidence for this collection: the
-	// base commit's oracle index (protecting earlier oracles from agent
-	// edits). nil when the base commit has none.
-	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
-}
-
-// CommitOraclesInput is CommitOraclesActivity's input. PinnedOracleSHA256 is
-// the tree hash the reference_oracle gate recorded for the oracle content it
-// actually ran against; the Activity refuses to commit bytes that do not hash
-// to it.
-type CommitOraclesInput struct {
-	RunWorkflowInput
-	PinnedOracleSHA256 string `json:"pinned_oracle_sha256"`
-	// ValidateOnly (the request's -no-commit-oracles) runs every check the
-	// commit runs but writes and commits nothing.
-	ValidateOnly bool `json:"validate_only,omitempty"`
-}
-
-// CommittedOracles is CommitOraclesActivity's output. Active false means the
-// manifest declared no target_path and nothing was touched; every other
-// field is then zero and the workflow keeps CollectEvidenceActivity's values.
-// Otherwise ResultSHA/ChangedFiles/DiffStat/Diff* replace CollectEvidenceActivity's
-// (they describe the result commit that now includes the oracles).
-type CommittedOracles struct {
-	Active        bool                `json:"active"`
-	Committed     bool                `json:"committed"`
-	ResultSHA     string              `json:"result_sha,omitempty"`
-	ChangedFiles  []string            `json:"changed_files,omitempty"`
-	DiffStat      *run.DiffStat       `json:"diff_stat,omitempty"`
-	DiffAvailable bool                `json:"diff_available,omitempty"`
-	DiffTruncated bool                `json:"diff_truncated,omitempty"`
-	Oracles       *run.OracleEvidence `json:"oracles,omitempty"`
-	// RequiredContentFinalFiles is the required-content evidence recomputed from
-	// the committed tree: the host commit can write or supersede a path listed in
-	// the ticket's required files, so the pre-commit snapshot from
-	// CollectEvidenceActivity no longer describes ResultSHA (Codex review of the
-	// Temporal parity PR). nil when the ticket declares no required content.
-	RequiredContentFinalFiles map[string]string `json:"required_content_final_files,omitempty"`
 }
 
 // RunProgress is the snapshot RunWorkflow's RunProgressQueryName query
@@ -1092,17 +997,6 @@ type RunWorkflowResult struct {
 	// rejected every accepted zero-change Temporal-routed run.
 	ChangedFiles []string      `json:"changed_files"`
 	DiffStat     *run.DiffStat `json:"diff_stat,omitempty"`
-	// Oracles mirrors run.Run.Oracles (see run.OracleEvidence): the
-	// committed-oracle evidence carried from CollectEvidenceActivity /
-	// CommitOraclesActivity so the durable record and release check see it.
-	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
-	// FailedAfterOracleCommit mirrors run.Run.FailedAfterOracleCommit: the
-	// checks whose post-oracle-commit rerun replaced a passing result with a
-	// failing one. Data only: no activity or workflow call depends on it.
-	FailedAfterOracleCommit []string `json:"failed_after_oracle_commit,omitempty"`
-	// OracleCanary mirrors run.Run.OracleCanary: the reference_oracle gate's
-	// runtime-canary outcome (nil when it never ran).
-	OracleCanary *run.OracleCanaryEvidence `json:"oracle_canary,omitempty"`
 	// DiffAvailable/DiffTruncated mirror run.Run's own fields of the same
 	// name — carried through from CollectedEvidence for the same reason
 	// ChangedFiles/DiffStat are above. The diff text itself never appears

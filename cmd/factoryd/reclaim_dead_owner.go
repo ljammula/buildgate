@@ -195,7 +195,7 @@ func reclaimLostWork(dp *deps, ctx context.Context, dataDir, dockerBinary, tempo
 }
 
 // reclaimDeadRequestJobs removes the worker and relay containers that a
-// request-level job (spec, oracle or plan drafting) left behind when its
+// request-level job (spec or plan drafting) left behind when its
 // process died: reclaimDeadOwnerRuns only scans run records, and these jobs
 // have none. The owner is the PID in the request's sandbox-owner.pid marker,
 // read like a run's (runOwnerDead). Best-effort: failures are logged.
