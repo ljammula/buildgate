@@ -22,6 +22,7 @@ const metrics = (extra: Record<string, unknown> = {}) => ({
   quarantined_by: [],
   halted_by: [],
   corrective_builds: { ran: 0, accepted: 0 },
+  pull_requests: { opened: 0, sent_back: 0, sent_back_rate: null },
   spend: { tokens: 0, cost_micro_usd: 0, per_accepted_ticket_micro_usd: 0 },
   ...extra,
 });

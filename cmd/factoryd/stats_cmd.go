@@ -175,6 +175,7 @@ func printProjectStats(w io.Writer, r stats.Report) {
 	fmt.Fprintf(tw, "same failure twice\t%s of failed-round pairs that recorded a signature\n", share(m.SameFailurePairs, m.ComparablePairs))
 	fmt.Fprintf(tw, "round changed no file\t%s of failed-round pairs\n", share(m.NoChangePairs, m.FailedRoundPairs))
 	fmt.Fprintf(tw, "corrective builds\t%d ran, %d accepted\n", m.CorrectiveBuilds.Ran, m.CorrectiveBuilds.Accepted)
+	fmt.Fprintf(tw, "sent back after PR\t%s of tickets that reached a pull request\n", share(m.PullRequests.SentBack, m.PullRequests.Opened))
 	fmt.Fprintf(tw, "relay spend\t%d tokens, $%.2f; $%.2f per accepted ticket\n", m.Spend.Tokens, float64(m.Spend.CostMicroUSD)/1e6, float64(m.Spend.PerAcceptedTicketMicroUSD)/1e6)
 	tw.Flush()
 	printBucketTable(w, r)
