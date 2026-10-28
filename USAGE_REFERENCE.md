@@ -1250,8 +1250,8 @@ the deterministic gates and the human gates.
 Formatting drift never reaches the reviewer: `build_app.py` runs `gofmt -w`
 on changed `.go` files once a round's verify passes.
 
-`-code-review-policy` (`off`/`advisory`/`required`, default `off`; session
-config: `code_review_policy`; `quickstart` writes `required`) is the AI code
+`-code-review-policy` (`off`/`advisory`/`required`, default `required`; session
+config: `code_review_policy`, which `quickstart` writes into a new config) is the AI code
 review: one launch of `agent/pi/scripts/combined_review.py` (progress stage
 `review`, attempt kind `review`), a free-form review of the diff for
 concrete correctness/security/data-loss/concurrency defects. It runs right
@@ -2321,8 +2321,9 @@ reusing an existing config backfills only the missing keys. `doctor` warns
 `doctor -fix` can write them.
 
 **Code review default.** `quickstart` writing a new config (not reusing an
-existing one) also sets `code_review_policy: required`; `worker`'s bare
-`-code-review-policy` flag stays `off` with no config. A single-ticket run
+existing one) also writes `code_review_policy: required`, which is also the default of
+`worker`'s and a single-ticket run's `-code-review-policy` flag with no config.
+A single-ticket run
 (`factoryd -ticket ...`, and a run `serve` starts for `POST /runs`) with no
 `-code-review-policy` takes the config's value too; its flag overrides it.
 

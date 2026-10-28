@@ -112,8 +112,8 @@ type RunWorkflowInput struct {
 	// Worker happens to have configured. "" is treated identically to
 	// codereview.PolicyOff -- RunWorkflow never calls
 	// RunReviewStepActivityName in either case,
-	// matching cmd/factoryd's (-code-review-policy defaults to
-	// "off", never silently enabled).
+	// whatever policy the caller passes; cmd/factoryd's default is
+	// codereview.DefaultPolicy.
 	CodeReviewPolicy  string `json:"code_review_policy,omitempty"`
 	MaxRounds         int    `json:"max_rounds,omitempty"`
 	TimeoutMinutes    int    `json:"timeout_minutes,omitempty"`

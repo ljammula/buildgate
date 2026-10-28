@@ -30,9 +30,8 @@ var (
 // default rather than hand-maintaining a second copy of these strings
 // that could silently drift from EvaluateRun's own.
 //
-// "code_review" is deliberately NOT listed here: it is off by default
-// (-code-review-policy defaults to "off"), so most runs never declare a
-// code-review command at all. Listing it would make it
+// "code_review" is deliberately NOT listed here: a run whose
+// -code-review-policy is "off" never declares a code-review command. Listing it would make it
 // internal/release.MergePolicy's default RequiredGates member, and every run
 // with the review off would then deny release outright for a gate it was
 // never meant to satisfy. Add it here only alongside a merge_policy.go

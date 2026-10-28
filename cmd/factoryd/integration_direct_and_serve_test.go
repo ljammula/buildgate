@@ -1301,6 +1301,8 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 	)
+	// The default policy, required, needs a model relay this run lacks.
+	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, "sandbox_docker: "+filepath.Join(testdataDir(t), "fake_docker.sh")+"\ncode_review_policy: off\n")...)
 	var output synchronizedBuffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output

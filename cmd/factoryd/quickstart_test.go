@@ -468,9 +468,8 @@ func TestQuickstartBuildConfigCopilotSetsContextWindow(t *testing.T) {
 
 // TestQuickstartBuildConfigDefaultsCodeReviewPolicyToRequired covers M2-D's
 // quickstart change: a freshly built session config turns the standalone
-// AI code-review pass on (worker's own bare -code-review-policy flag
-// default stays "off", for an operator running with no config at all --
-// see that flag's own doc comment), so a new factory gets the
+// AI code-review pass on (the same policy as the
+// -code-review-policy flags' default, codereview.DefaultPolicy), so a new factory gets the
 // review-corrective round's code_review half working out of the box
 // rather than needing a manual opt-in.
 func TestQuickstartBuildConfigDefaultsCodeReviewPolicyToRequired(t *testing.T) {

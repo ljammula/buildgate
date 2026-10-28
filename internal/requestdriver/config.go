@@ -103,9 +103,8 @@ type WorkerConfig struct {
 	AdvanceOn string
 	// codeReviewPolicy mirrors factoryd <run>'s own -code-review-policy
 	// flag -- the review step (agent/pi/scripts/combined_review.py,
-	// internal/codereview). off (the default) means
-	// every worker-drained entry never runs it, matching the bare CLI's
-	// own -code-review-policy default.
+	// internal/codereview). its default is
+	// codereview.DefaultPolicy, the same as the bare CLI's.
 	CodeReviewPolicy string
 	// codeReviewPolicyExplicit records whether the operator actually chose
 	// codeReviewPolicy (CLI flag or session config), as opposed to it

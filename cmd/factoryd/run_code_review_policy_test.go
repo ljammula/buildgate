@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -26,7 +27,8 @@ func codeReviewPolicyOfRun(t *testing.T, extraFlags ...string) string {
 		}
 		flags = append(flags, all[i])
 	}
-	cmd := factorydCommand(t, append(flags, extraFlags...)...)
+	// Not factorydCommand, which turns the review off for a run that names no policy.
+	cmd := exec.Command(binPath, append(flags, extraFlags...)...)
 	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "RUN_INPUT_GOLDEN_KEY=sk-test", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t)+"code_review_policy: required\n")...)
 	out, _ := cmd.CombinedOutput()
