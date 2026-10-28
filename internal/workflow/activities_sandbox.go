@@ -38,7 +38,7 @@ type relaunchUnstartedOnlyKey struct{}
 
 // relaunchUnstartedOnly marks ctx as a step whose launch is made again only
 // when its sandbox never started the command (sandbox.ErrSandboxNotStarted):
-// the review, full-suite and named-gate steps. Nothing ran, so the second
+// the review, full-suite and repository-gate steps. Nothing ran, so the second
 // launch spends nothing twice and finds the worktree as the first did. A
 // command that started and then failed is not launched again on these
 // steps: a review would get a second full spend ceiling and a worktree its
@@ -414,7 +414,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	// always invoked from inside heartbeatWhileRunning (see every one of
 	// its callers -- RunBuildActivity, RunVerifyActivity,
 	// RunReviewStepActivity, RunFullSuiteVerifyActivity, the
-	// named-gate check), which already runs a ticker calling
+	// repository-gate check), which already runs a ticker calling
 	// activity.RecordHeartbeat concurrently with this call for as long as
 	// it runs, regardless of what it's doing internally -- so a long wait
 	// for the lock keeps heartbeating exactly like a long-running build
@@ -772,7 +772,7 @@ func unlaunchedAttempt(afterAttempt func(int, runner.Result, error) error, attem
 
 // hasFakeRunner reports whether a test has injected a fake unsandboxed
 // runner (runWithRetries/runWithRetriesChecked). Every production caller
-// leaves both nil, so every build/verify/full-suite/named-gate launch goes
+// leaves both nil, so every build/verify/full-suite/repository-gate launch goes
 // through the real sandboxed worker container (runSandboxWithRetries) --
 // sandboxing is unconditional and has no host-execution opt-out. Checked
 // ahead of the sandboxed dispatch at every call site in this file so a

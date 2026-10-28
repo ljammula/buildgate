@@ -106,7 +106,7 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 	if err := os.WriteFile(filepath.Join(runDir, "agent-notes.md"), []byte(notesFile), 0o600); err != nil {
 		f.t.Fatal(err)
 	}
-	rr := requestdrivertest.QuarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "repo-lint")
 	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)

@@ -271,7 +271,7 @@
         "log_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
       },
       {
-        "check": "lint",
+        "check": "repo-lint",
         "command": [
           "go",
           "vet",

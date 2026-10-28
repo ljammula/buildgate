@@ -17,10 +17,9 @@ import (
 // building its own string.
 func TestFactoryYMLContentSharedByInitAndOnboard(t *testing.T) {
 	t.Parallel()
-	const commentedGateDefaults = "# lint_command: \"golangci-lint run ./...\"\n" +
-		"# security_command: \"govulncheck ./...\"\n" +
-		"# unit_test_command: \"go test ./...\"\n" +
-		"# integration_test_command: \"go test -tags=integration ./...\"\n"
+	const commentedGateDefaults = "# gates:\n" +
+		"#   - id: lint\n" +
+		"#     command: \"golangci-lint run ./...\"\n"
 	if got, want := factoryYMLContent("go test ./...", "brownfield"), "verify_command: \"go test ./...\"\npreflight_profile: brownfield\n"+commentedGateDefaults; got != want {
 		t.Errorf("factoryYMLContent = %q, want %q", got, want)
 	}

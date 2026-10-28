@@ -524,7 +524,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	}}
 	accepted.GateResults = []run.GateResult{
 		{Check: "verify", Command: []string{"go", "test", "./..."}, Passed: true, DurationMs: 4200, LogSHA256: strings.Repeat("cd", 32)},
-		{Check: "lint", Command: []string{"go", "vet", "./..."}, Passed: true, DurationMs: 900, LogSHA256: strings.Repeat("ef", 32)},
+		{Check: "repo-lint", Command: []string{"go", "vet", "./..."}, Passed: true, DurationMs: 900, LogSHA256: strings.Repeat("ef", 32)},
 	}
 	model, provider := "gpt-5.6-luna", "chatgpt-codex"
 	accepted.AgentEvidence = &run.AgentEvidence{

@@ -252,7 +252,7 @@ func TestAdviceRoundThatIsNotAcceptedLeavesTheAcceptedRunStanding(t *testing.T) 
 				id := requestdrivertest.ArgValue(args, "-ticket")
 				onReady(&run.Run{ID: id})
 				rr := f.adviceRun(t, id, run.StateQuarantined, false)
-				rr.GateResults = []run.GateResult{{Check: "lint", ExitCode: 2}}
+				rr.GateResults = []run.GateResult{{Check: "repo-lint", ExitCode: 2}}
 				return rr.Save(f.dataDir)
 			}
 		}},
@@ -810,7 +810,7 @@ func TestAdviceRoundCountsAgainstNeitherBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 		branch := "factoryd/" + id + "-001"
-		buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")
+		buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
 		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 			return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 		})
@@ -913,7 +913,7 @@ func TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn(t *testing.T) {
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
 			cfg.Settings.RoundSessionContinuity = on
-			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")); err != nil {
+			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")); err != nil {
 				t.Fatalf("drive: %v", err)
 			}
 			if *calls != 1 {

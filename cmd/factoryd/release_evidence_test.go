@@ -84,31 +84,32 @@ func TestRenderEvidenceMarkdownIncludesRealEvidence(t *testing.T) {
 }
 
 // TestRenderEvidenceMarkdownNamedGatesRenderPassFailNotConfigured is the
-// named-gate mechanism's PR-body case: each of the four named gates gets
-// its own line, showing pass, FAIL, or "not configured" -- never silently
-// absent the way an undeclared ticket-scoped gate (diff_scope, etc.) is.
+// repository gates' PR-body case: each gate the run recorded gets its own
+// line, showing pass or FAIL, under "Repository gates"; a run that recorded
+// none has no such section.
 func TestRenderEvidenceMarkdownNamedGatesRenderPassFailNotConfigured(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{
 		ID: "run-1",
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: true},
-			{Check: "lint", Passed: true, ExitCode: 0},
-			{Check: "security_audit", Passed: false, ExitCode: 1},
-			// unit_tests and integration_tests deliberately absent: not
-			// configured for this run.
+			{Check: "repo-lint", Passed: true, ExitCode: 0},
+			{Check: "repo-security", Passed: false, ExitCode: 1},
 		},
 	}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
 	for _, want := range []string{
-		"- `lint`: pass",
-		"- `security_audit`: FAIL",
-		"- `unit_tests`: not configured",
-		"- `integration_tests`: not configured",
+		"## Repository gates",
+		"- `repo-lint`: pass",
+		"- `repo-security`: FAIL",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("evidence body does not contain %q:\n%s", want, body)
 		}
+	}
+	none := renderEvidenceMarkdown(&run.Run{ID: "run-2", GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}}}, &release.MergePolicy{})
+	if strings.Contains(none, "Repository gates") || strings.Contains(none, "Named gates") {
+		t.Errorf("a run with no repository gate has a gates section:\n%s", none)
 	}
 }
 

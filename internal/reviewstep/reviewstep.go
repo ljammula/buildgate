@@ -1,5 +1,5 @@
 // Package reviewstep is the single source of truth for the model-backed
-// review phase that runs after build/verify (and every named gate) have
+// review phase that runs after build/verify (and every repository gate) have
 // already passed and the workspace holds a real, already-committed result:
 // one launch of agent/pi/scripts/combined_review.py, a free-form code review
 // whose findings may cite a line of the approved spec and carry a

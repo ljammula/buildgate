@@ -564,15 +564,16 @@ func TestIntegrationFullSuiteVerifyQuarantinesOnRegression(t *testing.T) {
 	}
 }
 
-// TestIntegrationSecurityCommandQuarantinesWithGateName is the named-gate
-// mechanism's case: a failing -security-command quarantines the run with
-// "security_audit" as the cause, the same way -full-suite-command's
+// TestIntegrationSecurityCommandQuarantinesWithGateName is the repository
+// gates' case: a failing gate from the committed .factory.yml quarantines the
+// run with "repo-security" as the cause, the same way -full-suite-command's
 // failure quarantines on "full_suite_verify"
 // (TestIntegrationFullSuiteVerifyQuarantinesOnRegression, above). The
-// ticket's own -verify-command passes; only the named gate fails.
+// ticket's own -verify-command passes; only the repository gate fails.
 func TestIntegrationSecurityCommandQuarantinesWithGateName(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-security-command", "false"})
+	commitFactoryYML(t, ws, "gates:\n  - id: security\n    command: \"false\"\n")
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -582,7 +583,7 @@ func TestIntegrationSecurityCommandQuarantinesWithGateName(t *testing.T) {
 		switch r.GateResults[i].Check {
 		case "canonical_verify":
 			canonicalGate = &r.GateResults[i]
-		case "security_audit":
+		case "repo-security":
 			securityGate = &r.GateResults[i]
 		}
 	}
@@ -590,19 +591,19 @@ func TestIntegrationSecurityCommandQuarantinesWithGateName(t *testing.T) {
 		t.Fatalf("expected a passing canonical_verify gate, got %+v", r.GateResults)
 	}
 	if securityGate == nil || securityGate.Passed || securityGate.LogSHA256 == "" {
-		t.Fatalf("expected a failing security_audit gate with a log hash, got %+v", r.GateResults)
+		t.Fatalf("expected a failing repo-security gate with a log hash, got %+v", r.GateResults)
 	}
 }
 
 // TestIntegrationLintAndUnitTestCommandsBothRecordPassingGates is the
-// named-gate mechanism's happy-path case: two configured named gates
-// (lint, unit_tests) that both
-// pass are each recorded as their own gate with a log hash, and neither
-// blocks acceptance; the two left unconfigured (security_audit,
-// integration_tests) are simply absent from GateResults.
+// repository gates' happy-path case: two gates in the committed .factory.yml
+// (lint, unit) that both pass are each recorded as their own gate with a log
+// hash, and neither blocks acceptance; a gate the file does not list is
+// simply absent from GateResults.
 func TestIntegrationLintAndUnitTestCommandsBothRecordPassingGates(t *testing.T) {
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, []string{"-lint-command", "true", "-unit-test-command", "true"})
+	commitFactoryYML(t, ws, "gates:\n  - id: lint\n    command: \"true\"\n  - id: unit\n    command: \"true\"\n")
+	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil, nil)
 
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
@@ -611,13 +612,13 @@ func TestIntegrationLintAndUnitTestCommandsBothRecordPassingGates(t *testing.T) 
 	for _, g := range r.GateResults {
 		seen[g.Check] = g
 	}
-	for _, check := range []string{"lint", "unit_tests"} {
+	for _, check := range []string{"repo-lint", "repo-unit"} {
 		g, ok := seen[check]
 		if !ok || !g.Passed || g.LogSHA256 == "" {
 			t.Errorf("expected a passing %s gate with a log hash, got %+v (present=%v)", check, g, ok)
 		}
 	}
-	for _, check := range []string{"security_audit", "integration_tests"} {
+	for _, check := range []string{"repo-security", "repo-integration"} {
 		if _, ok := seen[check]; ok {
 			t.Errorf("expected no %s gate (not configured), got %+v", check, seen[check])
 		}

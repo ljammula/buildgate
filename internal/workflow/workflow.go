@@ -48,13 +48,11 @@ const (
 	// verification itself already passed, so it has its own call site
 	// rather than being a parameterization of RunVerifyActivity.
 	RunFullSuiteVerifyActivityName = "RunFullSuiteVerifyActivity"
-	// RunNamedGateActivityName ports the four operator-configured
-	// named gates (lint, security_audit, unit_tests, integration_tests --
-	// RunWorkflowInput.LintCommand/SecurityCommand/UnitTestCommand/
-	// IntegrationTestCommand) to the Temporal path. One Activity
+	// RunNamedGateActivityName runs the repository's own gates (.factory.yml
+	// `gates:`). Its value is the Activity's registered type name, kept
+	// because recorded histories carry it. One Activity
 	// implementation, called once per configured gate (each its own
-	// ActivityID, so their checkpoints/journals never collide) rather
-	// than four near-identical Activities -- these gates share
+	// ActivityID, so their checkpoints/journals never collide) -- these gates share
 	// RunFullSuiteVerifyActivity's exact shape (run a shell command
 	// after canonical verify passes, checkpoint/journal it, hash the
 	// log) and differ only in which command and gate name each call
@@ -172,7 +170,7 @@ const (
 	ProviderQuotaFailureType    = "ProviderQuota"
 	MeterDeniedFailureType      = "MeterDenied"
 	// DependencyFetchFailureType marks a verify, baseline verify, full-suite
-	// or named-gate step whose command failed, was run again in the same
+	// or repository-gate step whose command failed, was run again in the same
 	// Activity and failed again, the registry proxy having failed to reach a
 	// package registry during both runs (errDependencyFetch): the failure
 	// says nothing about the work, so the attempt is not retried by Temporal
@@ -182,7 +180,7 @@ const (
 	DependencyFetchFailureType = "DependencyFetch"
 	// SandboxDiskFailureType marks a launch refused because Docker's disk
 	// had too little room (sandbox.ErrSandboxDiskLow: nothing ran), or a
-	// verify, baseline verify, full-suite or named-gate command that failed
+	// verify, baseline verify, full-suite or repository-gate command that failed
 	// in a launch that left Docker's disk nearly full without having filled
 	// it (errSandboxDisk). SandboxMemoryFailureType marks a baseline verify
 	// that failed in a launch whose worker container Docker reports as
@@ -405,34 +403,28 @@ func hostGitActivityOptions() temporalworkflow.ActivityOptions {
 // a run without them records no marker.
 const repoDefinedGatesChange = "repo-defined-gates"
 
-// gateChecksToRun lists the command gates of input that have a command, in
-// the order RunWorkflow runs them: policy.CommandGates' order, then the
-// repository's own gates by name. It also returns the gate commands every
+// gateChecksToRun lists the repository gates of input that have a command, in
+// the order RunWorkflow runs them: by name. It also returns the gate commands every
 // later step must use: input's own, or, when this history predates
 // repo-defined-gates, a copy without the repository's gates, so a later
 // rerun cannot run (and then lose the failure of) a gate
 // the main pass never ran.
 func gateChecksToRun(ctx temporalworkflow.Context, input RunWorkflowInput) ([]string, map[string]string) {
-	var checks []string
-	for _, g := range policy.CommandGates {
-		if input.GateCommands[g.ID] != "" {
-			checks = append(checks, g.ID)
-		}
-	}
 	repo := policy.RepoGateChecks(input.GateCommands)
 	if len(repo) == 0 {
-		return checks, input.GateCommands
+		return nil, input.GateCommands
 	}
 	if temporalworkflow.GetVersion(ctx, repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1) == 1 {
-		return append(checks, repo...), input.GateCommands
+		return repo, input.GateCommands
 	}
-	registryOnly := make(map[string]string, len(input.GateCommands))
+	// A history recorded before repo-defined-gates ran no repository gate.
+	withoutRepoGates := make(map[string]string, len(input.GateCommands))
 	for check, command := range input.GateCommands {
 		if !policy.IsRepoGate(check) {
-			registryOnly[check] = command
+			withoutRepoGates[check] = command
 		}
 	}
-	return checks, registryOnly
+	return nil, withoutRepoGates
 }
 
 // referenceOracleRemovedChange is the GetVersion change ID recorded where

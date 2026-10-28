@@ -412,30 +412,29 @@ func (a *Activities) runFullSuiteVerifyActivity(ctx context.Context, input RunWo
 	return rerunResult, nil
 }
 
-// NamedGateActivityInput is RunNamedGateActivity's input: the whole
+// RepoGateActivityInput is RunNamedGateActivity's input: the whole
 // RunWorkflowInput (workspace, sandbox, checkpoint/log directories) plus
-// which named gate this particular Activity execution is for. Check
-// names the gate ("lint", "security_audit", "unit_tests",
-// "integration_tests") and doubles as this Activity's checkpoint/journal
+// which repository gate this particular Activity execution is for. Check
+// names the gate ("repo-<id>") and doubles as this Activity's checkpoint/journal
 // kind, log-file name, and Attempt.Kind; Command is the shell command to
 // run. RunWorkflow calls this Activity once per configured gate, each its
 // own ActivityID, so their checkpoints/journals never collide even though
 // they share this one Activity implementation.
-type NamedGateActivityInput struct {
+type RepoGateActivityInput struct {
 	RunWorkflowInput
 	Check   string `json:"check"`
 	Command string `json:"command"`
 }
 
 // RunNamedGateActivity invokes input.Command through runner.RunWithRetries
-// with a single attempt -- the lint/security_audit/unit_tests/
-// integration_tests named gates ported to the Temporal path, one Activity
-// implementation shared by all four (see NamedGateActivityInput's own doc
+// with a single attempt -- the repository's own gates ported to the Temporal
+// path, one Activity implementation shared by all of them (see
+// RepoGateActivityInput's own doc
 // comment). Same checkpoint/two-phase intent protocol as
 // RunFullSuiteVerifyActivity, keyed by this Activity's own ActivityID so
 // it cannot collide with any sibling gate's checkpoint for the same
 // execution.
-func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateActivityInput) (progressResult VerifyActivityResult, err error) {
+func (a *Activities) RunNamedGateActivity(ctx context.Context, input RepoGateActivityInput) (progressResult VerifyActivityResult, err error) {
 	ctx, endGuard := GuardStep(ctx)
 	defer endGuard()
 	// The stage "start" mark is deferred until past the checkpoint
@@ -532,9 +531,9 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		})
 		return saveActivityAttemptJournal(ctx, a.checkpointDirFor(input.RunWorkflowInput), input.Check, attempts)
 	}
-	namedGateHeartbeatStart := time.Now()
+	repoGateHeartbeatStart := time.Now()
 	result, runErr := heartbeatWhileRunning(activityHeartbeatInterval, func() {
-		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: input.Check, Elapsed: time.Since(namedGateHeartbeatStart)})
+		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: input.Check, Elapsed: time.Since(repoGateHeartbeatStart)})
 	}, func() (runner.Result, error) {
 		if a.hasFakeRunner() {
 			return a.runWithRetriesFn()(
@@ -550,7 +549,7 @@ func (a *Activities) RunNamedGateActivity(ctx context.Context, input NamedGateAc
 		return failOnEnvironment(relaunchUnstartedOnly(ctx), logPath, beforeAttempt, afterAttempt, false, func(ctx context.Context, logPath func(int) string, before func(int) error, after func(int, runner.Result, error) error) (runner.Result, error) {
 			return a.runSandboxWithRetries(ctx, input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after,
 				// nil, for the same reason canonical verification passes
-				// nil: a named gate never calls a model.
+				// nil: a repository gate never calls a model.
 				nil, registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 		})
 	})

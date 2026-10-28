@@ -27,10 +27,7 @@
   "fast_check_command": "echo fast",
   "full_suite_command": "echo full",
   "gate_commands": {
-    "integration_tests": "echo integration",
-    "lint": "echo lint",
-    "security_audit": "echo security",
-    "unit_tests": "echo unit"
+    "repo-lint": "echo lint"
   },
   "harness": "pi",
   "instruction_base_sha": "<BASE_SHA>",

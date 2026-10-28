@@ -128,7 +128,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 	f := newReplayFixture(t)
 	input := replayFixtureInput()
 	input.FullSuiteCommand = "make full"
-	setGateCommand(&input, "lint", "make lint")
+	setGateCommand(&input, "repo-lint", "make lint")
 	setGateCommand(&input, "repo-docs", "make docs")
 	input.CodeReviewPolicy = "advisory"
 	var mu sync.Mutex
@@ -140,7 +140,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 		mu.Unlock()
 		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make full"}, ExitCode: 0}}, nil
 	}, activity.RegisterOptions{Name: RunFullSuiteVerifyActivityName})
-	f.env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+	f.env.RegisterActivityWithOptions(func(_ context.Context, in RepoGateActivityInput) (VerifyActivityResult, error) {
 		mu.Lock()
 		gates = append(gates, in.Check)
 		mu.Unlock()
@@ -159,7 +159,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 	if err != nil || result.State != run.StateAccepted {
 		t.Fatalf("replay run: err=%v state=%q, want accepted", err, result.State)
 	}
-	for _, check := range []string{"full_suite_verify", "lint", "repo-docs"} {
+	for _, check := range []string{"full_suite_verify", "repo-lint", "repo-docs"} {
 		if !slices.Contains(gates, check) {
 			t.Errorf("gates run = %v, want %s among them", gates, check)
 		}

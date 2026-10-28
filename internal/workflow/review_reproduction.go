@@ -85,16 +85,16 @@ func legacyReviewOutcome(outcome reviewOutcome, step reviewstep.Step, stepResult
 	return outcome
 }
 
-// legacyConformityGates is namedGates with the spec_conformity gate a history
+// legacyConformityGates is repoGates with the spec_conformity gate a history
 // recorded before reviewReproductionChange decided the run under appended
-// last, after every named gate and before code_review, as the policy then
-// ordered it. namedGates is never modified.
-func legacyConformityGates(namedGates []policy.NamedGateInput, reviews reviewOutcome) []policy.NamedGateInput {
+// last, after every repository gate and before code_review, as the policy then
+// ordered it. repoGates is never modified.
+func legacyConformityGates(repoGates []policy.RepoGateInput, reviews reviewOutcome) []policy.RepoGateInput {
 	c := reviews.legacyConformity
 	if c == nil {
-		return namedGates
+		return repoGates
 	}
-	return append(namedGates[:len(namedGates):len(namedGates)], policy.NamedGateInput{
+	return append(repoGates[:len(repoGates):len(repoGates)], policy.RepoGateInput{
 		Check: reviewstep.SpecConformity, Command: c.Result.Command, ExitCode: c.Result.ExitCode,
 		DurationMs: c.DurationMs, LogSHA256: c.LogSHA256,
 	})

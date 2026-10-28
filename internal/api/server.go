@@ -1299,7 +1299,7 @@ type composeServiceView struct {
 	Digest string `json:"digest,omitempty"`
 }
 
-// composePhaseOrder ranks the phases every run has ahead of named gates.
+// composePhaseOrder ranks the phases every run has ahead of repository gates.
 var composePhaseOrder = map[string]int{"build": 0, "verify": 1, "full_suite_verify": 2}
 
 // readComposePhases reads each services*.json under the run's compose

@@ -20,7 +20,7 @@ import (
 func TestVerifyAndGateActivitiesLaunchWithNoModelRoute(t *testing.T) {
 	gate := func(check string) func(context.Context, *Activities, RunWorkflowInput) error {
 		return func(ctx context.Context, a *Activities, input RunWorkflowInput) error {
-			_, err := a.RunNamedGateActivity(ctx, NamedGateActivityInput{RunWorkflowInput: input, Check: check, Command: "make " + check})
+			_, err := a.RunNamedGateActivity(ctx, RepoGateActivityInput{RunWorkflowInput: input, Check: check, Command: "make " + check})
 			return err
 		}
 	}

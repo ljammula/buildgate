@@ -159,7 +159,7 @@ func TestFromRunTwoStreaksAreTwoObservations(t *testing.T) {
 func TestFromRunQuarantineAndHaltWithoutDetail(t *testing.T) {
 	q := finished("q", run.StateQuarantined)
 	q.Triage = "The verify command failed on TestKey in every round.\nmore"
-	q.GateResults = []run.GateResult{{Check: "lint", Passed: true}, {Check: "code_review", Passed: false, ExitCode: 3}, {Check: "code_review", Passed: false, ExitCode: 3}}
+	q.GateResults = []run.GateResult{{Check: "repo-lint", Passed: true}, {Check: "code_review", Passed: false, ExitCode: 3}, {Check: "code_review", Passed: false, ExitCode: 3}}
 	got := FromRun(q)
 	if len(got) != 1 || got[0].Check != "code_review" {
 		t.Errorf("a check failing twice = %+v, want one observation", got)

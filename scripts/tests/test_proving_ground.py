@@ -104,7 +104,7 @@ class CauseBucketTest(unittest.TestCase):
             self.assertEqual("ticket_spec", pg.cause_bucket({}, "unexpected_quarantine:%s" % gate), gate)
 
     def test_build_quality_gate_is_model_quality(self):
-        for gate in ("canonical_verify", "unit_tests", "lint"):
+        for gate in ("canonical_verify", "full_suite_verify"):
             self.assertEqual("model_quality", pg.cause_bucket({}, "unexpected_quarantine:%s" % gate), gate)
 
     def test_agent_evidence_failure_is_model_quality(self):

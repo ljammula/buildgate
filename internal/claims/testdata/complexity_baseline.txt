@@ -1,7 +1,6 @@
 43 cmd/factoryd/api_start.go apiStartStarter
 33 cmd/factoryd/cost_cmd_test.go TestBuildCostReportAggregatesAcrossRequests
 31 cmd/factoryd/daemon_cmd.go (*daemonRun).serviceRepository
-27 cmd/factoryd/doctor.go doctorChecksFor
 42 cmd/factoryd/doctor.go doctorMain
 31 cmd/factoryd/doctor_list_models.go doctorListModels
 27 cmd/factoryd/integration_direct_and_serve_test.go TestIntegrationServeDrainsAPIStartedRunBeforeExiting
@@ -38,7 +37,6 @@
 28 internal/openshell/live_test.go TestLiveSandboxRunsTheGuardedCommand
 26 internal/registryproxy/server.go NewServer
 29 internal/request/approve_test.go TestRejectFromEachState
-29 internal/requestsubmit/submit.go ApplyProjectConfigDefaults
 36 internal/sandbox/composeservices_inputs.go materializeComposeBindSource
 27 internal/sandbox/composeservices_lifecycle_test.go TestComposeServicesLifecycleApplyToWorkerLaunch
 29 internal/sandbox/composeservices_orphans.go ReconcileComposeServicesOrphans

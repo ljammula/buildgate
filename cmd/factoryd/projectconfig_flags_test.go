@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"buildgate/internal/policy"
 	"buildgate/internal/testfixture"
 )
 
@@ -18,17 +17,13 @@ import (
 // default to the same literals -meter-token-budget/-meter-cost-budget-
 // micro-usd use in run_ticket.go, so a test that doesn't care about the
 // ceiling-vs-budget interaction still exercises the real 5x-budget
-// default resolution. gateCommands is keyed by policy.CommandGate.ID
-// (registry order), one *string per command gate -- see
-// policy.CommandGates for the flags it derives from.
+// default resolution. gateCommands starts empty: applyProjectConfigDefaults
+// adds the repository gates the file defines under policy.RepoGateCheck(id).
 func newProjectConfigTestFlags() (fs *flag.FlagSet, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, preflightProfile, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget *int, meterCostBudget *int64) {
 	fs = flag.NewFlagSet("test", flag.ContinueOnError)
 	verifyCommand = fs.String("verify-command", "make verify", "")
 	fastCheckCommand = fs.String("fast-check-command", "", "")
-	gateCommands = make(map[string]*string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		gateCommands[g.ID] = fs.String(g.Flag, "", "")
-	}
+	gateCommands = map[string]*string{}
 	preflightProfile = fs.String("preflight-profile", "", "")
 	releaseProtectedPaths = fs.String("release-protected-paths", "", "")
 	testPatterns = new([]string)
@@ -111,41 +106,19 @@ cost_ceiling_micro_usd: 99
 	}
 }
 
-// TestApplyProjectConfigDefaultsFillsNamedGateCommands is the
-// regression test for the named-gate keys: unset flags pick up
-// .factory.yml's lint_command/security_command/
-// unit_test_command/integration_test_command,
-// and an explicit flag still wins over any one of them individually --
-// same "explicit flag wins" contract
-// TestApplyProjectConfigDefaultsExplicitFlagAlwaysWins already proves for
-// verify-command/fast-check-command.
-func TestApplyProjectConfigDefaultsFillsNamedGateCommands(t *testing.T) {
+// TestApplyProjectConfigDefaultsAddsTheRepositorysOwnGates: the gates the
+// committed .factory.yml defines land in the gate commands under their
+// "repo-<id>" names, and nothing else does: the retired fixed gates' keys
+// are refused when the file loads.
+func TestApplyProjectConfigDefaultsAddsTheRepositorysOwnGates(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFactoryYML(t, dir, `lint_command: "golangci-lint run ./..."
-security_command: "govulncheck ./..."
-unit_test_command: "go test ./..."
-integration_test_command: "go test -tags=integration ./..."
-`)
+	writeTestFactoryYML(t, dir, "gates:\n  - id: lint\n    command: \"golangci-lint run ./...\"\n  - id: audit\n    command: \"govulncheck ./...\"\n")
 	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
-	if err := fs.Parse([]string{"-unit-test-command", "make my-own-unit-tests"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
-	if *gateCommands["lint"] != "golangci-lint run ./..." {
-		t.Errorf("lintCommand = %q", *gateCommands["lint"])
-	}
-	if *gateCommands["security_audit"] != "govulncheck ./..." {
-		t.Errorf("securityCommand = %q", *gateCommands["security_audit"])
-	}
-	if *gateCommands["integration_tests"] != "go test -tags=integration ./..." {
-		t.Errorf("integrationTestCommand = %q", *gateCommands["integration_tests"])
-	}
-	// -unit-test-command was passed explicitly, so the config's own value
-	// must not override it.
-	if *gateCommands["unit_tests"] != "make my-own-unit-tests" {
-		t.Errorf("explicit unit-test-command must win, got %q", *gateCommands["unit_tests"])
+	if len(gateCommands) != 2 || *gateCommands["repo-lint"] != "golangci-lint run ./..." || *gateCommands["repo-audit"] != "govulncheck ./..." {
+		t.Errorf("gate commands = %v, want exactly repo-lint and repo-audit", gateCommands)
 	}
 }
 

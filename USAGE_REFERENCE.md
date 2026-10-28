@@ -338,7 +338,7 @@ see "Model routes".
 **Corrective builds.** A ticket run quarantined is followed by a corrective
 build when its
 handoff sorts every judged failed check as `corrective` (see "What a stopped
-run left behind" in USAGE.md for the bins). A named or repository gate that
+run left behind" in USAGE.md for the bins). A repository gate that
 fails the same way on the base commit is sorted `operator`, so no corrective
 build follows it (see "A failed gate is rerun on the base commit"). The build runs on the
 quarantined run's branch (`-on-branch`/`-diff-base`) with the ticket's own
@@ -775,11 +775,7 @@ there is refused at release.
 ```yaml
 verify_command: "make verify"          # canonical check, same as -verify-command
 fast_check_command: "make fast-check"  # cheap check run before verify_command each round
-# lint_command: "golangci-lint run ./..."           # optional named gate "lint"
-# security_command: "govulncheck ./..."             # optional named gate "security_audit"
-# unit_test_command: "go test ./..."                # optional named gate "unit_tests"
-# integration_test_command: "go test -tags=integration ./..."  # optional named gate "integration_tests"
-# gates:                                             # gates this repository defines for itself; see "Repo-defined gates"
+# gates:                                             # checks this repository defines for itself; see "Repository gates"
 #   - id: no_todo                                    # recorded as "repo-no_todo"
 #     command: "! grep -rn TODO src"
 # setup:                                            # commands for the repository; see "Setup and autofix commands"
@@ -876,22 +872,21 @@ profile does not suggest a file pattern because in-source unit tests and
 parsed for Go and pytest only. Other formats remain fail-closed and may halt
 before a model call when their baseline fails.
 
-**Repo-defined gates.** `gates:` lists further command gates, for a check
-none of the four named gates fits (a license check, a migration check, a
-size budget). No buildgate change or release is needed to add one.
+**Repository gates.** `gates:` lists the command gates a repository defines for
+itself (a lint check, a license check, a migration check, a size budget). No buildgate change or release is needed to add one.
 
 | | |
 |---|---|
 | Entry | `id` (`[a-z0-9_]`, at most 32 characters, unique) and `command` (a shell command run from the workspace root). At most 16 entries; any other key is refused |
 | Name | `repo-<id>`, in the run record, the evidence and the draft PR body |
-| When | After canonical verify (and the full suite, when it runs) passes and after the four named gates, in name order, whether or not an earlier gate failed |
+| When | After canonical verify (and the full suite, when it runs) passes in id order, whether or not an earlier gate failed |
 | Result | Passing adds a `pass` line. Failing quarantines the run naming the gate. A gate can only add a denial: it cannot pass another gate or be made a required gate of the release policy |
 | Where it runs | The sandbox only, with no network, like `verify_command` |
 | Source | The committed `.factory.yml` only. There is no flag, and a run cannot change the file it is judged by |
-| Cost | One sandbox launch per gate per run; with Compose services, each launch brings the services up and down. `doctor` does not check a repo gate's executable against the image, as it does for the four named gates |
+| Cost | One sandbox launch per gate per run; with Compose services, each launch brings the services up and down. `doctor` does not check a repository gate's executable against the image |
 | A gate that did not run | An accepted run with no result for one of the repository's gates is quarantined naming it (a long-lived Worker older than this `factoryd`): `factoryd restart` |
 | A result reclaimed after its worker was lost | The result is accepted only if it ran every gate and `setup:` command of `.factory.yml` as the run's commit holds it, read from git objects in your checkout. When that cannot be checked the run is quarantined as yours with `reclaim refused, <reason>: <checkout> must hold commit <sha> with the run's .factory.yml; then start the run again, or factoryd override`. Reasons: `sandbox block not approved`, `no commit on the run record`, `repository not found`, `commit not found`, `file differs`, `file too large`, `file is not a regular file`, `file does not parse`. Restore the checkout (or fetch the commit) and start the run again; `factoryd override` accepts the result as it stands, on your word |
-| A gate that fails the same way on the base commit | See "A failed gate is rerun on the base commit" under Named gates: the same rule |
+| A gate that fails the same way on the base commit | See "A failed gate is rerun on the base commit" below: the same rule |
 
 **Sandbox block (`sandbox:`).** The dependency install of a repository, which
 runs once per install image and is restored into every build, verify and gate
@@ -955,7 +950,7 @@ workspace; the command of the step follows only when all passed:
 
 | | |
 |---|---|
-| Runs before | The baseline verify; the build (by the build script: once before the first agent turn, and again before each round's fast check and verify, output in the round's `setup.log`, kept for every round in the run's directory as `round-logs/round-<n>/setup.log`, each command with a 10-minute limit); canonical verify; the full suite; each named and repo gate |
+| Runs before | The baseline verify; the build (by the build script: once before the first agent turn, and again before each round's fast check and verify, output in the round's `setup.log`, kept for every round in the run's directory as `round-logs/round-<n>/setup.log`, each command with a 10-minute limit); canonical verify; the full suite; each repository gate |
 | Never runs in | Review sandboxes (they hold a model route); drafting and planning jobs |
 | A failure | The step's own check fails (exit 95, `buildgate: setup failed: <command>` in its log). On the base commit the run halts before any model call: `setup fails on the base commit: <command>`. In a build round it fails the round (`setup command failed: <command>`), skips that round's verify and goes to the next round as feedback. A setup command that fails before the first agent turn ends the build without a model call (`setup command failed: <command>`); the build exits 95 like any other step and its log names the command. When the meter counted no token for the build and nothing was committed, the run reads `the build stopped before its first agent turn: ...`, is sorted for the operator and gets no corrective build, on a first build and on a corrective one; the exit status and the log line alone decide nothing |
 | Cost | It runs once per sandbox: a run with N gates runs them at least N+1 more times. A `sandbox:` block's install runs once per install image instead, and each sandbox copies its tree |
@@ -976,7 +971,7 @@ workspace; the command of the step follows only when all passed:
 | Limits | 8 entries, 2000 bytes and one line each, 5 minutes per command: up to 40 minutes a round, inside the build's own time limit |
 
 **The `.factory/` directory.** Scripts the commands above call
-(`lint_command: sh .factory/lint.sh`) go in `.factory/` at the repository
+(a `gates:` entry with `command: sh .factory/lint.sh`) go in `.factory/` at the repository
 root. Every sandbox that runs a repository command sees that directory as a
 trusted commit holds it, read-only, so a build cannot change the script a gate
 judges it with.
@@ -985,7 +980,7 @@ judges it with.
 |---|---|
 | What it is | The directory `.factory/` at the repository root, committed. Regular files and subdirectories only: a symlink or a submodule in it, two names that differ only by letter case, more than 2,000 files, a file over 4 MiB or 16 MiB in all is refused |
 | Which commit | The commit `.factory.yml` was read from: `HEAD` of your checkout when the run was dispatched (`project_config_commit_sha` on the run), also for a repository with no `.factory.yml` |
-| Mounted read-only in | The baseline verify, the build, canonical verify, the full suite and each named and repo gate, at `/workspace/.factory`. A new snapshot is taken from git objects before each launch |
+| Mounted read-only in | The baseline verify, the build, canonical verify, the full suite and each repository gate, at `/workspace/.factory`. A new snapshot is taken from git objects before each launch |
 | Not mounted in | Review sandboxes; drafting and planning jobs (they run no repository command) |
 | The commit has no `.factory/` and the worktree does | An empty read-only directory is mounted over it |
 | What now fails | A command that writes into `.factory/`: a cache or report written there, `chmod +x .factory/*`. Commit the executable bit (`git update-index --chmod=+x`) and write output elsewhere (a gitignored directory, `/tmp`) |
@@ -1007,21 +1002,7 @@ status` quotes the reason, which names the path; it is on the refused attempt
 as `factory_dir_error`. On the baseline verify, the first sandbox of a run,
 this stops the run before any model call.
 
-**Named gates.** `lint_command`/`security_command`/`unit_test_command`/
-`integration_test_command` (flags:
-`-lint-command`/`-security-command`/`-unit-test-command`/
-`-integration-test-command`) each declare one
-optional gate (`lint`/`security_audit`/`unit_tests`/`integration_tests`). Each configured command runs in the sandbox after
-canonical verify passes and becomes its own
-gate with its own exit code/log/log-SHA-256 — mirroring
-`full_suite_verify`. Unset = "not configured", never blocks; a failing
-one quarantines the run naming that gate, same as `canonical_verify`. The
-draft PR body lists `pass`/`FAIL`/`not configured` per gate. `doctor`
-checks each configured command's leading executable exists in the
-sandbox image.
-
-**A failed gate is rerun on the base commit.** A named gate (`lint`,
-`security_audit`, `unit_tests`, `integration_tests`) or a repository gate
+**A failed gate is rerun on the base commit.** A repository gate
 (`repo-<id>`) that fails on the build's result is run once more on the commit
 the ticket's work started from. A gate that fails there the same way cannot be
 fixed by a build, so the factory spends none on it. A gate that was already
@@ -1089,7 +1070,7 @@ runner picks the test IDs and the command, as for a review's reproduction):
 | No runner takes a changed file, the report is missing, a changed test fails when run alone on the result commit although the full suite passed, the run has no known base commit, or the proof is otherwise not reached | Passes, and the pull request lists a note: the check refuses only on what it saw run |
 
 The proof runs only after the run's own checks passed (verification, the full
-suite, the named gates), at most 3 changed test files (added files first, then modified ones, each sorted)
+suite, the repository gates), at most 3 changed test files (added files first, then modified ones, each sorted)
 of at most 32 KiB each, with at most 20 test IDs a file, and the gate sandbox
 has no model route. The run record keeps each file's path, the SHA-256 of the
 copy it ran, the test IDs and each launch's result (`tests_red_on_base` in

@@ -127,7 +127,7 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 	// though that run's own changed-file gates excluded it. Extended to
 	// FullSuiteExitCode when FullSuiteRan (found via a later review
 	// round, same class of bug): see FullSuiteRan's own doc comment.
-	if input.BuildExitCode == 0 && input.VerifyExitCode == 0 && (!input.FullSuiteRan || input.FullSuiteExitCode == 0) && !input.NamedGatesFailed {
+	if input.BuildExitCode == 0 && input.VerifyExitCode == 0 && (!input.FullSuiteRan || input.FullSuiteExitCode == 0) && !input.RepoGatesFailed {
 		verifyClean, err := runner.GitIsClean(input.WorkspacePath)
 		if err != nil {
 			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause("check workspace cleanliness after verification", InfrastructureFailureType, err)

@@ -2,80 +2,11 @@ package policy
 
 import "strings"
 
-// CommandGate describes one operator-configured command gate: an optional
-// shell command that runs in the sandbox after canonical verification
-// passes and becomes its own named gate ("lint", "security_audit", etc.)
-// in the release decision. Before this registry existed, adding a 6th
-// command gate meant touching roughly 14 separate places across
-// cmd/factoryd, internal/workflow, internal/projectconfig and
-// internal/requestsubmit (see M4-K2's own PR description for the exact
-// list found by reading each one) -- every one of them either iterates
-// CommandGates or CommandGateIDs() now, so adding a 6th touches exactly:
-// one entry in CommandGates below, one YAML field + one line in
-// projectconfig.Config.GateCommands, and USAGE_REFERENCE.md's own gate
-// table. Nothing else -- see M4-K2's PR body for the measured before/after
-// file count.
-type CommandGate struct {
-	// ID is this gate's run.GateResult.Check / run-record value, e.g. "lint".
-	ID string
-	// Flag is the factoryd run CLI flag name (without the leading "-"),
-	// e.g. "lint-command".
-	Flag string
-	// ProjectKey is the .factory.yml YAML key this gate's command
-	// defaults from, e.g. "lint_command".
-	ProjectKey string
-	// Help is this gate's -Flag usage text, moved here verbatim from
-	// cmd/factoryd/run_ticket.go's own flags.String calls so the CLI
-	// registers every gate's flag from one loop over this table.
-	Help string
-}
-
-// CommandGates is every operator-configured command gate, in the order
-// they run and the order AllGateChecks lists them (EvaluateRun's own
-// gate order, in turn, mirrors this). Adding a 6th: see CommandGate's own
-// doc comment.
-var CommandGates = []CommandGate{
-	{
-		ID:         "lint",
-		Flag:       "lint-command",
-		ProjectKey: "lint_command",
-		Help:       `lint command, run in the sandbox after verification passes as the "lint" gate. Empty uses lint_command from .factory.yml; with neither, the gate is not configured and never blocks`,
-	},
-	{
-		ID:         "security_audit",
-		Flag:       "security-command",
-		ProjectKey: "security_command",
-		Help:       `optional security-audit command (e.g. govulncheck), same gating as -lint-command; becomes the "security_audit" gate (default: security_command from .factory.yml)`,
-	},
-	{
-		ID:         "unit_tests",
-		Flag:       "unit-test-command",
-		ProjectKey: "unit_test_command",
-		Help:       `optional unit-test command, same gating as -lint-command; becomes the "unit_tests" gate (default: unit_test_command from .factory.yml)`,
-	},
-	{
-		ID:         "integration_tests",
-		Flag:       "integration-test-command",
-		ProjectKey: "integration_test_command",
-		Help:       `optional integration-test command, same gating as -lint-command; becomes the "integration_tests" gate (default: integration_test_command from .factory.yml)`,
-	},
-}
-
-// CommandGateIDs returns CommandGates' IDs, in registry order.
-func CommandGateIDs() []string {
-	ids := make([]string, len(CommandGates))
-	for i, g := range CommandGates {
-		ids[i] = g.ID
-	}
-	return ids
-}
-
 // RepoGatePrefix marks a gate a target repository defines itself in its
-// .factory.yml `gates:` list, as opposed to one of CommandGates' fixed ids:
-// "repo-<id>" is its key in a run's gate commands, its run.GateResult.Check
-// and its Temporal activity id suffix. No CommandGates id starts with it,
-// so the two sets cannot collide, and it has no slash because the id is
-// part of an activity id and a progress mark.
+// .factory.yml `gates:` list, the only command gates besides canonical
+// verification and the full suite: "repo-<id>" is its key in a run's gate
+// commands, its run.GateResult.Check and its Temporal activity id suffix. It
+// has no slash because the id is part of an activity id and a progress mark.
 const RepoGatePrefix = "repo-"
 
 // RepoGateCheck is the check name of the repo-defined gate id.
@@ -86,7 +17,7 @@ func IsRepoGate(check string) bool { return strings.HasPrefix(check, RepoGatePre
 
 // RepoGateChecks returns the repo-defined gates among commands (a run's
 // gate commands, keyed by check) that have a command, sorted by name: the
-// order they run in, after every CommandGates entry.
+// order they run in.
 func RepoGateChecks(commands map[string]string) []string {
 	var out []string
 	for check, command := range commands {

@@ -20,13 +20,9 @@ var checkLiteral = regexp.MustCompile(`Check:\s*"([a-z0-9_]+)"`)
 
 // TestEveryCheckTheFactoryRecordsHasABin is the rule that no failure is
 // left without a decision about feeding it back: every check name the
-// policy can record (found in its source) and every named command gate is
-// placed in the table deliberately. A new check fails here until it is given a bin.
+// policy can record (found in its source) is placed in the table deliberately. A new check fails here until it is given a bin.
 func TestEveryCheckTheFactoryRecordsHasABin(t *testing.T) {
 	names := map[string]string{}
-	for _, id := range policy.CommandGateIDs() {
-		names[id] = "policy.CommandGates"
-	}
 	// Wherever a gate result is built with a literal name: the policy, the
 	// workflow and the command that runs a ticket.
 	var sources []string
@@ -348,7 +344,7 @@ func TestBuildDoesNotJudgeDiffChecksOfAnAttemptThatCommittedNothing(t *testing.T
 	dataDir := t.TempDir()
 	gates := []run.GateResult{
 		{Check: "canonical_verify", Passed: false, ExitCode: 1}, {Check: "diff_scope", Passed: false},
-		{Check: "tests_red_on_base", Passed: false}, {Check: "lint", Passed: false, ExitCode: 2},
+		{Check: "tests_red_on_base", Passed: false}, {Check: "repo-lint", Passed: false, ExitCode: 2},
 	}
 	uncommitted := &run.Run{ID: "r", State: run.StateQuarantined, BaseSHA: "1111111", ResultSHA: "1111111", GateResults: gates}
 	doc := Build(uncommitted, dataDir)
@@ -356,7 +352,7 @@ func TestBuildDoesNotJudgeDiffChecksOfAnAttemptThatCommittedNothing(t *testing.T
 	for _, c := range doc.Checks {
 		notJudged[c.Check] = c.NotJudged
 	}
-	want := map[string]bool{"canonical_verify": false, "diff_scope": true, "tests_red_on_base": true, "lint": false}
+	want := map[string]bool{"canonical_verify": false, "diff_scope": true, "tests_red_on_base": true, "repo-lint": false}
 	if !reflect.DeepEqual(notJudged, want) {
 		t.Errorf("NotJudged = %v, want %v", notJudged, want)
 	}
@@ -364,7 +360,7 @@ func TestBuildDoesNotJudgeDiffChecksOfAnAttemptThatCommittedNothing(t *testing.T
 		t.Errorf("Next = %q, want corrective: only verification and lint were judged", doc.Next)
 	}
 	md := doc.Markdown()
-	if strings.Contains(md, "tests_red_on_base") || strings.Contains(md, "diff_scope") || !strings.Contains(md, "`canonical_verify`") || !strings.Contains(md, "`lint`") {
+	if strings.Contains(md, "tests_red_on_base") || strings.Contains(md, "diff_scope") || !strings.Contains(md, "`canonical_verify`") || !strings.Contains(md, "`repo-lint`") {
 		t.Errorf("Markdown tells a build about checks that were not judged:\n%s", md)
 	}
 
@@ -400,8 +396,8 @@ func TestBuildCarriesTheFailingLinesOfACommandGatesOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &run.Run{ID: "r", State: run.StateQuarantined, BaseSHA: "1", ResultSHA: "2",
-		GateResults: []run.GateResult{{Check: "lint", Passed: false, ExitCode: 1}, {Check: "diff_scope", Passed: false}},
-		Attempts:    []run.Attempt{{Kind: "lint", ExitCode: 1, LogPath: logPath}},
+		GateResults: []run.GateResult{{Check: "repo-lint", Passed: false, ExitCode: 1}, {Check: "diff_scope", Passed: false}},
+		Attempts:    []run.Attempt{{Kind: "repo-lint", ExitCode: 1, LogPath: logPath}},
 	}
 	doc := Build(r, dataDir)
 	want := []string{"error: add.py must begin with the comment line: # lint: ok", "error: 'rm -rf' everything"}
@@ -575,12 +571,12 @@ func TestBuildSortsAGateThatFailsTheSameWayOnTheBaseCommitIntoTheOperatorsBin(t 
 		want        Bin
 		wantFinding string
 	}{
-		{"a named gate that fails the same way on the base", gate("lint", "fails_same"), BinOperator, operatorSentence},
+		{"a named gate that fails the same way on the base", gate("repo-lint", "fails_same"), BinOperator, operatorSentence},
 		{"a repository gate that fails the same way on the base", gate("repo-docs", "fails_same"), BinOperator, operatorSentence},
-		{"a gate that was failing on the base in another way", gate("lint", "fails_differently"), BinCorrective, alreadyFailing},
-		{"a gate that passes on the base", gate("lint", "passes"), BinCorrective, ""},
+		{"a gate that was failing on the base in another way", gate("repo-lint", "fails_differently"), BinCorrective, alreadyFailing},
+		{"a gate that passes on the base", gate("repo-lint", "passes"), BinCorrective, ""},
 		{"a gate whose rerun could not be made", gate("repo-docs", "not_checked"), BinCorrective, ""},
-		{"a gate recorded before the rerun existed", run.GateResult{Check: "lint", ExitCode: 1}, BinCorrective, ""},
+		{"a gate recorded before the rerun existed", run.GateResult{Check: "repo-lint", ExitCode: 1}, BinCorrective, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &run.Run{ID: "run-b", Ticket: "t", State: run.StateQuarantined, BaseSHA: base, GateResults: []run.GateResult{tc.gate}}
@@ -605,12 +601,12 @@ func TestBuildSortsAGateThatFailsTheSameWayOnTheBaseCommitIntoTheOperatorsBin(t 
 	}
 	// One gate the build can fix beside one it cannot: the attempt as a
 	// whole is the operator's, since a corrective build could not pass.
-	r := &run.Run{ID: "run-m", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", "passes"), gate("repo-docs", "fails_same")}}
+	r := &run.Run{ID: "run-m", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("repo-lint", "passes"), gate("repo-docs", "fails_same")}}
 	if doc := Build(r, t.TempDir()); doc.Next != BinOperator {
 		t.Errorf("next = %q, want operator", doc.Next)
 	}
 	// The record a later build is given says the gate was already red.
-	r = &run.Run{ID: "run-d", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("lint", "fails_differently")}}
+	r = &run.Run{ID: "run-d", Ticket: "t", State: run.StateQuarantined, GateResults: []run.GateResult{gate("repo-lint", "fails_differently")}}
 	if md := Build(r, t.TempDir()).Markdown(); !strings.Contains(md, alreadyFailing) {
 		t.Errorf("the record for a later build does not say the gate was already failing on the base:\n%s", md)
 	}

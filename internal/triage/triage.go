@@ -116,13 +116,7 @@ func commandGateLogTail(r *run.Run, check string) string {
 		kind = "verify"
 	case check == "full_suite_verify" || policy.IsRepoGate(check):
 	default:
-		named := false
-		for _, id := range policy.CommandGateIDs() {
-			named = named || id == check
-		}
-		if !named {
-			return ""
-		}
+		return ""
 	}
 	attempt, found := lastAttempt(r, kind)
 	if !found {

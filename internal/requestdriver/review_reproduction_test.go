@@ -483,7 +483,7 @@ func TestARoundAfterAPassingRecheckStillRechecksIt(t *testing.T) {
 			onReady(&run.Run{ID: roundRunID})
 		}
 		if len(rounds) == 1 {
-			return requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "lint").Save(dataDir)
+			return requestdrivertest.AfterRecheck(t, dataDir, roundRunID, id+"-001", branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 3), "passes", "repo-lint").Save(dataDir)
 		}
 		return (&run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch, PullRequestURL: "https://github.com/acme/app/pull/9"}).Save(dataDir)
 	}

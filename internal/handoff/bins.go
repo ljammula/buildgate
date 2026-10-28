@@ -38,10 +38,6 @@ const (
 var bins = map[string]Bin{
 	"canonical_verify":  BinCorrective,
 	"full_suite_verify": BinCorrective,
-	"lint":              BinCorrective,
-	"security_audit":    BinCorrective,
-	"unit_tests":        BinCorrective,
-	"integration_tests": BinCorrective,
 	"diff_scope":        BinCorrective,
 	// The changed tests pass on the base commit (they do not exercise the
 	// change), or no test file changed: a build can fix each when told, in one
@@ -59,7 +55,7 @@ var bins = map[string]Bin{
 }
 
 // BinOf returns the bin of a failed check. A repository's own gate
-// (repo-<id>, .factory.yml gates:) is a command like the named gates. A
+// (repo-<id>, .factory.yml gates:) is a command like the repository gates. A
 // check this package does not know is BinNever: an unknown failure is not
 // handed to a build.
 func BinOf(check string) Bin {

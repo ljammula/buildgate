@@ -827,7 +827,7 @@ func withStage(dataDir, id, stage string, fn func() (outcome, detail string, err
 
 // withStageDetail is withStage's variant for a stage whose start mark
 // itself carries a non-empty detail (e.g. "gate", whose start and end both
-// name which named gate is running).
+// name which repository gate is running).
 func withStageDetail(dataDir, id, stage, startDetail string, fn func() (outcome, detail string, err error)) error {
 	progressMark(dataDir, id, stage, "start", "", startDetail)
 	outcome, detail, err := fn()

@@ -121,7 +121,7 @@ func TestBuildRunWorkflowInputCarriesGateCommandsForAnyGateID(t *testing.T) {
 	dataDir := t.TempDir()
 	id := "gate-commands-input-fixture"
 	gateCommands := map[string]string{
-		"lint":               "golangci-lint run ./...",
+		"repo-lint":          "golangci-lint run ./...",
 		"a-hypothetical-6th": "make sixth-gate",
 	}
 
@@ -147,8 +147,8 @@ func TestBuildRunWorkflowInputCarriesGateCommandsForAnyGateID(t *testing.T) {
 		SandboxDocker:       "docker",
 	}.workflowInput()
 
-	if input.GateCommands["lint"] != "golangci-lint run ./..." {
-		t.Errorf("GateCommands[lint] = %q", input.GateCommands["lint"])
+	if input.GateCommands["repo-lint"] != "golangci-lint run ./..." {
+		t.Errorf("GateCommands[lint] = %q", input.GateCommands["repo-lint"])
 	}
 	if input.GateCommands["a-hypothetical-6th"] != "make sixth-gate" {
 		t.Errorf("GateCommands[a-hypothetical-6th] = %q, want it carried through unfiltered", input.GateCommands["a-hypothetical-6th"])

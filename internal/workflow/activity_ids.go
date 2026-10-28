@@ -214,7 +214,7 @@ func (ids *activityIDs) with(ctx temporalworkflow.Context, name string) temporal
 }
 
 // withRetries is with for an Activity that Temporal may retry (build,
-// verify, full-suite, named gates, review steps).
+// verify, full-suite, repository gates, review steps).
 // The Activities that must not repeat -- workspace prepare/rollback,
 // base-sha capture, chain checks, preflight, worker-group
 // write, evaluate -- use with and keep a single attempt, and so do

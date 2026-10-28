@@ -584,7 +584,7 @@ func TestARetryOfAStackedTicketOnTheOldHeadChainsFromTheCurrentHead(t *testing.T
 				built = append(built, args)
 				ticket := requestdrivertest.ArgValue(args, "-ticket")
 				onReady(&run.Run{ID: ticket})
-				rec := requestdrivertest.QuarantinedOn(t, dataDir, ticket, "factoryd/"+ticket, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")
+				rec := requestdrivertest.QuarantinedOn(t, dataDir, ticket, "factoryd/"+ticket, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
 				sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
 				if err != nil {
 					t.Fatal(err)

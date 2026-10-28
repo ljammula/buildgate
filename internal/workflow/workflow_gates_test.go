@@ -122,15 +122,15 @@ func TestRunWorkflowSkipsFullSuiteVerifyWhenNotDeclared(t *testing.T) {
 }
 
 // TestRunWorkflowRunsNamedGates is the named gates' "Done when" case
-// ported to the Temporal path: both configured named gates (lint,
-// security_audit) each call RunNamedGateActivityName exactly once, and
+// ported to the Temporal path: both configured repository gates (repo-lint,
+// repo-security) each call RunNamedGateActivityName exactly once, and
 // a failing one
 // quarantines the run with its own gate name as the cause -- the same
 // contract TestIntegrationSecurityCommandQuarantinesWithGateName pins.
 func TestRunWorkflowRunsNamedGates(t *testing.T) {
 	input := fixtureInput()
-	setGateCommand(&input, "lint", "golangci-lint run ./...")
-	setGateCommand(&input, "security_audit", "govulncheck ./...")
+	setGateCommand(&input, "repo-lint", "golangci-lint run ./...")
+	setGateCommand(&input, "repo-security", "govulncheck ./...")
 	var calls []string
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
@@ -143,10 +143,10 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
 		},
 	)
-	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+	env.RegisterActivityWithOptions(func(_ context.Context, in RepoGateActivityInput) (VerifyActivityResult, error) {
 		calls = append(calls, in.Check)
 		exitCode := 0
-		if in.Check == "security_audit" {
+		if in.Check == "repo-security" {
 			exitCode = 1
 		}
 		result := VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: exitCode}}
@@ -167,13 +167,13 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 	if result.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", result.State, run.StateQuarantined)
 	}
-	if !slices.Equal(calls, []string{"lint", "security_audit"}) {
-		t.Fatalf("named gate Activity calls = %v, want [lint security_audit] in that order", calls)
+	if !slices.Equal(calls, []string{"repo-lint", "repo-security"}) {
+		t.Fatalf("repository gate Activity calls = %v, want [repo-lint repo-security] in that order", calls)
 	}
 	// The gate Activity's rerun on the base commit reaches the run's gate
 	// result; a gate that passed has none.
 	for _, g := range result.GateResults {
-		if want := g.Check == "security_audit"; g.FailsSameOnBase() != want {
+		if want := g.Check == "repo-security"; g.FailsSameOnBase() != want {
 			t.Errorf("%s: fails the same way on base = %v, want %v (%+v)", g.Check, g.FailsSameOnBase(), want, g.BaseCheck)
 		}
 	}
@@ -181,60 +181,14 @@ func TestRunWorkflowRunsNamedGates(t *testing.T) {
 	for _, g := range result.GateResults {
 		seen[g.Check] = g
 	}
-	if g, ok := seen["lint"]; !ok || !g.Passed {
-		t.Errorf("expected a passing lint gate, got %+v (present=%v)", g, ok)
+	if g, ok := seen["repo-lint"]; !ok || !g.Passed {
+		t.Errorf("expected a passing repo-lint gate, got %+v (present=%v)", g, ok)
 	}
-	if g, ok := seen["security_audit"]; !ok || g.Passed {
-		t.Errorf("expected a failing security_audit gate, got %+v (present=%v)", g, ok)
+	if g, ok := seen["repo-security"]; !ok || g.Passed {
+		t.Errorf("expected a failing repo-security gate, got %+v (present=%v)", g, ok)
 	}
-	if _, ok := seen["unit_tests"]; ok {
-		t.Errorf("expected no unit_tests gate (not configured), got %+v", seen["unit_tests"])
-	}
-}
-
-// TestRunWorkflowRunsAFakeSixthRegistryGate is M4-K2's own registry-
-// plumbing proof for RunWorkflow's gate loop: it temporarily appends a
-// gate to policy.CommandGates that names nothing else in this test suite
-// (no CLI flag, no projectconfig key), and confirms RunWorkflow still
-// calls RunNamedGateActivityName for it -- proving the loop is driven by
-// iterating policy.CommandGates itself, not a hardcoded list of today's
-// five gate names that a real 6th entry would need a matching code change
-// here to reach.
-func TestRunWorkflowRunsAFakeSixthRegistryGate(t *testing.T) {
-	original := policy.CommandGates
-	policy.CommandGates = append(append([]policy.CommandGate{}, original...), policy.CommandGate{
-		ID:         "a_hypothetical_sixth_gate",
-		Flag:       "sixth-gate-command",
-		ProjectKey: "sixth_gate_command",
-		Help:       "test-only fake registry entry",
-	})
-	t.Cleanup(func() { policy.CommandGates = original })
-
-	input := fixtureInput()
-	setGateCommand(&input, "a_hypothetical_sixth_gate", "true")
-	var calls []string
-	env := newWorkflowEnvironment(t,
-		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
-			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
-		},
-		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: 0}}, nil
-		},
-		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
-			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
-		},
-	)
-	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
-		calls = append(calls, in.Check)
-		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: 0}}, nil
-	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
-
-	env.ExecuteWorkflow(RunWorkflow, input)
-	if err := env.GetWorkflowError(); err != nil {
-		t.Fatalf("workflow error: %v", err)
-	}
-	if !slices.Equal(calls, []string{"a_hypothetical_sixth_gate"}) {
-		t.Fatalf("named gate Activity calls = %v, want [a_hypothetical_sixth_gate]", calls)
+	if _, ok := seen["repo-unit"]; ok {
+		t.Errorf("expected no repo-unit gate (not configured), got %+v", seen["repo-unit"])
 	}
 }
 
@@ -296,13 +250,12 @@ func TestRunWorkflowRunsFullSuiteVerifyBeforeCollectingEvidence(t *testing.T) {
 	}
 }
 
-// repoGateFixture runs RunWorkflow with one registry gate and two gates the
+// repoGateFixture runs RunWorkflow with two gates the
 // repository defines for itself, and returns the checks the gate Activity
 // was asked to run, in order.
 func repoGateFixture(t *testing.T, pin func(*testsuite.TestWorkflowEnvironment)) []string {
 	t.Helper()
 	input := fixtureInput()
-	setGateCommand(&input, "lint", "true")
 	setGateCommand(&input, "repo-zeta", "true")
 	setGateCommand(&input, "repo-alpha", "true")
 	var calls []string
@@ -317,7 +270,7 @@ func repoGateFixture(t *testing.T, pin func(*testsuite.TestWorkflowEnvironment))
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
 		},
 	)
-	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+	env.RegisterActivityWithOptions(func(_ context.Context, in RepoGateActivityInput) (VerifyActivityResult, error) {
 		calls = append(calls, in.Check)
 		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", in.Command}, ExitCode: 0}}, nil
 	}, activity.RegisterOptions{Name: RunNamedGateActivityName})
@@ -331,25 +284,28 @@ func repoGateFixture(t *testing.T, pin func(*testsuite.TestWorkflowEnvironment))
 	return calls
 }
 
-// A repository's own gates (.factory.yml `gates:`) run after the registry's,
-// by name, through the same gate Activity.
+// A repository's own gates (.factory.yml `gates:`) run by name, through the
+// gate Activity.
 func TestRunWorkflowRunsRepoDefinedGatesAfterTheRegistrys(t *testing.T) {
 	calls := repoGateFixture(t, nil)
-	if want := []string{"lint", "repo-alpha", "repo-zeta"}; !slices.Equal(calls, want) {
-		t.Fatalf("named gate Activity calls = %v, want %v", calls, want)
+	if want := []string{"repo-alpha", "repo-zeta"}; !slices.Equal(calls, want) {
+		t.Fatalf("repository gate Activity calls = %v, want %v", calls, want)
 	}
 }
 
 // TestHistoryRecordedBeforeRepoDefinedGatesReplaysWithoutThem pins the change
 // to DefaultVersion, what a history recorded before repo-defined-gates replays
-// as: it schedules the registry's gates and nothing else, so the activities it
-// recorded still line up.
+// as: it schedules no repository gate, so the activities it recorded still
+// line up.
 func TestHistoryRecordedBeforeRepoDefinedGatesReplaysWithoutThem(t *testing.T) {
 	calls := repoGateFixture(t, func(env *testsuite.TestWorkflowEnvironment) {
 		env.OnGetVersion(repoDefinedGatesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	})
-	if want := []string{"lint"}; !slices.Equal(calls, want) {
-		t.Fatalf("named gate Activity calls = %v, want %v", calls, want)
+	if len(calls) != 0 {
+		t.Fatalf("repository gate Activity calls = %v, want none", calls)
+	}
+	if want := []string(nil); !slices.Equal(calls, want) {
+		t.Fatalf("repository gate Activity calls = %v, want %v", calls, want)
 	}
 }
 
@@ -370,7 +326,7 @@ func TestRunWorkflowQuarantinesOnAFailingRepoDefinedGate(t *testing.T) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
 		},
 	)
-	env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+	env.RegisterActivityWithOptions(func(_ context.Context, in RepoGateActivityInput) (VerifyActivityResult, error) {
 		exit := 0
 		if in.Check == "repo-zeta" {
 			exit = 1
@@ -402,8 +358,8 @@ func TestRunWorkflowQuarantinesOnAFailingRepoDefinedGate(t *testing.T) {
 // A history recorded before repo-defined-gates is handed no repo gate.
 func TestGateCommandsLoseRepoGatesWhenTheChangeIsOff(t *testing.T) {
 	input := fixtureInput()
-	setGateCommand(&input, "lint", "golangci-lint run")
 	setGateCommand(&input, "repo-alpha", "a")
+	setGateCommand(&input, "other", "o")
 	var s testsuite.WorkflowTestSuite
 	for version, wantRepo := range map[temporalworkflow.Version]bool{temporalworkflow.DefaultVersion: false, 1: true} {
 		env := s.NewTestWorkflowEnvironment()
@@ -418,8 +374,8 @@ func TestGateCommandsLoseRepoGatesWhenTheChangeIsOff(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, hasRepo := commands["repo-alpha"]
-		if hasRepo != wantRepo || slices.Contains(checks, "repo-alpha") != wantRepo || commands["lint"] == "" {
-			t.Errorf("version %d: checks %v, commands %v; want repo gate present = %v and lint kept", version, checks, commands, wantRepo)
+		if hasRepo != wantRepo || slices.Contains(checks, "repo-alpha") != wantRepo || commands["other"] == "" {
+			t.Errorf("version %d: checks %v, commands %v; want repo gate present = %v and the other command kept", version, checks, commands, wantRepo)
 		}
 	}
 }

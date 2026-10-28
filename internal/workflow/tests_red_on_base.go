@@ -46,7 +46,7 @@ func noTestsRedVerdict(reason string) testsRedOutcome {
 // once on the result commit and, unless it already failed there, once on the
 // base commit (gateBaseCommit), through RunReviewReproductionActivity; then
 // reproduction.DecideRedOnBase. It runs only once build, verification, the full
-// suite and the named gates passed, and only for a run that did not opt out of
+// suite and the repository gates passed, and only for a run that did not opt out of
 // tests and changed a test file; the gate itself refuses a run with none. An
 // Activity that fails is the run's failure, as for a reviewer's reproduction.
 func runTestsRedOnBase(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, worktreePath, branch string) (testsRedOutcome, error) {

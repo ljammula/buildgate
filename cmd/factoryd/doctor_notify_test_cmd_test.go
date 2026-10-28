@@ -19,7 +19,7 @@ import (
 // doctorMain at all.
 func TestDoctorRegisterNotifyTestFlagParses(t *testing.T) {
 	t.Parallel()
-	flags, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ := newDoctorFlags()
+	flags, _, _, _, _, _, _, _, _, _, _, _, _ := newDoctorFlags()
 	notifyTest := doctorRegisterNotifyTestFlag(flags)
 	if err := flags.Parse([]string{"-notify-test"}); err != nil {
 		t.Fatalf("flags.Parse(-notify-test): %v", err)
@@ -48,7 +48,7 @@ func TestNotifyTestClickTargetIsTheConfiguredDataDirAsAnAbsolutePath(t *testing.
 	defaultPath := isolateSessionConfig(t)
 	writeSessionConfig(t, defaultPath, "data_dir: /configured/data\n")
 
-	flags, _, _, _, _, _, _, _, dataDir, _, _, _, _, _, _, _, configPath := newDoctorFlags()
+	flags, _, _, _, _, _, _, _, dataDir, _, _, _, configPath := newDoctorFlags()
 	if err := flags.Parse(nil); err != nil {
 		t.Fatalf("flags.Parse: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestNotifyTestClickTargetIsTheConfiguredDataDirAsAnAbsolutePath(t *testing.
 		t.Errorf("notifyTestClickTarget with no -data-dir = %q, %v, want the session config's data_dir", got, err)
 	}
 
-	flags, _, _, _, _, _, _, _, dataDir, _, _, _, _, _, _, _, configPath = newDoctorFlags()
+	flags, _, _, _, _, _, _, _, dataDir, _, _, _, configPath = newDoctorFlags()
 	if err := flags.Parse([]string{"-data-dir", "relative/data"}); err != nil {
 		t.Fatalf("flags.Parse: %v", err)
 	}

@@ -804,7 +804,7 @@ func TestEvaluateRunQuarantinesOnCodeReviewFailure(t *testing.T) {
 
 // TestEvaluateRunSkipsUnconfiguredNamedGates is the named gates' version
 // of TestEvaluateRunSkipsFullSuiteVerifyWhenNotDeclared: a gate absent from
-// NamedGates never appears in GateResults at all -- not present-and-
+// RepoGates never appears in GateResults at all -- not present-and-
 // passed, since "not configured" is a distinct state the PR body must be
 // able to render.
 func TestEvaluateRunSkipsUnconfiguredNamedGates(t *testing.T) {
@@ -815,7 +815,7 @@ func TestEvaluateRunSkipsUnconfiguredNamedGates(t *testing.T) {
 	})
 	for _, g := range result.GateResults {
 		if g.Check == "lint" || g.Check == "security_audit" || g.Check == "unit_tests" || g.Check == "integration_tests" {
-			t.Errorf("GateResults = %+v, want no named gates when NamedGates is empty", result.GateResults)
+			t.Errorf("GateResults = %+v, want no named gates when RepoGates is empty", result.GateResults)
 		}
 	}
 }
@@ -829,7 +829,7 @@ func TestEvaluateRunQuarantinesOnFailingSecurityAudit(t *testing.T) {
 		VerifyCommand:  []string{"sh", "-c", "true"},
 		BuildExitCode:  0,
 		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
+		RepoGates: []RepoGateInput{
 			{Check: "lint", Command: []string{"sh", "-c", "golangci-lint run ./..."}, ExitCode: 0, DurationMs: 10, LogSHA256: "abc"},
 			{Check: "security_audit", Command: []string{"sh", "-c", "govulncheck ./..."}, ExitCode: 1, DurationMs: 20, LogSHA256: "def"},
 		},
@@ -1367,7 +1367,7 @@ func TestEvaluateRunCarriesANamedGatesBaseCheckWithoutJudgingByIt(t *testing.T) 
 	passesOnBase := &run.GateBaseCheck{Outcome: run.GateBasePasses, BaseSHA: "abc"}
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand: []string{"sh", "-c", "true"},
-		NamedGates: []NamedGateInput{
+		RepoGates: []RepoGateInput{
 			{Check: "lint", Command: []string{"sh", "-c", "lint"}, ExitCode: 1, BaseCheck: passesOnBase},
 			{Check: "unit_tests", Command: []string{"sh", "-c", "test"}, ExitCode: 0},
 		},

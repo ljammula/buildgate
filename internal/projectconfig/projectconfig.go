@@ -55,25 +55,12 @@ type Config struct {
 	// before VerifyCommand each round, short-circuiting it on failure --
 	// see -fast-check-command in cmd/factoryd.
 	FastCheckCommand string `yaml:"fast_check_command"`
-	// LintCommand/SecurityCommand/UnitTestCommand/IntegrationTestCommand
-	// are optional named gates, each run in the sandbox after canonical
-	// verification passes and recorded as its own pass/fail/not-configured
-	// gate in the release decision --
-	// "lint"/"security_audit"/"unit_tests"/"integration_tests"
-	// respectively. Threaded exactly the way
-	// FastCheckCommand already is (projectconfig -> -lint-command/etc. ->
-	// applyProjectConfigDefaults -> run). Unset means the gate never runs
-	// and is recorded as "not configured", never as passed.
-	LintCommand     string `yaml:"lint_command"`
-	SecurityCommand string `yaml:"security_command"`
 	// FullSuiteCommand is the repo-wide regression command the "full_suite_verify"
 	// gate runs. The default release policy requires that gate to have passed,
 	// and the worker/request path has no per-ticket flag for it, so without
 	// this default no queued ticket could ever open a pull request (found live
 	// on a Flutter + Go app repo, 2026-09-19).
-	FullSuiteCommand       string `yaml:"full_suite_command"`
-	UnitTestCommand        string `yaml:"unit_test_command"`
-	IntegrationTestCommand string `yaml:"integration_test_command"`
+	FullSuiteCommand string `yaml:"full_suite_command"`
 	// TestPatterns is the tests_red_on_base gate boundary: glob patterns
 	// (path.Match syntax) matched against a run's changed-file inventory,
 	// both the full repo-relative path and the bare basename, so
@@ -230,29 +217,6 @@ func (c *Config) validateGates() error {
 		}
 	}
 	return nil
-}
-
-// GateCommands returns this config's operator-configured command-gate
-// values, keyed by policy.CommandGate.ID (policy.CommandGates' own
-// ProjectKey field says which YAML key each one reads) -- the YAML keys
-// stay individual Config fields (they're the operator-facing ABI other
-// tooling may read/write directly), but every caller that just wants
-// "the configured command for gate X" goes through this instead of
-// naming a field, so a new registry entry needs one field here (its
-// YAML key) and one line in the map below, not a change at every call
-// site.
-func (c Config) GateCommands() map[string]string {
-	raw := map[string]string{
-		"lint_command":             c.LintCommand,
-		"security_command":         c.SecurityCommand,
-		"unit_test_command":        c.UnitTestCommand,
-		"integration_test_command": c.IntegrationTestCommand,
-	}
-	out := make(map[string]string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		out[g.ID] = raw[g.ProjectKey]
-	}
-	return out
 }
 
 var designGuideNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)

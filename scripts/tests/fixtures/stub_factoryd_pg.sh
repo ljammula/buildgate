@@ -10,7 +10,7 @@
 # stub), which always writes a fixed minimal run.json; this one instead
 # writes STUB_FACTORYD_PG_RUN_JSON's literal content, so a single test can
 # exercise every classify()/cause_bucket() outcome (accepted, quarantined
-# on a named gate, halted with a reason code, ...) through the real shell
+# on a gate, halted with a reason code, ...) through the real shell
 # script's recording plumbing, not just "accepted"/"halted".
 set -eu
 

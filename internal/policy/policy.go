@@ -20,10 +20,8 @@ var (
 	numberedSectionRE = regexp.MustCompile(`^\d+(?:\.\d+)*[.)]?\s+`)
 )
 
-// AllGateChecks names every gate EvaluateRun can run, in the order it runs
-// them: the four built-in checks below, followed by CommandGateIDs()'s own
-// registry order (policy.CommandGates) -- lint, security_audit,
-// unit_tests, integration_tests today. A caller that
+// AllGateChecks names every gate EvaluateRun runs for every run, in the order
+// it runs them (a repository's own gates, RepoGateChecks, come after). A caller that
 // wants to require "the strong gates actually ran" rather than merely "no
 // recorded gate failed" (internal/release.MergePolicy.RequiredGates
 // exists for exactly that -- see its doc comment) uses this as its
@@ -36,12 +34,12 @@ var (
 // with the review off would then deny release outright for a gate it was
 // never meant to satisfy. Add it here only alongside a merge_policy.go
 // exemption for "declared but not run", as full_suite_verify has.
-var AllGateChecks = append([]string{
+var AllGateChecks = []string{
 	"canonical_verify",
 	"diff_scope",
 	TestsRedOnBaseCheck,
 	"full_suite_verify",
-}, CommandGateIDs()...)
+}
 
 // CanonicalVerify evaluates the canonical-verification evidence.
 func CanonicalVerify(cmd []string, buildExitCode, verifyExitCode int, durationMs int64, logSHA256 string) run.GateResult {
@@ -465,14 +463,9 @@ func ReviewReproduction(in ReviewReproductionInput) run.GateResult {
 	}
 }
 
-// NamedGateInput is one operator-configured named gate beyond the
-// built-in checks above -- lint/security_audit/unit_tests/
-// integration_tests, declared via .factory.yml's lint_command/
-// security_command/unit_test_command/integration_test_command. Command is
-// nil exactly when the project didn't configure this particular gate;
-// EvaluateRun skips it entirely in that case (never "passed"), the same
-// convention FullSuiteCommand already uses for full_suite_verify.
-type NamedGateInput struct {
+// RepoGateInput is one gate the target repository defines for itself in its
+// .factory.yml `gates:` list, beyond the built-in checks above.
+type RepoGateInput struct {
 	Check      string
 	Command    []string
 	ExitCode   int
@@ -483,9 +476,9 @@ type NamedGateInput struct {
 	BaseCheck *run.GateBaseCheck
 }
 
-// NamedGate evaluates one NamedGateInput the same way FullSuiteVerify
+// RepoGate evaluates one RepoGateInput the same way FullSuiteVerify
 // evaluates the full-suite gate: pass iff the command exited zero.
-func NamedGate(check string, cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
+func RepoGate(check string, cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
 	return run.GateResult{
 		Check:      check,
 		Command:    cmd,
@@ -553,12 +546,9 @@ type EvaluateRunInput struct {
 	// canonical verification's.
 	FullSuiteRerun *run.VerifyRerun
 
-	// NamedGates is the lint/security_audit/unit_tests/
-	// integration_tests named gates, one entry per gate the project
-	// actually configured (an unconfigured gate is simply absent from this slice,
-	// not present with a nil Command) -- see NamedGateInput's own doc
-	// comment.
-	NamedGates []NamedGateInput
+	// RepoGates is the repository's own gates, one entry per gate it
+	// defines -- see RepoGateInput's own doc comment.
+	RepoGates []RepoGateInput
 
 	// CodeReviewCommand/CodeReviewExitCode/... mirror
 	// FullSuiteCommand's own nil-skips-the-gate convention -- nil
@@ -662,8 +652,8 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		}
 	}
 
-	for _, g := range input.NamedGates {
-		gate := NamedGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256)
+	for _, g := range input.RepoGates {
+		gate := RepoGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256)
 		gate.BaseCheck = g.BaseCheck
 		result.GateResults = append(result.GateResults, gate)
 		if !gate.Passed {

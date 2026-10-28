@@ -419,13 +419,10 @@ func addRepoGates(gateCommands map[string]*string, cfg *projectconfig.Config) []
 // read back by this package's own Submit; the rest exist purely so the
 // same .factory.yml read and the same precedence rules apply here as in
 // every other caller of this logic.
-// gateCommands is keyed by policy.CommandGate.ID (see policy.CommandGates),
-// one *string per command gate a caller wants defaulted from .factory.yml;
-// a caller uninterested in a given gate's resolved value (requestsubmit's
-// own Submit, which never uses the named-gate commands) still passes a
-// non-nil placeholder for every registry entry, matching the "always
-// receives one flag per registry entry" contract the CLI edge (cmd/
-// factoryd's newRunFlags) already has -- see this function's own tests.
+// gateCommands receives the repository gates the committed .factory.yml
+// defines (`gates:`), keyed by policy.RepoGateCheck(id); a caller
+// uninterested in their values (requestsubmit's own Submit) passes an empty
+// map. nil takes none.
 func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, preflightProfile, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget int, meterCostBudget int64) error {
 	cfg, found, err := projectconfig.Load(workspaceDir)
 	if err != nil {
@@ -443,18 +440,6 @@ func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, v
 	if !explicit["fast-check-command"] && cfg.FastCheckCommand != "" {
 		*fastCheckCommand = cfg.FastCheckCommand
 		applied = append(applied, "fast-check-command")
-	}
-	projectGateCommands := cfg.GateCommands()
-	for _, g := range policy.CommandGates {
-		dest, ok := gateCommands[g.ID]
-		if !ok || dest == nil {
-			continue
-		}
-		value := projectGateCommands[g.ID]
-		if !explicit[g.Flag] && value != "" {
-			*dest = value
-			applied = append(applied, g.Flag)
-		}
 	}
 	applied = append(applied, addRepoGates(gateCommands, cfg)...)
 	if len(cfg.TestPatterns) > 0 {
@@ -732,11 +717,7 @@ func Submit(p Params) (Result, error) {
 		explicit["preflight-profile"] = true
 	}
 	var discardedFastCheckCommand string
-	discardedGateCommands := make(map[string]*string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		var discarded string
-		discardedGateCommands[g.ID] = &discarded
-	}
+	discardedGateCommands := map[string]*string{}
 	var discardedProtectedPaths string
 	var discardedTestPatterns []string
 	// discardedTokenCeiling/discardedCostCeiling seed as the caller's own

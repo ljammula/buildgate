@@ -77,7 +77,7 @@ func prRoundAfter(t *testing.T, last *request.Round, lastRun *run.Run) (dataDir,
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
 		args = a
-		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
 	}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}, time.Now()); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestAnOverrideTakesTheReproductionOffTheTicketsList(t *testing.T) {
 	var argvs [][]string
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
 		argvs = append(argvs, a)
-		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
@@ -281,7 +281,7 @@ func TestAMissingHeldCopyHaltsAndARetryDropsIt(t *testing.T) {
 	var argvs [][]string
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
 		argvs = append(argvs, a)
-		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
@@ -491,7 +491,7 @@ func TestAnOverrideDropIsNotAddedBack(t *testing.T) {
 	var argvs [][]string
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
 		argvs = append(argvs, a)
-		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+		return (&run.Run{ID: requestdrivertest.ArgValue(a, "-ticket"), State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}
 	for i, thread := range []forge.Thread{
@@ -543,7 +543,7 @@ func TestADropCoversOnlyTheRefusalsItWasMadeFor(t *testing.T) {
 			z = id
 			return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
 		}
-		return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+		return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 5}
 	for i, thread := range []forge.Thread{

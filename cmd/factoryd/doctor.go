@@ -93,7 +93,7 @@ type doctorCheck struct {
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy *bool, registryProxyImage *string, composeServices, fix *bool, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand *string, hitlReminderInterval *time.Duration, configPath *string) {
+func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy *bool, registryProxyImage *string, composeServices, fix *bool, repoRoot, workspace, dataDir, temporalAddress, egressCABundle *string, hitlReminderInterval *time.Duration, configPath *string) {
 	flags = flag.NewFlagSet("doctor", flag.ContinueOnError)
 	// configPath resolves every session-config-derived value below
 	// (settings, -hitl-reminder-interval, -data-dir): `doctor` had no
@@ -112,10 +112,6 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	dataDir = flags.String("data-dir", "data", "Directory of durable run records and logs, checked, with -workspace, for Docker visibility and for lying outside it. Unset uses the session config's data_dir.")
 	temporalAddress = flags.String("temporal-address", "", "Temporal server address to confirm is reachable; empty skips this check")
 	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of extra CA certificates to check parses and to trust in the model-route reachability probe. Empty uses the bundle built for a network that re-signs TLS, when one exists.")
-	lintCommand = flags.String("lint-command", "", "Lint gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	securityCommand = flags.String("security-command", "", "Security-audit gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	unitTestCommand = flags.String("unit-test-command", "", "Unit-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	integrationTestCommand = flags.String("integration-test-command", "", "Integration-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
 	hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "How often the worker re-reminds a request waiting at a review gate. Doctor prints it and checks nothing against it. Unset uses the session config's hitl_reminder_interval.")
 	finishFlags(flags)
 	return
@@ -130,7 +126,7 @@ func doctorMain(dp *deps, args []string) error {
 		fmt.Printf("factoryd doctor: running %s (%s)\n\n", selfPath, factoryVersionOf(selfPath))
 	}
 
-	flags, sandboxImage, registryProxy, registryProxyImage, composeServices, fix, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand, hitlReminderInterval, configPath := newDoctorFlags()
+	flags, sandboxImage, registryProxy, registryProxyImage, composeServices, fix, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, hitlReminderInterval, configPath := newDoctorFlags()
 	// Registered directly on flags rather than threaded through
 	// newDoctorFlags' own already-long return tuple -- see
 	// doctorRegisterNotifyTestFlag's own doc comment (cmd/factoryd/
@@ -259,10 +255,6 @@ func doctorMain(dp *deps, args []string) error {
 		profileImages:          doctorProfileImages(),
 		baselineCheck:          doctorBaselineCheckRunner(dp, resolvedConfigPath, doctorExplicitDataDir(flags, *dataDir), *temporalAddress),
 		egressCABundle:         *egressCABundle,
-		lintCommand:            *lintCommand,
-		securityCommand:        *securityCommand,
-		unitTestCommand:        *unitTestCommand,
-		integrationTestCommand: *integrationTestCommand,
 		composeServices:        *composeServices,
 		targetRepo:             *targetRepo,
 		removeSandbox:          *removeSandbox,
@@ -785,10 +777,6 @@ type doctorInputs struct {
 	dataDir                     string
 	temporalAddress             string
 	egressCABundle              string
-	lintCommand                 string
-	securityCommand             string
-	unitTestCommand             string
-	integrationTestCommand      string
 	composeServices             bool
 	// targetRepo is -target-repo: see doctorTargetRepoChecks.
 	targetRepo string
@@ -1005,16 +993,6 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorCheckRequiredBinaries(ctx, in)...)
 		checks = append(checks, doctorCheckSandboxBlock(in)...)
 		checks = append(checks, doctorCheckBaseline(in, doctorChecksFailed(checks)))
-	}
-	for _, gate := range []struct{ label, command string }{
-		{"-lint-command", in.lintCommand},
-		{"-security-command", in.securityCommand},
-		{"-unit-test-command", in.unitTestCommand},
-		{"-integration-test-command", in.integrationTestCommand},
-	} {
-		if gate.command != "" {
-			checks = append(checks, doctorCheckExecutableInImage(ctx, in.sandboxDocker, image, gate.label, gate.command))
-		}
 	}
 	return checks
 }
@@ -1777,12 +1755,10 @@ func doctorCheckImagePresent(ctx context.Context, dockerBinary, label, image, fi
 }
 
 // doctorCheckExecutableInImage confirms command's leading executable is on
-// PATH inside image -- the named-gate commands (lint_command,
-// security_command, unit_test_command, integration_test_command) are only useful if their tool is actually
-// installed in the sandbox image a real
-// run will execute them in; a missing one otherwise surfaces as a
-// confusing gate failure deep inside a run instead of naming it here,
-// before the run ever starts.
+// PATH inside image -- a command is only useful if its tool is
+// installed in the sandbox image a real run will execute it in; a missing
+// one otherwise surfaces as a confusing failure deep inside a run instead of
+// naming it here, before the run ever starts.
 func doctorCheckExecutableInImage(ctx context.Context, dockerBinary, image, label, command string) doctorCheck {
 	name := fmt.Sprintf("%s executable present in sandbox image (%s)", label, image)
 	fields := strings.Fields(command)

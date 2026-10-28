@@ -141,7 +141,7 @@ func (f *factoryDirFixture) gate(check string) []run.Attempt {
 	env.RegisterActivity(f.acts.RunNamedGateActivity)
 	in := f.input
 	in.CheckpointDir = f.t.TempDir()
-	val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: in, Check: check, Command: "sh .factory/x.sh"})
+	val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: in, Check: check, Command: "sh .factory/x.sh"})
 	if err != nil {
 		f.t.Fatalf("%s gate: %v", check, err)
 	}

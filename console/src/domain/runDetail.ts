@@ -288,7 +288,7 @@ function simpleStageRow(
 
 /**
  * Builds the Gates row directly from `run.gate_results` (the built-in policy
- * gates' own recorded evidence) when the progress feed has no named-gate
+ * gates' own recorded evidence) when the progress feed has no repository-gate
  * events to show -- see `gateRow`'s doc comment.
  */
 function gateRowFromResults(results: readonly GateResult[]): TimelineRow {
@@ -328,7 +328,7 @@ function gateRow(
     if (list === undefined) byGate.set(name, [event]);
     else list.push(event);
   }
-  // No named-gate progress events (no lint/security_audit/etc. configured)
+  // No repository-gate progress events (no `gates:` entries configured)
   // does NOT mean no gates ran: the built-in policy gates (canonical_verify,
   // diff_scope, ...) are always evaluated but never emit their own `gate`
   // progress events (found live, 2026-09-26 operator walk) -- falling

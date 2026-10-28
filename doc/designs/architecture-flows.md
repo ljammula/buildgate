@@ -175,7 +175,7 @@ RunWorkflow result: accepted / quarantined / halted
 Conditional Activities not on every run: `CheckChainSuccessorActivity`/
 `ValidateSliceChainActivity` (multi-ticket chain), `RollbackIsolatedWorkspaceActivity`
 (setup fails before build), `RunFullSuiteVerifyActivity`/`RunNamedGateActivity`
-(declared full-suite/named-gate policy).
+(declared full-suite/repository-gate policy).
 
 Completed Activities are durable: their checkpoints are reused, never
 redone. An interrupted build, verify, gate or review step is never rerun

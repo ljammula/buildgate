@@ -50,7 +50,7 @@ func TestAutomaticCorrectiveRoundsRunOnTheEscalation(t *testing.T) {
 			return requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branchOf(id), baseSHA, "")
 		},
 		"check round": func(t *testing.T, dataDir, id string) requestdriver.TicketRunner {
-			return checkQuarantinedBuildRunner(t, dataDir, branchOf(id), baseSHA, resultSHA, "lint")
+			return checkQuarantinedBuildRunner(t, dataDir, branchOf(id), baseSHA, resultSHA, "repo-lint")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

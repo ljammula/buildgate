@@ -940,12 +940,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	}
 	writeNotesSection(&b, r.Notes)
 	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
-	// Every policy.CommandGate always gets its own line, even when the
-	// project never configured one -- "not configured" is a real,
-	// distinct state a reviewer needs to see, not silence the way an
-	// undeclared ticket-scoped gate (diff_scope) is: that has no "the operator
-	// should have configured this" implication, these project-scoped ones do.
-	writeNamedGatesSection(&b, r)
+	writeRepoGatesSection(&b, r)
 	writeChangedFilesAndDependencies(&b, r)
 	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
 		fmt.Fprintf(&b, "**Relay spend:** %s\n\n", relaySpendLine(totalCostMicroUSD, totalTokens, partial, run.SubscriptionBilled(r.Attempts)))
@@ -1001,27 +996,16 @@ func noteLine(n string) string {
 	return sanitizePRField(words) + ": `" + sanitizePRField(value) + "`"
 }
 
-// writeNamedGatesSection lists every command gate and the repository's own
-// gates.
-func writeNamedGatesSection(b *strings.Builder, r *run.Run) {
-	b.WriteString("## Named gates\n\n")
-	namedGateResults := make(map[string]run.GateResult, len(r.GateResults))
-	for _, g := range r.GateResults {
-		namedGateResults[g.Check] = g
+// writeRepoGatesSection lists the repository's own gates, when the run
+// recorded any.
+func writeRepoGatesSection(b *strings.Builder, r *run.Run) {
+	var lines strings.Builder
+	writeRepoGateLines(&lines, r.GateResults)
+	if lines.Len() == 0 {
+		return
 	}
-	for _, g := range gatepolicy.CommandGates {
-		check := g.ID
-		gateResult, ran := namedGateResults[check]
-		status := "not configured"
-		if ran {
-			status = "pass"
-			if !gateResult.Passed {
-				status = "FAIL"
-			}
-		}
-		fmt.Fprintf(b, "- `%s`: %s\n", check, status)
-	}
-	writeRepoGateLines(b, r.GateResults)
+	b.WriteString("## Repository gates\n\n")
+	b.WriteString(lines.String())
 	b.WriteString("\n")
 }
 

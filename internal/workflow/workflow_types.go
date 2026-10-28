@@ -164,21 +164,15 @@ type RunWorkflowInput struct {
 	// passing check ends with RunWorkflowResult.BaselineChecked and no
 	// State, so nothing reaches release or a pull request.
 	BaselineCheck bool `json:"baseline_check,omitempty"`
-	// GateCommands is every operator-configured command gate (see
-	// policy.CommandGates -- "lint", "security_audit", "unit_tests",
-	// "integration_tests" today, keyed by
-	// policy.CommandGate.ID), ported to the Temporal path the same way
-	// FullSuiteCommand was: carried per-execution, no Worker-static
-	// fallback, doubling as RunWorkflow's own deterministic decision of
-	// whether to call RunNamedGateActivityName for each one -- RunWorkflow
-	// iterates policy.CommandGates itself (never this map directly) so
+	// GateCommands is the repository gates (.factory.yml `gates:`) by
+	// policy.RepoGateCheck(id), carried to the Temporal path the same way
+	// FullSuiteCommand was: per-execution, no Worker-static fallback,
+	// doubling as RunWorkflow's own deterministic decision of whether to
+	// call RunNamedGateActivityName for each one -- RunWorkflow runs them
+	// by name (gateChecksToRun, which never iterates this map directly) so
 	// every Worker in a replay-safe deployment visits gates in the same
-	// order. A gate ID absent from the map, or present with an empty
-	// value, skips that gate entirely, matching cmd/factoryd.
-	//
-	// It also carries the gates the target repository defines for itself
-	// (.factory.yml `gates:`), under policy.RepoGateCheck(id): RunWorkflow
-	// runs those after the registry's, by name (gateChecksToRun).
+	// order. A gate absent from the map, or present with an empty value,
+	// is skipped, matching cmd/factoryd.
 	GateCommands map[string]string `json:"gate_commands,omitempty"`
 	// SetupCommands is the committed .factory.yml `setup:` list, resolved
 	// before the workflow starts and never re-read from the worktree. Every
@@ -625,7 +619,7 @@ type VerifyActivityResult struct {
 }
 
 // ReviewStepInput is RunReviewStepActivity's input. Embeds RunWorkflowInput
-// the same way NamedGateActivityInput does, plus which review step this call
+// the same way RepoGateActivityInput does, plus which review step this call
 // is for and this run's relay spend before the review's own launch (the
 // build's): this Activity's relay spec is derived from
 // RunWorkflowInput.RoutePolicy the same way relaySpecFor already does for
@@ -871,16 +865,16 @@ type CollectEvidenceInput struct {
 	// same as before.
 	FullSuiteRan      bool `json:"full_suite_ran,omitempty"`
 	FullSuiteExitCode int  `json:"full_suite_exit_code,omitempty"`
-	// NamedGatesFailed extends the same gate to the named gates
-	// (lint/security_audit/unit_tests/integration_tests): false (the
+	// RepoGatesFailed extends the same gate to the repository gates
+	// (.factory.yml `gates:`): false (the
 	// zero value, and every caller before this field existed) means
 	// "none configured, or every one that ran exited zero" and leaves
 	// the commit gated on BuildExitCode/VerifyExitCode (and
 	// FullSuiteRan/FullSuiteExitCode) alone, the same as before. Only
-	// set true when a named gate ran and exited non-zero — same
+	// set true when a repository gate ran and exited non-zero — same
 	// reasoning as FullSuiteRan/FullSuiteExitCode's own doc comment, one
 	// gate at a time.
-	NamedGatesFailed bool `json:"named_gates_failed,omitempty"`
+	RepoGatesFailed bool `json:"named_gates_failed,omitempty"`
 	// CheckpointDir/LogDir: see PostBuildInput's matching doc comment —
 	// same reasoning, for this Activity's own safety-net commit.
 	CheckpointDir string `json:"checkpoint_dir,omitempty"`

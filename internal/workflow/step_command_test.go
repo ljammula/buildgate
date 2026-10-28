@@ -166,7 +166,7 @@ func TestEveryVerifyClassLaunchRunsSetupFirst(t *testing.T) {
 
 		for _, gate := range []string{"lint", "repo-licenses"} {
 			a, l = launchRecorder(t)
-			execActivity(t, a.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: base(), Check: gate, Command: "make " + gate})
+			execActivity(t, a.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: base(), Check: gate, Command: "make " + gate})
 			check("gate "+gate, *l, "make "+gate)
 		}
 

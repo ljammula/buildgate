@@ -354,7 +354,7 @@ func (a *Activities) registryProxySpecFor(input RunWorkflowInput) (*sandbox.Regi
 // ComposeServicesEnabled's own doc comment for why.
 // phase namespaces the returned spec's own compose evidence (see
 // sandbox.ComposeServicesSpec.Phase's own doc comment) -- build, verify,
-// full_suite_verify, and a named gate's own check name each call this
+// full_suite_verify, and a repository gate's own check name each call this
 // independently against the same input.DataDir/RunID, so each needs its
 // own value here to keep runSandboxWithRetries' per-phase
 // BeginComposeServicesLifecycle call from overwriting another phase's

@@ -10,9 +10,8 @@ import (
 // factoryYMLContent builds .factory.yml's content for -write-factory-yml,
 // shared by initMain and onboardMain: a detected verify_command (omitted
 // when the caller's own detection found none), preflight_profile, and
-// commented-out Go defaults for the four named-gate keys --
-// lint_command, security_command, unit_test_command,
-// integration_test_command -- so an operator only has to uncomment and
+// a commented-out example of the `gates:` list -- so an operator only has to
+// uncomment and
 // adjust rather than look up the key names and a sensible Go command for
 // each. Commented out, not written live: unlike verify_command, these are
 // never safe to guess as *the* command for an arbitrary onboarded repo
@@ -28,10 +27,9 @@ func factoryYMLContent(verifyCommand, preflightProfile string) string {
 		fmt.Fprintf(&body, "verify_command: %q\n", verifyCommand)
 	}
 	fmt.Fprintf(&body, "preflight_profile: %s\n", preflightProfile)
-	body.WriteString("# lint_command: \"golangci-lint run ./...\"\n")
-	body.WriteString("# security_command: \"govulncheck ./...\"\n")
-	body.WriteString("# unit_test_command: \"go test ./...\"\n")
-	body.WriteString("# integration_test_command: \"go test -tags=integration ./...\"\n")
+	body.WriteString("# gates:\n")
+	body.WriteString("#   - id: lint\n")
+	body.WriteString("#     command: \"golangci-lint run ./...\"\n")
 	return body.String()
 }
 

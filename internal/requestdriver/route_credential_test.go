@@ -175,7 +175,7 @@ func TestACorrectiveRoundRefusedForItsRouteCredentialWaitsInResumeReview(t *test
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	branch := "factoryd/" + id + "-001"
-	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")
+	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
 	orig := requestdriver.ReviewCorrectiveRunner
 	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
 	calls := 0

@@ -71,18 +71,18 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 		// "" for one that starts from the base.
 		wantOpens, wantDiffBase string
 	}{
-		"a gate a build can fix": {failed: []string{"lint"}, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: base},
+		"a gate a build can fix": {failed: []string{"repo-lint"}, wantRecord: "- `repo-lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: base},
 		// SC-022: a finding refuses only through its reproduction, so a
 		// failed code_review is never handed to a build.
 		"only a review failed, with a high finding":        {shape: flagged},
-		"the attempt ran on a branch with an earlier base": {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.DiffBaseSHA = fmt.Sprintf("%040d", 9) }, wantRecord: "- `lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: fmt.Sprintf("%040d", 9)},
-		"-from scratch":                                     {failed: []string{"lint"}, fromScratch: true, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
-		"the attempt committed nothing":                     {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.ResultSHA = rr.BaseSHA }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
-		"the attempt recorded no branch":                    {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.Branch = "" }, wantRecord: "- `lint` failed (exit 2)", wantOpens: fromBase},
-		"a check a build is never told of":                  {failed: []string{"lint", "a_check_from_the_future"}},
-		"the run is another request's":                      {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.RequestID = "some-other-request" }},
-		"the ticket's spec changed since":                   {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.SpecSHA256 = strings.Repeat("0", 64) }},
-		"the handoff was changed after the run recorded it": {failed: []string{"lint"}, shape: func(rr *run.Run) { rr.HandoffSHA256 = strings.Repeat("0", 64) }},
+		"the attempt ran on a branch with an earlier base": {failed: []string{"repo-lint"}, shape: func(rr *run.Run) { rr.DiffBaseSHA = fmt.Sprintf("%040d", 9) }, wantRecord: "- `repo-lint` failed (exit 2)", wantOpens: onBranch, wantDiffBase: fmt.Sprintf("%040d", 9)},
+		"-from scratch":                                     {failed: []string{"repo-lint"}, fromScratch: true, wantRecord: "- `repo-lint` failed (exit 2)", wantOpens: fromBase},
+		"the attempt committed nothing":                     {failed: []string{"repo-lint"}, shape: func(rr *run.Run) { rr.ResultSHA = rr.BaseSHA }, wantRecord: "- `repo-lint` failed (exit 2)", wantOpens: fromBase},
+		"the attempt recorded no branch":                    {failed: []string{"repo-lint"}, shape: func(rr *run.Run) { rr.Branch = "" }, wantRecord: "- `repo-lint` failed (exit 2)", wantOpens: fromBase},
+		"a check a build is never told of":                  {failed: []string{"repo-lint", "a_check_from_the_future"}},
+		"the run is another request's":                      {failed: []string{"repo-lint"}, shape: func(rr *run.Run) { rr.RequestID = "some-other-request" }},
+		"the ticket's spec changed since":                   {failed: []string{"repo-lint"}, shape: func(rr *run.Run) { rr.SpecSHA256 = strings.Repeat("0", 64) }},
+		"the handoff was changed after the run recorded it": {failed: []string{"repo-lint"}, shape: func(rr *run.Run) { rr.HandoffSHA256 = strings.Repeat("0", 64) }},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dp := newTestDeps(t)
@@ -159,7 +159,7 @@ func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 	dp := newTestDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	var builds [][]string
-	buildRunner := quarantinedThenAcceptedBuildRunner(t, dataDir, id, [2]string{fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)}, []string{"lint"}, nil, &builds)
+	buildRunner := quarantinedThenAcceptedBuildRunner(t, dataDir, id, [2]string{fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)}, []string{"repo-lint"}, nil, &builds)
 	cfg := requestdriver.WorkerConfig{Resume: requestdriver.ResumeGate{Preconditions: &requestdrivertest.FakeResumePreconditions{T: t, OK: true}}}
 	drive := func() {
 		t.Helper()
@@ -216,7 +216,7 @@ func TestARetryOfALaterTicketContinuesOnItsBranchWithoutThePriorRun(t *testing.T
 		if ticket == id+"-001" || len(builds) > 2 {
 			return (&run.Run{ID: ticket, Ticket: ticket, State: run.StateAccepted, BaseSHA: base, Branch: "factoryd/" + ticket, RequestID: id}).Save(dataDir)
 		}
-		rr := requestdrivertest.QuarantinedOn(t, dataDir, ticket, branch2, base, result, "lint")
+		rr := requestdrivertest.QuarantinedOn(t, dataDir, ticket, branch2, base, result, "repo-lint")
 		rr.RequestID = id
 		sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
 		if err != nil {
@@ -438,7 +438,7 @@ func quarantinedThenLostBuildRunner(t *testing.T, dataDir, id, repoDir string, s
 		*started = append(*started, current)
 		switch n {
 		case 1:
-			rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, branch, shas[0], shas[1], "lint")
+			rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, branch, shas[0], shas[1], "repo-lint")
 			rr.RequestID = id
 			sum, err := evidence.SHA256File(requestdrivertest.ArgValue(args, "-spec"))
 			if err != nil {
@@ -480,7 +480,7 @@ func assertRecordOf(t *testing.T, path, opens, attemptID string) {
 	if !strings.HasPrefix(string(record), opens) {
 		t.Errorf("the record opens:\n%.300s\nwant it to open: %s", record, opens)
 	}
-	if !strings.Contains(string(record), "(run "+attemptID+")") || !strings.Contains(string(record), "- `lint` failed (exit 2)") {
+	if !strings.Contains(string(record), "(run "+attemptID+")") || !strings.Contains(string(record), "- `repo-lint` failed (exit 2)") {
 		t.Errorf("the record is not of the quarantined attempt %s:\n%s", attemptID, record)
 	}
 }

@@ -40,7 +40,7 @@ func TestAResumeDecidedAfterAnUnresolvedCorrectiveRoundIsKept(t *testing.T) {
 	after, decided := requestdriver.OperatorResumesBetweenTheSaves(t, id)
 	dp.afterReviewSave(after)
 	branch := "factoryd/" + id + "-001"
-	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")
+	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
 	requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(_, roundRunID string) *run.Run {
 		return unresolvedHalts(roundRunID)[unresolved.SandboxLaunch]
 	})

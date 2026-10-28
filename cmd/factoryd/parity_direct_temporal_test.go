@@ -59,11 +59,11 @@ type parityScenario struct {
 	// terminal state -- a halt (this suite's rewind_and_commit scenario)
 	// never reaches gate evaluation.
 	wantGates map[string]bool
-	// gateCommands optionally declares a policy.CommandGate command (keyed
-	// by gate ID) for this scenario -- RunWorkflowInput.
-	// GateCommands get it identically, so a scenario like lint_gate_fails
-	// below exercises the M4-K2 command-gate registry plumbing on both
-	// paths, not just canonical_verify/diff_scope/tests_red_on_base.
+	// gateCommands optionally declares a repository gate command (keyed by
+	// policy.RepoGateCheck(id)) for this scenario -- RunWorkflowInput.
+	// GateCommands, so a scenario like repo_gate_fails below exercises the
+	// repository-gate plumbing, not just canonical_verify/diff_scope/
+	// tests_red_on_base.
 	gateCommands map[string]string
 }
 
@@ -132,19 +132,18 @@ func parityScenarios() []parityScenario {
 			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": false, "full_suite_verify": true},
 		},
 		{
-			// lint_gate_fails exercises policy.CommandGates' registry
-			// plumbing end to end (M4-K2): a configured
-			// command-gate command that exits nonzero must quarantine the
-			// run and record "lint": false, through
+			// repo_gate_fails exercises the repository-gate plumbing end to
+			// end: a configured repository gate that exits nonzero must
+			// quarantine the run and record "repo-lint": false, through
 			// RunWorkflowInput.GateCommands.
-			name:          "lint_gate_fails",
+			name:          "repo_gate_fails",
 			mode:          "commit",
 			verifyCommand: "true",
 			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateQuarantined,
 			wantCommitted: false,
-			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true, "lint": false},
-			gateCommands:  map[string]string{"lint": "false"},
+			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true, "repo-lint": false},
+			gateCommands:  map[string]string{"repo-lint": "false"},
 		},
 		{
 			// rewind_and_commit resets the workspace to its root commit

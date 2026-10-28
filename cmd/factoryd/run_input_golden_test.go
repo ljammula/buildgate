@@ -112,10 +112,6 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-fast-check-command", "echo fast",
 		"-verify-max-attempts", "4",
 		"-full-suite-command", "echo full",
-		"-lint-command", "echo lint",
-		"-security-command", "echo security",
-		"-unit-test-command", "echo unit",
-		"-integration-test-command", "echo integration",
 		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
@@ -375,9 +371,10 @@ func replayedBranch(t *testing.T, workspace, branch string) (onto, head string) 
 	return onto, head
 }
 
-// goldenFactoryYML is the committed .factory.yml of the golden runs: setup and
-// autofix have no flag, so this file is the only way they reach the input.
-const goldenFactoryYML = "setup:\n  - npm ci\n  - make generate\nautofix:\n  - gofmt -w .\n"
+// goldenFactoryYML is the committed .factory.yml of the golden runs: setup,
+// autofix and the repository's own gates have no flag, so this file is the
+// only way they reach the input.
+const goldenFactoryYML = "setup:\n  - npm ci\n  - make generate\nautofix:\n  - gofmt -w .\ngates:\n  - id: lint\n    command: echo lint\n"
 
 // commitFactoryYML commits content as workspace's .factory.yml.
 func commitFactoryYML(t *testing.T, workspace, content string) {

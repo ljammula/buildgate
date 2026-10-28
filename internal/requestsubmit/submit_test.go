@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"buildgate/internal/policy"
 	"buildgate/internal/request"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
@@ -315,11 +314,7 @@ func TestApplyProjectConfigDefaultsCeilingTightenOnly(t *testing.T) {
 			var testPatterns []string
 			var meterTokenCeiling int
 			var meterCostCeilingMicroUSD int64
-			gateCommands := make(map[string]*string, len(policy.CommandGates))
-			for _, g := range policy.CommandGates {
-				var v string
-				gateCommands[g.ID] = &v
-			}
+			gateCommands := map[string]*string{}
 
 			err := ApplyProjectConfigDefaults(map[string]bool{}, dir, &verifyCommand, &fastCheckCommand, gateCommands, &preflightProfile, &releaseProtectedPaths, &testPatterns, &meterTokenCeiling, &meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget)
 

@@ -379,7 +379,7 @@ serve       the console and its API, over the same data dir</code></pre>
 
   <rect class="box fail" x="770" y="282" width="180" height="56" rx="8"/>
   <text class="label" x="786" y="306">Quarantined</text>
-  <text class="small" x="786" y="324">named gate + triage note</text>
+  <text class="small" x="786" y="324">failed gate + triage note</text>
 
   <rect class="box human" x="770" y="356" width="180" height="50" rx="8"/>
   <text class="label" x="786" y="378">Human merges</text>
@@ -406,7 +406,7 @@ serve       the console and its API, over the same data dir</code></pre>
     <tr><td><code>code_review</code></td><td>Correctness review with structured findings posted to the PR, in the same review-role call. A finding is advice, listed in the PR; it refuses a request's build only through a reproduction test the factory runs itself (<code>review_reproduction</code>). Under <code>required</code> (what <code>quickstart</code> writes) a review with no verdict waits for a person</td><td>The test computes its expected value by calling <code>Multiply</code> itself, so it can never fail: flagged as a test that proves nothing</td></tr>
   </tbody>
 </table></div>
-<p class="note"><code>.factory.yml</code> can add <code>lint</code>, <code>security_audit</code>, <code>unit_tests</code> and <code>integration_tests</code> gates, each with its own exit code and log.</p>
+<p class="note">A repository's <code>.factory.yml</code> <code>gates:</code> list adds its own checks (a lint check, say), each recorded as <code>repo-&lt;id&gt;</code> with its own exit code and log.</p>
 
 <h3 id="outcomes">Outcomes</h3>
 <div class="cards">
@@ -435,9 +435,8 @@ serve       the console and its API, over the same data dir</code></pre>
     <tr><td>Teach the agent a team practice</td><td>Write a skill: a folder with a <code>SKILL.md</code> whose front-matter <code>name</code> matches the folder. Commit it to the repo's <code>.agents/skills</code> (every harness loads it for the build), or keep it in a host folder listed in <code>skill_dirs:</code> and enable it per role with <code>roles.&lt;role&gt;.skills</code>. Refused at launch: scripts or exec bits, symlinks, over 2 MiB per role, or a repo skill with the same name</td><td>No</td></tr>
     <tr><td>Give every repository a team skill</td><td>Add <code>&lt;skill_dirs entry&gt;/&lt;name&gt;/SKILL.md</code> and name it in <code>roles.&lt;role&gt;.skills</code>; the launch refuses symlinks, executable files and a name mismatch</td><td>No, config only</td></tr>
     <tr><td>Use another model or endpoint</td><td>Add <code>routes:</code> and <code>models:</code> entries in the session config: any OpenAI-compatible <code>/v1</code> (vLLM, Ollama, a gateway), ChatGPT via Codex login, Copilot, Anthropic. Add its price to <code>internal/prices/prices.yml</code> so budgets and <code>factoryd cost</code> are right</td><td>No (price table: rebuild)</td></tr>
-    <tr><td>Add a check for one repo</td><td>Set <code>lint_command</code>, <code>security_command</code>, <code>unit_test_command</code> or <code>integration_test_command</code> in the repo's <code>.factory.yml</code>; each becomes a named gate with its own evidence</td><td>No</td></tr>
+    <tr><td>Add a check for one repo</td><td>List it under <code>gates:</code> in the repo's <code>.factory.yml</code> (an <code>id</code> and a <code>command</code>); it becomes a <code>repo-&lt;id&gt;</code> gate with its own evidence</td><td>No</td></tr>
     <tr><td>Give the build real services</td><td>Declare Postgres, Kafka or Redis in the repo's <code>docker-compose.yml</code> (allow-listed images); they run as sidecars for every phase. Check with <code>factoryd doctor -target-repo &lt;repo&gt;</code></td><td>No</td></tr>
-    <tr><td>Add a new kind of gate for all repos</td><td>One <code>CommandGate</code> entry in <code>internal/policy/gates.go</code> plus one <code>.factory.yml</code> field</td><td>Yes, small</td></tr>
     <tr><td>Add a coding-agent harness</td><td>One adapter class in <code>agent/pi/scripts/harness_adapters.py</code>, one entry in <code>internal/harness/registry.go</code>, one image stage in the sandbox Dockerfile, recorded fixtures, one <code>containment-matrix.md</code> row. No change to job launch, the sandbox runtime or the config schema; Codex and Copilot CLI were added this way</td><td>Yes, five files</td></tr>
   </tbody>
 </table></div>

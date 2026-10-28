@@ -261,17 +261,17 @@ func runBuildStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 	return build, err
 }
 
-// gateOutcome is what postVerifyGates found: the full-suite and named-gate
+// gateOutcome is what postVerifyGates found: the full-suite and repository-gate
 // results the later phases read.
 type gateOutcome struct {
 	fullSuite    VerifyActivityResult
 	ranFullSuite bool
-	// namedGateInputs and namedGatesFailed are the named gates' results.
-	namedGateInputs  []policy.NamedGateInput
-	namedGatesFailed bool
+	// repoGateInputs and repoGatesFailed are the repository gates' results.
+	repoGateInputs  []policy.RepoGateInput
+	repoGatesFailed bool
 }
 
-// postVerifyGates runs the full-suite check and the named gates, each only
+// postVerifyGates runs the full-suite check and the repository gates, each only
 // once canonical verification passed. It sets input.GateCommands.
 func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) (gateOutcome, error) {
 	// Full-suite regression check (gap 3 of the plan's 2026-08-28 readiness
@@ -301,12 +301,11 @@ func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerify
 		ranFullSuite = true
 	}
 
-	// The named gates (lint, security_audit, unit_tests,
-	// integration_tests), as full-suite is: each project-configured
+	// The repository gates, as full-suite is: each project-configured
 	// command runs here, via RunNamedGateActivityName, only once canonical
 	// verification itself passed.
-	var namedGateInputs []policy.NamedGateInput
-	namedGatesFailed := false
+	var repoGateInputs []policy.RepoGateInput
+	repoGatesFailed := false
 	if result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 {
 		gateChecks, gateCommands := gateChecksToRun(ctx, *input)
 		// The commands the gates below ran with: a repository's own gates
@@ -316,11 +315,11 @@ func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerify
 			command := input.GateCommands[check]
 			var gateResult VerifyActivityResult
 			current.Stage, current.StartedAt = check, temporalworkflow.Now(ctx)
-			if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "gate-"+check), RunNamedGateActivityName, NamedGateActivityInput{RunWorkflowInput: *input, Check: check, Command: command}).Get(ctx, &gateResult); err != nil {
+			if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "gate-"+check), RunNamedGateActivityName, RepoGateActivityInput{RunWorkflowInput: *input, Check: check, Command: command}).Get(ctx, &gateResult); err != nil {
 				return gateOutcome{}, wrapActivityFailure("run "+check+" gate activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 			}
 			result.Attempts = append(result.Attempts, gateResult.Attempts...)
-			namedGateInputs = append(namedGateInputs, policy.NamedGateInput{
+			repoGateInputs = append(repoGateInputs, policy.RepoGateInput{
 				Check:      check,
 				Command:    gateResult.Result.Command,
 				ExitCode:   gateResult.Result.ExitCode,
@@ -329,15 +328,15 @@ func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerify
 				BaseCheck:  gateResult.BaseCheck,
 			})
 			if gateResult.Result.ExitCode != 0 {
-				namedGatesFailed = true
+				repoGatesFailed = true
 			}
 		}
 	}
 	return gateOutcome{
-		fullSuite:        fullSuite,
-		ranFullSuite:     ranFullSuite,
-		namedGateInputs:  namedGateInputs,
-		namedGatesFailed: namedGatesFailed,
+		fullSuite:       fullSuite,
+		ranFullSuite:    ranFullSuite,
+		repoGateInputs:  repoGateInputs,
+		repoGatesFailed: repoGatesFailed,
 	}, nil
 }
 
@@ -375,7 +374,7 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		// readiness review.
 		FullSuiteRan:      gates.ranFullSuite,
 		FullSuiteExitCode: gates.fullSuite.Result.ExitCode,
-		NamedGatesFailed:  gates.namedGatesFailed,
+		RepoGatesFailed:   gates.repoGatesFailed,
 		CheckpointDir:     input.CheckpointDir,
 		LogDir:            input.LogDir,
 	}
@@ -416,10 +415,10 @@ type reviewOutcome struct {
 }
 
 // earlierGatesPassed reports whether build, canonical verification, the full
-// suite and the named gates all passed: the point from which the proof of the
+// suite and the repository gates all passed: the point from which the proof of the
 // changed tests and the review run.
 func earlierGatesPassed(result *RunWorkflowResult, gates gateOutcome) bool {
-	return result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed
+	return result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.repoGatesFailed
 }
 
 // runReviewSteps runs the review step (planReviewSteps) once every earlier
@@ -515,7 +514,7 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		RequiredContent:           input.RequiredContent,
 		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
 		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,
-		NamedGates:                legacyConformityGates(gates.namedGateInputs, reviews),
+		RepoGates:                 legacyConformityGates(gates.repoGateInputs, reviews),
 		TestPatterns:              input.TestPatterns,
 		TestsRequiredOptOut:       input.TestsRequiredOptOut,
 		TestsOptOutRefused:        input.Bug,

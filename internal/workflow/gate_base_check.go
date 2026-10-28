@@ -90,7 +90,7 @@ func gateBaseNotChecked(baseSHA, format string, args ...any) *run.GateBaseCheck 
 // pendingGateBaseCheck is the base check a gate's first checkpoint carries:
 // nil when the gate is not rerun (it passed or it did not reach an exit code), else the "interrupted" record the finished
 // rerun replaces.
-func pendingGateBaseCheck(input NamedGateActivityInput, result runner.Result, runErr, evidenceErr error) *run.GateBaseCheck {
+func pendingGateBaseCheck(input RepoGateActivityInput, result runner.Result, runErr, evidenceErr error) *run.GateBaseCheck {
 	if runErr != nil || evidenceErr != nil || result.ExitCode == 0 {
 		return nil
 	}
@@ -131,7 +131,7 @@ func gateBaseCommit(input RunWorkflowInput) (sha, unknown string) {
 // free within gateBaseSweepLockWait (else it deletes the directory and leaves
 // the registration for the next prune), and the Activity waits for it no
 // longer than gateBaseSweepWait. Best effort: a leftover costs disk only.
-func (a *Activities) sweepGateBaseWorktree(input NamedGateActivityInput) {
+func (a *Activities) sweepGateBaseWorktree(input RepoGateActivityInput) {
 	scratch, err := gateBaseWorktreePath(a.logDirFor(input.RunWorkflowInput), input.Check)
 	if err != nil {
 		return
@@ -182,7 +182,7 @@ func removeGateBaseWorktree(ctx context.Context, workspace, scratch string) erro
 // with what the rerun showed and returns that result. A second save that
 // fails returns the result the checkpoint still holds, so the Activity's
 // return value and its checkpoint never disagree.
-func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec, path string, checkpoint activityCheckpoint[VerifyActivityResult], gateResult VerifyActivityResult) VerifyActivityResult {
+func (a *Activities) finishGateBaseCheck(ctx context.Context, input RepoGateActivityInput, command []string, registrySpec *sandbox.RegistryProxySpec, path string, checkpoint activityCheckpoint[VerifyActivityResult], gateResult VerifyActivityResult) VerifyActivityResult {
 	if gateResult.BaseCheck == nil {
 		return gateResult
 	}
@@ -202,7 +202,7 @@ func (a *Activities) finishGateBaseCheck(ctx context.Context, input NamedGateAct
 // host steps (the git metadata lock, the checkout, the removal) included:
 // another run of the repository may hold that lock for longer than the
 // Activity's heartbeat timeout.
-func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+func (a *Activities) checkGateOnBase(ctx context.Context, input RepoGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
 	started := time.Now()
 	stop := make(chan struct{})
 	defer close(stop)
@@ -222,7 +222,7 @@ func (a *Activities) checkGateOnBase(ctx context.Context, input NamedGateActivit
 }
 
 // rerunGateOnBase is checkGateOnBase's work.
-func (a *Activities) rerunGateOnBase(ctx context.Context, input NamedGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
+func (a *Activities) rerunGateOnBase(ctx context.Context, input RepoGateActivityInput, gate runner.Result, command []string, registrySpec *sandbox.RegistryProxySpec) *run.GateBaseCheck {
 	base, unknown := gateBaseCommit(input.RunWorkflowInput)
 	if base == "" {
 		return gateBaseNotChecked("", "%s", unknown)

@@ -2415,7 +2415,7 @@ func TestPRReviewRoundBlocksOnlyOnAReproducedFinding(t *testing.T) {
 				argvs, inputs = append(argvs, args), append(inputs, string(content)+earlierAttemptOf(t, args))
 				id := requestdrivertest.ArgValue(args, "-ticket")
 				if len(argvs) > 1 {
-					return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "lint", Passed: false}}}).Save(dataDir)
+					return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
 				}
 				if reproduced {
 					return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)

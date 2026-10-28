@@ -796,7 +796,7 @@ func withInherited(inherited, own []run.Attempt) []run.Attempt {
 // completed attempts, plus a partial Attempt (FinishedAt empty, ExitCode -1,
 // exactly as RecoverAttemptsFromCheckpointDir synthesizes) for an intent no
 // journal accounts for. journalKind is the kind this Activity journals under
-// (the step or check name for review steps and named gates); only records of
+// (the step or check name for review steps and repository gates); only records of
 // that kind are read. It does not depend on the earlier attempt having saved
 // a checkpoint, which a lost worker never does. Empty at attempt 1. The
 // result goes into the Activity's result and checkpoint only, never into its
@@ -840,7 +840,7 @@ func intentKindFitsJournal(journalKind, intentKind string) bool {
 // loadActivityAttemptJournalOfKind reads one attempt's journal for the
 // Activity that journals under kind, validating identity and that every
 // attempt has a start time. Unlike loadActivityAttemptJournalForExecution it
-// is not limited to the build/verify kinds: review steps and named gates
+// is not limited to the build/verify kinds: review steps and repository gates
 // journal under their own names.
 func loadActivityAttemptJournalOfKind(logDir, workflowID, runID, activityID string, activityAttempt int32, kind string) (activityAttemptJournal, bool, error) {
 	b, err := os.ReadFile(activityAttemptJournalPath(logDir, workflowID, runID, activityID, activityAttempt))

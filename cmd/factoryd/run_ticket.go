@@ -269,9 +269,8 @@ type runFlags struct {
 	fullSuiteCommand    *string
 	fullSuiteSource     *string
 	fullSuiteCadence    *int
-	// gateCommands holds one flag per policy.CommandGate, keyed by its
-	// ID ("lint", "security_audit", "unit_tests", "integration_tests") --
-	// see newRunFlags' own registration loop.
+	// gateCommands holds the repository gates the committed .factory.yml
+	// defines (`gates:`), keyed by policy.RepoGateCheck(id); they have no flag.
 	gateCommands                 map[string]*string
 	bug                          *bool
 	sandboxImage                 *string
@@ -332,13 +331,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.fullSuiteCommand = flags.String("full-suite-command", "", "repo-wide test command run on the final state -verify-command passed on. Empty uses .factory.yml's full_suite_command, else -verify-command; none skips it")
 	f.fullSuiteSource = flags.String("full-suite-source", "", "internal: how the worker already resolved -full-suite-command: verify_command for a substitution, none for an opt-out")
 	f.fullSuiteCadence = flags.Int("full-suite-cadence", 0, "run -full-suite-command only on every Nth run of a -prior-run chain; 0 or 1 runs it every time")
-	// One flag per policy.CommandGate, registered from its own Flag/Help
-	// fields -- adding a 6th command gate needs no new line here, only a
-	// new CommandGates entry.
-	f.gateCommands = make(map[string]*string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		f.gateCommands[g.ID] = flags.String(g.Flag, "", g.Help)
-	}
+	f.gateCommands = map[string]*string{}
 	f.bug = flags.Bool("bug", false, "internal: ticket 1 of a bug request, whose Tests-Required: no opt-out is not honoured")
 	f.sandboxImage = flags.String("sandbox-image", "", "Docker image the build and checks run in, pinned by digest (name@sha256:...); a tag is refused. Empty uses the session config's sandbox_image, which make install records")
 	f.executionModel = flags.String("execution-model", "", "model for this run's build: one of roles.execution.allowed in the session config. Empty uses roles.execution.model")
@@ -912,11 +905,8 @@ func (tr *ticketRun) applyProjectDefaults() error {
 	}
 	// gateCommands is rf.gateCommands' resolved values (post-
 	// applyProjectConfigDefaults, its one mutator), keyed by
-	// policy.CommandGate.ID -- the form every command-gate call site
-	// below (namedGateInputs, the
-	// Temporal/-repository positional args, the evidence render) now
-	// takes, in registry order, instead of five individually-named
-	// commands.
+	// policy.RepoGateCheck(id) -- the form every gate call site below (the
+	// Temporal/-repository positional args, the evidence render) takes.
 	tr.gateCommands = resolvedGateCommands(tr.rf.gateCommands)
 	// routes:/models: mode: execSelection/reviewSelection's own
 	// RoutePolicy.TokenCeiling/CostCeilingMicroUSD were computed by
@@ -2738,15 +2728,11 @@ func (tr *ticketRun) dispatch() error {
 	return fmt.Errorf("Temporal at %s is unreachable: %w; builds run only on Temporal (factoryd doctor -fix starts it)", *tr.temporalAddress, dialErr)
 }
 
-// resolvedGateCommands is the run's gate commands by check: every
-// policy.CommandGates entry (empty when unset), plus the gates the target
-// repository's .factory.yml defines for itself, which
+// resolvedGateCommands is the run's gate commands by check: the gates the
+// target repository's .factory.yml defines for itself, which
 // applyProjectConfigDefaults added under their "repo-<id>" names.
 func resolvedGateCommands(flags map[string]*string) map[string]string {
 	out := make(map[string]string, len(flags))
-	for _, g := range policy.CommandGates {
-		out[g.ID] = *flags[g.ID]
-	}
 	for check, command := range flags {
 		if policy.IsRepoGate(check) && command != nil {
 			out[check] = *command
