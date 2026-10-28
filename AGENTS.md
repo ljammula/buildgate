@@ -19,7 +19,7 @@ only — it does not restate that content.
 
 ## Current state
 
-- Release tags are `vX.Y.Z` (latest `v0.0.18`); `main` may be ahead of it.
+- Release tags are `vX.Y.Z` (latest `v0.0.19`); `main` may be ahead of it.
   The status table and known limits are in [`STATUS.md`](STATUS.md),
   summarised in README's "Status" and "Known limits" sections — update both
   in the same PR as a change that alters either.
