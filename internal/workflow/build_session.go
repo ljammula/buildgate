@@ -15,13 +15,9 @@ import (
 	"go.temporal.io/sdk/activity"
 
 	"buildgate/internal/evidence"
+	"buildgate/internal/run"
 	"buildgate/internal/runner"
 )
-
-// BuildSessionDirName is the folder, in a run's own directory, that holds the
-// copy of its build's harness session a later round of the same ticket may
-// continue (round_session_continuity).
-const BuildSessionDirName = "build-session"
 
 // The limits of a kept build session: a session over any of them is not
 // kept, and the round that follows starts a fresh one, told why
@@ -224,7 +220,7 @@ func (a *Activities) keepFinishedBuildSession(ctx context.Context, input RunWork
 	_, err := heartbeatWhileRunning(activityHeartbeatInterval, func() {
 		recordStepHeartbeat(ctx, HeartbeatDetails{Stage: "build", Elapsed: time.Since(started)})
 	}, func() (runner.Result, error) {
-		return runner.Result{}, keepBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir), filepath.Join(logDir, BuildSessionDirName))
+		return runner.Result{}, keepBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir), filepath.Join(logDir, run.BuildSessionDirName))
 	})
 	if err != nil {
 		activity.GetLogger(ctx).Warn("failed to keep the finished build's session for a round that follows", "error", err)

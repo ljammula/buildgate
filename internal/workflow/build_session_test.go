@@ -11,6 +11,7 @@ import (
 
 	"go.temporal.io/sdk/testsuite"
 
+	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/testfixture"
 )
@@ -49,7 +50,7 @@ func writeSession(t *testing.T, dir string) {
 // harness's own session state, never a saved prompt, a failed round's
 // output, the agent's notes, a credential-named file, a download or a link.
 func TestKeepBuildSessionCopiesOnlyTheHarnessState(t *testing.T) {
-	src, dst := t.TempDir(), filepath.Join(t.TempDir(), BuildSessionDirName)
+	src, dst := t.TempDir(), filepath.Join(t.TempDir(), run.BuildSessionDirName)
 	writeSession(t, src)
 	if err := keepBuildSession(src, dst); err != nil {
 		t.Fatalf("keepBuildSession: %v", err)
@@ -69,7 +70,7 @@ func TestKeepBuildSessionCopiesOnlyTheHarnessState(t *testing.T) {
 // TestKeepBuildSessionRefusesAnOversizeSession: nothing is kept for a
 // session over the cap.
 func TestKeepBuildSessionRefusesAnOversizeSession(t *testing.T) {
-	src, dst := t.TempDir(), filepath.Join(t.TempDir(), BuildSessionDirName)
+	src, dst := t.TempDir(), filepath.Join(t.TempDir(), run.BuildSessionDirName)
 	if err := os.WriteFile(filepath.Join(src, "big"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func TestKeepBuildSessionRefusesTooManyEntriesOrLevels(t *testing.T) {
 		if err := os.MkdirAll(deep, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		assertNotKept(t, src, filepath.Join(t.TempDir(), BuildSessionDirName))
+		assertNotKept(t, src, filepath.Join(t.TempDir(), run.BuildSessionDirName))
 	})
 	t.Run("entries", func(t *testing.T) {
 		src := t.TempDir()
@@ -112,7 +113,7 @@ func TestKeepBuildSessionRefusesTooManyEntriesOrLevels(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		assertNotKept(t, src, filepath.Join(t.TempDir(), BuildSessionDirName))
+		assertNotKept(t, src, filepath.Join(t.TempDir(), run.BuildSessionDirName))
 	})
 }
 
@@ -157,7 +158,7 @@ func TestCopySessionFileRefusesALinkAndAFileThatGrew(t *testing.T) {
 // and is passed --resume-session; a build given none is passed neither, and
 // a kept session is written to the run's directory only when asked.
 func TestRunBuildActivityCarriesTheFollowedRunsSession(t *testing.T) {
-	kept := filepath.Join(t.TempDir(), BuildSessionDirName)
+	kept := filepath.Join(t.TempDir(), run.BuildSessionDirName)
 	writeSession(t, kept)
 	for name, tc := range map[string]struct {
 		resume, keep bool
@@ -196,7 +197,7 @@ func TestRunBuildActivityCarriesTheFollowedRunsSession(t *testing.T) {
 			if got := strings.Contains(strings.Join(gotArgs, " "), "--resume-session"); got != tc.resume || sawTranscript != tc.resume {
 				t.Errorf("--resume-session %t, carried transcript seen %t; want %t", got, sawTranscript, tc.resume)
 			}
-			_, err := os.Stat(filepath.Join(logDir, BuildSessionDirName, "own.jsonl"))
+			_, err := os.Stat(filepath.Join(logDir, run.BuildSessionDirName, "own.jsonl"))
 			if (err == nil) != tc.keep {
 				t.Errorf("kept session present %t, want %t", err == nil, tc.keep)
 			}

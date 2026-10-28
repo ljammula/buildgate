@@ -836,7 +836,15 @@ requires a new contract review and an updated machine-checkable test.
   record included: it reaches only a later build of the same ticket, as the
   record itself does, and is removed from the round's worktree when its
   build step returns like any build session. No review, verify or gate step
-  is given it.
+  is given it. The copy in the run directory is removed (`PruneBuildSessions`,
+  through an `os.Root` on the runs directory: the directory itself only,
+  never through a link) after each worker step of the request and on
+  cancel: the sessions of a ticket lower than the one a building or
+  `resume_review` request is on, and every session of the request in any
+  other state, except one a round still in flight follows (a run of the
+  request not yet terminal names it as `EarlierAttemptOf`, or a ticket's
+  advice round not yet started names it). A request that stops outside a
+  worker step or cancel keeps its sessions.
   A line the worker prints in the progress feed's protocol can never carry a
   `log` path or begin or end a start-up step: the feed drops a log from every
   line but the factory's, and the worker parser accepts only the `round` and

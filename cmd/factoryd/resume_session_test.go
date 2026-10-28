@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"buildgate/internal/run"
-	"buildgate/internal/workflow"
 )
 
 // TestResumeSessionPathOfRefusesWhatIsNotARequestRun: -resume-session-of
@@ -27,7 +26,7 @@ func TestResumeSessionPathOfRefusesWhatIsNotARequestRun(t *testing.T) {
 	}
 	round := resumeSessionRun{requestTicket: true, ticket: "req-1-001-advice1", workspace: workspace}
 	got, err := resumeSessionPathOf(dataDir, "req-1-001", round)
-	want, _ := filepath.Abs(filepath.Join(run.Dir(dataDir, "req-1-001"), workflow.BuildSessionDirName))
+	want, _ := filepath.Abs(filepath.Join(run.Dir(dataDir, "req-1-001"), run.BuildSessionDirName))
 	if err != nil || got != want {
 		t.Fatalf("resumeSessionPathOf = %q, %v; want %q", got, err, want)
 	}

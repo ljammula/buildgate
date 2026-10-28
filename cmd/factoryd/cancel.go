@@ -70,6 +70,9 @@ func cancelMain(dp *deps, args []string) error {
 	if err := requestdriver.ClearKeptRunsOfRequest(*dataDir, r.ID); err != nil {
 		fmt.Fprintf(os.Stderr, "request %s: could not discard a kept worktree: %v\n", r.ID, err)
 	}
+	if err := requestdriver.PruneBuildSessions(*dataDir, r); err != nil {
+		fmt.Fprintf(os.Stderr, "request %s: could not remove a kept build session: %v\n", r.ID, err)
+	}
 	requestdriver.PruneRoundRefs(dp, r)
 	wakeAfterSave(dp, context.Background(), os.Stderr, *dataDir, r.ID)
 	if _, err := fmt.Fprintf(os.Stdout, "request %s: state=%s\n", r.ID, r.State); err != nil {

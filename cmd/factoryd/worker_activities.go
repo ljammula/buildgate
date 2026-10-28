@@ -306,6 +306,11 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 	if err != nil {
 		return "", fmt.Errorf("reload request %s: %w", id, err)
 	}
+	// The kept build sessions no round of the request can follow any more
+	// go, whatever state the step left it in.
+	if err := requestdriver.PruneBuildSessions(a.dataDir, after); err != nil {
+		log.Printf("request %s: could not remove a kept build session: %v", id, err)
+	}
 	return string(after.State), nil
 }
 
