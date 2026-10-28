@@ -614,6 +614,15 @@ SESSION_ORIGIN_FILE = "session-origin.json"
 MAX_RESUMED_SESSION_BYTES = 4 << 20
 # Folders of a session that are not the harness's own state.
 _SESSION_SIDE_FOLDERS = ("feedback", "prompts")
+# Where the notes turn sets the session's state aside while it runs, inside
+# the session folder (set_session_aside).
+SESSION_ASIDE_DIR = "pre-notes"
+# Left in the session folder when the notes turn's exchange could not be
+# taken back out of it: such a session is never continued.
+NOTES_IN_SESSION_FILE = "notes-in-session"
+# The folder of a session that was not kept, written by the factory, holds
+# only this file, with its reason.
+NOT_KEPT_FILE = "not-kept.txt"
 
 
 def session_origin(adapter) -> dict:
@@ -633,11 +642,69 @@ def write_session_origin(session_dir: Path, adapter) -> None:
 		pass
 
 
+def _session_state_entries(session_dir: Path) -> list[Path]:
+	"""The entries of session_dir that are the harness's own state."""
+	keep = {*_SESSION_SIDE_FOLDERS, SESSION_ASIDE_DIR, HANDOFF_NOTES_FILE}
+	return [entry for entry in session_dir.iterdir() if entry.name not in keep]
+
+
+def set_session_aside(session_dir: Path) -> Path | None:
+	"""Copies the session's own state (not the feedback, prompts or notes)
+	into session_dir/SESSION_ASIDE_DIR before the notes turn, so that turn's
+	exchange, which holds the agent's notes, can be taken out of the session
+	afterwards (restore_session_aside): a later build that continues the
+	session must never find the notes there (SC-018). The copy stays in the
+	session folder so every path the harness recorded stays valid. None, with
+	NOTES_IN_SESSION_FILE written, when the copy fails."""
+	aside = session_dir / SESSION_ASIDE_DIR
+	try:
+		shutil.rmtree(aside, ignore_errors=True)
+		aside.mkdir(parents=True)
+		for entry in _session_state_entries(session_dir):
+			if entry.is_symlink() or not (entry.is_dir() or entry.is_file()):
+				continue
+			if entry.is_dir():
+				shutil.copytree(entry, aside / entry.name, symlinks=True)
+			else:
+				shutil.copy2(entry, aside / entry.name)
+		return aside
+	except OSError:
+		shutil.rmtree(aside, ignore_errors=True)
+		_mark_notes_in_session(session_dir)
+		return None
+
+
+def restore_session_aside(session_dir: Path, aside: Path | None) -> None:
+	"""Puts back the state set_session_aside copied, dropping what the notes
+	turn added. On a failure NOTES_IN_SESSION_FILE is written, so the session
+	is never continued."""
+	if aside is None:
+		return
+	try:
+		for entry in _session_state_entries(session_dir):
+			if entry.is_dir() and not entry.is_symlink():
+				shutil.rmtree(entry)
+			else:
+				entry.unlink()
+		for entry in aside.iterdir():
+			entry.rename(session_dir / entry.name)
+		aside.rmdir()
+	except OSError:
+		_mark_notes_in_session(session_dir)
+
+
+def _mark_notes_in_session(session_dir: Path) -> None:
+	try:
+		(session_dir / NOTES_IN_SESSION_FILE).write_text("the notes turn's exchange is in this session\n")
+	except OSError:
+		pass
+
+
 def _session_state_bytes(session_dir: Path) -> int:
 	total = 0
 	for path in session_dir.rglob("*"):
 		rel = path.relative_to(session_dir).parts
-		if rel and rel[0] in _SESSION_SIDE_FOLDERS:
+		if rel and rel[0] in (*_SESSION_SIDE_FOLDERS, SESSION_ASIDE_DIR):
 			continue
 		if path.is_file() and not path.is_symlink():
 			total += path.stat().st_size
@@ -652,6 +719,11 @@ def carried_session_fallback(adapter, session_dir: Path) -> str:
 	try:
 		if not session_dir.is_dir() or session_dir.is_symlink() or not any(session_dir.iterdir()):
 			return "missing"
+		not_kept = session_dir / NOT_KEPT_FILE
+		if not_kept.is_file() and not not_kept.is_symlink():
+			return "not kept: " + " ".join(not_kept.read_text()[:200].split())
+		if (session_dir / NOTES_IN_SESSION_FILE).exists():
+			return "notes turn in session"
 		origin = json.loads((session_dir / SESSION_ORIGIN_FILE).read_text())
 	except (OSError, ValueError):
 		return "origin unknown"
@@ -2484,9 +2556,16 @@ def _notes_turn(
 		continue_session=True, thinking=thinking, load_repo_skills=False, **extra,
 	)
 	fingerprint_before = workspace_fingerprint(workspace)
-	completed, timed_out = run_agent_streaming(
-		command, cwd=workspace, timeout=HANDOFF_NOTES_TIMEOUT_S, env=env, on_event=lambda line: None,
-	)
+	# The turn continues the build's session, so its exchange (the notes)
+	# would stay in it: the session's state is set aside first and put back
+	# after, and a session a later build continues never holds the notes.
+	aside = set_session_aside(session_dir)
+	try:
+		completed, timed_out = run_agent_streaming(
+			command, cwd=workspace, timeout=HANDOFF_NOTES_TIMEOUT_S, env=env, on_event=lambda line: None,
+		)
+	finally:
+		restore_session_aside(session_dir, aside)
 	fingerprint_after = workspace_fingerprint(workspace)
 	record["duration_s"] = _monotonic() - started
 	parsed = adapter.parse(completed.stdout if completed else "")

@@ -82,24 +82,25 @@ func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.
 		// it before the first, as acceptTicketRun would.
 		ticket.Branch, ticket.PRURL = accepted.Branch, accepted.PullRequestURL
 	}
-	if stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
+	if _, stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
 		return err
 	}
 	return acceptTicketRun(dataDir, r, ticket, accepted, cfg.OpenPullRequest, time.Now())
 }
 
 // runAdviceRounds runs advice rounds after current while they apply
-// (adviceRoundApplies), each after the round before it was pushed. stop is
-// true when the caller must return err at once (runAdviceRound).
-func runAdviceRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (stop bool, err error) {
+// (adviceRoundApplies), each after the round before it was pushed, and
+// returns the last run whose result is the pull request's head. stop is true
+// when the caller must return err at once (runAdviceRound).
+func runAdviceRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (last *run.Run, stop bool, err error) {
 	for adviceRoundApplies(ticket, current, cfg) {
 		pushed, stop, err := runAdviceRound(dp, ctx, dataDir, r, ticket, current, cfg, now)
 		if stop || pushed == nil {
-			return stop, err
+			return current, stop, err
 		}
 		current, now = pushed, time.Now()
 	}
-	return false, nil
+	return current, false, nil
 }
 
 // runAdviceRound runs the advice round that follows current and settles it
@@ -187,15 +188,7 @@ func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket,
 // until then the round stays in flight on disk, so a pass that is lost in
 // between settles it again (a repeated push of the same commit is a no-op).
 func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, now time.Time) (pushed *run.Run, stop bool, err error) {
-	ticket.Advice = nil
-	ticket.RunID = current.ID
-	ticket.Rounds = append(ticket.Rounds, request.Round{
-		Index: ticket.NextRoundIndex(), Kind: request.AdviceRoundKind, RunID: ended.loadID, Outcome: ended.outcome,
-		StartFailure: ended.startFailure, Unresolved: ended.unresolved, Error: ended.errText,
-		At: now.UTC().Format(time.RFC3339Nano),
-	})
-	slice := len(ticket.Rounds) - 1
-	tagRoundByID(dp, dataDir, r, ticket, ended.loadID, request.RoundTagAdvice, now)
+	slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, now)
 	if ended.outcome != request.RoundAccepted {
 		log.Printf("request %s: ticket %d/%d: advice round %s %s; run %s stands", r.ID, ticket.Index, r.TicketCount, ended.loadID, ended.outcome, current.ID)
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
@@ -227,6 +220,22 @@ func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *reques
 		log.Printf("request %s: ticket %d: comment on %s about advice round %s: %v", r.ID, ticket.Index, ticket.PRURL, roundRun.ID, err)
 	}
 	return roundRun, false, nil
+}
+
+// recordAdviceRound records the advice round that followed current, ended
+// as ended, on ticket, ends it in flight, makes current the ticket's run
+// again and tags the round's commit; it returns the round's index in
+// ticket.Rounds.
+func recordAdviceRound(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, now time.Time) int {
+	ticket.Advice = nil
+	ticket.RunID = current.ID
+	ticket.Rounds = append(ticket.Rounds, request.Round{
+		Index: ticket.NextRoundIndex(), Kind: request.AdviceRoundKind, RunID: ended.loadID, Outcome: ended.outcome,
+		StartFailure: ended.startFailure, Unresolved: ended.unresolved, Error: ended.errText,
+		At: now.UTC().Format(time.RFC3339Nano),
+	})
+	tagRoundByID(dp, dataDir, r, ticket, ended.loadID, request.RoundTagAdvice, now)
+	return len(ticket.Rounds) - 1
 }
 
 // restoreUnpushed puts the local branch an unpushed advice round built on
@@ -325,12 +334,13 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	if stop {
 		return err
 	}
+	last := current
 	if pushed != nil {
-		if stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
+		if last, stop, err = runAdviceRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
 			return err
 		}
 	}
-	return advanceAcceptedTicket(dataDir, r, ticket, current, cfg.OpenPullRequest, time.Now())
+	return advanceAcceptedTicket(dataDir, r, ticket, last, cfg.OpenPullRequest, time.Now())
 }
 
 // interruptedAdviceOutcome is how the in-flight round adv ended, or, in
@@ -368,10 +378,11 @@ func interruptedAdviceOutcome(dataDir string, adv *request.TicketAdvice, now tim
 }
 
 // abandonInFlightAdvice ends every advice round a request left in flight when
-// it left building (a halt, then a retry into pr_review): the round is
-// recorded as not pushed, halted, and its branch put back on the run it
-// followed (restoreUnpushed), so PRHeadRunID and every later round build on
-// that run. stop is true when the request was halted for a branch that could
+// it left building (a halt, then a retry into pr_review): once the round's
+// run has ended (interruptedAdviceOutcome: waited for, up to
+// adviceSettleBound), the round is recorded with its outcome, never pushed,
+// and its branch put back on the run it followed (restoreUnpushed), so
+// PRHeadRunID and every later round build on that run. stop is true when the request was halted for a branch that could
 // not be put back. r is saved when anything changed.
 func abandonInFlightAdvice(dp Deps, dataDir string, r *request.Request, now time.Time) (stop bool, err error) {
 	changed := false
@@ -384,9 +395,17 @@ func abandonInFlightAdvice(dp Deps, dataDir string, r *request.Request, now time
 		if lerr != nil {
 			return false, fmt.Errorf("request %s: ticket %d: load run %s the advice round followed: %w", r.ID, ticket.Index, ticket.Advice.Of, lerr)
 		}
-		ended := correctiveLaunch{loadID: ticket.Advice.RunID, roundOutcome: roundOutcome{outcome: request.RoundHalted, errText: "the request left building before the advice round was settled"}}
-		log.Printf("request %s: ticket %d: the advice round left in flight is recorded as not pushed; run %s stands", r.ID, ticket.Index, current.ID)
-		if _, stop, err := concludeAdviceRound(dp, context.Background(), dataDir, r, ticket, current, ended, now); stop {
+		// The branch is put back only once the round's run can no longer
+		// move it: while that run has not ended the poll waits, as a
+		// settle does, up to adviceSettleBound.
+		ended, wait := interruptedAdviceOutcome(dataDir, ticket.Advice, now)
+		if wait != nil {
+			return false, fmt.Errorf("request %s: ticket %d: %w", r.ID, ticket.Index, wait)
+		}
+		log.Printf("request %s: ticket %d: the advice round left in flight (run %s, %s) is recorded as not pushed; run %s stands", r.ID, ticket.Index, ended.loadID, ended.outcome, current.ID)
+		slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, now)
+		ticket.Rounds[slice].Error = strings.TrimPrefix(ticket.Rounds[slice].Error+"; the request left building before the advice round was settled, so nothing was pushed", "; ")
+		if stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now); stop {
 			return true, err
 		}
 		changed = true

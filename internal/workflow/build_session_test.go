@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,14 +21,18 @@ import (
 func writeSession(t *testing.T, dir string) {
 	t.Helper()
 	for rel, body := range map[string]string{
-		"2026-10-27.jsonl":                  "transcript",
-		"session-origin.json":               `{"harness":"pi","model":"luna"}`,
-		"codex-home/sessions/rollout.jsonl": "rollout",
-		"codex-home/auth.json":              `{"key":"secret"}`,
-		"codex-home/.tmp/plugin/x":          "download",
-		"prompts/build-round-1.txt":         "the first prompt",
-		"feedback/round-1/agent.log":        "failed round",
-		"handoff-notes.md":                  "notes for the next attempt",
+		"2026-10-27.jsonl":                   "transcript",
+		"session-origin.json":                `{"harness":"pi","model":"luna"}`,
+		"codex-home/sessions/rollout.jsonl":  "rollout",
+		"codex-home/auth.json":               `{"key":"secret"}`,
+		"codex-home/.tmp/plugin/x":           "download",
+		"prompts/build-round-1.txt":          "the first prompt",
+		"feedback/round-1/agent.log":         "failed round",
+		"handoff-notes.md":                   "notes for the next attempt",
+		"codex-home/config.toml":             "model_provider = \"relay\"",
+		"copilot-home/config.json":           "{}",
+		"codex-home/skills/planted/SKILL.md": "planted skill",
+		"pre-notes/2026-10-27.jsonl":         "set aside",
 	} {
 		path := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -53,7 +59,7 @@ func TestKeepBuildSessionCopiesOnlyTheHarnessState(t *testing.T) {
 			t.Errorf("the copy lacks %s: %v", want, err)
 		}
 	}
-	for _, unwanted := range []string{"codex-home/auth.json", "codex-home/.tmp", "prompts", "feedback", "handoff-notes.md", "link"} {
+	for _, unwanted := range []string{"codex-home/auth.json", "codex-home/.tmp", "prompts", "feedback", "handoff-notes.md", "link", "codex-home/config.toml", "copilot-home/config.json", "codex-home/skills", "pre-notes"} {
 		if _, err := os.Lstat(filepath.Join(dst, unwanted)); err == nil {
 			t.Errorf("the copy carries %s", unwanted)
 		}
@@ -70,11 +76,79 @@ func TestKeepBuildSessionRefusesAnOversizeSession(t *testing.T) {
 	if err := os.Truncate(filepath.Join(src, "big"), maxKeptBuildSessionBytes+1); err != nil {
 		t.Fatal(err)
 	}
+	assertNotKept(t, src, dst)
+}
+
+// assertNotKept checks keepBuildSession keeps nothing of src but the reason.
+func assertNotKept(t *testing.T, src, dst string) {
+	t.Helper()
 	if err := keepBuildSession(src, dst); err == nil {
-		t.Fatal("an oversize session was kept")
+		t.Fatal("the session was kept")
 	}
-	if _, err := os.Stat(dst); !os.IsNotExist(err) {
-		t.Errorf("a partial copy was left: %v", err)
+	entries, err := os.ReadDir(dst)
+	if err != nil || len(entries) != 1 || entries[0].Name() != notKeptFile {
+		t.Errorf("the kept folder holds %v (%v), want only %s", entries, err, notKeptFile)
+	}
+}
+
+// TestKeepBuildSessionRefusesTooManyEntriesOrLevels: a session over the
+// entry or depth limit is not kept.
+func TestKeepBuildSessionRefusesTooManyEntriesOrLevels(t *testing.T) {
+	t.Run("depth", func(t *testing.T) {
+		src := t.TempDir()
+		deep := src
+		for i := 0; i <= maxKeptBuildSessionDepth; i++ {
+			deep = filepath.Join(deep, "d")
+		}
+		if err := os.MkdirAll(deep, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		assertNotKept(t, src, filepath.Join(t.TempDir(), BuildSessionDirName))
+	})
+	t.Run("entries", func(t *testing.T) {
+		src := t.TempDir()
+		for i := 0; i <= maxKeptBuildSessionEntries; i++ {
+			if err := os.WriteFile(filepath.Join(src, fmt.Sprintf("f%05d", i)), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertNotKept(t, src, filepath.Join(t.TempDir(), BuildSessionDirName))
+	})
+}
+
+// TestCopySessionFileRefusesALinkAndAFileThatGrew: a file opened by the copy
+// must be a regular file at its path, not a link swapped in after the walk
+// (nor under a linked folder that leads out of the session), and must hold
+// no more than the bytes left under the cap when it is read.
+func TestCopySessionFileRefusesALinkAndAFileThatGrew(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "secret"), "outside the session")
+	writeFile(t, filepath.Join(src, "grown"), "0123456789")
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(src, "swapped")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(src, "linked-dir")); err != nil {
+		t.Fatal(err)
+	}
+	srcRoot, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srcRoot.Close()
+	dstRoot, err := os.OpenRoot(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dstRoot.Close()
+	for _, rel := range []string{"swapped", "linked-dir/secret"} {
+		if _, err := copySessionFile(srcRoot, dstRoot, rel, 1<<20); err == nil {
+			t.Errorf("%s was copied", rel)
+		}
+	}
+	// The walk counted 4 bytes left; the file holds 10 when it is read.
+	if _, err := copySessionFile(srcRoot, dstRoot, "grown", 4); !errors.Is(err, errSessionTooLarge) {
+		t.Errorf("a file that grew past the cap = %v, want errSessionTooLarge", err)
 	}
 }
 

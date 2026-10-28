@@ -715,9 +715,9 @@ func TestAdviceRoundInFlightTooLongIsSettledAsHalted(t *testing.T) {
 }
 
 // TestAHaltMidRoundThenRetryUsesTheAcceptedRun: a request halted while its
-// advice round was in flight and retried into pr_review records the round
-// as not pushed, puts the branch back, and reads the accepted run as the
-// pull request's head.
+// advice round was in flight and retried into pr_review waits for the
+// round's run to end, then records the round as not pushed, puts the branch
+// back, and reads the accepted run as the pull request's head.
 func TestAHaltMidRoundThenRetryUsesTheAcceptedRun(t *testing.T) {
 	f := newAdviceFixture(t, adviceFindings)
 	f.stopMidRound(t, 1, true)
@@ -733,6 +733,19 @@ func TestAHaltMidRoundThenRetryUsesTheAcceptedRun(t *testing.T) {
 	if r.State != request.StatePRReview {
 		t.Fatalf("retry moved to %q, want pr_review", r.State)
 	}
+	// While the round's run has not ended, nothing is restored: the poll waits.
+	if err := requestdriver.AdvancePRReview(f.dp, context.Background(), f.dataDir, r, f.cfg, now); err == nil || !strings.Contains(err.Error(), "has not ended") {
+		t.Fatalf("AdvancePRReview while the round runs = %v, want it to wait", err)
+	}
+	if len(f.restored) != 0 {
+		t.Fatalf("the branch was restored while the round's run could still move it: %v", f.restored)
+	}
+	lost := f.adviceRun(t, r.Tickets[0].Advice.RunID, run.StateHalted, false)
+	lost.HaltReasonCode = string(unresolved.WorkerLost)
+	if err := lost.Save(f.dataDir); err != nil {
+		t.Fatal(err)
+	}
+	r = requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	if err := requestdriver.AdvancePRReview(f.dp, context.Background(), f.dataDir, r, f.cfg, now); err != nil {
 		t.Fatalf("AdvancePRReview: %v", err)
 	}

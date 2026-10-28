@@ -131,18 +131,27 @@ func replayConflicts(f runFlags) []string {
 	return set
 }
 
+// resumeSessionRun is what -resume-session-of is checked against: this run's
+// own -request-ticket, -ticket and -workspace.
+type resumeSessionRun struct {
+	requestTicket     bool
+	ticket, workspace string
+}
+
 // resumeSessionPathOf is the kept build session of run id
 // (workflow.BuildSessionDirName in its run directory, absolute) for
 // -resume-session-of, "" when id is "". It is refused unless this run is a
-// request's ticket build and id names a run of a request: the request driver
-// passes only the run a corrective or advice round of the same ticket
-// follows. A run that kept no session is not refused: the build starts a
-// fresh one and records why.
-func resumeSessionPathOf(dataDir, id string, requestTicket bool) (string, error) {
+// request's ticket build and id names a run of the same request ticket on
+// the same workspace: its RequestID and TicketIndex are the ones this run's
+// -ticket begins with (<request>-<NNN>, as the request driver names every
+// build of a ticket), and its ProjectPath is this run's -workspace. A run
+// that kept no session is not refused: the build starts a fresh one and
+// records why.
+func resumeSessionPathOf(dataDir, id string, this resumeSessionRun) (string, error) {
 	if id == "" {
 		return "", nil
 	}
-	if !requestTicket {
+	if !this.requestTicket {
 		return "", fmt.Errorf("-resume-session-of is only for a request's ticket build (-request-ticket)")
 	}
 	if !run.ValidID(id) {
@@ -152,10 +161,24 @@ func resumeSessionPathOf(dataDir, id string, requestTicket bool) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("-resume-session-of %s: %w", id, err)
 	}
-	if rec.RequestID == "" {
-		return "", fmt.Errorf("-resume-session-of %s: not a run of a request", id)
+	if rec.RequestID == "" || rec.TicketIndex < 1 {
+		return "", fmt.Errorf("-resume-session-of %s: not a run of a request ticket", id)
+	}
+	if want := fmt.Sprintf("%s-%03d", rec.RequestID, rec.TicketIndex); this.ticket != want && !strings.HasPrefix(this.ticket, want+"-") {
+		return "", fmt.Errorf("-resume-session-of %s: a run of request %s ticket %d, not of this build's ticket %q", id, rec.RequestID, rec.TicketIndex, this.ticket)
+	}
+	if !sameDir(rec.ProjectPath, this.workspace) {
+		return "", fmt.Errorf("-resume-session-of %s: a run on %s, not this build's workspace %s", id, rec.ProjectPath, this.workspace)
 	}
 	return filepath.Abs(filepath.Join(run.Dir(dataDir, id), workflow.BuildSessionDirName))
+}
+
+// sameDir reports whether a and b name the same directory path once made
+// absolute and clean.
+func sameDir(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && a != "" && absA == absB
 }
 
 // maxEarlierAttemptBytes bounds -earlier-attempt: the file goes into a
@@ -1067,7 +1090,7 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 	if err := validateFollowUpRunInputs(*tr.diffBase, *tr.instructionBase, *tr.earlierAttempt); err != nil {
 		return err
 	}
-	resumeSession, err := resumeSessionPathOf(*tr.dataDir, *tr.rf.resumeSessionOf, *tr.requestTicket)
+	resumeSession, err := resumeSessionPathOf(*tr.dataDir, *tr.rf.resumeSessionOf, resumeSessionRun{requestTicket: *tr.requestTicket, ticket: *tr.ticket, workspace: *tr.workspace})
 	if err != nil {
 		return err
 	}

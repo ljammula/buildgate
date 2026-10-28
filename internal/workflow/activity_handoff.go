@@ -316,9 +316,7 @@ func (a *Activities) dropFinishedBuildSession(ctx context.Context, input RunWork
 		// directory, never in the worktree. Best-effort: the round then
 		// starts fresh.
 		if logDir := a.logDirFor(input); input.KeepBuildSession && logDir != "" {
-			if err := keepBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir), filepath.Join(logDir, BuildSessionDirName)); err != nil {
-				activity.GetLogger(ctx).Warn("failed to keep the finished build's session for a round that follows", "error", err)
-			}
+			a.keepFinishedBuildSession(ctx, input, logDir)
 		}
 	}
 	if err := removeBuildSession(filepath.Join(input.WorkspacePath, buildSessionDir)); err != nil {

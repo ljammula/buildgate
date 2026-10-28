@@ -88,7 +88,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 	if err := os.WriteFile(held, []byte("package p\n"), 0o444); err != nil {
 		t.Fatalf("write the held reproduction: %v", err)
 	}
-	if err := (&run.Run{ID: "golden-quarantined", RequestID: "req-golden"}).Save(dataDir); err != nil {
+	if err := (&run.Run{ID: "golden-quarantined", RequestID: "req-golden", TicketIndex: 1, ProjectPath: workspace}).Save(dataDir); err != nil {
 		t.Fatalf("save the quarantined run: %v", err)
 	}
 	manifest := fmt.Sprintf(`{"request_id":"req-golden","reproductions":[{"run_id":"golden-quarantined","finding":0,"path":"held_test.go","sha256":"%s","host_path":%q,"spec_line":3,"test_ids":["TestHeld"],"runner":"go-test-json"}]}`, strings.Repeat("a", 64), held)
@@ -97,7 +97,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		t.Fatalf("read the workspace's head: %v", err)
 	}
 	return []string{
-		"-ticket", "001-golden",
+		"-ticket", "req-golden-001-golden",
 		"-instruction-base", strings.TrimSpace(head),
 		"-run-id", runID,
 		"-workspace", workspace,

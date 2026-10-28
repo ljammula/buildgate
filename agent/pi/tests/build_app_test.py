@@ -4522,3 +4522,69 @@ class ResumeSessionTests(unittest.TestCase):
 			# Copilot continues once the id its first round stored is there.
 			(session_dir / harness_adapters.get("copilot").session_id_file).write_text("abc\n")
 			self.assertEqual(build_app.carried_session_fallback(harness_adapters.get("copilot"), session_dir), "")
+
+
+class NotesTurnLeavesNoTraceInTheSessionTests(unittest.TestCase):
+	"""The notes turn continues the build's session; what it adds (the agent's
+	notes) is taken back out, so a later build that continues the session
+	never finds the notes in it (SC-018)."""
+
+	def _session(self, root: Path) -> Path:
+		session = root / ".pi-build-session"
+		(session / "codex-home" / "sessions").mkdir(parents=True)
+		(session / "2026-10-27.jsonl").write_text("build transcript\n")
+		(session / "codex-home" / "sessions" / "rollout.jsonl").write_text("rollout\n")
+		(session / build_app.SESSION_ORIGIN_FILE).write_text('{"harness": "pi", "model": ""}')
+		return session
+
+	@staticmethod
+	def _state(session: Path) -> dict:
+		return {
+			str(p.relative_to(session)): p.read_text()
+			for p in sorted(session.rglob("*"))
+			if p.is_file() and p.relative_to(session).parts[0] not in ("prompts", "feedback")
+		}
+
+	def _turn(self, root: Path, session: Path, agent):
+		with mock.patch.object(build_app, "run_agent_streaming", side_effect=agent):
+			return build_app._notes_turn(root, session, harness_adapters.get("pi"), {}, None, {}, 0.0, "write your notes", False)
+
+	def test_the_notes_turns_exchange_is_taken_out_of_the_session(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			session = self._session(root)
+			before = self._state(session)
+
+			def agent(command, **_):
+				(session / "2026-10-27.jsonl").write_text("build transcript\nNOTES: the cache key is wrong\n")
+				(session / "codex-home" / "sessions" / "notes.jsonl").write_text("NOTES\n")
+				return subprocess.CompletedProcess(command, 0, pi_output("clean"), ""), False
+
+			self._turn(root, session, agent)
+			self.assertEqual(self._state(session), before)
+			self.assertFalse((session / build_app.SESSION_ASIDE_DIR).exists())
+			self.assertEqual(build_app.carried_session_fallback(harness_adapters.get("pi"), session), "")
+
+	def test_a_session_whose_notes_could_not_be_taken_out_is_never_continued(self):
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			init_repo_with_commit(root)
+			session = self._session(root)
+
+			def agent(command, **_):
+				(session / "2026-10-27.jsonl").write_text("NOTES\n")
+				return subprocess.CompletedProcess(command, 0, pi_output("clean"), ""), False
+
+			with mock.patch.object(build_app, "restore_session_aside", side_effect=lambda s, a: build_app._mark_notes_in_session(s)):
+				self._turn(root, session, agent)
+			self.assertEqual(build_app.carried_session_fallback(harness_adapters.get("pi"), session), "notes turn in session")
+
+	def test_a_session_the_factory_did_not_keep_says_why(self):
+		with tempfile.TemporaryDirectory() as directory:
+			session = Path(directory)
+			(session / build_app.NOT_KEPT_FILE).write_text("build session is over the size it may be kept at\n")
+			self.assertEqual(
+				build_app.carried_session_fallback(harness_adapters.get("pi"), session),
+				"not kept: build session is over the size it may be kept at",
+			)
