@@ -127,3 +127,10 @@ func TestScanRegistryProxyUpstreamFailuresIsBoundedByLineNotByLog(t *testing.T) 
 		t.Errorf("count = %d, known = %v, err = %v; want 3 from a log of %d bytes", count, known, err, log.Len())
 	}
 }
+
+// parseRegistryProxyUpstreamFailures is scanRegistryProxyUpstreamFailures
+// over a log already in hand.
+func parseRegistryProxyUpstreamFailures(log string) (count int, known bool) {
+	count, known, _ = scanRegistryProxyUpstreamFailures(strings.NewReader(log))
+	return count, known
+}

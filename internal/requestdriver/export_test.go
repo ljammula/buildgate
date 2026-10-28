@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/forge"
 	"buildgate/internal/request"
 )
 
@@ -67,4 +68,12 @@ func RequireOperatorResumeKept(t *testing.T, dataDir, id string, decided *bool, 
 	if got.NotifyCount != 0 {
 		t.Errorf("NotifyCount = %d: a reminder was recorded for a review the operator had already decided", got.NotifyCount)
 	}
+}
+
+// WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md
+// (<ticket>-<round>-fix<n> for the round's n-th fix attempt) for the external
+// tests of this package.
+func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, roundIndex, fix int) (string, error) {
+	path, _, err := writeRoundAddendum(dataDir, requestID, ticket, threads, roundIndex, fix)
+	return path, err
 }

@@ -126,35 +126,6 @@ func criteriaCarryIDs(criteria []string) bool {
 // criterionIDPrefixRE matches the "AC-N: " label a criterion starts with.
 var criterionIDPrefixRE = regexp.MustCompile(`^(\d+[.)]\s+)?AC-\d+:\s*`)
 
-// stripCriterionID returns text without its "AC-N: " label (after the item's
-// own number, if it has one), so a manifest that quotes a criterion with or
-// without the label matches the spec's.
-func stripCriterionID(text string) string {
-	t := strings.TrimSpace(text)
-	if m := criterionIDPrefixRE.FindStringSubmatch(t); m != nil {
-		return m[1] + t[len(m[0]):]
-	}
-	return text
-}
-
-// manifestLabel returns the "AC-N" label a manifest entry's criterion text
-// carries, or "".
-func manifestLabel(text string) string {
-	if m := criterionIDPrefixRE.FindString(strings.TrimSpace(text)); m != "" {
-		if i := strings.Index(m, "AC-"); i >= 0 {
-			return strings.TrimRight(strings.TrimSpace(m[i:]), ":")
-		}
-	}
-	return ""
-}
-
-// manifestLabelMismatch reports whether text carries a label that is not
-// AC-<index>. An unlabelled quote matches.
-func manifestLabelMismatch(text string, index int) bool {
-	label := manifestLabel(text)
-	return label != "" && label != fmt.Sprintf("AC-%d", index)
-}
-
 // criterionLeadRE strips a folded criterion's "N. AC-N: " prefix.
 var criterionLeadRE = regexp.MustCompile(`^\d+[.)]\s+AC-\d+:\s*`)
 

@@ -125,7 +125,7 @@ func TestSpecDraftJobStagesTheCurrentSpecForAScopedRedraft(t *testing.T) {
 
 	// A plain rejection (no comments) is a full redraft: nothing staged.
 	plainDir := specReviewWithSkeleton(t)
-	if _, err := request.Reject(plainDir, "req-1", "bob", "shorter", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(plainDir, "req-1", "bob", "shorter", nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	plain, _ := request.Load(plainDir, "req-1")

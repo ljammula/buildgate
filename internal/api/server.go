@@ -276,15 +276,6 @@ type DaemonController interface {
 	Stop(context.Context, string) error
 }
 
-// WithPollInterval changes how often SSE streams check the durable record.
-func WithPollInterval(interval time.Duration) Option {
-	return func(s *Server) {
-		if interval > 0 {
-			s.pollInterval = interval
-		}
-	}
-}
-
 // WithOverrideToken enables POST /runs/{id}/override, requiring every
 // request to present it as `Authorization: Bearer <token>`. The endpoint is
 // independently authenticated from POST /runs, and every read route this
@@ -499,13 +490,6 @@ func WithProjectStatsProvider(provider ProjectStatsProvider) Option {
 	return func(s *Server) {
 		s.projectStatsProvider = provider
 	}
-}
-
-// withStatsClock fixes the clock GET /stats reads, for a test that compares
-// its response with a committed file: the route's buckets are counted back
-// from the current day, so on the real clock that response changes daily.
-func withStatsClock(now func() time.Time) Option {
-	return func(s *Server) { s.statsNow = now }
 }
 
 // WithDaemonController supplies the lifecycle implementation used by
@@ -2629,13 +2613,6 @@ type retryOrCancelRequestBody struct {
 	// (request.RetryFromRound); "" or "attempt" is the default. Any other
 	// value is refused. Cancel ignores it.
 	From string `json:"from,omitempty"`
-}
-
-// WithReviewGateExpiry sets a fixed review_gate_expiry: a decision on a gate
-// that has waited this long is refused under the request's lock, which halts
-// the request (gate_expired). 0, the default, is off.
-func WithReviewGateExpiry(d time.Duration) Option {
-	return WithReviewGateExpirySource(func() (time.Duration, error) { return d, nil })
 }
 
 // WithReviewGateExpirySource is WithReviewGateExpiry read afresh at every

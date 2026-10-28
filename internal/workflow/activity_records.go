@@ -651,16 +651,6 @@ func priorActivityIntent(ctx context.Context, logDir string) (bool, error) {
 	return found, err
 }
 
-// priorActivityIntentUnlessRetried is priorActivityIntent for an Activity
-// that is rerun by Temporal: at attempt > 1 the earlier attempts' intents
-// are expected (see retriedAttempt), so none is reported.
-func priorActivityIntentUnlessRetried(ctx context.Context, logDir string) (bool, error) {
-	if retriedAttempt(ctx) {
-		return false, nil
-	}
-	return priorActivityIntent(ctx, logDir)
-}
-
 // priorRecordError names which kind of record failed to load, so each
 // Activity keeps its own "load ... attempt journal" / "load ... intent"
 // failure message.

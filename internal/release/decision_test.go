@@ -16,7 +16,7 @@ import (
 
 func TestEvaluateDecisionFailsClosedWhenKillSwitchEngaged(t *testing.T) {
 	dir := t.TempDir()
-	if err := Engage(dir, "app", "operator", "incident", func() string { return "2026-08-27T00:00:00Z" }); err != nil {
+	if err := engageKillSwitch(dir, "app", "operator", "incident", func() string { return "2026-08-27T00:00:00Z" }); err != nil {
 		t.Fatal(err)
 	}
 	candidate := cleanMergeCandidate()

@@ -1628,7 +1628,7 @@ func TestListRequestsIncludesTheJobSlotWait(t *testing.T) {
 func TestListRequestsIncludesRejections(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
-	if _, err := request.Reject(dataDir, "req-1", "bob", "too broad", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, "req-1", "bob", "too broad", nil, time.Now()); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 
@@ -1652,7 +1652,7 @@ func TestListRequestsIncludesRejections(t *testing.T) {
 func TestGetRequestIncludesRejections(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
-	if _, err := request.Reject(dataDir, "req-1", "bob", "too broad", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, "req-1", "bob", "too broad", nil, time.Now()); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 
@@ -1766,7 +1766,7 @@ func TestGetRequestRevisionRequiresAuth(t *testing.T) {
 func TestListRequestRevisions(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
-	if _, err := request.Reject(dataDir, "req-1", "bob", "too broad", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, "req-1", "bob", "too broad", nil, time.Now()); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 
@@ -1803,7 +1803,7 @@ func TestListRequestRevisionsNotFound(t *testing.T) {
 func TestGetRequestRevision(t *testing.T) {
 	dataDir := t.TempDir()
 	seedApprovableRequest(t, dataDir, "req-1", request.StateSpecReview, false)
-	if _, err := request.Reject(dataDir, "req-1", "bob", "too broad", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, "req-1", "bob", "too broad", nil, time.Now()); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 

@@ -303,13 +303,6 @@ func sectionEnd(lines []string, headingLine, level int, mask []bool) int {
 	return len(lines)
 }
 
-// findNamedAcceptanceCriteriaSection finds the first criteria heading that
-// is not the exact drafted-spec heading. Its list is read by derived-item
-// rules, and its section ends at the next heading of the same or higher level.
-func findNamedAcceptanceCriteriaSection(lines []string) (start, end int, heading string, ok bool) {
-	return findNamedAcceptanceCriteriaSectionWithMask(lines, markdownLineMask(lines))
-}
-
 func findNamedAcceptanceCriteriaSectionWithMask(lines []string, mask []bool) (start, end int, heading string, ok bool) {
 	for i, raw := range lines {
 		level := MarkdownHeadingLevel(raw)

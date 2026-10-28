@@ -585,14 +585,14 @@ func TestKillSwitchDeniesAMemoryRunsRelease(t *testing.T) {
 	result := m.commit(map[string]*string{"AGENTS.md": sp(expected)})
 	dataDir := t.TempDir()
 	saveTestProposal(t, m, dataDir, "req-1", expected, base)
-	if err := release.Engage(dataDir, "widget", "operator", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
+	if err := engageKillSwitch(dataDir, "widget", "operator", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
 		t.Fatal(err)
 	}
 	r, decision := applyMemoryRun(t, m, dataDir, base, result, "req-1")
 	if r.MemoryEdit == nil || !r.MemoryEdit.Matches || decision.Allowed {
 		t.Fatalf("edit = %+v decision = %+v, want the approved file and a denied release", r.MemoryEdit, decision)
 	}
-	if err := release.Disengage(dataDir, "widget", "operator", "resume", func() string { return "2026-10-09T00:01:00Z" }); err != nil {
+	if err := disengageKillSwitch(dataDir, "widget", "operator", "resume", func() string { return "2026-10-09T00:01:00Z" }); err != nil {
 		t.Fatal(err)
 	}
 	if _, decision := applyMemoryRunOf(t, m, dataDir, "widget", "run-2", base, result, "req-1"); !decision.Allowed {

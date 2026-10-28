@@ -1658,19 +1658,6 @@ func reviewThreadsSection(threads []forge.Thread) boundedAddendumSection {
 	}
 }
 
-// WriteRoundAddendum writes <request>/rounds/<ticket>-<round>/addendum.md
-// (<ticket>-<round>-fix<n> for the round's n-th fix attempt): the ticket's
-// own build spec (TicketBuildSpecContent -- its spec plus the approved-spec
-// acceptance criteria it covers, verbatim), plus a "## Reviewer comments to
-// address" section listing each of threads with its path, line, author, and
-// body verbatim -- becomes the corrective round's own -spec. What a refused
-// attempt before it left is never here: it is the build's -earlier-attempt
-// (withRefusedAttempt, SC-018).
-func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, roundIndex, fix int) (string, error) {
-	path, _, err := writeRoundAddendum(dataDir, requestID, ticket, threads, roundIndex, fix)
-	return path, err
-}
-
 func writeRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threads []forge.Thread, roundIndex, fix int) (string, []forge.Thread, error) {
 	// buildSpec, not the raw ticket spec: this round's own -spec must
 	// carry the same acceptance-criteria text the ticket's first build

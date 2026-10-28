@@ -144,7 +144,7 @@ func TestClearActiveRequests(t *testing.T) {
 	if ids, _ := daemonheartbeat.WorkerActiveRequests(dir, time.Now()); len(ids) != 0 {
 		t.Errorf("final heartbeat lists %v, want none", ids)
 	}
-	if ids, _ := daemonheartbeat.WorkerSlotRequests(dir, time.Now()); len(ids) != 0 {
+	if ids := workerSlotRequests(dir, time.Now()); len(ids) != 0 {
 		t.Errorf("final heartbeat lists slot holders %v, want none", ids)
 	}
 }
@@ -218,4 +218,24 @@ func TestStepWaitsForRepoLockOnlyForJobsQueueBuildsAndPRReview(t *testing.T) {
 			t.Errorf("stepWaitsForRepoLock(%s, %v) = %v, want %v", tc.state, tc.onJobs, got, tc.want)
 		}
 	}
+}
+
+// workerSlotRequests returns the SlotRequests of dataDir's worker heartbeat,
+// or nil when there is no heartbeat or it is stale.
+func workerSlotRequests(dataDir string, now time.Time) []string {
+	hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dataDir))
+	if err != nil || daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
+		return nil
+	}
+	return hb.SlotRequests
+}
+
+// workerRepositoryWaits returns the RepositoryWaits of dataDir's worker
+// heartbeat, or nil when there is no heartbeat or it is stale.
+func workerRepositoryWaits(dataDir string, now time.Time) map[string]string {
+	hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dataDir))
+	if err != nil || daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) {
+		return nil
+	}
+	return hb.RepositoryWaits
 }

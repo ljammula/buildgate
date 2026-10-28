@@ -319,37 +319,6 @@ func (r *Request) approveTransition(by string, now time.Time) error {
 	return nil
 }
 
-// Reject sends a request in a review state back to the prior drafting
-// state -- spec_review to spec_drafting, plan_review to planning -- the
-// one function the approve/reject flow's CLI and API (POST
-// /requests/{id}/reject) both call. Any other state, or an empty
-// reason, is refused. reason is
-// recorded structurally on Request.Rejections alongside a revisions/<n>/
-// snapshot of the file(s) this rejection applies to, so a later operator
-// can see exactly what an earlier redraft was reacting to; the next
-// drafting pass reads it back via its
-// own stage-scoped feedback file (SpecFeedback/PlanFeedback,
-// stageFeedback's own doc comment) -- never via request.md.
-//
-// request.md itself is left untouched by every stage's rejection, not
-// just one stage's (confirmed by an adversarial review, 2026-09-24):
-// this function used to append a "## Rejected ..." note to request.md for
-// the spec_review/plan_review cases (appendRejectionNote, removed), but
-// draft_spec.py and plan_tickets.py both fold request.md's *entire*
-// content into their own prompt verbatim ("## Request"/"## Original
-// request" -- see build_prompt in each script), unframed and with no
-// stage scoping of its own. A spec_review rejection note landing there
-// reached plan_tickets.py's prompt too the moment the request advanced
-// past spec_review, mixed into "## Original request" with no framing
-// distinguishing it from the request's own original text -- exactly the
-// leak stageFeedback's dedicated per-stage files exist to prevent.
-// stageFeedback already renders every same-stage rejection (not just the
-// latest), so removing the request.md copy loses no information a
-// redraft needs.
-func Reject(dataDir, id, by, reason string, now time.Time, opts ...DecisionOption) (*Request, error) {
-	return RejectAnchored(dataDir, id, by, reason, nil, now, opts...)
-}
-
 // Seen is the stage a caller read a request in before deciding on it: its
 // State and EnteredAt. A decision made with a Seen applies only while the
 // request is still in that stage, entered at that time, so a rejection
@@ -376,12 +345,25 @@ func (seen Seen) check(r *Request) error {
 	return nil
 }
 
-// RejectAnchored is Reject with notes tied to places in the reviewed files
-// (RejectionAnchor). The rejection is recorded under AnchoredReason(anchors,
-// note), which is what every reader of a reason sees, the redraft's
-// feedback file included; the anchors and the free note are also kept on
-// the Rejection as given, for a console to show against the document. note
-// may be empty when there is at least one anchor.
+// RejectAnchored sends a request in a review state back to the prior drafting
+// state -- spec_review to spec_drafting, plan_review to planning -- the one
+// function the approve/reject flow's CLI and API (POST /requests/{id}/reject)
+// both reach. Any other state, or an empty reason, is refused. The reason is
+// recorded structurally on Request.Rejections alongside a revisions/<n>/
+// snapshot of the file(s) the rejection applies to, so a later operator can
+// see exactly what an earlier redraft was reacting to; the next drafting
+// pass reads it back through its own stage-scoped feedback file
+// (SpecFeedback/PlanFeedback), never through request.md, which no rejection
+// touches: draft_spec.py and plan_tickets.py fold request.md whole into
+// their prompts with no stage scoping, so a note there would leak across
+// stages.
+//
+// The notes may be tied to places in the reviewed files (RejectionAnchor).
+// The rejection is recorded under AnchoredReason(anchors, note), which is
+// what every reader of a reason sees, the redraft's feedback file included;
+// the anchors and the free note are also kept on the Rejection as given, for
+// a console to show against the document. note may be empty when there is at
+// least one anchor.
 func RejectAnchored(dataDir, id, by, note string, anchors []RejectionAnchor, now time.Time, opts ...DecisionOption) (*Request, error) {
 	return RejectSeen(dataDir, id, by, note, anchors, Seen{}, now, opts...)
 }
@@ -433,12 +415,12 @@ func RejectSeen(dataDir, id, by, note string, anchors []RejectionAnchor, seen Se
 	case StatePlanReview:
 		// ticketSpecRelPaths is Approve's precondition check -- it hard-fails
 		// when tickets/*.spec.md is missing or empty, which is right for
-		// Approve but not for Reject: an operator must still be able to
+		// Approve but not for a rejection: an operator must still be able to
 		// reject (and so unstick) a request whose plan step left the
 		// tickets directory missing or corrupted. Snapshotting revision
 		// files is a nice-to-have for 2.2's diff view, not a precondition
 		// for the state transition, so a failure here just leaves relPaths
-		// empty rather than aborting Reject.
+		// empty rather than aborting the rejection.
 		if paths, tErr := ticketSpecRelPaths(dataDir, id); tErr == nil {
 			relPaths = paths
 		}
@@ -556,8 +538,7 @@ func ticketSpecRelPaths(dataDir, id string) ([]string, error) {
 // SpecFeedbackFileName/PlanFeedbackFileName are the files the spec_review and
 // plan_review rejection feedback is written to, beside request.md: these give
 // draft_spec.py/plan_tickets.py a clearly delimited "what to change" signal
-// without going through request.md at all -- Reject no longer appends a
-// rejection note there for any stage (see Reject's own doc comment for why).
+// without going through request.md at all (see RejectAnchored's doc comment).
 const (
 	SpecFeedbackFileName = "spec-feedback.md"
 	PlanFeedbackFileName = "plan-feedback.md"

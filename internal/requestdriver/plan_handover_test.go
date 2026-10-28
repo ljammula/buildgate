@@ -184,7 +184,7 @@ func TestRevisedImportedPlanIsNotReimportedAfterASpecSendBack(t *testing.T) {
 	if err != nil || planReview.State != request.StatePlanReview || !planReview.PlanImported || !planReview.PlanImportEnded || planReview.PlanAsHandedOver() {
 		t.Fatalf("after revised plan: state = %q, PlanImported = %v, PlanImportEnded = %v, PlanAsHandedOver = %v, err = %v; want plan_review with import ended", planReview.State, planReview.PlanImported, planReview.PlanImportEnded, planReview.PlanAsHandedOver(), err)
 	}
-	if _, err := request.Reject(dataDir, id, "operator", "the revised plan still needs work", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "operator", "the revised plan still needs work", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan review: %v", err)
 	}
 	invalidRunner, _ := requestdrivertest.StubPlanTicketsRunner(
@@ -230,7 +230,7 @@ func TestPlanningRunsThePlanningJobAfterAPlanRejection(t *testing.T) {
 	ticket := requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)
 	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": ticket})
 	drivePlanHandoverPass(t, dp, dataDir, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t))
-	if _, err := request.Reject(dataDir, id, "op", "name the migration file", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "op", "name the migration file", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan review: %v", err)
 	}
 	runner, gotVerify := requestdrivertest.StubPlanTicketsRunner([]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: ticket}}, &request.PlanEvidence{}, nil)

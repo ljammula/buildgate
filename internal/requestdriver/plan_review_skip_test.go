@@ -107,7 +107,7 @@ func TestAPlanAPersonSentBackWaitsAtPlanReview(t *testing.T) {
 		t.Fatalf("state %s (%s), want plan_review for 2 tickets", r.State, r.Error)
 	}
 	requestdrivertest.PlanReviewOff(t, dataDir, id)
-	if _, err := request.Reject(dataDir, id, "alice", "merge them", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "alice", "merge them", nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := planOnce(t, dataDir, id, 1); got.State != request.StatePlanReview {

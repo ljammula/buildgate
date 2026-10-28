@@ -432,23 +432,6 @@ func AcceptingBuildRunner(t *testing.T, dataDir string) requestdriver.TicketRunn
 	}
 }
 
-func PlanTwoTickets(dp requestdriver.Deps, t *testing.T, dataDir string) *request.Request {
-	t.Helper()
-	tickets := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: ValidBrownfieldTicket("make verify", 1)},
-		{Filename: "002.spec.md", Content: ValidBrownfieldTicket("make verify", 2)},
-	}
-	runner, _ := StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, FailingSpecDraftRunner(t), runner, FailingBuildRunner(t)); err != nil {
-		t.Fatal(err)
-	}
-	r, err := request.Load(dataDir, "req-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
-}
-
 // StubReviewCorrectiveRunner installs a package-var override for the
 // duration of the test (mirroring stubPRReviewDeps' own swap-and-restore
 // shape) that records the args it was called with and its call count, and

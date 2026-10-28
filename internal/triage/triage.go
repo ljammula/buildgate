@@ -272,21 +272,6 @@ func triageDiffScope(r *run.Run, dataDir string) string {
 	return "diff_scope: " + strings.Join(parts, "; ")
 }
 
-// leadingCriterionNumber extracts a criterion's own leading "N." / "N)"
-// ordinal.
-var leadingCriterionNumber = regexp.MustCompile(`^\s*(\d+)[.)]`)
-
-// criterionNumber returns criterion's leading ordinal ("2" from
-// "2. Handles empty input."), or the trimmed criterion text itself when it
-// carries no leading number -- never empty for a non-empty criterion, so
-// callers always have something to name.
-func criterionNumber(criterion string) string {
-	if m := leadingCriterionNumber.FindStringSubmatch(criterion); m != nil {
-		return m[1]
-	}
-	return strings.TrimSpace(criterion)
-}
-
 // triageTestsRedOnBase words a failed tests_red_on_base gate from the run's
 // recorded proof (r.TestsRedOnBase): no test file changed, the changed tests
 // all pass on the base commit. The path comes from the agent's own files, so

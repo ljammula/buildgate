@@ -27,7 +27,7 @@ func TestRejectPlanPrunesStaleTicketApprovals(t *testing.T) {
 	if err := loaded.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Reject(dataDir, r.ID, "alice", "shrink the plan", fixedNow); err != nil {
+	if _, err := RejectAnchored(dataDir, r.ID, "alice", "shrink the plan", nil, fixedNow); err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
 	// The re-plan deleted the old tickets.

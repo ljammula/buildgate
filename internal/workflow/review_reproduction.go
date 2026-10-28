@@ -149,12 +149,6 @@ func (o reproductionOutcome) policyInput() *policy.ReviewReproductionInput {
 	return in
 }
 
-// refuses reports whether any reproduction refuses the run.
-func (o reproductionOutcome) refuses() bool {
-	in := o.policyInput()
-	return in != nil && in.Refusing > 0
-}
-
 // reproductionContext is ctx with the reproduction Activity's options: the
 // build/verify options (heartbeat, retries) with a start-to-close that
 // covers one capped launch, its setup and the scratch worktree.

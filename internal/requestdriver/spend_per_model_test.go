@@ -36,7 +36,7 @@ func TestPlanRedraftOnAnotherModelKeepsEachModelsSpend(t *testing.T) {
 	}
 
 	drive(&request.JobSpend{Role: "planning", Model: "model-local", InputTokens: 9000, OutputTokens: 3000, At: time.Unix(1000, 0)})
-	if _, err := request.Reject(dataDir, id, "alice", "plan it on the other model", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "alice", "plan it on the other model", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan: %v", err)
 	}
 	drive(&request.JobSpend{Role: "planning", Model: "model-hosted", InputTokens: 30000, OutputTokens: 5000, CostMicroUSD: 14000, SpendPartial: true, At: time.Unix(2000, 0)})

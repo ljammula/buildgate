@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/request"
 )
 
@@ -108,7 +107,7 @@ func TestHeartbeatCarriesRepositoryWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop()
-	got := daemonheartbeat.WorkerRepositoryWaits(dir, time.Now())
+	got := workerRepositoryWaits(dir, time.Now())
 	if len(got) != 1 || got["req-1"] != "2026-10-20T10:03:00Z" {
 		t.Errorf("WorkerRepositoryWaits = %v, want req-1 at 10:03", got)
 	}

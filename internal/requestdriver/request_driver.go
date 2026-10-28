@@ -1395,18 +1395,6 @@ func failedGate(runRecord *run.Run, check string) bool {
 	return false
 }
 
-// recordTicketRunStarted points ticket ticketIndex's RunID at runID on
-// disk the moment a corrective round's run starts, so the
-// console and status follow the running round instead of showing the
-// quarantined first run as the ticket's state until the round finishes
-// (found live, 2026-09-26 Flutter + Go app run: a red "Quarantined" ticket while
-// the automatic round was fixing it). A locked read-modify-write that
-// changes nothing unless the request is still building, so it can never
-// overwrite a cancel that landed meanwhile.
-func recordTicketRunStarted(dataDir, requestID string, ticketIndex int, runID string) error {
-	return updateBuildingTicket(dataDir, requestID, ticketIndex, func(t *request.Ticket) { t.RunID = runID })
-}
-
 // recordRoundStarted records a corrective round's started run on ticket, in
 // memory and on disk (recordTicketRunStarted): as the ticket's run, or, for an
 // advice round, as the in-flight round's run (Ticket.Advice.RunID), leaving

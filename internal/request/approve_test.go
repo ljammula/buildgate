@@ -117,7 +117,7 @@ func TestRejectFromEachState(t *testing.T) {
 			dataDir := t.TempDir()
 			newApprovableRequest(t, dataDir, "req-1", state, true)
 
-			r, err := Reject(dataDir, "req-1", "bob", "please tighten the scope", fixedNow)
+			r, err := RejectAnchored(dataDir, "req-1", "bob", "please tighten the scope", nil, fixedNow)
 			switch state {
 			case StateSpecReview:
 				if err != nil {
@@ -221,7 +221,7 @@ func TestRejectFromPlanReviewWithoutTicketsDirStillSucceeds(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StatePlanReview, false)
 
-	r, err := Reject(dataDir, "req-1", "bob", "plan is missing tickets", fixedNow)
+	r, err := RejectAnchored(dataDir, "req-1", "bob", "plan is missing tickets", nil, fixedNow)
 	if err != nil {
 		t.Fatalf("Reject from plan_review with no tickets dir: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestRejectTwiceWithSameReasonStillGetsTwoRevisions(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StateSpecReview, false)
 
-	if _, err := Reject(dataDir, "req-1", "bob", "too broad", fixedNow); err != nil {
+	if _, err := RejectAnchored(dataDir, "req-1", "bob", "too broad", nil, fixedNow); err != nil {
 		t.Fatalf("first Reject: %v", err)
 	}
 	r, err := Load(dataDir, "req-1")
@@ -322,7 +322,7 @@ func TestRejectTwiceWithSameReasonStillGetsTwoRevisions(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := Reject(dataDir, "req-1", "bob", "too broad", fixedNow)
+	got, err := RejectAnchored(dataDir, "req-1", "bob", "too broad", nil, fixedNow)
 	if err != nil {
 		t.Fatalf("second Reject (same reason): %v", err)
 	}
@@ -343,7 +343,7 @@ func TestRejectTwiceAppendsRejectionsAndRevisions(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StateSpecReview, false)
 
-	if _, err := Reject(dataDir, "req-1", "bob", "first pass, too broad", fixedNow); err != nil {
+	if _, err := RejectAnchored(dataDir, "req-1", "bob", "first pass, too broad", nil, fixedNow); err != nil {
 		t.Fatalf("first Reject: %v", err)
 	}
 	// Reject moved the request to spec_drafting; move it back to
@@ -359,7 +359,7 @@ func TestRejectTwiceAppendsRejectionsAndRevisions(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := Reject(dataDir, "req-1", "carol", "second pass, still too broad", fixedNow)
+	got, err := RejectAnchored(dataDir, "req-1", "carol", "second pass, still too broad", nil, fixedNow)
 	if err != nil {
 		t.Fatalf("second Reject: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestRejectTwiceAppendsRejectionsAndRevisions(t *testing.T) {
 func TestRejectWithoutReasonIsRefused(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StateSpecReview, false)
-	if _, err := Reject(dataDir, "req-1", "bob", "", fixedNow); err == nil {
+	if _, err := RejectAnchored(dataDir, "req-1", "bob", "", nil, fixedNow); err == nil {
 		t.Fatal("Reject with empty reason: want an error, got nil")
 	}
 }
@@ -673,7 +673,7 @@ func TestRejectClearsReminderState(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := Reject(dataDir, "req-1", "bob", "needs another pass", fixedNow)
+	got, err := RejectAnchored(dataDir, "req-1", "bob", "needs another pass", nil, fixedNow)
 	if err != nil {
 		t.Fatalf("Reject: %v", err)
 	}

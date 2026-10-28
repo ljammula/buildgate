@@ -547,7 +547,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	} {
 		appendProgress(t, dataDir, accepted.ID, e)
 	}
-	must(release.Engage(dataDir, "app", "operator@example.com", "incident 42", func() string { return stamp(26) }))
+	must(engageKillSwitch(dataDir, "app", "operator@example.com", "incident 42", func() string { return stamp(26) }))
 	must(release.SaveDecision(dataDir, release.Decision{
 		RunID: accepted.ID, Project: "app", Allowed: false, Evaluated: stamp(27),
 		Reasons: []string{`kill switch is engaged for project "app"`},

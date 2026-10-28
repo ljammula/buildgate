@@ -54,7 +54,10 @@ func TestDecisionsRefuseALapsedGateAtomically(t *testing.T) {
 			_, err := ApproveShown(d, "req-5", "alice", now, nil, expiry)
 			return err
 		}},
-		"reject": {StatePlanReview, func(d string) error { _, err := Reject(d, "req-5", "alice", "no", now, expiry); return err }},
+		"reject": {StatePlanReview, func(d string) error {
+			_, err := RejectAnchored(d, "req-5", "alice", "no", nil, now, expiry)
+			return err
+		}},
 		"resume": {StateResumeReview, func(d string) error {
 			_, err := ResumeRequest(d, "req-5", ResumeScratch, "alice", now, nil, expiry)
 			return err

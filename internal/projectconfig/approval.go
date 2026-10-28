@@ -113,9 +113,6 @@ func (s ApprovalStore) Approved(repoKey, hash string) (Approval, bool) {
 	return Approval{}, false
 }
 
-// List returns the repository's approvals, oldest first.
-func (s ApprovalStore) List(repoKey string) []Approval { return s.read(repoKey) }
-
 // Approve records a (replacing an earlier approval of the same hash). Older
 // approvals stay valid.
 func (s ApprovalStore) Approve(repoKey string, a Approval) error {

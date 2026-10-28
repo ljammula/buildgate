@@ -114,13 +114,6 @@ func flagsWasVisited(flags *flag.FlagSet, name string) bool {
 	return found
 }
 
-func explicitValue(flags *flag.FlagSet, name, value string) string {
-	if flagsWasVisited(flags, name) {
-		return value
-	}
-	return ""
-}
-
 var apiStartMu sync.Mutex
 
 func main() {
