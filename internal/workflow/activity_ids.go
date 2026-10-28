@@ -74,6 +74,9 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	// A reviewer's reproduction the factory accepted and could not hold,
 	// check or mount (SC-022): the finding was never judged.
 	ReproductionUnheldFailureType: unresolved.ReproductionUnheld,
+	// A route credential the Worker could not use (missing, or expiring
+	// before the step's budget ends): no model request was made with it.
+	RouteCredentialFailureType: unresolved.RouteCredential,
 }
 
 // modelRouteFailureTypes is the failure type of each cause
@@ -174,6 +177,7 @@ var nonRetryableActivityFailureTypes = []string{
 	TemporalUnreachableFailureType,
 	ReviewStepRetiredFailureType,
 	ReproductionUnheldFailureType,
+	RouteCredentialFailureType,
 }
 
 // retriedActivityOptions is options with the retrying policy: the second

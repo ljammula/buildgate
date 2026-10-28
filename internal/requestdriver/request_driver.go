@@ -242,6 +242,9 @@ func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r 
 		log.Printf("request %s: spec drafting finished but the request left spec_drafting while it ran (e.g. cancelled) -- discarding the result", r.ID)
 		return false, nil
 	}
+	if step, lost := routeCredentialStep(jobErr); lost {
+		return false, EnterResumeReview(dp, dataDir, r, step, now)
+	}
 	if jobErr != nil {
 		return false, HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
 	}
@@ -298,7 +301,7 @@ func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r 
 	if ok, err := saveSpecDraftSpend(dataDir, r, evidence); !ok {
 		return false, err
 	}
-	if ok, err := recordReadBack(ctx, dataDir, r, specMD, cfg); !ok {
+	if ok, err := recordReadBack(dp, ctx, dataDir, r, specMD, cfg); !ok {
 		return false, err
 	}
 	if err := os.WriteFile(RequestSpecPath(dataDir, r.ID), []byte(specMD), 0o600); err != nil {
@@ -518,7 +521,7 @@ func AdvanceOracleDrafting(dp Deps, ctx context.Context, dataDir string, r *requ
 		if ctx.Err() != nil {
 			return jobErr
 		}
-		if failure := firstOracleJobFailure(r, jobErr); failure != nil {
+		if failure := oracleJobFailure(r, jobErr); failure != nil {
 			return unresolvedOracleDrafting(dp, dataDir, r, failure, now)
 		}
 		draft = failedOracleDraft(jobErr)
@@ -699,6 +702,9 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		} else if !ok {
 			log.Printf("request %s: plan drafting finished but the request left planning while it ran (e.g. cancelled) -- discarding the result", r.ID)
 			return nil
+		}
+		if step, lost := routeCredentialStep(jobErr); lost {
+			return EnterResumeReview(dp, dataDir, r, step, now)
 		}
 		if jobErr != nil {
 			return HaltRequest(dataDir, r, fmt.Sprintf("plan drafting failed: %v", jobErr), now)
@@ -1065,7 +1071,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// ticket.RunID still names a prior attempt this invocation
 			// never touched. Either way there is no *current* run state
 			// to consult; this is a genuine start failure.
-			return HaltRequest(dataDir, r, startFailedReason(idx, r.TicketCount, runErr, onBranch), now)
+			return ticketStartFailed(dp, dataDir, r, idx, runErr, onBranch, now)
 		}
 		// A run record exists for this invocation, so runErr alone can't
 		// tell us whether this ticket actually quarantined or genuinely
@@ -1279,6 +1285,22 @@ func baseOracleQuarantineCheck(runRecord *run.Run) string {
 		return request.QuarantineCheckOracleNotRun
 	}
 	return ""
+}
+
+// ticketStartFailed moves r on after its ticket build failed before its run
+// existed: to resume_review when the build's route credential could not be
+// used (no verdict on the work), halted otherwise. When that build was the
+// operator's resume of a kept build (a pending ResumeRound decision, still
+// unconsumed since no run started), the kept run stays the one a resume
+// continues, as parkRequest keeps it.
+func ticketStartFailed(dp Deps, dataDir string, r *request.Request, idx int, runErr error, onBranch bool, now time.Time) error {
+	if step, lost := routeCredentialStep(runErr); lost {
+		if r.PendingResumeVerb() == request.ResumeRound && r.Resume.LostRunID != "" {
+			step.RunID = r.Resume.LostRunID
+		}
+		return EnterResumeReview(dp, dataDir, r, step, now)
+	}
+	return HaltRequest(dataDir, r, startFailedReason(idx, r.TicketCount, runErr, onBranch), now)
 }
 
 // startFailedReason is the halt reason of a ticket build that never started.

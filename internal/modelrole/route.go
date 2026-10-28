@@ -24,7 +24,9 @@ import (
 // with the model/role name and the full skip list so the caller's error
 // message names every route that was tried and why, without ever
 // resolving to a different model -- see SelectRoute's own doc comment for
-// why that never happens.
+// why that never happens. When every route was skipped because its
+// credential could not be used, the error also carries
+// sandbox.ErrRouteCredential.
 var ErrNoRouteAvailable = errors.New("modelrole: no configured route is usable for this role's model")
 
 // RouteSkip records one candidate route SelectRoute passed over, and a
@@ -321,6 +323,7 @@ func SelectRoute(s sessionconfig.Settings, r Role, choice, harnessChoice string,
 	}
 
 	var skipped []RouteSkip
+	credentialSkips := 0
 	for _, routeName := range candidateRoutes {
 		route, ok := routes[routeName]
 		if !ok {
@@ -348,6 +351,7 @@ func SelectRoute(s sessionconfig.Settings, r Role, choice, harnessChoice string,
 		if probe != nil {
 			if err := probe(routeName, route); err != nil {
 				skipped = append(skipped, RouteSkip{Route: routeName, Reason: skipReasonCredentialUnavailable})
+				credentialSkips += credentialSkip(err)
 				continue
 			}
 		}
@@ -368,7 +372,23 @@ func SelectRoute(s sessionconfig.Settings, r Role, choice, harnessChoice string,
 		}, nil
 	}
 
-	return Selection{}, fmt.Errorf("%w: roles.%s.model %q, routes tried %v", ErrNoRouteAvailable, r, selectedModel, skipped)
+	err = fmt.Errorf("%w: roles.%s.model %q, routes tried %v", ErrNoRouteAvailable, r, selectedModel, skipped)
+	if len(skipped) > 0 && credentialSkips == len(skipped) {
+		// Every route was skipped because its credential could not be used
+		// (the probe's error carried sandbox.ErrRouteCredential): a fresh
+		// credential, not a configuration change, is what the role needs.
+		return Selection{}, sandbox.RouteCredentialError(err)
+	}
+	return Selection{}, err
+}
+
+// credentialSkip is 1 when a probe's error says the route's credential
+// cannot be used (sandbox.ErrRouteCredential), 0 for any other refusal.
+func credentialSkip(probeErr error) int {
+	if errors.Is(probeErr, sandbox.ErrRouteCredential) {
+		return 1
+	}
+	return 0
 }
 
 // candidateModelNames is the closed set of models: entries role's own

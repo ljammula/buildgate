@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -271,5 +272,74 @@ func TestDoctorRouteCredentialFixNamesWhyNoRouteIsUsable(t *testing.T) {
 	}
 	if got := doctorRouteCredentialFix(settings, errors.New("another failure")); got != "" {
 		t.Errorf("fix for an unrelated error = %q, want none", got)
+	}
+}
+
+// doctor fails a codex token builds already refuse, warns about one they
+// will refuse within codexTokenRunwayWarning (naming the local time they
+// start to), and passes one with more runway. It never prints the token.
+func TestDoctorChatGPTCodexCredentialWarnsBeforeBuildsRefuseTheToken(t *testing.T) {
+	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		expiresIn    time.Duration
+		wantErr      bool
+		wantAdvisory bool
+	}{
+		"plenty of runway":         {codexTokenExpiryMargin + codexTokenRunwayWarning + time.Hour, false, false},
+		"builds refuse it tonight": {codexTokenExpiryMargin + 4*time.Hour, true, true},
+		"exactly the runway":       {codexTokenExpiryMargin + codexTokenRunwayWarning, false, false},
+		"a second inside it":       {codexTokenExpiryMargin + codexTokenRunwayWarning - time.Second, true, true},
+		"inside the margin":        {codexTokenExpiryMargin - time.Minute, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			token := fakeCodexJWT(t, now.Add(tc.expiresIn))
+			path := writeCodexAuthFile(t, t.TempDir(), map[string]any{
+				"auth_mode": "chatgpt",
+				"tokens":    map[string]any{"access_token": token, "account_id": "acct-123"},
+			})
+			c := doctorCheckChatGPTCodexCredential(path, doctorRouteKeys{codexAuthFile: "codex_auth_file"}, now)
+			if (c.Err != nil) != tc.wantErr || c.Advisory != tc.wantAdvisory {
+				t.Fatalf("check = %+v, want error %v advisory %v", c, tc.wantErr, tc.wantAdvisory)
+			}
+			if c.Err != nil && (strings.Contains(c.Err.Error(), token) || !strings.Contains(c.Fix, "codex login")) {
+				t.Errorf("check = %+v: must name `codex login` and never the token", c)
+			}
+			if tc.wantAdvisory {
+				refuseFrom := now.Add(tc.expiresIn - codexTokenExpiryMargin).Local().Format("Mon 15:04 MST")
+				if !strings.Contains(c.Err.Error(), refuseFrom) {
+					t.Errorf("warning %q, want the local time builds stop taking the token, %s", c.Err, refuseFrom)
+				}
+			}
+		})
+	}
+}
+
+// The warning names the local time builds stop taking the token, computed
+// here by hand: a token expiring at 23:00 UTC is refused from 17:00 UTC, 6 h
+// before. doctor's route checks judge it against the clock doctorInputs
+// carries.
+func TestDoctorRouteChecksWarnAgainstTheInjectedClock(t *testing.T) {
+	now := time.Date(2026, 10, 27, 9, 0, 1, 0, time.UTC) // 7h59m59s before 17:00
+	path := writeCodexAuthFile(t, t.TempDir(), map[string]any{
+		"auth_mode": "chatgpt",
+		"tokens":    map[string]any{"access_token": fakeCodexJWT(t, time.Date(2026, 10, 27, 23, 0, 0, 0, time.UTC)), "account_id": "acct-123"},
+	})
+	want := time.Date(2026, 10, 27, 17, 0, 0, 0, time.UTC).Local().Format("Mon 15:04 MST")
+	route := doctorRoute{label: "codex", credentialMode: meter.CredentialModeChatGPTCodex, codexAuthFile: path}
+	find := func(in doctorInputs) doctorCheck {
+		t.Helper()
+		for _, c := range doctorRouteChecks(context.Background(), in, "", route, true, false) {
+			if strings.Contains(c.Name, "chatgpt codex credential") {
+				return c
+			}
+		}
+		t.Fatal("no chatgpt codex credential check")
+		return doctorCheck{}
+	}
+	if c := find(doctorInputs{now: now}); !c.Advisory || c.Err == nil || !strings.Contains(c.Err.Error(), want+" at the latest") {
+		t.Errorf("at %s: check = %+v, want a warning naming %s", now, c, want)
+	}
+	if c := find(doctorInputs{now: now.Add(-time.Second)}); c.Err != nil {
+		t.Errorf("exactly 8h ahead: check = %+v, want it to pass", c)
 	}
 }

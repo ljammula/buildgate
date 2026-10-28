@@ -179,7 +179,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 	// — canonical verification and the full-suite gate call no model.
 	relaySpec, err := a.relaySpecFor(input)
 	if err != nil {
-		return BuildActivityResult{}, temporal.NewApplicationError(err.Error(), RelayConfigurationFailureType)
+		return BuildActivityResult{}, temporal.NewApplicationError(err.Error(), relayFailureType(err))
 	}
 	if err := a.capRelayForAttempt(ctx, input, relaySpec); err != nil {
 		return BuildActivityResult{}, err

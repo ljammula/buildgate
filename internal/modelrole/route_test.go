@@ -84,6 +84,40 @@ func TestSelectRouteNeverCrossesModels(t *testing.T) {
 	}
 }
 
+// A role every one of whose routes was skipped for a credential that cannot
+// be used needs a fresh credential: the error says so through
+// sandbox.ErrRouteCredential, with its message unchanged. One route skipped
+// for anything else leaves it out.
+func TestSelectRouteSaysWhenOnlyCredentialsStoodInTheWay(t *testing.T) {
+	s := routesModeSettings()
+	expired := func(string, sessionconfig.Route) error {
+		return sandbox.RouteCredentialError(errors.New("token expires within the margin"))
+	}
+	_, err := SelectRoute(s, RoleExecution, "", "", "", expired)
+	if !errors.Is(err, ErrNoRouteAvailable) || !errors.Is(err, sandbox.ErrRouteCredential) {
+		t.Fatalf("every route's credential expired: err = %v, want ErrNoRouteAvailable and ErrRouteCredential", err)
+	}
+	if strings.Contains(err.Error(), "margin") || strings.Contains(err.Error(), sandbox.ErrRouteCredential.Error()) {
+		t.Errorf("err = %q: the message must stay the fixed skip list", err)
+	}
+
+	mixed := func(name string, r sessionconfig.Route) error {
+		if name == "primary" {
+			return expired(name, r)
+		}
+		return errors.New("some other probe failure")
+	}
+	if _, err := SelectRoute(s, RoleExecution, "", "", "", mixed); err == nil || errors.Is(err, sandbox.ErrRouteCredential) {
+		t.Errorf("one route failed on something else: err = %v, want no ErrRouteCredential", err)
+	}
+	s.Routes["primary"] = sessionconfig.Route{CredentialMode: "static", Upstream: "ftp://primary.example.invalid", CredentialEnv: "PRIMARY_KEY"}
+	if _, err := SelectRoute(s, RoleExecution, "", "", "", expired); err == nil || errors.Is(err, sandbox.ErrRouteCredential) {
+		t.Errorf("one route was refused before its credential was read: err = %v, want no ErrRouteCredential", err)
+	} else if !strings.Contains(err.Error(), "routes tried") {
+		t.Errorf("err = %v, want the skip list", err)
+	}
+}
+
 // routesModeSettingsWithAllowedSonnet is routesModeSettings plus a second
 // execution-role model, "sonnet", reachable only over its own "fallback2"
 // route, and roles.execution.allowed naming both -- the fixture SelectRoute's

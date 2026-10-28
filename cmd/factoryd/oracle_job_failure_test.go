@@ -47,6 +47,7 @@ func TestAnOracleDraftLaunchErrorIsAJobFailureWithItsCause(t *testing.T) {
 		"command started twice":         {fmt.Errorf("sandbox x: %w", sandbox.ErrSandboxRerun), unresolved.DraftingJob},
 		"an error that only says so":    {errors.New("the sandbox did not start the worker command"), unresolved.DraftingJob},
 		"deadline while the script ran": {context.DeadlineExceeded, unresolved.DraftingJob},
+		"credential refused at launch":  {fmt.Errorf("sandbox attempts exhausted: %w", sandbox.RouteCredentialError(errors.New("route credential expires before this step's budget ends"))), unresolved.RouteCredential},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

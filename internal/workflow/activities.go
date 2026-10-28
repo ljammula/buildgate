@@ -272,6 +272,18 @@ func (a *Activities) boundRelaySpec(role string, p sandbox.RoutePolicy, thinking
 	return spec, nil
 }
 
+// relayFailureType is the ApplicationError type of a failure to assemble or
+// bind a step's relay: RouteCredentialFailureType when the route's
+// credential cannot be used (sandbox.ErrRouteCredential in err's chain, put
+// there by the Worker's credential resolver), RelayConfigurationFailureType
+// for any other.
+func relayFailureType(err error) string {
+	if errors.Is(err, sandbox.ErrRouteCredential) {
+		return RouteCredentialFailureType
+	}
+	return RelayConfigurationFailureType
+}
+
 // relaySpecFor assembles the launchable relay configuration for this
 // execution's build step: the request-scoped policy carried in Workflow
 // input, plus this Worker's own credential and this run's identity. Returns

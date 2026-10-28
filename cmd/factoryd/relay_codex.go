@@ -63,32 +63,41 @@ type codexAuthFileCredential struct {
 // here would log the host `codex` CLI out from underneath the operator).
 // Never logs or includes the token itself in an error message.
 func resolveChatGPTCodexCredential(path string) (accessToken, accountID string, err error) {
+	accessToken, accountID, _, err = resolveChatGPTCodexCredentialAt(path, time.Now())
+	return accessToken, accountID, err
+}
+
+// resolveChatGPTCodexCredentialAt is resolveChatGPTCodexCredential with the
+// clock passed in, also returning the access token's own expiry (set as well
+// when the token is refused for being inside the margin, zero on an error
+// before the expiry was read).
+func resolveChatGPTCodexCredentialAt(path string, now time.Time) (accessToken, accountID string, expiresAt time.Time, err error) {
 	resolved, err := resolveCodexAuthFilePath(path)
 	if err != nil {
-		return "", "", err
+		return "", "", time.Time{}, err
 	}
 	data, err := os.ReadFile(resolved)
 	if err != nil {
-		return "", "", fmt.Errorf("read codex auth file %q: %w; authenticate with `codex` on the host, or set the route's codex_auth_file", resolved, err)
+		return "", "", time.Time{}, fmt.Errorf("read codex auth file %q: %w; authenticate with `codex` on the host, or set the route's codex_auth_file", resolved, err)
 	}
 	var auth codexAuthFileCredential
 	if err := json.Unmarshal(data, &auth); err != nil {
-		return "", "", fmt.Errorf("parse codex auth file %q: %w", resolved, err)
+		return "", "", time.Time{}, fmt.Errorf("parse codex auth file %q: %w", resolved, err)
 	}
 	if auth.AuthMode != "chatgpt" {
-		return "", "", fmt.Errorf("codex auth file %q has auth_mode %q, want \"chatgpt\": credential_mode: chatgpt-codex requires a ChatGPT OAuth login (run `codex login` on the host)", resolved, auth.AuthMode)
+		return "", "", time.Time{}, fmt.Errorf("codex auth file %q has auth_mode %q, want \"chatgpt\": credential_mode: chatgpt-codex requires a ChatGPT OAuth login (run `codex login` on the host)", resolved, auth.AuthMode)
 	}
 	if auth.Tokens.AccessToken == "" || auth.Tokens.AccountID == "" {
-		return "", "", fmt.Errorf("codex auth file %q is missing tokens.access_token or tokens.account_id; run `codex login` on the host", resolved)
+		return "", "", time.Time{}, fmt.Errorf("codex auth file %q is missing tokens.access_token or tokens.account_id; run `codex login` on the host", resolved)
 	}
-	expiresAt, err := jwtExpiry(auth.Tokens.AccessToken)
+	expiresAt, err = jwtExpiry(auth.Tokens.AccessToken)
 	if err != nil {
-		return "", "", fmt.Errorf("codex auth file %q: parse access token expiry: %w", resolved, err)
+		return "", "", time.Time{}, fmt.Errorf("codex auth file %q: parse access token expiry: %w", resolved, err)
 	}
-	if time.Until(expiresAt) < codexTokenExpiryMargin {
-		return "", "", fmt.Errorf("codex access token in %q expires at %s, within the required %s margin; run `codex login` on the host for a new token (other codex commands leave a token this close to expiry as it is)", resolved, expiresAt.UTC().Format(time.RFC3339), codexTokenExpiryMargin)
+	if expiresAt.Sub(now) < codexTokenExpiryMargin {
+		return "", "", expiresAt, fmt.Errorf("codex access token in %q expires at %s, within the required %s margin; run `codex login` on the host for a new token (other codex commands leave a token this close to expiry as it is)", resolved, expiresAt.UTC().Format(time.RFC3339), codexTokenExpiryMargin)
 	}
-	return auth.Tokens.AccessToken, auth.Tokens.AccountID, nil
+	return auth.Tokens.AccessToken, auth.Tokens.AccountID, expiresAt, nil
 }
 
 // resolveCodexAuthFilePath applies -relay-codex-auth-file's own three-tier

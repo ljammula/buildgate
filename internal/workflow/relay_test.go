@@ -17,6 +17,7 @@ import (
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/testfixture"
+	"buildgate/internal/unresolved"
 )
 
 func testRelayPolicy() *sandbox.RoutePolicy {
@@ -195,6 +196,61 @@ func TestRunBuildActivityFailsClosedOnUnusableRelayConfiguration(t *testing.T) {
 				t.Error("a worker was launched despite an unusable route configuration")
 			}
 		})
+	}
+}
+
+// A build whose route credential the Worker cannot use (it resolves with
+// sandbox.ErrRouteCredential: the token expires too soon, the file is gone)
+// fails before any launch with RouteCredentialFailureType, which carries
+// unresolved.RouteCredential across the Temporal boundary and keeps the
+// worktree. Any other resolver failure stays a relay configuration failure.
+func TestABuildWhoseRouteCredentialCannotBeUsedIsUnresolved(t *testing.T) {
+	for name, tc := range map[string]struct {
+		resolveErr error
+		wantType   string
+	}{
+		"credential":       {sandbox.RouteCredentialError(errors.New("codex access token expires within the required margin")), RouteCredentialFailureType},
+		"not a credential": {errors.New(`route "codex" is not configured on this Worker`), RelayConfigurationFailureType},
+	} {
+		t.Run(name, func(t *testing.T) {
+			launched := filepath.Join(t.TempDir(), "launched")
+			docker := fakeDockerBinary(t, "touch "+launched+"\nexit 0\n")
+			activities := &Activities{
+				CheckRoute: func(string, sandbox.RoutePolicy, string) error { return nil },
+				ResolveRouteCredentials: func(string) (RouteCredentials, error) {
+					return RouteCredentials{}, tc.resolveErr
+				},
+			}
+			input := relayFixtureInput(t, docker, t.TempDir())
+
+			var suite testsuite.WorkflowTestSuite
+			env := suite.NewTestActivityEnvironment()
+			env.RegisterActivity(activities.RunBuildActivity)
+			_, err := env.ExecuteActivity(activities.RunBuildActivity, input)
+			if !hasApplicationErrorType(err, tc.wantType) {
+				t.Fatalf("error = %v, want application error type %q", err, tc.wantType)
+			}
+			if _, statErr := os.Stat(launched); statErr == nil {
+				t.Error("a worker was launched without a usable route credential")
+			}
+			crossed := wrapActivityFailure("run build activity", err, nil, "base", false, "/wt", "branch")
+			wantCause := unresolved.Cause("")
+			if tc.wantType == RouteCredentialFailureType {
+				wantCause = unresolved.RouteCredential
+			}
+			if got := UnresolvedCauseFromError(crossed); got != wantCause {
+				t.Errorf("cause across the Temporal boundary = %q, want %q", got, wantCause)
+			}
+			if got := HaltReasonCodeFromError(crossed); got != string(wantCause) {
+				t.Errorf("HaltReasonCode = %q, want %q", got, wantCause)
+			}
+		})
+	}
+	// A launch the sandbox runtime refused because the credential expires
+	// before the step's budget ends is the same cause.
+	refused := sandbox.RouteCredentialError(errors.New(`sandbox runtime: route "codex" credential expires at 2026-10-27T12:00:00Z, before this step's budget of 45m0s ends`))
+	if got := launchErrorType(refused); got != RouteCredentialFailureType {
+		t.Errorf("launchErrorType(credential refused at launch) = %q, want %q", got, RouteCredentialFailureType)
 	}
 }
 

@@ -116,7 +116,9 @@ func refusedFactoryDirAttempt(afterAttempt func(int, runner.Result, error) error
 // registry (errDependencyFetch) is DependencyFetchFailureType. A launch
 // refused for want of disk, or a command that failed with Docker's disk
 // exhausted, is SandboxDiskFailureType; a baseline verify that failed with
-// its worker OOM-killed is SandboxMemoryFailureType. A command
+// its worker OOM-killed is SandboxMemoryFailureType. A launch refused
+// because the route's credential cannot be used (sandbox.ErrRouteCredential)
+// is RouteCredentialFailureType. A command
 // the runtime started twice is a lost step for the build only
 // (buildActivityErrorType): one of its signs is an exit code, which a
 // repository's own verify or gate command could return.
@@ -130,6 +132,8 @@ func launchErrorType(runErr error) string {
 		return SandboxDiskFailureType
 	case errors.Is(runErr, errSandboxMemory):
 		return SandboxMemoryFailureType
+	case errors.Is(runErr, sandbox.ErrRouteCredential):
+		return RouteCredentialFailureType
 	case errors.Is(runErr, sandbox.ErrSandboxNotStarted):
 		return SandboxLaunchFailureType
 	case errors.Is(runErr, errDependencyFetch):

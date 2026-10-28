@@ -5,7 +5,9 @@ import (
 	"buildgate/internal/evidence"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/unresolved"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -39,6 +41,21 @@ func reviewNoVerdictCause(runRecord *run.Run) unresolved.Cause {
 		return cause
 	}
 	return unresolved.NoVerdict
+}
+
+// routeCredentialStep is the lost step of a model job or a ticket build that
+// ended before it made any model request because its route's credential
+// could not be used: sandbox.ErrRouteCredential is in err's chain, put there
+// where the fact was observed (the worker's credential resolver, route
+// selection when every route failed on its credential, or the sandbox
+// runtime refusing a credential that expires before the step's budget ends).
+// The wording of err is never read; it is only the reason line's detail.
+// ok is false for any other error.
+func routeCredentialStep(err error) (step request.LostStep, ok bool) {
+	if !errors.Is(err, sandbox.ErrRouteCredential) {
+		return request.LostStep{}, false
+	}
+	return request.LostStep{Cause: unresolved.RouteCredential, Detail: jobFailureDetail(err)}, true
 }
 
 // lostStepOf describes runRecord, a run that gave no verdict for cause, for

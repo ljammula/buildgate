@@ -143,7 +143,7 @@ func routeCredential(spec RouteSpec, access RouteAccess, now time.Time, stepTime
 	if spec.AuthMode == meter.CredentialModeChatGPTCodex {
 		var err error
 		if expiresAt, err = accessTokenExpiry(spec.ChatGPTToken.reveal()); err != nil {
-			return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q access token: %w", spec.Route, err)
+			return RouteCredential{}, RouteCredentialError(fmt.Errorf("sandbox runtime: route %q access token: %w", spec.Route, err))
 		}
 	}
 	return spec.RoutePolicy.RouteCredential(access, spec.APIKey, spec.GitHubToken, spec.ChatGPTToken, spec.ChatGPTAccountID, expiresAt, now, stepTimeout)

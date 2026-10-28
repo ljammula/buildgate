@@ -1297,13 +1297,22 @@ func withRefusedAttempt(dataDir, dir string, refused *run.Run, args []string) ([
 // own doc comment for why this distinction exists (a start failure must
 // not consume a max_review_rounds slot). unresolved is the halted run's
 // recorded cause when it ended with no verdict on the work
-// (run.UnresolvedCauseOf): such a round is not counted either, and its
+// (run.UnresolvedCauseOf), or unresolved.RouteCredential for a round with
+// no record whose runErr says its route credential could not be used
+// (routeCredentialStep): such a round is not counted either, and its
 // request waits in resume_review.
 func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, error) {
 	loaded, loadErr := run.Load(dataDir, runID)
 	if loadErr != nil {
 		if runErr != nil {
-			return roundOutcome{outcome: request.RoundHalted, errText: runErr.Error(), startFailure: true}, nil
+			// A round refused before its record existed because its route
+			// credential could not be used is no verdict either: it waits
+			// for a human, rather than starting again every poll.
+			ended := roundOutcome{outcome: request.RoundHalted, errText: runErr.Error(), startFailure: true}
+			if step, lost := routeCredentialStep(runErr); lost {
+				ended.unresolved = step.Cause
+			}
+			return ended, nil
 		}
 		return roundOutcome{}, fmt.Errorf("load round run %q: %w", runID, loadErr)
 	}

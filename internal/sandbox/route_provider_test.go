@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -240,21 +241,36 @@ func TestRouteCredentialRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, account, now.Add(59*time.Minute), now, time.Hour); err == nil || !strings.Contains(err.Error(), "expires at 2026-10-04T12:59:00Z") {
+	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, account, now.Add(59*time.Minute), now, time.Hour); err == nil || !strings.Contains(err.Error(), "expires at 2026-10-04T12:59:00Z") || !errors.Is(err, ErrRouteCredential) {
 		t.Errorf("a credential that expires inside the step: err = %v", err)
 	}
-	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "BG_CHATGPT_ACCOUNT") {
+	if _, err := p.RouteCredential(access, RouteSecret{}, RouteSecret{}, token, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "BG_CHATGPT_ACCOUNT") || !errors.Is(err, ErrRouteCredential) {
 		t.Errorf("a missing account id: err = %v", err)
 	}
 	if _, err := p.RouteCredential(access, NewRouteSecret("key"), RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil {
 		t.Error("an API key for a chatgpt route was accepted")
+	}
+	// Access naming keys the credential mode does not supply is a
+	// configuration fault, never a credential to refresh, whether or not
+	// the values are present.
+	for name, env := range map[string][]string{
+		"fewer keys":      {EnvModelKey},
+		"a different key": {EnvModelKey, EnvChatGPTAccount},
+	} {
+		mismatched := access
+		mismatched.CredentialEnv = env
+		for _, tok := range []RouteSecret{token, {}} {
+			if _, err := p.RouteCredential(mismatched, RouteSecret{}, RouteSecret{}, tok, account, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "does not match") || errors.Is(err, ErrRouteCredential) {
+				t.Errorf("%s (token set %v): err = %v, want an untagged mismatch", name, tok.Configured(), err)
+			}
+		}
 	}
 	local := localModelPolicy()
 	localAccess, err := local.RouteAccess(t.TempDir(), piBinaries)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := local.RouteCredential(localAccess, RouteSecret{}, RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "no provider") {
+	if _, err := local.RouteCredential(localAccess, RouteSecret{}, RouteSecret{}, RouteSecret{}, RouteSecret{}, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "no provider") || errors.Is(err, ErrRouteCredential) {
 		t.Errorf("a route with no provider: err = %v", err)
 	}
 }
