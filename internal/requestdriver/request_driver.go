@@ -81,6 +81,9 @@ type Deps interface {
 	// HostGitVersion is the host's `git version` output, checked against
 	// workspace.GitFloor before a restack's first git call.
 	HostGitVersion(ctx context.Context) (string, error)
+	// ReadJobLog is the log of GitHub Actions job jobID of the pull
+	// request's repository (a CI round's failed check).
+	ReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error)
 }
 
 // RequestDriverOwnsState reports whether driveRequests knows how to

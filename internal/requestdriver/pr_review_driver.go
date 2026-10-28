@@ -53,6 +53,11 @@ func RealReadReviewState(ctx context.Context, prURL string, policy forge.AuthorP
 // request driver's spec/plan jobs ultimately bottom out in.
 var PrReviewCorrectiveRunner TicketRunner
 
+// RealReadJobLog is the real body of Deps.ReadJobLog.
+func RealReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return forge.GHPullRequestOpener{}.ReadJobLog(ctx, prURL, jobID)
+}
+
 // correctiveRunner is override when a test set one, else runMainWithReady
 // reaching the outside through dp.
 func correctiveRunner(dp Deps, override TicketRunner) TicketRunner {
@@ -517,6 +522,10 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 		return r.Save(dataDir)
 	}
 
+	if handled, err := handleCIChecks(dp, ctx, dataDir, r, ticket, state, cfg, now); handled {
+		return err
+	}
+
 	return advancePRReadyOrApproved(dp, ctx, dataDir, r, ticket, state, now)
 }
 
@@ -897,7 +906,10 @@ func checkMergeReadiness(dataDir string, ticket *request.Ticket, state forge.Rev
 		blockers = append(blockers, "a reviewer requested changes")
 	}
 	blockers = append(blockers, headReviewBlockers(dataDir, ticket.PRHeadRunID(), state.HeadSHA)...)
+	ciBlockers, notes := ciReadiness(state)
+	blockers = append(blockers, ciBlockers...)
 	return &request.MergeReadiness{
+		Notes:     notes,
 		Ready:     len(blockers) == 0,
 		CheckedAt: now.UTC().Format(time.RFC3339Nano),
 		HeadSHA:   state.HeadSHA,
@@ -976,6 +988,13 @@ func shortSHA(sha string) string {
 // roundRunID/addendum-directory naming, which must stay globally unique
 // per attempt regardless of whether it counts against the cap.
 func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, newThreads []forge.Thread, cfg WorkerConfig, now time.Time) error {
+	return runPRReviewRound(dp, ctx, dataDir, r, ticket, roundTrigger{threads: newThreads}, cfg, now)
+}
+
+// runPRReviewRound is RunCorrectiveRound over either trigger of a PR-review
+// round (roundTrigger): review threads, or one failed required CI check.
+func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, trig roundTrigger, cfg WorkerConfig, now time.Time) error {
+	newThreads := trig.threads
 	roundIndex := len(ticket.Rounds) + 1
 	countedRounds := 0
 	for _, rnd := range ticket.Rounds {
@@ -1030,6 +1049,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	// given that attempt's record, beside the reviewer's comments. The
 	// recheck is the ticket's list (ticketRecheck), whatever that round was.
 	refused := priorRoundRefusal(dataDir, r, ticket)
+	ciRecord := trig.record(dp, ctx, head.Run, ticket)
 	// One round is one build plus, when a reviewer's reproduction alone
 	// refused it (SC-022: a finding blocks only through its reproduction,
 	// never through its severity), up to review_corrective_rounds fix
@@ -1051,7 +1071,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 		if fix > 0 {
 			attemptID = fmt.Sprintf("%s-fix%d", roundRunID, fix)
 		}
-		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase, stackBaseSHA, refused)
+		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase, stackBaseSHA, refused, ciRecord)
 		if errors.Is(err, errNoRecheck) {
 			// The round would build without a reproduction the ticket must
 			// pass again: no build (SC-022).
@@ -1086,6 +1106,7 @@ func RunCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request
 	ticket.Rounds = append(ticket.Rounds, request.Round{
 		Index:        roundIndex,
 		ThreadIDs:    threadIDs,
+		CICheck:      trig.checkName(),
 		RunID:        loadID,
 		PriorRunIDs:  priorRunIDs,
 		Outcome:      outcome,
@@ -1158,7 +1179,7 @@ type roundOutcome struct {
 // blocking finding in one line (SC-018), from a file beside the addendum.
 // Like every build of the ticket, it rechecks the ticket's list
 // (ticketRecheck), and what refused it goes on that list.
-func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase, stackBaseSHA string, refused *run.Run) (roundAttempt, error) {
+func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase, stackBaseSHA string, refused *run.Run, ciRecord *handoff.Document) (roundAttempt, error) {
 	// -open-pull-request is always forced off for a corrective round,
 	// regardless of cfg.openPullRequest: this run's branch already has an
 	// open PR (opened when the ticket was first built), so a second
@@ -1182,10 +1203,8 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	entry.IssueRef = ""
 	entry.PRBase = ""
 	args := append(BuildTicketRunArgs(dataDir, entry, roundCfg), "-on-branch", branch, "-diff-base", diffBase)
-	if refused != nil {
-		if args, err = withRefusedAttempt(dataDir, filepath.Dir(specPath), refused, args); err != nil {
-			return roundAttempt{}, err
-		}
+	if args, err = withEarlierRecord(dataDir, filepath.Dir(specPath), refused, ciRecord, args); err != nil {
+		return roundAttempt{}, err
 	}
 
 	// startedRunID is this attempt's own actual run id, captured the moment
@@ -1263,17 +1282,33 @@ func roundFixRefusal(ctx context.Context, dataDir string, r *request.Request, cf
 	return loaded
 }
 
-// withRefusedAttempt adds to a PR-review build's args, from a file it
-// writes in dir, refused's record (-earlier-attempt, opening by saying the
-// attempt's commit is in the workspace), when it is a failure a build is
-// told about. The build's recheck comes from the ticket's list, not from
-// refused (ticketRecheck).
-func withRefusedAttempt(dataDir, dir string, refused *run.Run, args []string) ([]string, error) {
-	doc, ok := handoffForABuild(dataDir, refused)
+// withEarlierRecord adds to a PR-review build's args, from the one file it
+// writes in dir, the record of what the build follows (-earlier-attempt):
+// refused's handoff when it is a failure a build is told about (opening by
+// saying the attempt's commit is in the workspace), and the failed CI check
+// of ciRecord when the round is a CI round. When both exist they are one
+// record, the refused attempt's with the CI failure set on it, so the file
+// stays within the limit (handoff.MaxCILogBytes beside a Markdown record of
+// at most 8000 bytes, under the build's 32 KiB). The build's recheck comes
+// from the ticket's list, not from refused (ticketRecheck).
+func withEarlierRecord(dataDir, dir string, refused *run.Run, ciRecord *handoff.Document, args []string) ([]string, error) {
+	var doc handoff.Document
+	start := startsOnItsBranch
+	ok := false
+	if refused != nil {
+		doc, ok = handoffForABuild(dataDir, refused)
+	}
+	switch {
+	case ok && ciRecord != nil:
+		doc.CIFailure = ciRecord.CIFailure
+		start = ciAfterRefusalStart
+	case ciRecord != nil:
+		doc, ok, start = *ciRecord, true, ciStart
+	}
 	if !ok {
 		return args, nil
 	}
-	path, err := writeRecordFile(dir, doc, startsOnItsBranch)
+	path, err := writeRecordFile(dir, doc, start)
 	if err != nil {
 		return args, err
 	}

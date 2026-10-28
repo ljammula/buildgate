@@ -73,6 +73,9 @@ func (dp *deps) RestoreBranch(dir string, branch string, sha string) (bool, erro
 func (dp *deps) CommentOnPullRequest(ctx context.Context, prURL string, body string) error {
 	return dp.forge.commentOnPullRequest(ctx, prURL, body)
 }
+func (dp *deps) ReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return dp.forge.readJobLog(ctx, prURL, jobID)
+}
 func (dp *deps) HostGitVersion(ctx context.Context) (string, error) {
 	return dp.forge.hostGitVersion(ctx)
 }
@@ -85,6 +88,9 @@ func (dp *deps) RunTicket(ctx context.Context, args []string, onReady func(*run.
 
 func (impl realForge) readReviewState(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 	return requestdriver.RealReadReviewState(ctx, prURL, policy)
+}
+func (impl realForge) readJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return requestdriver.RealReadJobLog(ctx, prURL, jobID)
 }
 func (impl realForge) markPullRequestReady(ctx context.Context, prURL string) error {
 	return requestdriver.RealMarkPullRequestReady(ctx, prURL)

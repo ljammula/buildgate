@@ -121,6 +121,9 @@ type forgeBoundary interface {
 	// hostGitVersion is the host's `git version` output, which a restack
 	// checks against workspace.GitFloor.
 	hostGitVersion(ctx context.Context) (string, error)
+	// readJobLog is the log of a GitHub Actions job of the pull request's
+	// repository, which a CI round gives its build the tail of.
+	readJobLog(ctx context.Context, prURL string, jobID int64) (string, error)
 	userLogin() (string, error)
 }
 

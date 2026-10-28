@@ -106,6 +106,7 @@ type fakeForge struct {
 	restoreBranchFn               func(dir, branch, sha string) (bool, error)
 	commentOnPullRequestFn        func(ctx context.Context, prURL, body string) error
 	hostGitVersionFn              func(ctx context.Context) (string, error)
+	readJobLogFn                  func(ctx context.Context, prURL string, jobID int64) (string, error)
 	userLoginFn                   func() (string, error)
 }
 
@@ -176,6 +177,9 @@ func (f *fakeForge) restoreBranch(dir, branch, sha string) (bool, error) {
 }
 func (f *fakeForge) commentOnPullRequest(ctx context.Context, prURL, body string) error {
 	return f.commentOnPullRequestFn(ctx, prURL, body)
+}
+func (f *fakeForge) readJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return f.readJobLogFn(ctx, prURL, jobID)
 }
 func (f *fakeForge) hostGitVersion(ctx context.Context) (string, error) {
 	return f.hostGitVersionFn(ctx)
@@ -401,6 +405,9 @@ func newTestDeps(t testing.TB) *deps {
 		},
 		hostGitVersionFn: func(context.Context) (string, error) {
 			return "", errors.New("test forge: no git version is read")
+		},
+		readJobLogFn: func(context.Context, string, int64) (string, error) {
+			return "", errors.New("test forge: no job log is read")
 		},
 		userLoginFn: realForge.userLogin,
 	}

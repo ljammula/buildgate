@@ -1,0 +1,8 @@
+{"data":{"repository":{"pullRequest":{"commits":{"nodes":[{"commit":{"oid":"4f9d2c1b8e7a6d5c4b3a29180f7e6d5c4b3a2918","statusCheckRollup":{"contexts":{"pageInfo":{"hasNextPage":false,"endCursor":"Y3Vyc29yOjQ="},"nodes":[
+{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/widgets/actions/runs/9/job/77","databaseId":77,"checkSuite":{"app":{"slug":"github-actions"}}},
+{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.com/acme/widgets/actions/runs/9/job/78","databaseId":78,"checkSuite":{"app":{"slug":"github-actions"}}},
+{"__typename":"CheckRun","name":"build","status":"IN_PROGRESS","conclusion":null,"detailsUrl":"https://github.com/acme/widgets/actions/runs/9/job/79","databaseId":79,"checkSuite":{"app":{"slug":"github-actions"}}},
+{"__typename":"StatusContext","context":"license/cla","state":"FAILURE","targetUrl":"https://cla.example/acme","creator":{"login":"cla-bot"}},
+{"__typename":"StatusContext","context":"ci/legacy","state":"SUCCESS","targetUrl":"","creator":{"login":"ci-bot"}},
+{"__typename":"StatusContext","context":"ci/pending","state":"PENDING","targetUrl":"","creator":{"login":"ci-bot"}}
+]}}}}]}}}}}

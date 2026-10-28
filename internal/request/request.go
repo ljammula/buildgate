@@ -158,6 +158,10 @@ type Ticket struct {
 	// ticket's open pull request is ready to merge. Nil until a poll has
 	// checked it, while a corrective round runs, and once it has merged.
 	MergeReadiness *MergeReadiness `json:"merge_readiness,omitempty"`
+	// CITriaged are the "<check name>@<head SHA>" keys of the required
+	// checks whose failure was sent to the operator as a triage sentence
+	// (not the code's to fix), so each is sent once per head.
+	CITriaged []string `json:"ci_triaged,omitempty"`
 	// NotifiedPR is the last thing the operator was told this pull request
 	// asks of them, and the head it was said of: "review:<sha>" or
 	// "merge:<sha>". It is what keeps a poll from saying it again.
@@ -239,6 +243,9 @@ type MergeReadiness struct {
 	// Blockers says, one sentence each, what the bar still lacks. Empty
 	// exactly when Ready.
 	Blockers []string `json:"blockers,omitempty"`
+	// Notes are facts that do not block: a check that is not required and
+	// failed.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // ConformityRoundKind marks a Round as an automatic review corrective round
@@ -294,7 +301,12 @@ type Round struct {
 	// this type's own doc comment.
 	Kind      string   `json:"kind,omitempty"`
 	ThreadIDs []string `json:"thread_ids"`
-	RunID     string   `json:"run_id"`
+	// CICheck is the name of the required CI check whose failure started
+	// this PR-review round (a CI round), "" for a round started by review
+	// threads. A round has at most one trigger, and a CI round marks no
+	// thread seen.
+	CICheck string `json:"ci_check,omitempty"`
+	RunID   string `json:"run_id"`
 	// PriorRunIDs are the runs of a PR-review round's earlier attempts, in
 	// order: each was quarantined by the review gate alone and followed by
 	// a fix attempt on the same branch. RunID is the last attempt's run,
@@ -1502,6 +1514,9 @@ func (r *Request) prReviewNextAction() string {
 				byState[mergeReadyKey] = append(byState[mergeReadyKey], t.PRURL)
 			} else {
 				parts = append(parts, fmt.Sprintf("%s is not ready to merge: %s. Review comments from a trusted author (`pr_trusted_authors`) start a corrective round on the same branch", t.PRURL, strings.Join(mr.Blockers, "; ")))
+			}
+			if len(mr.Notes) > 0 {
+				parts = append(parts, fmt.Sprintf("note on %s: %s", t.PRURL, strings.Join(mr.Notes, "; ")))
 			}
 			continue
 		}

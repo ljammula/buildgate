@@ -263,8 +263,14 @@
           "head_sha": "every-field head_sha",
           "blockers": [
             "every-field blockers"
+          ],
+          "notes": [
+            "every-field notes"
           ]
         },
+        "ci_triaged": [
+          "every-field ci_triaged"
+        ],
         "notified_pr": "every-field notified_pr",
         "pr_not_ready_since": "2026-09-10T09:00:00Z",
         "seen_thread_ids": [
@@ -279,6 +285,7 @@
             "thread_ids": [
               "every-field thread_ids"
             ],
+            "ci_check": "every-field ci_check",
             "run_id": "every-field run_id",
             "prior_run_ids": [
               "every-field prior_run_ids"

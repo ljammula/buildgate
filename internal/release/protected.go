@@ -21,10 +21,44 @@ func inFactoryDir(c string) bool {
 	return strings.EqualFold(first, projectconfig.DirName)
 }
 
+// ciDefinitionDirs and ciDefinitionFiles are the CI definition paths
+// (safety-contract.md, "The CI definition paths are built-in protected
+// paths"): the files that define the checks judging a pull request. A
+// directory entry protects everything under it, a file entry that path
+// alone, both at the repository root and in any letter case. No config
+// exempts them.
+var (
+	ciDefinitionDirs = []string{
+		".github/workflows", ".github/actions", ".gitlab", ".circleci",
+		".buildkite", ".azure-pipelines", ".woodpecker",
+	}
+	ciDefinitionFiles = []string{
+		".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml",
+		"bitbucket-pipelines.yml", "jenkinsfile", ".drone.yml", ".woodpecker.yml",
+	}
+)
+
+// isCIDefinitionPath reports whether c is a CI definition path.
+func isCIDefinitionPath(c string) bool {
+	l := strings.ToLower(strings.TrimPrefix(c, "./"))
+	for _, f := range ciDefinitionFiles {
+		if l == f {
+			return true
+		}
+	}
+	for _, d := range ciDefinitionDirs {
+		if strings.HasPrefix(l, d+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // ProtectedFilesTouched returns the subset of changed that is protected --
 // cfg's own ProtectedPaths, plus projectconfig.FileName (.factory.yml), the
-// projectconfig.DirName (.factory/) directory in any case, and the
-// .buildgate/ directory unconditionally (in any case) -- in changed's original order.
+// projectconfig.DirName (.factory/) directory in any case, the CI definition
+// paths in any case, and the .buildgate/ directory unconditionally (in any
+// case) -- in changed's original order.
 // .factory.yml is always
 // included, on top of whatever the operator configured: the sandboxed
 // agent must not be able to weaken its own acceptance check (a lower
@@ -43,7 +77,7 @@ func (cfg MergePolicy) ProtectedFilesTouched(changed []string) []string {
 		// Case-insensitive worktrees (macOS) let an agent commit
 		// ".BuildGate/..." past an exact-case match, so fold case for the
 		// factory's own directory.
-		if first, _, _ := strings.Cut(c, "/"); strings.EqualFold(first, buildgateDir) || inFactoryDir(c) || len(matchProtected([]string{c}, protectedPaths)) > 0 {
+		if first, _, _ := strings.Cut(c, "/"); strings.EqualFold(first, buildgateDir) || inFactoryDir(c) || isCIDefinitionPath(c) || len(matchProtected([]string{c}, protectedPaths)) > 0 {
 			touched = append(touched, c)
 		}
 	}

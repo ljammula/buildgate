@@ -552,6 +552,28 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   request next reaches `pr_review`, after that build. The factory never
   merges.
 
+**CI rounds.** Each poll also reads the checks of the pull request's head
+(check runs and commit statuses, and whether GitHub requires each one for the
+pull request). A required check that completed with `FAILURE` on a head the
+factory pushed starts one PR-review round (a CI round) after any review-thread
+round: one build on the ticket's branch with the ticket's unchanged spec,
+given the check's name, conclusion and details URL and the last 200 lines
+(at most 16 KiB) of its GitHub Actions job's log as quoted data (a commit
+status or another app's check has no log; a log that cannot be read leaves the
+rest). It counts against `max_review_rounds`, is judged by every gate and a
+fresh review, and is pushed under the same checks as a thread's round. A ticket
+runs at most one CI round per check name: the same check failing again parks
+the request in `resume_review`, with the check named and no cause; `factoryd
+resume` reads the checks again. Around that:
+
+| Check | What happens |
+|---|---|
+| Not yet completed | Nothing starts; the ticket's "not ready to merge" reason names it |
+| Failed and not required | One note on the ticket and in `factoryd status`/`watch`; no round |
+| Required, conclusion `CANCELLED`, `TIMED_OUT`, `STARTUP_FAILURE`, `ACTION_REQUIRED` or `STALE`, or posted by a CLA or DCO app | One notification naming it, once per check and head; no round |
+| Required set unreadable (`isRequired` not served) | Every `FAILURE` counts as required, the reason says the set was not read; still one round per check |
+| Head not pushed by the factory | No round |
+
 Every poll that finds no new thread also checks the pull request against
 the ready-to-merge bar ([STATUS.md § Ready to merge](STATUS.md#ready-to-merge))
 and records the result as the ticket's `merge_readiness` (`ready`,
@@ -770,7 +792,12 @@ bypasses). Read from committed `HEAD` only:
 an uncommitted edit is ignored (logged), so a run can never widen its own
 defaults mid-run; `.factory.yml` is always a protected path, and so is
 everything under `.factory/` (any letter case): a run that changes anything
-there is refused at release.
+there is refused at release. The CI definition paths are protected the same way, in any letter
+case, and no config exempts them: `.github/workflows/`, `.github/actions/`,
+`.gitlab-ci.yml`, `.gitlab/`, `.circleci/`, `.buildkite/`, `.travis.yml`,
+`azure-pipelines.yml`, `.azure-pipelines/`, `bitbucket-pipelines.yml`,
+`Jenkinsfile`, `.drone.yml`, `.woodpecker.yml` and `.woodpecker/`. Only an
+operator's override releases a run that changes one.
 
 ```yaml
 verify_command: "make verify"          # canonical check, same as -verify-command

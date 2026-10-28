@@ -42,6 +42,7 @@ type fakeDeps struct {
 	listReviewCommentsFn          func(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error)
 	markPullRequestReadyFn        func(ctx context.Context, prURL string) error
 	pushExistingBranchFn          func(ctx context.Context, workspaceDir string, sha string, branch string) error
+	readJobLogFn                  func(ctx context.Context, prURL string, jobID int64) (string, error)
 	readReviewStateFn             func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error)
 	remoteBranchHeadSHAFn         func(ctx context.Context, workspaceDir string, branch string) (string, error)
 	replyToReviewCommentFn        func(ctx context.Context, prURL string, commentID int64, body string) error
@@ -142,6 +143,9 @@ func (f *fakeDeps) RestoreBranch(dir, branch, sha string) (bool, error) {
 func (f *fakeDeps) CommentOnPullRequest(ctx context.Context, prURL, body string) error {
 	return f.commentOnPullRequestFn(ctx, prURL, body)
 }
+func (f *fakeDeps) ReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return f.readJobLogFn(ctx, prURL, jobID)
+}
 func (f *fakeDeps) HostGitVersion(ctx context.Context) (string, error) {
 	return f.hostGitVersionFn(ctx)
 }
@@ -192,6 +196,9 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		restoreBranchFn: func(string, string, string) (bool, error) { return false, refused("RestoreBranch") },
 		commentOnPullRequestFn: func(context.Context, string, string) error {
 			return refused("CommentOnPullRequest")
+		},
+		readJobLogFn: func(context.Context, string, int64) (string, error) {
+			return "", refused("ReadJobLog")
 		},
 		hostGitVersionFn: func(context.Context) (string, error) {
 			return "", refused("HostGitVersion")

@@ -119,6 +119,9 @@ type Document struct {
 	// review, present only in the record an advice round's build is given
 	// (Advice): each value cut and cleaned like every other value here.
 	AdviceFindings []AdviceFinding `json:"advice_findings,omitempty"`
+	// CIFailure is the required CI check that failed on the pull request,
+	// present only in the record a CI round's build is given (CI).
+	CIFailure *CIFailure `json:"ci_failure,omitempty"`
 	// AgentNotes are the build agent's own notes for whoever attempts the
 	// ticket next: its view, not the factory's record. They never decide
 	// Next or a bin, and Markdown puts them last (SC-018).
@@ -579,6 +582,7 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
+	d.CIFailure.markdown(&b)
 	if len(d.Rounds) > 0 {
 		b.WriteString("## Build rounds\n\n")
 		for _, r := range d.Rounds {
@@ -612,10 +616,14 @@ func (d Document) Markdown() string {
 	}
 	b.WriteString(d.AgentNotes.markdown())
 	out := b.String()
-	if len(out) > maxMarkdownBytes {
-		cut := strings.LastIndex(out[:maxMarkdownBytes], "\n")
+	limit := maxMarkdownBytes
+	if d.CIFailure != nil {
+		limit += MaxCILogBytes
+	}
+	if len(out) > limit {
+		cut := strings.LastIndex(out[:limit], "\n")
 		if cut < 0 {
-			cut = maxMarkdownBytes
+			cut = limit
 		}
 		out = strings.ToValidUTF8(out[:cut], "") + "\n\n(The rest of this record was cut to fit.)\n"
 	}
