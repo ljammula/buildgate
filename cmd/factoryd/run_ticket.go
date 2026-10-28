@@ -325,7 +325,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.spec = flags.String("spec", "", "path to the ticket's spec.md (required)")
 	f.buildAppInterpreter = flags.String("build-app-interpreter", "python3", "internal: the interpreter that runs -build-app-script; tests point it at a stand-in")
 	f.buildAppScript = flags.String("build-app-script", "", "build script to run instead of the one built into this binary")
-	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "launches the build gets in total when a launch fails for an infrastructure reason")
+	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", sessionconfig.DefaultBuildAppMaxAttempts, "launches the build gets in total when a launch fails for an infrastructure reason")
 	f.codeReviewPolicy = flags.String("code-review-policy", codereview.PolicyOff, "AI code review after the other checks pass: off, advisory (findings recorded, never blocks) or required (a review that gives no verdict quarantines the run). Unset uses the session config's value")
 	f.maxRounds = flags.Int("max-rounds", requestdriver.DefaultMaxRounds, "most build rounds the coding agent gets")
 	f.timeoutMinutes = flags.Int("timeout-minutes", 45, "minutes the coding agent may run in one build round")

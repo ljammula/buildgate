@@ -240,14 +240,15 @@ type Config struct {
 	// ticket run whose code review recorded a high-severity finding may get:
 	// each a build on its pull request's branch given those findings, pushed
 	// only when it is accepted again and never refusing anything; the next
-	// follows only a pushed round whose own review recorded one. 0 (the
-	// default) is off; at most MaxReviewAdviceRounds.
+	// follows only a pushed round whose own review recorded one. 0 is off;
+	// DefaultReviewAdviceRounds when unset; at most MaxReviewAdviceRounds.
 	ReviewAdviceRounds *int `yaml:"review_advice_rounds,omitempty"`
 
 	// RoundSessionContinuity is whether a corrective or advice round's build
 	// continues the harness session of the build of the run it follows,
 	// instead of starting a fresh one with only the written record. Default
-	// false.
+	// true. A round on a role's escalation model starts fresh: a session
+	// continues only on the harness and model that wrote it.
 	RoundSessionContinuity *bool `yaml:"round_session_continuity,omitempty"`
 
 	// PlanReview, opt-in and false by default, makes every request submitted
@@ -551,8 +552,8 @@ type Settings struct {
 	// advice round.
 	ReviewAdviceRounds int
 
-	// RoundSessionContinuity is set when the config says
-	// round_session_continuity: true; the zero value carries no session.
+	// RoundSessionContinuity is round_session_continuity, true unless the
+	// config says false; false carries no session.
 	RoundSessionContinuity bool
 
 	// PlanReview is set when the config says plan_review: true; Submit
@@ -663,13 +664,15 @@ func (s Settings) EffectiveRelayCeilings() (tokenCeiling int, costCeilingMicroUS
 	return tokenCeiling, costCeilingMicroUSD
 }
 
-// DefaultSettings returns Settings populated with every knob's former CLI
-// flag default -- omitting a session config file, or any field of one,
-// changes nothing relative to the flag surface these replaced.
+// DefaultSettings returns Settings populated with every knob's default: the
+// value a key takes when the session config, or the whole file, omits it.
 func DefaultSettings() Settings {
 	return Settings{
-		BuildAppMaxAttempts: 2,
+		BuildAppMaxAttempts: DefaultBuildAppMaxAttempts,
 		VerifyMaxAttempts:   2,
+
+		ReviewAdviceRounds:     DefaultReviewAdviceRounds,
+		RoundSessionContinuity: true,
 
 		SandboxDocker:    "docker",
 		SandboxWorkerUID: sandbox.DefaultWorkerUID,
@@ -984,6 +987,13 @@ const (
 
 // MaxReviewAdviceRounds is the most review_advice_rounds allows.
 const MaxReviewAdviceRounds = 3
+
+// DefaultReviewAdviceRounds is review_advice_rounds when the config sets none.
+const DefaultReviewAdviceRounds = MaxReviewAdviceRounds
+
+// DefaultBuildAppMaxAttempts is build_app_max_attempts, and the
+// -build-app-max-attempts flags' default, when neither sets one.
+const DefaultBuildAppMaxAttempts = 4
 
 // DefaultPRBudgetLines is pr_budget_lines' default: a pull request a reviewer
 // reads in one sitting.

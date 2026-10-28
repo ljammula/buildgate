@@ -42,10 +42,8 @@ const defaultOracleDraftTimeoutMinutes = 15
 const defaultMaxReviewRounds = 3
 
 // defaultReviewCorrectiveRounds is -review-corrective-rounds' own
-// default:
-// the operator-approved default is one automatic corrective build, on by
-// default -- 0 disables it.
-const defaultReviewCorrectiveRounds = 1
+// default: three automatic corrective builds -- 0 disables them.
+const defaultReviewCorrectiveRounds = 3
 
 // workerFlags bundles every `factoryd worker` flag's *pointer, so
 // newWorkerFlags (below) can hand them back to workerMain without an
@@ -103,7 +101,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	f.planTicketsTimeoutMinutes = flags.Int("plan-tickets-timeout-minutes", defaultPlanTicketsTimeoutMinutes, "minutes allowed for drafting a request's plan")
 	f.oracleDraftScript = flags.String("draft-oracles-script", "", "path to a draft_acceptance_oracles.py to run for oracle drafting in place of the built-in one")
 	f.oracleDraftTimeoutMinutes = flags.Int("draft-oracles-timeout-minutes", defaultOracleDraftTimeoutMinutes, "minutes allowed for drafting a request's acceptance oracles")
-	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", 2, "total build attempts allowed when a build fails for an infrastructure reason")
+	f.buildAppMaxAttempts = flags.Int("build-app-max-attempts", sessionconfig.DefaultBuildAppMaxAttempts, "total build attempts allowed when a build fails for an infrastructure reason")
 	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "total canonical-verification attempts allowed on an infrastructure failure, and total launches of a review, full-suite or gate step whose sandbox never started")
 	f.sandboxImage = flags.String("sandbox-image", "", "Docker image that builds and verification run in; must be digest-pinned (name@sha256:...). Empty uses the session config's sandbox_image, which 'make install' records.")
 	f.registryProxy = flags.Bool("registry-proxy", false, "give each build a read-only caching proxy to the npm, PyPI and Go registries. Unset uses the config's registry_proxy, else on unless -build-app-script is given. True needs -sandbox-image.")
