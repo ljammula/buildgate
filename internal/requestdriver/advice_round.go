@@ -15,7 +15,7 @@ import (
 	"buildgate/internal/workflow"
 )
 
-// Advice rounds (session key review_advice_rounds, 0 to 3, 0 by default).
+// Advice rounds (session key review_advice_rounds, 0 to 3, 3 by default).
 //
 // A finding of a ticket run's code review refuses the run only through a
 // reproduction the factory runs (SC-022); every other finding is advice,

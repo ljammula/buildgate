@@ -362,7 +362,7 @@ build's first prompt receives, never a review. The file is kept in the
 request's directory (`rounds/<ticket>-corrective<n>/earlier-attempt.md`), the
 round's run is `<request>-<ticket>-corrective<n>`, and the round is recorded
 on the ticket with kind `corrective`. `-review-corrective-rounds` (default
-`1`; key `review_corrective_rounds`) is one budget per ticket build, `0`
+`3`; key `review_corrective_rounds`) is one budget per ticket build, `0`
 disables it, and it is counted separately from `max_review_rounds`. An
 accepted round opens the PR and advances exactly like a first build's
 acceptance. A budget greater than `1` runs up to that many consecutive
@@ -1289,9 +1289,12 @@ served nothing, and a review that still gave no verdict leaves the request in
 `resume_review`.
 
 With the session key `review_advice_rounds` above `0` (`0` to `3`, default
-`0`), a request's ticket run that is accepted with at least one `high` finding
+`3`), a request's ticket run that is accepted with at least one `high` finding
 in its review gets up to that many advice rounds before the request moves on.
-They never refuse anything, and the request stays in `building` throughout:
+With the default budgets a ticket can take up to seven builds before
+`pr_review` (its first, three corrective rounds, three advice rounds), each with
+its own review and checks;
+`request_token_budget` caps a request's total. They never refuse anything, and the request stays in `building` throughout:
 
 | | |
 |---|---|
@@ -2266,8 +2269,8 @@ limits for API-started runs.
 | `pr_budget_lines` | `400` -- the target size of one ticket's pull request, in changed lines: insertions plus deletions, as `git diff --shortstat` counts them. `0` is no budget. A negative value is refused. Planning writes one ticket when its estimate of the whole change is within the budget, and splits only a larger change, into the fewest tickets that each fit, each independently buildable and testable and never split by layer; with `0` it writes one ticket unless the spec's parts are independently shippable. The planner declares each ticket's estimate in an `Estimated-Changed-Lines:` header; the value the planning job ran under is recorded on the request (`plan_budget_lines`), and `plan_review` carries one note for each ticket whose estimate is over it. A planning target, not a cap: `release_max_insertions` and `release_max_files_changed` stay the hard limits. A running `worker` reads it at its next start (`factoryd restart`). |
 | `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `oracle_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, the oracle run-command edit and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
 | `review_reproductions` | `false` -- a request's ticket build's review still runs, but as advice on design, security, maintainability and risk (at most five findings, sent no spec and asked for no reproduction), so every finding is in the pull request's **Reviewer advice** and no `review_reproduction` check is recorded. `true` holds and runs each finding's reproduction (`review_reproduction`, SC-022), so a finding can block. A ticket that already has reproductions on its list still holds and runs them, and its review can still block, until the list is empty. A running `worker` reads it at its next start (`factoryd restart`). |
-| `round_session_continuity` | `false` -- `true` makes a corrective or advice round's build continue the harness session of the build of the run it follows, instead of starting a fresh session with only the written record of that run. The build session of a request's ticket build is kept in its run directory (`build-session/`, at most 64 MiB, 10,000 entries and 32 levels, without its saved prompts, round output, notes, harness configuration, skills or credential-named files; a session not kept leaves only the reason, which the round reports); the round's build continues it only when it was made by the same harness and model and holds at most 32 MiB of session state, and starts fresh with the record otherwise. `session` in the round's `BUILD_EVIDENCE.json` is `resumed` or `fresh(<reason>)`. Only a later round of the same ticket gets it; never a review. A running `worker` reads it at its next start (`factoryd restart`). |
-| `review_advice_rounds` | `0` -- `1` to `3` follows a request's accepted ticket run whose review recorded a `high` finding with up to that many advice rounds: each a build on its pull request's branch given those findings, pushed only when accepted again, never refusing anything; the next follows only a pushed round whose own review recorded a `high` finding (the advice rounds, beside `-code-review-policy`). Outside `0` to `3` is refused. A running `worker` reads it at its next start (`factoryd restart`). |
+| `round_session_continuity` | `true` -- a corrective or advice round's build continues the harness session of the build of the run it follows; `false` starts it fresh with only the written record of that run. The build session of a request's ticket build is kept in its run directory (`build-session/`, at most 64 MiB, 10,000 entries and 32 levels, without its saved prompts, round output, notes, harness configuration, skills or credential-named files; a session not kept leaves only the reason, which the round reports); the round's build continues it only when it was made by the same harness and model and holds at most 32 MiB of session state, and starts fresh with the record otherwise. `session` in the round's `BUILD_EVIDENCE.json` is `resumed` or `fresh(<reason>)`. Only a later round of the same ticket gets it; never a review. A running `worker` reads it at its next start (`factoryd restart`). |
+| `review_advice_rounds` | `3` -- `0` turns advice rounds off; `1` to `3` follows a request's accepted ticket run whose review recorded a `high` finding with up to that many advice rounds: each a build on its pull request's branch given those findings, pushed only when accepted again, never refusing anything; the next follows only a pushed round whose own review recorded a `high` finding (the advice rounds, beside `-code-review-policy`). Outside `0` to `3` is refused. A running `worker` reads it at its next start (`factoryd restart`). |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
 | `registry_proxy_pypi_upstream` | `https://pypi.org/simple` |
 | `registry_proxy_pypi_files_upstream` | `https://files.pythonhosted.org` |
@@ -2296,7 +2299,7 @@ limits for API-started runs.
 | `release_allow_dependency_lockfile_changes` | `false` |
 | `release_allow_unsandboxed` | `false` |
 | `release_allow_skipped_project_check` | `false` |
-| `build_app_max_attempts` | `2` |
+| `build_app_max_attempts` | `4` |
 | `verify_max_attempts` | `2` |
 
 Other keys that are not in the table: `data_dir` (the data dir of every

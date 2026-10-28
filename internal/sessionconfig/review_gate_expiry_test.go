@@ -100,11 +100,11 @@ func TestPlanReviewIsOffByDefaultAndTurnsOn(t *testing.T) {
 	}
 }
 
-func TestReviewAdviceRoundsDefaultsOffAndIsBounded(t *testing.T) {
-	if DefaultSettings().ReviewAdviceRounds != 0 || (Settings{}).ReviewAdviceRounds != 0 {
-		t.Error("advice rounds on by default, want 0")
+func TestReviewAdviceRoundsDefaultsToThreeAndIsBounded(t *testing.T) {
+	if got := DefaultSettings().ReviewAdviceRounds; got != 3 {
+		t.Errorf("default advice rounds = %d, want 3", got)
 	}
-	for body, want := range map[string]int{"review_advice_rounds: 0\n": 0, "review_advice_rounds: 1\n": 1, "review_advice_rounds: 3\n": 3, "review_reproductions: true\n": 0} {
+	for body, want := range map[string]int{"review_advice_rounds: 0\n": 0, "review_advice_rounds: 1\n": 1, "review_advice_rounds: 3\n": 3, "review_reproductions: true\n": 3} {
 		cfg, err := Load(writeConfig(t, body))
 		if err != nil {
 			t.Fatalf("Load %q: %v", body, err)
@@ -128,11 +128,11 @@ func TestReviewAdviceRoundsDefaultsOffAndIsBounded(t *testing.T) {
 	}
 }
 
-func TestRoundSessionContinuityDefaultsOffAndTurnsOn(t *testing.T) {
-	if DefaultSettings().RoundSessionContinuity || (Settings{}).RoundSessionContinuity {
-		t.Error("session continuity on by default, want off")
+func TestRoundSessionContinuityDefaultsOnAndTurnsOff(t *testing.T) {
+	if !DefaultSettings().RoundSessionContinuity {
+		t.Error("session continuity off by default, want on")
 	}
-	for body, want := range map[string]bool{"round_session_continuity: false\n": false, "round_session_continuity: true\n": true, "review_reproductions: true\n": false} {
+	for body, want := range map[string]bool{"round_session_continuity: false\n": false, "round_session_continuity: true\n": true, "review_reproductions: true\n": true} {
 		cfg, err := Load(writeConfig(t, body))
 		if err != nil {
 			t.Fatalf("Load %q: %v", body, err)

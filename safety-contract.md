@@ -810,7 +810,7 @@ requires a new contract review and an updated machine-checkable test.
   copied to the run directory first, where only the operator's prompts route
   and `factoryd logs -prompt` read them); a session that cannot be removed, or is not a plain
   directory, fails the build step, so no later step runs beside it.
-  With the session key `round_session_continuity` on (off by default), a
+  With the session key `round_session_continuity` on (on by default), a
   request ticket build's session is first also copied to the run directory
   (`build-session/`, `keepBuildSession`, while the step heartbeats): read
   and written through an `os.Root` on each side, every file opened with
