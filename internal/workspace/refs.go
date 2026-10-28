@@ -115,3 +115,40 @@ func keptBranch(branch string, keepPrefixes []string) bool {
 	}
 	return false
 }
+
+// RestoreBranch points the local branch back at sha in repoDir, under the git
+// metadata lock, when it is ahead of it: a build that ran on the branch and
+// whose commits are not to be kept moved it. Only a branch at a descendant of
+// sha is moved, by a compare-and-swap (`git update-ref` with the head just
+// read as the old value), so a branch moved meanwhile is never overwritten;
+// one already at sha is left as it is. ahead reports whether the branch still
+// points past sha when the call returns: true for a move that failed, false
+// for a branch at sha, and false for one that could not be read or is
+// elsewhere, which the call leaves as it is and reports as an error. It
+// writes only the local ref database: nothing is pushed.
+func RestoreBranch(repoDir, branch, sha string) (ahead bool, err error) {
+	if !commitID.MatchString(sha) || strings.HasPrefix(branch, "-") || branch == "" {
+		return false, fmt.Errorf("restore branch %q to %q: not a branch name and a full commit id", branch, sha)
+	}
+	unlock, err := lockGitMetadata(repoDir)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	ref := "refs/heads/" + branch
+	out, err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Output()
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", ref, err)
+	}
+	head := strings.TrimSpace(string(out))
+	if head == sha {
+		return false, nil
+	}
+	if err := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", sha, head).Run(); err != nil {
+		return false, fmt.Errorf("%s is at %s, which does not descend from %s: left as it is", ref, head, sha)
+	}
+	if out, err := gitMutate(repoDir, "update-ref", "-m", "buildgate: round not pushed", ref, sha, head); err != nil {
+		return true, fmt.Errorf("git update-ref %s %s %s: %w: %s", ref, sha, head, err, strings.TrimSpace(string(out)))
+	}
+	return false, nil
+}

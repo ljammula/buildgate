@@ -74,6 +74,11 @@ type Deps interface {
 	ReplayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	PushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	MoveBranch(dir string, branch string, sha string) error
+	// RestoreBranch points a local branch that is ahead of sha back at it
+	// (workspace.RestoreBranch): ahead is whether it still points past sha.
+	RestoreBranch(dir string, branch string, sha string) (ahead bool, err error)
+	// CommentOnPullRequest posts body as a comment on the pull request.
+	CommentOnPullRequest(ctx context.Context, prURL string, body string) error
 	// HostGitVersion is the host's `git version` output, checked against
 	// workspace.GitFloor before a restack's first git call.
 	HostGitVersion(ctx context.Context) (string, error)
@@ -1373,6 +1378,17 @@ func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket,
 	if ticket.PRURL != "" {
 		ticket.PRState = "draft"
 	}
+	return advanceAcceptedTicket(dataDir, r, ticket, runRecord, opensPullRequests, now)
+}
+
+// advanceAcceptedTicket is acceptTicketRun after the ticket's branch and pull
+// request are recorded: an advice round settled after a restart
+// (settleInterruptedAdviceRound) advances here, the branch and pull request
+// being the accepted run's, recorded before its first round.
+func advanceAcceptedTicket(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, opensPullRequests bool, now time.Time) error {
+	if ticket.PRURL != "" && ticket.PRState == "" {
+		ticket.PRState = "draft"
+	}
 	// With pull requests on (opensPullRequests is WorkerConfig.OpenPullRequest,
 	// the setting BuildTicketRunArgs turns into -open-pull-request), the next
 	// ticket is built on this run's commit and judged on its own changed
@@ -1492,6 +1508,32 @@ func failedGate(runRecord *run.Run, check string) bool {
 // changes nothing unless the request is still building, so it can never
 // overwrite a cancel that landed meanwhile.
 func recordTicketRunStarted(dataDir, requestID string, ticketIndex int, runID string) error {
+	return updateBuildingTicket(dataDir, requestID, ticketIndex, func(t *request.Ticket) { t.RunID = runID })
+}
+
+// recordRoundStarted records a corrective round's started run on ticket, in
+// memory and on disk (recordTicketRunStarted): as the ticket's run, or, for an
+// advice round, as the in-flight round's run (Ticket.Advice.RunID), leaving
+// the ticket's run the accepted one the round follows. A failure to save is
+// logged: the caller saves the outcome.
+func recordRoundStarted(dataDir string, r *request.Request, ticket *request.Ticket, runID string, advice bool) {
+	set := func(t *request.Ticket) { t.RunID = runID }
+	if advice {
+		set = func(t *request.Ticket) {
+			if t.Advice != nil {
+				t.Advice.RunID = runID
+			}
+		}
+	}
+	set(ticket)
+	if err := updateBuildingTicket(dataDir, r.ID, ticket.Index, set); err != nil {
+		log.Printf("request %s: ticket %d: record round run %s: %v", r.ID, ticket.Index, runID, err)
+	}
+}
+
+// updateBuildingTicket applies set to ticket ticketIndex of request requestID
+// on disk, under its lock, only while the request is still building.
+func updateBuildingTicket(dataDir, requestID string, ticketIndex int, set func(*request.Ticket)) error {
 	unlock, err := request.Lock(dataDir, requestID)
 	if err != nil {
 		return err
@@ -1506,7 +1548,7 @@ func recordTicketRunStarted(dataDir, requestID string, ticketIndex int, runID st
 	}
 	for i := range current.Tickets {
 		if current.Tickets[i].Index == ticketIndex {
-			current.Tickets[i].RunID = runID
+			set(&current.Tickets[i])
 			return current.Save(dataDir)
 		}
 	}
@@ -1573,14 +1615,14 @@ type correctiveLaunch struct {
 // outcome. stop is true when the caller must return at once with err and
 // record nothing: the request left building while the round ran (err nil),
 // the worker was asked to stop mid-round (the round is unrecorded and its
-// budget unspent), or the outcome could not be read. noteRefusals is false
-// for an advice round, whose run never refuses anything: a reproduction
-// that refused it goes on no ticket's list.
-func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf, stackBaseSHA string, escalated, noteRefusals bool) (launched correctiveLaunch, stop bool, err error) {
+// budget unspent), or the outcome could not be read. advice is true for an
+// advice round, whose run never refuses anything and is never the ticket's
+// run while it builds: a reproduction that refused it goes on no ticket's
+// list, and its run is recorded as Ticket.Advice.RunID, not Ticket.RunID.
+func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf, stackBaseSHA string, escalated, advice bool) (launched correctiveLaunch, stop bool, err error) {
 	var startedRunID string
 	runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
 		startedRunID = started.ID
-		ticket.RunID = started.ID
 		started.RequestID = r.ID
 		started.TicketIndex = ticket.Index
 		started.EarlierAttemptOf = recordOf
@@ -1589,13 +1631,11 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 		if err := started.Persist(dataDir); err != nil {
 			log.Printf("request %s: ticket %d: save run %s request id: %v", r.ID, ticket.Index, started.ID, err)
 		}
-		if err := recordTicketRunStarted(dataDir, r.ID, ticket.Index, started.ID); err != nil {
-			log.Printf("request %s: ticket %d: record corrective run %s: %v", r.ID, ticket.Index, started.ID, err)
-		}
+		recordRoundStarted(dataDir, r, ticket, started.ID, advice)
 	})
 	// What refused the round goes on the ticket's list at once, whatever
 	// becomes of the request next.
-	if noteRefusals {
+	if !advice {
 		noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
 	}
 	// stillInState: see AdvanceBuilding's own identical check and doc
@@ -1678,7 +1718,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if argValueOf(args, "-earlier-attempt") != "" {
 			recordOf = current.ID
 		}
-		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, run.StackBase(dataDir, current), executionEscalation(cfg) != nil, true)
+		launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, fmt.Sprintf("%s %d", plan.label, roundIndex), recordOf, run.StackBase(dataDir, current), executionEscalation(cfg) != nil, false)
 		if stop {
 			return true, err
 		}
@@ -1787,19 +1827,22 @@ func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Tick
 	return correctiveBuildArgs(dataDir, r, ticket, cfg, specPath, roundID, branch, diffBase, false)
 }
 
-// correctiveBuildArgs is BuildCorrectiveArgs. onOpenPR is true for a build on
-// a branch whose pull request is already open (an advice round): like a
+// correctiveBuildArgs is BuildCorrectiveArgs. onOpenPR is true for an advice
+// round, a build on a branch whose pull request is already open: like a
 // PR-review round (runRoundAttempt) it opens none, so -open-pull-request is
-// forced off and it gets no -pr-closes-issue or -pr-base.
+// forced off and it gets no -pr-closes-issue or -pr-base, and, not being
+// recovery from a failure, it runs on the execution role's model, never the
+// escalation.
 func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR bool) ([]string, error) {
 	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath, true)
 	if err != nil {
 		return nil, err
 	}
-	escalate(entry, cfg)
 	if onOpenPR {
 		cfg.OpenPullRequest = false
 		entry.IssueRef, entry.PRBase = "", ""
+	} else {
+		escalate(entry, cfg)
 	}
 	return append(BuildTicketRunArgs(dataDir, entry, cfg), "-on-branch", branch, "-diff-base", diffBase), nil
 }

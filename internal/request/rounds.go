@@ -183,25 +183,46 @@ func (rs *TicketRestack) nextAction(index, count int, prURL string) string {
 }
 
 // TicketAdvice is Ticket.Advice: Of is the accepted run the advice round
-// follows, which stays the ticket's run unless the round's result is pushed;
-// Since is when the round was started.
+// follows, which stays the ticket's run (Ticket.RunID) while the round is in
+// flight and after it unless the round's result is pushed; RunID is the
+// round's own run once it has started, "" before; Since is when the round
+// was started.
 type TicketAdvice struct {
 	Of    string `json:"of"`
+	RunID string `json:"run_id,omitempty"`
 	Since string `json:"since"`
 }
 
-// HadAdviceRound reports whether the ticket has had its one advice round:
-// one is recorded, or one is in flight.
-func (t *Ticket) HadAdviceRound() bool {
-	if t.Advice != nil {
-		return true
+// LiveRunID is the run of the ticket's that may be running now: its advice
+// round's while one is in flight and has started, else Ticket.RunID.
+func (t *Ticket) LiveRunID() string {
+	if t.Advice != nil && t.Advice.RunID != "" {
+		return t.Advice.RunID
 	}
+	return t.RunID
+}
+
+// AdviceRounds counts the ticket's recorded advice rounds, and reports
+// whether the last of them was pushed. A round in flight (Advice) is not
+// recorded yet.
+func (t *Ticket) AdviceRounds() (n int, lastPushed bool) {
 	for _, rnd := range t.Rounds {
 		if rnd.Kind == AdviceRoundKind {
-			return true
+			n++
+			lastPushed = rnd.Pushed
 		}
 	}
-	return false
+	return n, lastPushed
+}
+
+// NextRoundIndex is one past the highest Index among the ticket's rounds, so
+// Index keeps increasing in the order rounds are recorded.
+func (t *Ticket) NextRoundIndex() int {
+	n := 0
+	for _, rnd := range t.Rounds {
+		n = max(n, rnd.Index)
+	}
+	return n + 1
 }
 
 // TicketRestackHold is Ticket.RestackHold: since when whether the ticket

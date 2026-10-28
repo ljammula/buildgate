@@ -60,6 +60,8 @@ type fakeDeps struct {
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
 	hostGitVersionFn              func(ctx context.Context) (string, error)
+	restoreBranchFn               func(dir, branch, sha string) (bool, error)
+	commentOnPullRequestFn        func(ctx context.Context, prURL, body string) error
 }
 
 var _ requestdriver.Deps = (*fakeDeps)(nil)
@@ -134,6 +136,12 @@ func (f *fakeDeps) PushWithLease(ctx context.Context, dir, sha, branch, expected
 	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
 }
 func (f *fakeDeps) MoveBranch(dir, branch, sha string) error { return f.moveBranchFn(dir, branch, sha) }
+func (f *fakeDeps) RestoreBranch(dir, branch, sha string) (bool, error) {
+	return f.restoreBranchFn(dir, branch, sha)
+}
+func (f *fakeDeps) CommentOnPullRequest(ctx context.Context, prURL, body string) error {
+	return f.commentOnPullRequestFn(ctx, prURL, body)
+}
 func (f *fakeDeps) HostGitVersion(ctx context.Context) (string, error) {
 	return f.hostGitVersionFn(ctx)
 }
@@ -181,6 +189,10 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		},
 		pushWithLeaseFn: func(context.Context, string, string, string, string) error { return refused("PushWithLease") },
 		moveBranchFn:    func(string, string, string) error { return refused("MoveBranch") },
+		restoreBranchFn: func(string, string, string) (bool, error) { return false, refused("RestoreBranch") },
+		commentOnPullRequestFn: func(context.Context, string, string) error {
+			return refused("CommentOnPullRequest")
+		},
 		hostGitVersionFn: func(context.Context) (string, error) {
 			return "", refused("HostGitVersion")
 		},

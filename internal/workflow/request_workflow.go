@@ -137,9 +137,10 @@ const (
 	// heartbeat before Temporal declares it lost; AdvanceRequest heartbeats
 	// far more often than this.
 	requestStepHeartbeatTimeout = 2 * time.Minute
-	// requestStepStartToClose bounds one step. A ticket build carries its own
+	// RequestStepStartToClose bounds one step, and so the longest one ticket
+	// build can run. A ticket build carries its own
 	// round and verify timeouts; this only stops a step that hangs forever.
-	requestStepStartToClose = 48 * time.Hour
+	RequestStepStartToClose = 48 * time.Hour
 )
 
 // RequestWorkflowID is the workflow id of requestID's RequestWorkflow in the
@@ -210,7 +211,7 @@ func requestAdvanceActivityOptions(input RequestWorkflowInput, advance string) t
 	}
 	return temporalworkflow.ActivityOptions{
 		TaskQueue:           taskQueue,
-		StartToCloseTimeout: requestStepStartToClose,
+		StartToCloseTimeout: RequestStepStartToClose,
 		HeartbeatTimeout:    requestStepHeartbeatTimeout,
 		WaitForCancellation: true,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},

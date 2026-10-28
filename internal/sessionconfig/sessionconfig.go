@@ -236,11 +236,13 @@ type Config struct {
 	// review_reproduction check is recorded. True holds and runs them.
 	ReviewReproductions *bool `yaml:"review_reproductions,omitempty"`
 
-	// ReviewAdviceRound is whether a request's accepted ticket run whose code
-	// review recorded a high-severity finding gets one advice round: a build
-	// on its pull request's branch given those findings, pushed only when it
-	// is accepted again and never refusing anything. Default false.
-	ReviewAdviceRound *bool `yaml:"review_advice_round,omitempty"`
+	// ReviewAdviceRounds is how many advice rounds a request's accepted
+	// ticket run whose code review recorded a high-severity finding may get:
+	// each a build on its pull request's branch given those findings, pushed
+	// only when it is accepted again and never refusing anything; the next
+	// follows only a pushed round whose own review recorded one. 0 (the
+	// default) is off; at most MaxReviewAdviceRounds.
+	ReviewAdviceRounds *int `yaml:"review_advice_rounds,omitempty"`
 
 	// PlanReview, opt-in and false by default, makes every request submitted
 	// under this config wait at plan_review for a person to approve its
@@ -539,9 +541,9 @@ type Settings struct {
 	// review_reproductions: true; the zero value holds no reproduction.
 	ReviewReproductions bool
 
-	// ReviewAdviceRound is set when the config says review_advice_round:
-	// true; the zero value starts no advice round.
-	ReviewAdviceRound bool
+	// ReviewAdviceRounds mirrors Config.ReviewAdviceRounds; 0 starts no
+	// advice round.
+	ReviewAdviceRounds int
 
 	// PlanReview is set when the config says plan_review: true; Submit
 	// copies it onto each new request.
@@ -697,7 +699,8 @@ func DefaultSettings() Settings {
 }
 
 // applyLimits applies the keys that bound spend, waiting or size, each refused
-// when negative: the request and monthly budgets, pr_budget_lines and
+// when negative: the request and monthly budgets, pr_budget_lines,
+// review_advice_rounds (also refused over MaxReviewAdviceRounds) and
 // review_gate_expiry.
 func (c *Config) applyLimits(s *Settings) error {
 	// nonNegativeInteger/nonNegativeInteger64 back the four
@@ -739,6 +742,12 @@ func (c *Config) applyLimits(s *Settings) error {
 		return err
 	}
 	if err := nonNegativeInteger(&s.PRBudgetLines, "pr_budget_lines", c.PRBudgetLines); err != nil {
+		return err
+	}
+	if v := c.ReviewAdviceRounds; v != nil && *v > MaxReviewAdviceRounds {
+		return fmt.Errorf("review_advice_rounds: must be 0 to %d, got %d", MaxReviewAdviceRounds, *v)
+	}
+	if err := nonNegativeInteger(&s.ReviewAdviceRounds, "review_advice_rounds", c.ReviewAdviceRounds); err != nil {
 		return err
 	}
 	if c.ReviewGateExpiry == nil {
@@ -870,7 +879,6 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
 
 	boolean(&s.ReviewReproductions, c.ReviewReproductions)
-	boolean(&s.ReviewAdviceRound, c.ReviewAdviceRound)
 	boolean(&s.PlanReview, c.PlanReview)
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)
@@ -962,6 +970,9 @@ const (
 	// correct rollback for any PR this pipeline itself opens.
 	DefaultReleaseRollbackPlan = "git revert the merge commit on main"
 )
+
+// MaxReviewAdviceRounds is the most review_advice_rounds allows.
+const MaxReviewAdviceRounds = 3
 
 // DefaultPRBudgetLines is pr_budget_lines' default: a pull request a reviewer
 // reads in one sitting.

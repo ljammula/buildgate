@@ -274,13 +274,14 @@ const CorrectiveRoundKind = "corrective"
 // pre-PR kinds).
 const RestackRoundKind = "restack"
 
-// AdviceRoundKind marks a Round as the advice round of an accepted ticket
+// AdviceRoundKind marks a Round as an advice round of an accepted ticket
 // run: one build on the run's own branch, given the high-severity findings
 // of the run's code review as advice, whose result replaces the run on its
 // pull request only once every gate passed again and the push to that
 // branch is confirmed (Pushed). It never refuses anything: any other
-// outcome leaves the accepted run as the ticket's. At most one per ticket,
-// and it counts against neither round budget.
+// outcome leaves the accepted run as the ticket's. At most
+// review_advice_rounds per ticket, each after a pushed one, counted against
+// neither round budget.
 const AdviceRoundKind = "advice"
 
 // Round is one corrective build run against a ticket's own branch, in

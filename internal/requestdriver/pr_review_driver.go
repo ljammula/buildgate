@@ -184,6 +184,17 @@ func ParsePullRequestOwnerRepo(prURL string) (owner, repo string, number int, er
 	return m[1], m[2], number, nil
 }
 
+// RealCommentOnPullRequest posts body as a comment on prURL's pull request
+// (`gh pr comment <url> --body-file -`, the body on stdin).
+func RealCommentOnPullRequest(ctx context.Context, prURL, body string) error {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "comment", prURL, "--body-file", "-")
+	cmd.Stdin = strings.NewReader(body)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh pr comment %s: %w: %s", prURL, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // ReplyToReviewCommentPath is GitHub's REST "reply to a review comment"
 // endpoint, which is scoped by pull number:
 // POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies.
@@ -370,6 +381,11 @@ func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket) bool {
 func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, now time.Time) error {
 	if len(r.Tickets) == 0 {
 		return fmt.Errorf("request %s: in pr_review with no tickets", r.ID)
+	}
+	// An advice round left in flight when the request left building is
+	// recorded as not pushed before anything reads a ticket's PR head.
+	if stop, err := abandonInFlightAdvice(dp, dataDir, r, now); stop || err != nil {
+		return err
 	}
 	// awaitingHalt is r.AwaitingPRTicket() (internal/request), the SAME
 	// selection Retry uses to pick which ticket a `factoryd retry` acts

@@ -182,3 +182,50 @@ func MonthToDateSpend(dataDir string, now time.Time) (tokens int64, costMicroUSD
 	}
 	return tokens, costMicroUSD, nil
 }
+
+// runSpend is what run's attempts recorded spending: tokens in and out, and
+// cost.
+func runSpend(rec *run.Run) (tokens, costMicroUSD int64) {
+	for _, a := range rec.Attempts {
+		tokens += a.RelayConsumedInputTokens + a.RelayConsumedOutputTokens
+		costMicroUSD += a.RelayConsumedCostMicroUSD
+	}
+	return tokens, costMicroUSD
+}
+
+// budgetLeftFor is "" when every budget CheckLaunchBudget reads (the
+// request's and the month's, tokens and cost) has at least the spend of
+// repeats left, the build a launch is about to repeat; otherwise the reason
+// it has not. A budget that is not set always has enough. It is the advice
+// round's check: a build that is not a failure's recovery runs only when it
+// cannot be the launch that crosses a budget.
+func budgetLeftFor(dataDir string, r *request.Request, settings sessionconfig.Settings, repeats *run.Run, now time.Time) (string, error) {
+	needTokens, needCost := runSpend(repeats)
+	if settings.RequestTokenBudget > 0 || settings.RequestCostBudgetMicroUSD > 0 {
+		cs := api.NewServer(dataDir).ComputeCostSummary(r)
+		if reason := leftShort("request", cs.Tokens, costSummaryMicroUSD(cs), int64(settings.RequestTokenBudget), settings.RequestCostBudgetMicroUSD, needTokens, needCost); reason != "" {
+			return reason, nil
+		}
+	}
+	if settings.MonthlyTokenBudget > 0 || settings.MonthlyCostBudgetMicroUSD > 0 {
+		tokens, cost, err := MonthToDateSpend(dataDir, now)
+		if err != nil {
+			return "", err
+		}
+		return leftShort("monthly", tokens, cost, int64(settings.MonthlyTokenBudget), settings.MonthlyCostBudgetMicroUSD, needTokens, needCost), nil
+	}
+	return "", nil
+}
+
+// leftShort is the reason scope's budget (tokenLimit, costLimit; 0 is unset)
+// has less than needTokens and needCost left after spending tokens and cost,
+// "" when it has enough.
+func leftShort(scope string, tokens, cost, tokenLimit, costLimit, needTokens, needCost int64) string {
+	if tokenLimit > 0 && tokenLimit-tokens < needTokens {
+		return fmt.Sprintf("%s token budget has %d tokens left, under the %d the accepted run spent", scope, max(tokenLimit-tokens, 0), needTokens)
+	}
+	if costLimit > 0 && costLimit-cost < needCost {
+		return fmt.Sprintf("%s cost budget has $%.2f left, under the $%.2f the accepted run spent", scope, float64(max(costLimit-cost, 0))/1e6, float64(needCost)/1e6)
+	}
+	return ""
+}
