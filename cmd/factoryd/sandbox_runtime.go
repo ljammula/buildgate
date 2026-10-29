@@ -165,6 +165,11 @@ func newGatewayRuntime(dp *deps) *openshell.Lazy {
 			return hostcontrol.OpenShellMTLSDir(stack), nil
 		},
 		Ready: func(ctx context.Context) error {
+			// Every launch reaches the gateway through here first, so a
+			// refused backend launches nothing.
+			if err := dp.docker.backend(ctx).Refused(); err != nil {
+				return err
+			}
 			if err := dp.sandbox.meterHealthy(ctx); err != nil {
 				return fmt.Errorf("the meter does not answer (%v): run `factoryd doctor -fix` to start the OpenShell stack", err)
 			}

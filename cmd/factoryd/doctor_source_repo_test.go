@@ -47,7 +47,7 @@ func TestDoctorChecksRequestSourceReposFlagsInvisibleRepo(t *testing.T) {
 	dataDir := t.TempDir()
 	repo := t.TempDir()
 	saveDoctorTestRequest(t, dataDir, "req-1", repo, request.StateBuilding)
-	checks := doctorChecksRequestSourceRepos(context.Background(), "factoryd-doctor-test-nonexistent-binary", "img", dataDir, "")
+	checks := doctorChecksRequestSourceRepos(context.Background(), "", "factoryd-doctor-test-nonexistent-binary", "img", dataDir, "")
 	if len(checks) != 1 {
 		t.Fatalf("checks = %+v, want one", checks)
 	}

@@ -1462,7 +1462,7 @@ func (tr *ticketRun) checkProject() error {
 	// it exists.
 	if _, err := os.Stat(tr.sandboxDataDir); err == nil {
 		mountCtx, cancelMount := context.WithTimeout(tr.lifecycleCtx, 30*time.Second)
-		check := doctorCheckDataDirMountVisibility(mountCtx, *tr.sandboxDocker, *tr.sandboxImage, tr.sandboxDataDir)
+		check := doctorCheckDataDirMountVisibility(mountCtx, tr.dp.docker.backend(mountCtx).Backend, *tr.sandboxDocker, *tr.sandboxImage, tr.sandboxDataDir)
 		cancelMount()
 		if check.Err != nil {
 			if check.Fix != "" {

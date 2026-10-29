@@ -544,7 +544,7 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 	}
 	opts.DataDir = dataDir
 
-	if err := quickstartCheckRepoMountVisible(opts, configPath, repoRoot); err != nil {
+	if err := quickstartCheckRepoMountVisible(dp, opts, configPath, repoRoot); err != nil {
 		return err
 	}
 
@@ -1472,7 +1472,7 @@ func quickstartWriteNewConfig(dp *deps, opts *quickstartOptions, p *quickstartPr
 // fails minutes in with a bare "bind source path does not exist". The probe is
 // skipped when the config records no sandbox image or the image is not in the
 // local store (nothing to probe with); the home check needs no Docker.
-func quickstartCheckRepoMountVisible(opts *quickstartOptions, configPath, repoRoot string) error {
+func quickstartCheckRepoMountVisible(dp *deps, opts *quickstartOptions, configPath, repoRoot string) error {
 	if err := quickstartRepoUnderHome(repoRoot); err != nil {
 		return err
 	}
@@ -1485,7 +1485,7 @@ func quickstartCheckRepoMountVisible(opts *quickstartOptions, configPath, repoRo
 	if !sandbox.ImagePresent(ctx, opts.SandboxDocker, *cfg.SandboxImage) {
 		return nil
 	}
-	check := doctorCheckMountVisibilityFor(ctx, opts.SandboxDocker, *cfg.SandboxImage, repoRoot,
+	check := doctorCheckMountVisibilityFor(ctx, dp.docker.backend(ctx).Backend, opts.SandboxDocker, *cfg.SandboxImage, repoRoot,
 		"repository", "pass a real, existing git checkout as <repo-path>")
 	if check.Err == nil {
 		return nil

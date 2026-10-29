@@ -322,6 +322,7 @@ func TestUninstallForcePassesThroughToStop(t *testing.T) {
 func TestUninstallRemovesLaunchAgentsWhenPresent(t *testing.T) {
 	dp := newTestDeps(t)
 	f := newUninstallFixture(dp, t)
+	f.env.manager = hostcontrol.Launchd
 	dir := filepath.Join(f.home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -399,5 +400,24 @@ func TestUninstallWithoutPurgeKeepsGatewayState(t *testing.T) {
 	}
 	if strings.Contains(f.dockerCalls(), uninstallGatewayStateDir) {
 		t.Errorf("a non-purge uninstall touched the gateway state:\n%s", f.dockerCalls())
+	}
+}
+
+func TestUninstallRemovesSystemdUnitsWhenPresent(t *testing.T) {
+	dp := newTestDeps(t)
+	f := newUninstallFixture(dp, t)
+	f.env.manager = hostcontrol.Systemd
+	dir := filepath.Join(f.env.xdgConfg, "systemd", "user")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, hostcontrol.ServeService.Unit), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := uninstallRun(f.env, true, false, false, strings.NewReader("")); err != nil {
+		t.Fatal(err)
+	}
+	if f.serviceN != 1 || !strings.Contains(f.out.String(), "remove systemd service(s): "+filepath.Join(dir, hostcontrol.ServeService.Unit)) {
+		t.Errorf("uninstall-service ran %d times; plan:\n%s", f.serviceN, f.out.String())
 	}
 }

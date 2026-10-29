@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"buildgate/internal/dockerbackend"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sandbox"
 	"context"
@@ -73,7 +74,10 @@ type uninstallEnv struct {
 	stop    func(args []string) error
 	service func() error
 	// manager supervises install-service's services on this machine.
-	manager  hostcontrol.ServiceManager
+	manager hostcontrol.ServiceManager
+	// backend is the Docker the gateway runs on: it decides where the
+	// gateway's state directory is and how to remove it by hand.
+	backend  dockerbackend.Backend
 	out      io.Writer
 	runDock  func(args ...string) error
 	dockOut  func(args ...string) (string, error)
@@ -111,6 +115,7 @@ func newUninstallEnv(dp *deps, home, exe string, out io.Writer) *uninstallEnv {
 		stop:    func(a0 []string) error { return stopKeepingColima(dp, a0) },
 		service: func() error { return uninstallServiceMain(dp, nil) },
 		manager: dp.host.serviceManager(),
+		backend: dp.docker.backend(context.Background()).Backend,
 		out:     out,
 	}
 	env.xdgConfg = os.Getenv("XDG_CONFIG_HOME")
@@ -202,14 +207,18 @@ func (e *uninstallEnv) skillDirs() []string {
 // step cannot run, so it prints the manual command instead.
 func (e *uninstallEnv) gatewayStatePurgeSteps() []uninstallStep {
 	helper := uninstallImages[0]
+	where := "on the Docker VM"
+	if e.backend == dockerbackend.NativeLinux {
+		where = "on this host"
+	}
 	if !e.imagePresent(helper) {
 		return []uninstallStep{{
-			desc: "NOTE: the gateway's state on the Docker VM (" + uninstallGatewayStateDir + ": database, keys, stored credentials) is not removed here; remove it yourself, e.g. `colima ssh -- sudo rm -rf " + uninstallGatewayStateDir + "`",
+			desc: "NOTE: the gateway's state " + where + " (" + uninstallGatewayStateDir + ": database, keys, stored credentials) is not removed here; remove it yourself, e.g. " + e.gatewayStateRemoveCommand(),
 			run:  func() error { return nil },
 		}}
 	}
 	return []uninstallStep{{
-		desc: "DELETE the gateway's state on the Docker VM (" + uninstallGatewayStateDir + ": database, keys, stored credentials)",
+		desc: "DELETE the gateway's state " + where + " (" + uninstallGatewayStateDir + ": database, keys, stored credentials)",
 		run: func() error {
 			err := e.runDock("run", "--rm", "--user", "0", "--entrypoint", "sh",
 				"--mount", "type=bind,source="+uninstallGatewayStateDir+",target=/state",
@@ -220,6 +229,18 @@ func (e *uninstallEnv) gatewayStatePurgeSteps() []uninstallStep {
 			return err
 		},
 	}}
+}
+
+// gatewayStateRemoveCommand is the command that removes the gateway's state
+// directory by hand: it is root's, on the Docker host.
+func (e *uninstallEnv) gatewayStateRemoveCommand() string {
+	switch e.backend {
+	case dockerbackend.NativeLinux:
+		return "`sudo rm -rf " + uninstallGatewayStateDir + "`"
+	case dockerbackend.Colima:
+		return "`colima ssh -- sudo rm -rf " + uninstallGatewayStateDir + "`"
+	}
+	return "`sudo rm -rf " + uninstallGatewayStateDir + "` on the machine Docker runs on (colima: `colima ssh -- sudo rm -rf " + uninstallGatewayStateDir + "`)"
 }
 
 // scratchVolumePurgeSteps removes every worker scratch volume a sandbox left

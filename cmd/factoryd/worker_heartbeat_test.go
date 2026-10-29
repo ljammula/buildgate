@@ -130,7 +130,7 @@ func TestClearActiveRequests(t *testing.T) {
 		t.Errorf("active after clear = %v", got)
 	}
 	dir := t.TempDir()
-	stop, err := startWorkerHeartbeat(context.Background(), dir, "", "", "localhost:7233", daemonheartbeat.GitHubLoginUnusable, 3)
+	stop, err := startWorkerHeartbeat(context.Background(), dir, "", "", "localhost:7233", daemonheartbeat.GitHubLoginUnusable, "", 3)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -597,7 +597,7 @@ func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir 
 		if err := os.MkdirAll(dataDir, 0o750); err != nil {
 			checks = append(checks, doctorCheck{Name: name, Err: fmt.Errorf("create -data-dir: %w", err)})
 		} else {
-			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, in.sandboxDocker, in.sandboxImage, dataDir))
+			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, dp.docker.backend(ctx).Backend, in.sandboxDocker, in.sandboxImage, dataDir))
 		}
 	}
 	if failed := runDoctorChecks(checks, os.Stdout); failed > 0 {

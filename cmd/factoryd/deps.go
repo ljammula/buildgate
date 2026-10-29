@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/dockerbackend"
 	"buildgate/internal/forge"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/openshell"
@@ -62,6 +63,10 @@ func newDeps() *deps {
 }
 
 type dockerBoundary interface {
+	// backend names the Docker sandboxes would run on (colima, Docker
+	// Engine on this Linux host, or one buildgate refuses), read once by
+	// each caller that decides on it.
+	backend(ctx context.Context) dockerbackend.Detection
 	colimaBinary() string
 	dockerBinary() string
 	// imageToolchains runs image once and reads the versions of its

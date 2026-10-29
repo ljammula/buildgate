@@ -212,8 +212,10 @@ func heartbeatRoute(cfg requestdriver.WorkerConfig) (credentialMode, workerModel
 // own doc comment for why these two fields exist and why nothing else
 // route-related is written here. slots is how many jobs the process runs at
 // once (1 for worker); temporalAddress is set only by `factoryd worker`.
-// githubLogin is forge.githubLogin's answer for this process.
-func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin string, slots int) (stop func(), err error) {
+// githubLogin is forge.githubLogin's answer for this process, and
+// dockerBackend the Docker backend it launches on ("" when Docker did not
+// answer at its start).
+func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin, dockerBackend string, slots int) (stop func(), err error) {
 	path := workerHeartbeatPath(dataDir)
 	startedAt := time.Now().Format(time.RFC3339Nano)
 	write := func() error {
@@ -232,6 +234,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			RepositoryWaits:     repositoryWaits.snapshot(),
 			JobSlots:            slots,
 			TemporalAddress:     temporalAddress,
+			DockerBackend:       dockerBackend,
 		})
 	}
 	if err := write(); err != nil {
