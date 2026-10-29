@@ -944,6 +944,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	writeNotesSection(&b, r.Notes)
 	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
 	b.WriteString(renderChallengeMarkdown(r.Challenge))
+	b.WriteString(renderCarvedChallengeMarkdown(r.Replay))
 	writeRepoGatesSection(&b, r)
 	writeChangedFilesAndDependencies(&b, r)
 	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
@@ -1364,6 +1365,22 @@ func renderChallengeMarkdown(c *run.ChallengeRecord) string {
 	}
 	for _, note := range c.Notes {
 		fmt.Fprintf(&b, "- Note: %s\n", handoff.CleanSentence(note))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderCarvedChallengeMarkdown renders the challenge files of the mixed run a
+// carved ticket was cut from, for which no round ran (SC-022): only the first
+// carved ticket's replay record holds any. Nothing renders for any other run.
+func renderCarvedChallengeMarkdown(rp *run.Replay) string {
+	if rp == nil || rp.Carve == nil || len(rp.Carve.Notes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Challenge of the mixed change\n\n")
+	for _, note := range rp.Carve.Notes {
+		fmt.Fprintf(&b, "- %s\n", handoff.CleanSentence(note))
 	}
 	b.WriteString("\n")
 	return b.String()

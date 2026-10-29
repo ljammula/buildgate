@@ -99,3 +99,18 @@ func TestUnresolvableChallengerRoleDoesNotStopTheBuild(t *testing.T) {
 		t.Fatalf("a failed route left a selection: %+v", tr.challengerSelection)
 	}
 }
+
+// The first carved ticket's pull request body lists the mixed run's red and
+// broken challenge files with the note that no round ran; no other run's does.
+func TestRenderCarvedChallengeMarkdown(t *testing.T) {
+	rp := &run.Replay{Carve: &run.Carve{Notes: []string{"challenge test `p/x_test.go` (AC-1) fails on the mixed change; no challenge round ran for it"}}}
+	got := renderCarvedChallengeMarkdown(rp)
+	if !strings.Contains(got, "## Challenge of the mixed change") || !strings.Contains(got, "p/x_test.go") || !strings.Contains(got, "no challenge round ran") {
+		t.Errorf("rendered = %q", got)
+	}
+	for name, none := range map[string]*run.Replay{"no replay": nil, "not carved": {}, "no notes": {Carve: &run.Carve{}}} {
+		if out := renderCarvedChallengeMarkdown(none); out != "" {
+			t.Errorf("%s rendered %q", name, out)
+		}
+	}
+}

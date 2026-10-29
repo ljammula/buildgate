@@ -63,6 +63,10 @@ type Carve struct {
 	// Group is the 1-based group the commit holds (len(Groups)+1 for the
 	// files no group lists).
 	Group int `json:"group"`
+	// Notes are lines the first carved ticket's pull request body lists: the
+	// red and broken challenge files of the mixed run, for which no round ran
+	// (SC-022). Cleaned, never a file's content.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // ReplayedCommit is one commit of a replay and its original.

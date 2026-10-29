@@ -247,3 +247,41 @@ func TestCarveThatFailsAfterTheCommitsLeavesTheTicketFilesAlone(t *testing.T) {
 		t.Fatalf("hashes no longer describe the files: %v", err)
 	}
 }
+
+// A mixed run's red and broken challenge files get no round; the carve record
+// of the first carved ticket carries a line for each, for its pull request,
+// and the later tickets' records carry none.
+func TestCarvedFirstTicketCarriesTheMixedRunsChallengeFiles(t *testing.T) {
+	dp, _ := orderDeps(t)
+	dataDir, id := orderRequest(t)
+	mixed := mixedTicketRunner(t, dataDir, id, "mixed-1")
+	advanceOrder(t, dp, dataDir, id, func(ctx context.Context, a []string, onReady func(*run.Run)) error {
+		if err := mixed(ctx, a, onReady); err != nil {
+			return err
+		}
+		record, err := run.Load(dataDir, "mixed-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Challenge = &run.ChallengeRecord{Verdict: run.ChallengeRed, Files: []run.ChallengeFile{
+			{Path: "app/edge_test.go", Criterion: "AC-2", Verdict: run.ChallengeRed},
+			{Path: "app/odd_test.go", Criterion: "AC-1", Verdict: "broken"},
+			{Path: "app/ok_test.go", Criterion: "AC-1", Verdict: run.ChallengeGreen},
+		}}
+		return record.Save(dataDir)
+	})
+	var args []string
+	advanceOrder(t, dp, dataDir, id, func(_ context.Context, a []string, onReady func(*run.Run)) error {
+		args = a
+		onReady(&run.Run{ID: "carved-1", State: run.StateReady})
+		return (&run.Run{ID: "carved-1", RequestID: id, TicketIndex: 1, Project: "app", State: run.StateQuarantined}).Save(dataDir)
+	})
+	rp, err := run.ReadReplayFile(requestdrivertest.ArgValue(args, "-replay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := rp.Carve.Notes
+	if len(first) != 2 || !strings.Contains(first[0], "app/edge_test.go") || !strings.Contains(first[0], "no challenge round ran") || !strings.Contains(first[1], "broken") {
+		t.Errorf("first ticket's carve notes = %v, want one line for the red file and one for the broken file", first)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"buildgate/internal/handoff"
 	"buildgate/internal/prorder"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -172,6 +173,9 @@ func carvedBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, 
 		Commits: []run.ReplayedCommit{{Original: source.ResultSHA, Replayed: o.Commit}},
 		Carve:   &run.Carve{Groups: o.Groups, Group: o.Group},
 	}
+	if ticket.Index == o.First {
+		replay.Carve.Notes = mixedChallengeNotes(source)
+	}
 	file := filepath.Join(request.Dir(dataDir, r.ID), "restack", fmt.Sprintf("t%d-carve.json", ticket.Index))
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return nil, err
@@ -189,4 +193,27 @@ func carvedBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, 
 	}
 	entry.NoTicketScope = true
 	return append(BuildTicketRunArgs(dataDir, entry, cfg), "-on-branch", o.Branch, "-diff-base", o.Onto, "-replay", file), nil
+}
+
+// mixedChallengeNotes are the lines naming the red and broken challenge files
+// of a mixed run, which no challenge round followed: its carved tickets run no
+// challenger, so the first one's pull request lists them (SC-022).
+func mixedChallengeNotes(source *run.Run) []string {
+	if source.Challenge == nil || source.Challenge.Rerun {
+		return nil
+	}
+	var notes []string
+	for _, f := range source.Challenge.Files {
+		var what string
+		switch f.Verdict {
+		case run.ChallengeRed:
+			what = "fails on the mixed change"
+		case "broken":
+			what = "is broken (a compile or collection error, or no report)"
+		default:
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("challenge test `%s` (%s) %s; no challenge round ran for it, because the change was split by pr_order", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion), what))
+	}
+	return notes
 }
