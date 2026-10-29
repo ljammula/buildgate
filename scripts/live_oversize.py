@@ -6,7 +6,8 @@ to planning"): a request ticket whose run passes every gate before the code
 review and measures over a release hard cap opens no pull request, is never
 reviewed, and moves its request `building -> planning` once. This submits the
 challenge fixture's spec alone (no plan, so the request may move to planning)
-to a config whose `release_max_changed_lines` is far below the fixture's
+(its verify command is the fixture's `oversize_verify_command`: with no plan nothing declares tests/ as created, so the
+suite command would fail on the untouched repository) to a config whose `release_max_changed_lines` is far below the fixture's
 change, approves the spec gate, and PASSES only when the request's history
 holds `building -> planning` with the measurement in its reason, the ticket's
 run recorded no code review and no pull request, and the re-plan then waits at
@@ -52,7 +53,7 @@ class Oversize(lc.Challenge):
 		super().__init__()
 
 	def submit_spec_only(self, repo):
-		out = self.factoryd("submit", "-spec-file", str(self.dir / "spec.md"), "-verify-command", self.fixture["verify_command"],
+		out = self.factoryd("submit", "-spec-file", str(self.dir / "spec.md"), "-verify-command", self.fixture.get("oversize_verify_command", self.fixture["verify_command"]),
 			"-preflight-profile", self.fixture.get("preflight_profile", ""), str(repo))
 		ids = [l.strip() for l in out.splitlines() if lc.re.fullmatch(r"[a-z0-9][a-z0-9-]+-\d{8}-\d{6}", l.strip())]
 		if not ids:
