@@ -811,7 +811,7 @@ path and loads it before writing it to config (it also uses it for its own
 Copilot model listing).
 
 Unset, on a network that re-signs TLS, it is `~/.config/factoryd/build-ca.pem`:
-the bundle `make install` and `doctor -fix` write from the keychain. Set the
+the bundle `make install` and `doctor -fix` write from the machine's trust store. Set the
 key only to trust a different file.
 
 A model call from a sandbox does not use this key. Its TLS connection is
@@ -821,9 +821,9 @@ opened by the sandbox's supervisor, which always takes the machine's bundle
 | On a network that | The supervisor runs from | It trusts |
 |---|---|---|
 | does not re-sign TLS | OpenShell's pinned image | Its built-in public roots |
-| re-signs TLS | `buildgate-openshell-supervisor:ca-<hash>`, built by the stack start from the pinned image | Also `~/.config/factoryd/build-ca.pem`, which `make install` and `doctor -fix` write from the keychain |
+| re-signs TLS | `buildgate-openshell-supervisor:ca-<hash>`, built by the stack start from the pinned image | Also `~/.config/factoryd/build-ca.pem`, which `make install` and `doctor -fix` write from the machine's trust store |
 
-A proxy whose CA is not in the keychain: write that CA (PEM, with any
+A proxy whose CA is not in the machine's trust store: write that CA (PEM, with any
 public roots the proxy does not replace) to `~/.config/factoryd/build-ca.pem`,
 then `factoryd doctor -fix`.
 

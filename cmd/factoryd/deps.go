@@ -169,7 +169,6 @@ type hostBoundary interface {
 	// the user's units start at boot (linger).
 	systemctl(args ...string) ([]byte, error)
 	loginctl(args ...string) ([]byte, error)
-	shippedRootsPEM(ctx context.Context) ([]byte, error)
 	sleep(d time.Duration)
 	spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	// terminalNotifierOnPath reports whether terminal-notifier, which gives

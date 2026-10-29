@@ -11,12 +11,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/x509roots/fallback/bundle"
 )
 
 // tlsInterceptionDeps is a test deps whose host sees root as the signer of
-// the probe host and ships shipped as its public roots, with the session
-// config directory (where the bundle is written) under a temp dir.
-func tlsInterceptionDeps(t *testing.T, root *x509.Certificate, shipped []byte) *deps {
+// the probe host, with the session config directory (where the bundle is
+// written) under a temp dir.
+func tlsInterceptionDeps(t *testing.T, root *x509.Certificate) *deps {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dp := newTestDeps(t)
@@ -26,13 +28,42 @@ func tlsInterceptionDeps(t *testing.T, root *x509.Certificate, shipped []byte) *
 		}
 		return root, nil
 	}
-	fakeHostOf(dp).shippedRootsPEMFn = func(context.Context) ([]byte, error) { return shipped, nil }
 	return dp
 }
 
-func TestDoctorTLSInterceptionPassesOnAShippedRoot(t *testing.T) {
-	public, publicPEM := hostcontroltest.RootCA(t, "Public Root")
-	dp := tlsInterceptionDeps(t, public, publicPEM)
+// publicRoot is a real public root CA from the bundle factoryd compares
+// against: a chain ending in it is not intercepted.
+func publicRoot(t *testing.T) *x509.Certificate {
+	t.Helper()
+	for root := range bundle.Roots() {
+		cert, err := x509.ParseCertificate(root.Certificate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cert
+	}
+	t.Fatal("the public root bundle is empty")
+	return nil
+}
+
+// TestPublicRootsMatchByKeyNotByCertificate: a reissue of a public root
+// (same subject and key, another certificate) is still public, and a test CA
+// is not.
+func TestPublicRootsMatchByKeyNotByCertificate(t *testing.T) {
+	public := publicRoot(t)
+	reissued := *public
+	reissued.Raw = []byte("another certificate of the same CA")
+	if !pemHoldsKeyOf(publicRootsPEM(), &reissued) {
+		t.Errorf("a reissue of %s is not found among the public roots", public.Subject)
+	}
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
+	if pemHoldsKeyOf(publicRootsPEM(), proxy) {
+		t.Errorf("a test CA is found among the public roots")
+	}
+}
+
+func TestDoctorTLSInterceptionPassesOnAPublicRoot(t *testing.T) {
+	dp := tlsInterceptionDeps(t, publicRoot(t))
 	check, ok := doctorCheckTLSInterception(context.Background(), dp, true)
 	if !ok || check.Err != nil || check.Use != "" {
 		t.Fatalf("check = %+v, ok = %v; want a plain pass", check, ok)
@@ -43,9 +74,8 @@ func TestDoctorTLSInterceptionPassesOnAShippedRoot(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionWarnsAndNamesWhatToPass(t *testing.T) {
-	_, publicPEM := hostcontroltest.RootCA(t, "Public Root")
 	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
-	dp := tlsInterceptionDeps(t, proxy, publicPEM)
+	dp := tlsInterceptionDeps(t, proxy)
 	check, ok := doctorCheckTLSInterception(context.Background(), dp, false)
 	if !ok || check.Err == nil || !check.Advisory {
 		t.Fatalf("check = %+v, ok = %v; want an advisory warning", check, ok)
@@ -62,9 +92,9 @@ func TestDoctorTLSInterceptionWarnsAndNamesWhatToPass(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionFixWritesTheBundleAndPrintsTheCommand(t *testing.T) {
-	public, publicPEM := hostcontroltest.RootCA(t, "Public Root")
+	public := publicRoot(t)
 	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
-	dp := tlsInterceptionDeps(t, proxy, publicPEM)
+	dp := tlsInterceptionDeps(t, proxy)
 	check, ok := doctorCheckTLSInterception(context.Background(), dp, true)
 	want := "BUILD_CA_BUNDLE=" + buildCABundlePath() + " make install"
 	if !ok || check.Err != nil || check.Use != want {
@@ -75,7 +105,7 @@ func TestDoctorTLSInterceptionFixWritesTheBundleAndPrintsTheCommand(t *testing.T
 		t.Fatal(err)
 	}
 	if !pemHoldsKeyOf(bundle, proxy) || !pemHoldsKeyOf(bundle, public) {
-		t.Errorf("bundle must hold the proxy's root and the shipped roots:\n%s", bundle)
+		t.Errorf("bundle must hold the proxy's root and the public roots")
 	}
 
 	// With the bundle in place, a run without -fix passes and still prints
@@ -92,10 +122,9 @@ func TestDoctorTLSInterceptionFixWritesTheBundleAndPrintsTheCommand(t *testing.T
 }
 
 func TestDoctorTLSInterceptionFixReplacesABundleOfAnotherProxy(t *testing.T) {
-	_, publicPEM := hostcontroltest.RootCA(t, "Public Root")
 	old, oldPEM := hostcontroltest.RootCA(t, "Old Proxy CA")
 	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
-	dp := tlsInterceptionDeps(t, proxy, publicPEM)
+	dp := tlsInterceptionDeps(t, proxy)
 	if err := writeBuildCABundle(buildCABundlePath(), oldPEM); err != nil {
 		t.Fatal(err)
 	}
@@ -115,8 +144,8 @@ func TestDoctorTLSInterceptionFixReplacesABundleOfAnotherProxy(t *testing.T) {
 }
 
 func TestDoctorTLSInterceptionUntrustedProxyNamesTheManualStep(t *testing.T) {
-	proxy, publicPEM := hostcontroltest.RootCA(t, "Corp Proxy CA")
-	dp := tlsInterceptionDeps(t, proxy, publicPEM)
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
+	dp := tlsInterceptionDeps(t, proxy)
 	fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
 		return nil, x509.UnknownAuthorityError{Cert: proxy}
 	}
@@ -126,24 +155,15 @@ func TestDoctorTLSInterceptionUntrustedProxyNamesTheManualStep(t *testing.T) {
 	}
 }
 
-func TestDoctorTLSInterceptionSkippedWhenNothingToCheckAgainst(t *testing.T) {
-	proxy, publicPEM := hostcontroltest.RootCA(t, "Corp Proxy CA")
+func TestDoctorTLSInterceptionSkippedWhenTheProbeHostIsUnreachable(t *testing.T) {
+	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	t.Run("host unreachable", func(t *testing.T) {
-		dp := tlsInterceptionDeps(t, proxy, publicPEM)
+		dp := tlsInterceptionDeps(t, proxy)
 		fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
 			return nil, errors.New("dial tcp: no route to host")
 		}
 		if check, ok := doctorCheckTLSInterception(context.Background(), dp, true); ok {
 			t.Errorf("check reported offline: %+v", check)
-		}
-	})
-	t.Run("no shipped roots", func(t *testing.T) {
-		dp := tlsInterceptionDeps(t, proxy, publicPEM)
-		fakeHostOf(dp).shippedRootsPEMFn = func(context.Context) ([]byte, error) {
-			return nil, errors.New("not supported on linux")
-		}
-		if check, ok := doctorCheckTLSInterception(context.Background(), dp, true); ok {
-			t.Errorf("check reported with no shipped roots: %+v", check)
 		}
 	})
 	t.Run("default test host", func(t *testing.T) {
@@ -174,7 +194,7 @@ func TestRealTLSRootReportsASignerThisMachineDoesNotTrust(t *testing.T) {
 // intercepted network and empty in every other case, and the command never
 // fails.
 func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
-	public, publicPEM := hostcontroltest.RootCA(t, "Public Root")
+	public := publicRoot(t)
 	proxy, _ := hostcontroltest.RootCA(t, "Corp Proxy CA")
 	run := func(t *testing.T, dp *deps) (stdout, stderr string) {
 		t.Helper()
@@ -185,7 +205,7 @@ func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
 		return out.String(), errOut.String()
 	}
 	t.Run("intercepted", func(t *testing.T) {
-		dp := tlsInterceptionDeps(t, proxy, publicPEM)
+		dp := tlsInterceptionDeps(t, proxy)
 		stdout, stderr := run(t, dp)
 		if stdout != buildCABundlePath()+"\n" {
 			t.Errorf("stdout = %q, want the bundle path alone", stdout)
@@ -195,11 +215,11 @@ func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
 		}
 		bundle, err := os.ReadFile(buildCABundlePath())
 		if err != nil || !pemHoldsKeyOf(bundle, proxy) || !pemHoldsKeyOf(bundle, public) {
-			t.Errorf("bundle must hold the proxy's root and the shipped roots (read err %v)", err)
+			t.Errorf("bundle must hold the proxy's root and the public roots (read err %v)", err)
 		}
 	})
 	t.Run("not intercepted", func(t *testing.T) {
-		if stdout, stderr := run(t, tlsInterceptionDeps(t, public, publicPEM)); stdout != "" || stderr != "" {
+		if stdout, stderr := run(t, tlsInterceptionDeps(t, public)); stdout != "" || stderr != "" {
 			t.Errorf("stdout = %q, stderr = %q; want silence", stdout, stderr)
 		}
 	})
@@ -209,7 +229,7 @@ func TestBuildCABundleCommandPrintsOnlyABundleToUse(t *testing.T) {
 		}
 	})
 	t.Run("untrusted proxy", func(t *testing.T) {
-		dp := tlsInterceptionDeps(t, proxy, publicPEM)
+		dp := tlsInterceptionDeps(t, proxy)
 		fakeHostOf(dp).tlsRootFn = func(context.Context, string) (*x509.Certificate, error) {
 			return nil, x509.UnknownAuthorityError{Cert: proxy}
 		}

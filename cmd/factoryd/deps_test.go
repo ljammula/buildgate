@@ -210,7 +210,6 @@ type fakeHost struct {
 	serviceManagerFn     func() hostcontrol.ServiceManager
 	systemctlFn          func(args ...string) ([]byte, error)
 	loginctlFn           func(args ...string) ([]byte, error)
-	shippedRootsPEMFn    func(ctx context.Context) ([]byte, error)
 	sleepFn              func(d time.Duration)
 	spawnServeFn         func(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	spawnWorkerFn        func(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
@@ -250,9 +249,6 @@ func (f *fakeHost) tailscale(ctx context.Context, args ...string) ([]byte, error
 }
 func (f *fakeHost) serveVerifiedOurs(dataDir string, addr string) (int, bool) {
 	return f.serveVerifiedOursFn(dataDir, addr)
-}
-func (f *fakeHost) shippedRootsPEM(ctx context.Context) ([]byte, error) {
-	return f.shippedRootsPEMFn(ctx)
 }
 func (f *fakeHost) sleep(d time.Duration) { f.sleepFn(d) }
 func (f *fakeHost) tlsRoot(ctx context.Context, host string) (*x509.Certificate, error) {
@@ -451,11 +447,8 @@ func newTestDeps(t testing.TB) *deps {
 		loginctlFn: func(...string) ([]byte, error) {
 			return nil, errors.New("test host: no loginctl")
 		},
-		// No test reaches a public host or the machine's keychain: the
-		// TLS-interception check is skipped unless a test sets these.
-		shippedRootsPEMFn: func(context.Context) ([]byte, error) {
-			return nil, errors.New("test host: no shipped roots")
-		},
+		// No test reaches a public host: the TLS-interception check is
+		// skipped unless a test sets this.
 		tlsRootFn: func(context.Context, string) (*x509.Certificate, error) {
 			return nil, errors.New("test host: no public TLS probe")
 		},

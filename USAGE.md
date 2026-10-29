@@ -353,12 +353,17 @@ make install
   |
   BUILD_CA_BUNDLE given? -- yes --> use that file
   | no
-  registry.npmjs.org signed by a root macOS ships? -- yes --> no bundle
+  registry.npmjs.org signed by a public root? -- yes --> no bundle
   | no
-  that root in the keychain? -- no --> warning: pass BUILD_CA_BUNDLE yourself
+  that root trusted by this machine? -- no --> warning: pass BUILD_CA_BUNDLE yourself
   | yes
-  write it and macOS's roots to ~/.config/factoryd/build-ca.pem, use that
+  write it and the public roots to ~/.config/factoryd/build-ca.pem, use that
 ```
+
+A public root is one in the Mozilla root bundle compiled into `factoryd`, so
+the lookup is the same on macOS and Linux; "trusted by this machine" is the
+operating system's own trust store (the keychain on macOS, the system CA
+bundle on Linux).
 
 | Consumer | How it reads the bundle |
 |---|---|
@@ -374,8 +379,8 @@ make install
 | `ok ... (not intercepted, none needed)` | No bundle is used |
 | `ok ... (intercepted by <CA>; make install uses this bundle)` with `use: BUILD_CA_BUNDLE=...` | The bundle is written |
 | `warn ... signed by "<CA>"` | Intercepted, bundle not written yet: `make install` or `doctor -fix` writes it |
-| `warn ... a CA this machine does not trust` | The proxy's CA is not in the keychain: get it as a PEM file and run `BUILD_CA_BUNDLE=/path/to/ca.pem make install` |
-| no row | The registry is unreachable, or the machine is not a Mac |
+| `warn ... a CA this machine does not trust` | The proxy's CA is not in the machine's trust store: get it as a PEM file and run `BUILD_CA_BUNDLE=/path/to/ca.pem make install` |
+| no row | The registry is unreachable |
 
 **Upgrade.** `factoryd upgrade [-to <tag|ref>] [-source <checkout>] [-yes]
 [-wait]` takes this machine to the newest release tag (or `-to`) in one
