@@ -1208,9 +1208,9 @@ is unchanged.
 
 A person who sends that one-ticket plan back (`reject -to plan`) starts the
 planning model job, given the rejection's reason; its plan waits at
-`plan_review`. A ticket file carrying a `Required-Changed-Files:` or
-`Required-Content:` header, drafted or handed over, is refused by the plan's
-structural checks with a message naming the header. No request state lies
+`plan_review`. A `Required-Changed-Files:` or `Required-Content:` header
+in a ticket file, drafted or handed over, is ignored: no step reads it and no
+note is written for it. No request state lies
 between `spec_review` and `planning`: a request record in a state this
 release does not define (`oracle_drafting`, `oracle_review`) is refused when
 read, with a message naming the state, so such a request is finished or

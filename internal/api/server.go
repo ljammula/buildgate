@@ -795,7 +795,7 @@ func (s *Server) consoleConfig(w http.ResponseWriter, r *http.Request) {
 		Gate:          s.consoleGate(r),
 	}
 	if s.releasePolicy.CanNeverAllow() {
-		view.ReleasePolicyWarning = "release policy denies every PR unconditionally (release_max_files_changed/release_max_insertions is 0 or release_rollback_plan is empty) -- add release_max_files_changed, release_max_insertions, and release_rollback_plan to your session config (factoryd init-config's own scaffold now includes them)"
+		view.ReleasePolicyWarning = "release policy denies every PR unconditionally (release_max_files_changed/release_max_changed_lines is 0 or release_rollback_plan is empty) -- add release_max_files_changed, release_max_changed_lines, and release_rollback_plan to your session config (factoryd init-config's own scaffold now includes them)"
 	}
 	writeJSON(w, http.StatusOK, view)
 }

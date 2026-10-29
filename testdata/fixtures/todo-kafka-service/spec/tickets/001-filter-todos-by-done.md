@@ -51,8 +51,6 @@ one dated entry for this ticket.
 
 Verify-Command: go build ./... && go test ./...
 Allowed-Files: main.go, main_test.go, ARCHITECTURE.md, PROGRESS.md
-Required-Changed-Files: main.go, main_test.go, ARCHITECTURE.md, PROGRESS.md
-Required-Content: done
 
 ## Commit
 

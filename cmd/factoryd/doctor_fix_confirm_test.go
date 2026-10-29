@@ -147,7 +147,7 @@ func TestDoctorApplyFixesBackfillsReleaseDefaultsWithYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"release_max_files_changed:", "release_max_insertions:", "release_rollback_plan:"} {
+	for _, key := range []string{"release_max_files_changed:", "release_max_changed_lines:", "release_rollback_plan:"} {
 		if !strings.Contains(string(data), key) {
 			t.Errorf("%s missing %q after -fix -yes:\n%s", cfgPath, key, data)
 		}

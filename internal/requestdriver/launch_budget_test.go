@@ -283,6 +283,7 @@ func TestCheckLaunchBudgetMonthlyExceeded(t *testing.T) {
 // planning launch point.
 func TestAdvancePlanningQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	r := requestdrivertest.LoadRequest(t, dataDir, id)
 	r.SpecEvidence = &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 10_000_000, At: time.Now()}}
 	if err := r.Save(dataDir); err != nil {

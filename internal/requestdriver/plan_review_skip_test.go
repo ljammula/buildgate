@@ -14,6 +14,17 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
+// usePlanningJob sets up a request whose original handed-over plan has ended,
+// so tests of drafted plans exercise a path that invokes the planning job.
+func usePlanningJob(t *testing.T, dataDir, id string) {
+	t.Helper()
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	r.PlanImported, r.PlanImportEnded = true, true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // planOnce drives one planning pass over a request of TwoCriteriaSpec whose
 // plan is the given number of tickets (one covers both criteria; two cover one
 // each) and returns the request as saved.
@@ -32,6 +43,15 @@ func planOnce(t *testing.T, dataDir, id string, tickets int) *request.Request {
 // planDrafted is planOnce for the given drafted tickets and worker config.
 func planDrafted(t *testing.T, dataDir, id string, drafted []requestdriver.DraftedTicket, cfg requestdriver.WorkerConfig) *request.Request {
 	t.Helper()
+	// These tests exercise a drafted plan, which now requires feedback to
+	// enter the planning job instead of copying the approved spec.
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	if request.PlanFeedback(r) == "" && !r.PlanAsHandedOver() {
+		r.Rejections = append(r.Rejections, request.Rejection{By: request.FactoryActor, ForStage: request.StatePlanReview, Reason: "exercise drafted plan"})
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dp := newFakeDeps(t)
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(drafted, &request.PlanEvidence{}, nil)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
@@ -157,7 +177,7 @@ func TestOneTicketPlanKeepsItsReviewNotes(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
 	requestdrivertest.PlanReviewOff(t, dataDir, id)
 	big := requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)
-	big = strings.Replace(big, "Required-Changed-Files: internal/payments/refunds.go\n", "Required-Changed-Files: internal/payments/refunds.go\nEstimated-Changed-Lines: 900\n", 1)
+	big = strings.Replace(big, "Allowed-Files: internal/payments/refunds.go, internal/payments/refunds_test.go\n", "Allowed-Files: internal/payments/refunds.go, internal/payments/refunds_test.go\nEstimated-Changed-Lines: 900\n", 1)
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
 	cfg.Settings.PRBudgetLines = 400
 	r := planDrafted(t, dataDir, id, []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: big}}, cfg)

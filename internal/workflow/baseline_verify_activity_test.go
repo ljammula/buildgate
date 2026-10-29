@@ -170,7 +170,7 @@ func TestBaselineVerifyFailureTheTicketNamesGivesTheBuildANote(t *testing.T) {
 func TestBaselineVerifyFailureForAPathTheTicketCreatesBuilds(t *testing.T) {
 	input := fixtureInput()
 	input.WorkspacePath = baselineRepo(t)
-	input.RequiredChangedFiles = []string{"bom.go", "tests/test_bom.py"}
+	input.AllowedFiles = []string{"bom.go", "tests/test_bom.py"}
 	log := "Traceback (most recent call last):\nImportError: Start directory is not importable: 'tests'\n"
 	result, err, logDir, _ := runBaselineActivity(t, input, "x", log, 1, func(workspace string) {
 		// The command creating the directory itself changes nothing: what
@@ -191,7 +191,7 @@ func TestBaselineVerifyFailureForAPathTheTicketCreatesBuilds(t *testing.T) {
 	// The same failure in a repository that has the directory halts.
 	input = fixtureInput()
 	input.WorkspacePath = baselineRepo(t)
-	input.RequiredChangedFiles = []string{"bom.go"}
+	input.AllowedFiles = []string{"bom.go"}
 	if _, err, _, _ := runBaselineActivity(t, input, "x", log, 1, nil); err == nil {
 		t.Error("a failure naming no test and no path the ticket creates let the build run")
 	}

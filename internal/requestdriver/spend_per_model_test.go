@@ -20,6 +20,7 @@ import (
 func TestPlanRedraftOnAnotherModelKeepsEachModelsSpend(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	plan := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)},
 	}

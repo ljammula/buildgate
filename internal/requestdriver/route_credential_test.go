@@ -109,6 +109,7 @@ func TestASpecDraftingJobWithNoUsableRouteCredentialWaitsInResumeReview(t *testi
 
 func TestAPlanDraftingJobWithNoUsableRouteCredentialWaitsInResumeReview(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	r := requestdrivertest.LoadRequest(t, dataDir, id)
 	runner := func(context.Context, string, *request.Request, requestdriver.WorkerConfig, string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return nil, nil, errExpiredCredential

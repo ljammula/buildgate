@@ -46,7 +46,7 @@ func runInputGoldenConfig(t *testing.T) string {
 		"compose_services_require_digest: true\n" +
 		"release_protected_paths: \"deploy/,.github/\"\n" +
 		"release_max_files_changed: 7\n" +
-		"release_max_insertions: 77\n" +
+		"release_max_changed_lines: 77\n" +
 		"release_rollback_plan: revert it\n" +
 		"round_session_continuity: true\n"
 }
@@ -61,7 +61,7 @@ func runInputGoldenConfig(t *testing.T) string {
 // also refuses -earlier-attempt),
 // -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
 // covers it), and the
-// spec's Required-Content and the config's skills, test patterns and allowed paths.
+// spec's Tests-Required opt-out and the config's skills, test patterns and allowed paths.
 // -resume-session-of names the quarantined run, which kept no session.
 // inputs is the directory the flag files (spec, criteria) are written to.
 func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, address string) []string {

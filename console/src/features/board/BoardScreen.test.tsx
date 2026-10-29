@@ -439,7 +439,7 @@ describe("release policy warning banner", () => {
       server: board([]),
       config: {
         releasePolicyWarning:
-          "release policy denies every PR unconditionally (release_max_files_changed=0) -- add release_max_files_changed, release_max_insertions, and release_rollback_plan to your session config",
+          "release policy denies every PR unconditionally (release_max_files_changed=0) -- add release_max_files_changed, release_max_changed_lines, and release_rollback_plan to your session config",
       },
     });
     const banner = await screen.findByTestId("release-policy-warning-banner");

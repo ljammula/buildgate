@@ -162,7 +162,7 @@ each `daemon` child it runs.
 ## Request lifecycle
 
 `submitted` -> `spec_drafting` -> `spec_review` (you) -> `planning` ->
-`plan_review` (you; only for a plan of several tickets or an opt-in: `submit -plan-review`, session key `plan_review`, `.factory.yml` `plan_review: true`, so a one-ticket plan otherwise goes from `planning` to `building` after the factory runs a plan approval's checks and pins the files) -> `building` (one ticket at a time) -> `pr_review` ->
+`plan_review` (you; only for a plan of several tickets, an opt-in (`submit -plan-review`, session key `plan_review`, `.factory.yml` `plan_review: true`) or a plan you already sent back, so a one-ticket plan otherwise goes from `planning` to `building` after the factory runs a plan approval's checks and pins the files). A request submitted without a plan runs no planning model job: its planning step writes one ticket that is the approved spec byte for byte, with no `Allowed-Files:`, so the build is given the spec verbatim and builds it in one session; `reject -to plan` (or a `plan_review` rejection) runs the planning model job given your reason, and its plan waits at `plan_review` -> `building` (one ticket at a time) -> `pr_review` ->
 `done`, or `closed` when the last ticket's pull request is closed without
 merging. Off-ramps: `quarantined`, `halted`, `cancelled`. A step that ended
 with no verdict on the work (its `worker` stopped, or one of the causes in
@@ -211,7 +211,7 @@ is built on this one's commit and its pull request would carry the refused
 change); with pull requests off the tickets are built in order and each
 run's decision is on its record. The bare `-release-*`/session-config zero defaults deny
 everything, so a usable `-release-rollback-plan` and non-zero
-`-release-max-files-changed`/`-release-max-insertions` are required — see
+`-release-max-files-changed`/`-release-max-changed-lines` are required — see
 "Release policy" below. Per `-advance-on` (`accepted` default, or
 `pr_approved`), the next ticket starts once the current one is `accepted`
 (default) or once its PR is reviewer-approved. A ticket that quarantines
@@ -656,7 +656,7 @@ factoryd submit -spec-file my-spec.md -plan-dir my-tickets/ <repo>
 | After a reject | An operator-shaped spec stays operator-shaped: the drafting model applies the feedback while keeping its headings, order and list structure, and scoped comments can name any heading in that document. A drafted spec keeps the skeleton rules. The drafting cost shows in `factoryd cost` |
 | Edited in the console | At `spec_review` and `plan_review` the console's Edit saves the file in place. Each save is recorded on the request: who, when, the changed lines, and the replaced text as a revision (the request page's Audit lists them). If you then reject that stage, the changed lines go to the planning model with your feedback, marked to be kept; an edit you approve reaches no model, since nothing redrafts the file |
 | Not in the skeleton | Hand the document over with `-spec-file`; only the criterion rule above is required of its shape |
-| Ticket format | Header lines `Verify-Command:` (the request's verify command, exactly), `Allowed-Files:`, `Required-Changed-Files:` (with at least one test file, or a `Tests-Required: no -- <reason>` line), optionally `Estimated-Changed-Lines: <N>` (the planner's estimate of the ticket's changed lines, a positive integer; present but not one, the plan or the run is refused; absent is fine), then `## Goal`, `## Plan` with `### Files to touch`, `### Steps`, `### Tests to add`, `### Acceptance criteria covered` (criterion numbers, one per list item), `## Out of scope` (may be empty; every other section needs content). A file the ticket moves or renames is a change to both paths: list the old path and the new one in `Allowed-Files:` (the changed-file list names both, for `diff_scope`, required files and protected paths alike). `Allowed-Files:` refuses a run only when a person approved it (see "The `diff_scope` check"); the model's own list for a plan the factory approved itself is advice |
+| Ticket format | Header lines `Verify-Command:` (the request's verify command, exactly), `Allowed-Files:` (with at least one test file, or a `Tests-Required: no -- <reason>` line), optionally `Estimated-Changed-Lines: <N>` (the planner's estimate of the ticket's changed lines, a positive integer; present but not one, the plan or the run is refused; absent is fine), then `## Goal`, `## Plan` with `### Files to touch`, `### Steps`, `### Tests to add`, `### Acceptance criteria covered` (criterion numbers, one per list item), `## Out of scope` (may be empty; every other section needs content). A file the ticket moves or renames is a change to both paths: list the old path and the new one in `Allowed-Files:` (the changed-file list names both, for `diff_scope` and protected paths alike). `Allowed-Files:` refuses a run only when a person approved it (see "The `diff_scope` check"); an unapproved list is advice |
 | Plan checks | Names, headings and criteria coverage at submit; at planning, every check a drafted plan gets (ticket format, verify command, allowed files, criteria coverage, the tests rule, a malformed `Estimated-Changed-Lines:` value). A handed-over plan that fails one halts the request with the reason, or, when it fails the tests rule, is revised by the planning model with that reason as feedback. What the factory reads from a criterion's prose is a note at `plan_review`, never a refusal |
 | `-plan-dir` alone | Refused: tickets name the criteria of the spec they plan |
 | A halted hand-over | `factoryd retry` takes the same document again and halts the same way. Send it back with a reason instead (`factoryd reject -to plan -reason "..." <id>`, or `-to spec`): the model then revises your document to fix it. Or `cancel`, correct the file and submit again |
@@ -831,7 +831,7 @@ protected_paths:                       # same as session config's release_protec
 token_ceiling: 5000000                 # same as meter_token_ceiling; may only lower the session's effective ceiling, never raise it (a higher value refuses the run/submission)
 cost_ceiling_micro_usd: 25000000       # same as meter_cost_ceiling_micro_usd; lower-only, like token_ceiling
 # design_guide: go-service             # team design guide for spec drafting and planning; see "Design guide"
-# plan_review: true                    # a one-ticket plan also waits at plan_review (a plan of several tickets always does)
+# plan_review: true                    # the spec's one ticket also waits at plan_review (a plan of several tickets always does)
 ```
 
 `required_binaries` is an optional list of at most 32 bare executable names,
@@ -1119,12 +1119,10 @@ corrective check. Plan drafting rejects a ticket up front, before it ever
 reaches `plan_review`, if its own `Allowed-Files` could never include a test
 file and it declares no `Tests-Required` opt-out.
 
-`Required-Changed-Files:` and `Required-Content:` header lines are notes, not
-gates: a required file the run left unchanged, or a required string not newly
-present in a required file, becomes one line each under `## Notes` in the pull
-request (and in `run.json`'s `notes`), and the run is not refused for it. A
-required file already dirty in the workspace before the run is no refusal
-either.
+`Required-Changed-Files:` and `Required-Content:` are not ticket headers: a
+ticket file carrying either, drafted by the planning job or handed over with
+`submit -plan-dir`, is accepted and those lines are ignored. No run writes a
+note for them.
 
 The Ruby defaults include both `*_spec.rb` and `*_test.rb`, covering common
 RSpec and Minitest file names. Supply `test_patterns` for a repository whose
@@ -1137,7 +1135,7 @@ of its prose:
 |---|---|
 | A ticket off the format | The ticket's headings, in order (`## Goal` ... `## Out of scope`), and its header lines |
 | Another verify command | The ticket's `Verify-Command:` line against the request's verify command, as text |
-| No `Allowed-Files:`, no `Required-Changed-Files:` | Those two header lines |
+| No `Allowed-Files:` | That header line; retired `Required-Changed-Files:` and `Required-Content:` lines are ignored |
 | An unclaimed criterion | The numbers under each ticket's `### Acceptance criteria covered` against the count of the spec's factory-numbered criteria |
 | The tests rule | The ticket's `Allowed-Files:` entries against `test_patterns`, and its `Tests-Required:` line |
 | A drafted spec off the criterion shape | The numbers of `## Acceptance criteria` (1..k in order, numbered lines inside a code fence are not items) and their `AC-N:` labels: every criterion `N. AC-N: ...` (its text may follow on the next lines) with the label equal to its number and no leading zero. A scoped redraft that keeps the reviewed criteria section is not asked for IDs. A spec the model drafted that fails is drafted once more with the message as the feedback; a second failure halts. A handed-over or edited spec is checked for at least one parseable criterion; numbered exact sections keep their numbering/label checks, while bullet-only exact sections are factory-numbered and mixed top-level styles are refused |
@@ -2204,7 +2202,7 @@ limits for API-started runs.
 | `request_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `request_token_budget`, in micro-USD |
 | `monthly_token_budget` | `0` (unlimited) -- total spend across every request in the data dir during the current calendar month (UTC) |
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
-| `pr_budget_lines` | `400` -- the target size of one ticket's pull request, in changed lines: insertions plus deletions, as `git diff --shortstat` counts them. `0` is no budget. A negative value is refused. Planning writes one ticket when its estimate of the whole change is within the budget, and splits only a larger change, into the fewest tickets that each fit, each independently buildable and testable and never split by layer; with `0` it writes one ticket unless the spec's parts are independently shippable. The planner declares each ticket's estimate in an `Estimated-Changed-Lines:` header; the value the planning job ran under is recorded on the request (`plan_budget_lines`), and `plan_review` carries one note for each ticket whose estimate is over it. A planning target, not a cap: `release_max_insertions` and `release_max_files_changed` stay the hard limits. A running `worker` reads it at its next start (`factoryd restart`). |
+| `pr_budget_lines` | `400` -- the source-line threshold for a PR size note and the planning job's target when it drafts a plan. `0` disables the line threshold; the 25-function note threshold still applies. A negative value is refused. The planner may declare an `Estimated-Changed-Lines:` header, and `plan_review` notes estimates over its recorded budget. `release_max_changed_lines` and `release_max_files_changed` are the hard limits. A running `worker` reads the key at its next start (`factoryd restart`). |
 | `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
 | `review_reproductions` | `false` -- a request's ticket build's review still runs, but as advice on design, security, maintainability and risk (at most five findings, sent no spec and asked for no reproduction), so every finding is in the pull request's **Reviewer advice** and no `review_reproduction` check is recorded. `true` holds and runs each finding's reproduction (`review_reproduction`, SC-022), so a finding can block. A ticket that already has reproductions on its list still holds and runs them, and its review can still block, until the list is empty. A running `worker` reads it at its next start (`factoryd restart`). |
 | `round_session_continuity` | `true` -- a corrective or advice round's build continues the harness session of the build of the run it follows; `false` starts it fresh with only the written record of that run. The build session of a request's ticket build is kept in its run directory (`build-session/`, at most 64 MiB, 10,000 entries and 32 levels, without its saved prompts, round output, notes, harness configuration, skills or credential-named files; a session not kept leaves only the reason, which the round reports); the round's build continues it only when it was made by the same harness and model and holds at most 32 MiB of session state, and starts fresh with the record otherwise. `session` in the round's `BUILD_EVIDENCE.json` is `resumed` or `fresh(<reason>)`. Only a later round of the same ticket gets it; never a review. The kept copy is removed after a worker step or a cancel once no round can follow it: a settled ticket's when the request moves on to a later ticket, and all of them when the request leaves `building` and `resume_review` (`pr_review`, a terminal state), except one a round still in flight follows. A running `worker` reads it at its next start (`factoryd restart`). |
@@ -2226,12 +2224,12 @@ limits for API-started runs.
 | `compose_services_ready_timeout` | `3m` |
 | `compose_services_allowed_registries` | `[docker.io/library/]` -- the registry/namespace prefixes a target repo's compose images may come from. Never widened by a run or by a compose file: `doctor -target-repo <repo> -fix` and `quickstart` offer the prefixes a repo's images need and write them only on a yes |
 | `compose_services_worker_env` | empty -- `KEY: VALUE` worker variables for application endpoints the published ports don't already cover (the worker's `localhost` reaches each published port), e.g. `PSQL_URL: postgres://database:5432/<db>`, `REDIS_URL: redis:6379`. Factory, sandbox, credential, cache, proxy and `SF_*` names are rejected. Values reach the worker by name only: never in the docker argv, `run.json` or Temporal history |
-| `plan_review` | `false` -- every request submitted under this config waits at `plan_review`, as `submit -plan-review` does for one request. Off, a one-ticket plan goes straight to `building`; a plan of several tickets always waits. A repository's `.factory.yml` `plan_review: true` does the same for that repository |
+| `plan_review` | `false` -- every request submitted under this config waits at `plan_review`, as `submit -plan-review` does for one request. Off, the spec ticket of a request submitted without a plan (or any one-ticket plan) goes straight to `building`; a plan of several tickets always waits. A repository's `.factory.yml` `plan_review: true` does the same for that repository |
 | `compose_services_require_digest` | `false` |
 | `compose_services_concurrency` | `1` -- runs on this machine (any data dir or factoryd process) with compose sidecars at once; `0` disables the slot |
 | `release_protected_paths` | empty (`.factory.yml`'s `protected_paths` overlays it) |
 | `release_max_files_changed` | `0` (deny-all; see below) |
-| `release_max_insertions` | `0` (deny-all; see below) |
+| `release_max_changed_lines` | `0` (deny-all; see below) |
 | `release_rollback_plan` | empty (deny-all; see below) |
 | `release_allow_overrides` | `false` |
 | `release_allow_dependency_lockfile_changes` | `false` |
@@ -2257,6 +2255,32 @@ config, `init-config`'s scaffold has the same values, and `quickstart`
 reusing an existing config backfills only the missing keys. `doctor` warns
 (and the console board shows a strip) while all three are deny-all;
 `doctor -fix` can write them.
+
+### Change size
+
+After the other gates pass, the host measures the committed
+diff from its diff base to its result SHA, before code review. Source lines
+are insertions plus deletions; functions are distinct hunk names reported by
+git, counted per file. The run records each source file's counts and names.
+Tests matched by the committed `test_patterns`, dependency lockfiles,
+generated files on the factory's fixed suffix list, documentation and binary
+files do not count. Documentation includes files under `docs/` and the
+extensions `.md`, `.markdown`, `.rst`, `.txt`, `.adoc`, `.asciidoc`, `.org`
+and `.tex`. Generated suffixes are `.pb.go`, `.g.dart`, `.gen.go`, `_gen.go`,
+`.generated.go`, `.generated.ts`, `.generated.js`, `.designer.cs`, `.min.js`
+and `.min.css`. Git reads the diff using host-owned attributes and its built-in
+function patterns, without repository attributes.
+
+| Measured change | Outcome |
+|---|---|
+| At most `pr_budget_lines` source lines and 25 functions | PR opens without a size note when the release policy allows it |
+| Above either note threshold, within both hard caps | PR opens with a size note when the release policy allows it |
+| Above `release_max_changed_lines` or `release_max_files_changed` | No review or PR; release is denied. A request returns to planning once with its measurement and diff, and the new plan waits at `plan_review` |
+
+With `pr_budget_lines: 0`, only the function threshold adds a note. A ticket
+over a cap after that re-plan, or a ticket of a handed-over plan over a cap,
+halts the request with its measurement. A single-ticket run has no planning
+step and is denied release.
 
 **Code review default.** `quickstart` writing a new config (not reusing an
 existing one) also writes `code_review_policy: required`, which is also the default of
@@ -2423,7 +2447,7 @@ version marker. A history recorded before the marker replays without it.
 | Record | `baseline_verify.json` in the run's directory, written once the command has run to an exit code, before the Activity returns; `run.json` carries it as `baseline_verify`. A launch that failed as infrastructure (a timeout, a lost worker) leaves no record and halts the run as any failed launch does |
 | Failing tests | Read from the last 8 MiB of the log: `--- FAIL: <Test>` (a subtest counts as its top-level test) and pytest `FAILED`/`ERROR <file>::<test>` (parameters dropped); a Go compile error (`<file>.go:<line>:<col>:`) and a pytest collection error (`ERROR <file>.py`) name a file. No other runner's output is read |
 | Named by the ticket | The run's ticket (`-spec`, `-ticket-file`), the text its build is given, holds the test's full name or the last component of a pytest node id, with no identifier or path character on either side; a Go test may be followed by `/<subtest>`; a file is named by the path the log printed, or a longer path ending in it |
-| A path the ticket creates | When no test failed by name: the log's first recognised error line names, as a path or part of one, a file from the ticket's `Allowed-Files:`/`Required-Changed-Files:` (patterns left out) that does not exist in the worktree before the command runs, or a directory above it that does not exist either. Recorded as `needs_created` |
+| A path the ticket creates | When no test failed by name: the log's first recognised error line names, as a path or part of one, a file from the ticket's `Allowed-Files:` (patterns left out) that does not exist in the worktree before the command runs, or a directory above it that does not exist either. Recorded as `needs_created` |
 | Cause | When no test failed by name and the failure is not the ticket's own work: the earliest line of the log that shows one of four kinds, recorded as `cause` with the `cause_detail` it names (at most 120 bytes of path and identifier characters). `missing_module`: a Python `No module named X`. `missing_program`: a shell's own `sh: 1: X: not found` or `bash: line 1: X: command not found`, or `executable file not found`. `dependency_unavailable`: a Maven `Non-resolvable parent POM`, `Could not resolve dependencies` or `[ERROR] ... Missing:` artifact list, a Gradle `Could not resolve`, NuGet `NU1101`, Bundler `Could not find gem`, npm's or pnpm's `request to <url> failed, reason: connect EACCES` (a registry the network policy does not admit; the host is the detail). `missing_path`: MSBuild `MSB1009`, pytest `file or directory not found`, Ruby `cannot load such file`, or a `No such file or directory` line. The halt sentence says what is missing in place of the first error line, and its advice says what to change: the sandbox image or a `setup:` command for the first three, `verify_command` or the ticket's `Allowed-Files:` for a path. A log that shows none keeps the first error line |
 | Left paths | Right after the command ran, before the restore above: the paths `git status` reports now that it did not report before (untracked files the repository does not ignore, tracked files the command changed or deleted). Those that the `diff_scope` gate would refuse (the same harness-by-product exclusion and matcher as `policy.EvaluateRun`: outside a person-approved `Allowed-Files:` or the repository's `allowed_paths`; a run with neither has no such gate, and a path outside the model's own list is a note, not recorded here) are `left_out_of_scope`. The factory commits what a build leaves, so each would quarantine every build of the ticket. Not added to `baseline_failure.md` |
 | Told to the build | `baseline_failure.md` in the run's directory, staged read-only and named to the build script as `--baseline-failure`: the factory's sentence, the exit code, the verify command and each test in the words the ticket names it with, or the path the ticket creates (`named_as`). No text from the command's output |

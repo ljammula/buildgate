@@ -343,7 +343,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-inspecting proxy's, that the registry proxy and host-side model calls trust. Empty uses ~/.config/factoryd/build-ca.pem when it exists")
 	f.dataDir = flags.String("data-dir", "data", "directory for durable run records and logs")
 	f.baselineCheck = flags.Bool("baseline-check", false, "check that the repository's verify and full-suite commands pass in the sandbox, with no model call and nothing built. Takes -workspace, no ticket")
-	f.requireDeclaredScope = flags.Bool("require-declared-scope", false, "halt before the build if the ticket does not declare both Allowed-Files: and Required-Changed-Files:")
+	f.requireDeclaredScope = flags.Bool("require-declared-scope", false, "halt before the build if the ticket does not declare Allowed-Files:")
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts it with Docker if it is down; with FACTORYD_AUTOSTART=0 the address is required. An unreachable server halts the run")
 	f.repository = flags.String("repository", "", "repository name; runs that pass the same name run one at a time")
 	f.runID = flags.String("run-id", "", "internal: the run's id, set by serve for a run it starts")
@@ -367,7 +367,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.reviewReproduction = flags.Bool("review-reproduction", false, "internal: hold the review's reproductions and run them, so a finding can refuse the run (SC-022); a request's ticket build sets it")
 	f.reviewSpec = flags.String("review-spec", "", "internal: the request's approved spec.md, which the review cites by line and the reproduction check compares citations with")
 	f.recheckReproductions = flags.String("recheck-reproductions", "", "internal: manifest of a quarantined run's held reproductions that this corrective build's result must pass")
-	f.scopeApproval = flags.String("scope-approval", "", "internal: \"approved\" or \"unapproved\": whether a person approved the ticket's Allowed-Files; if not, a file outside it is a pull request note. A request's ticket build sets it; other runs may omit it")
+	f.scopeApproval = flags.String("scope-approval", "", "internal: whether a request ticket's scope is approved, unapproved, or absent")
 	f.configPath = flags.String("config", "", "session config path, or a profile name; empty uses the active profile or the default paths")
 	finishFlags(flags)
 	flags.Usage = func() {
@@ -485,7 +485,7 @@ type ticketRun struct {
 	registryProxyUpstreamTimeout          *time.Duration
 	releaseProtectedPaths                 *string
 	releaseMaxFilesChanged                *int
-	releaseMaxInsertions                  *int
+	releaseMaxChangedLines                *int
 	releaseRollbackPlan                   *string
 	releaseAllowOverrides                 *bool
 	releaseAllowDependencyLockfileChanges *bool
@@ -545,10 +545,8 @@ type ticketRun struct {
 	configuredFullSuiteCommand    string
 	effectiveFullSuiteCommand     string
 	allowedFiles                  []string
-	requiredChangedFiles          []string
 	testsRequiredOptOut           string
 	specTicketScopeMismatchFields []string
-	requiredContent               []string
 	resumeFrom                    *workflow.ResumeFrom
 	r                             *run.Run
 	onReady                       func(*run.Run)
@@ -758,7 +756,7 @@ func (tr *ticketRun) parseFlags() error {
 	tr.registryProxyUpstreamTimeout = &tr.settings.RegistryProxyUpstreamTimeout
 	tr.releaseProtectedPaths = &tr.settings.ReleaseProtectedPaths
 	tr.releaseMaxFilesChanged = &tr.settings.ReleaseMaxFilesChanged
-	tr.releaseMaxInsertions = &tr.settings.ReleaseMaxInsertions
+	tr.releaseMaxChangedLines = &tr.settings.ReleaseMaxChangedLines
 	tr.releaseRollbackPlan = &tr.settings.ReleaseRollbackPlan
 	tr.releaseAllowOverrides = &tr.settings.ReleaseAllowOverrides
 	tr.releaseAllowDependencyLockfileChanges = &tr.settings.ReleaseAllowDependencyLockfileChanges
@@ -775,7 +773,7 @@ func (tr *ticketRun) parseFlags() error {
 	warnIfReleasePolicyCanNeverAllow(*tr.openPullRequest, release.MergePolicy{
 		RollbackPlan:    *tr.releaseRollbackPlan,
 		MaxFilesChanged: *tr.releaseMaxFilesChanged,
-		MaxInsertions:   *tr.releaseMaxInsertions,
+		MaxChangedLines: *tr.releaseMaxChangedLines,
 	})
 	return nil
 }
@@ -1314,7 +1312,7 @@ func (tr *ticketRun) checkProject() error {
 	// (spec/tickets/<ticket>.md next to -workspace's parent), which is a
 	// real, intentional ticket file an operator relies on just as much as
 	// an explicit path (also found via review — a discovered ticket that
-	// actually declares Allowed-Files:/Required-Changed-Files:/
+	// actually declares Allowed-Files:/
 	// Verify-Command: must not be exempted just because -ticket-file itself
 	// was omitted). Falling back to *ticketFile only when piTicketPath is
 	// empty covers both.
@@ -1876,13 +1874,8 @@ func (tr *ticketRun) snapshotSpec() error {
 	// mistake, since it isn't a parse error and would otherwise silently
 	// fall back to a default or skip the check it should have gated. An
 	// absent optional header is never a problem here.
-	if problems, err := ticketspec.HeaderStrictnessProblems(tr.specSnapshotPath); err != nil {
-		return fmt.Errorf("check ticket header strictness: %w", err)
-	} else if len(problems) > 0 {
-		return fmt.Errorf(
-			"ticket header preflight failed for %s:\n%s\n\nrun `factoryd check-ticket %s`",
-			tr.specSnapshotPath, strings.Join(problems, "\n"), tr.specSnapshotPath,
-		)
+	if err := tr.checkSnapshotHeaders(); err != nil {
+		return err
 	}
 
 	// The ticket's own declared verify command wins over -verify-command's
@@ -1934,18 +1927,6 @@ func (tr *ticketRun) snapshotSpec() error {
 		return err
 	}
 
-	// A passing Verify-Command only proves the declared command exited 0,
-	// not that the ticket's required change was actually made — a command
-	// that never depended on the missing code can pass against an
-	// unmodified file (found live: an agent round stalled after writing
-	// only unrelated scaffolding, and the run was accepted with no code
-	// review catching it). Required-Changed-Files: is optional; when a
-	// ticket doesn't declare it, this check is skipped entirely.
-	tr.requiredChangedFiles, err = ticketspec.ParseRequiredChangedFiles(tr.specSnapshotPath)
-	if err != nil {
-		return fmt.Errorf("parse ticket required changed files: %w", err)
-	}
-
 	// A declared path missing a real prefix (e.g. "internal/service/note.go"
 	// for a repo whose real Go module root is backend/) is syntactically
 	// valid -- invalidWorkspaceRelativePaths above has nothing to say about
@@ -1960,7 +1941,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	if len(scopePathsToCheck) > 0 {
 		corrections, err := ticketspec.MisprefixedWorkspacePaths(*tr.workspace, scopePathsToCheck)
 		if err != nil {
-			return fmt.Errorf("check ticket Allowed-Files/Required-Changed-Files against -workspace: %w", err)
+			return fmt.Errorf("check ticket Allowed-Files against -workspace: %w", err)
 		}
 		if len(corrections) > 0 {
 			var lines []string
@@ -1977,6 +1958,21 @@ func (tr *ticketRun) snapshotSpec() error {
 	return nil
 }
 
+func (tr *ticketRun) checkSnapshotHeaders() error {
+	check := ticketspec.HeaderStrictnessProblems
+	if *tr.requestTicket && *tr.rf.scopeApproval == "none" {
+		check = ticketspec.SpecTicketHeaderStrictnessProblems
+	}
+	problems, err := check(tr.specSnapshotPath)
+	if err != nil {
+		return fmt.Errorf("check ticket header strictness: %w", err)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("ticket header preflight failed for %s:\n%s\n\nrun `factoryd check-ticket %s`", tr.specSnapshotPath, strings.Join(problems, "\n"), tr.specSnapshotPath)
+	}
+	return nil
+}
+
 // checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
 func (tr *ticketRun) checkScope() error {
 	var err error
@@ -1989,7 +1985,7 @@ func (tr *ticketRun) checkScope() error {
 	}
 
 	// build_app.py, and everything ticketspec parses above (Verify-Command:/
-	// Allowed-Files:/Required-Changed-Files:), come from -spec's own
+	// Allowed-Files:), come from -spec's own
 	// snapshot — never from -ticket-file, which PreflightActivity reads
 	// only for the pi-harness native structure check (## Goal/## Required
 	// changes/...). Found live: the documented invocation pattern
@@ -1999,13 +1995,13 @@ func (tr *ticketRun) checkScope() error {
 	// the diff_scope gate and the required-file notes — a real ticket 2+ run
 	// against an existing repo was accepted with zero of its required
 	// changes made, because both scope gates were skipped as
-	// undeclared (input.AllowedFiles/RequiredChangedFiles == nil) rather
+	// undeclared (input.AllowedFiles == nil) rather
 	// than failing. This check catches that class of misconfiguration
 	// before build_app.py ever runs: if -ticket-file declares a field that
 	// -spec's own snapshot doesn't *actually match* for that same field --
 	// not merely "-spec declares nothing at all" (found via review:
 	// comparing only presence let a spec that declares its own, different
-	// Allowed-Files/Required-Changed-Files/Verify-Command sail through
+	// Allowed-Files/Verify-Command sail through
 	// unflagged even though the run would still enforce the wrong scope)
 	// -- something is wrong with which file -spec points at.
 	//
@@ -2053,35 +2049,12 @@ func (tr *ticketRun) checkScope() error {
 				if ticketAllowed != nil && !stringSetsEqual(tr.allowedFiles, ticketAllowed) {
 					mismatches = append(mismatches, "Allowed-Files:")
 				}
-				ticketRequired, err := ticketspec.ParseRequiredChangedFiles(tr.scopeGuardTicketPath)
-				if err != nil {
-					return fmt.Errorf("parse -ticket-file %q required changed files for the -spec/-ticket-file scope-mismatch check: %w", tr.scopeGuardTicketPath, err)
-				}
-				if ticketRequired != nil && !stringSetsEqual(tr.requiredChangedFiles, ticketRequired) {
-					mismatches = append(mismatches, "Required-Changed-Files:")
-				}
 				ticketVerify, err := ticketspec.ParseVerifyCommand(tr.scopeGuardTicketPath)
 				if err != nil {
 					return fmt.Errorf("parse -ticket-file %q verify command for the -spec/-ticket-file scope-mismatch check: %w", tr.scopeGuardTicketPath, err)
 				}
 				if ticketVerify != "" && ticketVerify != tr.ticketVerifyCmd {
 					mismatches = append(mismatches, "Verify-Command:")
-				}
-				// Required-Content: is parsed independently of the
-				// requiredContent local below (found via review: that
-				// variable isn't computed until after this block, and
-				// duplicating one small parse call here is cheaper than
-				// reordering every declaration between here and there).
-				specRequiredContent, err := ticketspec.ParseRequiredContent(tr.specSnapshotPath)
-				if err != nil {
-					return fmt.Errorf("parse ticket required content: %w", err)
-				}
-				ticketRequiredContent, err := ticketspec.ParseRequiredContent(tr.scopeGuardTicketPath)
-				if err != nil {
-					return fmt.Errorf("parse -ticket-file %q required content for the -spec/-ticket-file scope-mismatch check: %w", tr.scopeGuardTicketPath, err)
-				}
-				if ticketRequiredContent != nil && !stringSetsEqual(specRequiredContent, ticketRequiredContent) {
-					mismatches = append(mismatches, "Required-Content:")
 				}
 				if len(mismatches) > 0 {
 					if !*tr.allowSpecTicketScopeMismatch {
@@ -2114,13 +2087,11 @@ func (tr *ticketRun) checkScope() error {
 	}
 
 	// When -require-declared-scope is set, enforce that the ticket declares
-	// both Allowed-Files: and Required-Changed-Files:. Without this flag
-	// (the default), tickets are free to omit either key — they remain
-	// entirely optional per-ticket, and unenforced scopes keep their prior
-	// behavior. When the flag is set, the run must halt before build_app.py
-	// is invoked if either key is absent, fail-closed against incomplete
-	// ticket scope declarations.
-	if *tr.requireDeclaredScope && (tr.allowedFiles == nil || tr.requiredChangedFiles == nil) {
+	// Allowed-Files:. Without this flag (the default), the key is optional
+	// per ticket, and an unenforced scope keeps its prior behavior. When the
+	// flag is set, the run must halt before build_app.py is invoked if the
+	// key is absent, fail-closed against an incomplete scope declaration.
+	if *tr.requireDeclaredScope && tr.allowedFiles == nil {
 		// Reuses the already-computed id, not a freshly recomputed one:
 		// two separate time.Now() calls for what must be the same run's
 		// identifier is exactly the class of drift this file's own
@@ -2151,22 +2122,9 @@ func (tr *ticketRun) checkScope() error {
 		if saveErr := save(r, *tr.dataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
 		}
-		return fmt.Errorf("ticket does not declare both Allowed-Files: and Required-Changed-Files: (required by -require-declared-scope)")
+		return fmt.Errorf("ticket does not declare Allowed-Files: (required by -require-declared-scope)")
 	}
 
-	// A required file that changed only proves it has *some* diff — a file
-	// touched only cosmetically (whitespace, an unrelated line) still
-	// counts. Required-Content: pins a concrete marker
-	// of the real change (a new widget's Key literal, a new test's
-	// function name) that must actually be newly present. Optional, like
-	// the other Required-* keys; skipped entirely when absent.
-	tr.requiredContent, err = ticketspec.ParseRequiredContent(tr.specSnapshotPath)
-	if err != nil {
-		return fmt.Errorf("parse ticket required content: %w", err)
-	}
-	if tr.requiredContent != nil && tr.requiredChangedFiles == nil {
-		return fmt.Errorf("ticket declares Required-Content: without Required-Changed-Files: — there is no required file set to search")
-	}
 	return nil
 }
 
@@ -2238,6 +2196,7 @@ func (tr *ticketRun) createRunRecord() error {
 		// *openPullRequest flag variable threaded into a function that
 		// doesn't otherwise see it (found via Codex review, PR #64).
 		OpenPullRequest:     *tr.openPullRequest,
+		PRBudgetLines:       tr.settings.PRBudgetLines,
 		PRCloses:            *tr.prClosesIssue,
 		PRBase:              *tr.prBase,
 		TestsRequiredOptOut: tr.testsRequiredOptOut,
@@ -2249,7 +2208,7 @@ func (tr *ticketRun) createRunRecord() error {
 		// against the policy this run actually started with, instead of
 		// an always-deny release.MergePolicy{} -- see run.Run.ReleasePolicy's
 		// own doc comment.
-		ReleasePolicy: runReleasePolicy(releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxInsertions, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)),
+		ReleasePolicy: runReleasePolicy(releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)),
 		// RFC3339Nano — see the other CreatedAt assignment above's doc
 		// comment for why.
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
@@ -2614,7 +2573,7 @@ func (tr *ticketRun) dispatch() error {
 			ExecutionRouteSkips: routeSkipsOf(tr.execSelection),
 			ReviewRouteSkips:    routeSkipsOf(tr.reviewSelection),
 		}
-		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxInsertions, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)
+		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)
 		relayOpts := modelRouteOptions{Policy: tr.relayPolicy, CABundlePath: *tr.egressCABundle}
 		relayOpts.CheckRoute = checkRouteFunc(tr.settings)
 		relayOpts.ResolveRouteCredentials = resolveRouteCredentialsFunc(tr.settings)
@@ -2694,11 +2653,10 @@ func (tr *ticketRun) dispatch() error {
 			GoModuleDir:            repositoryGoModuleDir(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, tr.baseSHA, tr.registryProxyPolicy),
 			ComposeServices:        composeServicesOpts,
 			AllowedFiles:           tr.allowedFiles,
-			RequiredChangedFiles:   tr.requiredChangedFiles,
-			RequiredContent:        tr.requiredContent,
 			TestPatterns:           tr.testPatterns,
 			AllowedPaths:           tr.allowedPaths,
 			ScopeUnapproved:        tr.scopeUnapproved,
+			NoTicketScope:          *tr.rf.scopeApproval == "none",
 			TestsRequiredOptOut:    tr.r.TestsRequiredOptOut,
 			Slice:                  sliceOpts,
 			ReleasePolicy:          releasePolicy,
@@ -2808,34 +2766,45 @@ func resolveScopeApproval(value string, requestTicket bool) (unapproved bool, er
 		return false, nil
 	case "unapproved":
 		return true, nil
+	case "none":
+		if !requestTicket {
+			return false, errors.New("-scope-approval none requires -request-ticket")
+		}
+		return false, nil
 	case "":
 		if requestTicket {
-			return false, errors.New("-scope-approval is required with -request-ticket: approved or unapproved")
+			return false, errors.New("-scope-approval is required with -request-ticket: approved, unapproved, or none")
 		}
 		return false, nil
 	}
-	return false, fmt.Errorf("-scope-approval must be approved or unapproved, got %q", value)
+	return false, fmt.Errorf("-scope-approval must be approved, unapproved, or none, got %q", value)
 }
 
 // parseAllowedScope reads the ticket's Allowed-Files (nil when it declares
 // none) and whether a person approved that list (-scope-approval).
 func (tr *ticketRun) parseAllowedScope() (err error) {
+	tr.scopeUnapproved, err = resolveScopeApproval(*tr.rf.scopeApproval, *tr.requestTicket)
+	if err != nil {
+		return err
+	}
+	if *tr.rf.scopeApproval == "none" {
+		tr.allowedFiles = nil
+		return nil
+	}
 	tr.allowedFiles, err = ticketspec.ParseAllowedFiles(tr.specSnapshotPath)
 	if err != nil {
 		return fmt.Errorf("parse ticket allowed files: %w", err)
 	}
-	tr.scopeUnapproved, err = resolveScopeApproval(*tr.rf.scopeApproval, *tr.requestTicket)
-	return err
+	return nil
 }
 
 // misprefixCheckPaths are the declared paths checked for a missing directory
-// prefix, without repeats: Required-Changed-Files, and Allowed-Files unless no
-// person approved that list (it refuses nothing then, so a wrong prefix in it
-// halts nothing).
+// prefix: Allowed-Files, unless no person approved that list (it refuses
+// nothing then, so a wrong prefix in it halts nothing).
 func (tr *ticketRun) misprefixCheckPaths() []string {
-	declared := tr.requiredChangedFiles
+	var declared []string
 	if !tr.scopeUnapproved {
-		declared = append(slices.Clone(tr.allowedFiles), tr.requiredChangedFiles...)
+		declared = tr.allowedFiles
 	}
 	var paths []string
 	for _, p := range declared {

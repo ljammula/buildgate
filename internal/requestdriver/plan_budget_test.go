@@ -20,6 +20,7 @@ const planBudgetDir = "testdata/plan_budget"
 func planUnderBudget(t *testing.T, c planCorpusCase, budget int) *request.Request {
 	t.Helper()
 	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, c.spec, c.verifyCommand)
+	usePlanningJob(t, dataDir, id)
 	fixture, err := request.Load(dataDir, id)
 	if err != nil {
 		t.Fatal(err)

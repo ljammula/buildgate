@@ -13,7 +13,7 @@ const SPEC =
   "# Spec\n\n## Problem\n\np\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts\n   exactly.\n3. It multiplies.\n\n## Risks\n\nr\n";
 
 const TICKET =
-  "Verify-Command: go test ./...\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n" +
+  "Verify-Command: go test ./...\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n" +
   "### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n" +
   "### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n";
 
@@ -236,12 +236,7 @@ describe("a ticket's header lines and covered criteria as fields", () => {
     ).toBeVisible();
     await userEvent.type(within(fields()).getByRole("textbox", { name: "Allowed files" }), "a.go");
 
-    expect(raw()).toHaveValue(
-      TICKET.replace(
-        "Allowed-Files: a.go\nRequired-Changed-Files: a.go\n",
-        "Required-Changed-Files: a.go\nAllowed-Files: a.go\n",
-      ),
-    );
+    expect(raw()).toHaveValue(TICKET);
   });
 
   test("Save sends the text shown against the hash of the text opened", async () => {
@@ -287,8 +282,7 @@ describe("a ticket's header lines and covered criteria as fields", () => {
 
     const expected =
       "Verify-Command: go test ./...\n" +
-      "Allowed-Files: a.go\n" +
-      "Required-Changed-Files: a.go\n\n" +
+      "Allowed-Files: a.go\n\n" +
       "## Goal\n\n" +
       "g\n\n" +
       "## Plan\n\n" +

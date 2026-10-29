@@ -868,7 +868,7 @@ func TestRecordAcceptedRunSideEffectsLockedMutatesRDirectly(t *testing.T) {
 // block or retroactively change an already-earned acceptance.
 //
 // tier2SettingsOverride is given a real, allowing release policy
-// (RollbackPlan/MaxFilesChanged/MaxInsertions) on top of
+// (RollbackPlan/MaxFilesChanged/MaxChangedLines) on top of
 // withFakeSandboxSettings' own fixture, not left at its zero-value
 // default: with the release-decision gate added ahead of
 // -open-pull-request, a denying policy (this repo's actual default) would
@@ -881,7 +881,7 @@ func TestAPIStartStarterPlumbsOpenPullRequestFlagBestEffort(t *testing.T) {
 	withFakeSandboxSettings(t)
 	tier2SettingsOverride.ReleaseRollbackPlan = "reviewed and reversible"
 	tier2SettingsOverride.ReleaseMaxFilesChanged = 100
-	tier2SettingsOverride.ReleaseMaxInsertions = 100000
+	tier2SettingsOverride.ReleaseMaxChangedLines = 100000
 	tier2SettingsOverride.ReleaseAllowUnsandboxed = true
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -941,10 +941,10 @@ func TestReleasePolicyCanNeverAllow(t *testing.T) {
 		want   bool
 	}{
 		{"this repo's actual -release-* defaults", release.MergePolicy{}, true},
-		{"no rollback plan alone", release.MergePolicy{MaxFilesChanged: 10, MaxInsertions: 100}, true},
-		{"zero max files changed alone", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxInsertions: 100}, true},
+		{"no rollback plan alone", release.MergePolicy{MaxFilesChanged: 10, MaxChangedLines: 100}, true},
+		{"zero max files changed alone", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxChangedLines: 100}, true},
 		{"zero max insertions alone", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10}, true},
-		{"every value real", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxInsertions: 100}, false},
+		{"every value real", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 100}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -964,7 +964,7 @@ func TestReleasePolicyCanNeverAllow(t *testing.T) {
 // not parallel-safe: redirects the global log package's output (log.SetOutput)
 func TestWarnIfReleasePolicyCanNeverAllowLogsOnlyWhenBothConditionsHold(t *testing.T) {
 	denyingPolicy := release.MergePolicy{}
-	allowingPolicy := release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxInsertions: 100}
+	allowingPolicy := release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 100}
 
 	cases := []struct {
 		name            string
@@ -1053,6 +1053,7 @@ func TestRecordReleaseDecisionAndOpenerGate(t *testing.T) {
 		State: run.StateAccepted, BaseSHA: "base", ResultSHA: "result",
 		ChangedFiles: []string{"lib/app.go"},
 		DiffStat:     &run.DiffStat{FilesChanged: 1, Insertions: 2},
+		ChangeSize:   &run.ChangeSize{SourceFiles: 1, SourceLines: 2},
 		GateResults:  []run.GateResult{{Check: "verify", Passed: true}},
 		Branch:       "factoryd/run-1", OpenPullRequest: true,
 	}

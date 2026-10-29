@@ -429,7 +429,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	// The plan was drafted under a 400-line budget; ticket 2's estimate is over it.
 	planReview.PlanBudgetLines = 400
 	withEstimate := func(ticket string, lines int) string {
-		return strings.Replace(ticket, "Required-Changed-Files: a.go\n", fmt.Sprintf("Required-Changed-Files: a.go\nEstimated-Changed-Lines: %d\n", lines), 1)
+		return strings.Replace(ticket, "Allowed-Files: a.go\n", fmt.Sprintf("Allowed-Files: a.go\nEstimated-Changed-Lines: %d\n", lines), 1)
 	}
 	write(ticketPath(planReview.ID, 2), withEstimate(seedApprovableRequestTicket, 620))
 	write(ticketPath(planReview.ID, 1), strings.Replace(withEstimate(seedApprovableRequestTicket, 220), "1. s\n", "1. migrate and switch over in one step\n", 1))

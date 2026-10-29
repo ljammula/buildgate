@@ -134,6 +134,22 @@
     "insertions": 3,
     "deletions": 3
   },
+  "change_size": {
+    "source_lines": 3,
+    "source_files": 3,
+    "functions": 3,
+    "files": [
+      {
+        "path": "every-field path",
+        "insertions": 3,
+        "deletions": 3,
+        "functions": [
+          "every-field functions"
+        ]
+      }
+    ]
+  },
+  "pr_budget_lines": 3,
   "diff_available": true,
   "diff_truncated": true,
   "agent_evidence": {
@@ -609,7 +625,7 @@
       "every-field protected_paths"
     ],
     "max_files_changed": 3,
-    "max_insertions": 3,
+    "max_changed_lines": 3,
     "rollback_plan": "every-field rollback_plan",
     "allow_overrides": true,
     "allow_dependency_lockfile_changes": true,

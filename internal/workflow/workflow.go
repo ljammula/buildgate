@@ -57,8 +57,9 @@ const (
 	// after canonical verify passes, checkpoint/journal it, hash the
 	// log) and differ only in which command and gate name each call
 	// uses.
-	RunNamedGateActivityName    = "RunNamedGateActivity"
-	CollectEvidenceActivityName = "CollectEvidenceActivity"
+	RunNamedGateActivityName      = "RunNamedGateActivity"
+	CollectEvidenceActivityName   = "CollectEvidenceActivity"
+	MeasureChangeSizeActivityName = "MeasureChangeSizeActivity"
 	// RunReviewStepActivityName is the model-backed review step
 	// (reviewstep.CombinedStep), called once per run whose review is on.
 	// It runs as its own sandboxed launch after CollectEvidenceActivity's
@@ -102,7 +103,7 @@ const (
 	InfrastructureFailureType     = "InfrastructureFailure"
 	CleanupUnconfirmedFailureType = "SandboxCleanupUnconfirmed"
 	// PreflightFailureType marks PreflightActivity finding a ticket's
-	// declared Required-Changed-Files already dirty before the run
+	// declared Allowed-Files already dirty before the run
 	// starts — a real precondition violation, not an infrastructure
 	// hiccup, but still one that must halt the Workflow before
 	// RunBuildActivity ever runs (see PreflightActivity's doc comment).
@@ -508,15 +509,15 @@ const baselineVerifyChange = "baseline-verify"
 func preBuildChecks(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, baseSHA string, committed bool, worktreePath, branch string, install **run.InstallImage) ([]run.Attempt, error) {
 	current.Stage, current.StartedAt = "preflight", temporalworkflow.Now(ctx)
 	if err := temporalworkflow.ExecuteActivity(ids.with(ctx, "preflight"), PreflightActivityName, PreflightInput{
-		WorkspacePath:        input.WorkspacePath,
-		AllowedFiles:         input.AllowedFiles,
-		ScopeUnapproved:      input.ScopeUnapproved,
-		RequiredChangedFiles: input.RequiredChangedFiles,
-		TicketPath:           input.TicketPath,
-		TicketNumber:         input.TicketNumber,
-		RequestTicket:        input.RequestTicket,
-		SpecPath:             input.SpecPath,
-		LogDir:               input.LogDir,
+		WorkspacePath:   input.WorkspacePath,
+		AllowedFiles:    input.AllowedFiles,
+		ScopeUnapproved: input.ScopeUnapproved,
+		TicketPath:      input.TicketPath,
+		TicketNumber:    input.TicketNumber,
+		RequestTicket:   input.RequestTicket,
+		NoTicketScope:   input.NoTicketScope,
+		SpecPath:        input.SpecPath,
+		LogDir:          input.LogDir,
 	}).Get(ctx, nil); err != nil {
 		return nil, wrapActivityFailure("preflight activity", err, nil, baseSHA, committed, worktreePath, branch)
 	}

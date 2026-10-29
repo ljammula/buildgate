@@ -184,116 +184,6 @@ func TestDiffScopeViolationsGlobDoesNotCrossDirectories(t *testing.T) {
 	}
 }
 
-func TestUnchangedRequiredFilesAllPresent(t *testing.T) {
-	if missing := UnchangedRequiredFiles([]string{"a.go", "a_test.go", "b.go"}, []string{"a.go", "a_test.go"}); len(missing) != 0 {
-		t.Errorf("got %v, want no missing files", missing)
-	}
-}
-
-func TestUnchangedRequiredFilesFindsMissingFile(t *testing.T) {
-	missing := UnchangedRequiredFiles([]string{"a_test.go"}, []string{"a.go", "a_test.go"})
-	if want := []string{"a.go"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v", missing, want)
-	}
-}
-
-func TestUnchangedRequiredFilesEmptyChangedMissesEveryRequiredFile(t *testing.T) {
-	missing := UnchangedRequiredFiles(nil, []string{"a.go"})
-	if want := []string{"a.go"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v", missing, want)
-	}
-}
-
-// An unmet Required-Changed-Files or Required-Content declaration is a note,
-// never a refused run: the run is accepted and the pull request lists each
-// unmet fact on its own line.
-func TestEvaluateRunNotesUnmetRequiredFilesAndContentAndRefusesNothing(t *testing.T) {
-	got := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:             []string{"make", "test"},
-		ChangedFiles:              []string{"README.md"},
-		RequiredChangedFiles:      []string{"README.md", "main.go"},
-		RequiredContent:           []string{"marker"},
-		RequiredContentBaseFiles:  map[string]string{"main.go": ""},
-		RequiredContentFinalFiles: map[string]string{"main.go": ""},
-		TestsRequiredOptOut:       "a documentation row",
-	})
-	if !got.Accepted || len(got.FailedChecks) != 0 {
-		t.Fatalf("EvaluateRun() = %+v, want accepted: required files and content refuse nothing", got)
-	}
-	want := []string{"required file not changed: main.go", `required content not newly present: "marker"`}
-	if !slices.Equal(got.Notes, want) {
-		t.Errorf("Notes = %q, want %q", got.Notes, want)
-	}
-	for _, g := range got.GateResults {
-		if g.Check == "required_files_changed" || g.Check == "required_content_present" {
-			t.Errorf("gate %q recorded: required files and content are notes, not gates", g.Check)
-		}
-	}
-}
-
-func TestAbsentRequiredContentAllNew(t *testing.T) {
-	base := map[string]string{"a.dart": "class Widget {}\n"}
-	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
-	if missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"}); len(missing) != 0 {
-		t.Errorf("got %v, want none missing", missing)
-	}
-}
-
-func TestAbsentRequiredContentMissingFromFinal(t *testing.T) {
-	base := map[string]string{"a.dart": "class Widget {}\n"}
-	final := map[string]string{"a.dart": "class Widget {\n  // cosmetic change only\n}\n"}
-	missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"})
-	if want := []string{"Key('quick-time-chips')"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v", missing, want)
-	}
-}
-
-func TestAbsentRequiredContentAlreadyInBaseDoesNotCount(t *testing.T) {
-	base := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
-	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n  // untouched otherwise\n}\n"}
-	missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"})
-	if want := []string{"Key('quick-time-chips')"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v — content already present at base isn't new evidence of this run's change", missing, want)
-	}
-}
-
-func TestAbsentRequiredContentMatchesAcrossFiles(t *testing.T) {
-	base := map[string]string{"a.dart": "", "a_test.dart": ""}
-	final := map[string]string{"a.dart": "no marker here\n", "a_test.dart": "func TestQuickTimeChips() {}\n"}
-	if missing := AbsentRequiredContent(base, final, []string{"func TestQuickTimeChips("}); len(missing) != 0 {
-		t.Errorf("got %v, want none missing — the string only needs to appear in one of the required files", missing)
-	}
-}
-
-// TestAbsentRequiredContentDoesNotMaskAcrossFiles is the regression test
-// for a real finding from review: the marker is newly added to file B,
-// but that same marker already existed in file A at base — concatenating
-// every file into one blob before matching let A's pre-existing content
-// mask B's genuinely new addition. Checked per-file, A's pre-existing
-// marker must not affect B's independent pass.
-func TestAbsentRequiredContentDoesNotMaskAcrossFiles(t *testing.T) {
-	base := map[string]string{"a.dart": "Key('already-here')\n", "b.dart": ""}
-	final := map[string]string{"a.dart": "Key('already-here')\n", "b.dart": "Key('already-here')\n"}
-	if missing := AbsentRequiredContent(base, final, []string{"Key('already-here')"}); len(missing) != 0 {
-		t.Errorf("got %v, want none missing — b.dart newly added the marker, independent of a.dart already having it", missing)
-	}
-}
-
-// TestAbsentRequiredContentDoesNotFabricateSeamMatch is the regression
-// test for the other half of the same finding: concatenating file
-// content can fabricate a match at the seam between two files that
-// exists in neither file individually. "abc"+"def" naively concatenates
-// to "abcdef", which contains "cd" — a substring split across the seam —
-// even though no single file's content does.
-func TestAbsentRequiredContentDoesNotFabricateSeamMatch(t *testing.T) {
-	base := map[string]string{"a.dart": "", "b.dart": ""}
-	final := map[string]string{"a.dart": "xxxabc", "b.dart": "defxxx"}
-	missing := AbsentRequiredContent(base, final, []string{"abcdef"})
-	if want := []string{"abcdef"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v — no single file actually contains the marker", missing, want)
-	}
-}
-
 func TestEvaluateRunAcceptsWhenOnlyCanonicalVerifyDeclared(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:  []string{"sh", "-c", "make verify"},
@@ -358,16 +248,12 @@ func TestEvaluateRunRejectsOnFailingCanonicalVerify(t *testing.T) {
 
 func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:             []string{"sh", "-c", "true"},
-		BuildExitCode:             0,
-		VerifyExitCode:            0,
-		ChangedFiles:              []string{"a.go", "out-of-scope.txt"},
-		AllowedFiles:              []string{"a.go"},
-		RequiredChangedFiles:      []string{"a.go", "b.go"},
-		RequiredContent:           []string{"marker"},
-		RequiredContentBaseFiles:  map[string]string{"a.go": "", "b.go": ""},
-		RequiredContentFinalFiles: map[string]string{"a.go": "cosmetic change only", "b.go": ""},
-		TestsRequiredOptOut:       "not exercising tests_red_on_base in this fixture",
+		VerifyCommand:       []string{"sh", "-c", "true"},
+		BuildExitCode:       0,
+		VerifyExitCode:      0,
+		ChangedFiles:        []string{"a.go", "out-of-scope.txt"},
+		AllowedFiles:        []string{"a.go"},
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false")
@@ -378,10 +264,6 @@ func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 	}
 	if !slices.Equal(result.DiffScopeViolations, []string{"out-of-scope.txt"}) {
 		t.Errorf("DiffScopeViolations = %v, want [out-of-scope.txt]", result.DiffScopeViolations)
-	}
-	wantNotes := []string{"required file not changed: b.go", `required content not newly present: "marker"`}
-	if !slices.Equal(result.Notes, wantNotes) {
-		t.Errorf("Notes = %q, want %q", result.Notes, wantNotes)
 	}
 	wantChecks := []string{"canonical_verify", "diff_scope", "tests_red_on_base"}
 	if len(result.GateResults) != len(wantChecks) {
@@ -396,17 +278,13 @@ func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 
 func TestEvaluateRunAcceptsWhenAllDeclaredGatesPass(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:             []string{"sh", "-c", "true"},
-		BuildExitCode:             0,
-		VerifyExitCode:            0,
-		ChangedFiles:              []string{"a.go", "a_test.go"},
-		AllowedFiles:              []string{"a.go", "a_test.go"},
-		RequiredChangedFiles:      []string{"a.go"},
-		RequiredContent:           []string{"marker"},
-		RequiredContentBaseFiles:  map[string]string{"a.go": ""},
-		RequiredContentFinalFiles: map[string]string{"a.go": "marker"},
-		FullSuiteCommand:          []string{"sh", "-c", "true"},
-		FullSuiteExitCode:         0,
+		VerifyCommand:     []string{"sh", "-c", "true"},
+		BuildExitCode:     0,
+		VerifyExitCode:    0,
+		ChangedFiles:      []string{"a.go", "a_test.go"},
+		AllowedFiles:      []string{"a.go", "a_test.go"},
+		FullSuiteCommand:  []string{"sh", "-c", "true"},
+		FullSuiteExitCode: 0,
 	})
 	if !result.Accepted {
 		t.Errorf("Accepted = false, want true; FailedChecks = %v", result.FailedChecks)
@@ -534,8 +412,8 @@ func TestTestsRedOnBaseVerdictTable(t *testing.T) {
 }
 
 // TestTicketTestsFeasibleCatchesTheLiveCase pins the exact shape found
-// live (a Flutter + Go app repo run 3, 2026-09-28): a ticket's Allowed-Files/
-// Required-Changed-Files named only one concrete, non-test Go file, no
+// live (a Flutter + Go app repo run 3, 2026-09-28): a ticket's Allowed-Files
+// named only one concrete, non-test Go file, no
 // Tests-Required opt-out declared -- structurally unable to ever pass
 // tests_red_on_base, yet the plan reached plan_review and a build ran before
 // quarantining on it.
@@ -1284,7 +1162,6 @@ func containsReason(reasons []string, want string) bool {
 
 const wellFormedBrownfieldTicket = `Verify-Command: make verify
 Allowed-Files: internal/foo/foo.go, internal/foo/foo_test.go
-Required-Changed-Files: internal/foo/foo.go
 
 ## Goal
 
@@ -1331,6 +1208,21 @@ func TestTicketStructureBrownfieldRejectsMissingHeaderKey(t *testing.T) {
 	}
 }
 
+// Retired headers in existing plans are ignored, including malformed values.
+func TestTicketStructureBrownfieldIgnoresRetiredHeaders(t *testing.T) {
+	for _, header := range []string{"Required-Changed-Files: internal/foo/foo.go", "Required-Content: marker"} {
+		ticket := strings.Replace(wellFormedBrownfieldTicket, "\n\n## Goal", "\n"+header+"\n\n## Goal", 1)
+		passed, reasons := TicketStructureBrownfield(ticket)
+		if !passed || len(reasons) != 0 {
+			t.Errorf("TicketStructureBrownfield(%q) = %v, %v, want acceptance", header, passed, reasons)
+		}
+	}
+	fenced := strings.Replace(wellFormedBrownfieldTicket, "## Goal", "```\nRequired-Content: marker\n```\n\n## Goal", 1)
+	if passed, reasons := TicketStructureBrownfield(fenced); !passed {
+		t.Errorf("a retired header inside a fenced example refused the ticket: %v", reasons)
+	}
+}
+
 func TestTicketStructureBrownfieldRejectsMissingSection(t *testing.T) {
 	missingOutOfScope := strings.Replace(wellFormedBrownfieldTicket, "## Out of scope\n\nNothing else.\n", "", 1)
 	passed, reasons := TicketStructureBrownfield(missingOutOfScope)
@@ -1343,8 +1235,8 @@ func TestTicketStructureBrownfieldRejectsMissingSection(t *testing.T) {
 }
 
 func TestTicketStructureBrownfieldRejectsFencedHeaderKeyOnly(t *testing.T) {
-	fencedOnly := "```\nVerify-Command: make verify\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n```\n\n" +
-		strings.Replace(wellFormedBrownfieldTicket, "Verify-Command: make verify\nAllowed-Files: internal/foo/foo.go, internal/foo/foo_test.go\nRequired-Changed-Files: internal/foo/foo.go\n\n", "", 1)
+	fencedOnly := "```\nVerify-Command: make verify\nAllowed-Files: a.go\n```\n\n" +
+		strings.Replace(wellFormedBrownfieldTicket, "Verify-Command: make verify\nAllowed-Files: internal/foo/foo.go, internal/foo/foo_test.go\n\n", "", 1)
 	passed, reasons := TicketStructureBrownfield(fencedOnly)
 	if passed {
 		t.Fatal("TicketStructureBrownfield(header keys only inside a fenced block) Passed = true, want false")

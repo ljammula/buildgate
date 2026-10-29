@@ -147,8 +147,8 @@ func validateSandboxResourceLimitFlags(prefix, memory, cpus, tmpfsSize string) e
 }
 
 // stringSetsEqual reports whether a and b hold the same strings, ignoring
-// order — used to compare a ticket's declared Allowed-Files:/
-// Required-Changed-Files: (which are logically unordered sets of paths)
+// order — used to compare a ticket's declared Allowed-Files:
+// (which is a logically unordered set of paths)
 // between two files, so that two declarations differing only in list order
 // are correctly treated as equal, not flagged as a mismatch. nil and an
 // empty (non-nil) slice compare equal, matching ticketspec's own "absent

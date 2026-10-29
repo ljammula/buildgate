@@ -183,6 +183,7 @@ func countingHost(dp *deps) *int {
 func memoryDenial(t *testing.T, r *run.Run) []string {
 	t.Helper()
 	r.DiffStat = &run.DiffStat{FilesChanged: 1, Insertions: 1}
+	r.ChangeSize = &run.ChangeSize{SourceFiles: 1, SourceLines: 1}
 	r.GateResults = []run.GateResult{{Check: "verify", Passed: true}}
 	r.DependencyLockfilesTouched = []string{}
 	_, reasons := release.MergePolicyCheck(*r, *allowingMergePolicyForTest())

@@ -69,7 +69,7 @@ printf 'data_dir: %s\nopen_pull_request: false\nworkspaces:\n  - %s\n' \
 	"$SCRATCH/data" "$SCRATCH/repo" >> "$SCRATCH/config.yml"
 # The same backfill quickstart does for a reused config: an operator config
 # with no release_* keys otherwise denies every PR.
-for kv in 'release_max_files_changed: 25' 'release_max_insertions: 1000' 'release_rollback_plan: git revert the merge commit on main'; do
+for kv in 'release_max_files_changed: 25' 'release_max_changed_lines: 1000' 'release_rollback_plan: git revert the merge commit on main'; do
 	grep -q "^${kv%%:*}:" "$SCRATCH/config.yml" || printf '%s\n' "$kv" >> "$SCRATCH/config.yml"
 done
 "$REPO_ROOT/scripts/fixture-repo.sh" "$CONSOLE_WALK_REPO" "$SCRATCH/repo"

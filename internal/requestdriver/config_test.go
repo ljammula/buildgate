@@ -76,7 +76,7 @@ func TestFullSuiteNoneKeepsDenial(t *testing.T) {
 	policy := release.MergePolicy{
 		RollbackPlan:    "git revert the merge commit on main",
 		MaxFilesChanged: 25,
-		MaxInsertions:   1000,
+		MaxChangedLines: 1000,
 		RequiredGates:   []string{"canonical_verify", "full_suite_verify"},
 	}
 	allowed, reasons := release.MergePolicyCheck(r, policy)

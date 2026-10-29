@@ -896,6 +896,10 @@ func registerPassingBaselineVerify(env *testsuite.TestWorkflowEnvironment) {
 // the worktree path the fixtures already build in.
 func registerIsolationActivities(env *testsuite.TestWorkflowEnvironment) {
 	env.RegisterActivityWithOptions(
+		func(context.Context, MeasureChangeSizeInput) (*run.ChangeSize, error) { return &run.ChangeSize{}, nil },
+		activity.RegisterOptions{Name: MeasureChangeSizeActivityName},
+	)
+	env.RegisterActivityWithOptions(
 		func(context.Context, PrepareIsolatedWorkspaceInput) (PrepareIsolatedWorkspaceResult, error) {
 			return PrepareIsolatedWorkspaceResult{WorktreePath: "/fixture/workspace", Branch: "factoryd/fixture"}, nil
 		},

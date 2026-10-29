@@ -168,52 +168,6 @@ func TestParseAllowedFilesAcceptsGlobAndDirectoryPatterns(t *testing.T) {
 	}
 }
 
-func TestParseRequiredChangedFilesFound(t *testing.T) {
-	path := writeSpec(t, "# Ticket: foo\n\n## Out of scope\n\nRequired-Changed-Files: a/b.go, a/b_test.go\n")
-
-	got, err := ParseRequiredChangedFiles(path)
-	if err != nil {
-		t.Fatalf("ParseRequiredChangedFiles: %v", err)
-	}
-	want := []string{"a/b.go", "a/b_test.go"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestParseRequiredChangedFilesAbsent(t *testing.T) {
-	path := writeSpec(t, "# Ticket: foo\n\nNo machine-readable key here.\n")
-
-	got, err := ParseRequiredChangedFiles(path)
-	if err != nil {
-		t.Fatalf("ParseRequiredChangedFiles: %v", err)
-	}
-	if got != nil {
-		t.Errorf("got %v, want nil when ticket declares no required-changed-files list", got)
-	}
-}
-
-func TestParseRequiredChangedFilesEmptyValueErrors(t *testing.T) {
-	path := writeSpec(t, "Required-Changed-Files: \n")
-
-	if _, err := ParseRequiredChangedFiles(path); err == nil {
-		t.Error("expected an error for a Required-Changed-Files line with no files")
-	}
-}
-
-// TestParseRequiredChangedFilesRejectsAbsolutePath pins the same
-// preflight validation as ParseAllowedFiles (they share
-// parseFileListKeyLine) for the key that quarantined budget-remaining-amount's
-// required_files_changed and required_content_present gates alongside
-// diff_scope.
-func TestParseRequiredChangedFilesRejectsAbsolutePath(t *testing.T) {
-	path := writeSpec(t, "Required-Changed-Files: /Users/dev/code/repo/a.go\n")
-
-	if _, err := ParseRequiredChangedFiles(path); err == nil {
-		t.Error("expected an error for an absolute Required-Changed-Files path")
-	}
-}
-
 func TestParseTestsRequiredOptOutAbsentMeansGateRunsNormally(t *testing.T) {
 	path := writeSpec(t, "# Ticket: foo\n\nNo machine-readable key here.\n")
 
@@ -271,52 +225,6 @@ func TestParseTestsRequiredOptOutInvalidValueErrors(t *testing.T) {
 
 	if _, err := ParseTestsRequiredOptOut(path); err == nil {
 		t.Error("expected an error for a Tests-Required: value that is neither yes nor no -- <reason>")
-	}
-}
-
-func TestParseRequiredContentCollectsMultipleLines(t *testing.T) {
-	path := writeSpec(t, "# Ticket: foo\n\nRequired-Content: Key('reminder-quick-time-chips')\nRequired-Content: func TestQuickTimeChips(\n")
-
-	got, err := ParseRequiredContent(path)
-	if err != nil {
-		t.Fatalf("ParseRequiredContent: %v", err)
-	}
-	want := []string{"Key('reminder-quick-time-chips')", "func TestQuickTimeChips("}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestParseRequiredContentAbsent(t *testing.T) {
-	path := writeSpec(t, "# Ticket: foo\n\nNo machine-readable key here.\n")
-
-	got, err := ParseRequiredContent(path)
-	if err != nil {
-		t.Fatalf("ParseRequiredContent: %v", err)
-	}
-	if got != nil {
-		t.Errorf("got %v, want nil when ticket declares no required content", got)
-	}
-}
-
-func TestParseRequiredContentEmptyValueErrors(t *testing.T) {
-	path := writeSpec(t, "Required-Content: \n")
-
-	if _, err := ParseRequiredContent(path); err == nil {
-		t.Error("expected an error for a Required-Content line with no content")
-	}
-}
-
-func TestParseRequiredContentIgnoresFencedExample(t *testing.T) {
-	path := writeSpec(t, "# Ticket: foo\n\nDon't write:\n\n```\nRequired-Content: not-a-real-requirement\n```\n\nRequired-Content: real-requirement\n")
-
-	got, err := ParseRequiredContent(path)
-	if err != nil {
-		t.Fatalf("ParseRequiredContent: %v", err)
-	}
-	want := []string{"real-requirement"}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
@@ -473,7 +381,7 @@ func TestMisprefixedWorkspacePathsIgnoresAPathThatExistsAsDeclared(t *testing.T)
 }
 
 func TestMisprefixedWorkspacePathsIgnoresANewFileThatDoesNotExistAnywhere(t *testing.T) {
-	// The ordinary, common case: Required-Changed-Files names a file the
+	// The ordinary, common case: Allowed-Files names a file the
 	// ticket is about to create for the first time. Must not be reported
 	// as a correction candidate -- it isn't missing a prefix, it's just
 	// new.

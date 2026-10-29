@@ -55,6 +55,7 @@ func TestAdvancePlanningRefusesABugTicketOneThatOptsOutOfTests(t *testing.T) {
 		dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
 		r := requestdrivertest.LoadRequest(t, dataDir, id)
 		r.Bug = bug
+		r.Rejections = append(r.Rejections, request.Rejection{By: request.FactoryActor, ForStage: request.StatePlanReview, Reason: "exercise drafted plan"})
 		if err := r.Save(dataDir); err != nil {
 			t.Fatal(err)
 		}

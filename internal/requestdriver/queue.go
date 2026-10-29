@@ -86,6 +86,9 @@ type QueueEntry struct {
 	// note on the pull request and refuses nothing. BuildTicketRunArgs always
 	// forwards one of the two for a request's ticket build.
 	ScopeUnapproved bool `json:"scope_unapproved,omitempty"`
+	// NoTicketScope means this ticket is the approved spec itself, so a
+	// header-shaped line in its prose is not a ticket file list.
+	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
 	// IssueRef is the fully-qualified "<owner>/<repo>#<N>" GitHub issue
 	// reference this entry was submitted from (`factoryd submit -issue
 	// <url>`), empty when it wasn't. Qualified with the ISSUE's own

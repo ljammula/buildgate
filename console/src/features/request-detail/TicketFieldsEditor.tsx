@@ -102,12 +102,6 @@ export function TicketFieldsEditor({
     >
       <HeaderField headerKey="Verify-Command:" label="Verify command" {...shared} />
       <HeaderField headerKey="Allowed-Files:" label="Allowed files" list {...shared} />
-      <HeaderField
-        headerKey="Required-Changed-Files:"
-        label="Required changed files"
-        list
-        {...shared}
-      />
       {options.length === 0 ? null : (
         <fieldset className="flex flex-col gap-1" disabled={disabled || !hasSection}>
           <legend className="text-fg mb-1 text-xs font-medium">Acceptance criteria covered</legend>

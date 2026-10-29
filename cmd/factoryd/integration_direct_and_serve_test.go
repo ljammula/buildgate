@@ -499,7 +499,7 @@ func TestIntegrationPiTicketStructurePreflightAllowsValidTicket(t *testing.T) {
 }
 
 // wellFormedRequestTicketspec is a request-pipeline ticketspec-format
-// ticket (Verify-Command:/Allowed-Files:/Required-Changed-Files: headers,
+// ticket (Verify-Command:/Allowed-Files: headers,
 // ## Goal/## Plan/## Out of scope sections) that TestIntegration
 // RequestTicketPreflightValidatesSpecFile's -request-ticket run below
 // exercises against testdata/fake_build_app.sh's own "commit" mode
@@ -507,7 +507,6 @@ func TestIntegrationPiTicketStructurePreflightAllowsValidTicket(t *testing.T) {
 // fixture already tracks).
 const wellFormedRequestTicketspec = `Verify-Command: true
 Allowed-Files: content.txt
-Required-Changed-Files: content.txt
 Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base
 
 ## Goal
@@ -1198,20 +1197,16 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 	writeNativeTicketForAPI(t, ws, "fixture-release-policy-ticket")
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	// Declares the full Allowed-Files/Required-Changed-Files/
-	// Required-Content set, and this test's own FAKE_BUILD_APP_MODE below
-	// is "commit_with_marker" (not the bare "commit" this test used to
-	// use) and its StartRequest below sets FullSuiteCommand -- together
-	// making every one of policy.AllGateChecks actually run and pass, not
-	// just canonical_verify. Needed since release.MergePolicy.
+	// Declares Allowed-Files, and its StartRequest below sets
+	// FullSuiteCommand -- together making every one of
+	// policy.AllGateChecks actually run and pass, not just
+	// canonical_verify. Needed since release.MergePolicy.
 	// RequiredGates now defaults to the complete gate list (2026-09-05
 	// Opus review, S1): a decision this test expects Allowed to require
 	// every gate to have a real passing result, not merely "none
 	// recorded failed".
 	specContent := "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
-		"Allowed-Files: content.txt\n" +
-		"Required-Changed-Files: content.txt\n" +
-		"Required-Content: REQUIRED_MARKER_STRING\n"
+		"Allowed-Files: content.txt\n"
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
@@ -1233,7 +1228,7 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 	cmd := factorydCommand(t, "serve", "-data-dir", dataDir, "-addr", addr,
 		"-api-allowed-sandbox-images", fakeSandboxImage,
 		"-release-max-files-changed", "10",
-		"-release-max-insertions", "100",
+		"-release-max-changed-lines", "100",
 		"-release-rollback-plan", "reviewed and reversible",
 		// release.MergePolicy's own, separate AllowUnsandboxed gate
 		// (restrictive by default, added by the 2026-09-04 Phase 5
@@ -1246,10 +1241,7 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 	)
 	cmd.Env = append(os.Environ(),
 		"FACTORYD_API_START_TOKEN="+startToken,
-		// commit_with_marker, not the bare commit mode: this test's spec
-		// above now declares Required-Content: REQUIRED_MARKER_STRING,
-		// which only this mode's fake_build_app.sh actually writes.
-		"FAKE_BUILD_APP_MODE=commit_with_marker",
+		"FAKE_BUILD_APP_MODE=commit",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 	)

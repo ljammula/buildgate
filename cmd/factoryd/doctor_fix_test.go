@@ -208,7 +208,7 @@ func TestDoctorRefreshInputsAfterFixClearsReleasePolicyWarning(t *testing.T) {
 	// Before the fix: doctorInputs built from the pre-fix (missing
 	// release_*) settings warns, matching the config's actual state.
 	before := doctorInputs{}
-	check := doctorCheckReleasePolicy(before.releaseMaxFilesChanged, before.releaseMaxInsertions, before.releaseRollbackPlan)
+	check := doctorCheckReleasePolicy(before.releaseMaxFilesChanged, before.releaseMaxChangedLines, before.releaseRollbackPlan)
 	if check.Err == nil {
 		t.Fatal("doctorCheckReleasePolicy = no error before the fix, want a warning (the config has no release_* keys yet)")
 	}
@@ -220,7 +220,7 @@ func TestDoctorRefreshInputsAfterFixClearsReleasePolicyWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doctorRefreshInputsAfterFix: %v", err)
 	}
-	check = doctorCheckReleasePolicy(refreshed.releaseMaxFilesChanged, refreshed.releaseMaxInsertions, refreshed.releaseRollbackPlan)
+	check = doctorCheckReleasePolicy(refreshed.releaseMaxFilesChanged, refreshed.releaseMaxChangedLines, refreshed.releaseRollbackPlan)
 	if check.Err != nil {
 		t.Errorf("doctorCheckReleasePolicy after refresh = %v, want no error -- doctorApplyFixes already backfilled the config, so the refreshed doctorInputs must reflect that", check.Err)
 	}

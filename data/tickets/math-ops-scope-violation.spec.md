@@ -44,9 +44,7 @@ even if it happens to pass Verify-Command.
 
 Allowed-Files: tests/test_scope_violation.py
 
-Required-Changed-Files: tests/test_scope_violation.py
 
-Required-Content: divide_numbers
 
 ## Acceptance / verification
 

@@ -42,10 +42,7 @@ each dependency is currently reachable.
 
 Allowed-Files: main.go, main_test.go, kafka.go, integration_test.go
 
-Required-Changed-Files: main.go
 
-Required-Content: /health/deps
-Required-Content: "redis"
 
 ## Acceptance / verification
 

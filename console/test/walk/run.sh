@@ -100,7 +100,7 @@ fi
 mkdir -p "$walk_dir/config"
 if [ "${WALK_SEED:-}" = demo ]; then
   mkdir -p "$walk_dir/config/factoryd"
-  printf '%s\n' 'release_max_files_changed: 25' 'release_max_insertions: 1000' \
+  printf '%s\n' 'release_max_files_changed: 25' 'release_max_changed_lines: 1000' \
     'release_rollback_plan: "git revert the merge commit on main"' \
     >"$walk_dir/config/factoryd/config.yml"
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

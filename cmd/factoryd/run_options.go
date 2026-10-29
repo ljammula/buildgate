@@ -86,13 +86,12 @@ type runOptions struct {
 	GoModuleDir     string
 	ComposeServices composeServicesOptions
 
-	AllowedFiles         []string
-	RequiredChangedFiles []string
-	RequiredContent      []string
-	TestPatterns         []string
-	TestsRequiredOptOut  string
-	AllowedPaths         []string
-	ScopeUnapproved      bool
+	AllowedFiles        []string
+	TestPatterns        []string
+	TestsRequiredOptOut string
+	AllowedPaths        []string
+	ScopeUnapproved     bool
+	NoTicketScope       bool
 
 	Slice         temporalSliceOptions
 	ReleasePolicy release.MergePolicy

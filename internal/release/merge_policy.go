@@ -11,7 +11,7 @@ import (
 type MergePolicy struct {
 	ProtectedPaths  []string
 	MaxFilesChanged int
-	MaxInsertions   int
+	MaxChangedLines int
 	// RollbackPlan identifies the rollback plan included in the evidence
 	// package. Checking that reference is present does not implement rollback.
 	RollbackPlan string
@@ -85,7 +85,7 @@ type MergePolicy struct {
 // CanNeverAllow reports whether p denies every release decision
 // unconditionally, regardless of any run's own evidence: MergePolicyCheck
 // denies whenever RollbackPlan == "", MaxFilesChanged == 0, or
-// MaxInsertions == 0 -- and those are this repo's own documented
+// MaxChangedLines == 0 -- and those are this repo's own documented
 // zero-value/-release-* flag defaults, so an unconfigured policy silently
 // denies every PR forever with no indication why. A pure, static check
 // against the policy alone -- no run or decision needed -- which is what
@@ -94,7 +94,7 @@ type MergePolicy struct {
 // surface (internal/api's consoleConfig) that has no run to evaluate
 // against.
 func (p MergePolicy) CanNeverAllow() bool {
-	return p.RollbackPlan == "" || p.MaxFilesChanged == 0 || p.MaxInsertions == 0
+	return p.RollbackPlan == "" || p.MaxFilesChanged == 0 || p.MaxChangedLines == 0
 }
 
 // MergePolicyCheck evaluates the release evidence currently recorded on a run.
@@ -195,7 +195,8 @@ func runEvidenceReasons(r run.Run, cfg MergePolicy) []string {
 	return reasons
 }
 
-// diffStatReasons is why the run's diff stat denies a merge.
+// diffStatReasons requires both the recorded diff stat and the source-only
+// measurement used by the release caps.
 func diffStatReasons(r run.Run, cfg MergePolicy) []string {
 	var reasons []string
 	if r.DiffStat == nil {
@@ -203,17 +204,27 @@ func diffStatReasons(r run.Run, cfg MergePolicy) []string {
 	} else {
 		if r.DiffStat.FilesChanged < 0 {
 			reasons = append(reasons, "diff files changed must not be negative")
+		}
+		if r.DiffStat.Insertions < 0 || r.DiffStat.Deletions < 0 {
+			reasons = append(reasons, "diff line counts must not be negative")
+		}
+	}
+	if r.ChangeSize == nil {
+		reasons = append(reasons, "run has no source change size")
+	} else {
+		if r.ChangeSize.SourceFiles < 0 {
+			reasons = append(reasons, "source files changed must not be negative")
 		} else if cfg.MaxFilesChanged < 0 {
 			reasons = append(reasons, "max files changed must not be negative")
-		} else if r.DiffStat.FilesChanged > cfg.MaxFilesChanged {
-			reasons = append(reasons, fmt.Sprintf("diff changes %d files, limit is %d", r.DiffStat.FilesChanged, cfg.MaxFilesChanged))
+		} else if r.ChangeSize.SourceFiles > cfg.MaxFilesChanged {
+			reasons = append(reasons, fmt.Sprintf("diff changes %d source files, limit is %d", r.ChangeSize.SourceFiles, cfg.MaxFilesChanged))
 		}
-		if r.DiffStat.Insertions < 0 {
-			reasons = append(reasons, "diff insertions must not be negative")
-		} else if cfg.MaxInsertions < 0 {
-			reasons = append(reasons, "max insertions must not be negative")
-		} else if r.DiffStat.Insertions > cfg.MaxInsertions {
-			reasons = append(reasons, fmt.Sprintf("diff has %d insertions, limit is %d", r.DiffStat.Insertions, cfg.MaxInsertions))
+		if r.ChangeSize.SourceLines < 0 {
+			reasons = append(reasons, "source lines changed must not be negative")
+		} else if cfg.MaxChangedLines < 0 {
+			reasons = append(reasons, "max changed lines must not be negative")
+		} else if r.ChangeSize.SourceLines > cfg.MaxChangedLines {
+			reasons = append(reasons, fmt.Sprintf("diff changes %d source lines, limit is %d", r.ChangeSize.SourceLines, cfg.MaxChangedLines))
 		}
 	}
 	return reasons

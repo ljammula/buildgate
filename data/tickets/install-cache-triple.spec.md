@@ -31,9 +31,7 @@ is implemented, and test it.
 
 Allowed-Files: index.js, triple.test.js
 
-Required-Changed-Files: index.js, triple.test.js
 
-Required-Content: triple(
 
 ## Acceptance / verification
 

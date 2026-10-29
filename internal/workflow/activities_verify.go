@@ -655,7 +655,7 @@ func (a *Activities) RunBaselineVerifyActivity(ctx context.Context, input RunWor
 	}
 	// What the ticket is to create, read before the command can write
 	// anything: the worktree is the base commit here.
-	created := baseline.CreatedPaths(append(append([]string{}, input.AllowedFiles...), input.RequiredChangedFiles...), func(path string) bool {
+	created := baseline.CreatedPaths(input.AllowedFiles, func(path string) bool {
 		_, err := os.Lstat(filepath.Join(input.WorkspacePath, filepath.FromSlash(path)))
 		return err == nil
 	})

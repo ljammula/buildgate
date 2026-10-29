@@ -558,7 +558,7 @@
   "tickets": [
     {
       "name": "well-formed",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -576,13 +576,12 @@
       "covered": [],
       "headers_missing": [
         "Verify-Command:",
-        "Allowed-Files:",
-        "Required-Changed-Files:"
+        "Allowed-Files:"
       ]
     },
     {
       "name": "crlf line endings",
-      "text": "Verify-Command: true\r\nAllowed-Files: a.go\r\nRequired-Changed-Files: a.go\r\n\r\n## Goal\r\n\r\ng\r\n\r\n## Plan\r\n\r\n### Files to touch\r\n\r\n- a.go\r\n\r\n### Steps\r\n\r\n1. s\r\n\r\n### Tests to add\r\n\r\n- t\r\n\r\n### Acceptance criteria covered\r\n\r\n- 1\r\n\r\n## Out of scope\r\n\r\nnone\r\n",
+      "text": "Verify-Command: true\r\nAllowed-Files: a.go\r\n\r\n## Goal\r\n\r\ng\r\n\r\n## Plan\r\n\r\n### Files to touch\r\n\r\n- a.go\r\n\r\n### Steps\r\n\r\n1. s\r\n\r\n### Tests to add\r\n\r\n- t\r\n\r\n### Acceptance criteria covered\r\n\r\n- 1\r\n\r\n## Out of scope\r\n\r\nnone\r\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -602,13 +601,12 @@
       ],
       "headers_missing": [
         "Verify-Command:",
-        "Allowed-Files:",
-        "Required-Changed-Files:"
+        "Allowed-Files:"
       ]
     },
     {
       "name": "indented header line",
-      "text": "Verify-Command: true\n  Allowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\n  Allowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -621,7 +619,7 @@
     },
     {
       "name": "header only inside a fence",
-      "text": "```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n```\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "```\nVerify-Command: true\nAllowed-Files: a.go\n```\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -630,13 +628,12 @@
       ],
       "headers_missing": [
         "Verify-Command:",
-        "Allowed-Files:",
-        "Required-Changed-Files:"
+        "Allowed-Files:"
       ]
     },
     {
       "name": "header after a closed fence",
-      "text": "```\nx\n```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "```\nx\n```\nVerify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -647,7 +644,7 @@
     },
     {
       "name": "longer fence closed only by a longer one",
-      "text": "````\n```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n````\nVerify-Command: true\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "````\n```\nVerify-Command: true\nAllowed-Files: a.go\n````\nVerify-Command: true\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -655,13 +652,12 @@
         1
       ],
       "headers_missing": [
-        "Allowed-Files:",
-        "Required-Changed-Files:"
+        "Allowed-Files:"
       ]
     },
     {
       "name": "tilde fence with an info string",
-      "text": "~~~text\nVerify-Command: x\n~~~\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "~~~text\nVerify-Command: x\n~~~\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -674,7 +670,7 @@
     },
     {
       "name": "unclosed fence hides the headers",
-      "text": "```\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "```\nVerify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -683,13 +679,12 @@
       ],
       "headers_missing": [
         "Verify-Command:",
-        "Allowed-Files:",
-        "Required-Changed-Files:"
+        "Allowed-Files:"
       ]
     },
     {
       "name": "two backticks are not a fence",
-      "text": "``\nVerify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "``\nVerify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -700,7 +695,7 @@
     },
     {
       "name": "heading missing",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "### Tests to add",
       "empty_section": "",
@@ -709,7 +704,7 @@
     },
     {
       "name": "heading out of order",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Tests to add\n\n- t\n\n### Steps\n\n1. s\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Tests to add\n\n- t\n\n### Steps\n\n1. s\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "### Tests to add",
       "empty_section": "",
@@ -718,7 +713,7 @@
     },
     {
       "name": "empty section",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "## Goal",
@@ -729,7 +724,7 @@
     },
     {
       "name": "empty out of scope is accepted",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -740,7 +735,7 @@
     },
     {
       "name": "plan container may be empty",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -751,7 +746,7 @@
     },
     {
       "name": "covered: several forms",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n* 2\n3\n-4\n  - 05\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n* 2\n3\n-4\n  - 05\n\n## Out of scope\n\nnone\n",
       "plan_valid": true,
       "missing_heading": "",
       "empty_section": "",
@@ -766,7 +761,7 @@
     },
     {
       "name": "covered: a range is refused",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1-3\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1-3\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "",
@@ -775,7 +770,7 @@
     },
     {
       "name": "covered: two on a line is refused",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1, 2\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1, 2\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "",
@@ -784,7 +779,7 @@
     },
     {
       "name": "covered: prose is refused",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- criterion two\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- criterion two\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "",
@@ -793,7 +788,7 @@
     },
     {
       "name": "covered: blank only",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "### Acceptance criteria covered",
@@ -802,7 +797,7 @@
     },
     {
       "name": "covered: past the integer range is refused",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 9223372036854775808\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 9223372036854775808\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "",
@@ -811,7 +806,7 @@
     },
     {
       "name": "covered: plus bullet is refused",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n+ 1\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n+ 1\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "",
@@ -820,7 +815,7 @@
     },
     {
       "name": "covered: empty section and bad list",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- x\n\n## Out of scope\n\nnone\n",
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- x\n\n## Out of scope\n\nnone\n",
       "plan_valid": false,
       "missing_heading": "",
       "empty_section": "## Goal",
@@ -833,8 +828,8 @@
       "name": "every criterion claimed",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 3\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 3\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 3,
       "unclaimed": []
@@ -843,8 +838,8 @@
       "name": "one criterion claimed twice",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n- 3\n\n## Out of scope\n\nnone\n",
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 2\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n- 3\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 2\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 3,
       "unclaimed": []
@@ -853,7 +848,7 @@
       "name": "unclaimed criteria",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 2\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 2\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 3,
       "unclaimed": [
@@ -876,8 +871,8 @@
       "name": "a ticket that does not parse claims nothing",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 3 and more\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 3 and more\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 3,
       "unclaimed": [
@@ -888,7 +883,7 @@
       "name": "a ticket without the plan headings claims nothing",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n\n## Out of scope\n\nnone\n",
         "- 3\n"
       ],
       "criteria_count": 3,
@@ -900,7 +895,7 @@
       "name": "a claim past the last criterion",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n- 3\n- 7\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n- 2\n- 3\n- 7\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 3,
       "unclaimed": []
@@ -909,7 +904,7 @@
       "name": "criterion zero and a repeat",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. It adds.\n2. It subtracts.\n3. It multiplies\n   and divides.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 0\n- 1\n- 1\n- 2\n- 3\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 0\n- 1\n- 1\n- 2\n- 3\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 3,
       "unclaimed": []
@@ -918,7 +913,7 @@
       "name": "a spec with no numbered criteria",
       "spec": "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\nIt works.\n\n## Risks\n\nr\n\n## Open questions\n\nnone\n",
       "tickets": [
-        "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+        "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
       ],
       "criteria_count": 0,
       "unclaimed": []

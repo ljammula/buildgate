@@ -59,9 +59,21 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return err
 	}
 
-	reviews, err := runReviewSteps(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
-	if err != nil {
-		return err
+	var reviews reviewOutcome
+	version := temporalworkflow.GetVersion(ctx, changeSizeMeasurementChange, temporalworkflow.DefaultVersion, 1)
+	passed := beforeReviewPassed(*input, result, gates, testsRed)
+	if version == 1 && passed {
+		if err := measureChangeSize(ctx, ids, *input, current, result, worktreePath, branch); err != nil {
+			return err
+		}
+	}
+	if version == temporalworkflow.DefaultVersion || passed && !overSizeCap(*input, result.ChangeSize) {
+		reviews, err = runReviewSteps(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
+		if err != nil {
+			return err
+		}
+	} else {
+		result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
 	}
 
 	// Marks the executions that no longer commit a reference oracle's bytes
@@ -72,6 +84,37 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return err
 	}
 	return nil
+}
+
+// Histories before this marker replay without the measurement Activity.
+const changeSizeMeasurementChange = "source-change-size"
+
+func beforeReviewPassed(input RunWorkflowInput, result *RunWorkflowResult, gates gateOutcome, testsRed testsRedOutcome) bool {
+	if !earlierGatesPassed(result, gates) {
+		return false
+	}
+	scope := policy.Scope{AllowedFiles: input.AllowedFiles, Unapproved: input.ScopeUnapproved, AllowedPaths: input.AllowedPaths}
+	if scope.Declared() && len(scope.Judge(policy.ExcludeHarnessByproducts(result.ChangedFiles)).Refused()) != 0 {
+		return false
+	}
+	gate, _ := policy.TestsRedOnBase(policy.TestFiles(result.ChangedFiles, input.TestPatterns), input.TestsRequiredOptOut, input.Bug, testsRed.policyInput())
+	return gate.Passed
+}
+
+func measureChangeSize(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) error {
+	current.Stage, current.StartedAt = "change_size", temporalworkflow.Now(ctx)
+	in := MeasureChangeSizeInput{WorkspacePath: input.WorkspacePath, BaseSHA: input.effectiveDiffBase(), ResultSHA: result.ResultSHA, TestPatterns: input.TestPatterns}
+	if err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "measure-change-size"), MeasureChangeSizeActivityName, in).Get(ctx, &result.ChangeSize); err != nil {
+		return wrapActivityFailure("measure change size activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	if result.ChangeSize == nil {
+		return wrapActivityFailure("measure change size activity", fmt.Errorf("measurement returned no result"), result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	return nil
+}
+
+func overSizeCap(input RunWorkflowInput, size *run.ChangeSize) bool {
+	return size != nil && (size.SourceFiles > input.ReleaseMaxFilesChanged || size.SourceLines > input.ReleaseMaxChangedLines)
 }
 
 // captureRunBase records the commit this run is evaluated against
@@ -355,11 +398,9 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		// own doc comment — a corrective round's own BaseSHA is just its
 		// checkout point, not the cumulative diff base a -diff-base
 		// override names.
-		BaseSHA:              input.effectiveDiffBase(),
-		RequiredChangedFiles: input.RequiredChangedFiles,
-		RequiredContent:      input.RequiredContent,
-		BuildExitCode:        result.Build.ExitCode,
-		VerifyExitCode:       result.Verify.ExitCode,
+		BaseSHA:        input.effectiveDiffBase(),
+		BuildExitCode:  result.Build.ExitCode,
+		VerifyExitCode: result.Verify.ExitCode,
 		// FullSuiteRan/FullSuiteExitCode: found via review (GitHub Codex
 		// App, PR #33, same round as the reorder above) — without these,
 		// CollectEvidenceActivity's safety-net commit was gated only on
@@ -500,24 +541,20 @@ func runOneReviewStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 // found and records the verdict (EvaluateRunActivity) in result.
 func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, verify VerifyActivityResult, evidenceResult CollectedEvidence, gates gateOutcome, reviews reviewOutcome, testsRed testsRedOutcome) error {
 	policyInput := policy.EvaluateRunInput{
-		VerifyCommand:             result.Verify.Command,
-		BuildExitCode:             result.Build.ExitCode,
-		VerifyExitCode:            result.Verify.ExitCode,
-		VerifyDurationMs:          verify.DurationMs,
-		VerifyLogSHA256:           verify.LogSHA256,
-		VerifyRerun:               verify.Rerun,
-		ChangedFiles:              evidenceResult.ChangedFiles,
-		AllowedFiles:              input.AllowedFiles,
-		ScopeUnapproved:           input.ScopeUnapproved,
-		AllowedPaths:              input.AllowedPaths,
-		RequiredChangedFiles:      input.RequiredChangedFiles,
-		RequiredContent:           input.RequiredContent,
-		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
-		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,
-		RepoGates:                 legacyConformityGates(gates.repoGateInputs, reviews),
-		TestPatterns:              input.TestPatterns,
-		TestsRequiredOptOut:       input.TestsRequiredOptOut,
-		TestsOptOutRefused:        input.Bug,
+		VerifyCommand:       result.Verify.Command,
+		BuildExitCode:       result.Build.ExitCode,
+		VerifyExitCode:      result.Verify.ExitCode,
+		VerifyDurationMs:    verify.DurationMs,
+		VerifyLogSHA256:     verify.LogSHA256,
+		VerifyRerun:         verify.Rerun,
+		ChangedFiles:        evidenceResult.ChangedFiles,
+		AllowedFiles:        input.AllowedFiles,
+		ScopeUnapproved:     input.ScopeUnapproved,
+		AllowedPaths:        input.AllowedPaths,
+		RepoGates:           legacyConformityGates(gates.repoGateInputs, reviews),
+		TestPatterns:        input.TestPatterns,
+		TestsRequiredOptOut: input.TestsRequiredOptOut,
+		TestsOptOutRefused:  input.Bug,
 	}
 	if gates.ranFullSuite {
 		policyInput.FullSuiteCommand = gates.fullSuite.Result.Command

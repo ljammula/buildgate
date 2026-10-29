@@ -88,12 +88,35 @@ func TestResolveScopeApproval(t *testing.T) {
 		{"unapproved", false, true, false},
 		{"approved", true, false, false},
 		{"unapproved", true, true, false},
+		{"none", true, false, false},
+		{"none", false, false, true},
 		{"", true, false, true},
 		{"maybe", false, false, true},
 	} {
 		got, err := resolveScopeApproval(tc.value, tc.requestTicket)
 		if (err != nil) != tc.wantErr || got != tc.unapproved {
 			t.Errorf("resolveScopeApproval(%q, requestTicket=%v) = %v, %v; want unapproved=%v, error=%v", tc.value, tc.requestTicket, got, err, tc.unapproved, tc.wantErr)
+		}
+	}
+}
+
+func TestSpecTicketHasNoTicketScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(path, []byte("# Spec\n\nAllowed-Files: /a-path-in-the-spec\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		scope   string
+		wantErr bool
+	}{
+		{"none", false},
+		{"approved", true},
+	} {
+		requestTicket := true
+		tr := &ticketRun{rf: runFlags{scopeApproval: &tc.scope}, requestTicket: &requestTicket, specSnapshotPath: path}
+		err := tr.parseAllowedScope()
+		if (err != nil) != tc.wantErr || tr.allowedFiles != nil {
+			t.Errorf("scope %q: allowed files = %v, error = %v; want error %v and no list", tc.scope, tr.allowedFiles, err, tc.wantErr)
 		}
 	}
 }

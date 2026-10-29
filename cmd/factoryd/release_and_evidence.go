@@ -122,7 +122,7 @@ const subscriptionCostAggregateSuffix = " (includes subscription-billed runs; AP
 // runViaTemporal/runViaRepositoryOwner (called from runMain, where these
 // flag pointers are in scope) can build the identical policy to pass down
 // to applyRunWorkflowResult, rather than each re-deriving it.
-func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxInsertions int, rollbackPlan string, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck bool) release.MergePolicy {
+func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxChangedLines int, rollbackPlan string, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck bool) release.MergePolicy {
 	var protectedPaths []string
 	if protectedPathsCSV != "" {
 		protectedPaths = strings.Split(protectedPathsCSV, ",")
@@ -130,7 +130,7 @@ func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxInsert
 	return release.MergePolicy{
 		ProtectedPaths:                 protectedPaths,
 		MaxFilesChanged:                maxFilesChanged,
-		MaxInsertions:                  maxInsertions,
+		MaxChangedLines:                maxChangedLines,
 		RollbackPlan:                   rollbackPlan,
 		AllowOverrides:                 allowOverrides,
 		AllowDependencyLockfileChanges: allowDependencyLockfileChanges,
@@ -232,7 +232,7 @@ func runReleasePolicy(p release.MergePolicy) *run.ReleasePolicy {
 	return &run.ReleasePolicy{
 		ProtectedPaths:                 p.ProtectedPaths,
 		MaxFilesChanged:                p.MaxFilesChanged,
-		MaxInsertions:                  p.MaxInsertions,
+		MaxChangedLines:                p.MaxChangedLines,
 		RollbackPlan:                   p.RollbackPlan,
 		AllowOverrides:                 p.AllowOverrides,
 		AllowDependencyLockfileChanges: p.AllowDependencyLockfileChanges,
@@ -257,7 +257,7 @@ func mergePolicyFromRun(r *run.Run) (release.MergePolicy, bool) {
 	return release.MergePolicy{
 		ProtectedPaths:                 p.ProtectedPaths,
 		MaxFilesChanged:                p.MaxFilesChanged,
-		MaxInsertions:                  p.MaxInsertions,
+		MaxChangedLines:                p.MaxChangedLines,
 		RollbackPlan:                   p.RollbackPlan,
 		AllowOverrides:                 p.AllowOverrides,
 		AllowDependencyLockfileChanges: p.AllowDependencyLockfileChanges,
@@ -314,7 +314,7 @@ func releasePullRequestWithheldReason(decision *release.Decision) string {
 // releasePolicyCanNeverAllow reports whether policy can never allow a
 // release decision regardless of any run's own evidence: MergePolicyCheck
 // denies unconditionally whenever RollbackPlan == "", MaxFilesChanged ==
-// 0, or MaxInsertions == 0 -- and those are this repo's own documented
+// 0, or MaxChangedLines == 0 -- and those are this repo's own documented
 // -release-* flag defaults (see releasePolicyFromFlags above), so an
 // operator who turns on -open-pull-request without also setting real
 // values for these three would otherwise get no pull requests, ever, with
@@ -328,7 +328,7 @@ func releasePolicyCanNeverAllow(policy release.MergePolicy) bool {
 // releasePolicyNeverAllowsWarning is the loud, startup-time line
 // warnIfReleasePolicyCanNeverAllow logs -- named as a const so a test can
 // assert on its exact text without duplicating it.
-const releasePolicyNeverAllowsWarning = "warning: -open-pull-request is set but the release policy denies by default (no -release-rollback-plan and/or -release-max-files-changed=0/-release-max-insertions=0 means every run will be denied and no pull request will ever open); set real values or PRs will never appear"
+const releasePolicyNeverAllowsWarning = "warning: -open-pull-request is set but the release policy denies by default (no -release-rollback-plan and/or -release-max-files-changed=0/-release-max-changed-lines=0 means every run will be denied and no pull request will ever open); set real values or PRs will never appear"
 
 // releasePolicyWarnedOnce guards releasePolicyNeverAllowsWarning's own
 // log line -- deliberately NOT a sync.Once wrapping the whole call (an
@@ -908,6 +908,9 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	fmt.Fprintf(&b, "**Base:** `%s`  **Result:** `%s`\n\n", r.DiffBase(), r.ResultSHA)
 	if r.DiffStat != nil {
 		fmt.Fprintf(&b, "**Diff:** %d file(s), +%d/-%d\n\n", r.DiffStat.FilesChanged, r.DiffStat.Insertions, r.DiffStat.Deletions)
+	}
+	if size := r.ChangeSize; size != nil && (r.PRBudgetLines > 0 && size.SourceLines > r.PRBudgetLines || size.Functions > 25) {
+		fmt.Fprintf(&b, "**Change size:** %d source lines, %d source files, %d functions.\n\n", size.SourceLines, size.SourceFiles, size.Functions)
 	}
 	if len(r.GateResults) > 0 {
 		b.WriteString("## Gates\n\n")

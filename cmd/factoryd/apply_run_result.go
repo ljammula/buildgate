@@ -105,6 +105,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	recordComposeEvidence(r, dataDir)
 	r.DependencyChanges = result.DependencyChanges
 	r.DiffStat = result.DiffStat
+	r.ChangeSize = result.ChangeSize
 	r.DiffAvailable = result.DiffAvailable
 	r.DiffTruncated = result.DiffTruncated
 	r.GateResults = result.GateResults

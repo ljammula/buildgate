@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Fixture stand-in for plan_tickets.py, used only by the end-to-end worker
-test. It writes one ticket that covers criterion 1 and changes content.txt
+"""Fixture stand-in for plan_tickets.py, which the end-to-end worker test
+names but the worker does not launch: a request submitted without a plan
+has the approved spec as its one ticket and runs no planning job. It writes one ticket that covers criterion 1 and changes content.txt
 (the file build_app.py beside it edits), and the evidence
 file, where the real script writes them.
 """
@@ -10,7 +11,6 @@ import os
 
 TICKET = """Verify-Command: {verify_command}
 Allowed-Files: content.txt
-Required-Changed-Files: content.txt
 Tests-Required: no -- the fixture build adds no test
 
 ## Goal

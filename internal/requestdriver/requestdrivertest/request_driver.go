@@ -246,7 +246,6 @@ func ValidBrownfieldTicket(verifyCommand string, criteria ...int) string {
 	}
 	return fmt.Sprintf(`Verify-Command: %s
 Allowed-Files: internal/payments/refunds.go, internal/payments/refunds_test.go
-Required-Changed-Files: internal/payments/refunds.go
 
 ## Goal
 
@@ -375,6 +374,13 @@ func CountNotificationLogLines(t *testing.T, dataDir, id string) int {
 func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id string) {
 	t.Helper()
 	dataDir, id = ApprovedPlanningFixture(t, TwoCriteriaSpec, "make verify")
+	// These fixtures need the supplied drafted tickets, including multi-ticket
+	// plans. An ended handover enters the planning-job path.
+	r := LoadRequest(t, dataDir, id)
+	r.PlanImported, r.PlanImportEnded = true, true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	tickets := make([]requestdriver.DraftedTicket, 0, n)
 	for i := 1; i <= n; i++ {
 		// Each ticket claims both of TwoCriteriaSpec's own acceptance
@@ -396,6 +402,11 @@ func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id st
 		if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
 			t.Fatalf("approve plan: %v", err)
 		}
+	}
+	r = LoadRequest(t, dataDir, id)
+	r.PlanImported, r.PlanImportEnded = false, false
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
 	}
 	return dataDir, id
 }

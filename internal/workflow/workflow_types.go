@@ -10,8 +10,8 @@ import (
 )
 
 // RunWorkflowInput identifies the same bounded slice factoryd currently
-// runs. AllowedFiles, RequiredChangedFiles, and RequiredContent are the
-// ticket's declared scope/required-file/required-content keys, parsed by
+// runs. AllowedFiles is the
+// ticket's declared scope key, parsed by
 // the caller *before* this Workflow (and specifically before
 // RunBuildActivity) ever runs — not re-read from SpecPath by an Activity
 // partway through. Found live (review): the untrusted build subprocess
@@ -51,16 +51,17 @@ type RunWorkflowInput struct {
 	// policy.TicketStructureBrownfield instead of policy.TicketStructure.
 	// Mirrors cmd/factoryd's own -request-ticket flag; see its doc comment.
 	RequestTicket bool `json:"request_ticket,omitempty"`
+	// NoTicketScope marks the request's verbatim spec ticket, which has no
+	// Allowed-Files list even when its prose contains a header-shaped line.
+	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
 	// BaseSHA is the caller's own observation of the workspace's HEAD at
 	// submission time — kept for callers that have no queueing ahead of
 	// them (a caller with nothing else running against the same
 	// workspace), but RunWorkflow does NOT trust it for gate computation;
 	// see CaptureBaseSHAActivity's doc comment for why. Superseded by
 	// RunWorkflowResult.BaseSHA, the value actually used.
-	BaseSHA              string   `json:"base_sha"`
-	AllowedFiles         []string `json:"allowed_files,omitempty"`
-	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
-	RequiredContent      []string `json:"required_content,omitempty"`
+	BaseSHA      string   `json:"base_sha"`
+	AllowedFiles []string `json:"allowed_files,omitempty"`
 	// LogDir/CheckpointDir override Activities.LogDir/CheckpointDir for
 	// this execution when set, falling back to the Worker-static values
 	// otherwise (preserves every existing caller/test that only sets
@@ -133,13 +134,16 @@ type RunWorkflowInput struct {
 	SpecAcceptanceCriteria string `json:"spec_acceptance_criteria,omitempty"`
 	// TestPatterns/TestsRequiredOptOut feed the tests_red_on_base gate --
 	// see policy.EvaluateRunInput's own doc comment on the same two
-	// fields. No Worker-static fallback (like AllowedFiles/
-	// RequiredChangedFiles above, and unlike VerifyCommand): both come
+	// fields. No Worker-static fallback (like AllowedFiles
+	// above, and unlike VerifyCommand): both come
 	// from cmd/factoryd's own per-run resolution (.factory.yml's
 	// test_patterns, the ticket's own Tests-Required: opt-out), never a
 	// Worker-level default.
-	TestPatterns        []string `json:"test_patterns,omitempty"`
-	TestsRequiredOptOut string   `json:"tests_required_opt_out,omitempty"`
+	TestPatterns []string `json:"test_patterns,omitempty"`
+	// Release caps are the policy snapshot recorded when this run started.
+	ReleaseMaxFilesChanged int    `json:"release_max_files_changed"`
+	ReleaseMaxChangedLines int    `json:"release_max_changed_lines"`
+	TestsRequiredOptOut    string `json:"tests_required_opt_out,omitempty"`
 	// ScopeUnapproved and AllowedPaths are policy.Scope's other two fields,
 	// beside AllowedFiles above: no person approved the list AllowedFiles
 	// holds (a note on the pull request, never a refusal), and the
@@ -665,9 +669,8 @@ type PreflightInput struct {
 	WorkspacePath string `json:"workspace_path"`
 	// LogDir is RunWorkflowInput.LogDir, carried for the same reason
 	// EvaluateRunInput.LogDir is: progress-feed stage lines only.
-	LogDir               string   `json:"log_dir,omitempty"`
-	AllowedFiles         []string `json:"allowed_files,omitempty"`
-	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
+	LogDir       string   `json:"log_dir,omitempty"`
+	AllowedFiles []string `json:"allowed_files,omitempty"`
 	// ScopeUnapproved is RunWorkflowInput.ScopeUnapproved: AllowedFiles is
 	// then no person's list, and the misprefix check below leaves it out.
 	ScopeUnapproved bool   `json:"scope_unapproved,omitempty"`
@@ -677,6 +680,7 @@ type PreflightInput struct {
 	// PreflightActivity knows to check TicketPath with
 	// policy.TicketStructureBrownfield instead of policy.TicketStructure.
 	RequestTicket bool `json:"request_ticket,omitempty"`
+	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
 	// SpecPath is RunWorkflowInput.SpecPath, carried here so
 	// PreflightActivity can run the same ticketspec header-strictness
 	// check cmd/factoryd's runs against its own spec snapshot
@@ -834,14 +838,9 @@ type PostBuildResult struct {
 }
 
 // CollectEvidenceInput is CollectEvidenceActivity's input.
-// RequiredChangedFiles/RequiredContent come from RunWorkflowInput — parsed
-// once, before the build, per RunWorkflowInput's own doc comment — not
-// re-read from a spec file here.
 type CollectEvidenceInput struct {
-	WorkspacePath        string   `json:"workspace_path"`
-	BaseSHA              string   `json:"base_sha"`
-	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
-	RequiredContent      []string `json:"required_content,omitempty"`
+	WorkspacePath string `json:"workspace_path"`
+	BaseSHA       string `json:"base_sha"`
 	// BuildExitCode/VerifyExitCode gate the verification-output
 	// safety-net commit below: found live (review), committing
 	// verification's dirt unconditionally advanced HEAD even when build
@@ -913,11 +912,17 @@ type CollectedEvidence struct {
 	// risked exceeding Temporal's own default Activity-result payload
 	// limit for a large diff, on top of bloating every other reader of this
 	// struct.
-	DiffAvailable             bool                        `json:"diff_available,omitempty"`
-	DiffTruncated             bool                        `json:"diff_truncated,omitempty"`
-	DependencyChanges         []evidence.DependencyChange `json:"dependency_changes"`
-	RequiredContentBaseFiles  map[string]string           `json:"required_content_base_files,omitempty"`
-	RequiredContentFinalFiles map[string]string           `json:"required_content_final_files,omitempty"`
+	DiffAvailable     bool                        `json:"diff_available,omitempty"`
+	DiffTruncated     bool                        `json:"diff_truncated,omitempty"`
+	DependencyChanges []evidence.DependencyChange `json:"dependency_changes"`
+}
+
+// MeasureChangeSizeInput identifies the committed diff and test patterns.
+type MeasureChangeSizeInput struct {
+	WorkspacePath string   `json:"workspace_path"`
+	BaseSHA       string   `json:"base_sha"`
+	ResultSHA     string   `json:"result_sha"`
+	TestPatterns  []string `json:"test_patterns,omitempty"`
 }
 
 // RunProgress is the snapshot RunWorkflow's RunProgressQueryName query
@@ -989,8 +994,9 @@ type RunWorkflowResult struct {
 	// internal/release.MergePolicyCheck rejects any run.Run with a nil
 	// ChangedFiles regardless of outcome, so that round-trip silently
 	// rejected every accepted zero-change Temporal-routed run.
-	ChangedFiles []string      `json:"changed_files"`
-	DiffStat     *run.DiffStat `json:"diff_stat,omitempty"`
+	ChangedFiles []string        `json:"changed_files"`
+	DiffStat     *run.DiffStat   `json:"diff_stat,omitempty"`
+	ChangeSize   *run.ChangeSize `json:"change_size,omitempty"`
 	// DiffAvailable/DiffTruncated mirror run.Run's own fields of the same
 	// name — carried through from CollectedEvidence for the same reason
 	// ChangedFiles/DiffStat are above. The diff text itself never appears

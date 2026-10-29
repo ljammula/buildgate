@@ -12,7 +12,7 @@ into its own ticket separate from the code and tests that exercise it:
 a wiring-only ticket has no test of its own to add and can never pass the
 tests rule below no matter what a later, differently-scoped ticket does.
 
-Tests rule: every ticket's own Allowed-Files and Required-Changed-Files
+Tests rule: every ticket's own Allowed-Files
 must include at least one test file it will change, and that test must
 fail before the ticket's change and pass after it: the factory runs it on
 both. A ticket whose Allowed-Files names only non-test files can never pass
@@ -23,10 +23,13 @@ that genuinely cannot be tested (e.g. a docs-only change): declare
 adding a test file -- see the ticket format below.
 
 Never list `.factory.yml`, or anything under `.factory/` or `.buildgate/`, in a ticket's
-Allowed-Files or Required-Changed-Files: they are the operator's factory
+Allowed-Files: they are the operator's factory
 configuration, the factory never merges a build that changes them, and it
 rejects a plan that names them. If the request needs a change there, say
 so under the ticket's "Out of scope" for the operator to make.
+
+Never write a `Required-Changed-Files:` or `Required-Content:` header line:
+the factory ignores these retired headers.
 
 Multi-file criteria rule: when one criterion names files owned by
 several different tickets (e.g. "tests cover A, B and C" where A, B and C
@@ -51,7 +54,6 @@ Each ticket file must contain, in this exact order:
 
 Verify-Command: {verify_command}
 Allowed-Files: <comma-separated list of every file this ticket touches>
-Required-Changed-Files: <comma-separated list of files this ticket must actually change>
 Tests-Required: no -- <reason> (omit this line entirely unless this ticket adds no test file; see the tests rule above)
 Estimated-Changed-Lines: <N>
 

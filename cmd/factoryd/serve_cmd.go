@@ -190,7 +190,7 @@ type serveFlags struct {
 	sandboxWorkerUID                      *int
 	releaseProtectedPaths                 *string
 	releaseMaxFilesChanged                *int
-	releaseMaxInsertions                  *int
+	releaseMaxChangedLines                *int
 	releaseRollbackPlan                   *string
 	releaseAllowOverrides                 *bool
 	releaseAllowDependencyLockfileChanges *bool
@@ -274,7 +274,7 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	f.sandboxWorkerUID = flags.Int("sandbox-worker-uid", sandbox.DefaultWorkerUID, "user ID the sandboxed worker of a run started through the API runs as; must be positive and differ from this process's own")
 	f.releaseProtectedPaths = flags.String("release-protected-paths", "", "comma-separated paths a run may not change and still pass the release decision. Unset uses the session config's release_protected_paths.")
 	f.releaseMaxFilesChanged = flags.Int("release-max-files-changed", 0, "most files a run may change and still pass the release decision; 0 denies every release. Unset uses the session config's release_max_files_changed.")
-	f.releaseMaxInsertions = flags.Int("release-max-insertions", 0, "most inserted lines a run may have and still pass the release decision; 0 denies every release. Unset uses the session config's release_max_insertions.")
+	f.releaseMaxChangedLines = flags.Int("release-max-changed-lines", 0, "most source lines a run may add or delete and still pass release; 0 denies every release. Unset uses the session config's release_max_changed_lines.")
 	f.releaseRollbackPlan = flags.String("release-rollback-plan", "", "rollback plan named in the release evidence, such as \"git revert the merge commit on main\"; empty denies every release. Unset uses the session config's release_rollback_plan.")
 	f.releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "let a run with a human override in its history pass the release decision. Unset uses the session config's release_allow_overrides.")
 	f.releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "let a run that changed a dependency lockfile pass the release decision. Unset uses the session config's release_allow_dependency_lockfile_changes.")
@@ -1054,9 +1054,9 @@ func resolveServeReleasePolicy(flags *flag.FlagSet, base sessionconfig.Settings,
 	if !flagsWasVisited(flags, "release-max-files-changed") {
 		maxFilesChanged = base.ReleaseMaxFilesChanged
 	}
-	maxInsertions := *sf.releaseMaxInsertions
-	if !flagsWasVisited(flags, "release-max-insertions") {
-		maxInsertions = base.ReleaseMaxInsertions
+	maxChangedLines := *sf.releaseMaxChangedLines
+	if !flagsWasVisited(flags, "release-max-changed-lines") {
+		maxChangedLines = base.ReleaseMaxChangedLines
 	}
 	rollbackPlan := *sf.releaseRollbackPlan
 	if !flagsWasVisited(flags, "release-rollback-plan") {
@@ -1078,7 +1078,7 @@ func resolveServeReleasePolicy(flags *flag.FlagSet, base sessionconfig.Settings,
 	if !flagsWasVisited(flags, "release-allow-skipped-project-check") {
 		allowSkippedProjectCheck = base.ReleaseAllowSkippedProjectCheck
 	}
-	return releasePolicyFromFlags(protectedPaths, maxFilesChanged, maxInsertions, rollbackPlan, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck)
+	return releasePolicyFromFlags(protectedPaths, maxFilesChanged, maxChangedLines, rollbackPlan, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck)
 }
 
 // apiStartTier2Settings folds the on-disk session config (the same
@@ -1104,7 +1104,7 @@ func apiStartTier2Settings(base sessionconfig.Settings, releasePolicy release.Me
 	settings := base
 	settings.ReleaseProtectedPaths = strings.Join(releasePolicy.ProtectedPaths, ",")
 	settings.ReleaseMaxFilesChanged = releasePolicy.MaxFilesChanged
-	settings.ReleaseMaxInsertions = releasePolicy.MaxInsertions
+	settings.ReleaseMaxChangedLines = releasePolicy.MaxChangedLines
 	settings.ReleaseRollbackPlan = releasePolicy.RollbackPlan
 	settings.ReleaseAllowOverrides = releasePolicy.AllowOverrides
 	settings.ReleaseAllowDependencyLockfileChanges = releasePolicy.AllowDependencyLockfileChanges

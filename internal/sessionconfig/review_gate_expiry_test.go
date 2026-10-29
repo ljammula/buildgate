@@ -65,6 +65,20 @@ func TestPRBudgetLinesDefaultsAndValidates(t *testing.T) {
 	}
 }
 
+func TestReleaseChangedLinesKeyReplacesInsertionsKey(t *testing.T) {
+	cfg, err := Load(writeConfig(t, "release_max_changed_lines: 123\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := cfg.ApplySettings(DefaultSettings())
+	if err != nil || settings.ReleaseMaxChangedLines != 123 {
+		t.Fatalf("changed-line cap = %d, %v, want 123", settings.ReleaseMaxChangedLines, err)
+	}
+	if _, err := Load(writeConfig(t, "release_max_insertions: 123\n")); err == nil {
+		t.Fatal("retired release_max_insertions key was accepted")
+	}
+}
+
 func TestReviewReproductionsDefaultsOffAndTurnsOn(t *testing.T) {
 	if DefaultSettings().ReviewReproductions || (Settings{}).ReviewReproductions {
 		t.Error("reproductions on by default, want off")

@@ -325,7 +325,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	warnIfReleasePolicyCanNeverAllow(cfg.OpenPullRequest, release.MergePolicy{
 		RollbackPlan:    cfg.Settings.ReleaseRollbackPlan,
 		MaxFilesChanged: cfg.Settings.ReleaseMaxFilesChanged,
-		MaxInsertions:   cfg.Settings.ReleaseMaxInsertions,
+		MaxChangedLines: cfg.Settings.ReleaseMaxChangedLines,
 	})
 
 	return cfg, *dataDir, nil
@@ -534,7 +534,7 @@ func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir 
 	// -- so worker could report a clean preflight and start draining
 	// even with a configured tmpfs size too small for a real build,
 	// failing individual entries instead of refusing to start at all.
-	// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan
+	// releaseMaxFilesChanged/releaseMaxChangedLines/releaseRollbackPlan
 	// mirror the sandboxTmpfsSize fix just above, for the same reason:
 	// doctorChecksFor always appends doctorCheckReleasePolicy, and leaving
 	// these three at doctorInputs' own zero value (0, 0, "") makes
@@ -549,7 +549,7 @@ func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir 
 		egressCABundle:         cfg.EgressCABundle,
 		imageSourceRoot:        cfg.Settings.ImageSourceRoot,
 		releaseMaxFilesChanged: cfg.Settings.ReleaseMaxFilesChanged,
-		releaseMaxInsertions:   cfg.Settings.ReleaseMaxInsertions,
+		releaseMaxChangedLines: cfg.Settings.ReleaseMaxChangedLines,
 		releaseRollbackPlan:    cfg.Settings.ReleaseRollbackPlan,
 		settings:               cfg.Settings,
 	}

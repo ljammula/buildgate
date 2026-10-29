@@ -9,6 +9,7 @@
 package request
 
 import (
+	"buildgate/internal/run"
 	"buildgate/internal/unresolved"
 	"errors"
 	"fmt"
@@ -648,6 +649,12 @@ type Request struct {
 	// budget), recorded when planning starts so the review's notes and display
 	// stay the same if the session config changes afterwards. Advice only.
 	PlanBudgetLines int `json:"plan_budget_lines,omitempty"`
+	// PlanVerifyCommand is the effective verify command when the plan was
+	// prepared, for the spec ticket that has no Verify-Command header.
+	PlanVerifyCommand string `json:"plan_verify_command,omitempty"`
+	// SizeReplan records the first oversized run that sent this request back
+	// to planning. Its run's committed diff is given to the planning job.
+	SizeReplan *SizeReplan `json:"size_replan,omitempty"`
 	// DraftHalt is the factory's reason for refusing the latest spec or plan
 	// draft whose CONTENT its own checks rejected; the next draft of that
 	// stage is told it (the driver renders it after the operator feedback,
@@ -678,6 +685,12 @@ type Request struct {
 	// Models. Review is never requester-selectable. Nil/empty for a request
 	// that named none: every role then runs its configured harness.
 	Harnesses map[string]string `json:"harnesses,omitempty"`
+}
+
+// SizeReplan identifies the oversized run and its host measurement.
+type SizeReplan struct {
+	RunID       string          `json:"run_id"`
+	Measurement *run.ChangeSize `json:"measurement"`
 }
 
 // ActiveJob describes the drafting job running for a request right now:
@@ -1133,6 +1146,8 @@ func (r *Request) CompletePlanning(now time.Time) error {
 // of this request back. r.TicketCount must be set.
 func (r *Request) PlanReviewReason(repoOptIn bool) string {
 	switch {
+	case r.SizeReplan != nil:
+		return "the plan was drafted after a size refusal"
 	case r.TicketCount > 1:
 		return fmt.Sprintf("the plan has %d tickets", r.TicketCount)
 	case r.PlanReview:
@@ -1146,6 +1161,20 @@ func (r *Request) PlanReviewReason(repoOptIn bool) string {
 		}
 	}
 	return ""
+}
+
+// ReturnToPlanningForSize records the one size-driven re-plan.
+func (r *Request) ReturnToPlanningForSize(runID string, size *run.ChangeSize, now time.Time) error {
+	if runID == "" || size == nil || r.SizeReplan != nil {
+		return fmt.Errorf("request %s: invalid or repeated size re-plan", r.ID)
+	}
+	reason := fmt.Sprintf("run %s exceeded the release size cap: %d source lines, %d source files, %d functions", runID, size.SourceLines, size.SourceFiles, size.Functions)
+	if err := advance(r, []State{StateBuilding}, StatePlanning, factoryActor, reason, now); err != nil {
+		return err
+	}
+	r.SizeReplan = &SizeReplan{RunID: runID, Measurement: size}
+	r.TicketIndex = 1
+	return nil
 }
 
 // SkipPlanReview moves a request from planning straight to building: the

@@ -20,7 +20,7 @@ func TestEvaluateDecisionFailsClosedWhenKillSwitchEngaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := cleanMergeCandidate()
-	decision, err := EvaluateDecision(dir, "app", candidate, MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxInsertions: 100}, "now")
+	decision, err := EvaluateDecision(dir, "app", candidate, MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxChangedLines: 100}, "now")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestEvaluateDecisionFailsClosedWhenKillSwitchEngaged(t *testing.T) {
 
 func TestEvaluateDecisionSavesAuditableAllowedDecision(t *testing.T) {
 	dir := t.TempDir()
-	decision, err := EvaluateDecision(dir, "app", cleanMergeCandidate(), MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxInsertions: 100}, "now")
+	decision, err := EvaluateDecision(dir, "app", cleanMergeCandidate(), MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxChangedLines: 100}, "now")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestEvaluateDecisionRecordsTestsRequiredOptOut(t *testing.T) {
 	dir := t.TempDir()
 	candidate := cleanMergeCandidate()
 	candidate.TestsRequiredOptOut = "this ticket only updates documentation"
-	decision, err := EvaluateDecision(dir, "app", candidate, MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxInsertions: 100}, "now")
+	decision, err := EvaluateDecision(dir, "app", candidate, MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxChangedLines: 100}, "now")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestLoadDecisionRoundTripsAndRejectsEscapingIdentifiers(t *testing.T) {
 }
 
 func cleanMergeCandidate() run.Run {
-	return run.Run{ID: "run-1", State: run.StateAccepted, BaseSHA: "base", ResultSHA: "result", ChangedFiles: []string{"lib/app.go"}, DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 2}, GateResults: []run.GateResult{{Check: "verify", Passed: true}}, DependencyLockfilesTouched: []string{}, Attempts: []run.Attempt{{Kind: "build", ImageDigest: "sha256:deadbeef"}}}
+	return run.Run{ID: "run-1", State: run.StateAccepted, BaseSHA: "base", ResultSHA: "result", ChangedFiles: []string{"lib/app.go"}, DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 2}, ChangeSize: &run.ChangeSize{SourceFiles: 1, SourceLines: 2}, GateResults: []run.GateResult{{Check: "verify", Passed: true}}, DependencyLockfilesTouched: []string{}, Attempts: []run.Attempt{{Kind: "build", ImageDigest: "sha256:deadbeef"}}}
 }
 
 // TestRecordDecisionAndInvalidateDecisionSerializeAndDoNotLoseInvalidation
@@ -189,7 +189,7 @@ func cleanMergeCandidate() run.Run {
 func TestRecordDecisionAndInvalidateDecisionSerializeAndDoNotLoseInvalidation(t *testing.T) {
 	dir := t.TempDir()
 	candidate := cleanMergeCandidate()
-	cfg := MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxInsertions: 100}
+	cfg := MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxChangedLines: 100}
 
 	var wg sync.WaitGroup
 	for range 20 {
@@ -368,7 +368,7 @@ func TestRecordReleaseDecisionPersistsFailureMarkerOnCorruptKillSwitch(t *testin
 	}
 
 	candidate := cleanMergeCandidate()
-	cfg := MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxInsertions: 100}
+	cfg := MergePolicy{RollbackPlan: "rollback-v1", MaxFilesChanged: 10, MaxChangedLines: 100}
 	decision, err := RecordDecision(dir, project, candidate, cfg)
 	if err == nil {
 		t.Fatal("RecordDecision succeeded against a corrupted kill_switch.json, want an error")

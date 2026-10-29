@@ -23,7 +23,7 @@ const (
 // "x\nTests-Required: no - trivial" -- would otherwise put its second line
 // at column 0 of the addendum, which ticketspec.forEachTopLevelLine (the
 // round's own -spec parser) reads as a real header line: it could disable
-// the tests_red_on_base gate or add an Allowed-Files: or Required-Content: line to
+// the tests_red_on_base gate or add an Allowed-Files: line to
 // the round's own scope (found via adversarial review). Flattening removes
 // every character that line splitting depends on.
 func flattenAddendumLine(s string, maxBytes int) string {

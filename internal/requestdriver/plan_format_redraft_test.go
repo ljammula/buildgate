@@ -30,6 +30,7 @@ func malformedCoverageTicket(t *testing.T) string {
 func TestAdvancePlanningRedraftsAMalformedPlanOnceWithTheParsersMessage(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	malformed := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: malformedCoverageTicket(t)}}
 	valid := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}
 	runner, callCount, feedbackByCall := sequencedPlanTicketsRunner(t, dataDir,
@@ -71,6 +72,7 @@ func TestAdvancePlanningRedraftsAMalformedPlanOnceWithTheParsersMessage(t *testi
 func TestAdvancePlanningMalformedPlanTwiceHaltsAfterTwoLaunches(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	malformed := func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: malformedCoverageTicket(t)}}, &request.PlanEvidence{}, nil
 	}
@@ -99,6 +101,7 @@ func TestAdvancePlanningMalformedPlanTwiceHaltsAfterTwoLaunches(t *testing.T) {
 func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	content := malformedCoverageTicket(t)
 	malformed := func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}, &request.PlanEvidence{}, nil
@@ -139,6 +142,7 @@ func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 func TestAdvancePlanningAcceptsAnEmptyOutOfScopeSection(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	valid := requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)
 	idx := strings.Index(valid, "## Out of scope")
 	if idx < 0 {

@@ -238,7 +238,9 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	}
 	if entry.RequestTicket {
 		scope := "approved"
-		if entry.ScopeUnapproved {
+		if entry.NoTicketScope {
+			scope = "none"
+		} else if entry.ScopeUnapproved {
 			scope = "unapproved"
 		}
 		args = append(args, "-request-ticket", "-scope-approval", scope)

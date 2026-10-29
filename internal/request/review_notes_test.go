@@ -39,8 +39,7 @@ func notesTicket(name string, allowed []string, criteria ...int) PlanTicket {
 		covered += fmt.Sprintf("- %d\n", n)
 	}
 	files := strings.Join(allowed, ", ")
-	return PlanTicket{Name: name, Allowed: allowed, Content: "Verify-Command: make verify\nAllowed-Files: " + files + "\nRequired-Changed-Files: " + files +
-		"\n\n## Goal\n\nDo it.\n\n## Plan\n\n### Files to touch\n\n- " + allowed[0] + "\n\n### Steps\n\n1. Do it.\n\n### Tests to add\n\n- one\n\n### Acceptance criteria covered\n\n" +
+	return PlanTicket{Name: name, Allowed: allowed, Content: "Verify-Command: make verify\nAllowed-Files: " + files + "\n\n## Goal\n\nDo it.\n\n## Plan\n\n### Files to touch\n\n- " + allowed[0] + "\n\n### Steps\n\n1. Do it.\n\n### Tests to add\n\n- one\n\n### Acceptance criteria covered\n\n" +
 		covered + "\n## Out of scope\n\nNothing else.\n"}
 }
 

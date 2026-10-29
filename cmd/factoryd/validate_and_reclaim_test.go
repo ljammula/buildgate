@@ -573,7 +573,7 @@ func TestRunReleasePolicyRoundTrip(t *testing.T) {
 	original := release.MergePolicy{
 		ProtectedPaths:                 []string{"a/b", "c/d"},
 		MaxFilesChanged:                12,
-		MaxInsertions:                  345,
+		MaxChangedLines:                345,
 		RollbackPlan:                   "git revert the merge commit on main",
 		AllowOverrides:                 true,
 		AllowDependencyLockfileChanges: true,
@@ -741,7 +741,7 @@ func TestReconcilePersistedPolicyRendersProtectedPathEvaluationInPRBody(t *testi
 // is set because these fixtures record no build Attempts with an
 // ImageDigest.
 func allowingMergePolicyForTest() *release.MergePolicy {
-	return &release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxInsertions: 1000, AllowUnsandboxed: true}
+	return &release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 1000, AllowUnsandboxed: true}
 }
 
 // allowingRunWorkflowResultForTest is a workflow.RunWorkflowResult that,
@@ -755,6 +755,7 @@ func allowingRunWorkflowResultForTest(state run.State, resultSHA string) workflo
 		ResultSHA:    resultSHA,
 		ChangedFiles: []string{"lib/app.go"},
 		DiffStat:     &run.DiffStat{FilesChanged: 1, Insertions: 2},
+		ChangeSize:   &run.ChangeSize{SourceFiles: 1, SourceLines: 2},
 		GateResults:  []run.GateResult{{Check: "verify", Passed: true}},
 	}
 }

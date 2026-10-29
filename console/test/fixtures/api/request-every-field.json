@@ -228,6 +228,25 @@
     "every-field review_notes"
   ],
   "plan_budget_lines": 3,
+  "plan_verify_command": "every-field plan_verify_command",
+  "size_replan": {
+    "run_id": "every-field run_id",
+    "measurement": {
+      "source_lines": 3,
+      "source_files": 3,
+      "functions": 3,
+      "files": [
+        {
+          "path": "every-field path",
+          "insertions": 3,
+          "deletions": 3,
+          "functions": [
+            "every-field functions"
+          ]
+        }
+      ]
+    }
+  },
   "draft_halt": {
     "stage": "",
     "reason": "every-field reason",
@@ -354,7 +373,7 @@
           "unheld": true
         }
       ],
-      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "full_path": "/data/requests/req-every-field/tickets/001.spec.md"
     }
   ],

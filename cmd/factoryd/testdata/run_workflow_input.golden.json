@@ -121,14 +121,13 @@
     "worker_model_extra_json": "{\"reasoning\":true}",
     "worker_model_id": "builder-model-id"
   },
+  "release_max_changed_lines": 77,
+  "release_max_files_changed": 7,
   "release_protected_paths": [
     "deploy/",
     ".github/"
   ],
   "request_ticket": true,
-  "required_changed_files": [
-    "content.txt"
-  ],
   "resume_session_path": "<DATA_DIR>/runs/golden-quarantined/build-session",
   "review_harness": "pi",
   "review_relay_policy": {

@@ -27,7 +27,7 @@ import (
 // request.ValidateTicketSpecContent on every ticket before approving
 // (found live 2026-09-25), so a placeholder like "Verify-Command: true\n"
 // alone no longer passes.
-const seedApprovableRequestTicket = "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+const seedApprovableRequestTicket = "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
 
 // seedApprovableRequest writes a request directory (request.md,
 // request.json, spec.md, and -- when withTickets is true -- one ticket
@@ -998,7 +998,6 @@ None.
 // internal/api without an import cycle.
 const validTicketMD = `Verify-Command: true
 Allowed-Files: internal/payments/refunds.go
-Required-Changed-Files: internal/payments/refunds.go
 
 ## Goal
 

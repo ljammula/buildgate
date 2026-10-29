@@ -11,12 +11,12 @@ import (
 // wellFormedApprovableTicket is a plan ticket that passes both
 // ValidateTicketSpecContent checks (ValidateTicketPlan's ## Goal/## Plan/
 // ## Out of scope prose skeleton and policy.TicketStructureBrownfield's
-// Verify-Command:/Allowed-Files:/Required-Changed-Files: header shape) --
+// Verify-Command:/Allowed-Files: header shape) --
 // the shape Approve's own plan_review branch now requires of every ticket
 // it approves (found live 2026-09-25). Used wherever a test fixture needs
 // a ticket Approve will actually accept, not just a placeholder byte
 // string.
-const wellFormedApprovableTicket = "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+const wellFormedApprovableTicket = "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
 
 // newApprovableRequest writes a fully-formed request directory (request.md,
 // request.json, spec.md, and -- when withTickets is true -- two ticket

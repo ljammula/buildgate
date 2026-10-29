@@ -76,9 +76,7 @@ under `verify/` is what determines whether this run is accepted. See
 
 Allowed-Files: merge.go, merge_test.go
 
-Required-Changed-Files: merge.go
 
-Required-Content: encoding/json
 <!-- required_content_present gates on text that NEWLY appears (base vs.
      final), not merely present in the final file -- "func MergePatch"
      was tried first and rejected every real implementation, because that

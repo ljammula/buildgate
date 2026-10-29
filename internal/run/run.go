@@ -581,6 +581,22 @@ type DiffStat struct {
 	Deletions    int `json:"deletions"`
 }
 
+// ChangeSize is the host's source-only measurement of a committed diff.
+type ChangeSize struct {
+	SourceLines int              `json:"source_lines"`
+	SourceFiles int              `json:"source_files"`
+	Functions   int              `json:"functions"`
+	Files       []ChangeSizeFile `json:"files"`
+}
+
+// ChangeSizeFile records git's counts and enclosing hunk names for one file.
+type ChangeSizeFile struct {
+	Path       string   `json:"path"`
+	Insertions int      `json:"insertions"`
+	Deletions  int      `json:"deletions"`
+	Functions  []string `json:"functions"`
+}
+
 // AgentEvidenceSchemaVersion is the schema_version this struct's own field
 // set/shape currently matches. build_app.py (pi-harness-hardening,
 // scripts/build_app.py's own write_evidence_json) writes the identical
@@ -1419,8 +1435,7 @@ type Run struct {
 	// 2026-09-03 Opus factory-pipeline review.
 	SkipProjectCheck bool `json:"skip_project_check,omitempty"`
 	// SpecTicketScopeMismatchFields records which of
-	// Allowed-Files:/Required-Changed-Files:/Verify-Command:/
-	// Required-Content: -ticket-file declared differently (or not at all)
+	// Allowed-Files:/Verify-Command: -ticket-file declared differently (or not at all)
 	// than -spec's own snapshot, when this run proceeded anyway via the
 	// explicit -allow-spec-ticket-scope-mismatch opt-out -- empty/absent
 	// for a run that never hit the mismatch, and never populated for a
@@ -1590,6 +1605,11 @@ type Run struct {
 	// from the base commit, empty when it launched none.
 	ComposeServices []string  `json:"compose_services,omitempty"`
 	DiffStat        *DiffStat `json:"diff_stat,omitempty"`
+	// ChangeSize is nil until the host has measured the committed diff.
+	ChangeSize *ChangeSize `json:"change_size,omitempty"`
+	// PRBudgetLines is the session's note threshold at run start; zero disables
+	// the line threshold, while the function threshold still applies.
+	PRBudgetLines int `json:"pr_budget_lines,omitempty"`
 	// DiffAvailable is true when a full unified diff between BaseSHA and the
 	// workspace state at the moment evidence was collected was snapshotted
 	// to this run's own durable directory (see DiffPath) — worktree-
@@ -1832,7 +1852,7 @@ type Run struct {
 type ReleasePolicy struct {
 	ProtectedPaths                 []string `json:"protected_paths,omitempty"`
 	MaxFilesChanged                int      `json:"max_files_changed"`
-	MaxInsertions                  int      `json:"max_insertions"`
+	MaxChangedLines                int      `json:"max_changed_lines"`
 	RollbackPlan                   string   `json:"rollback_plan"`
 	AllowOverrides                 bool     `json:"allow_overrides,omitempty"`
 	AllowDependencyLockfileChanges bool     `json:"allow_dependency_lockfile_changes,omitempty"`

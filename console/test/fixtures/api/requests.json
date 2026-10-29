@@ -546,6 +546,25 @@
       "every-field review_notes"
     ],
     "plan_budget_lines": 3,
+    "plan_verify_command": "every-field plan_verify_command",
+    "size_replan": {
+      "run_id": "every-field run_id",
+      "measurement": {
+        "source_lines": 3,
+        "source_files": 3,
+        "functions": 3,
+        "files": [
+          {
+            "path": "every-field path",
+            "insertions": 3,
+            "deletions": 3,
+            "functions": [
+              "every-field functions"
+            ]
+          }
+        ]
+      }
+    },
     "draft_halt": {
       "stage": "",
       "reason": "every-field reason",

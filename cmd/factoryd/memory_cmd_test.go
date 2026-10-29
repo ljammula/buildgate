@@ -901,10 +901,9 @@ func TestMemoryRequestPlanIsItsOneTicket(t *testing.T) {
 		t.Fatalf("tickets = %+v (%v), want one", loaded.Tickets, err)
 	}
 	for key, want := range map[string]string{
-		"Verify-Command:":         "make test",
-		"Allowed-Files:":          "AGENTS.md",
-		"Required-Changed-Files:": "AGENTS.md",
-		"Tests-Required:":         "no -- this change edits only AGENTS.md",
+		"Verify-Command:": "make test",
+		"Allowed-Files:":  "AGENTS.md",
+		"Tests-Required:": "no -- this change edits only AGENTS.md",
 	} {
 		if got := ticketHeader(t, loaded.Tickets[0].SpecPath, key); got != want {
 			t.Errorf("ticket header %s %q, want %q", key, got, want)

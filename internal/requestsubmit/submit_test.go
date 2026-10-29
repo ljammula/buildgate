@@ -513,7 +513,7 @@ func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 	}
 }
 
-const handedOverTicket = "Verify-Command: make verify\nAllowed-Files: refunds.go, refunds_test.go\nRequired-Changed-Files: refunds.go, refunds_test.go\n\n" +
+const handedOverTicket = "Verify-Command: make verify\nAllowed-Files: refunds.go, refunds_test.go\n\n" +
 	"## Goal\n\nIdempotent refunds.\n\n## Plan\n\n### Files to touch\n\n- refunds.go\n\n### Steps\n\n1. Add the key check.\n\n" +
 	"### Tests to add\n\n- a retry test\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nCharges.\n"
 

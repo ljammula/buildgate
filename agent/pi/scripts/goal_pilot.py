@@ -327,7 +327,7 @@ def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 # account). /spec-plan's generated tickets satisfy buildgate's
 # policy.TicketStructure (## Goal/## Required changes/## Verification/
 # ## Commit) but never declared the separate Verify-Command:/
-# Allowed-Files:/Required-Changed-Files: keys internal/ticketspec parses
+# Allowed-Files: keys internal/ticketspec parses
 # -- the format policy.EvaluateRun's real per-run gates (diff_scope,
 # canonical_verify)
 # actually read. A generated ticket could pass every structural check
@@ -354,7 +354,7 @@ def resolve_spec_input(raw: str, pilot_dir: Path) -> Path:
 # as a citation, never as a file this ticket edits. Found live (2026-08-30
 # end-to-end validation run): without this exclusion, a ticket whose
 # `## Required changes` cited `spec/contract.md` for its expected error
-# text got it listed in `Allowed-Files:`/`Required-Changed-Files:` as if
+# text got it listed in `Allowed-Files:` as if
 # this ticket were supposed to modify the frozen contract itself.
 #
 # ARCHITECTURE.md/PROGRESS.md/README.md deliberately do NOT belong here,
@@ -582,7 +582,7 @@ def replace_stale_verify_command_line(content: str, verify_command: str) -> str:
 # or a future caller that adds `Verify-Command:` on its own but not the
 # other two) be detected as such per-key, not lumped into "already fully
 # declared" by the presence of any one of the three.
-TICKETSPEC_KEY_PREFIXES = ("Verify-Command:", "Allowed-Files:", "Required-Changed-Files:")
+TICKETSPEC_KEY_PREFIXES = ("Verify-Command:", "Allowed-Files:")
 
 # Every ticket's mandatory closing instruction ("Update `ARCHITECTURE.md`
 # and append a `PROGRESS.md` entry before finishing") always contributes
@@ -608,22 +608,21 @@ MANDATORY_CLOSING_PATHS = frozenset({"ARCHITECTURE.md", "PROGRESS.md"})
 
 
 def inject_ticketspec_keys(pilot_dir: Path, verify_command: str | None = None) -> list[Path]:
-	"""Adds whichever of Verify-Command:/Allowed-Files:/
-	Required-Changed-Files: a ticket is missing to the end of its `##
+	"""Adds whichever of Verify-Command:/Allowed-Files: a ticket is missing to the end of its `##
 	Verification` section, except: ticket 001 (the walking-skeleton
 	exemption -- see spec-plan.md's own doc comment: a brand-new repo has
 	no real paths yet to name honestly), a ticket that already declares
-	all three (hand-edited, or a prior run of this same function --
+	both (hand-edited, or a prior run of this same function --
 	idempotent, never double-injects), and a ticket whose `## Required
 	changes` names no extractable path at all (nothing concrete to
-	declare; leaving it undeclared skips diff_scope and the
-	required-file note cleanly rather than risk a wrong, guessed declaration causing a false
+	declare; leaving it undeclared skips diff_scope
+	cleanly rather than risk a wrong, guessed declaration causing a false
 	quarantine later).
 
 	Checks each key independently (found via review): a ticket declaring
 	only `Verify-Command:` by hand used to be treated as "already fully
-	declared" and skipped entirely, silently leaving Allowed-Files:/
-	Required-Changed-Files: undeclared -- the scope gates skip cleanly on
+	declared" and skipped entirely, silently leaving Allowed-Files:
+	undeclared -- the scope gate skips cleanly on
 	an absent declaration, but that's not what a caller who added one key
 	by hand was asking for.
 
@@ -636,12 +635,12 @@ def inject_ticketspec_keys(pilot_dir: Path, verify_command: str | None = None) -
 	Verify-Command: line whose value differs, rather than leaving it
 	alone (found via a real brownfield /spec-plan run against
 	example-app, 2026-09-10/11): this function's own "already
-	declares all three, skip" rule otherwise makes `--inject-only
+	declares both, skip" rule otherwise makes `--inject-only
 	<dir> --verify-command ...` -- the documented remediation for a
 	ticket that already has the unsatisfiable hardcoded default baked
 	in -- a complete no-op on exactly the ticket it exists to fix,
 	since that ticket already has SOME Verify-Command: line. Every
-	other declared key (Allowed-Files:/Required-Changed-Files:) is left
+	other declared key (Allowed-Files:) is left
 	alone regardless -- only Verify-Command: has a caller-supplied
 	override to reconcile against.
 
@@ -663,8 +662,8 @@ def inject_ticketspec_keys(pilot_dir: Path, verify_command: str | None = None) -
 			continue
 		paths = extract_required_change_paths(content)
 		# Verify-Command: doesn't depend on knowing any file path -- only
-		# Allowed-Files:/Required-Changed-Files: do. A ticket with nothing
-		# concrete to declare for those two must still get Verify-Command:
+		# Allowed-Files: does. A ticket with nothing
+		# concrete to declare for it must still get Verify-Command:
 		# injected if it's missing (found via Codex review of this same
 		# PR): omitting it lets a direct `factoryd` run skip canonical_verify
 		# entirely, accepting code that fails `make verify`/`make
@@ -681,7 +680,6 @@ def inject_ticketspec_keys(pilot_dir: Path, verify_command: str | None = None) -
 		candidate_lines = {
 			"Verify-Command:": f"Verify-Command: {verify_command_for_ticket(content, verify_command)}",
 			"Allowed-Files:": f"Allowed-Files: {joined}",
-			"Required-Changed-Files:": f"Required-Changed-Files: {joined}",
 		}
 		new_lines = [candidate_lines[p] for p in TICKETSPEC_KEY_PREFIXES if p in keys_to_inject]
 		declaration = "\n" + "\n".join(new_lines) + "\n\n"

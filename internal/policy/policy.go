@@ -165,23 +165,6 @@ func containsPath(list []string, f string) bool {
 	return false
 }
 
-// UnchangedRequiredFiles returns the files the ticket declared as required
-// that do not appear in the changed-file inventory. A passing canonical
-// verification only proves the ticket's Verify-Command exited 0, not that the
-// required implementation change was made; the missing files are listed as a
-// note on the pull request. They refuse nothing: a check that refuses must
-// execute something, and this one reads only file lists.
-func UnchangedRequiredFiles(changed, required []string) []string {
-	changedSet := stringSet(changed)
-	var missing []string
-	for _, f := range required {
-		if !changedSet[f] {
-			missing = append(missing, f)
-		}
-	}
-	return missing
-}
-
 // stringSet returns the members of list as a set.
 func stringSet(list []string) map[string]bool {
 	set := make(map[string]bool, len(list))
@@ -189,36 +172,6 @@ func stringSet(list []string) map[string]bool {
 		set[s] = true
 	}
 	return set
-}
-
-// AbsentRequiredContent returns the strings the ticket declared as required
-// that are not newly present in at least one required file's final content:
-// present now, and not already present in that same file at the run's base
-// commit. A file touched only cosmetically still has a diff, so a concrete
-// marker of the real change (a new widget's Key literal, a new test's function
-// name) is what shows the change was made. baseContent and finalContent are
-// keyed by the same required file paths. The result is a note on the pull
-// request and refuses nothing.
-//
-// Checked per file, not by concatenating every file's content into one blob:
-// concatenation discards the base/final pairing (a marker newly added to file
-// B would be masked by the same marker already in file A at base) and can
-// fabricate a match from fragments split across the seam of two files.
-func AbsentRequiredContent(baseContent, finalContent map[string]string, required []string) []string {
-	var missing []string
-	for _, s := range required {
-		found := false
-		for path, final := range finalContent {
-			if strings.Contains(final, s) && !strings.Contains(baseContent[path], s) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			missing = append(missing, s)
-		}
-	}
-	return missing
 }
 
 // DefaultTestPatterns is used when the project's .factory.yml doesn't
@@ -364,7 +317,7 @@ func TestsRedOnBase(tests []string, optOutReason string, optOutRefused bool, pro
 // means no opt-out).
 //
 // Found live (a Flutter + Go app repo run 3, 2026-09-28): a drafted ticket's
-// Allowed-Files/Required-Changed-Files named only
+// Allowed-Files named only
 // backend/internal/handler/dispatch_mux.go, it declared no Tests-Required
 // opt-out, and its own "Tests to add" prose said the route would be
 // exercised by a *different* ticket's test -- a ticket that, by its own
@@ -514,9 +467,8 @@ func RepoGate(check string, cmd []string, exitCode int, durationMs int64, logSHA
 // risking the two silently drifting apart (the same class of bug this
 // plan's --review-base-sha incident and CLAIMS.md's false-accept gaps
 // were both about: two things that were supposed to agree, didn't).
-// AllowedFiles, RequiredChangedFiles, and RequiredContent are nil exactly
-// when the ticket didn't declare the corresponding key — each check is
-// skipped entirely in that case, not evaluated against an empty list.
+// AllowedFiles is nil exactly when the ticket didn't declare the key — the
+// check is skipped entirely in that case, not evaluated against an empty list.
 type EvaluateRunInput struct {
 	VerifyCommand    []string
 	BuildExitCode    int
@@ -528,19 +480,14 @@ type EvaluateRunInput struct {
 	// rerun's when it ran; it never decides Passed itself.
 	VerifyRerun *run.VerifyRerun
 
-	ChangedFiles         []string
-	AllowedFiles         []string
-	RequiredChangedFiles []string
+	ChangedFiles []string
+	AllowedFiles []string
 
 	// ScopeUnapproved and AllowedPaths complete AllowedFiles into the run's
 	// Scope: the list is the model's guess (notes only), and the
 	// repository's .factory.yml allowed_paths (always refuses).
 	ScopeUnapproved bool
 	AllowedPaths    []string
-
-	RequiredContent           []string
-	RequiredContentBaseFiles  map[string]string
-	RequiredContentFinalFiles map[string]string
 
 	// TestPatterns/TestsRequiredOptOut/TestsRedOnBase feed the
 	// tests_red_on_base gate (TestsRedOnBase). Unlike AllowedFiles et al.,
@@ -638,17 +585,6 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		if !scopeGate.Passed {
 			accepted = false
 			result.FailedChecks = append(result.FailedChecks, "diff_scope")
-		}
-	}
-
-	if input.RequiredChangedFiles != nil {
-		for _, f := range UnchangedRequiredFiles(input.ChangedFiles, input.RequiredChangedFiles) {
-			result.Notes = append(result.Notes, "required file not changed: "+f)
-		}
-	}
-	if input.RequiredContent != nil {
-		for _, c := range AbsentRequiredContent(input.RequiredContentBaseFiles, input.RequiredContentFinalFiles, input.RequiredContent) {
-			result.Notes = append(result.Notes, fmt.Sprintf("required content not newly present: %q", c))
 		}
 	}
 
@@ -806,13 +742,10 @@ var requiredBrownfieldTicketSections = []string{
 }
 
 // requiredBrownfieldTicketHeaderKeys are the internal/ticketspec header
-// lines every brownfield ticket must declare -- Required-Content: is
-// deliberately excluded, since the plan-drafting pass marks it
-// optional, matching ticketspec's own optional-key convention for it.
+// lines every brownfield ticket must declare.
 var requiredBrownfieldTicketHeaderKeys = []string{
 	"Verify-Command:",
 	"Allowed-Files:",
-	"Required-Changed-Files:",
 }
 
 // TicketStructureBrownfield checks the ticket shape the plan-drafting
@@ -836,7 +769,6 @@ func TicketStructureBrownfield(ticketContent string) (bool, []string) {
 			reasons = append(reasons, "ticket is missing required header line "+key)
 		}
 	}
-
 	_, sectionReasons := requiredMarkdownSections(ticketContent, "ticket", requiredBrownfieldTicketSections)
 	reasons = append(reasons, sectionReasons...)
 	return len(reasons) == 0, reasons
@@ -1281,11 +1213,6 @@ func ExcludeHarnessByproducts(changed []string) []string {
 //     segment, "?" matches one character, no "/" crossing) — for a known
 //     filename pattern within a single directory, e.g.
 //     "app/l10n/app_localizations*.dart".
-//
-// This is deliberately not extended to Required-Changed-Files: a required
-// file names one specific file a human wants confirmed changed, and a
-// glob there would weaken that to "something in this set changed,"
-// defeating the check's own purpose.
 func matchesAllowed(f string, patterns []string) bool {
 	for _, pattern := range patterns {
 		if f == pattern {

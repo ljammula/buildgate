@@ -158,7 +158,7 @@ func memoryRequestDocuments(p memory.Proposal, changes []memory.Change, verifyCo
 	spec.WriteString("## Open questions\n\nNone.\n\n" + expectedSection)
 
 	var ticket strings.Builder
-	fmt.Fprintf(&ticket, "Verify-Command: %s\nAllowed-Files: AGENTS.md\nRequired-Changed-Files: AGENTS.md\nTests-Required: no -- this change edits only AGENTS.md\n\n", verifyCommand)
+	fmt.Fprintf(&ticket, "Verify-Command: %s\nAllowed-Files: AGENTS.md\nTests-Required: no -- this change edits only AGENTS.md\n\n", verifyCommand)
 	ticket.WriteString("## Goal\n\nReplace `AGENTS.md` with the approved repository memory text.\n\n")
 	ticket.WriteString("## Plan\n\n### Files to touch\n\n- `AGENTS.md` — its whole content becomes the expected text at the end of this document.\n\n")
 	ticket.WriteString("### Steps\n\n1. " + exact + "\n2. Copy the text; do not reword, reorder, re-wrap or reformat any line, inside or outside the memory section.\n3. Check the file's size and SHA-256 against the numbers in step 1 (`shasum -a 256 AGENTS.md` or `sha256sum AGENTS.md`).\n4. Change no other file.\n\n")

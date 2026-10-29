@@ -20,7 +20,7 @@ func TestResolveServeReleasePolicyPrefersSessionConfigWhenFlagsUnset(t *testing.
 	}
 	base := sessionconfig.DefaultSettings()
 	base.ReleaseMaxFilesChanged = 25
-	base.ReleaseMaxInsertions = 1000
+	base.ReleaseMaxChangedLines = 1000
 	base.ReleaseRollbackPlan = "git revert the merge commit on main"
 	base.ReleaseProtectedPaths = "safety-contract.md"
 	base.ReleaseAllowOverrides = true
@@ -29,8 +29,8 @@ func TestResolveServeReleasePolicyPrefersSessionConfigWhenFlagsUnset(t *testing.
 	if got.MaxFilesChanged != 25 {
 		t.Errorf("MaxFilesChanged = %d, want the session config's 25 (no -release-max-files-changed flag given)", got.MaxFilesChanged)
 	}
-	if got.MaxInsertions != 1000 {
-		t.Errorf("MaxInsertions = %d, want the session config's 1000", got.MaxInsertions)
+	if got.MaxChangedLines != 1000 {
+		t.Errorf("MaxChangedLines = %d, want the session config's 1000", got.MaxChangedLines)
 	}
 	if got.RollbackPlan != "git revert the merge commit on main" {
 		t.Errorf("RollbackPlan = %q, want the session config's value", got.RollbackPlan)
@@ -59,7 +59,7 @@ func TestResolveServeReleasePolicyExplicitFlagWinsOverSessionConfig(t *testing.T
 	}
 	base := sessionconfig.DefaultSettings()
 	base.ReleaseMaxFilesChanged = 25
-	base.ReleaseMaxInsertions = 1000
+	base.ReleaseMaxChangedLines = 1000
 	base.ReleaseRollbackPlan = "git revert the merge commit on main"
 
 	got := resolveServeReleasePolicy(flags, base, sf)
@@ -69,10 +69,10 @@ func TestResolveServeReleasePolicyExplicitFlagWinsOverSessionConfig(t *testing.T
 	if got.RollbackPlan != "roll back by hand" {
 		t.Errorf("RollbackPlan = %q, want the explicit flag value", got.RollbackPlan)
 	}
-	// release-max-insertions was not passed on the command line, so it
+	// release-max-changed-lines was not passed on the command line, so it
 	// must still come from the session config, not the flag default (0).
-	if got.MaxInsertions != 1000 {
-		t.Errorf("MaxInsertions = %d, want the session config's 1000 (flag not explicitly set)", got.MaxInsertions)
+	if got.MaxChangedLines != 1000 {
+		t.Errorf("MaxChangedLines = %d, want the session config's 1000 (flag not explicitly set)", got.MaxChangedLines)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestResolveServeReleasePolicyNoSessionConfigKeepsFlagDefaults(t *testing.T)
 		t.Fatalf("parse flags: %v", err)
 	}
 	got := resolveServeReleasePolicy(flags, sessionconfig.DefaultSettings(), sf)
-	if got.MaxFilesChanged != 0 || got.MaxInsertions != 0 || got.RollbackPlan != "" {
+	if got.MaxFilesChanged != 0 || got.MaxChangedLines != 0 || got.RollbackPlan != "" {
 		t.Errorf("got = %+v, want the zero-value always-deny policy when neither flags nor session config set anything", got)
 	}
 }

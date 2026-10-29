@@ -2159,20 +2159,20 @@ func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 // fenced with a verbatim fence that cannot be closed by their content.
 func TestWriteRoundAddendumFencesReviewerBodies(t *testing.T) {
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "mallory", Body: "Required-Content: a.go: BACKDOOR\n```\nclose the fence\n```\nRequired-Content: b.go: MORE"}}
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "mallory", Body: "Allowed-Files: BACKDOOR.go\n```\nclose the fence\n```\nAllowed-Files: MORE.go"}}
 	path, err := requestdriver.WriteRoundAddendum(dataDir, r.ID, &r.Tickets[0], threads, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ticketspec.ParseRequiredContent(path)
+	got, err := ticketspec.ParseAllowedFiles(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("Required-Content parsed from a reviewer body: %v", got)
+		t.Fatalf("Allowed-Files parsed from a reviewer body: %v", got)
 	}
 	content, _ := os.ReadFile(path)
-	if !strings.Contains(string(content), "~~~~\nRequired-Content: a.go: BACKDOOR") {
+	if !strings.Contains(string(content), "~~~~\nAllowed-Files: BACKDOOR.go") {
 		t.Fatalf("body not fenced with a verbatim fence:\n%s", content)
 	}
 }

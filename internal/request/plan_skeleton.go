@@ -13,7 +13,7 @@ import (
 // instructs the model to produce for each ticket, in order:
 // ## Goal, ## Plan (with four ### subsections), ## Out of scope. The
 // ticketspec header lines (Verify-Command:/Allowed-Files:/
-// Required-Changed-Files:) that precede these headings are validated
+// Tests-Required:) that precede these headings are validated
 // separately, by internal/ticketspec and policy.TicketStructureBrownfield
 // -- this function only checks the prose/plan structure underneath them.
 var requiredTicketHeadings = []string{
@@ -96,7 +96,7 @@ func ValidateTicketPlan(content string) error {
 // content must pass before it is trusted anywhere downstream:
 // ValidateTicketPlan (the ## Goal/## Plan/## Out of scope prose skeleton)
 // and policy.TicketStructureBrownfield (the ticketspec Verify-Command:/
-// Allowed-Files:/Required-Changed-Files: header and section shape --
+// Allowed-Files: header and section shape --
 // internal/policy's own brownfield ticket checker, the same one a
 // request-driven run's -request-ticket preflight applies at build start,
 // see cmd/factoryd/project_check.go). Shared by every place that accepts a
@@ -110,13 +110,32 @@ func ValidateTicketPlan(content string) error {
 // malformed hand-edit reached plan_review approval, spec/plan review
 // human attention, and queueing, before the first sign of trouble).
 func ValidateTicketSpecContent(content string) error {
-	if err := ValidateTicketPlan(content); err != nil {
-		return err
-	}
-	if passed, reasons := policy.TicketStructureBrownfield(content); !passed {
+	if ok, reasons := RequestTicketStructure(content); !ok {
 		return fmt.Errorf("%s", strings.Join(reasons, "; "))
 	}
 	return nil
+}
+
+// RequestTicketStructure is the structural check a request's ticket passes
+// wherever it is trusted: approval, the console's ticket editor and the
+// start of its build. A ticket is either the shape the planning job drafts
+// (ValidateTicketPlan and policy.TicketStructureBrownfield) or in spec form,
+// the approved spec's own skeleton (ValidateSpecSkeleton): the one ticket the
+// factory writes for a request submitted without a plan is the spec itself.
+// A drafted or handed-over plan is checked strictly when it is written
+// (requestdriver's writeAndValidateDraftedTickets), which does not accept
+// spec form. The reasons are the ticket shape's, the common case.
+func RequestTicketStructure(content string) (bool, []string) {
+	if ValidateSpecSkeleton(content) == nil {
+		return true, nil
+	}
+	if err := ValidateTicketPlan(content); err != nil {
+		return false, []string{err.Error()}
+	}
+	if passed, reasons := policy.TicketStructureBrownfield(content); !passed {
+		return false, reasons
+	}
+	return true, nil
 }
 
 // ValidatePlanCoverage reports an error listing every acceptance

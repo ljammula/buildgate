@@ -27,8 +27,8 @@
     },
     {
       "name": "well-formed ticket",
-      "text": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
-      "sha256": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+      "text": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "sha256": "d1ca21dfc7eae7025b2d9a17c35ec78821ef3df0035ce82ce2256ae60f6722c7"
     },
     {
       "name": "non-utf-8 bytes",
@@ -75,17 +75,17 @@
         {
           "index": 1,
           "spec_path": "/data/requests/req-1/tickets/001.spec.md",
-          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+          "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
         },
         {
           "index": 2,
           "spec_path": "/data/requests/req-1/tickets/002.spec.md",
-          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\nRésumé upload — naïve café ✓\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+          "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\nRésumé upload — naïve café ✓\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
         }
       ],
       "want": {
-        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a",
-        "tickets/002.spec.md": "a617e740aaffdc954c2060bc96da13fb0b599f7b6cbfd45897ac84ce12cd7642"
+        "tickets/001.spec.md": "d1ca21dfc7eae7025b2d9a17c35ec78821ef3df0035ce82ce2256ae60f6722c7",
+        "tickets/002.spec.md": "081f4bfc121a708bf547869c1db7770af6693f3cc20a9cbf2de8841b95bead7b"
       }
     },
     {
@@ -96,11 +96,11 @@
         {
           "index": 1,
           "spec_path": "/srv/tickets/factory-data/requests/req-1/tickets/001.spec.md",
-          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+          "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
         }
       ],
       "want": {
-        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+        "tickets/001.spec.md": "d1ca21dfc7eae7025b2d9a17c35ec78821ef3df0035ce82ce2256ae60f6722c7"
       }
     },
     {
@@ -111,11 +111,11 @@
         {
           "index": 1,
           "spec_path": "tickets/001.spec.md",
-          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+          "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
         }
       ],
       "want": {
-        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+        "tickets/001.spec.md": "d1ca21dfc7eae7025b2d9a17c35ec78821ef3df0035ce82ce2256ae60f6722c7"
       }
     },
     {
@@ -126,11 +126,11 @@
         {
           "index": 1,
           "spec_path": "C:\\data\\requests\\req-1\\tickets\\001.spec.md",
-          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+          "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
         }
       ],
       "want": {
-        "tickets/001.spec.md": "8e80e8e7185a7827286f2cbf56233b34fef47fe407a9f54686a63a48204b295a"
+        "tickets/001.spec.md": "d1ca21dfc7eae7025b2d9a17c35ec78821ef3df0035ce82ce2256ae60f6722c7"
       }
     },
     {
@@ -141,7 +141,7 @@
         {
           "index": 1,
           "spec_path": "/data/requests/req-1/tickets/001.spec.md",
-          "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+          "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
         }
       ],
       "want": {}

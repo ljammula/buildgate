@@ -5,7 +5,6 @@ import (
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"context"
-	"fmt"
 	"path/filepath"
 
 	"go.temporal.io/sdk/activity"
@@ -240,30 +239,5 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 		result.DiffTruncated = truncated
 	}
 
-	if input.RequiredContent == nil {
-		return result, nil
-	}
-
-	// Base content via GitShowFile (as of BaseSHA); final content read
-	// directly from the workspace via ReadRegularFile — the file's true
-	// final state, including anything left uncommitted by verification,
-	// same convention cmd/factoryd's uses, but refusing to
-	// follow a symlink a required path may have been replaced with (see
-	// ReadRegularFile's doc comment).
-	result.RequiredContentBaseFiles = make(map[string]string, len(input.RequiredChangedFiles))
-	result.RequiredContentFinalFiles = make(map[string]string, len(input.RequiredChangedFiles))
-	for _, f := range input.RequiredChangedFiles {
-		content, _, err := runner.GitShowFile(input.WorkspacePath, input.BaseSHA, f)
-		if err != nil {
-			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause(fmt.Sprintf("read base content of required file %q", f), InfrastructureFailureType, err)
-		}
-		result.RequiredContentBaseFiles[f] = content
-
-		finalContent, _, err := runner.ReadRegularFile(filepath.Join(input.WorkspacePath, f))
-		if err != nil {
-			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause(fmt.Sprintf("read final content of required file %q", f), InfrastructureFailureType, err)
-		}
-		result.RequiredContentFinalFiles[f] = finalContent
-	}
 	return result, nil
 }

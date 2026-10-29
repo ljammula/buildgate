@@ -370,14 +370,6 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 	if err != nil {
 		t.Fatalf("parse Allowed-Files: %v", err)
 	}
-	requiredChangedFiles, err := ticketspec.ParseRequiredChangedFiles(specPath)
-	if err != nil {
-		t.Fatalf("parse Required-Changed-Files: %v", err)
-	}
-	requiredContent, err := ticketspec.ParseRequiredContent(specPath)
-	if err != nil {
-		t.Fatalf("parse Required-Content: %v", err)
-	}
 	testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(specPath)
 	if err != nil {
 		t.Fatalf("parse Tests-Required: %v", err)
@@ -421,35 +413,33 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 		sliceOpts.TicketPath = specPath
 	}
 	input := runOptions{
-		ID:                   id,
-		Ticket:               ticket,
-		WorkspacePath:        workspace,
-		SpecSnapshotPath:     specPath,
-		BaseSHA:              baseSHA,
-		DataDir:              dataDir,
-		BuildAppInterpreter:  "/bin/sh",
-		BuildAppScript:       scriptPath,
-		Harness:              "pi",
-		ReviewHarness:        "pi",
-		CodeReviewPolicy:     "off",
-		VerifyCommand:        verifyCommand,
-		FullSuiteCommand:     fullSuiteCommand,
-		GateCommands:         gateCommands,
-		MaxRounds:            3,
-		TimeoutMinutes:       45,
-		BuildAppMaxAttempts:  2,
-		VerifyMaxAttempts:    2,
-		SandboxImage:         fakeSandboxImage,
-		SandboxDocker:        dockerPath,
-		ComposeServices:      compose,
-		AllowedFiles:         allowedFiles,
-		RequiredChangedFiles: requiredChangedFiles,
-		RequiredContent:      requiredContent,
-		TestsRequiredOptOut:  testsRequiredOptOut,
-		Slice:                sliceOpts,
-		Thinking:             thinking,
-		ReviewThinking:       reviewThinking,
-		ReviewRelayPolicy:    reviewRelayPolicy,
+		ID:                  id,
+		Ticket:              ticket,
+		WorkspacePath:       workspace,
+		SpecSnapshotPath:    specPath,
+		BaseSHA:             baseSHA,
+		DataDir:             dataDir,
+		BuildAppInterpreter: "/bin/sh",
+		BuildAppScript:      scriptPath,
+		Harness:             "pi",
+		ReviewHarness:       "pi",
+		CodeReviewPolicy:    "off",
+		VerifyCommand:       verifyCommand,
+		FullSuiteCommand:    fullSuiteCommand,
+		GateCommands:        gateCommands,
+		MaxRounds:           3,
+		TimeoutMinutes:      45,
+		BuildAppMaxAttempts: 2,
+		VerifyMaxAttempts:   2,
+		SandboxImage:        fakeSandboxImage,
+		SandboxDocker:       dockerPath,
+		ComposeServices:     compose,
+		AllowedFiles:        allowedFiles,
+		TestsRequiredOptOut: testsRequiredOptOut,
+		Slice:               sliceOpts,
+		Thinking:            thinking,
+		ReviewThinking:      reviewThinking,
+		ReviewRelayPolicy:   reviewRelayPolicy,
 	}.workflowInput()
 
 	var suite testsuite.WorkflowTestSuite
@@ -708,7 +698,7 @@ func TestOnBranchTemporalPathChecksOutPRBranchNotSharedHEAD(t *testing.T) {
 // B -- this run (-on-branch review-branch-temporal, -diff-base=A) then
 // edits content.txt again (FAKE_BUILD_APP_MODE=commit) as the round's own
 // commit C, which alone touches only content.txt. The ticket declares
-// Required-Changed-Files: content.txt,b_test.go -- satisfiable only by
+// Allowed-Files: content.txt, b_test.go -- satisfiable only by
 // the cumulative range A..HEAD, not by C..HEAD (this round's own
 // BaseSHA), which is exactly what DiffBaseSHA=A selects.
 func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
@@ -744,7 +734,7 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 		t.Fatalf("checkout main: %v: %s", err, out)
 	}
 
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nRequired-Changed-Files: content.txt, b_test.go\nTests-Required: no -- fixture doesn't exercise tests_red_on_base\n"
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nTests-Required: no -- fixture doesn't exercise tests_red_on_base\n"
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -764,10 +754,6 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 	allowedFiles, err := ticketspec.ParseAllowedFiles(specPath)
 	if err != nil {
 		t.Fatalf("parse Allowed-Files: %v", err)
-	}
-	requiredChangedFiles, err := ticketspec.ParseRequiredChangedFiles(specPath)
-	if err != nil {
-		t.Fatalf("parse Required-Changed-Files: %v", err)
 	}
 	testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(specPath)
 	if err != nil {
@@ -790,29 +776,28 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 	// equivalent -- both mirror what a real corrective round submitted by
 	// pr_review_driver.go/request_driver.go would carry.
 	input := runOptions{
-		ID:                   id,
-		Ticket:               ticket,
-		WorkspacePath:        workspace,
-		SpecSnapshotPath:     specPath,
-		BaseSHA:              branchTip,
-		DataDir:              dataDir,
-		BuildAppInterpreter:  "/bin/sh",
-		BuildAppScript:       scriptPath,
-		Harness:              "pi",
-		ReviewHarness:        "pi",
-		CodeReviewPolicy:     "off",
-		VerifyCommand:        "true",
-		FullSuiteCommand:     "true",
-		MaxRounds:            3,
-		TimeoutMinutes:       45,
-		BuildAppMaxAttempts:  2,
-		VerifyMaxAttempts:    2,
-		SandboxImage:         fakeSandboxImage,
-		SandboxDocker:        dockerPath,
-		AllowedFiles:         allowedFiles,
-		RequiredChangedFiles: requiredChangedFiles,
-		TestsRequiredOptOut:  testsRequiredOptOut,
-		Slice:                sliceOpts,
+		ID:                  id,
+		Ticket:              ticket,
+		WorkspacePath:       workspace,
+		SpecSnapshotPath:    specPath,
+		BaseSHA:             branchTip,
+		DataDir:             dataDir,
+		BuildAppInterpreter: "/bin/sh",
+		BuildAppScript:      scriptPath,
+		Harness:             "pi",
+		ReviewHarness:       "pi",
+		CodeReviewPolicy:    "off",
+		VerifyCommand:       "true",
+		FullSuiteCommand:    "true",
+		MaxRounds:           3,
+		TimeoutMinutes:      45,
+		BuildAppMaxAttempts: 2,
+		VerifyMaxAttempts:   2,
+		SandboxImage:        fakeSandboxImage,
+		SandboxDocker:       dockerPath,
+		AllowedFiles:        allowedFiles,
+		TestsRequiredOptOut: testsRequiredOptOut,
+		Slice:               sliceOpts,
 	}.workflowInput()
 
 	if input.DiffBaseSHA != diffBase {

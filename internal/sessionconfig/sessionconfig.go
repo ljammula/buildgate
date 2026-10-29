@@ -220,14 +220,10 @@ type Config struct {
 	// expiry: merging is a human act and a long-open pull request is normal.
 	ReviewGateExpiry *string `yaml:"review_gate_expiry,omitempty"`
 
-	// PRBudgetLines is the target size of one ticket's pull request in changed
-	// lines (insertions plus deletions, as git diff --shortstat counts them).
-	// Planning writes one ticket for a spec whose estimated change fits it and
-	// splits only an estimate over it, into the fewest tickets that each fit.
-	// Default 400; 0 is no budget (one ticket unless the spec's parts are
-	// independently shippable); negative is refused. It is a planning target,
-	// not a cap: release_max_insertions and release_max_files_changed stay the
-	// hard limits.
+	// PRBudgetLines is the source-line threshold for a pull request size note
+	// and the target when a planning job drafts tickets. Default 400; 0 disables
+	// the line threshold; negative is refused. The release size limits are
+	// release_max_changed_lines and release_max_files_changed.
 	PRBudgetLines *int `yaml:"pr_budget_lines,omitempty"`
 
 	// ReviewReproductions is whether a request's ticket build holds and runs
@@ -317,7 +313,7 @@ type Config struct {
 
 	ReleaseProtectedPaths                 *string `yaml:"release_protected_paths,omitempty"`
 	ReleaseMaxFilesChanged                *int    `yaml:"release_max_files_changed,omitempty"`
-	ReleaseMaxInsertions                  *int    `yaml:"release_max_insertions,omitempty"`
+	ReleaseMaxChangedLines                *int    `yaml:"release_max_changed_lines,omitempty"`
 	ReleaseRollbackPlan                   *string `yaml:"release_rollback_plan,omitempty"`
 	ReleaseAllowOverrides                 *bool   `yaml:"release_allow_overrides,omitempty"`
 	ReleaseAllowDependencyLockfileChanges *bool   `yaml:"release_allow_dependency_lockfile_changes,omitempty"`
@@ -587,7 +583,7 @@ type Settings struct {
 
 	ReleaseProtectedPaths                 string
 	ReleaseMaxFilesChanged                int
-	ReleaseMaxInsertions                  int
+	ReleaseMaxChangedLines                int
 	ReleaseRollbackPlan                   string
 	ReleaseAllowOverrides                 bool
 	ReleaseAllowDependencyLockfileChanges bool
@@ -897,7 +893,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)
 	integer(&s.ReleaseMaxFilesChanged, c.ReleaseMaxFilesChanged)
-	integer(&s.ReleaseMaxInsertions, c.ReleaseMaxInsertions)
+	integer(&s.ReleaseMaxChangedLines, c.ReleaseMaxChangedLines)
 	str(&s.ReleaseRollbackPlan, c.ReleaseRollbackPlan)
 	boolean(&s.ReleaseAllowOverrides, c.ReleaseAllowOverrides)
 	boolean(&s.ReleaseAllowDependencyLockfileChanges, c.ReleaseAllowDependencyLockfileChanges)
@@ -954,11 +950,11 @@ func (c *Config) applyListKeys(s *Settings) error {
 	return nil
 }
 
-// DefaultReleaseMaxFilesChanged/DefaultReleaseMaxInsertions/
+// DefaultReleaseMaxFilesChanged/DefaultReleaseMaxChangedLines/
 // DefaultReleaseRollbackPlan are the release-policy values a fresh
 // session config should carry so a first PR isn't silently denied. The
 // shipped zero-value Settings (see applySettings above:
-// ReleaseMaxFilesChanged/ReleaseMaxInsertions/ReleaseRollbackPlan default
+// ReleaseMaxFilesChanged/ReleaseMaxChangedLines/ReleaseRollbackPlan default
 // to the zero value) deny every PR unconditionally --
 // internal/release.MergePolicyCheck treats 0 files allowed and an empty
 // rollback plan as always-deny. These are the single source of truth for
@@ -976,7 +972,7 @@ func (c *Config) applyListKeys(s *Settings) error {
 // any other session config key.
 const (
 	DefaultReleaseMaxFilesChanged = 25
-	DefaultReleaseMaxInsertions   = 1000
+	DefaultReleaseMaxChangedLines = 1000
 	// DefaultReleaseRollbackPlan only needs to be non-empty --
 	// MergePolicyCheck checks presence, not content (see its own doc
 	// comment: "Checking that reference is present does not implement
@@ -1035,7 +1031,7 @@ const DefaultSandboxInstallCacheImages = 3
 // registry_proxy_image is omitted entirely -- see the comment below. The
 // model id must come from GET /v1/models. The
 // release_* keys below are DefaultReleaseMaxFilesChanged/
-// DefaultReleaseMaxInsertions/DefaultReleaseRollbackPlan spelled out as
+// DefaultReleaseMaxChangedLines/DefaultReleaseRollbackPlan spelled out as
 // YAML -- kept in sync with those constants by TestExampleMatchesReleaseDefaults.
 const Example = `# factoryd session config: the machine-side values every worker needs.
 # Each key mirrors a ` + "`factoryd worker`" + ` flag; a flag given on the command
@@ -1128,7 +1124,7 @@ registry_proxy: true
 # (0 files allowed, empty rollback plan) -- see DefaultReleaseMaxFilesChanged
 # and friends above.
 release_max_files_changed: 25
-release_max_insertions: 1000
+release_max_changed_lines: 1000
 release_rollback_plan: "git revert the merge commit on main"
 `
 

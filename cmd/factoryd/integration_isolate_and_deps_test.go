@@ -1181,175 +1181,6 @@ func gateRecorded(r *run.Run, check string) bool {
 	return slices.ContainsFunc(r.GateResults, func(g run.GateResult) bool { return g.Check == check })
 }
 
-// TestIntegrationRequiredFilesNotChangedIsANoteNotARefusal: a passing
-// Verify-Command proves only that the declared command exited 0, not that the
-// ticket's required implementation change was made. Here the ticket declares
-// content.txt as required but the fake agent (mode commit_other) touches only
-// other.txt. A check that refuses must execute something, and a changed-file
-// list executes nothing, so the run is accepted and the pull request lists
-// the unmet file as a note; no required_files_changed gate is recorded.
-func TestIntegrationRequiredFilesNotChangedIsANoteNotARefusal(t *testing.T) {
-	ws := newFixtureRepo(t)
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
-
-	r := runFactorydWithSpec(t, ws, "commit_other", "true", specContent, "30s")
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q (%s), want %q: an unchanged required file is a note", r.State, r.HaltError, run.StateAccepted)
-	}
-	if !noteWith(r, "required file not changed: content.txt") {
-		t.Errorf("Notes = %q, want one naming content.txt", r.Notes)
-	}
-	if gateRecorded(r, "required_files_changed") {
-		t.Errorf("GateResults = %+v, want no required_files_changed gate", r.GateResults)
-	}
-	if slices.Contains(r.ChangedFiles, "content.txt") {
-		t.Errorf("ChangedFiles = %v, want it to NOT include the never-touched required file", r.ChangedFiles)
-	}
-}
-
-// TestIntegrationRequiredFilesNoteIgnoresPreExistingDirt: the note is
-// computed against the run's own worktree, which is cut from the base
-// commit, so uncommitted state in the operator's shared checkout never
-// reaches a build. A required file dirty there must not halt the run (no
-// submitter-side check exists), and its dirt is not attributed to the run:
-// content.txt stays unchanged in the run, so the note names it.
-func TestIntegrationRequiredFilesNoteIgnoresPreExistingDirt(t *testing.T) {
-	ws := newFixtureRepo(t)
-	f, err := os.OpenFile(filepath.Join(ws, "content.txt"), os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatalf("dirty content.txt: %v", err)
-	}
-	if _, err := f.WriteString("pre-existing uncommitted edit\n"); err != nil {
-		t.Fatalf("dirty content.txt: %v", err)
-	}
-	f.Close()
-
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
-	r := runFactorydWithSpecAndFlags(t, ws, "commit_other", "true", specContent, "30s", nil, nil)
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q (%s), want %q: dirt in the shared checkout must not halt the run", r.State, r.HaltError, run.StateAccepted)
-	}
-	var buildRan bool
-	for _, a := range r.Attempts {
-		if a.Kind == "build" {
-			buildRan = true
-		}
-	}
-	if !buildRan {
-		t.Error("no build attempt recorded, want the build to run")
-	}
-	if !noteWith(r, "required file not changed: content.txt") {
-		t.Errorf("Notes = %q, want one naming content.txt (the shared checkout's dirt is not this run's change)", r.Notes)
-	}
-	if slices.Contains(r.ChangedFiles, "content.txt") {
-		t.Errorf("ChangedFiles = %v, want no content.txt", r.ChangedFiles)
-	}
-}
-
-// TestIntegrationRequiredFilesNoteSkippedWithoutDeclaration: a ticket without
-// a Required-Changed-Files: key has nothing required, so no note.
-func TestIntegrationRequiredFilesNoteSkippedWithoutDeclaration(t *testing.T) {
-	ws := newFixtureRepo(t)
-	r := runFactoryd(t, ws, "commit_other", "true")
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q: no Required-Changed-Files declared, so nothing required", r.State, run.StateAccepted)
-	}
-	if noteWith(r, "required file") {
-		t.Errorf("Notes = %q, want no required-file note when the ticket declared none", r.Notes)
-	}
-}
-
-// TestIntegrationRequiredContentPresentRaisesNoNote: the ticket declares
-// REQUIRED_MARKER_STRING as required content and the fake agent (mode
-// commit_with_marker) writes it into content.txt, so there is nothing to note.
-func TestIntegrationRequiredContentPresentRaisesNoNote(t *testing.T) {
-	ws := newFixtureRepo(t)
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\nRequired-Content: REQUIRED_MARKER_STRING\n"
-
-	r := runFactorydWithSpec(t, ws, "commit_with_marker", "true", specContent, "30s")
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q: the required content was actually written", r.State, run.StateAccepted)
-	}
-	if len(r.Notes) != 0 {
-		t.Errorf("Notes = %q, want none", r.Notes)
-	}
-}
-
-// TestIntegrationRequiredContentCosmeticChangeIsANote: the ticket declares
-// REQUIRED_MARKER_STRING as required content, but the fake agent (mode
-// commit) only appends unrelated text. content.txt changed, yet the marker
-// never appeared: the run is accepted and the note says so.
-func TestIntegrationRequiredContentCosmeticChangeIsANote(t *testing.T) {
-	ws := newFixtureRepo(t)
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\nRequired-Content: REQUIRED_MARKER_STRING\n"
-
-	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q (%s), want %q: unmet required content is a note", r.State, r.HaltError, run.StateAccepted)
-	}
-	if noteWith(r, "required file not changed") {
-		t.Errorf("Notes = %q, want no required-file note (content.txt did change)", r.Notes)
-	}
-	if !noteWith(r, `required content not newly present: "REQUIRED_MARKER_STRING"`) {
-		t.Errorf("Notes = %q, want one naming the marker", r.Notes)
-	}
-	if gateRecorded(r, "required_content_present") {
-		t.Errorf("GateResults = %+v, want no required_content_present gate", r.GateResults)
-	}
-}
-
-// TestIntegrationRequiredContentAlreadyAtBaseIsANote: required content
-// already present before the run started is not evidence of this run's own
-// change. The fixture pre-seeds content.txt with the marker at base; the
-// agent still only makes its normal unrelated edit (mode commit).
-func TestIntegrationRequiredContentAlreadyAtBaseIsANote(t *testing.T) {
-	ws := newFixtureRepo(t)
-	f, err := os.OpenFile(filepath.Join(ws, "content.txt"), os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatalf("seed content.txt: %v", err)
-	}
-	if _, err := f.WriteString("REQUIRED_MARKER_STRING\n"); err != nil {
-		t.Fatalf("seed content.txt: %v", err)
-	}
-	f.Close()
-	commitCmd := exec.Command("git", "-C", ws, "commit", "-q", "-am", "pre-seed marker before base")
-	commitCmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	if out, err := commitCmd.CombinedOutput(); err != nil {
-		t.Fatalf("commit seeded marker: %v: %s", err, out)
-	}
-
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\nRequired-Content: REQUIRED_MARKER_STRING\n"
-	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q (%s), want %q", r.State, r.HaltError, run.StateAccepted)
-	}
-	if !noteWith(r, `required content not newly present: "REQUIRED_MARKER_STRING"`) {
-		t.Errorf("Notes = %q, want a note: the marker was already present at base", r.Notes)
-	}
-}
-
-// TestIntegrationRequiredContentNoteSkippedWithoutDeclaration: a ticket
-// without a Required-Content: key has nothing required, so no note.
-func TestIntegrationRequiredContentNoteSkippedWithoutDeclaration(t *testing.T) {
-	ws := newFixtureRepo(t)
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nRequired-Changed-Files: content.txt\n"
-
-	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
-
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q", r.State, run.StateAccepted)
-	}
-	if noteWith(r, "required content") {
-		t.Errorf("Notes = %q, want no required-content note when the ticket declared none", r.Notes)
-	}
-}
-
 // TestIntegrationHaltsWhenBaseSHANoLongerAnAncestor is the regression
 // test for a real finding from a live factoryd run against
 // a Flutter + Go app repo: the workspace's git history no longer contained
@@ -1778,7 +1609,7 @@ func TestIntegrationOnBranchKeepsBranchOnHalt(t *testing.T) {
 // content.txt as commit B -- this run (-on-branch review-branch) then
 // edits content.txt again (FAKE_BUILD_APP_MODE=commit) as the round's own
 // commit C, which alone touches only content.txt. The ticket declares
-// Required-Changed-Files: content.txt,b_test.go -- satisfiable only by
+// Allowed-Files: content.txt, b_test.go -- satisfiable only by
 // the cumulative range A..HEAD, not by B..HEAD (round B's own base_sha),
 // which is exactly what -diff-base=A selects.
 func TestIntegrationDiffBaseComputesCumulativeChangedFiles(t *testing.T) {
@@ -1809,7 +1640,7 @@ func TestIntegrationDiffBaseComputesCumulativeChangedFiles(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nRequired-Changed-Files: content.txt, b_test.go\n"
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\n"
 	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", "true", specContent, "30s", nil,
 		[]string{"-on-branch", "review-branch", "-diff-base", diffBase}, dataDir)
 

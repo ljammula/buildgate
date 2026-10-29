@@ -1,6 +1,7 @@
 package requestdriver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -486,6 +487,7 @@ type planningInputs struct {
 	planReview    bool // the repository's .factory.yml plan_review
 	testPatterns  []string
 	criteriaCount int
+	spec          []byte // the approved spec.md, verified against its pinned hash
 }
 
 var errPlanningInputsHalted = errors.New("planning inputs halted")
@@ -541,6 +543,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 		testPatterns:  testPatterns,
 		planReview:    planReview,
 		criteriaCount: criteriaCount,
+		spec:          specBytes,
 	}, nil
 }
 
@@ -593,6 +596,10 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 	// The budget the planner is told is the one the review's notes read.
 	r.PlanBudgetLines = cfg.Settings.PRBudgetLines
+	r.PlanVerifyCommand = verifyCommand
+	if !r.PlanImported && request.PlanFeedback(r) == "" && r.SizeReplan == nil {
+		return planApprovedSpec(dp, dataDir, r, inputs, ticketsDir, now)
+	}
 
 	runner = withPlanImport(runner)
 	reviewedTickets, reviewErr := ReviewedTickets(dataDir, r)
@@ -681,6 +688,30 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		}
 		log.Printf("request %s: drafted plan refused (%v) -- re-planning automatically", r.ID, validateErr)
 	}
+	return finishPlanning(dp, dataDir, r, inputs, requestTickets, evidence, now)
+}
+
+// planApprovedSpec writes one ticket without a model launch or launch budget.
+func planApprovedSpec(dp Deps, dataDir string, r *request.Request, inputs planningInputs, ticketsDir string, now time.Time) error {
+	if err := writeDraftFeedback(request.PlanFeedbackPath(dataDir, r.ID), ""); err != nil {
+		return err
+	}
+	if err := clearTicketArtifacts(ticketsDir); err != nil {
+		return fmt.Errorf("clear previous plan's tickets: %w", err)
+	}
+	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+		return fmt.Errorf("create tickets dir: %w", err)
+	}
+	tickets, err := writeSpecTicket(ticketsDir, DraftedTicket{Filename: specTicketName, Content: string(inputs.spec)})
+	if err != nil {
+		return err
+	}
+	return finishPlanning(dp, dataDir, r, inputs, tickets, nil, now)
+}
+
+// finishPlanning records a planning pass's tickets and evidence on r, then
+// either has the factory approve the plan itself or sends it to plan_review.
+func finishPlanning(dp Deps, dataDir string, r *request.Request, inputs planningInputs, requestTickets []request.Ticket, evidence *request.PlanEvidence, now time.Time) error {
 	r.Tickets = requestTickets
 	r.TicketCount = len(requestTickets)
 	recordPlanEvidence(r, evidence)
@@ -707,6 +738,21 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: planning -> plan_review (plan drafted: %d ticket(s))", r.ID, r.TicketCount)
 	return saveAndRemind(dp, dataDir, r, now)
+}
+
+// specTicketName is the file name of the ticket the factory writes from the
+// approved spec.
+const specTicketName = "001.spec.md"
+
+// writeSpecTicket writes the approved spec as the ticket. The approval
+// that follows accepts it as a ticket in spec form
+// (request.RequestTicketStructure).
+func writeSpecTicket(ticketsDir string, ticket DraftedTicket) ([]request.Ticket, error) {
+	ticketPath := filepath.Join(ticketsDir, ticket.Filename)
+	if err := os.WriteFile(ticketPath, []byte(ticket.Content), 0o600); err != nil {
+		return nil, fmt.Errorf("write ticket %s: %w", ticket.Filename, err)
+	}
+	return []request.Ticket{{Index: 1, SpecPath: ticketPath}}, nil
 }
 
 // planRedraftable reports whether a plan refused with err gets the one
@@ -1033,6 +1079,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, reason string, idx int, now time.Time) error {
 	switch runRecord.State {
 	case run.StateAccepted:
+		if handled, err := handleOversizedRun(dataDir, r, runRecord, now); handled {
+			return err
+		}
 		// The "merge by hand" hint used to always guess "factoryd/<run-id>", wrong for
 		// a -repository/Temporal-routed run's own real branch -- recorded
 		// here, the one place this ticket's run is known to have reached
@@ -1060,6 +1109,30 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		// expected to actually reach this branch.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
+}
+
+// handleOversizedRun sends the first oversized request ticket back to
+// planning only after the run's recorded release decision denied it.
+func handleOversizedRun(dataDir string, r *request.Request, record *run.Run, now time.Time) (bool, error) {
+	if record.ChangeSize == nil || record.ReleasePolicy == nil {
+		return false, nil
+	}
+	size, caps := record.ChangeSize, record.ReleasePolicy
+	if size.SourceLines <= caps.MaxChangedLines && size.SourceFiles <= caps.MaxFilesChanged {
+		return false, nil
+	}
+	reason := fmt.Sprintf("run %s exceeded the release size cap: %d source lines, %d source files, %d functions", record.ID, size.SourceLines, size.SourceFiles, size.Functions)
+	decision, err := release.LoadDecision(dataDir, record.Project, record.ID)
+	if err != nil || decision == nil || decision.Allowed || record.PullRequestURL != "" {
+		return true, HaltRequest(dataDir, r, reason+"; the denied release decision or absence of a pull request could not be confirmed", now)
+	}
+	if r.SizeReplan != nil || r.PlanImported {
+		return true, HaltRequest(dataDir, r, reason+"; this plan cannot be sent to planning for size again", now)
+	}
+	if err := r.ReturnToPlanningForSize(record.ID, size, now); err != nil {
+		return true, err
+	}
+	return true, r.Save(dataDir)
 }
 
 // noteLostCause names the cause of a lost build correctly when the request
@@ -1805,7 +1878,7 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 // reads the ticket's header lines and the project's test patterns and no
 // prose. Every other
 // validation failure this function can return (a bad heading, a missing
-// Allowed-Files/Required-Changed-Files, a Verify-Command drift, an
+// Allowed-Files, a Verify-Command drift, an
 // unclaimed acceptance criterion) is not wrapped with it; planRedraftable
 // decides which of those get the same retry.
 var errPlanInfeasible = errors.New("plan is infeasible")
@@ -1865,13 +1938,7 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		} else if len(allowed) == 0 {
 			return nil, contentErr(fmt.Errorf("ticket %s: missing Allowed-Files", ticket.Filename))
 		}
-		required, err := ticketspec.ParseRequiredChangedFiles(ticketPath)
-		if err != nil {
-			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
-		} else if len(required) == 0 {
-			return nil, contentErr(fmt.Errorf("ticket %s: missing Required-Changed-Files", ticket.Filename))
-		}
-		if problem := ticketProtectedPaths(ticket.Filename, allowed, required); problem != "" {
+		if problem := ticketProtectedPaths(ticket.Filename, allowed); problem != "" {
 			infeasible = append(infeasible, problem)
 		}
 		if _, _, err := ticketspec.ParseEstimatedChangedLines(ticketPath); err != nil {
@@ -1887,7 +1954,7 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 			}
 		}
 		if !policy.TicketTestsFeasible(allowed, testPatterns, testsRequiredOptOut) {
-			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_red_on_base gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files and Required-Changed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
+			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_red_on_base gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
 		}
 		requestTickets = append(requestTickets, request.Ticket{Index: i + 1, SpecPath: ticketPath})
 		contents = append(contents, ticket.Content)
@@ -1942,18 +2009,18 @@ func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket, reason error) 
 	}
 }
 
-// ticketProtectedPaths reports a ticket whose Allowed-Files or
-// Required-Changed-Files name a path release never merges from a build's own
+// ticketProtectedPaths reports a ticket whose Allowed-Files name a path
+// release never merges from a build's own
 // change (release.MergePolicy's floor: .factory.yml, anything under
 // .factory/, .buildgate/): such a build is accepted and then denied at
 // release, after its model spend. Each entry is cleaned and case-folded
 // first, as a case-insensitive worktree would let either spelling through.
-// It reads the two file lists only, never prose, and checks literal entries:
+// It reads the file list only, never prose, and checks literal entries:
 // a broad glob or "." is not refused. Empty when the ticket names none.
-func ticketProtectedPaths(filename string, allowed, required []string) string {
+func ticketProtectedPaths(filename string, allowed []string) string {
 	original := map[string]string{}
 	var folded []string
-	for _, entry := range append(append([]string{}, allowed...), required...) {
+	for _, entry := range allowed {
 		key := strings.ToLower(path.Clean(entry))
 		if _, seen := original[key]; !seen {
 			original[key] = entry
@@ -1968,7 +2035,7 @@ func ticketProtectedPaths(filename string, allowed, required []string) string {
 	if len(named) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ticket %s: names %v, which release never merges from a build (the repository's factory configuration is the operator's to change) -- drop the path from Allowed-Files and Required-Changed-Files, and leave the change to the operator", filename, named)
+	return fmt.Sprintf("ticket %s: names %v, which release never merges from a build (the repository's factory configuration is the operator's to change) -- drop the path from Allowed-Files, and leave the change to the operator", filename, named)
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file
@@ -2190,6 +2257,13 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("resolve verify command for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
+	if verifyCommand == "" {
+		// The ticket the factory wrote from the spec declares none.
+		verifyCommand = r.PlanVerifyCommand
+		if verifyCommand == "" {
+			verifyCommand = r.VerifyCommand
+		}
+	}
 	// fullSuiteCommand/fullSuiteSource: a configured full-suite command
 	// (set at submit, FullSuiteSource "") is forwarded as it is, and an
 	// opt-out (FullSuiteSourceNone) stays off. A full-suite command that was
@@ -2218,7 +2292,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		return nil, err
 	}
 	scopeApproved, scopeWhy := request.ScopeApproved(r, ticket.Index)
-	if !scopeApproved {
+	noTicketScope := isUnmodifiedSpecTicket(dataDir, r, ticket)
+	if !scopeApproved && !noTicketScope {
 		log.Printf("request %s ticket %d: Allowed-Files is not a person's list (%s): files outside it are PR notes", r.ID, ticket.Index, scopeWhy)
 	}
 	return &QueueEntry{
@@ -2266,6 +2341,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		RequestTicket: true,
 		// ScopeUnapproved: see QueueEntry.ScopeUnapproved's own doc comment.
 		ScopeUnapproved: !scopeApproved,
+		NoTicketScope:   noTicketScope,
 		// ExecutionModel: r.Models["execution"] is `factoryd submit
 		// -model execution=...` / the API's own "models" field, already
 		// validated at submit time (sessionconfig.ValidateRequestModels)
@@ -2274,6 +2350,20 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil
+}
+
+// isUnmodifiedSpecTicket recognizes only the factory's verbatim spec ticket.
+// A handed-over or size-replanned ticket and a scope amendment remain plans.
+func isUnmodifiedSpecTicket(dataDir string, r *request.Request, ticket request.Ticket) bool {
+	if r.PlanImported || r.SizeReplan != nil || ticket.ScopeAmendedBy != "" {
+		return false
+	}
+	spec, err := os.ReadFile(RequestSpecPath(dataDir, r.ID))
+	if err != nil {
+		return false
+	}
+	content, err := os.ReadFile(ticket.SpecPath)
+	return err == nil && bytes.Equal(spec, content)
 }
 
 // reviewInputs are a ticket build's review inputs: SpecPath, the approved
@@ -2584,6 +2674,15 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 	ticketContent, err := os.ReadFile(ticket.SpecPath)
 	if err != nil {
 		return "", err
+	}
+	if specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestRecord.ID)); readErr == nil && bytes.Equal(specContent, ticketContent) {
+		// The ticket the factory wrote from the spec (writeSpecTicket): the
+		// build is given the spec itself, not the spec twice.
+		input := string(specContent)
+		if block := AnsweredReadBackBlock(requestRecord.ReadBack.Answered()); block != "" {
+			input += "\n" + block
+		}
+		return checkedTicketBuildBaseInput(input, requestRecord.ID)
 	}
 	useApprovedSpec := requestRecord.BuildInput == request.BuildInputApprovedSpec
 	numbers, covErr := request.TicketCoveredCriteria(string(ticketContent))

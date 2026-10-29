@@ -259,7 +259,7 @@ func doctorMain(dp *deps, args []string) error {
 		targetRepo:             *targetRepo,
 		removeSandbox:          *removeSandbox,
 		releaseMaxFilesChanged: settings.ReleaseMaxFilesChanged,
-		releaseMaxInsertions:   settings.ReleaseMaxInsertions,
+		releaseMaxChangedLines: settings.ReleaseMaxChangedLines,
 		releaseRollbackPlan:    settings.ReleaseRollbackPlan,
 		settings:               settings,
 		// The repo a request will clone and run version control against is
@@ -351,7 +351,7 @@ func doctorMain(dp *deps, args []string) error {
 		if err != nil {
 			return err
 		}
-		checks = doctorReplaceCheck(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan))
+		checks = doctorReplaceCheck(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan))
 		if in.workspace != "" {
 			// .factory.yml (fix (a), written by doctorApplyFixes above) --
 			// a round-2 review of Phase A found this was left
@@ -478,7 +478,7 @@ func doctorRefreshInputsAfterFix(in doctorInputs, dataDirExplicit bool, dataDir,
 		return in, dataDir, err
 	}
 	in.releaseMaxFilesChanged = settings.ReleaseMaxFilesChanged
-	in.releaseMaxInsertions = settings.ReleaseMaxInsertions
+	in.releaseMaxChangedLines = settings.ReleaseMaxChangedLines
 	in.releaseRollbackPlan = settings.ReleaseRollbackPlan
 	dataDir = resolveConfiguredDataDir(dataDirExplicit, dataDir, configPath)
 	in.dataDir = dataDir
@@ -788,15 +788,15 @@ type doctorInputs struct {
 	// profileImages is each profile's sandbox_image, keyed by image, the
 	// profiles in order (doctorProfileImages); empty checks none.
 	profileImages []doctorProfileImage
-	// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan feed
+	// releaseMaxFilesChanged/releaseMaxChangedLines/releaseRollbackPlan feed
 	// doctorCheckReleasePolicy: the same three
-	// release_max_files_changed/release_max_insertions/release_rollback_plan
+	// release_max_files_changed/release_max_changed_lines/release_rollback_plan
 	// session-config keys releasePolicyCanNeverAllow already checks at
 	// runtime, surfaced here so an operator learns about a deny-all
 	// release policy from `factoryd doctor` before ever running a ticket,
 	// not only after a first accepted run silently produces no PR.
 	releaseMaxFilesChanged int
-	releaseMaxInsertions   int
+	releaseMaxChangedLines int
 	releaseRollbackPlan    string
 	// checkRequestSourceRepos makes doctorChecksFor also probe the source
 	// repo of every in-flight request under dataDir (set by `factoryd doctor`
@@ -942,7 +942,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	if in.sandboxTmpfsSize != "" {
 		checks = append(checks, doctorCheckTmpfsSize(in.sandboxTmpfsSize))
 	}
-	checks = append(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan))
+	checks = append(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan))
 	checks = append(checks, doctorCheckRolesResolve(in))
 	checks = append(checks, doctorCheckSkills(in))
 	checks = append(checks, doctorCheckDesignGuide(in))
@@ -2855,7 +2855,7 @@ func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
 // releasePolicyCanNeverAllow (release_and_evidence.go) already knows a
 // release policy denies every
 // PR unconditionally whenever release_rollback_plan is empty or
-// release_max_files_changed/release_max_insertions is 0, but until this
+// release_max_files_changed/release_max_changed_lines is 0, but until this
 // check existed that only ever surfaced as a runtime warning logged once
 // -open-pull-request was already set, or as silence and no PR after a
 // run had already been accepted. Reports the same condition here, with
@@ -2875,17 +2875,17 @@ func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
 // backfill and never touches -open-pull-request at all, purely on an
 // unrelated session-config gap. Warn-and-name-the-fix still satisfies
 // that same visibility goal without that regression.
-func doctorCheckReleasePolicy(maxFilesChanged, maxInsertions int, rollbackPlan string) doctorCheck {
+func doctorCheckReleasePolicy(maxFilesChanged, maxChangedLines int, rollbackPlan string) doctorCheck {
 	name := "release policy allows a PR"
-	if !releasePolicyCanNeverAllow(release.MergePolicy{MaxFilesChanged: maxFilesChanged, MaxInsertions: maxInsertions, RollbackPlan: rollbackPlan}) {
+	if !releasePolicyCanNeverAllow(release.MergePolicy{MaxFilesChanged: maxFilesChanged, MaxChangedLines: maxChangedLines, RollbackPlan: rollbackPlan}) {
 		return doctorCheck{Name: name}
 	}
 	return doctorCheck{
 		Name:     name,
 		Advisory: true,
-		Err:      fmt.Errorf("the effective release policy denies every PR unconditionally (release_max_files_changed=%d, release_max_insertions=%d, release_rollback_plan=%q -- MergePolicyCheck denies whenever any of these is 0/empty); harmless if you never set -open-pull-request", maxFilesChanged, maxInsertions, rollbackPlan),
-		Fix: fmt.Sprintf("add these three keys to your session config (factoryd init-config's own scaffold now includes them):\nrelease_max_files_changed: %d\nrelease_max_insertions: %d\nrelease_rollback_plan: %q",
-			sessionconfig.DefaultReleaseMaxFilesChanged, sessionconfig.DefaultReleaseMaxInsertions, sessionconfig.DefaultReleaseRollbackPlan),
+		Err:      fmt.Errorf("the effective release policy denies every PR unconditionally (release_max_files_changed=%d, release_max_changed_lines=%d, release_rollback_plan=%q -- MergePolicyCheck denies whenever any of these is 0/empty); harmless if you never set -open-pull-request", maxFilesChanged, maxChangedLines, rollbackPlan),
+		Fix: fmt.Sprintf("add these three keys to your session config (factoryd init-config's own scaffold now includes them):\nrelease_max_files_changed: %d\nrelease_max_changed_lines: %d\nrelease_rollback_plan: %q",
+			sessionconfig.DefaultReleaseMaxFilesChanged, sessionconfig.DefaultReleaseMaxChangedLines, sessionconfig.DefaultReleaseRollbackPlan),
 	}
 }
 

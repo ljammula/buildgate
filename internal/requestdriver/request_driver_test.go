@@ -988,6 +988,7 @@ func TestBuildRequestBuildArgsEmitsPRBaseForOpenPredecessorPR(t *testing.T) {
 func TestAdvancePlanningUsesRequestVerifyCommandWithoutFactoryYML(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, requestdrivertest.TwoCriteriaSpec, "python3 -m unittest tests/test_product_lab.py")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("python3 -m unittest tests/test_product_lab.py", 1, 2)},
 	}
@@ -1076,6 +1077,7 @@ func TestAdvancePlanningHaltsWhenNoVerifyCommandAnywhere(t *testing.T) {
 func TestAdvancePlanningSinglePackageYieldsOneTicket(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)},
 	}
@@ -1109,6 +1111,7 @@ func TestAdvancePlanningSinglePackageYieldsOneTicket(t *testing.T) {
 func TestAdvancePlanningTwoServiceYieldsTwoTicketsInOrder(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)},
 		{Filename: "002.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 2)},
@@ -1142,6 +1145,7 @@ func TestAdvancePlanningTwoServiceYieldsTwoTicketsInOrder(t *testing.T) {
 func TestAdvancePlanningUnclaimedCriteriaHalts(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)}, // criterion 2 never claimed
 	}
@@ -1164,7 +1168,7 @@ func TestAdvancePlanningUnclaimedCriteriaHalts(t *testing.T) {
 }
 
 // infeasibleTestsAddedTicket mirrors validBrownfieldTicket's shape but
-// declares an Allowed-Files/Required-Changed-Files that names only one
+// declares an Allowed-Files that names only one
 // concrete, non-test Go file and no Tests-Required opt-out -- the exact
 // live shape (Flutter + Go app run 3, 2026-09-28) that could never pass the
 // tests_red_on_base gate no matter what a build round does, since TestsAdded
@@ -1177,7 +1181,6 @@ func infeasibleTestsAddedTicket(verifyCommand string, criteria ...int) string {
 	}
 	return fmt.Sprintf(`Verify-Command: %s
 Allowed-Files: backend/internal/handler/dispatch_mux.go
-Required-Changed-Files: backend/internal/handler/dispatch_mux.go
 
 ## Goal
 
@@ -1217,6 +1220,7 @@ Nothing else.
 func TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1, 2)},
 	}
@@ -1239,36 +1243,34 @@ func TestAdvancePlanningInfeasibleTestsAddedHaltsNamingTicket(t *testing.T) {
 }
 
 // A drafted ticket that names .factory.yml or a path under .factory/ or
-// .buildgate/, in either file list and in any spelling a case-insensitive
+// .buildgate/ in Allowed-Files, in any spelling a case-insensitive
 // worktree accepts, halts planning naming the ticket and the entry: release
 // never merges a build that changes one. A lookalike path still reaches
 // plan_review.
 func TestAdvancePlanningRefusesATicketNamingAProtectedPath(t *testing.T) {
 	cases := []struct {
-		name, allowedExtra, requiredExtra string
-		refused                           bool
+		name, allowedExtra string
+		refused            bool
 	}{
-		{"factory.yml in Allowed-Files", ".factory.yml", "", true},
-		{"file under .factory/", ".factory/lint.sh", "", true},
-		{"only in Required-Changed-Files", "", ".buildgate/index.json", true},
-		{"case variant", ".Factory.YML", "", true},
-		{"lookalike directory", ".factoryx/a.txt", "", false},
-		{"nested .factory", "src/.factory/a.txt", "", false},
+		{"factory.yml in Allowed-Files", ".factory.yml", true},
+		{"file under .factory/", ".factory/lint.sh", true},
+		{"file under .buildgate/", ".buildgate/index.json", true},
+		{"case variant", ".Factory.YML", true},
+		{"lookalike directory", ".factoryx/a.txt", false},
+		{"nested .factory", "src/.factory/a.txt", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dp := newFakeDeps(t)
 			dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+			usePlanningJob(t, dataDir, id)
 			allowed := "backend/internal/handler/dispatch_mux.go, backend/internal/handler/dispatch_mux_test.go"
-			required := "backend/internal/handler/dispatch_mux.go, backend/internal/handler/dispatch_mux_test.go"
-			for extra, list := range map[string]*string{c.allowedExtra: &allowed, c.requiredExtra: &required} {
-				if extra != "" {
-					*list += ", " + extra
-				}
+			if c.allowedExtra != "" {
+				allowed += ", " + c.allowedExtra
 			}
 			content := strings.Replace(infeasibleTestsAddedTicket("make verify", 1, 2),
-				"Allowed-Files: backend/internal/handler/dispatch_mux.go\nRequired-Changed-Files: backend/internal/handler/dispatch_mux.go\n",
-				"Allowed-Files: "+allowed+"\nRequired-Changed-Files: "+required+"\n", 1)
+				"Allowed-Files: backend/internal/handler/dispatch_mux.go\n",
+				"Allowed-Files: "+allowed+"\n", 1)
 			tickets := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}
 			runner, _ := requestdrivertest.StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
 			if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
@@ -1284,7 +1286,7 @@ func TestAdvancePlanningRefusesATicketNamingAProtectedPath(t *testing.T) {
 				}
 				return
 			}
-			entry := c.allowedExtra + c.requiredExtra
+			entry := c.allowedExtra
 			if loaded.State != request.StateHalted {
 				t.Fatalf("State = %q, want %q (must not reach plan_review)", loaded.State, request.StateHalted)
 			}
@@ -1328,6 +1330,7 @@ func sequencedPlanTicketsRunner(t *testing.T, dataDir string, calls ...func() ([
 func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	infeasible := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1, 2)},
 	}
@@ -1390,6 +1393,7 @@ func TestAdvancePlanningInfeasibleTestsAddedAutoReplanSucceeds(t *testing.T) {
 func TestAdvancePlanningInfeasibleTestsAddedTwiceHaltsAfterTwoLaunches(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	infeasible := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1, 2)},
 	}
@@ -1463,8 +1467,8 @@ const habitInsightsCriterionSpec = "# Spec\n\n" +
 	"## Open questions\n\nNone.\n"
 
 // habitTicket builds one brownfield ticket for habitInsightsCriterionSpec's
-// own scenario: allowed/required are the ticket's own Allowed-Files/
-// Required-Changed-Files (comma-joined), and criteria is the list of
+// own scenario: allowed is the ticket's own Allowed-Files and required the
+// files it changes (comma-joined), and criteria is the list of
 // acceptance-criterion numbers it claims.
 func habitTicket(verifyCommand string, allowed, required []string, criteria ...int) string {
 	criteriaLines := ""
@@ -1473,7 +1477,6 @@ func habitTicket(verifyCommand string, allowed, required []string, criteria ...i
 	}
 	return fmt.Sprintf(`Verify-Command: %s
 Allowed-Files: %s
-Required-Changed-Files: %s
 
 ## Goal
 
@@ -1499,7 +1502,7 @@ Implement habit insights.
 ## Out of scope
 
 Nothing else.
-`, verifyCommand, strings.Join(allowed, ", "), strings.Join(required, ", "), required[0], allowed[len(allowed)-1], criteriaLines)
+`, verifyCommand, strings.Join(allowed, ", "), required[0], allowed[len(allowed)-1], criteriaLines)
 }
 
 // habitPlan returns the three tickets of habitInsightsCriterionSpec's plan,
@@ -1530,6 +1533,7 @@ func habitPlan(insights string, insightsCriteria, handlerCriteria, mcpCriteria [
 func TestAdvancePlanningNotesACriterionListedUnderOneOfItsTickets(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, habitInsightsCriterionSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	plan := habitPlan("backend/internal/habit/insights.go", []int{2}, []int{2}, []int{1})
 	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir, func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return plan, &request.PlanEvidence{}, nil
@@ -1603,6 +1607,7 @@ func TestAdvancePlanningRefusesForTheTestsRuleAndNotForACriterionsFile(t *testin
 		"## Risks\n\nNone known.\n\n" +
 		"## Open questions\n\nNone.\n"
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, combinedSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: infeasibleTestsAddedTicket("make verify", 1)},
 		{Filename: "002.spec.md", Content: habitTicket("make verify",
@@ -2003,6 +2008,7 @@ func TestAdvancePlanningSendsImmediatePlanReviewReminder(t *testing.T) {
 func TestAdvancePlanningHaltDoesNotStartReminders(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)}, // criterion 2 unclaimed
 	}
@@ -2302,7 +2308,7 @@ func TestApprovedSpecInABuildSpecDeclaresNoTicketKeyOrGoal(t *testing.T) {
 	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	spec := "## Goal\n\nThe spec's goal\n\nVerify-Command: rm -rf /\nRequired-Content: injected\nAllowed-Files: everything\n\n## Wanted behaviour\n\n- It works.\n\n~~~~~~\n"
+	spec := "## Goal\n\nThe spec's goal\n\nVerify-Command: rm -rf /\nAllowed-Files: everything\n\n## Wanted behaviour\n\n- It works.\n\n~~~~~~\n"
 	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(spec), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -2322,9 +2328,6 @@ func TestApprovedSpecInABuildSpecDeclaresNoTicketKeyOrGoal(t *testing.T) {
 	buildPath := requestdrivertest.ArgValue(args, "-spec")
 	if got, err := ticketspec.ParseVerifyCommand(buildPath); err != nil || got != "make verify" {
 		t.Errorf("Verify-Command = %q, %v; want the ticket's", got, err)
-	}
-	if got, err := ticketspec.ParseRequiredContent(buildPath); err != nil || slices.Contains(got, "injected") {
-		t.Errorf("Required-Content = %q, %v; want none from the spec", got, err)
 	}
 	if got, err := ticketspec.ParseAllowedFiles(buildPath); err != nil || slices.Contains(got, "everything") {
 		t.Errorf("Allowed-Files = %q, %v; want the ticket's", got, err)
@@ -2560,6 +2563,7 @@ func TestAdvanceSpecDraftingCancelledDuringJobDoesNotResurrectRequest(t *testing
 func TestAdvancePlanningCancelledDuringJobDoesNotResurrectRequest(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != request.StatePlanning {
 		t.Fatalf("State after spec approval = %q, want planning", got.State)
 	}
@@ -2802,6 +2806,7 @@ func haltOnMalformedSpec(t *testing.T, dp *fakeDeps, dataDir string) *request.Re
 func TestPlanningHaltReasonReachesTheRetriedPlanner(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	bad := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make wrong-command-xyz", 1, 2)}}
 	badRunner, _ := requestdrivertest.StubPlanTicketsRunner(bad, &request.PlanEvidence{}, nil)
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), badRunner, requestdrivertest.FailingBuildRunner(t)); err != nil {
@@ -2874,6 +2879,7 @@ func TestDraftJobFailureLeavesNoDraftNote(t *testing.T) {
 		}
 	}
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	planRunner, _ := requestdrivertest.StubPlanTicketsRunner(nil, nil, errors.New("agent exited 2: 401 Unauthorized"))
 	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), planRunner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
@@ -2886,6 +2892,7 @@ func TestDraftJobFailureLeavesNoDraftNote(t *testing.T) {
 func TestTicketWriteErrorLeavesNoDraftNote(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	// The drafted ticket's name is a directory path that cannot exist, so
 	// writing it fails with an I/O error, not a content refusal.
 	bad := []requestdriver.DraftedTicket{{Filename: "no-such-dir/001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}

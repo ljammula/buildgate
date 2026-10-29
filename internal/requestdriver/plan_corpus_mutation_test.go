@@ -605,6 +605,7 @@ func drivePlan(t *testing.T, criteria, files []string, tickets []requestdriver.D
 	}
 	spec += "\n## Risks\n\nNone.\n\n## Open questions\n\nNone.\n"
 	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, spec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	fixture, err := request.Load(dataDir, id)
 	if err != nil {
 		t.Fatal(err)

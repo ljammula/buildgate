@@ -20,10 +20,9 @@
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
 30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
-31 cmd/factoryd/run_ticket.go (*ticketRun).checkScope
 26 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 28 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
-28 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
+26 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
 46 cmd/factoryd/sandbox_exec.go runSandboxWithRetriesVia
 30 cmd/factoryd/watch.go printRunRecap
 32 cmd/factoryd/worker_uid_separation_live_test.go TestWorkerUIDSeparationLiveDocker
@@ -42,7 +41,7 @@
 29 internal/sandbox/composeservices_orphans.go ReconcileComposeServicesOrphans
 26 internal/sandbox/runtime_worker_test.go TestRunWorkerThroughRuntimeGivesTheWorkerItsRouteAndCountsItsSpend
 32 internal/workflow/activities_build.go (*Activities).runBuild
-31 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
+27 internal/workflow/activities_evidence.go (*Activities).runCollectEvidence
 35 internal/workflow/activities_prepare.go (*Activities).PrepareIsolatedWorkspaceActivity
 34 internal/workflow/activities_review.go (*Activities).RunReviewStepActivity
 80 internal/workflow/activities_sandbox.go (*Activities).runSandboxWithRetries
