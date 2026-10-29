@@ -1348,35 +1348,12 @@ func TestCodeReviewFindingFromBeforeReproductionsDecodesAndReencodesByteForByte(
 	if err := json.Unmarshal([]byte(old), &result); err != nil {
 		t.Fatal(err)
 	}
-	f := result.Findings[0]
-	if f.SpecLine != nil || f.Reproduction != nil || f.Disposition != "" {
-		t.Fatalf("an old finding decoded with new fields set: %+v", f)
-	}
 	again, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(again) != old {
 		t.Errorf("re-encoded = %s\nwant %s", again, old)
-	}
-}
-
-func TestCodeReviewFindingRecordsTheCitationAndReproductionWithoutContent(t *testing.T) {
-	f := CodeReviewFinding{
-		Severity: "high", Summary: "s", Disposition: "blocks",
-		SpecLine:     &SpecCitation{Number: 7, Text: "t"},
-		Reproduction: &ReviewReproduction{Path: "a_test.go", Verdict: "blocks"},
-	}
-	data, err := json.Marshal(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"severity":"high","summary":"s","spec_line":{"number":7,"text":"t"},"reproduction":{"path":"a_test.go","verdict":"blocks"},"disposition":"blocks"}`
-	if string(data) != want {
-		t.Errorf("encoded = %s\nwant %s", data, want)
-	}
-	if strings.Contains(strings.ToLower(string(data)), "content") {
-		t.Errorf("a finding's record has a content key: %s", data)
 	}
 }
 
@@ -1413,8 +1390,8 @@ func TestPreP2RunRecordStillDecodes(t *testing.T) {
 	if len(got.GateResults) != 3 || got.GateResults[1].Check != "spec_conformity" || got.GateResults[1].Passed {
 		t.Errorf("GateResults = %+v, want the failed spec_conformity gate kept", got.GateResults)
 	}
-	if got.CodeReview == nil || len(got.CodeReview.Findings) != 1 || got.CodeReview.Findings[0].Disposition != "" {
-		t.Errorf("CodeReview = %+v, want the one pre-P2 finding with no disposition", got.CodeReview)
+	if got.CodeReview == nil || len(got.CodeReview.Findings) != 1 {
+		t.Errorf("CodeReview = %+v, want the one pre-P2 finding", got.CodeReview)
 	}
 	out, err := json.Marshal(got)
 	if err != nil {

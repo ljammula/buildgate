@@ -19,7 +19,6 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
-	"buildgate/internal/codereview"
 	"buildgate/internal/evidence"
 	"buildgate/internal/reproduction"
 	"buildgate/internal/run"
@@ -28,18 +27,20 @@ import (
 	wsisolation "buildgate/internal/workspace"
 )
 
-// A reviewer's reproduction (SC-022) is held on the host once, by the review
-// step that read it (holdReproductions), and run by the factory in a gate
-// sandbox (RunReviewReproductionActivity):
+// A held test file (SC-022: a challenge file, and a changed test file of the
+// tests_red_on_base proof) is held on the host once, by the step that
+// chose it, and run by the factory in a gate sandbox
+// (RunReviewReproductionActivity, the registered type of every launch of
+// this path):
 //
-//   - the hold copies each reproduction the shape rules accept into the run's
-//     own directory (run.ReviewReproductionDir), mode 0444, created
-//     exclusively, and records its SHA-256 on the review's checkpoint; the
-//     content never reaches the workflow, its history or the run record;
+//   - the hold copies each accepted file into the run's own directory
+//     (run.ReviewReproductionDir), mode 0444, created exclusively, and
+//     records its SHA-256; the content never reaches the workflow, its
+//     history or the run record;
 //   - a run checks out the commit it judges in a scratch worktree under the
 //     run's directory, never the run's own worktree, copies the held file
 //     after checking its hash, checks the copy's hash again before each
-//     launch, and mounts it read-only over the reproduction's path, with the
+//     launch, and mounts it read-only over the file's path, with the
 //     runner's helper files read-only at /inputs/reproduction;
 //   - the launch is a gate's: the same launch path, image, setup commands,
 //     registry proxy, compose services and read-only `.factory/`, and no
@@ -64,94 +65,17 @@ const reproductionRunDirName = "review-repro-run"
 
 // Caps on what the hold and a run read from files a model or a test wrote.
 const (
-	maxReviewEvidenceBytes    = 4 << 20
 	maxReproductionReport     = 4 << 20
-	maxReviewSpecBytes        = 1 << 20
 	reproductionLaunchMargin  = 10 * time.Minute
 	reproductionActivityLimit = reproduction.LaunchTimeout + 20*time.Minute
 )
 
 // errReproductionUnheld wraps every failure to hold, check or mount a
 // reproduction.
-var errReproductionUnheld = errors.New("the reviewer's reproduction could not be held")
+var errReproductionUnheld = errors.New("a held test file could not be held")
 
 func unheld(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", errReproductionUnheld, fmt.Sprintf(format, args...))
-}
-
-// holdReproductions is the review step's hold (SC-022): for a run with
-// ReviewReproduction, every finding of the review's evidence that carries a
-// reproduction is checked against the shape rules (reproduction.CheckAll)
-// with what the judged commit (the worktree's clean HEAD) and the approved
-// spec say, and each accepted one is copied to the run's directory. A
-// review that left no readable evidence holds nothing: its findings are
-// advice. An error is a failure to hold (errReproductionUnheld).
-func (a *Activities) holdReproductions(ctx context.Context, input RunWorkflowInput) ([]run.HeldReproduction, error) {
-	if !input.ReviewReproduction {
-		return nil, nil
-	}
-	data, err := evidence.ReadHostileFile(filepath.Join(input.WorkspacePath, codereview.EvidenceFile), maxReviewEvidenceBytes)
-	if err != nil {
-		return nil, nil
-	}
-	parsed, err := codereview.ParseDetailed(data)
-	if err != nil {
-		return nil, nil
-	}
-	judged, err := judgedFacts(ctx, input)
-	if err != nil {
-		return nil, unheld("%v", err)
-	}
-	findings := make([]reproduction.Finding, len(parsed.Result.Findings))
-	for i, f := range parsed.Result.Findings {
-		if f.Reproduction == nil || f.Reproduction.Refused != "" {
-			continue
-		}
-		findings[i] = reproduction.Finding{Path: f.Reproduction.Path, Content: []byte(parsed.ReproductionContent[i])}
-		if f.SpecLine != nil {
-			findings[i].SpecLine, findings[i].SpecText = f.SpecLine.Number, f.SpecLine.Text
-		}
-	}
-	dir := run.ReviewReproductionDir(a.logDirFor(input))
-	inBase := baseLiteralSearch(ctx, input)
-	var held []run.HeldReproduction
-	for i, c := range reproduction.CheckAll(findings, judged) {
-		rep := parsed.Result.Findings[i].Reproduction
-		switch {
-		case rep == nil:
-			continue
-		case rep.Refused != "":
-			held = append(held, run.HeldReproduction{Finding: i, Path: rep.Path, Refused: rep.Refused})
-		case c.Accepted == nil:
-			held = append(held, run.HeldReproduction{Finding: i, Path: rep.Path, Refused: c.Refused})
-		default:
-			h, err := holdOne(dir, i, *c.Accepted, findings[i].Content, reproduction.NewLiteral(c.Accepted.SpecText, findings[i].Content, inBase))
-			if err != nil {
-				return nil, err
-			}
-			held = append(held, h)
-		}
-	}
-	return held, nil
-}
-
-// baseLiteralSearch is reproduction.NewLiteral's search of the base commit
-// (gateBaseCommit, the commit the base launch runs on): whether a literal
-// appears, case-sensitive and byte-exact, in any tracked file of it, read by
-// a host git grep that runs nothing of the repository's. An unknown base is
-// nil, which counts no literal; a search that fails reports the literal as
-// in the base, so it does not count either.
-func baseLiteralSearch(ctx context.Context, input RunWorkflowInput) func(string) bool {
-	base, _ := gateBaseCommit(input)
-	if base == "" {
-		return nil
-	}
-	return func(literal string) bool {
-		err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(input.WorkspacePath),
-			"grep", "-q", "-F", "--no-textconv", "--no-recurse-submodules", "-e", literal, base, "--")...).Run()
-		var exit *exec.ExitError
-		return !(errors.As(err, &exit) && exit.ExitCode() == 1)
-	}
 }
 
 // holdOne writes one accepted reproduction's content to
@@ -193,34 +117,6 @@ func holdOne(dir string, finding int, acc reproduction.Accepted, content []byte,
 		return held, unheld("close the host copy: %v", err)
 	}
 	return held, nil
-}
-
-// judgedFacts is what the shape rules compare a reproduction with: the
-// approved spec (checked against the hash the run started with), the paths
-// and root markers of the commit the review judged (the worktree's HEAD,
-// read by a host git that runs nothing of the repository's), the run's test
-// patterns and its protected paths.
-func judgedFacts(ctx context.Context, input RunWorkflowInput) (reproduction.Judged, error) {
-	j := reproduction.Judged{TestPatterns: input.TestPatterns, Protected: input.ReleaseProtectedPaths, Root: reproduction.RootFacts{}}
-	if input.ReviewSpecPath != "" {
-		spec, err := evidence.ReadHostileFile(input.ReviewSpecPath, maxReviewSpecBytes)
-		if err != nil {
-			return j, fmt.Errorf("read the approved spec: %w", err)
-		}
-		if sum := sha256.Sum256(spec); hex.EncodeToString(sum[:]) != input.ReviewSpecSHA256 {
-			return j, errors.New("the approved spec no longer matches the hash the run started with")
-		}
-		j.Spec = spec
-	}
-	tracked, err := treePaths(ctx, input.WorkspacePath, "HEAD")
-	if err != nil {
-		return j, err
-	}
-	j.Tracked = tracked
-	if j.Root, err = rootFactsAt(ctx, input.WorkspacePath, "HEAD", tracked); err != nil {
-		return j, err
-	}
-	return j, nil
 }
 
 // rootFactsAt reads the root files of commit that select a reproduction
@@ -275,18 +171,6 @@ func pathInTree(tree []string, p string) bool {
 	return false
 }
 
-// failHold ends a review whose hold failed: the review's own result stands
-// in the checkpoint with the failure, which is non-retryable and no verdict
-// on the work.
-func (a *Activities) failHold(ctx context.Context, label string, checkpoint activityCheckpoint[VerifyActivityResult], path string, stepResult VerifyActivityResult, cause error) (VerifyActivityResult, error) {
-	checkpoint.Result = stepResult
-	checkpoint.Error, checkpoint.ErrorType = fmt.Sprintf("%s: %v", label, cause), ReproductionUnheldFailureType
-	if saveErr := saveActivityCheckpoint(path, checkpoint, activity.GetInfo(ctx).Attempt); saveErr != nil {
-		return stepResult, temporal.NewApplicationErrorWithCause(fmt.Sprintf("save %s Activity checkpoint", label), InfrastructureFailureType, saveErr, stepResult.Attempts)
-	}
-	return stepResult, temporal.NewNonRetryableApplicationError(checkpoint.Error, ReproductionUnheldFailureType, cause, stepResult.Attempts)
-}
-
 // ReproductionRunInput is RunReviewReproductionActivity's input: the run's
 // input, the held reproduction, which pass this launch is (head1, head2,
 // base or recheck) and the commit it runs on.
@@ -323,7 +207,8 @@ type ReproductionRunResult struct {
 // a reproduction launch.
 const reproductionAttemptKind = "review_reproduction"
 
-// RunReviewReproductionActivity runs one held reproduction once on
+// RunReviewReproductionActivity (the name is the registered Activity type, kept
+// so recorded histories replay) runs one held test file once on
 // input.Commit (see the comment at the top of this file). It never runs on
 // the run's own worktree. A held copy whose hash no longer matches, or a
 // launch that refuses its mount, is a non-retryable

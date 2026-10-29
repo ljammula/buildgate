@@ -1234,16 +1234,14 @@ const reviewerAdviceMaxRendered = 20
 
 // renderReviewerAdviceMarkdown renders the "## Reviewer advice" PR-body
 // section: every finding of the review step (agent/pi/scripts/
-// combined_review.py, internal/codereview) that did not refuse the run --
-// Disposition "advice", or "" on a record from before reproductions; a
-// finding that blocks never reaches an accepted run's body. nil (the
+// combined_review.py, internal/codereview), all of them advice. nil (the
 // ticket never ran the review, i.e. -code-review-policy was "off" or the
 // run never reached it) renders nothing at all.
 //
 // Each finding is one line, `- **<severity>** <summary>`, both made safe by
 // handoff's rules for what someone else wrote (one line, cut to a fixed
 // length, no backtick, escape or recognisable secret): never the failure
-// scenario, the file, or a reproduction. Findings are sorted high severity
+// scenario or the file. Findings are sorted high severity
 // first, then medium, then low, stable within a severity, and capped at
 // reviewerAdviceMaxRendered, with a final "… N more" line naming how many
 // were left out.
@@ -1258,12 +1256,7 @@ func renderReviewerAdviceMarkdown(cr *run.CodeReviewResult) string {
 		b.WriteString(" Reviewer unavailable.")
 	}
 	b.WriteString("\n\n")
-	var advice []run.CodeReviewFinding
-	for _, f := range cr.Findings {
-		if f.Disposition != run.DispositionBlocks {
-			advice = append(advice, f)
-		}
-	}
+	advice := slices.Clone(cr.Findings)
 	if cr.Available && len(advice) == 0 {
 		b.WriteString("No findings.\n\n")
 		return b.String()

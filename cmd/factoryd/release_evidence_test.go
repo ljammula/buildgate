@@ -1132,22 +1132,17 @@ func TestRenderEvidenceMarkdownCodeReviewUnavailable(t *testing.T) {
 	}
 }
 
-// P2.5: the PR body lists every finding that is advice (Disposition
-// "advice", or none on an older record) as one line, "- **<severity>**
-// <summary>", high severity first, stable within a severity; never the
-// file, the failure scenario, the cited spec line or the reproduction, and
-// never a finding that blocked.
+// The PR body lists every finding as one line, "- **<severity>** <summary>",
+// high severity first, stable within a severity; never the file or the
+// failure scenario.
 func TestPRBodyListsReviewerAdviceOneLineEach(t *testing.T) {
 	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{
 		Policy: "required", Available: true,
 		Findings: []run.CodeReviewFinding{
-			{Severity: "low", Summary: "low one", Disposition: run.DispositionAdvice},
-			{Severity: "high", Summary: "high one", File: "a.go", Line: 12, FailureScenario: "SCENARIO crashes on nil", Disposition: run.DispositionAdvice,
-				SpecLine:     &run.SpecCitation{Number: 3, Text: "SPECTEXT"},
-				Reproduction: &run.ReviewReproduction{Path: "REPROPATH_test.go", Verdict: "advice", Reason: "REASON passes on the result"}},
+			{Severity: "low", Summary: "low one"},
+			{Severity: "high", Summary: "high one", File: "a.go", Line: 12, FailureScenario: "SCENARIO crashes on nil"},
 			{Severity: "medium", Summary: "medium one"},
-			{Severity: "high", Summary: "BLOCKING one", Disposition: run.DispositionBlocks},
-			{Severity: "high", Summary: "high two", Disposition: run.DispositionAdvice},
+			{Severity: "high", Summary: "high two"},
 		},
 	}}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
@@ -1155,7 +1150,7 @@ func TestPRBodyListsReviewerAdviceOneLineEach(t *testing.T) {
 	if !strings.Contains(body, want) {
 		t.Errorf("evidence body lacks\n%s\n---\n%s", want, body)
 	}
-	for _, leaked := range []string{"a.go", "SCENARIO", "SPECTEXT", "REPROPATH", "REASON", "BLOCKING"} {
+	for _, leaked := range []string{"a.go", "SCENARIO"} {
 		if strings.Contains(body, leaked) {
 			t.Errorf("evidence body carries %q:\n%s", leaked, body)
 		}

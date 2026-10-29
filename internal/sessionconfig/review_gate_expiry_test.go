@@ -79,25 +79,6 @@ func TestReleaseChangedLinesKeyReplacesInsertionsKey(t *testing.T) {
 	}
 }
 
-func TestReviewReproductionsDefaultsOffAndTurnsOn(t *testing.T) {
-	if DefaultSettings().ReviewReproductions || (Settings{}).ReviewReproductions {
-		t.Error("reproductions on by default, want off")
-	}
-	for body, want := range map[string]bool{"review_reproductions: false\n": false, "review_reproductions: true\n": true, "pr_budget_lines: 250\n": false} {
-		cfg, err := Load(writeConfig(t, body))
-		if err != nil {
-			t.Fatalf("Load %q: %v", body, err)
-		}
-		s, err := cfg.ApplySettings(DefaultSettings())
-		if err != nil || s.ReviewReproductions != want {
-			t.Errorf("%q: ReviewReproductions = %t err %v, want %t", body, s.ReviewReproductions, err, want)
-		}
-	}
-	if _, err := Load(writeConfig(t, "review_reproductions: sometimes\n")); err == nil {
-		t.Error("review_reproductions: sometimes loaded, want a refusal")
-	}
-}
-
 func TestPlanReviewIsOffByDefaultAndTurnsOn(t *testing.T) {
 	if DefaultSettings().PlanReview || (Settings{}).PlanReview {
 		t.Error("plan_review on by default, want off")
@@ -118,7 +99,7 @@ func TestReviewAdviceRoundsDefaultsToThreeAndIsBounded(t *testing.T) {
 	if got := DefaultSettings().ReviewAdviceRounds; got != 3 {
 		t.Errorf("default advice rounds = %d, want 3", got)
 	}
-	for body, want := range map[string]int{"review_advice_rounds: 0\n": 0, "review_advice_rounds: 1\n": 1, "review_advice_rounds: 3\n": 3, "review_reproductions: true\n": 3} {
+	for body, want := range map[string]int{"review_advice_rounds: 0\n": 0, "review_advice_rounds: 1\n": 1, "review_advice_rounds: 3\n": 3, "pr_budget_lines: 250\n": 3} {
 		cfg, err := Load(writeConfig(t, body))
 		if err != nil {
 			t.Fatalf("Load %q: %v", body, err)
@@ -146,7 +127,7 @@ func TestRoundSessionContinuityDefaultsOnAndTurnsOff(t *testing.T) {
 	if !DefaultSettings().RoundSessionContinuity {
 		t.Error("session continuity off by default, want on")
 	}
-	for body, want := range map[string]bool{"round_session_continuity: false\n": false, "round_session_continuity: true\n": true, "review_reproductions: true\n": true} {
+	for body, want := range map[string]bool{"round_session_continuity: false\n": false, "round_session_continuity: true\n": true, "pr_budget_lines: 250\n": true} {
 		cfg, err := Load(writeConfig(t, body))
 		if err != nil {
 			t.Fatalf("Load %q: %v", body, err)
@@ -158,5 +139,13 @@ func TestRoundSessionContinuityDefaultsOnAndTurnsOff(t *testing.T) {
 	}
 	if _, err := Load(writeConfig(t, "round_session_continuity: sometimes\n")); err == nil {
 		t.Error("round_session_continuity: sometimes loaded, want a refusal")
+	}
+}
+
+// A review writes no test the factory runs (SC-022): the retired
+// review_reproductions key is refused, not ignored.
+func TestRetiredReviewReproductionsKeyIsRefused(t *testing.T) {
+	if _, err := Load(writeConfig(t, "review_reproductions: true\n")); err == nil {
+		t.Fatal("retired review_reproductions key was accepted")
 	}
 }

@@ -519,26 +519,12 @@ type RunWorkflowInput struct {
 	// roles.review is unset: the review keeps RoutePolicy's
 	// own build fields unchanged, exactly as before roles: existed.
 	ReviewRelayPolicy *sandbox.RoutePolicy `json:"review_relay_policy,omitempty"`
-	// ReviewReproduction is -review-reproduction: the review step holds the
-	// reproductions its findings carry and the factory runs each one
-	// (SC-022), so a finding can refuse the run through the
-	// review_reproduction check. Only a request's ticket build sets it; a
-	// bare run's review is advice only. Read only under
-	// reviewReproductionChange version 1, which no history recorded before
-	// the field existed holds.
-	ReviewReproduction bool `json:"review_reproduction,omitempty"`
-	// ReviewSpecPath is the run's snapshot of -review-spec (the request's
-	// approved spec.md, in the run's directory), which the review numbers
-	// for its citations and the hold checks each citation against;
-	// ReviewSpecSHA256 is its hash when the snapshot was taken, checked
-	// again before the hold reads it. Empty: no line can be cited, so every
-	// finding is advice.
-	ReviewSpecPath   string `json:"review_spec_path,omitempty"`
-	ReviewSpecSHA256 string `json:"review_spec_sha256,omitempty"`
-	// RecheckReproductions is -recheck-reproductions: the reproductions
-	// earlier runs' reviews held, which this build's result must pass, each
-	// run once after the gates. Every host path was checked to be under its
-	// entry's run's review-repro directory before the run started.
+	// ReviewReproduction and RecheckReproductions are the inputs of the
+	// retired reviewer-reproduction phase, read only under a history recorded
+	// before retireReviewReproductionChange (DefaultVersion), whose recorded
+	// input holds them; no Worker sets either now. The rechecks are the
+	// reproductions earlier runs' reviews held, each run once after the gates.
+	ReviewReproduction   bool               `json:"review_reproduction,omitempty"`
 	RecheckReproductions []run.RecheckEntry `json:"recheck_reproductions,omitempty"`
 }
 
@@ -1050,11 +1036,9 @@ type RunWorkflowResult struct {
 	// caller inspecting result.Runs needs a way to tell "this request
 	// failed" apart from "this request reached StateHalted on its own".
 	Err string `json:"error,omitempty"`
-	// ReviewReproductions is what the factory decided about each review
-	// finding that carried a reproduction (SC-022), keyed by the finding's
-	// index; ReviewReproductionRechecks are a corrective build's runs of an
-	// earlier run's held reproductions. Both nil for a run without
-	// ReviewReproduction.
+	// ReviewReproductions and ReviewReproductionRechecks are what the retired
+	// reviewer-reproduction phase decided, set only by a history recorded
+	// before retireReviewReproductionChange.
 	ReviewReproductions        []run.FindingReproduction `json:"review_reproductions,omitempty"`
 	ReviewReproductionRechecks []run.ReviewReproduction  `json:"review_reproduction_rechecks,omitempty"`
 	// TestsRedOnBase is the factory's runs of the changed test files on the

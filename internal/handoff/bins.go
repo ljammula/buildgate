@@ -46,12 +46,8 @@ var bins = map[string]Bin{
 	policy.TestsRedOnBaseCheck: BinCorrective,
 	// The review fails only when the reviewer gave no verdict: there is
 	// nothing to tell a build, and the run's request waits in
-	// resume_review. A finding reaches a build only through
-	// review_reproduction (SC-022).
+	// resume_review. A finding is advice (SC-022).
 	"code_review": BinNever,
-	// A reviewer's finding whose reproduction the factory ran and saw
-	// fail (SC-022): one corrective build is told the finding in one line.
-	policy.ReviewReproductionCheck: BinCorrective,
 }
 
 // BinOf returns the bin of a failed check. A repository's own gate

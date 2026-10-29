@@ -1,10 +1,7 @@
 """The code review's shared helpers, imported by combined_review.py (the
 only review step the factory launches): the finding parser
-(parse_code_review_findings, with each finding's spec_line and
-reproduction), the reproduction caps (MAX_REPRODUCTIONS,
-MAX_REPRODUCTION_BYTES, cap_reproductions), the rule texts the review prompt
-embeds (SCOPE_RULE, SEVERITY_RULE, REPRODUCTION_RULE, COMMAND_OUTCOME_RULE, and the
-advice path's ADVICE_SCOPE_RULE, ADVICE_SEVERITY_RULE),
+(parse_code_review_findings), the advice cap (cap_advice), the rule texts the
+review prompt embeds (ADVICE_SCOPE_RULE, ADVICE_SEVERITY_RULE, COMMAND_OUTCOME_RULE),
 and the CODE_REVIEW_EVIDENCE.json builder and writer (code_review_evidence,
 write_code_review_evidence_json). It has no command line and runs no model
 turn.
@@ -24,30 +21,11 @@ CODE_REVIEW_EVIDENCE_SCHEMA_VERSION = 1
 
 _VALID_SEVERITIES = ("high", "medium", "low")
 
-# A review carries at most MAX_REPRODUCTIONS reproductions of at most
-# MAX_REPRODUCTION_BYTES each (SC-022); internal/codereview applies the same
-# caps (maxReproductions, maxReproductionBytes) to the evidence file it reads.
-MAX_REPRODUCTIONS = 3
-MAX_REPRODUCTION_BYTES = 32 << 10
-
-SCOPE_RULE = (
-	prompt_templates.load_text("code_review.scope_rule")
-)
-
-SEVERITY_RULE = (
-	prompt_templates.load_text("code_review.severity_rule")
-)
-
-REPRODUCTION_RULE = (
-	prompt_templates.load_text("code_review.reproduction_rule")
-)
-
 ADVICE_SCOPE_RULE = prompt_templates.load_text("code_review.advice_scope_rule")
 
 ADVICE_SEVERITY_RULE = prompt_templates.load_text("code_review.advice_severity_rule")
 
-# Without reproductions every finding is advice, and the review reports at
-# most this many (the advice scope rule says so; cap_advice enforces it).
+# Every finding is advice, and the review reports at most this many (the advice scope rule says so; cap_advice enforces it).
 MAX_ADVICE_FINDINGS = 5
 
 COMMAND_OUTCOME_RULE = (
@@ -58,7 +36,7 @@ COMMAND_OUTCOME_RULE = (
 # reuses one wording instead of a driftable copy.
 
 
-def parse_code_review_findings(output: str, *, reproductions: bool = True) -> tuple[bool, list[dict]]:
+def parse_code_review_findings(output: str) -> tuple[bool, list[dict]]:
 	"""Extracts the reviewer's findings from its final response text.
 	Returns (available, findings): available is False when no candidate
 	JSON object with a "findings" list was found at all (an unreachable
@@ -77,10 +55,7 @@ def parse_code_review_findings(output: str, *, reproductions: bool = True) -> tu
 	defaults to "" when missing/not a string. "severity" is lowercased;
 	anything missing or not one of high/medium/low defaults to "medium"
 	-- a reviewer that flags something but garbles its own severity label
-	should never have that finding silently disappear. reproductions False
-	(a review of a build that holds none) drops every spec_line and
-	reproduction: the answer format never asks for them, and a model that
-	sends them anyway cannot make a finding block."""
+	should never have that finding silently disappear."""
 	candidate_findings = None
 	for candidate in build_app._iter_json_objects(output):
 		if not isinstance(candidate, dict):
@@ -118,64 +93,8 @@ def parse_code_review_findings(output: str, *, reproductions: bool = True) -> tu
 			"summary": summary,
 			"failure_scenario": failure_scenario,
 		}
-		spec_line = _parse_spec_line(entry.get("spec_line")) if reproductions else None
-		if spec_line:
-			finding["spec_line"] = spec_line
-		reproduction = _parse_reproduction(entry.get("reproduction")) if reproductions else None
-		if reproduction:
-			finding["reproduction"] = reproduction
 		parsed.append(finding)
 	return True, parsed
-
-
-def _parse_spec_line(value) -> dict | None:
-	"""The {"number", "text"} a finding cites, or None unless number is an
-	int of at least 1 (not a bool) and text a non-empty string. Whether the
-	text is the approved spec's line is the host's check (SC-022), not this
-	one."""
-	if not isinstance(value, dict):
-		return None
-	number, text = value.get("number"), value.get("text")
-	if not isinstance(number, int) or isinstance(number, bool) or number < 1:
-		return None
-	if not isinstance(text, str) or not text.strip():
-		return None
-	return {"number": number, "text": text}
-
-
-def _parse_reproduction(value) -> dict | None:
-	"""The {"path", "content"} a finding carries, or None unless both are
-	non-empty strings. Its shape (a new test path, a size) is the host's
-	check (SC-022); the caps on count and size are cap_reproductions'."""
-	if not isinstance(value, dict):
-		return None
-	path, content = value.get("path"), value.get("content")
-	if not isinstance(path, str) or not path.strip() or not isinstance(content, str) or not content:
-		return None
-	return {"path": path.strip(), "content": content}
-
-
-def cap_reproductions(findings: list[dict]) -> list[str]:
-	"""Drops the reproduction of every finding past the first
-	MAX_REPRODUCTIONS, and of any over MAX_REPRODUCTION_BYTES, in place; the
-	finding stays, as advice. Returns one note per drop. A cap never fails a
-	review."""
-	notes: list[str] = []
-	kept = 0
-	for index, finding in enumerate(findings, start=1):
-		reproduction = finding.get("reproduction")
-		if not reproduction:
-			continue
-		size = len(reproduction["content"].encode("utf-8"))
-		if size > MAX_REPRODUCTION_BYTES:
-			notes.append(f"finding {index}: reproduction dropped, {size} bytes is over the {MAX_REPRODUCTION_BYTES} byte cap")
-		elif kept >= MAX_REPRODUCTIONS:
-			notes.append(f"finding {index}: reproduction dropped, a review carries at most {MAX_REPRODUCTIONS}")
-		else:
-			kept += 1
-			continue
-		del finding["reproduction"]
-	return notes
 
 
 def cap_advice(findings: list[dict]) -> list[str]:

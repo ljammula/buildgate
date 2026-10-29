@@ -692,30 +692,13 @@ type ReviewVerdictRecheck struct {
 // whatever concrete correctness/security/data-loss/concurrency defect the
 // reviewer found, each with its own failure scenario.
 //
-// A finding blocks a run only through a reproduction the factory runs
-// (SC-022). SpecLine is the line of the approved spec it cites; Reproduction
-// is what the factory recorded about the reproduction it carried, never the
-// reproduction's content (which lives in a host copy checked against
-// SHA256); Disposition is "blocks" or "advice", "" for a record from before
-// reproductions. All three are omitted when unset, so an older record
-// re-encodes byte for byte.
+// A finding is advice: it refuses nothing (SC-022).
 type CodeReviewFinding struct {
-	Severity        string              `json:"severity"`
-	File            string              `json:"file,omitempty"`
-	Line            int                 `json:"line,omitempty"`
-	Summary         string              `json:"summary"`
-	FailureScenario string              `json:"failure_scenario,omitempty"`
-	SpecLine        *SpecCitation       `json:"spec_line,omitempty"`
-	Reproduction    *ReviewReproduction `json:"reproduction,omitempty"`
-	Disposition     string              `json:"disposition,omitempty"`
-}
-
-// SpecCitation is the line of the approved spec a finding cites: its number
-// and the text the reviewer gave for it. The factory compares the text with
-// the line (SC-022); this record is what the reviewer said.
-type SpecCitation struct {
-	Number int    `json:"number"`
-	Text   string `json:"text"`
+	Severity        string `json:"severity"`
+	File            string `json:"file,omitempty"`
+	Line            int    `json:"line,omitempty"`
+	Summary         string `json:"summary"`
+	FailureScenario string `json:"failure_scenario,omitempty"`
 }
 
 // ReviewReproduction is what the run record keeps of a finding's

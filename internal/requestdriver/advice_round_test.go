@@ -852,27 +852,6 @@ func TestAdviceRoundCountsAgainstNeitherBudget(t *testing.T) {
 	})
 }
 
-// TestAReproductionThatRefusedTheAdviceRoundGoesOnNoList: the advice round
-// refuses nothing, so a reviewer's reproduction that refused its run is not
-// added to the ticket's list, which every later build rechecks.
-func TestAReproductionThatRefusedTheAdviceRoundGoesOnNoList(t *testing.T) {
-	f := newAdviceFixture(t, adviceFindings)
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		id := requestdrivertest.ArgValue(args, "-ticket")
-		onReady(&run.Run{ID: id})
-		return requestdrivertest.ReproductionRefusedOn(t, f.dataDir, id, f.branch(), f.resultSHA, roundSHA(1)).Save(f.dataDir)
-	}
-	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
-		t.Fatalf("drive: %v", err)
-	}
-	f.assertOriginalStands(t, request.RoundQuarantined)
-	if got := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0].Reproductions; len(got) != 0 {
-		t.Errorf("the ticket's list = %+v, want empty: the advice round refuses nothing", got)
-	}
-}
-
 // TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn: with
 // round_session_continuity on, a corrective round's and an advice round's
 // build name the run they follow (always a run of the same ticket) as the

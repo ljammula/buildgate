@@ -20,6 +20,13 @@ import (
 // and decode (legacyReviewPlan, legacyReviewOutcome) unchanged.
 const reviewReproductionChange = "review-reproduction"
 
+// retireReviewReproductionChange is the GetVersion change ID from which
+// RunWorkflow's review phase runs no reviewer-reproduction phase and no
+// recheck of one: a review's finding is advice and writes no test the factory
+// runs. A history recorded before it (DefaultVersion) replays the retired
+// phase (reproduceReviewFindings, recheckReproductions) unchanged.
+const retireReviewReproductionChange = "retire-review-reproduction"
+
 // ReviewStepRetiredFailureType is the non-retryable ApplicationError type of
 // a review step a retired plan scheduled (the spec-conformity review or the
 // standalone code review) that reaches a Worker that no longer runs it: an
@@ -100,9 +107,10 @@ func legacyConformityGates(repoGates []policy.RepoGateInput, reviews reviewOutco
 	})
 }
 
-// RunReviewReproductionActivityName runs one held reviewer's reproduction
-// once on one commit (RunReviewReproductionActivity, SC-022).
-const RunReviewReproductionActivityName = "RunReviewReproductionActivity"
+// RunHeldTestActivityName runs one held test file once on one commit
+// (RunReviewReproductionActivity, SC-022): its value is the Activity type
+// recorded in histories.
+const RunHeldTestActivityName = "RunReviewReproductionActivity"
 
 // ReproductionUnheldFailureType is the non-retryable ApplicationError type of
 // a reviewer's reproduction the factory accepted and then could not hold: its
@@ -119,34 +127,13 @@ const (
 	reproductionPassBase  = "base"
 )
 
-// reproductionOutcome is what the reproduction phase and the recheck found.
-// ran is set when the run took the phase (version 1, ReviewReproduction).
+// reproductionOutcome is what the retired reproduction phase and its recheck
+// found, for a history recorded before retireReviewReproductionChange. ran is
+// set when the run took the phase.
 type reproductionOutcome struct {
 	ran      bool
 	findings []run.FindingReproduction
 	rechecks []run.ReviewReproduction
-}
-
-// policyInput is the review_reproduction check's input, nil when the run did
-// not take the phase.
-func (o reproductionOutcome) policyInput() *policy.ReviewReproductionInput {
-	if !o.ran {
-		return nil
-	}
-	in := &policy.ReviewReproductionInput{}
-	for _, f := range o.findings {
-		in.Decided++
-		if f.Disposition == run.DispositionBlocks {
-			in.Refusing++
-		}
-	}
-	for _, rc := range o.rechecks {
-		in.Decided++
-		if rc.Verdict != string(reproduction.VerdictPasses) {
-			in.Refusing++
-		}
-	}
-	return in
 }
 
 // reproductionContext is ctx with the reproduction Activity's options: the
@@ -163,7 +150,7 @@ func reproductionContext(ctx, buildVerifyCtx temporalworkflow.Context) temporalw
 func runReproductionPass(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, held run.HeldReproduction, id, pass, commit, kind, worktreePath, branch string) (ReproductionRunResult, error) {
 	var res ReproductionRunResult
 	in := ReproductionRunInput{RunWorkflowInput: input, Held: held, Pass: pass, Commit: commit, AttemptKind: kind}
-	if err := temporalworkflow.ExecuteActivity(ids.withRetries(rctx, id), RunReviewReproductionActivityName, in).Get(ctx, &res); err != nil {
+	if err := temporalworkflow.ExecuteActivity(ids.withRetries(rctx, id), RunHeldTestActivityName, in).Get(ctx, &res); err != nil {
 		return res, wrapActivityFailure("run review reproduction activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	result.Attempts = append(result.Attempts, res.Attempts...)

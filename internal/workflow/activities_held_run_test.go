@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,17 +13,16 @@ import (
 	"testing"
 	"time"
 
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
+	temporalworkflow "go.temporal.io/sdk/workflow"
 
-	"buildgate/internal/codereview"
 	"buildgate/internal/reproduction"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sandbox/sandboxtest"
 )
-
-const reproSpec = "# Spec\n\n- `Add(1, 2)` returns `3`.\n"
 
 const reproContent = "package p\n\nimport \"testing\"\n\nfunc TestRepro(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal(\"Add(1, 2)\")\n\t}\n}\n"
 
@@ -64,9 +62,6 @@ func newReproFixture(t *testing.T) *reproFixture {
 	writeFile(t, filepath.Join(f.repo, "go.mod"), "module example.com/p\n\ngo 1.22\n")
 	writeFile(t, filepath.Join(f.repo, "p", "add.go"), "package p\n\nfunc Add(a, b int) int { return a + b }\n")
 	f.commit = trustedCommit(t, f.repo)
-	spec := filepath.Join(acts.LogDir, "approved-spec.snapshot.md")
-	writeFile(t, spec, reproSpec)
-	input.ReviewReproduction, input.ReviewSpecPath, input.ReviewSpecSHA256 = true, spec, sha256Of([]byte(reproSpec))
 	input.CheckpointDir = t.TempDir()
 	input.BaseSHA = f.commit
 	f.input = input
@@ -92,34 +87,15 @@ func newReproFixture(t *testing.T) *reproFixture {
 	return f
 }
 
-// writeEvidence writes the review's evidence into the worktree.
-func (f *reproFixture) writeEvidence(findings ...map[string]any) {
-	f.t.Helper()
-	data, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "advisory", "available": true, "findings": findings})
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	writeFile(f.t, filepath.Join(f.repo, codereview.EvidenceFile), string(data))
-}
-
-func reproFinding(path, content string, line int, text string) map[string]any {
-	return map[string]any{"severity": "high", "summary": "Add is wrong", "spec_line": map[string]any{"number": line, "text": text}, "reproduction": map[string]any{"path": path, "content": content}}
-}
-
-// hold runs the review step's hold on the fixture.
-func (f *reproFixture) hold() ([]run.HeldReproduction, error) {
-	return f.acts.holdReproductions(context.Background(), f.input)
-}
-
-// held holds one valid reproduction and returns it.
+// held holds one valid test file with holdOne and returns it.
 func (f *reproFixture) held() run.HeldReproduction {
 	f.t.Helper()
-	f.writeEvidence(reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`."))
-	held, err := f.hold()
-	if err != nil || len(held) != 1 || held[0].Refused != "" {
-		f.t.Fatalf("hold = %+v, %v; want one held reproduction", held, err)
+	dir := run.ReviewReproductionDir(f.acts.logDirFor(f.input))
+	h, err := holdOne(dir, 0, reproduction.Accepted{Path: "p/repro_test.go", Runner: "go-test-json", TestIDs: []string{"TestRepro"}}, []byte(reproContent), true)
+	if err != nil {
+		f.t.Fatalf("holdOne: %v", err)
 	}
-	return held[0]
+	return h
 }
 
 // launch runs RunReviewReproductionActivity for one pass.
@@ -147,116 +123,6 @@ func failureType(err error) string {
 		return appErr.Type()
 	}
 	return ""
-}
-
-// The hold copies an accepted reproduction once, read-only, into the run's
-// directory and records its hash; a refused one is recorded with its rule
-// and nothing is written; a finding without one is not listed. Holding again
-// (a checkpoint replay that reaches it) finds the same copy.
-func TestHoldReproductionsCopiesAcceptedOnesReadOnly(t *testing.T) {
-	f := newReproFixture(t)
-	f.writeEvidence(
-		reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`."),
-		reproFinding("p/add.go", reproContent, 3, "- `Add(1, 2)` returns `3`."),
-		map[string]any{"severity": "low", "summary": "style"},
-		reproFinding("p/other_test.go", reproContent, 3, "- Add returns something else."),
-	)
-	held, err := f.hold()
-	if err != nil {
-		t.Fatalf("hold: %v", err)
-	}
-	if len(held) != 3 || held[0].Finding != 0 || held[1].Finding != 1 || held[2].Finding != 3 {
-		t.Fatalf("held = %+v, want the first, second and fourth findings", held)
-	}
-	h := held[0]
-	if h.Refused != "" || h.SHA256 != sha256Of([]byte(reproContent)) || h.Runner != "go-test-json" || strings.Join(h.TestIDs, ",") != "TestRepro" || h.SpecLine != 3 || !h.HoldsLiteral {
-		t.Errorf("held[0] = %+v", h)
-	}
-	want := filepath.Join(run.ReviewReproductionDir(f.acts.LogDir), "0", "p", "repro_test.go")
-	if h.HostPath != want {
-		t.Errorf("host path = %s, want %s", h.HostPath, want)
-	}
-	info, err := os.Stat(h.HostPath)
-	if err != nil || info.Mode().Perm() != 0o444 {
-		t.Errorf("host copy mode = %v, %v; want 0444", info, err)
-	}
-	if body, _ := os.ReadFile(h.HostPath); string(body) != reproContent {
-		t.Errorf("host copy = %q", body)
-	}
-	if held[1].Refused == "" || held[1].SHA256 != "" || held[1].HostPath != "" || held[2].Refused == "" {
-		t.Errorf("refused = %+v, %+v; want each refusal recorded and nothing held", held[1], held[2])
-	}
-	if exists(filepath.Join(run.ReviewReproductionDir(f.acts.LogDir), "1")) {
-		t.Error("a refused reproduction was written")
-	}
-	again, err := f.hold()
-	if err != nil || len(again) != 3 || again[0].SHA256 != h.SHA256 {
-		t.Errorf("hold again = %+v, %v; want the same copy", again, err)
-	}
-}
-
-// The hold counts a backticked literal of the cited line only when the
-// reproduction holds it and no tracked file of the base commit does
-// (case-sensitive, byte-exact); a file the worktree holds untracked does not
-// make it the base's, and an unknown base counts none.
-func TestHoldCountsOnlyALiteralTheBaseDoesNotHold(t *testing.T) {
-	holdsLiteral := func(f *reproFixture) bool {
-		t.Helper()
-		f.writeEvidence(reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`."))
-		held, err := f.hold()
-		if err != nil || len(held) != 1 || held[0].Refused != "" {
-			t.Fatalf("hold = %+v, %v; want one held reproduction", held, err)
-		}
-		return held[0].HoldsLiteral
-	}
-	notInBase := newReproFixture(t)
-	writeFile(t, filepath.Join(notInBase.repo, "p", "notes.txt"), "Add(1, 2) is 3\n")
-	writeFile(t, filepath.Join(notInBase.repo, "p", "case.go"), "package p\n\n// add(1, 2)\n")
-	if !holdsLiteral(notInBase) {
-		t.Error("literals only in the reproduction and an untracked file: want the literal to count")
-	}
-	inBase := newReproFixture(t)
-	writeFile(t, filepath.Join(inBase.repo, "p", "doc.go"), "package p\n\n// Add(1, 2) returns 3.\n")
-	inBase.input.BaseSHA = trustedCommit(t, inBase.repo)
-	if holdsLiteral(inBase) {
-		t.Error("every literal the reproduction holds is in a tracked file of the base: want none to count")
-	}
-	unknown := newReproFixture(t)
-	unknown.input.BaseSHA = ""
-	if holdsLiteral(unknown) {
-		t.Error("unknown base: want no literal to count")
-	}
-}
-
-// A different file already at the host copy's path, or an approved spec
-// that no longer matches the hash the run started with, is a failure to
-// hold, never advice.
-func TestHoldReproductionsRefusesToHoldWhatDoesNotMatch(t *testing.T) {
-	f := newReproFixture(t)
-	h := f.held()
-	if err := os.Chmod(h.HostPath, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, h.HostPath, "package p\n")
-	if _, err := f.hold(); !errors.Is(err, errReproductionUnheld) {
-		t.Errorf("hold over a different copy = %v, want unheld", err)
-	}
-	f = newReproFixture(t)
-	writeFile(t, f.input.ReviewSpecPath, reproSpec+"- edited\n")
-	f.writeEvidence(reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`."))
-	if _, err := f.hold(); !errors.Is(err, errReproductionUnheld) {
-		t.Errorf("hold with an edited spec = %v, want unheld", err)
-	}
-}
-
-// A run without -review-reproduction holds nothing.
-func TestHoldReproductionsIsOffWithoutTheRunInput(t *testing.T) {
-	f := newReproFixture(t)
-	f.input.ReviewReproduction = false
-	f.writeEvidence(reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`."))
-	if held, err := f.hold(); held != nil || err != nil {
-		t.Errorf("hold = %+v, %v; want nothing", held, err)
-	}
 }
 
 // SC-012: every launch checks the held copy against the hash the review
@@ -377,55 +243,6 @@ func TestRecheckOfACommitHoldingThePathLaunchesNothing(t *testing.T) {
 	}
 }
 
-// reviewStepWithReproduction is a review step whose launch writes evidence
-// carrying one reproduction, on a run with -review-reproduction and the
-// approved spec, whose recorded hash is specSHA.
-func reviewStepWithReproduction(t *testing.T, specSHA string) (*reviewFixture, *[]string) {
-	t.Helper()
-	f := newReviewFixture(t, map[string]string{"go.mod": "module example.com/p\n\ngo 1.22\n", "p/add.go": "package p\n\nfunc Add(a, b int) int { return a + b }\n"}, func(string) {})
-	// As a run's worktree does, git ignores the review's evidence file.
-	writeFile(t, filepath.Join(gitIn(t, f.repo, "rev-parse", "--absolute-git-dir"), "info", "exclude"), codereview.EvidenceFile+"\n")
-	spec := filepath.Join(t.TempDir(), "approved-spec.snapshot.md")
-	writeFile(t, spec, reproSpec)
-	f.input.ReviewReproduction, f.input.ReviewSpecPath, f.input.ReviewSpecSHA256 = true, spec, specSHA
-	var args []string
-	f.fakeLaunch(func(a []string) {
-		args = a
-		data, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "advisory", "available": true, "findings": []any{reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`.")}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, filepath.Join(f.repo, codereview.EvidenceFile), string(data))
-	}, nil)
-	return f, &args
-}
-
-// The review step gives its launch the approved spec and holds the
-// reproduction its evidence carries in the result it checkpoints.
-func TestReviewStepHoldsItsReproductions(t *testing.T) {
-	f, args := reviewStepWithReproduction(t, sha256Of([]byte(reproSpec)))
-	res, err := f.run()
-	if err != nil {
-		t.Fatalf("review step: %v", err)
-	}
-	if !strings.Contains(strings.Join(*args, " "), "--approved-spec "+f.input.ReviewSpecPath) {
-		t.Errorf("review args = %v, want --approved-spec %s", *args, f.input.ReviewSpecPath)
-	}
-	if len(res.Reproductions) != 1 || res.Reproductions[0].Refused != "" || res.Reproductions[0].SHA256 != sha256Of([]byte(reproContent)) || !exists(res.Reproductions[0].HostPath) {
-		t.Errorf("Reproductions = %+v, want the one held copy", res.Reproductions)
-	}
-}
-
-// A review whose hold fails (here the approved spec no longer matches its
-// hash) is a non-retryable failure to hold.
-func TestReviewStepWhoseHoldFailsIsUnheld(t *testing.T) {
-	f, _ := reviewStepWithReproduction(t, strings.Repeat("0", 64))
-	_, err := f.run()
-	if failureType(err) != ReproductionUnheldFailureType {
-		t.Errorf("review step = %v, want %s", err, ReproductionUnheldFailureType)
-	}
-}
-
 // A pass on a commit where a parent of the reproduction's path is a link (here
 // the base tracks p as a symlink to a directory outside the scratch) or a
 // file makes no mountpoint and launches nothing: the host writes nothing
@@ -490,42 +307,6 @@ func TestReproductionOverATrackedBaseFileLaunches(t *testing.T) {
 	}
 	if len(f.creates) != 1 || len(f.mounted) != 1 || f.mounted[0] != "ro "+h.SHA256 || res.Run.Outcome != string(reproduction.OutcomeFailed) {
 		t.Errorf("launches %d, mounted %v, outcome %q; want one launch of the held copy", len(f.creates), f.mounted, res.Run.Outcome)
-	}
-}
-
-// Evidence already in the worktree when the review starts (the build wrote
-// it) is removed before the launch, so a launch that writes none holds
-// nothing from it.
-func TestReviewStepHoldsNoEvidenceItDidNotWrite(t *testing.T) {
-	f, _ := reviewStepWithReproduction(t, sha256Of([]byte(reproSpec)))
-	planted := filepath.Join(f.repo, codereview.EvidenceFile)
-	data, err := json.Marshal(map[string]any{"schema_version": 1, "review_policy": "advisory", "available": true, "findings": []any{reproFinding("p/repro_test.go", reproContent, 3, "- `Add(1, 2)` returns `3`.")}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, planted, string(data))
-	var foundAtLaunch bool
-	f.fakeLaunch(func([]string) { foundAtLaunch = exists(planted) }, nil)
-	res, err := f.run()
-	if err != nil {
-		t.Fatalf("review step: %v", err)
-	}
-	if foundAtLaunch || len(res.Reproductions) != 0 {
-		t.Errorf("evidence present at launch %v, held %+v; want it removed and nothing held", foundAtLaunch, res.Reproductions)
-	}
-}
-
-// A review that gave no verdict (CombinedExitBase+2) holds nothing, even
-// when its launch wrote evidence carrying a reproduction.
-func TestReviewWithNoVerdictHoldsNothing(t *testing.T) {
-	f, _ := reviewStepWithReproduction(t, sha256Of([]byte(reproSpec)))
-	f.exitOffset = 2
-	res, err := f.run()
-	if err != nil {
-		t.Fatalf("review step: %v", err)
-	}
-	if len(res.Reproductions) != 0 || reviewStepPassed(res.Result.ExitCode) {
-		t.Errorf("exit %d, held %+v; want no verdict and nothing held", res.Result.ExitCode, res.Reproductions)
 	}
 }
 
@@ -606,4 +387,36 @@ func TestRanPastLaunchCapReadsOnlyTheLaunchsDeadline(t *testing.T) {
 	if ranPastLaunchCap(done, launch, started) {
 		t.Error("the Activity's context ended: want false")
 	}
+}
+
+// liveReproduce runs the retired reproduction phase (reproduceReviewFindings)
+// in a test workflow environment whose launch Activity is the real one.
+func liveReproduce(t *testing.T, acts *Activities, input RunWorkflowInput, held []run.HeldReproduction, resultSHA string) []run.FindingReproduction {
+	t.Helper()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.SetTestTimeout(90 * time.Minute)
+	env.RegisterActivityWithOptions(acts.RunReviewReproductionActivity, activity.RegisterOptions{Name: RunHeldTestActivityName})
+	env.RegisterWorkflowWithOptions(liveReproductionWorkflow, temporalworkflow.RegisterOptions{Name: "liveReproductionWorkflow"})
+	env.ExecuteWorkflow("liveReproductionWorkflow", input, held, resultSHA)
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("reproduction phase: %v", err)
+	}
+	var findings []run.FindingReproduction
+	if err := env.GetWorkflowResult(&findings); err != nil {
+		t.Fatal(err)
+	}
+	return findings
+}
+
+// liveReproductionWorkflow calls the phase with RunWorkflow's build/verify
+// Activity options and explicit Activity IDs.
+func liveReproductionWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput, held []run.HeldReproduction, resultSHA string) ([]run.FindingReproduction, error) {
+	buildVerifyCtx := temporalworkflow.WithActivityOptions(ctx, temporalworkflow.ActivityOptions{
+		StartToCloseTimeout: time.Hour, HeartbeatTimeout: stepHeartbeatTimeout,
+		RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
+	ids := &activityIDs{explicit: true, seen: map[string]int{}}
+	result := &RunWorkflowResult{ResultSHA: resultSHA, BaseSHA: input.BaseSHA}
+	return reproduceReviewFindings(ctx, ids, buildVerifyCtx, input, &RunProgress{}, result, held, input.WorkspacePath, "")
 }

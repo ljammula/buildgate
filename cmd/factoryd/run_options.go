@@ -102,15 +102,6 @@ type runOptions struct {
 	Thinking          string
 	ReviewThinking    string
 	ReviewRelayPolicy *sandbox.RoutePolicy
-
-	// ReviewReproduction, ReviewSpecPath, ReviewSpecSHA256 and
-	// RecheckReproductions are -review-reproduction, -review-spec's
-	// snapshot and hash, and -recheck-reproductions' checked manifest; see
-	// the RunWorkflowInput fields of the same names.
-	ReviewReproduction   bool
-	ReviewSpecPath       string
-	ReviewSpecSHA256     string
-	RecheckReproductions []run.RecheckEntry
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not

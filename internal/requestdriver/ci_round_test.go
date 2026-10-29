@@ -260,7 +260,7 @@ func TestCIRoundAfterAQuarantinedRoundGivesOneRecordWithBothTheRefusalAndTheChec
 	var argvs [][]string
 	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, _ func(*run.Run)) error {
 		argvs = append(argvs, args)
-		return requestdrivertest.ReproductionRefusedOn(t, h.dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "").Save(h.dataDir)
+		return requestdrivertest.CorrectableQuarantine(t, h.dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "").Save(h.dataDir)
 	}
 	h.poll(t) // the thread's round, quarantined
 	h.state.BlocksReadyThreads, h.state.ActionableThreads = nil, nil
@@ -273,7 +273,7 @@ func TestCIRoundAfterAQuarantinedRoundGivesOneRecordWithBothTheRefusalAndTheChec
 		t.Fatalf("builds = %d, want 2", len(argvs))
 	}
 	record := earlierAttemptOf(t, argvs[1])
-	for _, want := range []string{reproducedLine, `"test"`, `"FAILURE"`, "      FAIL: TestWidget expected 3 got 4"} {
+	for _, want := range []string{"tests_red_on_base", `"test"`, `"FAILURE"`, "      FAIL: TestWidget expected 3 got 4"} {
 		if !strings.Contains(record, want) {
 			t.Errorf("record lacks %q", want)
 		}

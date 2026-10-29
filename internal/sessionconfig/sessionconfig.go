@@ -193,10 +193,8 @@ type Config struct {
 	// ReviewCorrectiveRounds mirrors worker's own
 	// -review-corrective-rounds flag: the most
 	// automatic corrective builds a ticket gets when its run quarantines
-	// with checks a build can fix when told about them (a reviewer's
-	// reproduction that refused it included, SC-022), before the request
-	// quarantines, and the most fix attempts a PR-review corrective round
-	// gets when a reviewer's reproduction alone refuses it. Like
+	// with checks a build can fix when told about them, before the request
+	// quarantines. Like
 	// MaxReviewRounds, this is a per-invocation Tier-1 value
 	// (applySessionConfig fills the flag directly from this field), not a
 	// daemon-wide Tier-2 setting. 0 disables the corrective round
@@ -225,12 +223,6 @@ type Config struct {
 	// the line threshold; negative is refused. The release size limits are
 	// release_max_changed_lines and release_max_files_changed.
 	PRBudgetLines *int `yaml:"pr_budget_lines,omitempty"`
-
-	// ReviewReproductions is whether a request's ticket build holds and runs
-	// its review's reproductions (SC-022). Default false: the review and its
-	// approved spec stay, so every finding is advice and no
-	// review_reproduction check is recorded. True holds and runs them.
-	ReviewReproductions *bool `yaml:"review_reproductions,omitempty"`
 
 	// ReviewAdviceRounds is how many advice rounds a request's accepted
 	// ticket run whose code review recorded a high-severity finding may get:
@@ -539,10 +531,6 @@ type Settings struct {
 
 	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
 	PRBudgetLines int
-
-	// ReviewReproductions is set when the config says
-	// review_reproductions: true; the zero value holds no reproduction.
-	ReviewReproductions bool
 
 	// ReviewAdviceRounds mirrors Config.ReviewAdviceRounds; 0 starts no
 	// advice round.
@@ -887,7 +875,6 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	boolean(&s.ComposeServicesRequireDigest, c.ComposeServicesRequireDigest)
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
 
-	boolean(&s.ReviewReproductions, c.ReviewReproductions)
 	boolean(&s.RoundSessionContinuity, c.RoundSessionContinuity)
 	boolean(&s.PlanReview, c.PlanReview)
 

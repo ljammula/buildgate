@@ -480,12 +480,12 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	}
 	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
 	outcome.legacy = legacy
-	// SC-022: only at version 1, only for a run given -review-reproduction,
-	// and only when the plan runs the review step: with code review off no
-	// review_reproduction check is recorded, since nothing would stand
-	// behind it. A corrective build's recheck runs first, after the gates
-	// and before its own review.
-	outcome.reproductions.ran = !legacy && input.ReviewReproduction && len(steps) > 0
+	// A history recorded before retireReviewReproductionChange may hold the
+	// retired reviewer-reproduction phase (a run given -review-reproduction,
+	// which no Worker sets any more): it replays unchanged. From that change
+	// on a review writes no test the factory runs, so no run takes the phase.
+	retired := temporalworkflow.GetVersion(ctx, retireReviewReproductionChange, temporalworkflow.DefaultVersion, 1) == 1
+	outcome.reproductions.ran = !retired && !legacy && input.ReviewReproduction && len(steps) > 0
 	if outcome.reproductions.ran {
 		rechecks, err := recheckReproductions(ctx, ids, buildVerifyCtx, input, current, result, worktreePath, branch)
 		if err != nil {
@@ -563,7 +563,6 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		policyInput.FullSuiteLogSHA256 = gates.fullSuite.LogSHA256
 		policyInput.FullSuiteRerun = gates.fullSuite.Rerun
 	}
-	policyInput.ReviewReproduction = reviews.reproductions.policyInput()
 	policyInput.TestsRedOnBase = testsRed.policyInput()
 	if reviews.ranCodeReview {
 		policyInput.CodeReviewCommand = reviews.codeReview.Result.Command

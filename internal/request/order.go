@@ -89,7 +89,6 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 		carved = append(carved, Ticket{
 			Index:          idx + k,
 			SpecPath:       path,
-			Reproductions:  append([]TicketReproduction(nil), original.Reproductions...),
 			ScopeAmendedBy: original.ScopeAmendedBy,
 			Order:          &TicketOrder{SourceRunID: sourceRunID, Groups: order, Group: group, First: idx},
 		})

@@ -263,18 +263,6 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}
-	// A request's ticket build holds and runs its review's reproductions
-	// (SC-022) only when review_reproductions is on (reproductionInputs); a
-	// bare run never gets these flags.
-	if entry.ReviewReproduction {
-		args = append(args, "-review-reproduction")
-	}
-	if entry.ReviewSpecPath != "" {
-		args = append(args, "-review-spec", entry.ReviewSpecPath)
-	}
-	if entry.RecheckReproductions != "" {
-		args = append(args, "-recheck-reproductions", entry.RecheckReproductions)
-	}
 	if cfg.OpenPullRequest {
 		args = append(args, "-open-pull-request")
 	}

@@ -4,7 +4,6 @@ import (
 	"buildgate/internal/unresolved"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os/exec"
@@ -1046,56 +1045,28 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 
 	// The round before this one, when it was quarantined: its commits are
 	// the tip this round builds on (priorRoundRefusal), so its builder is
-	// given that attempt's record, beside the reviewer's comments. The
-	// recheck is the ticket's list (ticketRecheck), whatever that round was.
+	// given that attempt's record, beside the reviewer's comments.
 	refused := priorRoundRefusal(dataDir, r, ticket)
 	ciRecord := trig.record(dp, ctx, head.Run, ticket)
-	// One round is one build plus, when a reviewer's reproduction alone
-	// refused it (SC-022: a finding blocks only through its reproduction,
-	// never through its severity), up to review_corrective_rounds fix
-	// attempts on the same branch, each given the record of the attempt
-	// before it and rechecking its reproductions -- the allowance the
-	// ticket's first build has (TryCheckCorrectiveRound). Only the last
-	// attempt decides the round, and the round counts once against
-	// max_review_rounds however many attempts it took.
-	var attempt roundAttempt
-	var priorRunIDs []string
-	var includedThreads []forge.Thread
-	for fix := 0; ; fix++ {
-		addendumPath, renderedThreads, err := writeRoundAddendum(dataDir, r.ID, ticket, newThreads, roundIndex, fix)
-		if err != nil {
-			return fmt.Errorf("request %s: ticket %d: round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
-		}
-		includedThreads = renderedThreads
-		attemptID := roundRunID
-		if fix > 0 {
-			attemptID = fmt.Sprintf("%s-fix%d", roundRunID, fix)
-		}
-		attempt, err = runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, attemptID, branch, diffBase, stackBaseSHA, refused, ciRecord)
-		if errors.Is(err, errNoRecheck) {
-			// The round would build without a reproduction the ticket must
-			// pass again: no build (SC-022).
-			return haltWithoutRecheck(dataDir, r, err, now)
-		}
-		if err != nil {
-			return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
-		}
-		if attempt.errText != "" {
-			log.Printf("request %s: ticket %d: round %d: %s: %s", r.ID, ticket.Index, roundIndex, attempt.outcome, attempt.errText)
-		}
-		// A cancel that landed while the attempt built must not be undone
-		// by the saves below, nor answered with another paid build.
-		if ok, err := stillInState(dataDir, r.ID, request.StatePRReview); err != nil {
-			return err
-		} else if !ok {
-			log.Printf("request %s: ticket %d: round %d finished but the request left pr_review while it ran (e.g. cancelled) -- discarding the result", r.ID, ticket.Index, roundIndex)
-			return nil
-		}
-		if refused = roundFixRefusal(ctx, dataDir, r, cfg, attempt, fix, now); refused == nil {
-			break
-		}
-		log.Printf("request %s: ticket %d: round %d: a reviewer's reproduction refused it; fix attempt %d/%d", r.ID, ticket.Index, roundIndex, fix+1, cfg.ReviewCorrectiveRounds)
-		priorRunIDs = append(priorRunIDs, attempt.runID)
+	// One round is one build; it counts once against max_review_rounds.
+	addendumPath, includedThreads, err := writeRoundAddendum(dataDir, r.ID, ticket, newThreads, roundIndex, 0)
+	if err != nil {
+		return fmt.Errorf("request %s: ticket %d: round %d: write addendum: %w", r.ID, ticket.Index, roundIndex, err)
+	}
+	attempt, err := runRoundAttempt(dp, ctx, dataDir, r, ticket, cfg, addendumPath, roundRunID, branch, diffBase, stackBaseSHA, refused, ciRecord)
+	if err != nil {
+		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
+	}
+	if attempt.errText != "" {
+		log.Printf("request %s: ticket %d: round %d: %s: %s", r.ID, ticket.Index, roundIndex, attempt.outcome, attempt.errText)
+	}
+	// A cancel that landed while the attempt built must not be undone by the
+	// saves below, nor answered with another paid build.
+	if ok, err := stillInState(dataDir, r.ID, request.StatePRReview); err != nil {
+		return err
+	} else if !ok {
+		log.Printf("request %s: ticket %d: round %d finished but the request left pr_review while it ran (e.g. cancelled) -- discarding the result", r.ID, ticket.Index, roundIndex)
+		return nil
 	}
 	loadID, outcome, errText := attempt.runID, attempt.outcome, attempt.errText
 
@@ -1108,7 +1079,6 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 		ThreadIDs:    threadIDs,
 		CICheck:      trig.checkName(),
 		RunID:        loadID,
-		PriorRunIDs:  priorRunIDs,
 		Outcome:      outcome,
 		StartFailure: attempt.startFailure,
 		Unresolved:   attempt.unresolved,
@@ -1175,10 +1145,8 @@ type roundOutcome struct {
 // branch, with specPath (the round's addendum) as its ticket, and reports
 // how it ended. ticketID is the -ticket value; the run's own id comes from
 // onReady. refused, when not nil, is the quarantined build before this one:
-// this one is given its record as -earlier-attempt, which says each
-// blocking finding in one line (SC-018), from a file beside the addendum.
-// Like every build of the ticket, it rechecks the ticket's list
-// (ticketRecheck), and what refused it goes on that list.
+// this one is given its record as -earlier-attempt (SC-018), from a file
+// beside the addendum.
 func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, specPath, ticketID, branch, diffBase, stackBaseSHA string, refused *run.Run, ciRecord *handoff.Document) (roundAttempt, error) {
 	// -open-pull-request is always forced off for a corrective round,
 	// regardless of cfg.openPullRequest: this run's branch already has an
@@ -1193,7 +1161,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// and its source, harness, model and preflight profile. SpecPath is the
 	// round's addendum: the
 	// ticket's own spec plus this round's appended sections.
-	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath, true)
+	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath)
 	if err != nil {
 		return roundAttempt{}, err
 	}
@@ -1244,42 +1212,11 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if loadID == "" {
 		loadID = ticketID
 	}
-	// What refused the attempt goes on the ticket's list, which the next
-	// attempt rechecks, written to the request on disk at once, so a worker
-	// that stops between attempts does not lose it.
-	noteRunRefusals(dataDir, r, ticket.Index, loadID)
 	ended, loadErr := correctiveRoundOutcome(dataDir, loadID, runErr)
 	if loadErr != nil {
 		return roundAttempt{}, loadErr
 	}
 	return roundAttempt{runID: loadID, roundOutcome: ended}, nil
-}
-
-// roundFixRefusal decides whether a PR-review round gets another fix
-// attempt after attempt (its fix-th, counted from 0), and returns attempt's
-// run, which that fix attempt is given the record of and rechecks, or nil.
-// It does when a reviewer's reproduction alone refused attempt
-// (onlyAReproductionRefused), an automatic correction may follow it
-// (automaticCorrectionMayFollow: never after a recheck that is still
-// failing), fewer
-// than review_corrective_rounds fix attempts have run, the worker is not
-// stopping, and the request and monthly budgets still allow a launch. A
-// finding with no reproduction the factory ran never starts one, whatever
-// its severity (SC-022). Otherwise the round ends with attempt's outcome: a
-// budget that is reached quarantines the request when the next round starts
-// (RunCorrectiveRound's own check), not here.
-func roundFixRefusal(ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, attempt roundAttempt, fix int, now time.Time) *run.Run {
-	if attempt.outcome != request.RoundQuarantined || fix >= cfg.ReviewCorrectiveRounds || ctx.Err() != nil {
-		return nil
-	}
-	loaded, err := run.Load(dataDir, attempt.runID)
-	if err != nil || !onlyAReproductionRefused(loaded) || !automaticCorrectionMayFollow(dataDir, loaded) {
-		return nil
-	}
-	if check, _, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil || check != "" {
-		return nil
-	}
-	return loaded
 }
 
 // withEarlierRecord adds to a PR-review build's args, from the one file it
@@ -1289,8 +1226,7 @@ func roundFixRefusal(ctx context.Context, dataDir string, r *request.Request, cf
 // of ciRecord when the round is a CI round. When both exist they are one
 // record, the refused attempt's with the CI failure set on it, so the file
 // stays within the limit (handoff.MaxCILogBytes beside a Markdown record of
-// at most 8000 bytes, under the build's 32 KiB). The build's recheck comes
-// from the ticket's list, not from refused (ticketRecheck).
+// at most 8000 bytes, under the build's 32 KiB)..
 func withEarlierRecord(dataDir, dir string, refused *run.Run, ciRecord *handoff.Document, args []string) ([]string, error) {
 	var doc handoff.Document
 	start := startsOnItsBranch
@@ -1554,8 +1490,7 @@ func afterRoundPushed(dp Deps, ctx context.Context, r *request.Request, ticket *
 // (2026-10-06, three rounds on one pull request): each round was given only
 // the reviewer's comment, built on the refused commits, and was quarantined
 // for the finding the round before it had already been quarantined for. It
-// decides the record only: every round's recheck is the ticket's list
-// (ticketRecheck), whatever the round before it was.
+// decides the record only.
 func priorRoundRefusal(dataDir string, r *request.Request, ticket *request.Ticket) *run.Run {
 	rnd, ok := lastCountedRound(ticket)
 	if !ok || rnd.Outcome != request.RoundQuarantined {
@@ -1624,7 +1559,6 @@ func RoundNotPushedReply(dataDir, runID string, outcome request.RoundOutcome, ro
 	loaded, err := run.Load(dataDir, runID)
 	if outcome == request.RoundQuarantined && err == nil {
 		fmt.Fprintf(&b, "Attempted in corrective round %d of %d: a change was built and not pushed, because it did not pass %s.\n", round, maxRounds, failedGateNames(loaded))
-		b.WriteString(replyFindings(loaded))
 	} else {
 		fmt.Fprintf(&b, "Attempted in corrective round %d of %d: the build stopped before it was judged, so nothing was pushed.\n", round, maxRounds)
 	}
@@ -1650,27 +1584,6 @@ func failedGateNames(runRecord *run.Run) string {
 		return "every gate"
 	}
 	return strings.Join(names, ", ")
-}
-
-// replyFindings renders the findings a reviewer's reproduction refused
-// runRecord for (handoff.ReproducedFindingLines) for a reply: each one
-// line in its own code span, at most maxReplyFindings of them, or "" when
-// there are none. Never the failure scenario or the reproduction.
-func replyFindings(runRecord *run.Run) string {
-	lines := handoff.ReproducedFindingLines(runRecord)
-	if len(lines) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("\nWhat the factory's run of the reviewer's reproductions found:\n\n")
-	for i, line := range lines {
-		if i == maxReplyFindings {
-			fmt.Fprintf(&b, "%d more not shown.\n", len(lines)-maxReplyFindings)
-			break
-		}
-		fmt.Fprintf(&b, "- `%s`\n", replyInline(strings.TrimPrefix(strings.TrimSpace(line), "- ")))
-	}
-	return b.String()
 }
 
 // replyInline makes s safe inside an inline code span: one bounded line

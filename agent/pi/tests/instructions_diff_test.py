@@ -17,7 +17,7 @@ STAT_DIFF = ("a.txt | 1 +\n", "diff --git a/a.txt b/a.txt\n+x\n")
 
 
 def combined_prompt(block: str, diff) -> str:
-	return combined_review.combined_review_prompt("spec text", "abc123", diff=diff, instructions_block=block, approved_spec="L")
+	return combined_review.combined_review_prompt("spec text", "abc123", diff=diff, instructions_block=block)
 
 
 PROMPTS = [combined_prompt]

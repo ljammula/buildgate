@@ -171,7 +171,7 @@ func carvedBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, 
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), specPath, false)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), specPath)
 	if err != nil {
 		return nil, err
 	}

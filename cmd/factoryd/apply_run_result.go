@@ -177,7 +177,6 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 			}
 		}
 		loadCodeReview(r, dataDir, id)
-		mergeReviewReproductions(r, result.ReviewReproductions, result.ReviewReproductionRechecks)
 	}
 
 	// Before the release decision below reads it, and before the one save

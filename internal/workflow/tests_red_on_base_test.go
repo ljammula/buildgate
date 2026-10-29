@@ -78,7 +78,7 @@ func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldRes
 		res := results[in.Pass]
 		res.Run.Pass, res.Run.Commit = in.Pass, in.Commit
 		return res, nil
-	}, activity.RegisterOptions{Name: RunReviewReproductionActivityName})
+	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.ExecuteWorkflow(RunWorkflow, input)
 	p.err = env.GetWorkflowError()
 	if p.err == nil {

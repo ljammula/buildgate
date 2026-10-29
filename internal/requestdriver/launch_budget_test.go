@@ -367,7 +367,7 @@ func TestCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket := &r.Tickets[0]
-	runRecord := requestdrivertest.ReproductionRefusedOn(t, dataDir, "run-under-test", branch, baseSHA, fmt.Sprintf("%040d", 2))
+	runRecord := requestdrivertest.CorrectableQuarantine(t, dataDir, "run-under-test", branch, baseSHA, fmt.Sprintf("%040d", 2))
 
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}

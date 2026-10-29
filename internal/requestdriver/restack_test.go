@@ -2,13 +2,10 @@ package requestdriver_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -238,27 +235,6 @@ func TestRestackReplaysTheTicketOntoTheEarlierTicketsNewTip(t *testing.T) {
 	}
 	if f.r.State != request.StatePRReview {
 		t.Errorf("state = %s, want pr_review", f.r.State)
-	}
-}
-
-// SC-022: a restack's replay run holds and runs no reproduction, even for a
-// ticket with reproductions on its list, and leaves that list as it is: the
-// round after the restack rechecks it (TestEveryBuildOfATicketRechecksItsList).
-func TestARestackRunsNoReproductionAndKeepsTheTicketsList(t *testing.T) {
-	f := newRestackFixture(t, 2)
-	approveRequestSpec(t, f.dataDir, f.r)
-	seedTicketList(t, f.dataDir, f.r, 2)
-	f.pass()
-	if len(f.runArgs) != 1 {
-		t.Fatalf("replay runs = %d, want 1", len(f.runArgs))
-	}
-	for _, flag := range []string{"-review-reproduction", "-review-spec", "-recheck-reproductions"} {
-		if slices.Contains(f.runArgs[0], flag) {
-			t.Errorf("the replay run is given %s: %v", flag, f.runArgs[0])
-		}
-	}
-	if list := f.r.Tickets[1].Reproductions; len(list) != 1 {
-		t.Errorf("ticket 2's list after the restack = %+v, want it kept", list)
 	}
 }
 
@@ -1045,41 +1021,5 @@ func TestRestackPushesOnlyAResultOnTheReplayedHead(t *testing.T) {
 		if f.r.State != request.StatePRReview || !f.did("push "+onTop) || f.r.Tickets[1].PRHeadRunID() != "req-1-002-restack1-x" {
 			t.Errorf("state %s (%s), events %v: want the result on the replayed head pushed", f.r.State, f.r.Error, f.events)
 		}
-	}
-}
-
-// A replay run's review is advice only (SC-022 scope): even for a request
-// whose approved spec would give its ticket builds -review-reproduction and
-// -review-spec, the replay run gets neither, and the run path refuses either
-// beside -replay.
-func TestReplayRunCarriesNoReviewReproduction(t *testing.T) {
-	f := newRestackFixture(t, 2)
-	approved := filepath.Join(request.Dir(f.dataDir, f.r.ID), "spec.md")
-	body := []byte("# Spec\n\n- `Parse` returns a map.\n")
-	if err := os.WriteFile(approved, body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(body)
-	if f.r.ApprovedSHA256 == nil {
-		f.r.ApprovedSHA256 = map[string]string{}
-	}
-	f.r.ApprovedSHA256["spec.md"] = hex.EncodeToString(sum[:])
-	f.save()
-	f.cfg.Settings.ReviewReproductions = true
-	build, err := requestdriver.BuildRequestBuildArgs(f.dataDir, f.r, f.r.Tickets[1], f.cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(build, "-review-reproduction") {
-		t.Fatalf("a ticket build of this request = %v, want -review-reproduction (the fixture must approve the spec)", build)
-	}
-	f.pass()
-	if len(f.runArgs) != 1 {
-		t.Fatalf("replay runs = %d, want 1 (events %v)", len(f.runArgs), f.events)
-	}
-	args := f.runArgs[0]
-	checkReplayRunArgs(t, args)
-	if slices.Contains(args, "-review-reproduction") || slices.Contains(args, "-review-spec") || slices.Contains(args, "-recheck-reproductions") {
-		t.Errorf("replay run args = %v, want no review-reproduction input", args)
 	}
 }

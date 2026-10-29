@@ -175,16 +175,12 @@
         "combined_review.prompt.md",
         "combined_review.diff_self.prompt.md",
         "combined_review.diff_inline.prompt.md",
-        "combined_review.advice.prompt.md",
         "code_review.advice_scope_rule.prompt.md",
         "code_review.advice_severity_rule.prompt.md",
-        "code_review.scope_rule.prompt.md",
-        "code_review.severity_rule.prompt.md",
-        "code_review.reproduction_rule.prompt.md",
         "code_review.command_outcome_rule.prompt.md",
         "review.instructions_diff.prompt.md"
       ],
-      "description": "Assembles the review prompt: the diff (inline or self-fetched), the ticket spec, the command-outcome rule, the answer format and the optional repository-instruction diff; with reproductions, also the approved spec numbered by line and the scope, severity and reproduction rules; without, the advice scope and severity rules."
+      "description": "Assembles the review prompt: the diff (inline or self-fetched), the ticket spec, the command-outcome rule, the answer format and the optional repository-instruction diff; the advice scope and severity rules."
     },
     {
       "id": "prompt-source:goal-pilot-command-wrapper",

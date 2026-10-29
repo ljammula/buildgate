@@ -75,7 +75,7 @@ func TestEachTicketRoundGetsARefAndLedgerEntry(t *testing.T) {
 	buildRunner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		onReady(&run.Run{ID: runID})
-		return requestdrivertest.ReproductionRefusedOn(t, dataDir, runID, "factoryd/"+runID, base, first).Save(dataDir)
+		return requestdrivertest.CorrectableQuarantine(t, dataDir, runID, "factoryd/"+runID, base, first).Save(dataDir)
 	}
 	requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{
@@ -97,7 +97,7 @@ func TestEachTicketRoundGetsARefAndLedgerEntry(t *testing.T) {
 		kind, sha, outcome string
 		failed             []string
 	}{
-		{request.RoundTagBuild, first, "quarantined", []string{"review_reproduction"}},
+		{request.RoundTagBuild, first, "quarantined", []string{"tests_red_on_base"}},
 		{request.RoundTagCorrective, second, "quarantined", []string{"canonical_verify"}},
 	}
 	for i, w := range want {

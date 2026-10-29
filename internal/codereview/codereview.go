@@ -55,21 +55,6 @@ func ValidPolicy(p string) bool {
 // above that while still bounding the worst case.
 const maxFindings = 50
 
-// SC-022's caps on the reproductions a review carries: at most
-// maxReproductions per review, each at most maxReproductionBytes. A finding
-// past either cap stays, as advice, with the reason in its record. They match
-// code_review.py's MAX_REPRODUCTIONS and MAX_REPRODUCTION_BYTES.
-const (
-	maxReproductions     = 3
-	maxReproductionBytes = 32 << 10
-)
-
-// Reasons a finding's reproduction is kept as advice by the caps above.
-const (
-	refusedTooMany = "more than 3 reproductions in the review"
-	refusedTooBig  = "reproduction over 32768 bytes"
-)
-
 // evidenceFile mirrors CODE_REVIEW_EVIDENCE.json's own top-level shape
 // for decoding. Findings is decoded as raw JSON values, not directly
 // into evidenceFindingRaw -- an agent-written file can put anything in
@@ -130,35 +115,11 @@ func ProviderResetTime(evidence []byte) string {
 // int) and not isinstance(line, bool)` check) instead of Go's json
 // package silently decoding true/false as 1/0.
 type evidenceFindingRaw struct {
-	Severity        *string         `json:"severity"`
-	File            *string         `json:"file"`
-	Line            interface{}     `json:"line"`
-	Summary         *string         `json:"summary"`
-	FailureScenario *string         `json:"failure_scenario"`
-	SpecLine        json.RawMessage `json:"spec_line"`
-	Reproduction    json.RawMessage `json:"reproduction"`
-}
-
-// specLineRaw is a finding's "spec_line" as written; Number decodes into
-// interface{} for the same bool-is-not-a-number reason as Line.
-type specLineRaw struct {
-	Number interface{} `json:"number"`
-	Text   *string     `json:"text"`
-}
-
-// reproductionRaw is a finding's "reproduction" as written.
-type reproductionRaw struct {
-	Path    *string `json:"path"`
-	Content *string `json:"content"`
-}
-
-// Parsed is a decoded evidence file: the run-record shape, and, parallel to
-// Result.Findings, the content of each finding's reproduction ("" for none).
-// The content is held here for the host to copy and hash (SC-022); it is
-// never part of run.CodeReviewResult, so it can never reach the run record.
-type Parsed struct {
-	Result              run.CodeReviewResult
-	ReproductionContent []string
+	Severity        *string     `json:"severity"`
+	File            *string     `json:"file"`
+	Line            interface{} `json:"line"`
+	Summary         *string     `json:"summary"`
+	FailureScenario *string     `json:"failure_scenario"`
 }
 
 // ParseResult decodes a code_review.py evidence file into the trusted
@@ -172,32 +133,16 @@ type Parsed struct {
 // 1 outright -- an older or newer evidence shape must never be silently
 // misread. Caps at maxFindings entries (see that const's own doc
 // comment).
-//
-// A finding's "spec_line" (a number of at least 1 and non-empty text) and
-// "reproduction" (a non-empty path and non-empty content) are kept when
-// well-formed and dropped when not; the record keeps only the
-// reproduction's path. At most maxReproductions reproductions of at most
-// maxReproductionBytes are kept: a finding past either cap stays, its
-// reproduction recorded as refused. Whether the citation is the spec's line
-// and the path a fit one is the host's check, not this one's.
 func ParseResult(data []byte) (run.CodeReviewResult, error) {
-	parsed, err := ParseDetailed(data)
-	return parsed.Result, err
-}
-
-// ParseDetailed is ParseResult that also returns each reproduction's content.
-func ParseDetailed(data []byte) (Parsed, error) {
 	var file evidenceFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return Parsed{}, fmt.Errorf("decode code review evidence: %w", err)
+		return run.CodeReviewResult{}, fmt.Errorf("decode code review evidence: %w", err)
 	}
 	if file.SchemaVersion != 1 {
-		return Parsed{}, fmt.Errorf("unsupported code review evidence schema_version %d, want 1", file.SchemaVersion)
+		return run.CodeReviewResult{}, fmt.Errorf("unsupported code review evidence schema_version %d, want 1", file.SchemaVersion)
 	}
 
 	findings := make([]run.CodeReviewFinding, 0, len(file.Findings))
-	contents := make([]string, 0, len(file.Findings))
-	kept := 0
 	for _, raw := range file.Findings {
 		var entry evidenceFindingRaw
 		if err := json.Unmarshal(raw, &entry); err != nil {
@@ -210,59 +155,17 @@ func ParseDetailed(data []byte) (Parsed, error) {
 		if !ok {
 			continue
 		}
-		content := ""
-		finding.Reproduction, content = capReproduction(entry.Reproduction, &kept)
 		findings = append(findings, finding)
-		contents = append(contents, content)
 		if len(findings) >= maxFindings {
 			break
 		}
 	}
 
-	return Parsed{
-		Result: run.CodeReviewResult{
-			Policy:    file.ReviewPolicy,
-			Available: file.Available,
-			Findings:  findings,
-		},
-		ReproductionContent: contents,
+	return run.CodeReviewResult{
+		Policy:    file.ReviewPolicy,
+		Available: file.Available,
+		Findings:  findings,
 	}, nil
-}
-
-// capReproduction validates one reproduction and applies the caps: it returns
-// the record's value (nil for a malformed one) and the content to hold ("" when
-// none or refused). kept counts the reproductions kept so far in the review.
-func capReproduction(data json.RawMessage, kept *int) (*run.ReviewReproduction, string) {
-	var raw reproductionRaw
-	if json.Unmarshal(data, &raw) != nil || raw.Path == nil || strings.TrimSpace(*raw.Path) == "" || raw.Content == nil || *raw.Content == "" {
-		return nil, ""
-	}
-	record := &run.ReviewReproduction{Path: strings.TrimSpace(*raw.Path)}
-	switch {
-	case len(*raw.Content) > maxReproductionBytes:
-		record.Refused = refusedTooBig
-		return record, ""
-	case *kept >= maxReproductions:
-		record.Refused = refusedTooMany
-		return record, ""
-	}
-	*kept++
-	return record, *raw.Content
-}
-
-// specCitation validates a finding's "spec_line": nil unless its number is a
-// whole number of at least 1 (a JSON bool is not one) and its text is not
-// blank.
-func specCitation(data json.RawMessage) *run.SpecCitation {
-	var raw specLineRaw
-	if json.Unmarshal(data, &raw) != nil || raw.Text == nil || strings.TrimSpace(*raw.Text) == "" {
-		return nil
-	}
-	n, ok := raw.Number.(float64)
-	if !ok || n < 1 || n != float64(int64(n)) {
-		return nil
-	}
-	return &run.SpecCitation{Number: int(n), Text: *raw.Text}
 }
 
 func validateFinding(entry evidenceFindingRaw) (run.CodeReviewFinding, bool) {
@@ -302,7 +205,6 @@ func validateFinding(entry evidenceFindingRaw) (run.CodeReviewFinding, bool) {
 		Line:            line,
 		Summary:         *entry.Summary,
 		FailureScenario: failureScenario,
-		SpecLine:        specCitation(entry.SpecLine),
 	}, true
 }
 

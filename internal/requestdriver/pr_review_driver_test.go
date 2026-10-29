@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2244,7 +2243,7 @@ func TestRunCorrectiveRoundAfterAQuarantinedRoundCarriesTheGatesFindings(t *test
 	var argvs [][]string
 	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		argvs = append(argvs, args)
-		return requestdrivertest.ReproductionRefusedOn(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "").Save(dataDir)
+		return requestdrivertest.CorrectableQuarantine(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "").Save(dataDir)
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
 	now := time.Now()
@@ -2256,31 +2255,20 @@ func TestRunCorrectiveRoundAfterAQuarantinedRoundCarriesTheGatesFindings(t *test
 	if len(argvs) != 2 {
 		t.Fatalf("rounds run = %d, want 2", len(argvs))
 	}
-	if requestdrivertest.HasFlag(argvs[0], "-earlier-attempt") || requestdrivertest.HasFlag(argvs[0], "-recheck-reproductions") {
-		t.Errorf("round 1 is given a record or a recheck with no round before it: %v", argvs[0])
+	if requestdrivertest.HasFlag(argvs[0], "-earlier-attempt") {
+		t.Errorf("round 1 is given a record with no round before it: %v", argvs[0])
 	}
 	record := earlierAttemptOf(t, argvs[1])
-	if !strings.Contains(record, "## Reproduced review findings\n\n"+reproducedLine) {
-		t.Errorf("round 2's record lacks the finding's line:\n%s", record)
-	}
-	if m := readRecheckManifest(t, argvs[1]); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != requestdrivertest.ArgValue(argvs[0], "-ticket") {
-		t.Errorf("round 2 rechecks %+v, want round 1's", m.Reproductions)
+	if !strings.Contains(record, "tests_red_on_base") {
+		t.Errorf("round 2's record lacks the failed check:\n%s", record)
 	}
 	spec := string(mustReadFile(t, requestdrivertest.ArgValue(argvs[1], "-spec")))
-	if !strings.Contains(spec, "set an Allow header on the 405") || strings.Contains(spec, requestdrivertest.ReproductionSummary) {
-		t.Errorf("round 2's ticket should hold the reviewer's comment and no finding:\n%s", spec)
-	}
-	for _, input := range []string{record, spec} {
-		for _, leaked := range neverTold {
-			if strings.Contains(input, leaked) {
-				t.Errorf("round 2's input carries %q:\n%s", leaked, input)
-			}
-		}
+	if !strings.Contains(spec, "set an Allow header on the 405") {
+		t.Errorf("round 2's ticket should hold the reviewer's comment:\n%s", spec)
 	}
 }
 
-// approveRequestSpec gives r an approved spec.md, so its builds hold and
-// run their reviewer's reproductions (-review-reproduction).
+// approveRequestSpec gives r an approved spec.md.
 func approveRequestSpec(t *testing.T, dataDir string, r *request.Request) {
 	t.Helper()
 	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte("# Spec\n\nSum returns the sum of every element.\n"), 0o600); err != nil {
@@ -2294,172 +2282,6 @@ func approveRequestSpec(t *testing.T, dataDir string, r *request.Request) {
 		r.ApprovedSHA256 = map[string]string{}
 	}
 	r.ApprovedSHA256["spec.md"] = sum
-}
-
-// TestPRReviewRoundAfterAStillFailingFixAttemptRechecks (SC-022): a fix
-// attempt whose recheck is still failing ends its round (no further
-// automatic attempt), and the next round, which builds on its commits,
-// rechecks the first attempt's reproduction from that attempt's held copy.
-func TestPRReviewRoundAfterAStillFailingFixAttemptRechecks(t *testing.T) {
-	dp := newFakeDeps(t)
-	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
-	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	approveRequestSpec(t, dataDir, r)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	var argvs [][]string
-	var first string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		argvs = append(argvs, args)
-		id := requestdrivertest.ArgValue(args, "-ticket")
-		if len(argvs) == 2 {
-			return requestdrivertest.StillFailingAfterRecheck(t, dataDir, id, first, "", "", "").Save(dataDir)
-		}
-		if first == "" {
-			first = id
-		}
-		return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
-	}
-	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 2}
-	for i := 0; i < 2; i++ {
-		if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(time.Duration(i)*2*time.Minute)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(argvs) < 3 || !strings.HasSuffix(requestdrivertest.ArgValue(argvs[2], "-ticket"), "-review2") {
-		t.Fatalf("builds = %d, want round 1, its one fix attempt, then round 2", len(argvs))
-	}
-	m := readRecheckManifest(t, argvs[2])
-	if want := requestdrivertest.HeldEntry(t, dataDir, first); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
-		t.Errorf("round 2's manifest = %+v, want round 1's first attempt's held copy %+v", m.Reproductions, want)
-	}
-}
-
-// TestPRReviewRoundAfterAnAcceptedRecheckStillRechecks (SC-022): a round a
-// reproduction refused, whose fix attempt passed the recheck and was
-// accepted and pushed, is followed by a round on a new comment that still
-// rechecks that reproduction from the first attempt's held copy: a later
-// round cannot undo the proved fix.
-func TestPRReviewRoundAfterAnAcceptedRecheckStillRechecks(t *testing.T) {
-	dp := newFakeDeps(t)
-	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
-	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	approveRequestSpec(t, dataDir, r)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	var argvs [][]string
-	var first string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		argvs = append(argvs, args)
-		id := requestdrivertest.ArgValue(args, "-ticket")
-		switch len(argvs) {
-		case 1:
-			first = id
-			return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
-		case 2:
-			a := requestdrivertest.AfterRecheck(t, dataDir, id, first, requestdrivertest.ArgValue(args, "-on-branch"), "", "cafef00dcafef00dcafef00dcafef00dcafef00d", "passes")
-			a.State, a.GateResults, a.HandoffSHA256, a.WorkspacePath = run.StateAccepted, []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "review_reproduction", Passed: true}}, "", t.TempDir()
-			return saveAcceptedRoundRun(t, dataDir, a)
-		}
-		return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
-	}
-	pushed := func() {
-		dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-			requestdrivertest.LastPushedSHA[branch] = sha
-			return nil
-		}
-	}
-	pushed()
-	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 1}
-	now := time.Now()
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now); err != nil {
-		t.Fatal(err)
-	}
-	if rounds := r.Tickets[0].Rounds; len(argvs) != 2 || len(rounds) != 1 || rounds[0].Outcome != request.RoundAccepted || !rounds[0].Pushed {
-		t.Fatalf("builds %d, rounds %+v; want round 1 accepted and pushed after its fix attempt", len(argvs), rounds)
-	}
-	next := []forge.Thread{{ID: "thread-2", Path: "b.go", Line: 2, Author: "alice", Body: "and this", CommentID: 6}}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: next, ActionableThreads: next}, nil)
-	pushed()
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now.Add(2*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if len(argvs) < 3 || !strings.HasSuffix(requestdrivertest.ArgValue(argvs[2], "-ticket"), "-review2") {
-		t.Fatalf("builds = %d, want round 2 to run", len(argvs))
-	}
-	m := readRecheckManifest(t, argvs[2])
-	if want := requestdrivertest.HeldEntry(t, dataDir, first); len(m.Reproductions) != 1 || fmt.Sprint(m.Reproductions[0]) != fmt.Sprint(want) {
-		t.Errorf("round 2's manifest = %+v, want round 1's first attempt's held copy %+v", m.Reproductions, want)
-	}
-}
-
-// TestPRReviewRoundBlocksOnlyOnAReproducedFinding (SC-022): a PR-review
-// round's own review refuses an attempt only through a reproduction the
-// factory ran. An attempt a reproduction refused gets a fix attempt, told
-// the finding in one line and rechecking the reproduction; one whose
-// review reported a high finding with no such reproduction gets none, and
-// its finding reaches no later build.
-func TestPRReviewRoundBlocksOnlyOnAReproducedFinding(t *testing.T) {
-	for _, reproduced := range []bool{true, false} {
-		t.Run(fmt.Sprintf("reproduced=%v", reproduced), func(t *testing.T) {
-			dp := newFakeDeps(t)
-			threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
-			r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-			approveRequestSpec(t, dataDir, r)
-			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-			var argvs [][]string
-			var inputs []string
-			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				content, err := os.ReadFile(requestdrivertest.ArgValue(args, "-spec"))
-				if err != nil {
-					return err
-				}
-				argvs, inputs = append(argvs, args), append(inputs, string(content)+earlierAttemptOf(t, args))
-				id := requestdrivertest.ArgValue(args, "-ticket")
-				if len(argvs) > 1 {
-					return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "repo-lint", Passed: false}}}).Save(dataDir)
-				}
-				if reproduced {
-					return requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "").Save(dataDir)
-				}
-				return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "code_review", Passed: false}},
-					CodeReview: &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", File: "a.go", Line: 2, Summary: "UNREPRODUCED high finding", FailureScenario: "crash"}}}}).Save(dataDir)
-			}
-			cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 1}
-			if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
-				t.Fatal(err)
-			}
-			if !reproduced {
-				if len(argvs) != 1 {
-					t.Fatalf("builds = %d, want 1: a high finding without a reproduction starts no fix attempt", len(argvs))
-				}
-				if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now().Add(2*time.Minute)); err != nil {
-					t.Fatal(err)
-				}
-				if len(inputs) < 2 {
-					t.Fatalf("builds = %d, want the next round to run", len(inputs))
-				}
-				for i, in := range inputs[1:] {
-					if strings.Contains(in, "UNREPRODUCED") || requestdrivertest.HasFlag(argvs[i+1], "-earlier-attempt") {
-						t.Errorf("a later round was told an unreproduced finding:\n%s", in)
-					}
-				}
-				return
-			}
-			if len(argvs) != 2 || requestdrivertest.ArgValue(argvs[1], "-ticket") != "req-1-001-review1-fix1" {
-				t.Fatalf("builds = %d, want the round's build and one fix attempt", len(argvs))
-			}
-			if !strings.Contains(earlierAttemptOf(t, argvs[1]), reproducedLine) {
-				t.Errorf("the fix attempt's record lacks the finding's line:\n%s", inputs[1])
-			}
-			for _, leaked := range neverTold {
-				if strings.Contains(inputs[1], leaked) {
-					t.Errorf("the fix attempt's inputs carry %q", leaked)
-				}
-			}
-			if m := readRecheckManifest(t, argvs[1]); len(m.Reproductions) != 1 || m.Reproductions[0].RunID != "req-1-001-review1" {
-				t.Errorf("the fix attempt's manifest = %+v, want the round's first build's held reproduction", m)
-			}
-		})
-	}
 }
 
 // TestRunCorrectiveRoundAfterAHaltedRoundCarriesNoFindings: only the round
@@ -2540,13 +2362,12 @@ func TestRunCorrectiveRoundOpensNoPullRequest(t *testing.T) {
 	}
 }
 
-// reviewFlaggedRoundRun is a round attempt a reviewer's reproduction alone
-// refused, with one blocking finding (summary) whose held copy is on disk:
-// the shape that earns a fix attempt.
+// reviewFlaggedRoundRun is a quarantined round attempt a build may be told
+// about, whose review recorded one high finding (summary).
 func reviewFlaggedRoundRun(t *testing.T, dataDir, id, summary string) *run.Run {
 	t.Helper()
-	rr := requestdrivertest.ReproductionRefusedOn(t, dataDir, id, "", "", "")
-	rr.CodeReview.Findings[0].Summary = summary
+	rr := requestdrivertest.CorrectableQuarantine(t, dataDir, id, "", "", "")
+	rr.CodeReview.Findings = []run.CodeReviewFinding{{Severity: "high", Summary: summary}}
 	if err := handoff.Sync(rr, dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -2562,164 +2383,6 @@ func earlierAttemptOf(t *testing.T, args []string) string {
 		return ""
 	}
 	return string(mustReadFile(t, path))
-}
-
-// TestRunCorrectiveRoundFixAttemptAcceptedPushesAndCountsOnce: a round the
-// review gate quarantines gets a fix attempt on the same branch, told what
-// the gate flagged. When that attempt is accepted the round is accepted: one
-// round against the cap, its commit pushed, the thread answered.
-func TestRunCorrectiveRoundFixAttemptAcceptedPushesAndCountsOnce(t *testing.T) {
-	dp := newFakeDeps(t)
-	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
-	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	approveRequestSpec(t, dataDir, r)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	var tickets, addenda []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		id := requestdrivertest.ArgValue(args, "-ticket")
-		content, err := os.ReadFile(requestdrivertest.ArgValue(args, "-spec"))
-		if err != nil {
-			return err
-		}
-		tickets, addenda = append(tickets, id), append(addenda, string(content)+earlierAttemptOf(t, args))
-		if len(tickets) == 1 {
-			return reviewFlaggedRoundRun(t, dataDir, id, "nil map write on the first request").Save(dataDir)
-		}
-		a := &run.Run{ID: id, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00dcafef00dcafef00dcafef00dcafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
-		return saveAcceptedRoundRun(t, dataDir, a)
-	}
-	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
-		return nil
-	}
-	replies := 0
-	dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error {
-		replies++
-		return nil
-	}
-	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 1}
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"req-1-001-review1", "req-1-001-review1-fix1"}; !slices.Equal(tickets, want) {
-		t.Fatalf("builds = %v, want %v", tickets, want)
-	}
-	if strings.Contains(addenda[0], "## Reproduced review findings") {
-		t.Errorf("the round's first build was given findings before any review ran:\n%s", addenda[0])
-	}
-	for _, want := range []string{"## Reviewer comments to address", "This build continues on that attempt's branch", "## Reproduced review findings", "nil map write on the first request"} {
-		if !strings.Contains(addenda[1], want) {
-			t.Errorf("the fix attempt's inputs lack %q:\n%s", want, addenda[1])
-		}
-	}
-	rounds := r.Tickets[0].Rounds
-	if len(rounds) != 1 {
-		t.Fatalf("rounds = %+v, want one round for both builds", rounds)
-	}
-	got := rounds[0]
-	if got.Outcome != request.RoundAccepted || !got.Pushed || got.RunID != "req-1-001-review1-fix1" || !slices.Equal(got.PriorRunIDs, []string{"req-1-001-review1"}) {
-		t.Errorf("round = %+v, want accepted and pushed, decided by the fix attempt's run, naming the first build as prior", got)
-	}
-	if requestdrivertest.LastPushedSHA["factoryd/run-1"] != "cafef00dcafef00dcafef00dcafef00dcafef00d" || replies != 1 {
-		t.Errorf("pushed = %q, replies = %d; want the fix attempt's commit pushed and one reply", requestdrivertest.LastPushedSHA["factoryd/run-1"], replies)
-	}
-}
-
-// TestRunCorrectiveRoundFixAttemptsStopAtTheirBudget: a round runs at most
-// review_corrective_rounds fix attempts. Still quarantined after the last,
-// it is one quarantined round: nothing pushed, one slot of the cap used, and
-// the next round's ticket carries the last attempt's findings.
-func TestRunCorrectiveRoundFixAttemptsStopAtTheirBudget(t *testing.T) {
-	dp := newFakeDeps(t)
-	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
-	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	approveRequestSpec(t, dataDir, r)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	var addenda []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		content, err := os.ReadFile(requestdrivertest.ArgValue(args, "-spec"))
-		if err != nil {
-			return err
-		}
-		addenda = append(addenda, string(content)+earlierAttemptOf(t, args))
-		return reviewFlaggedRoundRun(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), fmt.Sprintf("finding of build %d", len(addenda))).Save(dataDir)
-	}
-	pushes := 0
-	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		pushes++
-		return nil
-	}
-	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: 1}
-	now := time.Now()
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now); err != nil {
-		t.Fatal(err)
-	}
-	rounds := r.Tickets[0].Rounds
-	if len(addenda) != 2 || len(rounds) != 1 || rounds[0].Outcome != request.RoundQuarantined || rounds[0].RunID != "req-1-001-review1-fix1" {
-		t.Fatalf("builds = %d, rounds = %+v; want two builds recorded as one quarantined round decided by the fix attempt", len(addenda), rounds)
-	}
-	if pushes != 0 || len(r.Tickets[0].SeenThreadIDs) != 0 {
-		t.Errorf("pushes = %d, seen = %v; want nothing pushed and the thread still open to the next round", pushes, r.Tickets[0].SeenThreadIDs)
-	}
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, now.Add(2*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if len(addenda) != 4 || len(r.Tickets[0].Rounds) != 2 {
-		t.Fatalf("builds = %d, rounds = %d; want round 2 to run its own two builds", len(addenda), len(r.Tickets[0].Rounds))
-	}
-	if !strings.Contains(addenda[2], "finding of build 2") || strings.Contains(addenda[2], "finding of build 1") {
-		t.Errorf("round 2's inputs should carry the last attempt's finding only:\n%s", addenda[2])
-	}
-}
-
-// TestRunCorrectiveRoundNoFixAttemptWithoutAReviewFinding: a fix attempt
-// answers a reviewer's reproduction only. A round that failed another gate
-// too, whose reviewer gave no verdict, whose high finding had no
-// reproduction the factory ran, or that runs with review_corrective_rounds
-// 0, ends after its one build.
-func TestRunCorrectiveRoundNoFixAttemptWithoutAReviewFinding(t *testing.T) {
-	cases := []struct {
-		name   string
-		budget int
-		first  func(t *testing.T, dataDir, id string) *run.Run
-	}{
-		{"another gate failed too", 1, func(t *testing.T, dataDir, id string) *run.Run {
-			rr := reviewFlaggedRoundRun(t, dataDir, id, "x")
-			rr.GateResults[0].Passed = false
-			return rr
-		}},
-		{"the reviewer gave no verdict", 1, func(t *testing.T, dataDir, id string) *run.Run {
-			return &run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "code_review", Passed: false}}, CodeReview: &run.CodeReviewResult{Policy: "required", Available: false}}
-		}},
-		{"a high finding with no reproduction", 1, func(t *testing.T, dataDir, id string) *run.Run {
-			return &run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "code_review", Passed: false}},
-				CodeReview: &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", File: "a.go", Line: 2, Summary: "x"}}}}
-		}},
-		{"fix attempts disabled", 0, func(t *testing.T, dataDir, id string) *run.Run { return reviewFlaggedRoundRun(t, dataDir, id, "x") }},
-		{"the build halted", 1, func(t *testing.T, dataDir, id string) *run.Run {
-			return &run.Run{ID: id, State: run.StateHalted, HaltError: "relay unreachable", Attempts: []run.Attempt{{}}}
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dp := newFakeDeps(t)
-			threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
-			r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-			builds := 0
-			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-				builds++
-				return tc.first(t, dataDir, requestdrivertest.ArgValue(args, "-ticket")).Save(dataDir)
-			}
-			cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3, ReviewCorrectiveRounds: tc.budget}
-			if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
-				t.Fatal(err)
-			}
-			if rounds := r.Tickets[0].Rounds; builds != 1 || len(rounds) != 1 || len(rounds[0].PriorRunIDs) != 0 {
-				t.Fatalf("builds = %d, rounds = %+v; want one build and no fix attempt", builds, rounds)
-			}
-		})
-	}
 }
 
 // TestRunCorrectiveRoundCancelledDuringARoundRecordsNothing: a request
@@ -2792,21 +2455,13 @@ func TestRunCorrectiveRoundQuarantinedRepliesOnTheThread(t *testing.T) {
 		t.Fatalf("replies = %v, want one per thread per round", replies)
 	}
 	first, last := replies[5][0], replies[5][1]
-	for _, want := range []string{"Attempted in corrective round 1 of 2", "not pushed", "`review_reproduction`", "the factory's run of 'internal/sum/sum_repro_test.go' failed on the result", "nil map write", "The pull request is unchanged.", "round 2 starts on the next poll"} {
+	for _, want := range []string{"Attempted in corrective round 1 of 2", "not pushed", "`tests_red_on_base`", "The pull request is unchanged.", "round 2 starts on the next poll"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("round 1's reply lacks %q:\n%s", want, first)
 		}
 	}
 	if strings.Contains(first, "/Users/someone") {
 		t.Errorf("the reply carries the run's halt error, which can hold local paths:\n%s", first)
-	}
-	if !strings.Contains(first, "- `\"high\" \"nil map write @octocat ''' # heading\"") {
-		t.Errorf("the review's text is not one line in a code span past its own backticks:\n%s", first)
-	}
-	for _, leaked := range neverTold {
-		if strings.Contains(first, leaked) {
-			t.Errorf("the reply carries %q:\n%s", leaked, first)
-		}
 	}
 	if !strings.Contains(last, "Attempted in corrective round 2 of 2") || !strings.Contains(last, "No rounds remain") {
 		t.Errorf("the last round's reply should say no rounds remain:\n%s", last)

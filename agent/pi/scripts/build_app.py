@@ -29,8 +29,7 @@ would fail every round as "review unavailable"); the intake scripts
 
 `--review-policy` governs only the legacy whole-diff "reviewer" extension
 trace. The per-criterion spec-conformity review is retired: the review step
-(combined_review.py) is a separate launch and its findings block only
-through a reproduction the factory runs (SC-022).
+(combined_review.py) is a separate launch and its findings are advice.
 
 Exit code 0 only if canonical verification and the selected review policy
 pass by the round budget.

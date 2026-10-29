@@ -54,8 +54,7 @@ func runInputGoldenConfig(t *testing.T) string {
 // runInputGoldenFlags is the full flag set of the golden runs: the run flags
 // that reach RunWorkflowInput, each with a value that is not its default.
 // -compose-services stays at its default (true), which is the value the JSON
-// shows. -recheck-reproductions names a held copy under a quarantined run
-// the flags write into dataDir. Not set, so absent from the golden: -prior-run,
+// shows. Not set, so absent from the golden: -prior-run,
 // -on-branch, -diff-base, -resume-worktree-of and -replay (each needs an
 // earlier run; TestReplayRunWorkflowInputMatchesGolden covers -replay, which
 // also refuses -earlier-attempt),
@@ -73,18 +72,9 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		}
 		return path
 	}
-	// A quarantined run's held reproduction, for -recheck-reproductions.
-	held := filepath.Join(dataDir, "runs", "golden-quarantined", "review-repro", "0", "held_test.go")
-	if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
-		t.Fatalf("create the held reproduction's directory: %v", err)
-	}
-	if err := os.WriteFile(held, []byte("package p\n"), 0o444); err != nil {
-		t.Fatalf("write the held reproduction: %v", err)
-	}
 	if err := (&run.Run{ID: "golden-quarantined", RequestID: "req-golden", TicketIndex: 1, ProjectPath: workspace}).Save(dataDir); err != nil {
 		t.Fatalf("save the quarantined run: %v", err)
 	}
-	manifest := fmt.Sprintf(`{"request_id":"req-golden","reproductions":[{"run_id":"golden-quarantined","finding":0,"path":"held_test.go","sha256":"%s","host_path":%q,"spec_line":3,"test_ids":["TestHeld"],"runner":"go-test-json"}]}`, strings.Repeat("a", 64), held)
 	head, err := runGit(t, workspace, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("read the workspace's head: %v", err)
@@ -115,9 +105,6 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
-		"-review-reproduction",
-		"-review-spec", write("approved-spec.md", "# Approved spec\n\n- `Parse` returns a map.\n"),
-		"-recheck-reproductions", write("recheck.json", manifest),
 		"-resume-session-of", "golden-quarantined",
 	}
 }
@@ -231,16 +218,6 @@ func runInputGoldenRunWith(t *testing.T, runID string, prepare func(workspace, i
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t))...)
 	out, _ := cmd.CombinedOutput()
 	t.Logf("factoryd output:\n%s", out)
-	// The run record keeps the recheck it was given from its start, for the
-	// build that follows it even when its gates fail before the recheck. A
-	// replay run is given none.
-	if slices.Contains(flags, "-recheck-reproductions") {
-		rec, err := run.Load(dataDir, runID)
-		if err != nil || len(rec.ReviewReproductionRechecksGiven) != 1 || rec.ReviewReproductionRechecksGiven[0].RunID != "golden-quarantined" {
-			t.Errorf("run record's rechecks given = %+v (%v), want the manifest's one entry", rec, err)
-		}
-	}
-
 	resolve := func(path string) string {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
@@ -310,14 +287,10 @@ func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 	var dataDir string
 	address, placeholders := runInputGoldenRunWith(t, "unused", func(workspace, inputs string, flags []string) ([]string, [][2]string) {
 		onto, head := replayedBranch(t, workspace, "buildgate/req-golden/t2-restack1")
-		for _, refused := range []string{"-earlier-attempt", "-run-id", "-review-spec", "-recheck-reproductions", "-resume-session-of"} {
+		for _, refused := range []string{"-earlier-attempt", "-run-id", "-resume-session-of"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
 			}
-		}
-		// A replay run's review is advice only: it takes no reproduction input.
-		if i := slices.Index(flags, "-review-reproduction"); i >= 0 {
-			flags = slices.Delete(flags, i, i+1)
 		}
 		dataDir = flags[slices.Index(flags, "-data-dir")+1]
 		flags = append(flags, "-on-branch", "buildgate/req-golden/t2-restack1", "-diff-base", onto, "-replay", writeReplayFile(t, inputs, onto, head))

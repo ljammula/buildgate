@@ -213,10 +213,6 @@ type Ticket struct {
 	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
 	// changed on its own is never recorded here.
 	Retarget *TicketRetarget `json:"retarget,omitempty"`
-	// Reproductions are the reviewer reproductions every later build of the
-	// ticket must pass again (SC-022, -recheck-reproductions): the ticket's
-	// recheck chain, whose only home this is. See TicketReproduction.
-	Reproductions []TicketReproduction `json:"reproductions,omitempty"`
 	// Order is set on a ticket the host carved from a mixed change by the
 	// repository's pr_order (ReplaceWithCarved); nil on every other ticket.
 	Order *TicketOrder `json:"order,omitempty"`
@@ -254,16 +250,14 @@ type MergeReadiness struct {
 
 // ConformityRoundKind marks a Round as an automatic review corrective round
 // a request recorded when a review's findings could quarantine a run. No
-// round of this kind is started now (a finding refuses a run only through
-// its reproduction, SC-022, and the build that follows it is a
-// CorrectiveRoundKind round); it stays so such a record still reads and
+// round of this kind is started now (a model review's finding is advice,
+// SC-022); it stays so such a record still reads and
 // counts against review_corrective_rounds.
 const ConformityRoundKind = "conformity"
 
 // CorrectiveRoundKind marks a Round as an automatic corrective build that
 // followed a run quarantined by checks a build can fix when told about
-// them (internal/handoff's "corrective" bin), a reviewer's reproduction
-// that refused it included: it is given the factory's record of that run.
+// them (internal/handoff's "corrective" bin): it is given the factory's record of that run.
 // It shares review_corrective_rounds with any ConformityRoundKind round a
 // request recorded before: one budget per ticket build.
 const CorrectiveRoundKind = "corrective"
@@ -465,12 +459,6 @@ type Request struct {
 	TicketIndex int      `json:"ticket_index,omitempty"`
 	TicketCount int      `json:"ticket_count,omitempty"`
 	Tickets     []Ticket `json:"tickets,omitempty"`
-	// DroppedReproductions are the reproductions taken off a ticket's list
-	// (Ticket.Reproductions), with the ticket, who dropped each and why: an
-	// operator's override of a run it refused, a retry of a request halted
-	// because its held copy was gone, or a send-back that discarded the
-	// tickets. Kept on the request, so the record outlives the tickets.
-	DroppedReproductions []DroppedReproduction `json:"dropped_reproductions,omitempty"`
 
 	// Error is the reason recorded by Quarantine or Halt. Empty
 	// otherwise.
@@ -1283,18 +1271,9 @@ func (r *Request) Halt(reason string, now time.Time) error {
 
 // QuarantineCheckCodeReview is the check a request recorded when the
 // code_review gate's findings could quarantine it. No build sets it now (a
-// finding refuses a run only through its reproduction, SC-022:
-// QuarantineCheckReviewReproduction); it stays so such a request still
-// reads its next action.
+// finding is advice, SC-022); it stays so such a request still reads its next
+// action.
 const QuarantineCheckCodeReview = "code_review"
-
-// QuarantineCheckReviewReproduction is set when a reviewer's reproduction
-// refused the ticket's run (the review_reproduction check, SC-022) and no
-// corrective build is left to fix it: the budget is spent, or a corrective
-// build's recheck of the reproduction still failed on its result. The
-// operator reads the finding and decides: adopt the reproduction as a test
-// at pull-request review, or override.
-const QuarantineCheckReviewReproduction = "review_reproduction"
 
 // QuarantineCheckDiffScope is set when a build quarantined because it
 // changed a file outside the ticket's own Allowed-Files: scope, or
@@ -1618,9 +1597,6 @@ func (r *Request) quarantinedNextAction() string {
 	if r.QuarantineCheck == QuarantineCheckCodeReview {
 		return fmt.Sprintf("code_review quarantined -- the reviewer reported blocking defects the corrective round did not fix (see the run's Code review findings); `factoryd retry %s` rebuilds the ticket%s", r.ID, r.sendBackHint())
 	}
-	if r.QuarantineCheck == QuarantineCheckReviewReproduction {
-		return fmt.Sprintf("review_reproduction quarantined -- the factory's run of a reviewer's reproduction test fails on the result (named above). Read the finding in the run's review evidence; if it is right, adopt the reproduction: rebuild with `factoryd retry %s`, or keep it as a test at pull-request review; if it is wrong, override the run: `factoryd override -run <run> -state accepted -by <you> -reason \"...\"`", r.ID)
-	}
 	if r.QuarantineCheck == QuarantineCheckDiffScope {
 		return fmt.Sprintf("diff_scope quarantined -- the build changed files outside the ticket's Allowed-Files, or outside the repository's allowed_paths in .factory.yml (named above). If a file outside Allowed-Files is a legitimate part of this ticket, widen its approved scope: `factoryd amend-scope -reason \"...\" %s <file>...`, then `factoryd retry %s`; a file outside allowed_paths is the repository owner's to allow in .factory.yml; otherwise `factoryd retry %s`%s", r.ID, r.ID, r.ID, r.sendBackHint())
 	}
@@ -1638,8 +1614,6 @@ func (r *Request) quarantinedNextAction() string {
 // piece of advice, easy to read top to bottom.
 func (r *Request) haltedNextAction() string {
 	switch r.HaltKind {
-	case HaltRecheckUnheld:
-		return fmt.Sprintf("`factoryd retry %s` drops the reproductions whose held copy is still missing (recorded on the request) and builds again, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltGateExpired:
 		return fmt.Sprintf("the review expired without a decision: `factoryd retry %s` reopens it, or `factoryd cancel %s`", r.ID, r.ID)
 	case HaltAcceptedNoPR:

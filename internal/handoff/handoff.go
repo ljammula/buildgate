@@ -110,11 +110,6 @@ type Document struct {
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	Rounds       []Round  `json:"rounds,omitempty"`
 	Checks       []Check  `json:"checks,omitempty"`
-	// ReproducedFindings are the review findings whose reproduction the
-	// factory ran and saw block the run (SC-022), present when
-	// review_reproduction failed: each one line, never the reproduction's
-	// content or the reviewer's failure scenario (SC-018).
-	ReproducedFindings []ReproducedFinding `json:"reproduced_findings,omitempty"`
 	// AdviceFindings are the high-severity findings of an accepted run's
 	// review, present only in the record an advice round's build is given
 	// (Advice): each value cut and cleaned like every other value here.
@@ -197,49 +192,11 @@ func Build(r *run.Run, dataDir string) Document {
 			NotJudged:   uncommitted && DiffChecks[finding.Check],
 		})
 	}
-	if failed[policy.ReviewReproductionCheck] {
-		doc.ReproducedFindings = reproducedFindings(r)
-	}
 	doc.Next = Next(r.State == run.StateHalted, doc.Checks)
 	if text, ok := evidence.ReadRetainedAgentNotes(runDir); ok {
 		doc.AgentNotes = parseNotes(text)
 	}
 	return doc
-}
-
-// ReproducedFinding is one blocking finding as a later build is told it:
-// the reviewer's severity and summary, the spec line it cited, the
-// reproduction's path, and one test ID with the failure kind the factory's
-// run recorded for it. Every string is cleaned.
-type ReproducedFinding struct {
-	Severity string `json:"severity"`
-	Summary  string `json:"summary"`
-	SpecLine int    `json:"spec_line,omitempty"`
-	Path     string `json:"path"`
-	TestID   string `json:"test_id,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-}
-
-// reproducedFindings lists the run's blocking findings, at most
-// maxReviewItems.
-func reproducedFindings(r *run.Run) []ReproducedFinding {
-	if r.CodeReview == nil {
-		return nil
-	}
-	var out []ReproducedFinding
-	for _, f := range r.CodeReview.Findings {
-		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil || len(out) == maxReviewItems {
-			continue
-		}
-		rf := ReproducedFinding{Severity: clean(f.Severity, maxWordLen), Summary: clean(f.Summary, maxSentenceLen), Path: clean(f.Reproduction.Path, maxNameLen)}
-		if f.SpecLine != nil {
-			rf.SpecLine = f.SpecLine.Number
-		}
-		id, kind := f.Reproduction.FailedTest()
-		rf.TestID, rf.Kind = clean(id, maxNameLen), clean(kind, maxWordLen)
-		out = append(out, rf)
-	}
-	return out
 }
 
 // AdviceFinding is one high-severity finding of an accepted run's review as
@@ -567,13 +524,6 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
-	if len(d.ReproducedFindings) > 0 {
-		b.WriteString("## Reproduced review findings\n\n")
-		for _, f := range d.ReproducedFindings {
-			b.WriteString(f.line())
-		}
-		b.WriteString("\n")
-	}
 	if len(d.AdviceFindings) > 0 {
 		b.WriteString("## A reviewer's concerns about the accepted change\n\n")
 		b.WriteString(adviceIntro)
@@ -630,19 +580,6 @@ func (d Document) Markdown() string {
 	return out
 }
 
-// ReproducedFindingLines is each blocking finding of r (at most
-// maxReviewItems) as the one list line a later build is told of it, for
-// text other than the Document: the reply a pull-request review round posts
-// on the reviewer's thread. Never the reproduction's content or the failure
-// scenario.
-func ReproducedFindingLines(r *run.Run) []string {
-	var lines []string
-	for _, f := range reproducedFindings(r) {
-		lines = append(lines, f.line())
-	}
-	return lines
-}
-
 // CleanSentence is s as this package makes a sentence someone else wrote
 // safe to show: one line, cut to a fixed length, with no backtick, escape or
 // recognisable secret. CleanWord is the same for a single word.
@@ -650,20 +587,6 @@ func CleanSentence(s string) string { return clean(s, maxSentenceLen) }
 
 // CleanWord: see CleanSentence.
 func CleanWord(s string) string { return clean(s, maxWordLen) }
-
-// line is the finding's one list line: the reviewer's words quoted, the
-// factory's in the sentence.
-func (f ReproducedFinding) line() string {
-	cited := ""
-	if f.SpecLine > 0 {
-		cited = fmt.Sprintf(" (spec line %d)", f.SpecLine)
-	}
-	failure := ""
-	if f.TestID != "" {
-		failure = fmt.Sprintf(": %s %s", quote(f.TestID), f.Kind)
-	}
-	return fmt.Sprintf("- %s %s%s: the factory's run of `%s` failed on the result%s\n", quote(f.Severity), quote(f.Summary), cited, f.Path, failure)
-}
 
 const maxFilesInLine = 12
 

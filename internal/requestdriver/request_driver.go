@@ -950,9 +950,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
 	args, recordOf, onBranch, escalated, err := ticketBuildStart(dp, dataDir, r, ticket, cfg, resumeRunID, escalated)
-	if errors.Is(err, errNoRecheck) {
-		return haltWithoutRecheck(dataDir, r, err, now)
-	}
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -1013,9 +1010,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// one second after building began -- before the run had even started --
 	// for a build that took four minutes.
 	now = time.Now()
-	// What refused the build goes on the ticket's list (SC-022) at once,
-	// whatever becomes of the request next: every later build rechecks it.
-	noteRunRefusals(dataDir, r, ticket.Index, ticket.RunID)
 	// stillInState: see its own doc comment. Checked once, after runner
 	// above returns (the build itself is the long-running job here), before
 	// any of runErr/runRecord's outcome is persisted below -- a cancel that
@@ -1477,13 +1471,10 @@ func reviewShapeOnly(runRecord *run.Run) bool {
 
 // quarantineCheckOf names the check a request's quarantine records for a
 // quarantined ticket run, so NextAction leads with that check's remedy:
-// review_reproduction when a reviewer's reproduction refused the run
-// (SC-022), diff_scope when the diff left Allowed-Files (amend-scope), none
+// diff_scope when the diff left Allowed-Files (amend-scope), none
 // otherwise.
 func quarantineCheckOf(runRecord *run.Run) string {
 	switch {
-	case failedGate(runRecord, policy.ReviewReproductionCheck):
-		return request.QuarantineCheckReviewReproduction
 	case failedGate(runRecord, "diff_scope"):
 		return request.QuarantineCheckDiffScope
 	}
@@ -1623,11 +1614,6 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 		}
 		recordRoundStarted(dataDir, r, ticket, started.ID, advice)
 	})
-	// What refused the round goes on the ticket's list at once, whatever
-	// becomes of the request next.
-	if !advice {
-		noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
-	}
 	// stillInState: see AdvanceBuilding's own identical check and doc
 	// comment. A cancel that lands while this round built must not be
 	// resurrected by the caller's own r.Save calls.
@@ -1692,9 +1678,6 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		diffBase := current.DiffBase()
 		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
 		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
-		if errors.Is(err, errNoRecheck) {
-			return true, haltWithoutRecheck(dataDir, r, err, now)
-		}
 		if err != nil {
 			return true, fmt.Errorf("request %s: ticket %d: %s %d: %w", r.ID, ticket.Index, plan.label, roundIndex, err)
 		}
@@ -1824,7 +1807,7 @@ func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Tick
 // recovery from a failure, it runs on the execution role's model, never the
 // escalation.
 func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR bool) ([]string, error) {
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath, true)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath)
 	if err != nil {
 		return nil, err
 	}
@@ -2278,7 +2261,7 @@ func RequestSpecPath(dataDir, id string) string {
 // harness instead of the request's actual one. One shared builder keeps
 // them in step: the PR-review round built its own too and ran with no
 // acceptance-criteria file, so no spec_conformity review at all.
-func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string, reproduce bool) (*QueueEntry, error) {
+func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string) (*QueueEntry, error) {
 	// prBase: ticket N (N>1) stacks its draft PR on ticket N-1's own
 	// branch while that PR is still open and unmerged -- see
 	// QueueEntry.PRBase's own doc comment for why.
@@ -2317,27 +2300,20 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, cfg.Settings.ReviewReproductions)
-	if err != nil {
-		return nil, err
-	}
 	scopeApproved, scopeWhy := request.ScopeApproved(r, ticket.Index)
 	noTicketScope := isUnmodifiedSpecTicket(dataDir, r, ticket)
 	if !scopeApproved && !noTicketScope {
 		log.Printf("request %s ticket %d: Allowed-Files is not a person's list (%s): files outside it are PR notes", r.ID, ticket.Index, scopeWhy)
 	}
 	return &QueueEntry{
-		ID:                   id,
-		Workspace:            r.Workspace,
-		Project:              r.Project,
-		SpecPath:             specPath,
-		ReviewSpecPath:       review.SpecPath,
-		ReviewReproduction:   review.Reproduce,
-		RecheckReproductions: review.Recheck,
-		VerifyCommand:        verifyCommand,
-		FullSuiteCommand:     fullSuiteCommand,
-		FullSuiteSource:      fullSuiteSource,
-		Bug:                  r.Bug && ticket.Index == 1,
+		ID:               id,
+		Workspace:        r.Workspace,
+		Project:          r.Project,
+		SpecPath:         specPath,
+		VerifyCommand:    verifyCommand,
+		FullSuiteCommand: fullSuiteCommand,
+		FullSuiteSource:  fullSuiteSource,
+		Bug:              r.Bug && ticket.Index == 1,
 		// ExecutionHarness: r.Harnesses["execution"] is `factoryd submit
 		// -harness execution=...` / the API's own "harnesses" field, already
 		// validated at submit time (sessionconfig.ValidateRequestHarnesses)
@@ -2397,62 +2373,11 @@ func isUnmodifiedSpecTicket(dataDir string, r *request.Request, ticket request.T
 	return err == nil && bytes.Equal(spec, content)
 }
 
-// reviewInputs are a ticket build's review inputs: SpecPath, the approved
-// spec its review cites (-review-spec), set only with Reproduce; Reproduce, whether it holds and runs
-// the review's reproductions (-review-reproduction, SC-022); and Recheck,
-// its -recheck-reproductions manifest.
-type reviewInputs struct {
-	SpecPath  string
-	Reproduce bool
-	Recheck   string
-}
-
-// reproductionInputs are a ticket build's review inputs. review is false for
-// a restack's replay run, which cannot take a corrective build: it gets none,
-// and the ticket's list stays as it is. hold is the session config's
-// review_reproductions off (the default) gives the build no approved spec and
-// holds no new reproduction, so every finding of the build's review is advice
-// (the spec is still checked against its approval); a ticket
-// whose list is not empty (a refusal recorded while it was on) is still
-// rechecked against that list, and so still holds. A ticket whose list is not
-// empty is never built without it: with no approved spec to run them under,
-// the build is refused (errNoRecheck).
-func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
-	in, err := reproductionInputsWithSpec(dataDir, r, index, buildID, review, hold)
-	if !in.Reproduce {
-		in.SpecPath = ""
-	}
-	return in, err
-}
-
-func reproductionInputsWithSpec(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
-	if !review {
-		return reviewInputs{}, nil
-	}
-	reviewSpec, err := approvedSpecPath(dataDir, r)
-	if err != nil {
-		return reviewInputs{}, err
-	}
-	if index < 1 || index > len(r.Tickets) {
-		return reviewInputs{SpecPath: reviewSpec, Reproduce: hold && reviewSpec != ""}, nil
-	}
-	ticket := &r.Tickets[index-1]
-	if reviewSpec == "" {
-		if len(ticket.Reproductions) > 0 {
-			return reviewInputs{}, fmt.Errorf("ticket %d: %w: the request has no approved spec to run them under", index, errNoRecheck)
-		}
-		return reviewInputs{}, nil
-	}
-	recheck, err := ticketRecheck(dataDir, r, ticket, buildID)
-	return reviewInputs{SpecPath: reviewSpec, Reproduce: hold || recheck != "", Recheck: recheck}, err
-}
-
 // requestSpecFile is the request's spec, relative to its directory.
 const requestSpecFile = "spec.md"
 
 // approvedSpecPath is the request's spec.md when spec_review approved it by
-// hash: the spec a ticket build's review cites and its reproduction check
-// compares citations with (SC-022). "" for a request with no approved spec
+// hash: the spec a ticket's challenger is given (SC-022). "" for a request with no approved spec
 // hash. A spec whose content no longer matches the approval is an error, so
 // a review never cites an unapproved line.
 func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
@@ -2535,7 +2460,7 @@ func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath, true)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath)
 	if err != nil {
 		return nil, err
 	}

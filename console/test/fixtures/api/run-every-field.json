@@ -446,52 +446,7 @@
         "file": "every-field file",
         "line": 3,
         "summary": "every-field summary",
-        "failure_scenario": "every-field failure_scenario",
-        "spec_line": {
-          "number": 3,
-          "text": "every-field text"
-        },
-        "reproduction": {
-          "path": "every-field path",
-          "sha256": "every-field sha256",
-          "runner": "every-field runner",
-          "test_ids": [
-            "every-field test_ids"
-          ],
-          "refused": "every-field refused",
-          "runs": [
-            {
-              "pass": "every-field pass",
-              "commit": "every-field commit",
-              "outcome": "every-field outcome",
-              "tests": {
-                "every-field key": "every-field tests"
-              },
-              "exit_code": 3,
-              "log_path": "every-field log_path",
-              "report_sha256": "every-field report_sha256",
-              "reproduction_sha256": "every-field reproduction_sha256",
-              "cap_exceeded": true
-            }
-          ],
-          "verdict": "every-field verdict",
-          "reason": "every-field reason",
-          "recheck": {
-            "run_id": "every-field run_id",
-            "finding": 3,
-            "path": "every-field path",
-            "refused": "every-field refused",
-            "sha256": "every-field sha256",
-            "host_path": "every-field host_path",
-            "spec_line": 3,
-            "test_ids": [
-              "every-field test_ids"
-            ],
-            "runner": "every-field runner",
-            "holds_literal": true
-          }
-        },
-        "disposition": "every-field disposition"
+        "failure_scenario": "every-field failure_scenario"
       }
     ]
   },

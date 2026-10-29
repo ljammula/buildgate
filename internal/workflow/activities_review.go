@@ -281,7 +281,7 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(relaunchUnserved(relaunchUnstartedOnly(withReviewSpec(prep.launchContext(ctx), input.RunWorkflowInput))), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(relaunchUnserved(relaunchUnstartedOnly(prep.launchContext(ctx))), input.RunWorkflowInput, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), beforeAttempt, afterAttempt, &relaySpec, nil, nil, reviewHarnessEnv(input.RunWorkflowInput), skills, buildAppInterpreter, args...)
 	})
 	// Immediately after the launch, before the clean check below: the stubs
 	// a mask over an absent path needed, and the snapshot's scratch.
@@ -292,38 +292,14 @@ func (a *Activities) RunReviewStepActivity(ctx context.Context, input ReviewStep
 
 // reviewStepArgs builds the review launch's harness-script argv.
 // input.SpecPath is already unconditionally staged by
-// a.runSandboxWithRetries (specPath) for every review-step launch; the
-// approved spec (input.ReviewSpecPath, a run with -review-spec) is staged
-// beside it by withReviewSpec, and --reproductions is passed, only when the
-// build holds reproductions (input.ReviewReproduction): the spec is sent to
-// the reviewer only to be cited. Otherwise every finding is advice and the
-// reviewer sees neither the numbered spec nor the reproduction rules. input.effectiveDiffBase(), not
-// input.BaseSHA: see RunWorkflowInput.DiffBaseSHA's own doc comment -- a
-// corrective round's own BaseSHA is just its checkout point, not the
-// cumulative diff a -diff-base override names for this review to read.
+// a.runSandboxWithRetries (specPath) for every review-step launch. The review
+// is advice: it is given no approved spec and holds nothing.
+// input.effectiveDiffBase(), not input.BaseSHA: see
+// RunWorkflowInput.DiffBaseSHA's own doc comment -- a corrective round's own
+// BaseSHA is just its checkout point, not the cumulative diff a -diff-base
+// override names for this review to read.
 func reviewStepArgs(input ReviewStepInput, script string) []string {
-	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, reviewSpecPathFor(input.RunWorkflowInput), input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness), input.ReviewReproduction)
-}
-
-// reviewSpecPathFor is the approved spec the review launch is given: the
-// run's snapshot when the build holds reproductions (the reviewer cites its
-// lines), empty otherwise (nothing to cite).
-func reviewSpecPathFor(input RunWorkflowInput) string {
-	if !input.ReviewReproduction {
-		return ""
-	}
-	return input.ReviewSpecPath
-}
-
-// withReviewSpec stages the approved spec (reviewSpecPathFor) beside the
-// ticket's spec for the review launch, which reads it as --approved-spec; ctx
-// unchanged when there is none.
-func withReviewSpec(ctx context.Context, input RunWorkflowInput) context.Context {
-	path := reviewSpecPathFor(input)
-	if path == "" {
-		return ctx
-	}
-	return withExtraRunInputs(ctx, path)
+	return reviewstep.CombinedArgs(script, input.WorkspacePath, input.SpecPath, input.CodeReviewPolicy, input.effectiveDiffBase(), input.ReviewThinking, harnessArg(input.ReviewHarness))
 }
 
 // retiredReviewStep reports whether input is a review a retired plan
@@ -394,16 +370,6 @@ func (a *Activities) completeReviewStep(ctx context.Context, input ReviewStepInp
 			if err == nil && !clean {
 				err = fmt.Errorf("%s left the workspace dirty -- refusing to auto-commit reviewer-authored output", step.Label)
 			}
-		}
-	}
-	if runErr == nil && err == nil && reviewStepPassed(result.ExitCode) {
-		// SC-022: the reproductions are held from the clean worktree the
-		// review judged, before the checkpoint records the review, and only
-		// when the launch gave a verdict: a review with no verdict holds
-		// nothing.
-		var holdErr error
-		if stepResult.Reproductions, holdErr = a.holdReproductions(ctx, input.RunWorkflowInput); holdErr != nil {
-			return a.failHold(ctx, step.Label, checkpoint, path, stepResult, holdErr)
 		}
 	}
 	errType := launchErrorType(stepErr(ctx, runErr))

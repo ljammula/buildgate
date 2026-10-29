@@ -392,8 +392,7 @@ func FullSuiteVerify(cmd []string, exitCode int, durationMs int64, logSHA256 str
 // entirely in that case, the same convention FullSuiteVerify already
 // follows. exitCode is the gate's exit code decoded from the launch
 // (reviewstep.ReviewExitCode): 0 when the reviewer gave a verdict, or under
-// "advisory" regardless; findings never fail it (SC-022: a finding refuses a
-// run only through its reproduction).
+// "advisory" regardless; findings never fail it (SC-022).
 func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
 	return run.GateResult{
 		Check:      "code_review",
@@ -402,33 +401,6 @@ func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) 
 		ExitCode:   exitCode,
 		DurationMs: durationMs,
 		LogSHA256:  logSHA256,
-	}
-}
-
-// ReviewReproductionCheck is the check through which a reviewer's finding
-// refuses a run (SC-022).
-const ReviewReproductionCheck = "review_reproduction"
-
-// ReviewReproductionInput is the factory's runs of the reproductions a
-// review held (SC-022): how many it decided, and how many of those refuse
-// the run (a finding whose reproduction blocks, or, after a corrective build,
-// a held reproduction still failing on its result).
-type ReviewReproductionInput struct {
-	Decided  int
-	Refusing int
-}
-
-// ReviewReproduction evaluates the review_reproduction check: it fails iff
-// any reproduction refuses the run. A finding that is advice never fails it.
-func ReviewReproduction(in ReviewReproductionInput) run.GateResult {
-	exitCode := 0
-	if in.Refusing > 0 {
-		exitCode = 1
-	}
-	return run.GateResult{
-		Check:    "review_reproduction",
-		Passed:   in.Refusing == 0,
-		ExitCode: exitCode,
 	}
 }
 
@@ -522,11 +494,6 @@ type EvaluateRunInput struct {
 	CodeReviewExitCode   int
 	CodeReviewDurationMs int64
 	CodeReviewLogSHA256  string
-
-	// ReviewReproduction is nil exactly when the run took no reproduction
-	// phase (a run without -review-reproduction, or one that never reached
-	// the review), and EvaluateRun then skips the review_reproduction check.
-	ReviewReproduction *ReviewReproductionInput
 }
 
 // EvaluateRunResult is EvaluateRun's outcome: every gate that actually ran
@@ -617,9 +584,6 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 
 	if input.CodeReviewCommand != nil {
 		accepted = result.add(CodeReview(input.CodeReviewCommand, input.CodeReviewExitCode, input.CodeReviewDurationMs, input.CodeReviewLogSHA256)) && accepted
-	}
-	if input.ReviewReproduction != nil {
-		accepted = result.add(ReviewReproduction(*input.ReviewReproduction)) && accepted
 	}
 
 	result.Accepted = accepted

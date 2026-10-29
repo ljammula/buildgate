@@ -28,22 +28,11 @@ import (
 // judges the result against the same spec as the first build's, and sees
 // nothing the earlier build or its checks wrote.
 //
-// A run a reviewer's reproduction refused (review_reproduction, SC-022) is
-// one of these: the record tells the build each blocking finding in one
-// cleaned line (handoff.ReproducedFinding: severity, summary, cited spec
-// line, the reproduction's path, one failing test and its kind), never the
-// reproduction or the reviewer's failure scenario, and the build mounts no
-// copy of the reproduction. Like every build of the ticket, it is given
-// -recheck-reproductions from the ticket's list (ticketRecheck): its
-// workflow runs each held copy once on its result, and anything but a pass
-// refuses it again, whatever its own review says.
-//
 // Budget, launch, recording and outcomes are runCorrectiveRounds':
 // -review-corrective-rounds is one budget per ticket build, the launch
 // budget is checked before each round, an accepted round is the ticket's
 // accepted run, and a round that quarantines again runs again only while
-// the budget lasts and only when a round still applies to it; one whose
-// recheck is still failing never does.
+// the budget lasts and only when a round still applies to it.
 func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
 	plan := correctivePlan{
 		kind: request.CorrectiveRoundKind, suffix: "corrective", label: "corrective round",
@@ -287,4 +276,12 @@ func writeRecordFile(dir string, doc handoff.Document, start string) (string, er
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// automaticCorrectionMayFollow reports whether an automatic corrective build
+// may follow quarantined on its commits: a build may be given its record
+// (handoffForABuild).
+func automaticCorrectionMayFollow(dataDir string, quarantined *run.Run) bool {
+	_, ok := handoffForABuild(dataDir, quarantined)
+	return ok
 }

@@ -2,8 +2,7 @@
 // review phase that runs after build/verify (and every repository gate) have
 // already passed and the workspace holds a real, already-committed result:
 // one launch of agent/pi/scripts/combined_review.py, a free-form code review
-// whose findings may cite a line of the approved spec and carry a
-// reproduction (SC-022). The Temporal workflow (internal/workflow) reads
+// whose findings are advice. The Temporal workflow (internal/workflow) reads
 // CombinedStep for the step's name, progress-feed stage, halt/error label, harness
 // script, and evidence file, and decodes the launch's exit status through
 // ReviewExitCode.
@@ -101,27 +100,16 @@ func ReviewExitCode(exit int) int {
 }
 
 // CombinedArgs constructs the argv passed to combined_review.py. specHostPath
-// is the ticket's spec (staged as this launch's own specPath, context only).
-// approvedSpecHostPath is the approved spec the reviewer may cite, numbered
-// (staged like specHostPath: each host path here must appear verbatim in this
-// argv for the sandbox staging's exact-string substitution to translate it to
-// the in-container path). approvedSpecHostPath, baseSHA and thinking are
-// omitted from the argv entirely when empty, so an unset value never appears
-// as an empty flag. reproductions adds --reproductions: the build holds the
-// reproductions the review's findings carry (SC-022), so the review is asked
-// for spec lines and reproductions; without it the review is advice on design,
-// security, maintainability and risk, and approvedSpecHostPath should be empty.
-func CombinedArgs(script, workspace, specHostPath, approvedSpecHostPath, reviewPolicy, baseSHA, thinking, harness string, reproductions bool) []string {
+// is the ticket's spec (staged as this launch's own specPath, context only):
+// each host path here must appear verbatim in this argv for the sandbox
+// staging's exact-string substitution to translate it to the in-container
+// path. baseSHA and thinking are omitted from the argv entirely when empty,
+// so an unset value never appears as an empty flag.
+func CombinedArgs(script, workspace, specHostPath, reviewPolicy, baseSHA, thinking, harness string) []string {
 	args := []string{
 		script,
 		"--workspace", workspace,
 		"--spec", specHostPath,
-	}
-	if approvedSpecHostPath != "" {
-		args = append(args, "--approved-spec", approvedSpecHostPath)
-	}
-	if reproductions {
-		args = append(args, "--reproductions")
 	}
 	args = append(args, "--review-policy", reviewPolicy)
 	if baseSHA != "" {

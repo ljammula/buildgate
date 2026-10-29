@@ -246,7 +246,7 @@ func TestReplayRunReviewSchedulesNoReproduction(t *testing.T) {
 	f.env.RegisterActivityWithOptions(func(context.Context, ReproductionRunInput) (ReproductionRunResult, error) {
 		t.Error("a replay run launched a reproduction")
 		return ReproductionRunResult{}, nil
-	}, activity.RegisterOptions{Name: RunReviewReproductionActivityName})
+	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 
 	result, err := f.run(t, input)
 	if err != nil || result.State != run.StateAccepted {
@@ -255,10 +255,7 @@ func TestReplayRunReviewSchedulesNoReproduction(t *testing.T) {
 	if !slices.Contains(f.started, ApplyReplayActivityName) || !slices.Contains(f.started, RunReviewStepActivityName) {
 		t.Errorf("Activities started = %v, want the replay applied and the review run", f.started)
 	}
-	if slices.Contains(f.started, RunReviewReproductionActivityName) || result.ReviewReproductions != nil {
+	if slices.Contains(f.started, RunHeldTestActivityName) || result.ReviewReproductions != nil {
 		t.Errorf("Activities started = %v, findings %+v; want no reproduction", f.started, result.ReviewReproductions)
-	}
-	if _, ok := reproductionGate(result); ok {
-		t.Errorf("gates = %+v, want no review_reproduction check", result.GateResults)
 	}
 }

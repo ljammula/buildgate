@@ -317,11 +317,8 @@ meanwhile; the factory marks it ready again by its usual rule (checks pass,
 no thread open, the release decision allows the new head), so no ready state
 crosses a head the factory changed.
 
-A finding of the review never quarantines a ticket by its severity: it
-refuses the run only through a reproduction the factory ran
-(`review_reproduction`, below), and a run that check refused gets the same
-corrective build as any other check a build can fix (below), with its
-reproductions rechecked. A review that gave no verdict (the reviewer timed
+A finding of the review never quarantines a ticket, whatever its severity:
+it is advice. A review that gave no verdict (the reviewer timed
 out, returned nothing parseable, or had its model calls refused by the spend
 meter or by the model provider's own limit) is not actionable, gets no round
 and is no quarantine: the request waits in `resume_review` with the cause,
@@ -361,43 +358,6 @@ in the verify or a gate, are sorted as the failed check they are), a
 halt, and a run with no handoff or one that no longer matches its record.
 When verification never passed and the attempt committed nothing, the checks
 on its diff are not judged and the run is sorted on the others.
-
-A run a reviewer's reproduction refused (`review_reproduction`, SC-022) gets
-this corrective build too, with what the factory ran and nothing else:
-
-| | |
-|---|---|
-| Told | Each blocking finding as one line of the record (`## Reproduced review findings`: severity, summary, the cited spec line, the reproduction's path, one failing test and its kind). Never the reproduction, the reviewer's failure scenario, a finding that is advice, or a high finding with no reproduction the factory ran |
-| Mounted | Nothing more: the build does not see the reproduction |
-| Rechecked | The ticket's list of reproductions (`reproductions` on the ticket in the request record): every reproduction that refused a run of the ticket, each once by path and hash, with the id of the run that holds it (path, SHA-256, runner, test IDs, the host copy under that run's `review-repro/`). Every build of the ticket gets it as a manifest in `rounds/<build>/recheck.json`, checked again by `factoryd` before the build starts (each run a run of the request). The build's workflow runs each copy once on its result, after the gates and before its own review; anything but a pass on every test refuses the build |
-| Still failing | The recheck runs once per automatic build: a round whose recheck still fails is not followed by another, whatever the budget, and the request is quarantined with check `review_reproduction`, its reason the run's triage sentence (``review_reproduction: "<path>" still fails on the result commit after the corrective build ("<test>" <kind>); …``). A new blocking finding in the round's own review is a new refusal: it gets the next round while the budget lasts |
-| No build | A held copy that is gone or no longer matches its hash: no build of the ticket, the request halted with halt kind `recheck_unheld` and the paths. `factoryd retry <id>` checks each copy again, takes those still missing off the list (recorded on the request, under `dropped_reproductions`, with the ticket, who and why) and builds again. Not the run's unresolved cause `reproduction_unheld`, which halts one run whose copy could not be held or mounted while it ran (see below) |
-
-Every build of the ticket rechecks the list the same way: a retry, a
-`retry -from <N>`, a resume and every PR-review round, also after a recheck
-that still fails and after an accepted or restacked round. The list grows
-only by refusals, each bounded by `review_corrective_rounds` and
-`max_review_rounds`. A reproduction's refusal of a run `factoryd override`
-accepted is taken off it (recorded under `dropped_reproductions`, with the
-runs it covers): the override is the decision on that refusal. A send-back
-to spec or to plan discards the tickets and with them their lists: an
-operator's action that ends the chain, each entry recorded under
-`dropped_reproductions` with who sent it back. A drop covers only the
-refusals it was made for (the ticket and the runs): the same reproduction
-refusing another run, a later one or one of a ticket planned again, is on
-the list again. A run that started before the request's last send-back
-notes nothing: the tickets it judged are gone. A restack's replay run holds and runs no reproduction, and leaves the
-list for the round after it. The list is written to the request as soon as
-the run that a reproduction refused ends, whatever the request's state, and
-each build first notes again what refused every run recorded on the ticket;
-one window is left: a worker killed inside a PR-review round, between a fix
-attempt's end and that write, when the attempt's run is not yet on the
-ticket.
-
-| Token | What it is | Way out |
-|---|---|---|
-| `recheck_unheld` | A request's halt kind: a build of the ticket would run without a reproduction on its list whose held copy is gone or changed | `factoryd retry <id>` drops the ones still missing, recorded, and builds again |
-| `reproduction_unheld` | A run's unresolved cause: a copy could not be held, no longer matched its hash before a launch, or its mount was refused during that run | `factoryd resume <id>` or `-from scratch` (resume_review) |
 
 The build agent's own notes for the next attempt (the last section of
 `earlier-attempt.md`, labelled as the agent's unverified view):
@@ -513,29 +473,13 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
 - A round passes every gate the ticket's first build passes, judged on the
   whole pull request diff: verify, the full suite, the diff-shape gates,
   and the code review.
-- A round a reviewer's reproduction alone refused (only `review_reproduction`
-  failed, SC-022) gets up to `review_corrective_rounds` fix attempts
-  (default `1`, `0` disables) on the same branch before it ends, each given
-  the record of the attempt before it (`-earlier-attempt`, the reproduced
-  findings one line each) and rechecking its held copies; an attempt whose recheck still fails gets no
-  further one. A high finding with no
-  reproduction the factory ran starts no fix attempt and is told to no later
-  build. The last attempt decides the round, and the round uses
-  one slot of `max_review_rounds` however many attempts it took. The request
-  page links each earlier attempt's run under the round.
 - A quarantined attempt's commits stay on the local branch, unpushed, and
   the next attempt or round builds on them. Each one's ticket is the
   ticket's own spec plus `## Reviewer comments to address` (each open
-  trusted thread: path, line, author, body). After an attempt a reviewer's
-  reproduction refused, the next attempt or round is also given that
-  attempt's record as `-earlier-attempt` (opening by saying the attempt's
-  commit is in the workspace; its blocking findings one line each under
-  `## Reproduced review findings`: severity, summary, cited spec line, the
-  reproduction's path, one failing test and its kind; never the failure
-  scenario or the reproduction). Every attempt and round rechecks the
-  ticket's list of reproductions (see "Corrective builds"), whatever the
-  round before it was, so a later round cannot undo a fix a reproduction
-  proved. The reply posted on the thread quotes the same lines.
+  trusted thread: path, line, author, body). After a quarantined attempt, the
+  next round is also given that attempt's record as `-earlier-attempt`
+  (opening by saying the attempt's commit is in the workspace; the failed
+  checks, SC-018).
 - No new threads, still a draft, checks passing, no unresolved thread
   from any non-bot/non-self author (trusted or not — an untrusted human's
   open comment still blocks readiness, it just can't trigger a round),
@@ -1112,7 +1056,7 @@ back to `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust, plus
 `__tests__/`). The factory then runs those files, in the gate sandbox, on a
 scratch checkout of the base commit and one of the result commit, each with the
 result commit's copy of the file mounted read-only over its path (the toolchain
-runner picks the command, as for a review's reproduction). Only the change's
+runner picks the command, SC-022). Only the change's
 own tests are judged: a test ID the result commit's copy of a changed file holds
 and the base commit's copy does not, or one whose block in that file (the
 runner's host parse gives its lines) holds a line the change added, rewrote or
@@ -1138,7 +1082,7 @@ result (`tests_red_on_base` in `run.json`), never the file's content, and
 reason (no runner for its path, a failed host parse, no test of it changed, a
 cap on a new file, unreadable or empty at the result commit, or past the 3
 files). The pull request's notes name each such file and its reason. A launch that fails to start halts the
-run for a human like a review reproduction does, and a build that failed this
+run for a human, and a build that failed this
 gate is told in one line (`tests_red_on_base: the changed tests pass on the base
 commit, so they do not exercise the change`), then rebuilt once like any
 corrective check. Plan drafting rejects a ticket up front, before it ever
@@ -1229,15 +1173,8 @@ Every finding that is advice reaches the PR body under `## Reviewer advice`,
 one line each (`- **<severity>** <summary>`, made one line, cut to 300
 characters and stripped of backticks, escapes and recognisable credentials),
 `high` first and capped at 20; never its file, failure scenario or
-reproduction. A finding blocks a run only through a reproduction the factory
-runs itself (SC-022 in `safety-contract.md`), and only on a request's ticket
-build:
-
-| Run | Review |
-|---|---|
-| A request's ticket build, its corrective rounds and its PR-review rounds | Findings are advice; a reproduction can refuse the run (`review_reproduction`), and a refused run gets one corrective build that rechecks it |
-| A bare `factoryd -ticket` run | Advice only: no reproduction is held or run, no `review_reproduction` check, no corrective round |
-| A restack's replay run | Advice only, the same |
+reproduction. A finding never refuses a run or starts a build (SC-022 in
+`safety-contract.md`): the review writes no test the factory runs.
 
 Severity orders the advice, and with `review_advice_rounds` above `0` picks
 what an advice round is given (below); nothing else. An answer without a parseable verdict is asked for
@@ -1263,46 +1200,22 @@ its own review and checks;
 | When | The run (a ticket's first build, or its accepted corrective round) opened its pull request. Round k+1 runs only after round k was accepted and pushed and its own review recorded a `high` finding. Never with pull requests off. Skipped, with a log line, when a launch budget is reached or has less left than the run the round repeats spent; a round's spend counts toward `request_token_budget` and `request_cost_budget_micro_usd` like any build's |
 | Build | One build of the ticket on the run's branch (`-on-branch`, `-diff-base`), run `<request>-<ticket>-advice<k>`, with the ticket's unchanged spec, no pull request of its own, and the execution role's model (never `roles.execution.escalation`: it is not recovery from a failure). Its `-earlier-attempt` record (`rounds/<ticket>-advice<k>/earlier-attempt.md`) says the attempt was accepted and lists the `high` findings of the run it follows, at most five (severity, file and line, summary, failure scenario, each one line, cut and cleaned): check each, fix each that is real with a test, leave the rest. Every gate and a fresh review run again. While it builds, the ticket's run stays the one it follows; the round is on the ticket as `advice` (`of`, `run_id`, `since`) |
 | Accepted | Its result is pushed to the pull request's branch under the checks a PR-review round's push takes (release decision allowed, same branch, the remote head an ancestor of the result, the pull request back to draft, push `<sha>:refs/heads/<branch>`, read back). Its run becomes the ticket's run, which a later ticket stacks on, and the pull request gets one comment: the findings the round was given, its run and commit, and its own review's findings, severity and summary only. The round is on the ticket (`rounds`, kind `advice`, `pushed`) |
-| Anything else | Quarantined, halted, never started, no verdict, a release decision not allowed, a push check that refuses (a failed draft conversion included): nothing is pushed, the round is recorded with its reason, the local branch is put back on the commit of the run it followed (only from a commit that descends from it), and that run stays the ticket's. A branch that cannot be put back halts the request only while it still points past that commit. A reproduction that refused the round goes on no ticket's list |
+| Anything else | Quarantined, halted, never started, no verdict, a release decision not allowed, a push check that refuses (a failed draft conversion included): nothing is pushed, the round is recorded with its reason, the local branch is put back on the commit of the run it followed (only from a commit that descends from it), and that run stays the ticket's. A branch that cannot be put back halts the request only while it still points past that commit. |
 | Push failed | A push or read-back that fails once sent halts the request, as for a PR-review round: the commit may be on the remote |
 | Interrupted | A worker that stops mid-round leaves it in flight on the ticket; the next pass settles it from its run, never building it again, and runs the rounds that still apply. A run that has not ended is waited for until a ticket build's own limit (48 hours) and an hour have passed since the round started, then the round is settled as halted. A worker lost mid-round parks the request in `resume_review` as for any lost build; whatever is chosen there, the round is settled the same way. A request that reaches `pr_review` with a round still in flight (a halt, then `factoryd retry`) records it as not pushed once its run has ended |
 
 They count against neither `review_corrective_rounds` nor `max_review_rounds`.
 
-A request's ticket build runs the reviewer's reproductions (the
-`review_reproduction` check, progress stage `review_reproduction`, attempt
-kind `review_reproduction`):
-
-| Step | What the factory does |
-|---|---|
-| Hold | After the review, each finding's reproduction is checked against the shape rules: it cites a line of the request's approved `spec.md` byte for byte, its path is new in the judged commit (case-folded), matches `test_patterns`, is not an instruction path, under `.factory/` or protected, and a runner applies (`go test -json`, pytest, vitest, Maven Surefire, minitest), with 1 to 20 tests. An accepted one is copied once, read-only, to the run's `review-repro/<finding>/<path>` and its SHA-256 recorded; a refused one is advice, its rule recorded on the finding |
-| Run | Each held copy runs in a scratch worktree of the result commit, never the run's own, launched as a gate (the run's image, setup commands, `.factory/`, registry proxy and compose services, no model route), mounted read-only after its hash is checked, under the runner's own command and per-test timeout of 60 s (JUnit's in a separate thread, so a loop that ignores interrupts still times out; a default: a vitest reproduction can set its own per-test timeout, with a test's own timeout argument or `vi.setConfig`, and is then cut only by the launch's cap). It runs twice on the result, the second time only after a failure, then once on the commit the ticket started from only after two failures |
-| Decide | It blocks when some of its tests failed on both result launches and, on the base, it does not compile or does not fail the same way (same test, same kind); failing the same way blocks only when the reproduction holds a backticked literal of the cited line that no tracked file of the base commit holds (a value the spec states, not a name the base already has; case-sensitive, searched when the reproduction is held, none with an unknown base). A launch that runs past its cap after its command started (its output appeared) is a timeout of every test (a cap that passes before that is no verdict); a run is a compile error only when the build or collection output names the reproduction's own file and is no module resolution failure (`go test`'s build output, Go 1.24 and later: an undefined name or a type error in the reproduction; pytest's collection error: `cannot import name` or an `AttributeError` at import, a syntax error; `mvn test-compile`'s output). A module that cannot be resolved or fetched, whichever file imports it (Go's `cannot find module providing package`, `no required module provides package` or any module fetch error; Python's `ModuleNotFoundError`, whatever the module), any other failure of that step (a dependency that does not build, a conftest that does not import) and an older Go that names no file are a missing report: advice, never a block, since false advice is better than a false block. Everything else is advice: a pass, a compile or collection error, a missing report, one failure, an unknown base |
-| Gate | `review_reproduction` fails when any finding blocks. The finding records each run (pass, commit, outcome, each test's kind, report hash), the verdict and the reason, and its disposition (`blocks` or `advice`) |
-
-The `review_reproduction` triage sentence names the reproduction's path and
-one failing test with its kind, for example ``review_reproduction: the
-factory's run of the reviewer's reproduction "p/repro_test.go" fails on the
-result commit ("TestRepro" fail); the finding is in the run's review
-evidence``. The handoff a later build reads lists each blocking finding as
-one line under `## Reproduced review findings` (severity, summary, the cited
-spec line, the path, the test and its kind), never the reproduction's
-content or the reviewer's failure scenario. A corrective build handed an
-earlier run's held copies (see "Corrective builds") runs each once on its
-own result, after the gates and before its review: anything but a pass on every test, a result commit that holds the path
-included, is still failing and fails `review_reproduction`. Known limits: no
-runner for Gradle, jest, cargo, .NET or PHP (their reproductions are advice);
-a vitest reproduction can set its own per-test timeout; a ticket of a
-multi-ticket request may cite any line of the approved spec; a recheck that
-still fails starts no further automatic build; pytest reads any
-`ModuleNotFoundError` as a missing report (advice), a module the reproduction
-names that the commit adds included, while Go's `main module does not
-contain package` (a package of the module the commit does not have) reads as
-a compile error. A copy that cannot be held, no longer matches its hash
-before a launch, or whose mount is refused halts the run with the unresolved
-cause `reproduction_unheld`. A bare `factoryd -ticket` run, a restack's replay
-run and a run with code review off hold and run no reproduction and record no
-`review_reproduction` check: their review is advice only.
+A changed test file of the `tests_red_on_base` proof is held and run by the
+launch path of SC-022: the factory copies the file out of the result commit
+once, pins its SHA-256 and checks it before each mount, runs it in a gate
+sandbox on a scratch worktree of the commit (the run's image, setup
+commands, `.factory/`, registry proxy and compose services, no model route),
+mounted read-only, under a reproduction runner's own command and per-test
+timeout (Go, pytest, vitest, Maven Surefire, Minitest), and reads the runner's
+structured report on the host. A copy that cannot be held, no longer matches
+its hash before a launch, or whose mount is refused halts the run with the
+unresolved cause `reproduction_unheld`.
 
 | Restriction | Why |
 |---|---|
@@ -1633,7 +1546,7 @@ roles:
   | Build | Model and level |
   |---|---|
   | A ticket's first build | `roles.execution.model` (or the request's `submit -model execution=...`) at `roles.execution.thinking` |
-  | An automatic corrective build, after a check a build can fix, a reviewer's reproduction included (see "Corrective builds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
+  | An automatic corrective build, after a check a build can fix (see "Corrective builds") | `escalation.model` at `escalation.thinking`, also when the request picked a model with `submit -model execution=...` |
   | The build that takes the place of an automatic corrective build that never finished (`factoryd resume`, `resume -from scratch`, `retry` after a halt) | `escalation.model` at `escalation.thinking`, as configured when it starts |
   | A rebuild after `factoryd retry` of a ticket whose corrective round finished quarantined | As a first build: the retry is the operator's, not an automatic corrective build |
   | A PR-review round (a reviewer's comments) | As a first build |
@@ -2230,7 +2143,6 @@ limits for API-started runs.
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
 | `pr_budget_lines` | `400` -- the source-line threshold for a PR size note and the planning job's target when it drafts a plan. `0` disables the line threshold; the 25-function note threshold still applies. A negative value is refused. The planner may declare an `Estimated-Changed-Lines:` header, and `plan_review` notes estimates over its recorded budget. `release_max_changed_lines` and `release_max_files_changed` are the hard limits. A running `worker` reads the key at its next start (`factoryd restart`). |
 | `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
-| `review_reproductions` | `false` -- a request's ticket build's review still runs, but as advice on design, security, maintainability and risk (at most five findings, sent no spec and asked for no reproduction), so every finding is in the pull request's **Reviewer advice** and no `review_reproduction` check is recorded. `true` holds and runs each finding's reproduction (`review_reproduction`, SC-022), so a finding can block. A ticket that already has reproductions on its list still holds and runs them, and its review can still block, until the list is empty. A running `worker` reads it at its next start (`factoryd restart`). |
 | `round_session_continuity` | `true` -- a corrective or advice round's build continues the harness session of the build of the run it follows; `false` starts it fresh with only the written record of that run. The build session of a request's ticket build is kept in its run directory (`build-session/`, at most 64 MiB, 10,000 entries and 32 levels, without its saved prompts, round output, notes, harness configuration, skills or credential-named files; a session not kept leaves only the reason, which the round reports); the round's build continues it only when it was made by the same harness and model and holds at most 32 MiB of session state, and starts fresh with the record otherwise. `session` in the round's `BUILD_EVIDENCE.json` is `resumed` or `fresh(<reason>)`. Only a later round of the same ticket gets it; never a review. The kept copy is removed after a worker step or a cancel once no round can follow it: a settled ticket's when the request moves on to a later ticket, and all of them when the request leaves `building` and `resume_review` (`pr_review`, a terminal state), except one a round still in flight follows. A running `worker` reads it at its next start (`factoryd restart`). |
 | `review_advice_rounds` | `3` -- `0` turns advice rounds off; `1` to `3` follows a request's accepted ticket run whose review recorded a `high` finding with up to that many advice rounds: each a build on its pull request's branch given those findings, pushed only when accepted again, never refusing anything; the next follows only a pushed round whose own review recorded a `high` finding (the advice rounds, beside `-code-review-policy`). Outside `0` to `3` is refused. A running `worker` reads it at its next start (`factoryd restart`). |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |
