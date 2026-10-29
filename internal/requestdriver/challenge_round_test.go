@@ -2,6 +2,7 @@ package requestdriver_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,5 +213,26 @@ func TestChallengeRoundWithUncommittedGreenFilesDoesNotReplaceTheRun(t *testing.
 	tk := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0]
 	if len(f.pushed) != 0 || tk.RunID != requestdrivertest.TicketRunID(f.id, 1) {
 		t.Errorf("pushed %v, ticket run %s; want nothing pushed and the first run to stand", f.pushed, tk.RunID)
+	}
+}
+
+// A push that failed once sent ends a challenge round as no verdict with a
+// note: a challenge never halts (SC-022), unlike an advice round.
+func TestChallengeRoundPushThatFailsHaltsNothing(t *testing.T) {
+	f := challengeFixture(t, run.ChallengeRed)
+	f.dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return errors.New("remote hung up") }
+	requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+		return f.challengeRoundRun(t, id, run.ChallengeGreen)
+	})
+	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	loaded := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
+	if loaded.State == request.StateHalted {
+		t.Fatalf("request halted: %q", loaded.Error)
+	}
+	tk := loaded.Tickets[0]
+	if tk.RunID != requestdrivertest.TicketRunID(f.id, 1) || len(tk.Rounds) != 1 || tk.Rounds[0].Pushed || !strings.Contains(tk.Rounds[0].Error, "no verdict") {
+		t.Errorf("ticket run %q rounds %+v, want the accepted run standing and one unpushed round noted as no verdict", tk.RunID, tk.Rounds)
 	}
 }

@@ -57,6 +57,10 @@ type roundFlavor struct {
 	// declined, when set, is the PR comment for a round whose result was not
 	// pushed (current stands): "" posts nothing.
 	declined func(dataDir string, current, round *run.Run) string
+	// pushFailureEndsRound, when set, makes a push or read-back that failed
+	// once sent end the round as no verdict, with a note, instead of halting
+	// the request: a challenge never halts (SC-022).
+	pushFailureEndsRound bool
 }
 
 var adviceFlavor = roundFlavor{name: adviceRoundName, kind: request.AdviceRoundKind, tag: request.RoundTagAdvice, comment: adviceComment}
@@ -251,6 +255,11 @@ func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *reques
 	}
 	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, fl.name)
 	switch {
+	case failed != "" && fl.pushFailureEndsRound:
+		ticket.Rounds[slice].Error = "no verdict: " + failed
+		log.Printf("request %s: ticket %d/%d: %s %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, roundRun.ID, failed, current.ID)
+		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
+		return nil, stop, err
 	case failed != "":
 		return nil, true, HaltRequest(dataDir, r, failed, now)
 	case refused != "":

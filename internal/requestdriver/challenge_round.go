@@ -32,7 +32,8 @@ var challengeFlavor = roundFlavor{
 	replaces: func(round *run.Run) bool {
 		return round.Challenge != nil && round.Challenge.Verdict == run.ChallengeGreen && round.Challenge.CommittedSHA != ""
 	},
-	declined: challengeDeclinedComment,
+	declined:             challengeDeclinedComment,
+	pushFailureEndsRound: true,
 }
 
 // challengeRoundApplies reports whether current, the ticket's accepted run, is
