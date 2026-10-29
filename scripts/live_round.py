@@ -62,6 +62,17 @@ holds), not by GitHub.
                          in stacked mode: the restack is read from its
                          request and run records)
 
+CI mode, LIVE_ROUND_CI=1 (fixture default todo-kafka-ci): no reviewer comment
+is posted. The repository must run a workflow job named by the fixture's
+`ci_check` on pull requests, fail it for the fixture's first build, and
+require that check (a ruleset's required status check) on the default branch:
+the fixture's `.github/workflows/ci.yml` fails while `main.go` has a
+`/version` route and no `no-store`. The run passes when the factory starts a
+CI round for that check (its round carries `ci_check`), the round is
+accepted and pushed, and the check then concludes SUCCESS on the new head.
+
+    LIVE_ROUND_DATA_DIR  required in CI mode as in stacked mode; no LIVE_ROUND_REVIEWER is needed
+
 Prerequisites are the operator's working setup, as for live-smoke: Docker,
 the gateway and meter, a model route, `open_pull_request: true`. A short
 `pr_poll_interval` (1m) keeps the wait down.
@@ -232,6 +243,25 @@ def restack_rounds(ticket):
 	return [r for r in ticket.get("rounds") or [] if r.get("kind") == "restack" and r.get("outcome") == "accepted" and r.get("pushed")]
 
 
+def ci_round(tickets, check):
+	"""The first round of any ticket started by a failure of the required
+	check named check, or None."""
+	for t in tickets or []:
+		for r in t.get("rounds") or []:
+			if r.get("ci_check") == check:
+				return r
+	return None
+
+
+def check_conclusion(rollup, name):
+	"""The conclusion of the check run or status named name in a pull
+	request's statusCheckRollup, "" while it has none."""
+	for c in rollup or []:
+		if name in (c.get("name"), c.get("context")):
+			return (c.get("conclusion") or c.get("state") or "").upper()
+	return ""
+
+
 def sh(args, env=None, check=True, cwd=None):
 	p = subprocess.run(args, capture_output=True, text=True, env=env, cwd=cwd)
 	if check and p.returncode != 0:
@@ -246,7 +276,8 @@ class Round:
 		self.reviewer = os.environ.get("LIVE_ROUND_REVIEWER", "")
 		self.config = os.environ.get("LIVE_ROUND_CONFIG", "")
 		self.stacked = os.environ.get("LIVE_ROUND_STACKED") == "1"
-		self.name = os.environ.get("LIVE_ROUND_FIXTURE", "todo-kafka-stacked" if self.stacked else "todo-kafka-version")
+		self.ci = os.environ.get("LIVE_ROUND_CI") == "1"
+		self.name = os.environ.get("LIVE_ROUND_FIXTURE", "todo-kafka-stacked" if self.stacked else "todo-kafka-ci" if self.ci else "todo-kafka-version")
 		self.data_dir = os.environ.get("LIVE_ROUND_DATA_DIR", "")
 		self.second = ""
 		self.timeout = 60 * int(os.environ.get("LIVE_ROUND_TIMEOUT", "90"))
@@ -385,6 +416,30 @@ class Round:
 	def run_record(self, run_id):
 		return self.record("runs", run_id, "run.json")
 
+	def ci_checks(self, record):
+		"""CI mode: the factory's CI round for the fixture's check, accepted
+		and pushed, and the check green on the new head."""
+		check = self.fixture["ci_check"]
+		def step():
+			req = self.request_record()
+			rnd = ci_round(req.get("tickets"), check)
+			state = req.get("state", "")
+			if rnd is None:
+				note = f"no CI round for {check!r} yet, request {state}"
+			elif rnd.get("outcome") != "accepted":
+				note = f"CI round {rnd.get('index')} for {check!r}: {rnd.get('outcome') or 'running'}"
+			else:
+				got = check_conclusion(self.pr_json("statusCheckRollup")["statusCheckRollup"], check)
+				note = f"CI round accepted, check {check!r} on the new head: {got or 'pending'}"
+				if got == "SUCCESS":
+					return rnd, note
+			if state in STOPPED:
+				raise RuntimeError(f"request stopped: {state}: {note}")
+			return None, note
+		rnd = self.wait("the CI round", step)
+		record["ci_round"] = rnd.get("index")
+		record["ci_check"] = check
+
 	def to_stacked_pull_requests(self):
 		def step():
 			state = self.state().get("state", "")
@@ -476,9 +531,22 @@ class Round:
 			if pr:
 				self.gh("pr", "close", pr, "--delete-branch", check=False)
 
+	def threads(self, record):
+		slug, number, roots = self.comment()
+		# Counted only once posted: a run that stopped before its pull
+		# request put no comment in front of the factory.
+		record["comments"] = len(roots)
+		record["resolved"], record["rounds_not_pushed"], record["request_state"] = self.watch(slug, number, roots)
+		if self.stacked and roots and record["resolved"] == len(roots):
+			self.stacked_checks(slug, record)
+		if roots and record["resolved"] == len(roots):
+			record["outcome"] = "pass"
+
 	def run(self):
-		required = [("LIVE_ROUND_REPO", self.repo), ("LIVE_ROUND_REVIEWER", self.reviewer)]
-		if self.stacked:
+		required = [("LIVE_ROUND_REPO", self.repo)]
+		if not self.ci:
+			required.append(("LIVE_ROUND_REVIEWER", self.reviewer))
+		if self.stacked or self.ci:
 			required.append(("LIVE_ROUND_DATA_DIR", self.data_dir))
 		for name, value in required:
 			if not value:
@@ -499,15 +567,11 @@ class Round:
 			else:
 				self.to_pull_request()
 			record["pull_request"] = self.pr
-			slug, number, roots = self.comment()
-			# Counted only once posted: a run that stopped before its pull
-			# request put no comment in front of the factory.
-			record["comments"] = len(roots)
-			record["resolved"], record["rounds_not_pushed"], record["request_state"] = self.watch(slug, number, roots)
-			if self.stacked and roots and record["resolved"] == len(roots):
-				self.stacked_checks(slug, record)
-			if roots and record["resolved"] == len(roots):
+			if self.ci:
+				self.ci_checks(record)
 				record["outcome"] = "pass"
+			else:
+				self.threads(record)
 		except RuntimeError as err:
 			record["error"] = str(err)
 			print(f"live-round: {err}", file=sys.stderr)
@@ -519,6 +583,9 @@ class Round:
 			path.parent.mkdir(parents=True, exist_ok=True)
 			with path.open("a") as f:
 				f.write(json.dumps(record) + "\n")
+		if self.ci:
+			print(f"{'PASS' if record['outcome'] == 'pass' else 'FAIL'}  {self.name}: CI round for check {self.fixture['ci_check']!r}")
+			return 0 if record["outcome"] == "pass" else 1
 		print(f"{'PASS' if record['outcome'] == 'pass' else 'FAIL'}  {self.name}: {record['resolved']}/{record['comments']} posted reviewer comments resolved, {record['rounds_not_pushed']} round(s) not pushed first")
 		return 0 if record["outcome"] == "pass" else 1
 

@@ -166,5 +166,21 @@ class Summary(unittest.TestCase):
 		self.assertEqual(total, {"runs": 2, "passed": 1, "comments": 3, "resolved": 2})
 
 
+class CIRound(unittest.TestCase):
+	def test_finds_the_round_started_by_the_check(self):
+		tickets = [{"rounds": [{"index": 1, "ci_check": ""}, {"index": 2, "ci_check": "ci", "outcome": "accepted"}]}]
+		self.assertEqual(live_round.ci_round(tickets, "ci")["index"], 2)
+
+	def test_no_round_for_another_check(self):
+		self.assertIsNone(live_round.ci_round([{"rounds": [{"index": 1, "ci_check": "lint"}]}], "ci"))
+		self.assertIsNone(live_round.ci_round([{}], "ci"))
+
+	def test_check_conclusion_reads_runs_and_statuses(self):
+		rollup = [{"name": "ci", "conclusion": "failure"}, {"context": "legacy", "state": "success"}]
+		self.assertEqual(live_round.check_conclusion(rollup, "ci"), "FAILURE")
+		self.assertEqual(live_round.check_conclusion(rollup, "legacy"), "SUCCESS")
+		self.assertEqual(live_round.check_conclusion(rollup, "absent"), "")
+
+
 if __name__ == "__main__":
 	unittest.main()
