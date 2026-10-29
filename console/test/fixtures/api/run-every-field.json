@@ -374,6 +374,12 @@
           }
         ]
       }
+    ],
+    "skipped_files": [
+      {
+        "path": "every-field path",
+        "reason": "every-field reason"
+      }
     ]
   },
   "notes": [

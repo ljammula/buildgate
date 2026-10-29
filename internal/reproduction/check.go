@@ -117,7 +117,8 @@ func Check(f Finding, j Judged) (Accepted, error) {
 	if !ok {
 		return Accepted{}, errNoRunner
 	}
-	ids, err := r.TestIDs(f.Path, f.Content)
+	spans, err := r.Tests(f.Path, f.Content)
+	ids := spanIDs(spans)
 	if err != nil || len(ids) == 0 || len(ids) > MaxTestIDs {
 		return Accepted{}, errTestIDs
 	}

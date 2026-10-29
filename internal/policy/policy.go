@@ -301,6 +301,22 @@ const TestsRedOnBaseCheck = "tests_red_on_base"
 type TestsRedOnBaseInput struct {
 	Verdict string
 	Reason  string
+	// Skipped are the changed test files the proof neither ran nor judged;
+	// each is named, with its reason, in a note.
+	Skipped []run.TestsRedSkipped
+}
+
+// skippedNotes is one note line per changed test file the proof did not run or
+// judge.
+func skippedNotes(proof *TestsRedOnBaseInput) []string {
+	if proof == nil {
+		return nil
+	}
+	notes := make([]string, len(proof.Skipped))
+	for i, s := range proof.Skipped {
+		notes[i] = fmt.Sprintf("tests_red_on_base: %s was not run or judged: %s", s.Path, s.Reason)
+	}
+	return notes
 }
 
 // TestsRedOnBase evaluates the tests_red_on_base gate over tests (TestFiles),
@@ -640,6 +656,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	if note != "" {
 		result.Notes = append(result.Notes, note)
 	}
+	result.Notes = append(result.Notes, skippedNotes(input.TestsRedOnBase)...)
 	accepted = result.add(testsGate) && accepted
 
 	if input.FullSuiteCommand != nil {

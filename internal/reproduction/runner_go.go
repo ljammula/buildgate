@@ -31,22 +31,23 @@ func (goTest) Applies(p string, root RootFacts) bool {
 	return strings.HasSuffix(p, "_test.go") && root.Has("go.mod")
 }
 
-// TestIDs are the file's top-level func TestXxx(t *testing.T), TestMain
-// excepted, as go test names them.
-func (goTest) TestIDs(p string, content []byte) ([]string, error) {
-	f, err := parser.ParseFile(token.NewFileSet(), path.Base(p), content, parser.SkipObjectResolution)
+// Tests are the file's top-level func TestXxx(t *testing.T), TestMain
+// excepted, as go test names them, each spanning its declaration (go/parser).
+func (goTest) Tests(p string, content []byte) ([]TestSpan, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path.Base(p), content, parser.SkipObjectResolution)
 	if err != nil {
 		return nil, err
 	}
 	testing := testingName(f)
-	var ids []string
+	var spans []TestSpan
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
 		if ok && fn.Recv == nil && isGoTestName(fn.Name.Name) && takesTestingT(fn, testing) {
-			ids = append(ids, fn.Name.Name)
+			spans = append(spans, TestSpan{ID: fn.Name.Name, Start: fset.Position(fn.Pos()).Line, End: fset.Position(fn.End()).Line})
 		}
 	}
-	return uniqueIDs(ids), nil
+	return uniqueSpans(spans), nil
 }
 
 // testingName is the file's local name for package testing ("." for a dot

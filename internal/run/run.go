@@ -778,12 +778,23 @@ func TestsRedOnBaseDir(runDir string) string {
 
 // TestsRedOnBase is what the run record keeps of the tests_red_on_base proof
 // (SC-008): the verdict, a one-line reason, and for each changed test file
-// the factory ran, the hash of the copy it ran and its launches. Never the
-// files' content.
+// the factory ran, the hash of the copy it ran and its launches, and each
+// changed test file it did not run or judge with the reason. Never the files'
+// content.
 type TestsRedOnBase struct {
 	Verdict string         `json:"verdict"`
 	Reason  string         `json:"reason,omitempty"`
 	Files   []TestsRedFile `json:"files,omitempty"`
+	// SkippedFiles are the changed test files the proof neither ran nor
+	// judged, each with the reason the factory observed.
+	SkippedFiles []TestsRedSkipped `json:"skipped_files,omitempty"`
+}
+
+// TestsRedSkipped is one changed test file the tests_red_on_base proof did
+// not run or judge, and why (a fixed sentence, never the file's content).
+type TestsRedSkipped struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 // TestsRedFile is one changed test file of the proof: its path, the SHA-256

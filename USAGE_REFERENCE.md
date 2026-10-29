@@ -1086,7 +1086,12 @@ back to `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust, plus
 `__tests__/`). The factory then runs those files, in the gate sandbox, on a
 scratch checkout of the base commit and one of the result commit, each with the
 result commit's copy of the file mounted read-only over its path (the toolchain
-runner picks the test IDs and the command, as for a review's reproduction):
+runner picks the command, as for a review's reproduction). Only the change's
+own tests are judged: a test ID the result commit's copy of a changed file holds
+and the base commit's copy does not, or one whose block in that file (the
+runner's host parse gives its lines) holds a line the change added, rewrote or
+removed. The launch selects only those tests; any other test that shares a name
+with one of them runs too and is not judged:
 
 | What the runs show | `tests_red_on_base` |
 |---|---|
@@ -1094,14 +1099,19 @@ runner picks the test IDs and the command, as for a review's reproduction):
 | Every test that ran passes on the base too | Fails: `tests pass on the base commit: they do not exercise the change` |
 | The ticket declares `Tests-Required: no -- <reason>` | Passes with no runs; the pull request names the reason (the release decision records it) |
 | No test file changed, and no opt-out | Fails |
-| No runner takes a changed file, the report is missing, a changed test fails when run alone on the result commit although the full suite passed, the run has no known base commit, or the proof is otherwise not reached | Passes, and the pull request lists a note: the check refuses only on what it saw run |
+| The report is missing, a changed test fails when run alone on the result commit although the full suite passed, the run has no known base commit, or the proof is otherwise not reached | Passes, and the pull request lists a note: the check refuses only on what it saw run |
 
 The proof runs only after the run's own checks passed (verification, the full
-suite, the repository gates), at most 3 changed test files (added files first, then modified ones, each sorted)
-of at most 32 KiB each, with at most 20 test IDs a file, and the gate sandbox
-has no model route. The run record keeps each file's path, the SHA-256 of the
-copy it ran, the test IDs and each launch's result (`tests_red_on_base` in
-`run.json`), never the file's content. A launch that fails to start halts the
+suite, the repository gates), at most 3 changed test files (added files first,
+then modified ones, each sorted), and the gate sandbox has no model route. A
+test file the base commit already holds has no size or test-count cap; a new
+file is capped at 32 KiB and 20 test IDs. The run record keeps each file's
+path, the SHA-256 of the copy it ran, the judged test IDs and each launch's
+result (`tests_red_on_base` in `run.json`), never the file's content, and
+`skipped_files` lists each changed test file it neither ran nor judged with its
+reason (no runner for its path, a failed host parse, no test of it changed, a
+cap on a new file, unreadable or empty at the result commit, or past the 3
+files). The pull request's notes name each such file and its reason. A launch that fails to start halts the
 run for a human like a review reproduction does, and a build that failed this
 gate is told in one line (`tests_red_on_base: the changed tests pass on the base
 commit, so they do not exercise the change`), then rebuilt once like any

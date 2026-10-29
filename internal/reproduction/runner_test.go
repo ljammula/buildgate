@@ -33,6 +33,12 @@ func runnerByID(t *testing.T, id string) Runner {
 	return nil
 }
 
+// testIDs are the IDs of a runner's parse of a file.
+func testIDs(r Runner, p string, content []byte) ([]string, error) {
+	spans, err := r.Tests(p, content)
+	return spanIDs(spans), err
+}
+
 type classifyCase struct {
 	fixture string // "" for no report
 	path    string
@@ -173,7 +179,7 @@ func TestRecordedSourcesYieldTheReportsIDs(t *testing.T) {
 		{"minitest-json", "source-timeout.txt", "test/timeout_test.rb", []string{"AddTest#test_hangs"}},
 	}
 	for _, c := range cases {
-		ids, err := runnerByID(t, c.runner).TestIDs(c.path, fixture(t, c.runner, c.source))
+		ids, err := testIDs(runnerByID(t, c.runner), c.path, fixture(t, c.runner, c.source))
 		if err != nil || !reflect.DeepEqual(ids, c.want) {
 			t.Errorf("%s %s: TestIDs = %q, %v; want %q", c.runner, c.source, ids, err, c.want)
 		}
@@ -195,11 +201,11 @@ func (x) TestD(t *tt.T)      {}
 func TestÉ(t *tt.T)          {}
 func Test_e(t *tt.T)         {}
 `
-	ids, err := goTest{}.TestIDs("p/x_test.go", []byte(src))
+	ids, err := testIDs(goTest{}, "p/x_test.go", []byte(src))
 	if err != nil || !reflect.DeepEqual(ids, []string{"TestA", "Test", "TestÉ", "Test_e"}) {
 		t.Errorf("TestIDs = %q, %v", ids, err)
 	}
-	if _, err := (goTest{}).TestIDs("p/x_test.go", []byte("package p\nfunc TestA(")); err == nil {
+	if _, err := testIDs(goTest{}, "p/x_test.go", []byte("package p\nfunc TestA(")); err == nil {
 		t.Error("a file that does not parse gives no IDs")
 	}
 }
@@ -212,7 +218,7 @@ func TestPytestIDsSkipStringsAndNestedDefinitions(t *testing.T) {
 		"class TestThing:\n    def test_one(self):\n        pass\n\n    @pytest.mark.slow\n    def test_two(self):\n        pass\n\n" +
 		"class Helper:\n    def test_not_collected(self):\n        pass\n\n" +
 		"def helper():\n    pass\n"
-	ids, _ := pytestJUnit{}.TestIDs("tests/test_x.py", []byte(src))
+	ids, _ := testIDs(pytestJUnit{}, "tests/test_x.py", []byte(src))
 	want := []string{"test_top", "test_async", "TestThing::test_one", "TestThing::test_two"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Errorf("TestIDs = %q, want %q", ids, want)
@@ -233,7 +239,7 @@ func TestVitestIDsFollowDescribeNesting(t *testing.T) {
 		"})\n" +
 		"test('top', () => {})\n" +
 		"obj.test('a method', () => {})\n"
-	ids, _ := vitestJSON{}.TestIDs("src/a.test.ts", []byte(src))
+	ids, _ := testIDs(vitestJSON{}, "src/a.test.ts", []byte(src))
 	want := []string{"outer > inner > deep (with parens)", "outer > after inner", "top"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Errorf("TestIDs = %q, want %q", ids, want)
@@ -243,7 +249,7 @@ func TestVitestIDsFollowDescribeNesting(t *testing.T) {
 func TestMinitestIDsNameTheirClass(t *testing.T) {
 	src := "require \"test_helper\"\n\nmodule Shop\n  class CartTest < ActiveSupport::TestCase\n" +
 		"    test \"adds an item\" do\n    end\n\n    def test_empty?\n    end\n\n    def helper\n    end\n  end\nend\n"
-	ids, _ := minitestJSON{}.TestIDs("test/cart_test.rb", []byte(src))
+	ids, _ := testIDs(minitestJSON{}, "test/cart_test.rb", []byte(src))
 	want := []string{"CartTest#test_adds_an_item", "CartTest#test_empty?"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Errorf("TestIDs = %q, want %q", ids, want)
@@ -305,12 +311,12 @@ func TestRunnerCommandsAreFactoryOwned(t *testing.T) {
 			[]string{"go test -json -count=1 -run '^(TestA|TestB)$' -timeout 150s './internal/x' > '/out/report'"}, ""},
 		{"go-test-json", "x_test.go", []string{"TestA"}, []string{" '.' > "}, ""},
 		{"pytest-junitxml", "tests/test_x.py", []string{"test_a"},
-			[]string{"PYTHONPATH='/inputs/reproduction'", "BG_REPRO_TEST_TIMEOUT=60", "-p bg_repro_timeout", "--junitxml='/out/report' -q 'tests/test_x.py'", "-o addopts="}, pytestTimeoutPlugin},
+			[]string{"PYTHONPATH='/inputs/reproduction'", "BG_REPRO_TEST_TIMEOUT=60", "-p bg_repro_timeout", "--junitxml='/out/report' -q 'tests/test_x.py::test_a'", "-o addopts="}, pytestTimeoutPlugin},
 		{"vitest-json", "src/a.test.ts", []string{"a"},
 			[]string{"npx --no-install vitest run 'src/a.test.ts' --reporter=json --outputFile='/out/report' --testTimeout=60000"}, ""},
 		{"surefire-xml", "core/src/test/java/com/x/FooTest.java", []string{"a"},
 			[]string{`log=$(mktemp) || exit 125; mvn -B -q -f 'core/pom.xml' test-compile >"$log" 2>&1; rc=$?; cat "$log"; `,
-				`if [ "$rc" -ne 0 ]; then grep -qF -- '/core/src/test/java/com/x/FooTest.java' "$log" && exit 86; exit 87; fi; mvn `, "-f 'core/pom.xml' -Dtest='FooTest'", "timeout.default=60s",
+				`if [ "$rc" -ne 0 ]; then grep -qF -- '/core/src/test/java/com/x/FooTest.java' "$log" && exit 86; exit 87; fi; mvn `, "-f 'core/pom.xml' -Dtest='FooTest#a'", "timeout.default=60s",
 				"-Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD", "cp 'core/target/surefire-reports/TEST-com.x.FooTest.xml' '/out/report'", "exit $rc"}, ""},
 		{"minitest-json", "test/cart_test.rb", []string{"CartTest#test_a"},
 			[]string{"BG_REPRO_REPORT='/out/report' BG_REPRO_TEST_TIMEOUT=60", "-I'/inputs/reproduction' -rbg_repro_reporter", "'test/cart_test.rb'"}, minitestReporter},
@@ -436,5 +442,58 @@ func TestNamesPathMatchesOnlyTheWholePath(t *testing.T) {
 	}
 	if !namesPath("./repro_test.go:3:1: undefined: X", "repro_test.go") {
 		t.Error("a root-level file printed as ./repro_test.go is named")
+	}
+}
+
+// Each runner's host parse gives every test the lines its block spans
+// (testdata/<runner>/spans-source.txt, the line numbers counted by hand).
+func TestRunnersGiveEachTestsLineSpan(t *testing.T) {
+	cases := []struct {
+		runner, path string
+		want         []TestSpan
+	}{
+		{"go-test-json", "p/x_test.go", []TestSpan{{"TestOne", 6, 10}, {"TestTwo", 14, 14}}},
+		{"pytest-junitxml", "tests/test_x.py", []TestSpan{{"test_top", 7, 16}, {"TestGroup::test_one", 20, 21}, {"TestGroup::test_two", 24, 26}, {"test_last", 28, 28}}},
+		{"vitest-json", "src/a.test.ts", []TestSpan{{"outer > first", 4, 6}, {"outer > inner > deep", 9, 12}, {"top", 16, 16}}},
+		{"surefire-xml", "src/test/java/com/example/AddTest.java", []TestSpan{{"sums", 8, 13}, {"later", 17, 19}}},
+		{"minitest-json", "test/cart_test.rb", []TestSpan{{"CartTest#test_adds_an_item", 5, 8}, {"CartTest#test_empty?", 10, 12}, {"CartTest#test_one_line", 14, 14}, {"CartTest#test_braces", 16, 18}}},
+	}
+	for _, c := range cases {
+		spans, err := runnerByID(t, c.runner).Tests(c.path, fixture(t, c.runner, "spans-source.txt"))
+		if err != nil || !reflect.DeepEqual(spans, c.want) {
+			t.Errorf("%s: Tests = %v, %v; want %v", c.runner, spans, err, c.want)
+		}
+	}
+}
+
+func TestParseHunksReadsTheNewSide(t *testing.T) {
+	diff := "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -3 +3 @@ func\n-a\n+b\n@@ -10,2 +10,0 @@\n-c\n-d\n@@ -20,0 +19,3 @@\n+e\n@@ -30,4 +28,2 @@\n"
+	got := ParseHunks([]byte(diff))
+	want := LineChanges{Added: []LineRange{{3, 3}, {19, 21}, {28, 29}}, DeletedAfter: []int{10}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseHunks = %+v, want %+v", got, want)
+	}
+}
+
+// A launch selects exactly the judged IDs, so a large file's other tests do
+// not run under a timeout sized for the judged ones.
+func TestCommandsSelectExactlyTheJudgedIDs(t *testing.T) {
+	cases := []struct {
+		runner, path string
+		ids          []string
+		want         string
+		notWant      string
+	}{
+		{"go-test-json", "x/a_test.go", []string{"TestA", "TestB"}, "-run '^(TestA|TestB)$'", "TestC"},
+		{"pytest-junitxml", "tests/test_a.py", []string{"test_a", "TestG::test_b"}, "'tests/test_a.py::test_a' 'tests/test_a.py::TestG::test_b'", "test_c"},
+		{"vitest-json", "src/a.test.ts", []string{"outer > a.b (x)", "top"}, ` -t '(?:^|\s)(?:outer a\.b \(x\)|top)$'`, "other"},
+		{"surefire-xml", "core/src/test/java/com/x/FooTest.java", []string{"a", "b"}, "-Dtest='FooTest#a+b'", "FooTest'"},
+		{"minitest-json", "test/cart_test.rb", []string{"CartTest#test_a", "CartTest#test_b?"}, ` -n '/^(test_a|test_b\?)$/'`, "CartTest"},
+	}
+	for _, c := range cases {
+		script := runnerByID(t, c.runner).Command(Invocation{Path: c.path, TestIDs: c.ids, ReportPath: "/out/report", HelperDir: "/h"}).Script
+		if !strings.Contains(script, c.want) || strings.Contains(script, c.notWant) {
+			t.Errorf("%s: script %q, want it to contain %q and not %q", c.runner, script, c.want, c.notWant)
+		}
 	}
 }

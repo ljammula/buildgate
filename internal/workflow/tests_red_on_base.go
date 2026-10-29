@@ -33,7 +33,7 @@ func (o testsRedOutcome) policyInput() *policy.TestsRedOnBaseInput {
 	if o.proof == nil {
 		return nil
 	}
-	return &policy.TestsRedOnBaseInput{Verdict: o.proof.Verdict, Reason: o.proof.Reason}
+	return &policy.TestsRedOnBaseInput{Verdict: o.proof.Verdict, Reason: o.proof.Reason, Skipped: o.proof.SkippedFiles}
 }
 
 // noTestsRedVerdict is a proof that reached no verdict, for reason.
@@ -76,10 +76,12 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 		return testsRedOutcome{}, wrapActivityFailure("hold changed tests activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	if len(held.Held) == 0 {
-		return noTestsRedVerdict(held.Reason), nil
+		out := noTestsRedVerdict(held.Reason)
+		out.proof.SkippedFiles = held.Skipped
+		return out, nil
 	}
 	rctx := reproductionContext(ctx, buildVerifyCtx)
-	proof := &run.TestsRedOnBase{}
+	proof := &run.TestsRedOnBase{SkippedFiles: held.Skipped}
 	var runs []reproduction.FileRuns
 	for _, h := range held.Held {
 		file := run.TestsRedFile{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs}

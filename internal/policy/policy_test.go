@@ -1456,3 +1456,15 @@ func TestEvaluateRunReviewReproductionFailsOnlyOnARefusingReproduction(t *testin
 		}
 	}
 }
+
+func TestEvaluateRunTestsRedOnBaseNamesEachSkippedFile(t *testing.T) {
+	result := EvaluateRun(EvaluateRunInput{
+		VerifyCommand:  []string{"sh", "-c", "true"},
+		ChangedFiles:   []string{"a.go", "a_test.go", "b_test.go"},
+		TestsRedOnBase: &TestsRedOnBaseInput{Verdict: run.TestsRedProved, Skipped: []run.TestsRedSkipped{{Path: "b_test.go", Reason: "the runner reads no test ID in it"}}},
+	})
+	want := "tests_red_on_base: b_test.go was not run or judged: the runner reads no test ID in it"
+	if !slices.Contains(result.Notes, want) {
+		t.Errorf("Notes = %q, want %q", result.Notes, want)
+	}
+}

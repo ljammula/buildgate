@@ -176,7 +176,7 @@ func holdOne(dir string, finding int, acc reproduction.Accepted, content []byte,
 	}
 	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o444)
 	if errors.Is(err, fs.ErrExist) {
-		existing, readErr := evidence.ReadHostileFile(target, reproduction.MaxContentBytes)
+		existing, readErr := evidence.ReadHostileFile(target, reproduction.MaxHeldBytes)
 		if readErr != nil || !bytes.Equal(existing, content) {
 			return held, unheld("a different file is already at the host copy's path")
 		}
@@ -485,7 +485,7 @@ func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, 
 		// commit: no mountpoint is made under it.
 		return l, errUnstageable
 	}
-	content, err := evidence.ReadHostileFile(input.Held.HostPath, reproduction.MaxContentBytes)
+	content, err := evidence.ReadHostileFile(input.Held.HostPath, reproduction.MaxHeldBytes)
 	if err != nil {
 		return l, unheld("read the host copy: %v", err)
 	}
@@ -589,7 +589,7 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 	logPath := activityLogPath(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), fmt.Sprintf("review-repro-%d-%s.log", input.Held.Finding, input.Pass)))
 	before := func(attempt int) error {
 		// SC-012: the bytes mounted are the bytes the review held.
-		staged, err := evidence.ReadHostileFile(l.staged, reproduction.MaxContentBytes)
+		staged, err := evidence.ReadHostileFile(l.staged, reproduction.MaxHeldBytes)
 		if err != nil {
 			return unheld("read the staged reproduction: %v", err)
 		}

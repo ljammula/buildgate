@@ -1,6 +1,7 @@
 package reproduction
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -77,30 +78,71 @@ func TestDecideRedOnBaseSeveralTestsAndFiles(t *testing.T) {
 	}
 }
 
-func TestCheckChangedTest(t *testing.T) {
+func TestJudgeChangedTestRefusals(t *testing.T) {
 	goRoot := RootFacts{"go.mod": []byte("module x\n")}
 	const goTestFile = "package p\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {}\n"
-	if a, err := CheckChangedTest("p/a_test.go", []byte(goTestFile), goRoot); err != nil || a.Runner != "go-test-json" || strings.Join(a.TestIDs, ",") != "TestA" || a.Path != "p/a_test.go" {
-		t.Errorf("a Go test file = %+v, %v; want accepted with TestA", a, err)
+	if a, err := JudgeChangedTest(ChangedTest{Path: "p/a_test.go", Result: []byte(goTestFile), Root: goRoot}); err != nil || a.Runner != "go-test-json" || strings.Join(a.TestIDs, ",") != "TestA" || a.Path != "p/a_test.go" {
+		t.Errorf("a new Go test file = %+v, %v; want accepted with TestA", a, err)
 	}
+	big := goTestFile + strings.Repeat("//\n", MaxContentBytes)
 	for _, tc := range []struct {
-		name, path, content string
-		root                RootFacts
+		name string
+		c    ChangedTest
+		want error
 	}{
-		{"no runner for the toolchain", "p/a_test.go", goTestFile, RootFacts{}},
-		{"a helper with no test", "p/helper_test.go", "package p\n\nfunc helper() {}\n", goRoot},
-		{"empty", "p/a_test.go", "", goRoot},
-		{"binary", "p/a_test.go", goTestFile + "\x00", goRoot},
-		{"over the size cap", "p/a_test.go", goTestFile + strings.Repeat("//\n", MaxContentBytes), goRoot},
-		{"under .factory", ".factory/a_test.go", goTestFile, goRoot},
-		{"a path with a parent directory", "../a_test.go", goTestFile, goRoot},
-		{"too many tests", "p/a_test.go", "package p\n\nimport \"testing\"\n" + manyGoTests(MaxTestIDs+1), goRoot},
+		{"no runner for the toolchain", ChangedTest{Path: "p/a_test.go", Result: []byte(goTestFile)}, errNoRunner},
+		{"a helper with no test", ChangedTest{Path: "p/helper_test.go", Result: []byte("package p\n\nfunc helper() {}\n"), Root: goRoot}, errNoTests},
+		{"empty", ChangedTest{Path: "p/a_test.go", Root: goRoot}, errUnreadable},
+		{"binary", ChangedTest{Path: "p/a_test.go", Result: []byte(goTestFile + "\x00"), Root: goRoot}, errUnreadable},
+		{"a new file over the size cap", ChangedTest{Path: "p/a_test.go", Result: []byte(big), Root: goRoot}, errAddedTooBig},
+		{"a new file with too many tests", ChangedTest{Path: "p/a_test.go", Result: []byte("package p\n\nimport \"testing\"\n" + manyGoTests(MaxTestIDs+1)), Root: goRoot}, errAddedTooMany},
+		{"a parse failure", ChangedTest{Path: "p/a_test.go", Result: []byte("package p\nfunc TestA("), Root: goRoot}, errParse},
+		{"under .factory", ChangedTest{Path: ".factory/a_test.go", Result: []byte(goTestFile), Root: goRoot}, errPathShape},
+		{"a path with a parent directory", ChangedTest{Path: "../a_test.go", Result: []byte(goTestFile), Root: goRoot}, errPathShape},
+		{"a change outside any test", ChangedTest{Path: "p/a_test.go", Result: []byte(goTestFile), Base: []byte(goTestFile + "// x\n"), Changes: LineChanges{Added: []LineRange{{Start: 1, End: 1}}}, Root: goRoot}, errNoJudged},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if a, err := CheckChangedTest(tc.path, []byte(tc.content), tc.root); err == nil {
-				t.Errorf("CheckChangedTest() = %+v, want a refusal", a)
+			if a, err := JudgeChangedTest(tc.c); !errors.Is(err, tc.want) {
+				t.Errorf("JudgeChangedTest() = %+v, %v; want %v", a, err, tc.want)
 			}
 		})
+	}
+}
+
+// A file the base commit holds has no size or test-count cap, and only the
+// change's own tests are judged: the added ones and the ones with a changed
+// line in their span.
+func TestJudgeChangedTestJudgesOnlyTheChangesOwnTests(t *testing.T) {
+	goRoot := RootFacts{"go.mod": []byte("module x\n")}
+	header := "package p\n\nimport \"testing\"\n\n"
+	var base strings.Builder
+	base.WriteString(header)
+	for i := 0; i < 3*MaxTestIDs; i++ {
+		base.WriteString("func Test" + string(rune('A'+i%26)) + string(rune('a'+i/26)) + "(t *testing.T) {\n\t_ = 1\n}\n\n")
+	}
+	baseSrc := base.String() + "// padding\n" + strings.Repeat("// padding\n", MaxContentBytes/10)
+	if len(baseSrc) <= MaxContentBytes {
+		t.Fatalf("the fixture is %d bytes, want over the new-file cap", len(baseSrc))
+	}
+	lineOf := func(src, needle string) int { return 1 + strings.Count(src[:strings.Index(src, needle)], "\n") }
+	// Rewrite the body of TestBa, and add TestNew at the end.
+	result := strings.Replace(baseSrc, "func TestBa(t *testing.T) {\n\t_ = 1\n}", "func TestBa(t *testing.T) {\n\t_ = 2\n}", 1) + "func TestNew(t *testing.T) {}\n"
+	n := lineOf(result, "_ = 2")
+	total := 1 + strings.Count(result, "\n")
+	changes := LineChanges{Added: []LineRange{{Start: n, End: n}, {Start: total - 1, End: total - 1}}}
+	got, err := JudgeChangedTest(ChangedTest{Path: "p/big_test.go", Result: []byte(result), Base: []byte(baseSrc), Changes: changes, Root: goRoot})
+	if err != nil || strings.Join(got.TestIDs, ",") != "TestBa,TestNew" {
+		t.Fatalf("JudgeChangedTest() = %+v, %v; want TestBa and TestNew only", got, err)
+	}
+	// Removing a line from inside TestAa judges it; removing one between tests does not.
+	m := lineOf(baseSrc, "_ = 1")
+	got, err = JudgeChangedTest(ChangedTest{Path: "p/big_test.go", Result: []byte(baseSrc), Base: []byte(baseSrc), Changes: LineChanges{DeletedAfter: []int{m}}, Root: goRoot})
+	if err != nil || strings.Join(got.TestIDs, ",") != "TestAa" {
+		t.Errorf("a deletion inside a test = %+v, %v; want TestAa", got, err)
+	}
+	between := lineOf(baseSrc, "func TestBa")
+	if _, err = JudgeChangedTest(ChangedTest{Path: "p/big_test.go", Result: []byte(baseSrc), Base: []byte(baseSrc), Changes: LineChanges{DeletedAfter: []int{between - 1}}, Root: goRoot}); !errors.Is(err, errNoJudged) {
+		t.Errorf("a deletion between tests: err = %v, want errNoJudged", err)
 	}
 }
 

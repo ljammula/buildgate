@@ -18,9 +18,10 @@ type Runner interface {
 	// Applies reports whether the runner takes the path in a repository
 	// whose root holds root.
 	Applies(p string, root RootFacts) bool
-	// TestIDs parses the reproduction's own test IDs from its content, on
-	// the host; the IDs are the ones Classify keys its result by.
-	TestIDs(p string, content []byte) ([]string, error)
+	// Tests parses the file's own tests from its content, on the host: each
+	// test ID, the ones Classify keys its result by, with the lines (from 1,
+	// inclusive) its block spans. It is the one parse of a runner's test IDs.
+	Tests(p string, content []byte) ([]TestSpan, error)
 	// Command is the factory's command for one launch.
 	Command(inv Invocation) Command
 	// Classify reads one launch's report (nil when there is none) and exit
@@ -209,14 +210,14 @@ func launchTimeout(ids []string) time.Duration {
 	return min(time.Duration(len(ids))*PerTestTimeout+time.Minute, LaunchTimeout)
 }
 
-// uniqueIDs drops repeats, keeping the first.
-func uniqueIDs(ids []string) []string {
+// uniqueSpans drops spans of an ID already seen, keeping the first.
+func uniqueSpans(spans []TestSpan) []TestSpan {
 	seen := map[string]bool{}
-	var out []string
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, id)
+	var out []TestSpan
+	for _, s := range spans {
+		if !seen[s.ID] {
+			seen[s.ID] = true
+			out = append(out, s)
 		}
 	}
 	return out

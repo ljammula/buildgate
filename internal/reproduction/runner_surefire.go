@@ -54,22 +54,72 @@ var (
 )
 
 // javaCode is the source with comments and string literals blanked, so an
-// annotation inside either is not read.
+// annotation inside either is not read. Every newline is kept, so a position
+// in it is on the same line as in the source.
 func javaCode(content []byte) string {
-	s := javaTextBlock.ReplaceAllString(string(content), `""`)
-	s = javaBlockComment.ReplaceAllString(s, " ")
+	keepLines := func(s string) string { return strings.Repeat("\n", strings.Count(s, "\n")) }
+	s := javaTextBlock.ReplaceAllStringFunc(string(content), func(m string) string { return `""` + keepLines(m) })
+	s = javaBlockComment.ReplaceAllStringFunc(s, func(m string) string { return " " + keepLines(m) })
 	s = javaString.ReplaceAllString(s, `""`)
 	return javaLineComment.ReplaceAllString(s, "")
 }
 
-// TestIDs are the void methods annotated @Test, @ParameterizedTest or
-// @RepeatedTest, by name.
-func (surefireXML) TestIDs(_ string, content []byte) ([]string, error) {
-	var ids []string
-	for _, m := range javaTestMethod.FindAllStringSubmatch(javaCode(content), -1) {
-		ids = append(ids, m[1])
+// Tests are the void methods annotated @Test, @ParameterizedTest or
+// @RepeatedTest, by name, each spanning its annotation to the closing brace
+// of its body (a method with no body, ended by a semicolon, spans to it).
+func (surefireXML) Tests(_ string, content []byte) ([]TestSpan, error) {
+	code := javaCode(content)
+	var spans []TestSpan
+	for _, m := range javaTestMethod.FindAllStringSubmatchIndex(code, -1) {
+		spans = append(spans, TestSpan{
+			ID:    code[m[2]:m[3]],
+			Start: 1 + strings.Count(code[:m[0]], "\n"),
+			End:   1 + strings.Count(code[:javaBodyEnd(code, m[1])], "\n"),
+		})
 	}
-	return uniqueIDs(ids), nil
+	return uniqueSpans(spans), nil
+}
+
+// javaBodyEnd is the offset of the character that ends the method whose
+// parameter list opened just before from: its body's closing brace, or the
+// semicolon of a method with no body. code has no comments or strings; a
+// character literal is skipped. At the end of code when nothing closes.
+func javaBodyEnd(code string, from int) int {
+	depth, parens := 0, 1
+	for i := from; i < len(code); i++ {
+		switch c := code[i]; {
+		case c == '\'':
+			if end := strings.IndexByte(code[i+1:], '\''); end >= 0 && end <= 3 {
+				i += end + 1
+				if code[i-1] == '\\' && i+1 < len(code) && code[i+1] == '\'' {
+					i++
+				}
+			}
+		case parens > 0 && c == '(':
+			parens++
+		case parens > 0 && c == ')':
+			parens--
+		case parens > 0:
+		case c == ';' && depth == 0:
+			return i
+		case c == '{':
+			depth++
+		case c == '}':
+			if depth--; depth == 0 {
+				return i
+			}
+		}
+	}
+	return len(code) - 1
+}
+
+// surefireSelector is the -Dtest value that runs the invocation's methods of
+// the class (Class#m1+m2), or the whole class when there are none.
+func surefireSelector(class string, ids []string) string {
+	if len(ids) == 0 {
+		return class
+	}
+	return class + "#" + strings.Join(ids, "+")
 }
 
 // Command compiles the module's main and test sources on their own first
@@ -96,7 +146,7 @@ func (surefireXML) Command(inv Invocation) Command {
 		`if [ "$rc" -ne 0 ]; then grep -qF -- %s "$log" && exit %d; exit %d; fi; `+
 		"mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds -Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
 		shellQuote(reports), pom, shellQuote("/"+inv.Path), surefireCompileExit, surefireBuildExit,
-		pom, shellQuote(class), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
+		pom, shellQuote(surefireSelector(class, inv.TestIDs)), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 
