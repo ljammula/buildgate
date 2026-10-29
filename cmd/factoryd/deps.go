@@ -2,6 +2,7 @@ package main
 
 import (
 	"buildgate/internal/forge"
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/openshell"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
@@ -153,13 +154,21 @@ type hostBoundary interface {
 	launchctl(args ...string) ([]byte, error)
 	launchctlBinary() string
 	launchdServicePID(domain string) (int, bool)
-	lsof(port string) ([]byte, error)
+	portListeners(port string) ([]byte, error)
 	pidAlive(pid int) bool
 	pidLooksLikeWorker(pid int) bool
 	processUID(pid int) (int, bool)
 	runUpgradeCommand(c upgradeCmd) ([]byte, error)
 	serveHealthzOK(addr string) bool
 	serveVerifiedOurs(dataDir string, addr string) (int, bool)
+	// serviceManager is what supervises install-service's services on this
+	// OS (launchd, systemd or none).
+	serviceManager() hostcontrol.ServiceManager
+	// systemctl and loginctl run those commands and return their combined
+	// output: the systemd user units install-service manages, and whether
+	// the user's units start at boot (linger).
+	systemctl(args ...string) ([]byte, error)
+	loginctl(args ...string) ([]byte, error)
 	shippedRootsPEM(ctx context.Context) ([]byte, error)
 	sleep(d time.Duration)
 	spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error

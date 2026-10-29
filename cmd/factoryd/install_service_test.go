@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,7 +86,7 @@ func stubEnsureTemporal(dp *deps, t *testing.T, addr string) {
 }
 
 func TestInstallServiceRefusesWithoutTemporal(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "")
 	t.Setenv("HOME", t.TempDir())
 	dataDir := filepath.Join(t.TempDir(), "data")
@@ -137,7 +136,7 @@ func TestBuildServicePlistValidatesWithPlutil(t *testing.T) {
 }
 
 func TestInstallServicePrintContainsResolvedPaths(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	dataDir := filepath.Join(t.TempDir(), "data & scratch")
 	configPath := filepath.Join(t.TempDir(), "config.yml")
@@ -182,7 +181,7 @@ func TestInstallServicePrintContainsResolvedPaths(t *testing.T) {
 }
 
 func TestInstallServiceRefusesToOverwriteWithoutForce(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -223,24 +222,13 @@ func TestInstallServiceRefusesToOverwriteWithoutForce(t *testing.T) {
 	}
 }
 
-func TestDoctorCheckWorkerServiceNamesEachState(t *testing.T) {
-	// doctorCheckWorkerService itself short-circuits to a fixed
-	// "not applicable (non-macOS)" Name on any non-darwin GOOS -- launchd
-	// is macOS-only. This test exercises the darwin-only state machine
-	// beyond that early return, so it needs the same guard, not just the
-	// function under test: found failing on every push since 2026-09-12
-	// once CI started actually running (GitHub Actions' Linux runner),
-	// asserting macOS-specific messages the function correctly never
-	// produces there.
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd doctor check is macOS-only; doctorCheckWorkerService itself short-circuits on this GOOS")
-	}
+func TestDoctorCheckLaunchdWorkerServiceNamesEachState(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "dev.factoryd.worker.plist")
 	ctx := context.Background()
 
 	t.Run("absent", func(t *testing.T) {
-		check := doctorCheckWorkerService(ctx, "launchctl", plistPath)
+		check := doctorCheckLaunchdWorkerService(ctx, "launchctl", plistPath)
 		if check.Err != nil {
 			t.Fatalf("absent state should not fail doctor: %v", check.Err)
 		}
@@ -274,7 +262,7 @@ func TestDoctorCheckWorkerServiceNamesEachState(t *testing.T) {
 
 	t.Run("present, not loaded", func(t *testing.T) {
 		fake := writeFakeLaunchctl(t, "exit 1\n")
-		check := doctorCheckWorkerService(ctx, fake, plistPath)
+		check := doctorCheckLaunchdWorkerService(ctx, fake, plistPath)
 		if check.Err != nil {
 			t.Fatalf("not-loaded state should not fail doctor: %v", check.Err)
 		}
@@ -285,7 +273,7 @@ func TestDoctorCheckWorkerServiceNamesEachState(t *testing.T) {
 
 	t.Run("loaded, running", func(t *testing.T) {
 		fake := writeFakeLaunchctl(t, "echo 'state = running'\n")
-		check := doctorCheckWorkerService(ctx, fake, plistPath)
+		check := doctorCheckLaunchdWorkerService(ctx, fake, plistPath)
 		if check.Err != nil {
 			t.Fatalf("running state should not fail doctor: %v", check.Err)
 		}
@@ -299,7 +287,7 @@ func TestDoctorCheckWorkerServiceNamesEachState(t *testing.T) {
 			t.Fatalf("remove fake binary: %v", err)
 		}
 		fake := writeFakeLaunchctl(t, "echo 'state = running'\n")
-		check := doctorCheckWorkerService(ctx, fake, plistPath)
+		check := doctorCheckLaunchdWorkerService(ctx, fake, plistPath)
 		if check.Err == nil {
 			t.Fatal("stale binary: want a failing check, got nil error")
 		}
@@ -375,7 +363,7 @@ func TestBuildServePlistValidatesWithPlutil(t *testing.T) {
 // rotates that token -- the whole point being that a service restart
 // doesn't invalidate the browser's stored token.
 func TestInstallServiceAlsoInstallsServeByDefault(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -442,7 +430,7 @@ func TestInstallServiceAlsoInstallsServeByDefault(t *testing.T) {
 // the worker LaunchAgent, leaving no serve plist or stable token file
 // behind.
 func TestInstallServiceNoServeSkipsServeAgent(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -478,7 +466,7 @@ func TestInstallServiceNoServeSkipsServeAgent(t *testing.T) {
 // override and read token files (0600, kept across a -force reinstall) and
 // never into the plist; -allowed-host reaches the serve plist's arguments.
 func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	t.Setenv("HOME", t.TempDir())
 	dataDir := filepath.Join(t.TempDir(), "data")
@@ -531,7 +519,7 @@ func TestInstallServiceRequireTokensAndAllowedHost(t *testing.T) {
 
 func TestInstallServiceRefusesServeFlagsWithNoServe(t *testing.T) {
 	for _, flag := range [][]string{{"-require-tokens"}, {"-allowed-host", "host.docker.internal:8090"}} {
-		err := installServiceMain(newTestDeps(t), append([]string{"-no-serve"}, flag...))
+		err := installServiceMain(launchdTestDeps(t), append([]string{"-no-serve"}, flag...))
 		if err == nil || !strings.Contains(err.Error(), "-no-serve skips") {
 			t.Errorf("%v with -no-serve = %v, want a refusal", flag, err)
 		}
@@ -542,7 +530,7 @@ func TestInstallServiceRefusesServeFlagsWithNoServe(t *testing.T) {
 // uninstall-service` bootouts and removes BOTH LaunchAgents, not only
 // worker's.
 func TestUninstallServiceRemovesServeAgentToo(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -669,7 +657,7 @@ func TestBuildServicePlistIncludesUmask(t *testing.T) {
 // token file -- so a supervised serve reading -config on its own startup
 // derives the identical serveStableStartTokenPathFor result.
 func TestInstallServeServicePassesResolvedConfigPathToPlist(t *testing.T) {
-	dp := newTestDeps(t)
+	dp := launchdTestDeps(t)
 	stubEnsureTemporal(dp, t, "localhost:7233")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -708,4 +696,13 @@ func TestInstallServeServicePassesResolvedConfigPathToPlist(t *testing.T) {
 	if gotConfig != wantConfig {
 		t.Errorf("serve plist -config = %q, want %q (the same path installServeService resolved for the token file)", gotConfig, wantConfig)
 	}
+}
+
+// launchdTestDeps is newTestDeps on a machine whose services launchd runs,
+// whatever OS the test runs on.
+func launchdTestDeps(t *testing.T) *deps {
+	t.Helper()
+	dp := newTestDeps(t)
+	fakeHostOf(dp).serviceManagerFn = func() hostcontrol.ServiceManager { return hostcontrol.Launchd }
+	return dp
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"buildgate/internal/forge"
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
@@ -196,7 +197,7 @@ type fakeHost struct {
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchctlBinaryFn    func() string
 	launchdServicePIDFn  func(domain string) (int, bool)
-	lsofFn               func(port string) ([]byte, error)
+	portListenersFn      func(port string) ([]byte, error)
 	pidAliveFn           func(pid int) bool
 	pidLooksLikeWorkerFn func(pid int) bool
 	processUIDFn         func(pid int) (int, bool)
@@ -206,6 +207,9 @@ type fakeHost struct {
 	tailscaleFn          func(ctx context.Context, args ...string) ([]byte, error)
 	terminalNotifierFn   func() bool
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
+	serviceManagerFn     func() hostcontrol.ServiceManager
+	systemctlFn          func(args ...string) ([]byte, error)
+	loginctlFn           func(args ...string) ([]byte, error)
 	shippedRootsPEMFn    func(ctx context.Context) ([]byte, error)
 	sleepFn              func(d time.Duration)
 	spawnServeFn         func(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
@@ -231,13 +235,16 @@ func (f *fakeHost) headCommit(ctx context.Context, repoDir string) (string, erro
 func (f *fakeHost) launchctl(args ...string) ([]byte, error)       { return f.launchctlFn(args...) }
 func (f *fakeHost) launchctlBinary() string                        { return f.launchctlBinaryFn() }
 func (f *fakeHost) launchdServicePID(domain string) (int, bool)    { return f.launchdServicePIDFn(domain) }
-func (f *fakeHost) lsof(port string) ([]byte, error)               { return f.lsofFn(port) }
+func (f *fakeHost) portListeners(port string) ([]byte, error)      { return f.portListenersFn(port) }
 func (f *fakeHost) pidAlive(pid int) bool                          { return f.pidAliveFn(pid) }
 func (f *fakeHost) pidLooksLikeWorker(pid int) bool                { return f.pidLooksLikeWorkerFn(pid) }
 func (f *fakeHost) processUID(pid int) (int, bool)                 { return f.processUIDFn(pid) }
 func (f *fakeHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) { return f.runUpgradeCommandFn(c) }
 func (f *fakeHost) serveHealthzOK(addr string) bool                { return f.serveHealthzOKFn(addr) }
 func (f *fakeHost) terminalNotifierOnPath() bool                   { return f.terminalNotifierFn() }
+func (f *fakeHost) serviceManager() hostcontrol.ServiceManager     { return f.serviceManagerFn() }
+func (f *fakeHost) systemctl(args ...string) ([]byte, error)       { return f.systemctlFn(args...) }
+func (f *fakeHost) loginctl(args ...string) ([]byte, error)        { return f.loginctlFn(args...) }
 func (f *fakeHost) tailscale(ctx context.Context, args ...string) ([]byte, error) {
 	return f.tailscaleFn(ctx, args...)
 }
@@ -422,7 +429,7 @@ func newTestDeps(t testing.TB) *deps {
 		launchctlFn:          realHost.launchctl,
 		launchctlBinaryFn:    realHost.launchctlBinary,
 		launchdServicePIDFn:  realHost.launchdServicePID,
-		lsofFn:               realHost.lsof,
+		portListenersFn:      realHost.portListeners,
 		pidAliveFn:           realHost.pidAlive,
 		pidLooksLikeWorkerFn: realHost.pidLooksLikeWorker,
 		processUIDFn:         realHost.processUID,
@@ -435,6 +442,15 @@ func newTestDeps(t testing.TB) *deps {
 			return nil, errors.New("test host: no tailscale")
 		},
 		serveVerifiedOursFn: realHost.serveVerifiedOurs,
+		// No test reads or changes the developer's own services: no service
+		// manager unless a test names one, and systemd is never asked.
+		serviceManagerFn: func() hostcontrol.ServiceManager { return hostcontrol.NoServiceManager },
+		systemctlFn: func(...string) ([]byte, error) {
+			return nil, errors.New("test host: no systemctl")
+		},
+		loginctlFn: func(...string) ([]byte, error) {
+			return nil, errors.New("test host: no loginctl")
+		},
 		// No test reaches a public host or the machine's keychain: the
 		// TLS-interception check is skipped unless a test sets these.
 		shippedRootsPEMFn: func(context.Context) ([]byte, error) {

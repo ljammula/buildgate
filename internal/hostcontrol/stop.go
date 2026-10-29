@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -19,7 +18,7 @@ import (
 	"buildgate/internal/sanitize"
 )
 
-// launchdServicePID reports the pid launchd runs for a service
+// RealLaunchdServicePID reports the pid launchd runs for a service
 // domain (gui/<uid>/<label>), when it runs one.
 func RealLaunchdServicePID(dp Deps, domain string) (int, bool) {
 	return LaunchctlServicePID(dp, domain)
@@ -80,8 +79,8 @@ func StopDataDir(dp Deps, w io.Writer, dir string, force bool, now time.Time) St
 		out.Refused, out.QueueLive = true, true
 		return out
 	}
-	stopProcess(dp, w, what, dir, &out, WorkerPIDs(dp, dir, now), WorkerServiceLabel, WorkerPlistPath)
-	stopProcess(dp, w, "serve", dir, &out, ServePIDs(dp, dir), ServeServiceLabel, ServePlistPath)
+	stopProcess(dp, w, what, dir, &out, WorkerPIDs(dp, dir, now), WorkerService)
+	stopProcess(dp, w, "serve", dir, &out, ServePIDs(dp, dir), ServeService)
 	return out
 }
 
@@ -137,10 +136,12 @@ func AliveFactoryd(dp Deps, pid int) bool {
 }
 
 // stopProcess stops the first of sources (all name one process in the
-// normal case), or reports that it is launchd-supervised or not running.
-func stopProcess(dp Deps, w io.Writer, what, dir string, out *StopOutcome, sources []pidSource, label string, plist func() (string, error)) {
-	if LaunchdSupervises(dp, label, plist, dir) {
-		fmt.Fprintf(w, "%s (%s): supervised by launchd (%s), left running; `factoryd uninstall-service` removes it\n", what, dir, label)
+// normal case), or reports that its service manager supervises it or that
+// it is not running.
+func stopProcess(dp Deps, w io.Writer, what, dir string, out *StopOutcome, sources []pidSource, svc Service) {
+	if ServiceSupervises(dp, svc, dir) {
+		m := dp.ServiceManager()
+		fmt.Fprintf(w, "%s (%s): supervised by %s (%s), left running; `factoryd uninstall-service` removes it\n", what, dir, m, m.Name(svc))
 		if what != "serve" {
 			out.QueueLive = true
 		}
@@ -178,29 +179,6 @@ func stopProcess(dp Deps, w io.Writer, what, dir string, out *StopOutcome, sourc
 		return
 	}
 	fmt.Fprintf(w, "%s (%s): stopped (pid %d)\n", what, dir, pid)
-}
-
-// LaunchdSupervises reports whether the LaunchAgent label, installed by
-// `factoryd install-service` for dir, is running: launchd would restart
-// anything stop killed, so stop leaves it alone.
-func LaunchdSupervises(dp Deps, label string, plist func() (string, error), dir string) bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-	plistPath, err := plist()
-	if err != nil {
-		return false
-	}
-	b, err := os.ReadFile(plistPath)
-	if err != nil {
-		return false
-	}
-	got, ok := ProgramArgumentsFlagValue(ProgramArgumentsStrings(b), "-data-dir")
-	if !ok || !samePath(got, dir) {
-		return false
-	}
-	_, running := dp.LaunchdServicePID(fmt.Sprintf("gui/%d/%s", os.Getuid(), label))
-	return running
 }
 
 func samePath(a, b string) bool {

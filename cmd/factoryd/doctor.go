@@ -530,8 +530,8 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	checks := append(built, doctorChecksFor(ctx, in)...)
-	if plistPath, plistErr := hostcontrol.WorkerPlistPath(); plistErr == nil {
-		checks = append(checks, doctorCheckWorkerService(ctx, "launchctl", plistPath))
+	if path, pathErr := dp.host.serviceManager().DefinitionPath(hostcontrol.WorkerService); pathErr == nil {
+		checks = append(checks, doctorCheckWorkerService(ctx, dp, path))
 	}
 	if selfPath, selfErr := os.Executable(); selfErr == nil {
 		checks = append(checks, doctorCheckPathShadowing(selfPath, os.Getenv("PATH"), fix))

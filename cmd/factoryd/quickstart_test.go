@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -2173,7 +2172,7 @@ func TestQuickstartServiceDrainsSelectedQueueComparesArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matches, err := hostcontrol.QuickstartServiceDrainsSelectedQueue(plistPath, configPath, dataDir)
+	matches, err := hostcontrol.QuickstartServiceDrainsSelectedQueue(hostcontrol.Launchd, plistPath, configPath, dataDir)
 	if err != nil {
 		t.Fatalf("quickstartServiceDrainsSelectedQueue: %v", err)
 	}
@@ -2181,7 +2180,7 @@ func TestQuickstartServiceDrainsSelectedQueueComparesArguments(t *testing.T) {
 		t.Error("matches = false, want true when -config/-data-dir match exactly")
 	}
 
-	matches, err = hostcontrol.QuickstartServiceDrainsSelectedQueue(plistPath, filepath.Join(dir, "other-config.yml"), dataDir)
+	matches, err = hostcontrol.QuickstartServiceDrainsSelectedQueue(hostcontrol.Launchd, plistPath, filepath.Join(dir, "other-config.yml"), dataDir)
 	if err != nil {
 		t.Fatalf("quickstartServiceDrainsSelectedQueue: %v", err)
 	}
@@ -2189,7 +2188,7 @@ func TestQuickstartServiceDrainsSelectedQueueComparesArguments(t *testing.T) {
 		t.Error("matches = true, want false when -config differs")
 	}
 
-	matches, err = hostcontrol.QuickstartServiceDrainsSelectedQueue(plistPath, configPath, filepath.Join(dir, "other-data"))
+	matches, err = hostcontrol.QuickstartServiceDrainsSelectedQueue(hostcontrol.Launchd, plistPath, configPath, filepath.Join(dir, "other-data"))
 	if err != nil {
 		t.Fatalf("quickstartServiceDrainsSelectedQueue: %v", err)
 	}
@@ -2208,11 +2207,7 @@ func TestQuickstartServiceDrainsSelectedQueueComparesArguments(t *testing.T) {
 func TestQuickstartEnsureDaemonRestartsAliveChildWhenConfigRewritten(t *testing.T) {
 	dp := newTestDeps(t)
 	// Isolate from this developer's own real ~/Library/LaunchAgents plist
-	// and launchctl: quickstartEnsureDaemon's darwin branch runs
-	// unconditionally, and without this a real installed service (or
-	// simply a real `launchctl` binary reachable on PATH) could make this
-	// test's outcome depend on this machine's own state rather than the
-	// code under test (a Codex review on this PR, round 3).
+	// and launchctl, should a test name launchd as the service manager.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	restoreLaunchctlBinary := dp.host.launchctlBinary()
@@ -2721,10 +2716,7 @@ func TestQuickstartPullDoctorInputsSkipsRegistryProxyImageWhenDisabled(t *testin
 // just skipped even when restartNeeded is true, leaving it running against
 // the stale settings quickstart just rewrote.
 func TestQuickstartEnsureDaemonRestartsMatchingLaunchdServiceWhenRestartNeeded(t *testing.T) {
-	dp := newTestDeps(t)
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd is macOS-only; quickstartEnsureDaemon's own darwin check short-circuits on this GOOS")
-	}
+	dp := launchdTestDeps(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -2784,10 +2776,7 @@ func TestQuickstartEnsureDaemonRestartsMatchingLaunchdServiceWhenRestartNeeded(t
 // confirms the plain "already managed by launchd -- skipping" behavior is
 // unchanged (no kickstart call) when restartNeeded is false.
 func TestQuickstartEnsureDaemonSkipsMatchingLaunchdServiceWhenRestartNotNeeded(t *testing.T) {
-	dp := newTestDeps(t)
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd is macOS-only; quickstartEnsureDaemon's own darwin check short-circuits on this GOOS")
-	}
+	dp := launchdTestDeps(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 

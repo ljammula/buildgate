@@ -29,7 +29,8 @@ func RealLaunchctlBinary(dp Deps) string { return "launchctl" }
 // QuickstartEnsureDaemon leaves a worker driving -data-dir's requests,
 // skipping straight through when one is already in charge and actually
 // draining the -config/-data-dir this invocation resolved: an
-// install-service-managed launchd service on macOS (detected the same way
+// install-service-managed service (launchd on macOS, systemd on Linux;
+// detected the same way
 // `factoryd doctor` reports it, and only trusted once
 // QuickstartServiceDrainsSelectedQueue confirms its own -config/-data-dir
 // arguments match -- a Codex review on this PR: the label/running-state
@@ -44,53 +45,8 @@ func RealLaunchctlBinary(dp Deps) string { return "launchctl" }
 // doc comment. With no Temporal address it returns an error instead of
 // spawning anything.
 func QuickstartEnsureDaemon(dp Deps, w io.Writer, binaryPath, configPath, dataDir string, credentialEnv []string, restartNeeded bool, temporalAddress string) error {
-	if runtime.GOOS == "darwin" {
-		if plistPath, err := WorkerPlistPath(); err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			checkName := dp.WorkerServiceState(ctx, plistPath)
-			cancel()
-			if strings.Contains(checkName, "loaded, running") {
-				matches, matchErr := QuickstartServiceDrainsSelectedQueue(plistPath, configPath, dataDir)
-				switch {
-				case matchErr != nil:
-					fmt.Fprintf(w, "A launchd worker service is running, but its own arguments could not be checked against this invocation's (%v) -- not assuming it's the same queue.\n", matchErr)
-				case matches && restartNeeded && len(credentialEnv) > 0:
-					// A `launchctl kickstart` restart re-execs the worker
-					// off the SAME plist, whose EnvironmentVariables dict
-					// only ever carries PATH/HOME (buildWorkerPlist) --
-					// there is no way for a per-invocation credential to
-					// reach it that way, unlike the config/image-only case
-					// just below. Refuse rather than restart and claim
-					// success while actually leaving the daemon exactly as
-					// credential-less (or on the old credential) as before
-					// (a Codex review on this PR, round 3).
-					return fmt.Errorf("the worker is managed by launchd (%s) and cannot pick up a credential this way -- run `factoryd uninstall-service`, or drop -credential and let quickstart's own spawned-child path handle this run instead", checkName)
-				case matches && restartNeeded:
-					// Same config/data-dir the service already uses, but
-					// this invocation just rewrote that config (or its
-					// image refs) -- the running service resolved its
-					// settings at its own last startup and, unlike a
-					// plain SIGTERM'd spawned child, launchd's KeepAlive
-					// will bring it straight back up on its own once
-					// stopped, so a forced restart (not a reinstall) is
-					// all that's needed for it to pick the change up (a
-					// Codex review on this PR, round 2: the
-					// matches-but-stale case fell through this branch
-					// entirely and was returned as "skip", leaving it
-					// running against stale settings).
-					if _, err := dp.Launchctl("kickstart", "-k", fmt.Sprintf("gui/%d/%s", os.Getuid(), WorkerServiceLabel)); err != nil {
-						return fmt.Errorf("restart launchd worker service to pick up the rewritten configuration: %w", err)
-					}
-					fmt.Fprintf(w, "the worker is managed by launchd (%s); restarted it to pick up the rewritten configuration.\n", checkName)
-					return nil
-				case matches:
-					fmt.Fprintf(w, "the worker is already managed by launchd (%s) -- skipping. Stop it with `factoryd uninstall-service` if needed.\n", checkName)
-					return nil
-				default:
-					fmt.Fprintln(w, "A launchd worker service is running, but it drains a different -config/-data-dir than this invocation resolved -- not skipping it. Run `factoryd install-service -force` first if you want the service itself to pick up this configuration instead.")
-				}
-			}
-		}
+	if handled, err := quickstartWorkerServiceInCharge(dp, w, configPath, dataDir, credentialEnv, restartNeeded); handled || err != nil {
+		return err
 	}
 
 	pidPath := filepath.Join(dataDir, "quickstart-queue-run.pid")
@@ -109,6 +65,55 @@ func QuickstartEnsureDaemon(dp Deps, w io.Writer, binaryPath, configPath, dataDi
 		return errors.New("the worker needs Temporal and none is available -- run `factoryd doctor -fix` to start it, then `factoryd worker`")
 	}
 	return dp.SpawnWorker(w, binaryPath, configPath, dataDir, credentialEnv, pidPath, temporalAddress)
+}
+
+// quickstartWorkerServiceInCharge settles the case where install-service's
+// worker service is running: it is in charge when it drains this
+// invocation's -config/-data-dir (QuickstartServiceDrainsSelectedQueue: the
+// running state alone says nothing about which queue), and is restarted
+// through its manager when the config was just rewritten. handled is true
+// when nothing more is to be done.
+func quickstartWorkerServiceInCharge(dp Deps, w io.Writer, configPath, dataDir string, credentialEnv []string, restartNeeded bool) (handled bool, err error) {
+	m := dp.ServiceManager()
+	if m == NoServiceManager {
+		return false, nil
+	}
+	path, err := m.DefinitionPath(WorkerService)
+	if err != nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	checkName := dp.WorkerServiceState(ctx, path)
+	cancel()
+	if !strings.Contains(checkName, "loaded, running") {
+		return false, nil
+	}
+	matches, matchErr := QuickstartServiceDrainsSelectedQueue(m, path, configPath, dataDir)
+	switch {
+	case matchErr != nil:
+		fmt.Fprintf(w, "A %s worker service is running, but its own arguments could not be checked against this invocation's (%v) -- not assuming it's the same queue.\n", m, matchErr)
+		return false, nil
+	case matches && restartNeeded && len(credentialEnv) > 0:
+		// A restart re-execs the worker from the same definition, whose
+		// environment carries only what install-service wrote: a credential
+		// given to this invocation cannot reach it that way. Refuse rather
+		// than restart and claim the credential is in use.
+		return true, fmt.Errorf("the worker is managed by %s (%s) and cannot pick up a credential this way -- run `factoryd uninstall-service`, or drop -credential and let quickstart's own spawned-child path handle this run instead", m, checkName)
+	case matches && restartNeeded:
+		// The service resolved its settings when it last started, and its
+		// manager brings it back by itself once stopped: a restart through
+		// the manager is what picks up the rewritten config.
+		if err := RestartService(dp, WorkerService); err != nil {
+			return true, fmt.Errorf("restart %s worker service to pick up the rewritten configuration: %w", m, err)
+		}
+		fmt.Fprintf(w, "the worker is managed by %s (%s); restarted it to pick up the rewritten configuration.\n", m, checkName)
+		return true, nil
+	case matches:
+		fmt.Fprintf(w, "the worker is already managed by %s (%s) -- skipping. Stop it with `factoryd uninstall-service` if needed.\n", m, checkName)
+		return true, nil
+	}
+	fmt.Fprintf(w, "A %s worker service is running, but it drains a different -config/-data-dir than this invocation resolved -- not skipping it. Run `factoryd install-service -force` first if you want the service itself to pick up this configuration instead.\n", m)
+	return false, nil
 }
 
 // quickstartServeHealthzTimeout bounds a single GET /healthz probe --
@@ -208,18 +213,22 @@ func QuickstartSecureLogDir(dir string) error {
 	return nil
 }
 
-// lsof lists the pids of every process with an open LISTEN
+// RealPortListeners lists the pids of every process with an open LISTEN
 // socket on the given TCP port, one per line -- the "provably owns the
 // port" half of host.serveVerifiedOurs (per an adversarial review).
 // a boundary method so tests can stub the external `lsof` dependency.
-func RealLsof(dp Deps, port string) ([]byte, error) {
+// On Linux it reads /proc instead (procListeningPIDs).
+func RealPortListeners(dp Deps, port string) ([]byte, error) {
+	if runtime.GOOS == "linux" {
+		return procListeningPIDs("/proc", port)
+	}
 	return exec.Command("lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN", "-t").Output()
 }
 
 // QuickstartPortOwnedByPID reports whether pid is among the processes
-// lsof reports listening on port.
+// PortListeners reports listening on port.
 func QuickstartPortOwnedByPID(dp Deps, port string, pid int) bool {
-	out, err := dp.Lsof(port)
+	out, err := dp.PortListeners(port)
 	if err != nil {
 		return false
 	}
@@ -297,8 +306,8 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 	}
 	// The serve LaunchAgent serves one data dir (install-service pins its
 	// -data-dir): it is this data dir's serve only when that is the one.
-	if _, ok := servePlistFor(dataDir); ok {
-		if pid, ok := LaunchctlServicePID(dp, fmt.Sprintf("gui/%d/%s", os.Getuid(), ServeServiceLabel)); ok {
+	if _, ok := ServiceFor(dp, ServeService, dataDir); ok {
+		if pid, ok := ServicePID(dp, ServeService); ok {
 			candidates = append(candidates, pid)
 		}
 	}
@@ -417,14 +426,15 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 		return token
 	}
 
-	if _, installed := servePlistFor(dataDir); installed {
-		if _, err := dp.Launchctl("kickstart", "-k", fmt.Sprintf("gui/%d/%s", os.Getuid(), ServeServiceLabel)); err != nil {
-			fmt.Fprintf(w, "serve is installed as a launchd service but could not be kickstarted (%v) -- spawning a detached serve instead.\n", err)
+	if _, installed := ServiceFor(dp, ServeService, dataDir); installed {
+		m := dp.ServiceManager()
+		if err := RestartService(dp, ServeService); err != nil {
+			fmt.Fprintf(w, "serve is installed as a %s service but could not be restarted (%v) -- spawning a detached serve instead.\n", m, err)
 		} else if waitForServeWithSpinner(dp, w, addr) {
-			fmt.Fprintf(w, "serve is managed by launchd (%s); (re)started it.\n", ServeServiceLabel)
+			fmt.Fprintf(w, "serve is managed by %s (%s); (re)started it.\n", m, m.Name(ServeService))
 			return token
 		} else {
-			fmt.Fprintf(w, "serve is managed by launchd (%s) but did not answer /healthz within %s of being kickstarted -- it may still be starting.\n", ServeServiceLabel, quickstartServeReadyTimeout)
+			fmt.Fprintf(w, "serve is managed by %s (%s) but did not answer /healthz within %s of being restarted -- it may still be starting.\n", m, m.Name(ServeService), quickstartServeReadyTimeout)
 			return token
 		}
 	}
@@ -434,28 +444,6 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 		return token
 	}
 	return token
-}
-
-// servePlistFor returns the serve LaunchAgent's plist path when one is
-// installed and serves dataDir. Another data dir's service is neither this
-// data dir's serve nor something to kickstart on its behalf.
-func servePlistFor(dataDir string) (string, bool) {
-	if runtime.GOOS != "darwin" {
-		return "", false
-	}
-	plistPath, err := ServePlistPath()
-	if err != nil {
-		return "", false
-	}
-	b, err := os.ReadFile(plistPath)
-	if err != nil {
-		return "", false
-	}
-	got, ok := ProgramArgumentsFlagValue(ProgramArgumentsStrings(b), "-data-dir")
-	if !ok || !samePath(got, dataDir) {
-		return "", false
-	}
-	return plistPath, true
 }
 
 // freeLoopbackAddr returns a loopback address nothing listens on, for a
@@ -527,8 +515,9 @@ func RealSpawnServe(dp Deps, w io.Writer, binaryPath, configPath, dataDir, addr 
 	return nil
 }
 
-// QuickstartServiceDrainsSelectedQueue reports whether the launchd plist
-// at plistPath actually launches worker with the given -config and
+// QuickstartServiceDrainsSelectedQueue reports whether the service
+// definition at path (m's: a plist or a unit) actually launches worker
+// with the given -config and
 // -data-dir -- not merely whether some worker service is running under
 // that label. A running service's -config/-data-dir can differ from what
 // this invocation resolved (a different -config flag, a different
@@ -536,12 +525,12 @@ func RealSpawnServe(dp Deps, w io.Writer, binaryPath, configPath, dataDir, addr 
 // draining an entirely different queue and letting quickstart skip
 // spawning its own would leave the just-submitted request's queue never
 // serviced at all.
-func QuickstartServiceDrainsSelectedQueue(plistPath, configPath, dataDir string) (bool, error) {
+func QuickstartServiceDrainsSelectedQueue(m ServiceManager, plistPath, configPath, dataDir string) (bool, error) {
 	plistBytes, err := os.ReadFile(plistPath)
 	if err != nil {
 		return false, fmt.Errorf("read %s: %w", plistPath, err)
 	}
-	args := ProgramArgumentsStrings(plistBytes)
+	args := m.ProgramArgs(plistBytes)
 	gotConfig, ok := ProgramArgumentsFlagValue(args, "-config")
 	if !ok {
 		return false, fmt.Errorf("%s has no -config argument", plistPath)
@@ -639,12 +628,22 @@ func QuickstartReadAlivePID(dp Deps, pidPath string) (int, bool) {
 // operator who built/installed it under a different name still gets a
 // real check instead of quickstart wrongly treating every one of its own
 // spawned children as "not ours" (a Codex review on this PR, round 3).
+//
+// On Linux the name is /proc/<pid>/exe's (procExecutableName), which comm
+// would cut at 15 characters.
 func RealPidLooksLikeWorker(dp Deps, pid int) bool {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil {
-		return false
+	comm, ok := "", false
+	if runtime.GOOS == "linux" {
+		comm, ok = procExecutableName("/proc", pid)
 	}
-	comm := strings.ToLower(strings.TrimSpace(string(out)))
+	if !ok {
+		out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+		if err != nil {
+			return false
+		}
+		comm = string(out)
+	}
+	comm = strings.ToLower(strings.TrimSpace(comm))
 	if strings.Contains(comm, "factoryd") {
 		return true
 	}

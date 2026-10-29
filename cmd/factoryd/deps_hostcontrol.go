@@ -23,10 +23,12 @@ func (dp *deps) Launchctl(args ...string) ([]byte, error) { return dp.host.launc
 func (dp *deps) LaunchdServicePID(domain string) (int, bool) {
 	return dp.host.launchdServicePID(domain)
 }
-func (dp *deps) Lsof(port string) ([]byte, error) { return dp.host.lsof(port) }
-func (dp *deps) PidLooksLikeWorker(pid int) bool  { return dp.host.pidLooksLikeWorker(pid) }
-func (dp *deps) ProcessUID(pid int) (int, bool)   { return dp.host.processUID(pid) }
-func (dp *deps) ServeHealthzOK(addr string) bool  { return dp.host.serveHealthzOK(addr) }
+func (dp *deps) PortListeners(port string) ([]byte, error)  { return dp.host.portListeners(port) }
+func (dp *deps) PidLooksLikeWorker(pid int) bool            { return dp.host.pidLooksLikeWorker(pid) }
+func (dp *deps) ServiceManager() hostcontrol.ServiceManager { return dp.host.serviceManager() }
+func (dp *deps) Systemctl(args ...string) ([]byte, error)   { return dp.host.systemctl(args...) }
+func (dp *deps) ProcessUID(pid int) (int, bool)             { return dp.host.processUID(pid) }
+func (dp *deps) ServeHealthzOK(addr string) bool            { return dp.host.serveHealthzOK(addr) }
 func (dp *deps) ServeVerifiedOurs(dataDir string, addr string) (int, bool) {
 	return dp.host.serveVerifiedOurs(dataDir, addr)
 }
@@ -41,8 +43,8 @@ func (dp *deps) TemporalHealthy(ctx context.Context, addr string) error {
 	return dp.temporal.healthy(ctx, addr)
 }
 
-func (dp *deps) WorkerServiceState(ctx context.Context, plistPath string) string {
-	return doctorCheckWorkerService(ctx, dp.host.launchctlBinary(), plistPath).Name
+func (dp *deps) WorkerServiceState(ctx context.Context, path string) string {
+	return doctorCheckWorkerService(ctx, dp, path).Name
 }
 
 func (dp *deps) ServeStartToken(configPath string) (token, path string, err error) {
@@ -65,8 +67,10 @@ func (impl realHost) launchctlBinary() string { return hostcontrol.RealLaunchctl
 func (impl realHost) serveHealthzOK(addr string) bool {
 	return hostcontrol.RealServeHealthzOK(impl.dp, addr)
 }
-func (impl realHost) lsof(port string) ([]byte, error) { return hostcontrol.RealLsof(impl.dp, port) }
-func (impl realHost) processUID(pid int) (int, bool)   { return hostcontrol.RealProcessUID(impl.dp, pid) }
+func (impl realHost) portListeners(port string) ([]byte, error) {
+	return hostcontrol.RealPortListeners(impl.dp, port)
+}
+func (impl realHost) processUID(pid int) (int, bool) { return hostcontrol.RealProcessUID(impl.dp, pid) }
 func (impl realHost) serveVerifiedOurs(dataDir, addr string) (int, bool) {
 	return hostcontrol.RealServeVerifiedOurs(impl.dp, dataDir, addr)
 }

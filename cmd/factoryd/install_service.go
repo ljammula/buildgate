@@ -1,7 +1,9 @@
-// factoryd install-service/uninstall-service manage a macOS launchd
-// LaunchAgent that keeps `factoryd worker` running in the background,
-// so an operator no longer needs a dedicated terminal for it (see
-// USAGE.md §11). `factoryd doctor` reports the service's state.
+// factoryd install-service/uninstall-service manage the services that keep
+// `factoryd worker` and `factoryd serve` running in the background, so an
+// operator no longer needs a dedicated terminal for them (see USAGE.md
+// §11): launchd LaunchAgents on macOS (this file), systemd user units on
+// Linux (install_service_systemd.go). `factoryd doctor` reports the
+// worker service's state.
 
 package main
 
@@ -123,14 +125,7 @@ func buildServePlist(cfg servePlistConfig) []byte {
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
 	fmt.Fprintf(&b, "\t<key>Label</key>\n\t<string>%s</string>\n", escapeXML(hostcontrol.ServeServiceLabel))
 	b.WriteString("\t<key>ProgramArguments</key>\n\t<array>\n")
-	args := []string{cfg.BinaryPath, "serve", "-data-dir", cfg.DataDir}
-	if cfg.ConfigPath != "" {
-		args = append(args, "-config", cfg.ConfigPath)
-	}
-	for _, host := range cfg.AllowedHosts {
-		args = append(args, "-allowed-host", host)
-	}
-	for _, arg := range args {
+	for _, arg := range serveServiceArgs(cfg) {
 		fmt.Fprintf(&b, "\t\t<string>%s</string>\n", escapeXML(arg))
 	}
 	b.WriteString("\t</array>\n")
@@ -148,6 +143,18 @@ func buildServePlist(cfg servePlistConfig) []byte {
 	b.WriteString("\t</dict>\n")
 	b.WriteString("</dict>\n</plist>\n")
 	return []byte(b.String())
+}
+
+// serveServiceArgs is the serve service's command line under any manager.
+func serveServiceArgs(cfg servePlistConfig) []string {
+	args := []string{cfg.BinaryPath, "serve", "-data-dir", cfg.DataDir}
+	if cfg.ConfigPath != "" {
+		args = append(args, "-config", cfg.ConfigPath)
+	}
+	for _, host := range cfg.AllowedHosts {
+		args = append(args, "-allowed-host", host)
+	}
+	return args
 }
 
 // escapeXML XML-escapes s for embedding as plist character data (a
@@ -256,6 +263,10 @@ func installServiceMain(dp *deps, args []string) error {
 	if *f.noServe && (*f.requireTokens || len(f.allowedHosts.values) > 0) {
 		return errors.New("install-service: -require-tokens and -allowed-host set up the console agent, which -no-serve skips")
 	}
+	m := dp.host.serviceManager()
+	if m == hostcontrol.NoServiceManager {
+		return fmt.Errorf("install-service: no service manager on %s (launchd on macOS, systemd on Linux); run `factoryd worker` and `factoryd serve` yourself", runtime.GOOS)
+	}
 
 	binaryPath, err := resolveServiceBinaryPath()
 	if err != nil {
@@ -274,21 +285,43 @@ func installServiceMain(dp *deps, args []string) error {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
 	// Resolved the way submit's autostart resolves it. The progress line goes
-	// to stderr so -print's stdout stays the plist alone.
+	// to stderr so -print's stdout stays the service definition alone.
 	temporalAddress := dp.temporal.ensure(context.Background(), os.Stderr)
 	if temporalAddress == "" {
 		return errors.New("install-service: the worker needs Temporal and none is reachable; start Docker (or Temporal) and rerun")
 	}
 
-	plist := buildWorkerPlist(workerPlistConfig{
+	worker := workerPlistConfig{
 		BinaryPath:      binaryPath,
 		ConfigPath:      resolvedConfigPath,
 		DataDir:         resolvedDataDir,
 		HomeDir:         home,
 		TemporalAddress: temporalAddress,
-	})
+	}
+	var serve *servePlistConfig
+	if !*f.noServe {
+		serve = &servePlistConfig{
+			BinaryPath:   binaryPath,
+			ConfigPath:   resolvedConfigPath,
+			DataDir:      resolvedDataDir,
+			HomeDir:      home,
+			AllowedHosts: f.allowedHosts.values,
+		}
+	}
+	if m == hostcontrol.Systemd {
+		if *f.print {
+			return printSystemdUnits(worker, serve)
+		}
+		return installSystemdServices(dp, worker, serve, *f.requireTokens, *f.force)
+	}
+	return installLaunchdServices(dp, worker, serve, *f.print, *f.requireTokens, *f.force)
+}
 
-	if *f.print {
+// installLaunchdServices writes and bootstraps the worker LaunchAgent, then
+// the serve one unless serve is nil; print prints the worker plist instead.
+func installLaunchdServices(dp *deps, worker workerPlistConfig, serve *servePlistConfig, print, requireTokens, force bool) error {
+	plist := buildWorkerPlist(worker)
+	if print {
 		_, err := os.Stdout.Write(plist)
 		return err
 	}
@@ -297,15 +330,11 @@ func installServiceMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, statErr := os.Stat(plistPath); statErr == nil {
-		if !*f.force {
-			return fmt.Errorf("%s already exists; pass -force to overwrite (the service is bootstrapped again either way)", plistPath)
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
+	if err := refuseExistingDefinition(plistPath, force); err != nil {
+		return err
 	}
 
-	if err := os.MkdirAll(filepath.Join(resolvedDataDir, "logs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(worker.DataDir, "logs"), 0o755); err != nil {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
@@ -320,16 +349,53 @@ func installServiceMain(dp *deps, args []string) error {
 	}
 	fmt.Printf("installed %s and loaded it via launchctl\n", plistPath)
 
-	if *f.noServe {
+	if serve == nil {
 		return nil
 	}
-	return installServeService(dp, servePlistConfig{
-		BinaryPath:   binaryPath,
-		ConfigPath:   resolvedConfigPath,
-		DataDir:      resolvedDataDir,
-		HomeDir:      home,
-		AllowedHosts: f.allowedHosts.values,
-	}, *f.requireTokens, *f.force)
+	return installServeService(dp, *serve, requireTokens, force)
+}
+
+// refuseExistingDefinition refuses to overwrite an installed service
+// definition without -force.
+func refuseExistingDefinition(path string, force bool) error {
+	if _, statErr := os.Stat(path); statErr == nil {
+		if !force {
+			return fmt.Errorf("%s already exists; pass -force to overwrite (the service is started again either way)", path)
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	return nil
+}
+
+// prepareServeTokens generates (or reuses, via ensureTokenFile) the stable
+// start token file next to configPath, so `factoryd console` and the
+// service's first start agree on the token before serve binds a port;
+// requireTokens does the same for the override, read and console tokens,
+// which serve reads at each start.
+func prepareServeTokens(dp *deps, configPath string, requireTokens bool) error {
+	if _, _, err := ensureTokenFile(dp, serveStableStartTokenPathFor(configPath)); err != nil {
+		return fmt.Errorf("prepare stable serve start token: %w", err)
+	}
+	if requireTokens {
+		for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName, serveConsoleTokenFileName} {
+			if _, _, err := ensureTokenFile(dp, serveTokenFilePathFor(configPath, name)); err != nil {
+				return fmt.Errorf("prepare %s: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// printServeTokenNote says where the start token is kept and what the token
+// settings mean for the console.
+func printServeTokenNote(cfg *servePlistConfig, requireTokens bool) {
+	fmt.Printf("stable start token: %s\n", serveStableStartTokenPathFor(cfg.ConfigPath))
+	if requireTokens {
+		fmt.Println("every read and write now needs a token; the console on this machine too: open it with `factoryd console`, which gives it its token")
+	} else if len(cfg.AllowedHosts) > 0 {
+		fmt.Println("warning: a forwarder that adds no forwarding header (colima's host.docker.internal) lets its callers act as local, with no token; add -require-tokens")
+	}
 }
 
 // installServeService installs and bootstraps the dev.factoryd.serve
@@ -340,29 +406,16 @@ func installServiceMain(dp *deps, args []string) error {
 // port. requireTokens generates (or reuses) the override, read and console
 // token files the same way; serve reads them at each start.
 func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bool) error {
-	tokenPath := serveStableStartTokenPathFor(cfg.ConfigPath)
-	if _, _, err := ensureTokenFile(dp, tokenPath); err != nil {
-		return fmt.Errorf("prepare stable serve start token: %w", err)
+	if err := prepareServeTokens(dp, cfg.ConfigPath, requireTokens); err != nil {
+		return err
 	}
-	if requireTokens {
-		for _, name := range []string{serveOverrideTokenFileName, serveReadTokenFileName, serveConsoleTokenFileName} {
-			if _, _, err := ensureTokenFile(dp, serveTokenFilePathFor(cfg.ConfigPath, name)); err != nil {
-				return fmt.Errorf("prepare %s: %w", name, err)
-			}
-		}
-	}
-
 	plist := buildServePlist(cfg)
 	plistPath, err := hostcontrol.ServePlistPath()
 	if err != nil {
 		return err
 	}
-	if _, statErr := os.Stat(plistPath); statErr == nil {
-		if !force {
-			return fmt.Errorf("%s already exists; pass -force to overwrite (the service is bootstrapped again either way)", plistPath)
-		}
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
+	if err := refuseExistingDefinition(plistPath, force); err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "logs"), 0o755); err != nil {
@@ -377,12 +430,8 @@ func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bo
 	if err := launchctlBootstrap(dp, plistPath); err != nil {
 		return err
 	}
-	fmt.Printf("installed %s and loaded it via launchctl (stable start token: %s)\n", plistPath, tokenPath)
-	if requireTokens {
-		fmt.Println("every read and write now needs a token; the console on this machine too: open it with `factoryd console`, which gives it its token")
-	} else if len(cfg.AllowedHosts) > 0 {
-		fmt.Println("warning: a forwarder that adds no forwarding header (colima's host.docker.internal) lets its callers act as local, with no token; add -require-tokens")
-	}
+	fmt.Printf("installed %s and loaded it via launchctl\n", plistPath)
+	printServeTokenNote(&cfg, requireTokens)
 	return nil
 }
 
@@ -402,6 +451,13 @@ func uninstallServiceMain(dp *deps, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	switch dp.host.serviceManager() {
+	case hostcontrol.Systemd:
+		return uninstallSystemdServices(dp)
+	case hostcontrol.NoServiceManager:
+		fmt.Printf("no service manager on %s: no service to remove\n", runtime.GOOS)
+		return nil
+	}
 
 	plistPath, err := hostcontrol.WorkerPlistPath()
 	if err != nil {
@@ -416,15 +472,9 @@ func uninstallServiceMain(dp *deps, args []string) error {
 		fmt.Printf("launchctl bootout %s: %v: %s\n", domain, err, strings.TrimSpace(string(out)))
 	}
 
-	if err := os.Remove(plistPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove %s: %w", plistPath, err)
-		}
-		fmt.Printf("%s already absent\n", plistPath)
-	} else {
-		fmt.Printf("removed %s\n", plistPath)
+	if err := removeServiceDefinition(plistPath); err != nil {
+		return err
 	}
-
 	return uninstallServeService(dp)
 }
 
@@ -447,14 +497,20 @@ func uninstallServeService(dp *deps) error {
 		fmt.Printf("launchctl bootout %s: %v: %s\n", domain, err, strings.TrimSpace(string(out)))
 	}
 
-	if err := os.Remove(plistPath); err != nil {
+	return removeServiceDefinition(plistPath)
+}
+
+// removeServiceDefinition removes an installed plist or unit, saying which,
+// or that it was already absent.
+func removeServiceDefinition(path string) error {
+	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Printf("%s already absent\n", plistPath)
+			fmt.Printf("%s already absent\n", path)
 			return nil
 		}
-		return fmt.Errorf("remove %s: %w", plistPath, err)
+		return fmt.Errorf("remove %s: %w", path, err)
 	}
-	fmt.Printf("removed %s\n", plistPath)
+	fmt.Printf("removed %s\n", path)
 	return nil
 }
 
@@ -487,21 +543,27 @@ func (impl realHost) launchctl(args ...string) ([]byte, error) {
 	return exec.Command("launchctl", args...).CombinedOutput()
 }
 
-// doctorCheckWorkerService is `factoryd doctor`'s report on the
+// doctorCheckWorkerService is `factoryd doctor`'s report on the worker
+// service install-service installs, under this machine's service manager
+// (path is its definition). Reports "not applicable" with none.
+func doctorCheckWorkerService(ctx context.Context, dp *deps, path string) doctorCheck {
+	switch dp.host.serviceManager() {
+	case hostcontrol.Launchd:
+		return doctorCheckLaunchdWorkerService(ctx, dp.host.launchctlBinary(), path)
+	case hostcontrol.Systemd:
+		return doctorCheckSystemdWorkerService(dp, path)
+	}
+	return doctorCheck{Name: fmt.Sprintf("worker service: not applicable (no service manager on %s)", runtime.GOOS)}
+}
+
+// doctorCheckLaunchdWorkerService is the launchd report on the
 // install-service LaunchAgent: absent, present-but-not-loaded, or loaded
 // (running or not), each folded into the check's Name since none of
 // those states is itself a failure. launchctlBinary is injectable so
-// tests can stub `launchctl print` the same way doctor's other checks
-// stub `docker` (see doctorCheckImagePresent's own tests) -- a real
-// caller always passes "launchctl". Non-macOS reports "not applicable"
-// unconditionally, since launchd doesn't exist there. The one failure
+// tests can stub `launchctl print` with a script on disk. The one failure
 // case: the plist exists and names a binary that no longer exists on
 // disk, which install-service -force fixes.
-func doctorCheckWorkerService(ctx context.Context, launchctlBinary, plistPath string) doctorCheck {
-	if runtime.GOOS != "darwin" {
-		return doctorCheck{Name: "worker launchd service: not applicable (non-macOS)"}
-	}
-
+func doctorCheckLaunchdWorkerService(ctx context.Context, launchctlBinary, plistPath string) doctorCheck {
 	plistBytes, err := os.ReadFile(plistPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

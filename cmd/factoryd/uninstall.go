@@ -65,13 +65,15 @@ type uninstallStep struct {
 // uninstallEnv carries everything uninstall touches, so tests point it at a
 // temp HOME and a fake docker.
 type uninstallEnv struct {
-	home     string
-	docker   string
-	exePath  string
-	purge    bool
-	force    bool
-	stop     func(args []string) error
-	service  func() error
+	home    string
+	docker  string
+	exePath string
+	purge   bool
+	force   bool
+	stop    func(args []string) error
+	service func() error
+	// manager supervises install-service's services on this machine.
+	manager  hostcontrol.ServiceManager
 	out      io.Writer
 	runDock  func(args ...string) error
 	dockOut  func(args ...string) (string, error)
@@ -108,6 +110,7 @@ func newUninstallEnv(dp *deps, home, exe string, out io.Writer) *uninstallEnv {
 		exePath: exe,
 		stop:    func(a0 []string) error { return stopKeepingColima(dp, a0) },
 		service: func() error { return uninstallServiceMain(dp, nil) },
+		manager: dp.host.serviceManager(),
 		out:     out,
 	}
 	env.xdgConfg = os.Getenv("XDG_CONFIG_HOME")
@@ -151,10 +154,20 @@ func (e *uninstallEnv) imagePresent(ref string) bool {
 	return e.runDock("image", "inspect", ref) == nil
 }
 
-func (e *uninstallEnv) launchAgents() []string {
+// serviceDefinitions lists the installed plists or units of
+// install-service's two services.
+func (e *uninstallEnv) serviceDefinitions() []string {
 	var found []string
-	for _, label := range []string{hostcontrol.WorkerServiceLabel, hostcontrol.ServeServiceLabel} {
-		p := filepath.Join(e.home, "Library", "LaunchAgents", label+".plist")
+	for _, svc := range []hostcontrol.Service{hostcontrol.WorkerService, hostcontrol.ServeService} {
+		var p string
+		switch e.manager {
+		case hostcontrol.Launchd:
+			p = filepath.Join(e.home, "Library", "LaunchAgents", svc.Label+".plist")
+		case hostcontrol.Systemd:
+			p = filepath.Join(e.xdgConfg, "systemd", "user", svc.Unit)
+		default:
+			continue
+		}
 		if _, err := os.Lstat(p); err == nil {
 			found = append(found, p)
 		}
@@ -288,9 +301,9 @@ func (e *uninstallEnv) plan() []uninstallStep {
 			return e.stop(args)
 		},
 	})
-	if agents := e.launchAgents(); len(agents) > 0 {
+	if defs := e.serviceDefinitions(); len(defs) > 0 {
 		steps = append(steps, uninstallStep{
-			desc: "remove launchd service(s): " + strings.Join(agents, ", "),
+			desc: "remove " + string(e.manager) + " service(s): " + strings.Join(defs, ", "),
 			run:  e.service,
 		})
 	}
@@ -373,7 +386,7 @@ func uninstallRun(env *uninstallEnv, yes, dryRun, interactive bool, stdin io.Rea
 			fmt.Fprintf(env.out, "Keeping %s (pass -purge to delete).\n", strings.Join(kept, ", "))
 		}
 	}
-	fmt.Fprintln(env.out, "Not touched: Docker/colima, Go, Node, gh, Homebrew packages, git config, the repo checkout, and anything under ~/.docker.")
+	fmt.Fprintln(env.out, "Not touched: Docker/colima, Go, Node, gh, packages your package manager installed (Homebrew, apt), git config, the repo checkout, and anything under ~/.docker.")
 	if dryRun {
 		fmt.Fprintln(env.out, "Dry run: nothing changed.")
 		return nil

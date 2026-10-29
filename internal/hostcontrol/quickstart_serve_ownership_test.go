@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"buildgate/internal/consolelink"
@@ -14,10 +13,10 @@ import (
 // lsof's own whitespace-separated pid list and matches by exact pid.
 func TestQuickstartPortOwnedByPID(t *testing.T) {
 	dp := newFakeDeps(t)
-	orig := dp.lsofFn
-	t.Cleanup(func() { dp.lsofFn = orig })
+	orig := dp.portListenersFn
+	t.Cleanup(func() { dp.portListenersFn = orig })
 
-	dp.lsofFn = func(port string) ([]byte, error) {
+	dp.portListenersFn = func(port string) ([]byte, error) {
 		if port != "8090" {
 			t.Fatalf("quickstartLsofRun called with port %q, want 8090", port)
 		}
@@ -30,7 +29,7 @@ func TestQuickstartPortOwnedByPID(t *testing.T) {
 		t.Error("want false: 333 is not among lsof's reported pids")
 	}
 
-	dp.lsofFn = func(port string) ([]byte, error) {
+	dp.portListenersFn = func(port string) ([]byte, error) {
 		return nil, fmt.Errorf("lsof failed")
 	}
 	if QuickstartPortOwnedByPID(dp, "8090", 111) {
@@ -53,23 +52,23 @@ func TestQuickstartServeVerifiedOursRequiresPortOwnershipAndUID(t *testing.T) {
 
 	restoreLooksLike := dp.pidLooksLikeWorkerFn
 	dp.pidLooksLikeWorkerFn = func(pid int) bool { return true }
-	restoreLsof := dp.lsofFn
+	restoreLsof := dp.portListenersFn
 	restoreUID := dp.processUIDFn
 	t.Cleanup(func() {
 		dp.pidLooksLikeWorkerFn = restoreLooksLike
-		dp.lsofFn = restoreLsof
+		dp.portListenersFn = restoreLsof
 		dp.processUIDFn = restoreUID
 	})
 
 	// Case 1: port not owned by our pid at all.
-	dp.lsofFn = func(port string) ([]byte, error) { return []byte(""), nil }
+	dp.portListenersFn = func(port string) ([]byte, error) { return []byte(""), nil }
 	dp.processUIDFn = func(pid int) (int, bool) { return os.Getuid(), true }
 	if _, ok := dp.ServeVerifiedOurs(dataDir, "127.0.0.1:8090"); ok {
 		t.Error("want false: lsof reports nothing listening")
 	}
 
 	// Case 2: port owned by our pid, but uid lookup disagrees.
-	dp.lsofFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
+	dp.portListenersFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
 	dp.processUIDFn = func(pid int) (int, bool) { return os.Getuid() + 1, true }
 	if _, ok := dp.ServeVerifiedOurs(dataDir, "127.0.0.1:8090"); ok {
 		t.Error("want false: process uid does not match this process's own uid")
@@ -135,10 +134,10 @@ func TestServeVerifiedOursAcceptsTheDataDirsOwnRecord(t *testing.T) {
 	if _, err := consolelink.RecordServeAddress(dataDir, addr); err != nil {
 		t.Fatal(err)
 	}
-	restoreLsof, restoreUID := dp.lsofFn, dp.processUIDFn
-	t.Cleanup(func() { dp.lsofFn, dp.processUIDFn = restoreLsof, restoreUID })
+	restoreLsof, restoreUID := dp.portListenersFn, dp.processUIDFn
+	t.Cleanup(func() { dp.portListenersFn, dp.processUIDFn = restoreLsof, restoreUID })
 	dp.processUIDFn = func(pid int) (int, bool) { return os.Getuid(), true }
-	dp.lsofFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
+	dp.portListenersFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
 
 	if pid, ok := dp.ServeVerifiedOurs(dataDir, addr); !ok || pid != os.Getpid() {
 		t.Errorf("serveVerifiedOurs(recorded address) = %d, %v; want this process, true", pid, ok)
@@ -146,7 +145,7 @@ func TestServeVerifiedOursAcceptsTheDataDirsOwnRecord(t *testing.T) {
 	if _, ok := dp.ServeVerifiedOurs(dataDir, "127.0.0.1:8090"); ok {
 		t.Error("the record vouched for an address it does not name")
 	}
-	dp.lsofFn = func(port string) ([]byte, error) { return []byte("1\n"), nil }
+	dp.portListenersFn = func(port string) ([]byte, error) { return []byte("1\n"), nil }
 	if _, ok := dp.ServeVerifiedOurs(dataDir, addr); ok {
 		t.Error("the record vouched for a port another process holds")
 	}
@@ -157,10 +156,8 @@ func TestServeVerifiedOursAcceptsTheDataDirsOwnRecord(t *testing.T) {
 // is a foreign listener, which before this check got that data dir's token
 // and left it with no console of its own.
 func TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd only")
-	}
 	dp := newFakeDeps(t)
+	dp.serviceManagerFn = func() ServiceManager { return Launchd }
 	t.Setenv("HOME", t.TempDir())
 	serviceDir, otherDir := t.TempDir(), t.TempDir()
 	plistPath, err := ServePlistPath()
@@ -174,14 +171,14 @@ func TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent(t *testing.T) {
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restoreCtl, restoreLsof, restoreUID := dp.launchctlFn, dp.lsofFn, dp.processUIDFn
+	restoreCtl, restoreLsof, restoreUID := dp.launchctlFn, dp.portListenersFn, dp.processUIDFn
 	t.Cleanup(func() {
-		dp.launchctlFn, dp.lsofFn, dp.processUIDFn = restoreCtl, restoreLsof, restoreUID
+		dp.launchctlFn, dp.portListenersFn, dp.processUIDFn = restoreCtl, restoreLsof, restoreUID
 	})
 	dp.launchctlFn = func(args ...string) ([]byte, error) {
 		return []byte(fmt.Sprintf("pid = %d\n", os.Getpid())), nil
 	}
-	dp.lsofFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
+	dp.portListenersFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
 	dp.processUIDFn = func(pid int) (int, bool) { return os.Getuid(), true }
 
 	if _, ok := dp.ServeVerifiedOurs(serviceDir, "127.0.0.1:8090"); !ok {
@@ -189,5 +186,43 @@ func TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent(t *testing.T) {
 	}
 	if _, ok := dp.ServeVerifiedOurs(otherDir, "127.0.0.1:8090"); ok {
 		t.Error("another data dir took the LaunchAgent's serve for its own")
+	}
+}
+
+// TestServeVerifiedOursIgnoresAnotherDataDirsSystemdUnit is the systemd twin
+// of the LaunchAgent case: the serve unit is pinned to one data dir, and its
+// pid is the one systemd reports while the unit is active.
+func TestServeVerifiedOursIgnoresAnotherDataDirsSystemdUnit(t *testing.T) {
+	dp := newFakeDeps(t)
+	dp.serviceManagerFn = func() ServiceManager { return Systemd }
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	serviceDir, otherDir := t.TempDir(), t.TempDir()
+	unitPath, err := Systemd.DefinitionPath(ServeService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unit := "[Service]\nExecStart=" + SystemdQuote("factoryd") + " serve -data-dir " + SystemdQuote(serviceDir) + "\n"
+	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	dp.systemctlFn = func(args ...string) ([]byte, error) {
+		asked = args
+		return []byte(fmt.Sprintf("ActiveState=active\nMainPID=%d\n", os.Getpid())), nil
+	}
+	dp.portListenersFn = func(port string) ([]byte, error) { return []byte(fmt.Sprintf("%d\n", os.Getpid())), nil }
+	dp.processUIDFn = func(pid int) (int, bool) { return os.Getuid(), true }
+
+	if _, ok := dp.ServeVerifiedOurs(serviceDir, "127.0.0.1:8090"); !ok {
+		t.Error("the unit's own data dir did not verify its serve")
+	}
+	if got := fmt.Sprint(asked); got != "[--user show --property=ActiveState,MainPID factoryd-serve.service]" {
+		t.Errorf("systemctl asked %s", got)
+	}
+	if _, ok := dp.ServeVerifiedOurs(otherDir, "127.0.0.1:8090"); ok {
+		t.Error("another data dir took the unit's serve for its own")
 	}
 }

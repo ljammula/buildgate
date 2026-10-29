@@ -44,12 +44,14 @@ type fakeDeps struct {
 	gatewayHealthyFn     func(ctx context.Context) error
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchdServicePIDFn  func(domain string) (int, bool)
-	lsofFn               func(port string) ([]byte, error)
+	portListenersFn      func(port string) ([]byte, error)
 	meterHealthyFn       func(ctx context.Context) error
 	pidLooksLikeWorkerFn func(pid int) bool
 	processUIDFn         func(pid int) (int, bool)
 	sandboxNamesFn       func(ctx context.Context) ([]string, error)
 	serveHealthzOKFn     func(addr string) bool
+	serviceManagerFn     func() ServiceManager
+	systemctlFn          func(args ...string) ([]byte, error)
 	serveStartTokenFn    func(configPath string) (token, path string, err error)
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
 	sleepFn              func(d time.Duration)
@@ -67,14 +69,16 @@ func (f *fakeDeps) EnsureTemporal(ctx context.Context, w io.Writer) string {
 func (f *fakeDeps) GatewayHealthy(ctx context.Context) error    { return f.gatewayHealthyFn(ctx) }
 func (f *fakeDeps) Launchctl(args ...string) ([]byte, error)    { return f.launchctlFn(args...) }
 func (f *fakeDeps) LaunchdServicePID(domain string) (int, bool) { return f.launchdServicePIDFn(domain) }
-func (f *fakeDeps) Lsof(port string) ([]byte, error)            { return f.lsofFn(port) }
+func (f *fakeDeps) PortListeners(port string) ([]byte, error)   { return f.portListenersFn(port) }
 func (f *fakeDeps) MeterHealthy(ctx context.Context) error      { return f.meterHealthyFn(ctx) }
 func (f *fakeDeps) PidLooksLikeWorker(pid int) bool             { return f.pidLooksLikeWorkerFn(pid) }
 func (f *fakeDeps) ProcessUID(pid int) (int, bool)              { return f.processUIDFn(pid) }
 func (f *fakeDeps) SandboxNames(ctx context.Context) ([]string, error) {
 	return f.sandboxNamesFn(ctx)
 }
-func (f *fakeDeps) ServeHealthzOK(addr string) bool { return f.serveHealthzOKFn(addr) }
+func (f *fakeDeps) ServeHealthzOK(addr string) bool          { return f.serveHealthzOKFn(addr) }
+func (f *fakeDeps) ServiceManager() ServiceManager           { return f.serviceManagerFn() }
+func (f *fakeDeps) Systemctl(args ...string) ([]byte, error) { return f.systemctlFn(args...) }
 func (f *fakeDeps) ServeStartToken(configPath string) (token, path string, err error) {
 	return f.serveStartTokenFn(configPath)
 }
@@ -107,6 +111,8 @@ func (f *fakeDeps) WorkerServiceState(ctx context.Context, plistPath string) str
 //	GatewayHealthy, MeterHealthy  dial services: unhealthy
 //	SandboxNames        lists a gateway's sandboxes: none
 //	Launchctl           runs launchctl: refused
+//	Systemctl           runs systemctl: refused
+//	ServiceManager      the machine's: none, so no test reads a service
 //	SpawnWorker         starts a process: refused
 //	SpawnServe          starts a process: refused
 //	WorkerServiceState  asks launchd: no service
@@ -119,7 +125,7 @@ func newFakeDeps(t testing.TB) *fakeDeps {
 	f := &fakeDeps{}
 	f.dockerBinaryFn = func() string { return RealDockerBinary(f) }
 	f.launchdServicePIDFn = func(domain string) (int, bool) { return RealLaunchdServicePID(f, domain) }
-	f.lsofFn = func(port string) ([]byte, error) { return RealLsof(f, port) }
+	f.portListenersFn = func(port string) ([]byte, error) { return RealPortListeners(f, port) }
 	f.pidLooksLikeWorkerFn = func(pid int) bool { return RealPidLooksLikeWorker(f, pid) }
 	f.processUIDFn = func(pid int) (int, bool) { return RealProcessUID(f, pid) }
 	f.serveHealthzOKFn = func(addr string) bool { return RealServeHealthzOK(f, addr) }
@@ -133,6 +139,8 @@ func newFakeDeps(t testing.TB) *fakeDeps {
 	f.meterHealthyFn = func(context.Context) error { return errors.New("stubbed in tests") }
 	f.sandboxNamesFn = func(context.Context) ([]string, error) { return nil, nil }
 	f.launchctlFn = func(...string) ([]byte, error) { return nil, errors.New("tests run no launchctl") }
+	f.systemctlFn = func(...string) ([]byte, error) { return nil, errors.New("tests run no systemctl") }
+	f.serviceManagerFn = func() ServiceManager { return NoServiceManager }
 	f.spawnWorkerFn = func(io.Writer, string, string, string, []string, string, string) error {
 		return errors.New("tests start no real worker")
 	}

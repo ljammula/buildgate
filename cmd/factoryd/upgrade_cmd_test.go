@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +103,7 @@ func (f *fakeUpgrade) exec(c upgradeCmd) ([]byte, error) {
 		return []byte("installing factoryd\n"), nil
 	case c.Name == f.binary && len(c.Args) == 1 && c.Args[0] == "version":
 		return []byte("factoryd version " + f.installed + "\n"), nil
-	case c.Name == f.binary && c.Args[0] == "install-skill", c.Name == "launchctl":
+	case c.Name == f.binary && c.Args[0] == "install-skill", c.Name == "launchctl", c.Name == "systemctl":
 		return nil, nil
 	}
 	f.t.Fatalf("unexpected command: %s", line)
@@ -479,10 +478,7 @@ func TestUpgradeLeavesSymlinkedSkillAlone(t *testing.T) {
 }
 
 func TestUpgradeKickstartsLaunchdServicesInsteadOfSpawning(t *testing.T) {
-	dp := newTestDeps(t)
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd supervision is macOS-only")
-	}
+	dp := launchdTestDeps(t)
 	h := newUpgradeHarness(dp, t)
 	dir := h.profiles.roots["default"]
 	plist, err := hostcontrol.ServePlistPath()
