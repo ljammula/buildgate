@@ -589,6 +589,19 @@ type ChangeSize struct {
 	Files       []ChangeSizeFile `json:"files"`
 }
 
+// PROrder is the repository's `.factory.yml` pr_order as a request ticket's
+// run read it (from the commit that file was read from), and the group the
+// ticket is limited to when the host carved it from a mixed change. The
+// release decision reads the run's changed files against it.
+type PROrder struct {
+	// Groups are the patterns of each group, in order (internal/prorder).
+	Groups [][]string `json:"groups"`
+	// TicketGroup is the 1-based group a carved ticket's pull request is
+	// limited to (len(Groups)+1 for the files no group lists); 0 for a ticket
+	// that is not carved, whose change may touch one group only.
+	TicketGroup int `json:"ticket_group,omitempty"`
+}
+
 // ChangeSizeFile records git's counts and enclosing hunk names for one file.
 type ChangeSizeFile struct {
 	Path       string   `json:"path"`
@@ -1477,6 +1490,9 @@ type Run struct {
 	// replayed onto a new base, which the run judges instead of building
 	// (see Replay). Written once, when the run's record is created.
 	Replay *Replay `json:"replay,omitempty"`
+	// PROrder is set on a request ticket's run in a repository whose
+	// committed .factory.yml has a pr_order.
+	PROrder *PROrder `json:"pr_order,omitempty"`
 	// DiffBaseSHA is set only when -diff-base overrode the range the
 	// diff-shape checks (diff_scope, tests_red_on_base, the required-file
 	// and required-content notes) and the PR-body evidence were

@@ -344,6 +344,7 @@ func TestPackageBoundaryRules(t *testing.T) {
 			"buildgate/internal/notify":        true,
 			"buildgate/internal/policy":        true,
 			"buildgate/internal/projectconfig": true,
+			"buildgate/internal/prorder":       true,
 			"buildgate/internal/release":       true,
 			"buildgate/internal/request":       true,
 			"buildgate/internal/requestsubmit": true,

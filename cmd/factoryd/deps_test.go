@@ -101,6 +101,9 @@ type fakeForge struct {
 	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
 	patchIDFn                     func(dir, sha string) (string, error)
 	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
+	changedPathsFn                func(dir, base, result string) ([]string, error)
+	carveChainFn                  func(ctx context.Context, dir, base, result string, parts [][]string) error
+	carveCommitFn                 func(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error)
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
 	restoreBranchFn               func(dir, branch, sha string) (bool, error)
@@ -165,6 +168,15 @@ func (f *fakeForge) revListRange(dir, from, to string) ([]string, []string, erro
 func (f *fakeForge) patchID(dir, sha string) (string, error) { return f.patchIDFn(dir, sha) }
 func (f *fakeForge) replayCommits(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error) {
 	return f.replayCommitsFn(ctx, dir, worktreePath, branch, onto, commits)
+}
+func (f *fakeForge) changedPaths(dir, base, result string) ([]string, error) {
+	return f.changedPathsFn(dir, base, result)
+}
+func (f *fakeForge) carveChain(ctx context.Context, dir, base, result string, parts [][]string) error {
+	return f.carveChainFn(ctx, dir, base, result, parts)
+}
+func (f *fakeForge) carveCommit(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error) {
+	return f.carveCommitFn(ctx, dir, parent, result, paths, message)
 }
 func (f *fakeForge) pushWithLease(ctx context.Context, dir, sha, branch, expected string) error {
 	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
@@ -392,6 +404,15 @@ func newTestDeps(t testing.TB) *deps {
 		patchIDFn: func(string, string) (string, error) { return "", errors.New("test forge: no patch id is computed") },
 		replayCommitsFn: func(context.Context, string, string, string, string, []string) ([]string, error) {
 			return nil, errors.New("test forge: nothing is replayed")
+		},
+		changedPathsFn: func(string, string, string) ([]string, error) {
+			return nil, errors.New("test forge: no paths are listed")
+		},
+		carveChainFn: func(context.Context, string, string, string, [][]string) error {
+			return errors.New("test forge: nothing is carved")
+		},
+		carveCommitFn: func(context.Context, string, string, string, []string, string) (string, error) {
+			return "", errors.New("test forge: nothing is carved")
 		},
 		pushWithLeaseFn: func(context.Context, string, string, string, string) error {
 			return errors.New("test forge: nothing is pushed with a lease")

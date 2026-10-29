@@ -84,6 +84,12 @@ planning once; its replacement plan always waits for review. A ticket over a
 cap again, or one from a handed-over plan, halts with the measurement. See
 [change size](USAGE_REFERENCE.md#change-size) for the counts and bands.
 
+A repository whose `.factory.yml` sets `pr_order` (groups of paths that must
+ship as separate pull requests, such as `db/migrations/`) gets a ticket whose
+run changed more than one group carved by the host into one stacked pull
+request per group; a part a gate refuses sends the request to planning once.
+See [`pr_order`](USAGE_REFERENCE.md#shipping-parts-of-a-change-separately-pr_order).
+
 Every ticket build receives the approved spec verbatim before its ticket
 plan, then the ticket's covered criteria in the factory's numbered form, so
 exact names, formats and behaviours in the operator's spec remain part of the

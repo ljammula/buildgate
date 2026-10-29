@@ -66,7 +66,7 @@ func TestReplayFlagRefusals(t *testing.T) {
 		if err := flags.Parse(append(append([]string{}, ok...), extra...)); err != nil {
 			t.Fatal(err)
 		}
-		_, err := validateReplayFlags(*rf.replay, *rf.onBranch, *rf.diffBase, replayConflicts(rf))
+		_, err := validateReplayFlags(*rf.replay, *rf.onBranch, *rf.diffBase, func(carved bool) []string { return replayConflicts(rf, carved) })
 		return err
 	}
 	if err := check(); err != nil {

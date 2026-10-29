@@ -427,3 +427,31 @@ func containsReason(reasons []string, want string) bool {
 	}
 	return false
 }
+
+func TestMergePolicyCheckDeniesAChangeTouchingMoreThanOnePROrderGroup(t *testing.T) {
+	r := cleanRun()
+	r.PROrder = &run.PROrder{Groups: [][]string{{"db/migrations/"}}}
+	r.ChangedFiles = []string{"db/migrations/001.sql", "main.go"}
+	assertMergePolicyReason(t, r, cleanPolicy(), "db/migrations/001.sql in pr_order group 1")
+	assertMergePolicyReason(t, r, cleanPolicy(), "main.go in the files no pr_order group lists")
+	r.ChangedFiles = []string{"db/migrations/001.sql"}
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("a change inside one group is denied: %v", reasons)
+	}
+	r.PROrder = nil
+	r.ChangedFiles = []string{"db/migrations/001.sql", "main.go"}
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("a run with no pr_order is denied: %v", reasons)
+	}
+}
+
+func TestMergePolicyCheckDeniesACarvedTicketsFileOfAnotherGroup(t *testing.T) {
+	r := cleanRun()
+	r.PROrder = &run.PROrder{Groups: [][]string{{"db/migrations/"}}, TicketGroup: 1}
+	r.ChangedFiles = []string{"db/migrations/001.sql", "main.go"}
+	assertMergePolicyReason(t, r, cleanPolicy(), "main.go belongs to the files no pr_order group lists")
+	r.ChangedFiles = []string{"db/migrations/002.sql"}
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("a carved ticket's own group is denied: %v", reasons)
+	}
+}

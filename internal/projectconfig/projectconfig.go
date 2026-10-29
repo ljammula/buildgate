@@ -77,6 +77,12 @@ type Config struct {
 	// entry is a path.Match glob of the whole path (policy.PathAllowed). Empty (the
 	// default) bounds nothing. A person wrote it, so it always refuses.
 	AllowedPaths []string `yaml:"allowed_paths"`
+	// PROrder lists path groups that ship as separate, stacked pull requests,
+	// in order: each group is a list of patterns in allowed_paths syntax. A
+	// request ticket whose accepted run changes files of more than one group
+	// is carved into one pull request per group it touches (internal/prorder).
+	// Empty (the default) orders nothing.
+	PROrder [][]string `yaml:"pr_order"`
 	// RequiredBinaries names executables the operator-selected worker image
 	// must provide for this repository's verify/setup commands.
 	RequiredBinaries    []string `yaml:"required_binaries"`
@@ -254,6 +260,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateAllowedPaths(c.AllowedPaths); err != nil {
+		return err
+	}
+	if err := validatePROrder(c.PROrder); err != nil {
 		return err
 	}
 	if err := validateCommandList("setup", c.Setup); err != nil {
@@ -533,6 +542,20 @@ func validateAllowedPaths(patterns []string) error {
 		}
 		if _, err := path.Match(p, ""); err != nil {
 			return fmt.Errorf("allowed_paths entry %q is not a valid pattern: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// validatePROrder checks pr_order: each group a non-empty list whose entries
+// are valid allowed_paths patterns.
+func validatePROrder(groups [][]string) error {
+	for i, group := range groups {
+		if len(group) == 0 {
+			return fmt.Errorf("pr_order group %d must list at least one pattern", i+1)
+		}
+		if err := validateAllowedPaths(group); err != nil {
+			return fmt.Errorf("pr_order group %d: %s", i+1, strings.TrimPrefix(err.Error(), "allowed_paths "))
 		}
 	}
 	return nil

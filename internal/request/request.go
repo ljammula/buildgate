@@ -217,6 +217,9 @@ type Ticket struct {
 	// ticket must pass again (SC-022, -recheck-reproductions): the ticket's
 	// recheck chain, whose only home this is. See TicketReproduction.
 	Reproductions []TicketReproduction `json:"reproductions,omitempty"`
+	// Order is set on a ticket the host carved from a mixed change by the
+	// repository's pr_order (ReplaceWithCarved); nil on every other ticket.
+	Order *TicketOrder `json:"order,omitempty"`
 }
 
 // RoundOutcome is the terminal outcome of one PR-review corrective round.
@@ -687,10 +690,14 @@ type Request struct {
 	Harnesses map[string]string `json:"harnesses,omitempty"`
 }
 
-// SizeReplan identifies the oversized run and its host measurement.
+// SizeReplan identifies the oversized (or order-refused) run and its host
+// measurement.
 type SizeReplan struct {
 	RunID       string          `json:"run_id"`
 	Measurement *run.ChangeSize `json:"measurement"`
+	// Groups are the pr_order patterns the run's change was carved by when
+	// the re-plan is for order; the planning job is told them.
+	Groups [][]string `json:"groups,omitempty"`
 }
 
 // ActiveJob describes the drafting job running for a request right now:
@@ -1147,7 +1154,7 @@ func (r *Request) CompletePlanning(now time.Time) error {
 func (r *Request) PlanReviewReason(repoOptIn bool) string {
 	switch {
 	case r.SizeReplan != nil:
-		return "the plan was drafted after a size refusal"
+		return "the plan was drafted after a size or order refusal"
 	case r.TicketCount > 1:
 		return fmt.Sprintf("the plan has %d tickets", r.TicketCount)
 	case r.PlanReview:

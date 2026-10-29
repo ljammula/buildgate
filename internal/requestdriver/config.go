@@ -245,6 +245,9 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 		}
 		args = append(args, "-request-ticket", "-scope-approval", scope)
 	}
+	if entry.OrderGroup > 0 {
+		args = append(args, "-order-group", strconv.Itoa(entry.OrderGroup))
+	}
 	if entry.IssueRef != "" {
 		args = append(args, "-pr-closes-issue", entry.IssueRef)
 	}

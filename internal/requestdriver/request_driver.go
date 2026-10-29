@@ -74,6 +74,15 @@ type Deps interface {
 	ReplayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	PushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	MoveBranch(dir string, branch string, sha string) error
+	// The git calls of a pr_order carve (pr_order.go), all on the local
+	// repository's objects: ChangedPaths lists the paths base..result
+	// changes; CarveChain checks that carving result's change from base
+	// into the parts (each a list of paths) ends at result's own tree
+	// (workspace.CarveChain); CarveCommit makes the commit of one part on
+	// parent (workspace.CarveCommit). None moves a ref or a worktree.
+	ChangedPaths(dir string, base string, result string) ([]string, error)
+	CarveChain(ctx context.Context, dir string, base string, result string, parts [][]string) error
+	CarveCommit(ctx context.Context, dir string, parent string, result string, paths []string, message string) (string, error)
 	// RestoreBranch points a local branch that is ahead of sha back at it
 	// (workspace.RestoreBranch): ahead is whether it still points past sha.
 	RestoreBranch(dir string, branch string, sha string) (ahead bool, err error)
@@ -940,14 +949,10 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		return err
 	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
-	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
+	args, recordOf, onBranch, escalated, err := ticketBuildStart(dp, dataDir, r, ticket, cfg, resumeRunID, escalated)
 	if errors.Is(err, errNoRecheck) {
 		return haltWithoutRecheck(dataDir, r, err, now)
 	}
-	if err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
-	}
-	args, recordOf, onBranch, err := startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -1082,6 +1087,9 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		if handled, err := handleOversizedRun(dataDir, r, runRecord, now); handled {
 			return err
 		}
+		if handled, err := handleMixedRun(dp, ctx, dataDir, r, ticket, runRecord, now); handled {
+			return err
+		}
 		// The "merge by hand" hint used to always guess "factoryd/<run-id>", wrong for
 		// a -repository/Temporal-routed run's own real branch -- recorded
 		// here, the one place this ticket's run is known to have reached
@@ -1089,6 +1097,9 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
 		return acceptAfterAdvice(dp, ctx, dataDir, r, ticket, runRecord, cfg, now)
 	case run.StateQuarantined:
+		if handled, oErr := carvedRunRefused(dataDir, r, ticket, runRecord, reason, now); handled {
+			return oErr
+		}
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
 		}
@@ -1099,6 +1110,9 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		check := quarantineCheckOf(runRecord)
 		return quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
 	case run.StateHalted:
+		if handled, oErr := carvedRunRefused(dataDir, r, ticket, runRecord, reason, now); handled {
+			return oErr
+		}
 		return afterHaltedTicketRun(dp, dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
 	default:
 		// Defensive only: whenever a run record exists (nil runErr, or
@@ -1294,6 +1308,22 @@ func startFailedReason(idx, count int, runErr error, onBranch bool) string {
 		reason += "; this retry was to continue on the earlier attempt's branch: `factoryd retry -from scratch` rebuilds from the base commit instead"
 	}
 	return reason
+}
+
+// ticketBuildStart is the argv of the build AdvanceBuilding starts for ticket
+// and where it starts: a carved ticket's is the replay run of its carved
+// commit (carvedBuildArgs, never escalated); any other is the ordinary
+// build on its starting point (startingPoint).
+func ticketBuildStart(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, resumeRunID string, escalated bool) (args []string, recordOf string, onBranch, escalatedOut bool, err error) {
+	if ticket.Order != nil && !ticket.Pushed() {
+		args, err = carvedBuildArgs(dataDir, r, *ticket, cfg)
+		return args, "", false, false, err
+	}
+	if args, err = requestBuildArgs(dataDir, r, *ticket, cfg, escalated); err != nil {
+		return nil, "", false, escalated, err
+	}
+	args, recordOf, onBranch, err = startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
+	return args, recordOf, onBranch, escalated, err
 }
 
 // withEarlierTicketsWork adds the argument that puts the earlier tickets'
@@ -2342,6 +2372,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// ScopeUnapproved: see QueueEntry.ScopeUnapproved's own doc comment.
 		ScopeUnapproved: !scopeApproved,
 		NoTicketScope:   noTicketScope,
+		OrderGroup:      orderGroupOf(ticket),
 		// ExecutionModel: r.Models["execution"] is `factoryd submit
 		// -model execution=...` / the API's own "models" field, already
 		// validated at submit time (sessionconfig.ValidateRequestModels)

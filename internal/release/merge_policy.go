@@ -3,6 +3,8 @@ package release
 import (
 	"fmt"
 
+	"buildgate/internal/policy"
+	"buildgate/internal/prorder"
 	"buildgate/internal/run"
 )
 
@@ -154,6 +156,7 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 	}
 
 	reasons = append(reasons, memoryEditReasons(r.MemoryEdit)...)
+	reasons = append(reasons, PROrderReasons(r)...)
 
 	return len(reasons) == 0, reasons
 }
@@ -360,4 +363,28 @@ func namingPaths(reason string, paths []string) string {
 		reason += fmt.Sprintf(" and %d more", more)
 	}
 	return reason
+}
+
+// PROrderReasons is why the repository's pr_order (r.PROrder, read from the
+// commit its .factory.yml was read from) denies the run a pull request: its
+// changed files touch more than one group, or, for a ticket carved to one
+// group, include a file of another, named with its group. The check reads
+// the run's changed paths only. A run with no pr_order, or with no
+// changed-file inventory (denied for that elsewhere), has none.
+func PROrderReasons(r run.Run) []string {
+	if r.PROrder == nil || len(r.PROrder.Groups) == 0 || r.ChangedFiles == nil {
+		return nil
+	}
+	order := prorder.Order(r.PROrder.Groups)
+	changed := policy.ExcludeHarnessByproducts(r.ChangedFiles)
+	if r.PROrder.TicketGroup > 0 {
+		if why := order.OutsideReason(r.PROrder.TicketGroup-1, changed); why != "" {
+			return []string{why}
+		}
+		return nil
+	}
+	if why := order.MixedReason(changed); why != "" {
+		return []string{why}
+	}
+	return nil
 }

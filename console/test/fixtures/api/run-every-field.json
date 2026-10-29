@@ -50,7 +50,23 @@
         "original_patch_id": "every-field original_patch_id",
         "replayed_patch_id": "every-field replayed_patch_id"
       }
-    ]
+    ],
+    "carve": {
+      "groups": [
+        [
+          "every-field groups"
+        ]
+      ],
+      "group": 3
+    }
+  },
+  "pr_order": {
+    "groups": [
+      [
+        "every-field groups"
+      ]
+    ],
+    "ticket_group": 3
   },
   "diff_base_sha": "every-field diff_base_sha",
   "instruction_base_sha": "every-field instruction_base_sha",

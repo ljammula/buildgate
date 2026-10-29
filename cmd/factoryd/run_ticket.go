@@ -81,19 +81,19 @@ func validateFollowUpRunInputs(diffBase, instructionBase, earlierAttempt string)
 // (-diff-base, which must be the file's onto_sha), and takes none of the
 // inputs that start, chain or open a build (conflicts: the flags set that
 // it refuses).
-func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*run.Replay, error) {
+func validateReplayFlags(path, onBranch, diffBase string, conflicts func(carved bool) []string) (*run.Replay, error) {
 	if path == "" {
 		return nil, nil
-	}
-	if len(conflicts) > 0 {
-		return nil, fmt.Errorf("-replay cannot be combined with %s", strings.Join(conflicts, ", "))
-	}
-	if onBranch == "" || diffBase == "" {
-		return nil, errors.New("-replay needs -on-branch, the branch the commits were replayed to, and -diff-base, the commit they were replayed onto")
 	}
 	replay, err := run.ReadReplayFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if set := conflicts(replay.Carve != nil); len(set) > 0 {
+		return nil, fmt.Errorf("-replay cannot be combined with %s", strings.Join(set, ", "))
+	}
+	if onBranch == "" || diffBase == "" {
+		return nil, errors.New("-replay needs -on-branch, the branch the commits were replayed to, and -diff-base, the commit they were replayed onto")
 	}
 	if diffBase != replay.OntoSHA {
 		return nil, fmt.Errorf("-diff-base %s is not the commit the replay is onto (%s)", diffBase, replay.OntoSHA)
@@ -103,9 +103,9 @@ func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*
 
 // replayConflicts names the flags set in f that a replay run refuses: a
 // resume, a chain, an earlier attempt, a baseline check, a pull request it
-// would open, the shared repository queue, a run serve starts, and the
+// would open (a carved commit's own run opens one, stacked), the shared repository queue, a run serve starts, and the
 // review-reproduction inputs (a replay run's review is advice only).
-func replayConflicts(f runFlags) []string {
+func replayConflicts(f runFlags, carved bool) []string {
 	var set []string
 	for _, c := range []struct {
 		name string
@@ -116,8 +116,8 @@ func replayConflicts(f runFlags) []string {
 		{"-resume-worktree-of", *f.resumeWorktreeOf != ""},
 		{"-prior-run", *f.priorRun != ""},
 		{"-baseline-check", *f.baselineCheck},
-		{"-open-pull-request", *f.openPullRequest},
-		{"-pr-base", *f.prBase != ""},
+		{"-open-pull-request", *f.openPullRequest && !carved},
+		{"-pr-base", *f.prBase != "" && !carved},
 		{"-repository", *f.repository != ""},
 		{"-run-id", *f.runID != ""},
 		{"-review-reproduction", *f.reviewReproduction},
@@ -303,6 +303,7 @@ type runFlags struct {
 	resumeSessionOf              *string
 	resumeWorktreeOf             *string
 	replay                       *string
+	orderGroup                   *int
 	configPath                   *string
 	reviewReproduction           *bool
 	reviewSpec                   *string
@@ -364,6 +365,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.diffBase = flags.String("diff-base", "", "commit the diff checks and pull request evidence measure from, instead of the run's starting commit: a full 40-character id and an ancestor of it. Build and verify still use the branch tip")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts to continue its build. Refused with -repository, -on-branch or -prior-run, or when the worktree was not kept intact")
 	f.replay = flags.String("replay", "", "internal: file naming commits the host replayed onto a new base; the run judges them instead of building")
+	f.orderGroup = flags.Int("order-group", 0, "internal: the 1-based pr_order group this carved ticket's pull request is limited to; a result that changes a file of another group is denied release")
 	f.reviewReproduction = flags.Bool("review-reproduction", false, "internal: hold the review's reproductions and run them, so a finding can refuse the run (SC-022); a request's ticket build sets it")
 	f.reviewSpec = flags.String("review-spec", "", "internal: the request's approved spec.md, which the review cites by line and the reproduction check compares citations with")
 	f.recheckReproductions = flags.String("recheck-reproductions", "", "internal: manifest of a quarantined run's held reproductions that this corrective build's result must pass")
@@ -494,6 +496,7 @@ type ticketRun struct {
 	relayNeededForExecution               bool
 	testPatterns                          []string
 	allowedPaths                          []string
+	prOrder                               [][]string
 	scopeUnapproved                       bool
 	gateCommands                          map[string]string
 	sandboxImageExplicit                  bool
@@ -1060,7 +1063,7 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 		return err
 	}
 	tr.resumeSession = resumeSession
-	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, replayConflicts(tr.rf))
+	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, func(carved bool) []string { return replayConflicts(tr.rf, carved) })
 	tr.replay = replay
 	return err
 }
@@ -1983,6 +1986,11 @@ func (tr *ticketRun) checkScope() error {
 	if err != nil {
 		return fmt.Errorf("parse ticket tests-required opt-out: %w", err)
 	}
+	if tr.replay != nil && tr.replay.Carve != nil {
+		// A carved commit is a part of a change whose tests_red_on_base was
+		// judged on the run that was carved, and a part may hold no test.
+		tr.testsRequiredOptOut = carvedTestsRequiredReason
+	}
 
 	// build_app.py, and everything ticketspec parses above (Verify-Command:/
 	// Allowed-Files:), come from -spec's own
@@ -2202,6 +2210,7 @@ func (tr *ticketRun) createRunRecord() error {
 		TestsRequiredOptOut: tr.testsRequiredOptOut,
 		ScopeUnapproved:     tr.scopeUnapproved,
 		AllowedPaths:        tr.allowedPaths,
+		PROrder:             tr.runPROrder(),
 		// ReleasePolicy: persisted here, at run start, so a LATER
 		// reconciliation of this same run (Temporal reconcileReclaimedRun,
 		// or a daemon-restart reclaim) can evaluate its release decision
@@ -2717,6 +2726,7 @@ func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 		tr.setup, tr.autofix, tr.requiredBinaries, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.RequiredBinaries, cfg.SHA256
 		tr.sandbox = cfg.Sandbox
 		tr.allowedPaths = cfg.AllowedPaths
+		tr.prOrder = cfg.PROrder
 	}
 	// HEAD is the commit it was before the first read of the file
 	// (headBeforeProjectConfig) and that commit's file is the one just read,
@@ -2813,4 +2823,21 @@ func (tr *ticketRun) misprefixCheckPaths() []string {
 		}
 	}
 	return paths
+}
+
+// carvedTestsRequiredReason is the opt-out reason a carved commit's run
+// records for tests_red_on_base: that gate judged the whole change on the run
+// that was carved.
+const carvedTestsRequiredReason = "carved by pr_order from a run whose tests_red_on_base judged the whole change"
+
+// runPROrder is the pr_order a request ticket's run records, so the release
+// decision reads its changed files against it: the committed .factory.yml's
+// groups, and for a carved ticket (-order-group) the group it is limited to.
+// A run that is not a request's ticket (a single-ticket `factoryd run`) has
+// none, and so does a repository whose .factory.yml lists no groups.
+func (tr *ticketRun) runPROrder() *run.PROrder {
+	if !*tr.requestTicket || len(tr.prOrder) == 0 {
+		return nil
+	}
+	return &run.PROrder{Groups: tr.prOrder, TicketGroup: *tr.rf.orderGroup}
 }

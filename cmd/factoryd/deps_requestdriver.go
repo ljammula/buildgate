@@ -67,6 +67,15 @@ func (dp *deps) PushWithLease(ctx context.Context, dir string, sha string, branc
 func (dp *deps) MoveBranch(dir string, branch string, sha string) error {
 	return dp.forge.moveBranch(dir, branch, sha)
 }
+func (dp *deps) ChangedPaths(dir string, base string, result string) ([]string, error) {
+	return dp.forge.changedPaths(dir, base, result)
+}
+func (dp *deps) CarveChain(ctx context.Context, dir string, base string, result string, parts [][]string) error {
+	return dp.forge.carveChain(ctx, dir, base, result, parts)
+}
+func (dp *deps) CarveCommit(ctx context.Context, dir string, parent string, result string, paths []string, message string) (string, error) {
+	return dp.forge.carveCommit(ctx, dir, parent, result, paths, message)
+}
 func (dp *deps) RestoreBranch(dir string, branch string, sha string) (bool, error) {
 	return dp.forge.restoreBranch(dir, branch, sha)
 }

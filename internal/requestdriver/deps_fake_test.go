@@ -58,6 +58,9 @@ type fakeDeps struct {
 	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
 	patchIDFn                     func(dir, sha string) (string, error)
 	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
+	changedPathsFn                func(dir, base, result string) ([]string, error)
+	carveChainFn                  func(ctx context.Context, dir, base, result string, parts [][]string) error
+	carveCommitFn                 func(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error)
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
 	hostGitVersionFn              func(ctx context.Context) (string, error)
@@ -133,6 +136,15 @@ func (f *fakeDeps) PatchID(dir, sha string) (string, error) { return f.patchIDFn
 func (f *fakeDeps) ReplayCommits(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error) {
 	return f.replayCommitsFn(ctx, dir, worktreePath, branch, onto, commits)
 }
+func (f *fakeDeps) ChangedPaths(dir, base, result string) ([]string, error) {
+	return f.changedPathsFn(dir, base, result)
+}
+func (f *fakeDeps) CarveChain(ctx context.Context, dir, base, result string, parts [][]string) error {
+	return f.carveChainFn(ctx, dir, base, result, parts)
+}
+func (f *fakeDeps) CarveCommit(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error) {
+	return f.carveCommitFn(ctx, dir, parent, result, paths, message)
+}
 func (f *fakeDeps) PushWithLease(ctx context.Context, dir, sha, branch, expected string) error {
 	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
 }
@@ -190,6 +202,11 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		patchIDFn: func(string, string) (string, error) { return "", refused("PatchID") },
 		replayCommitsFn: func(context.Context, string, string, string, string, []string) ([]string, error) {
 			return nil, refused("ReplayCommits")
+		},
+		changedPathsFn: func(string, string, string) ([]string, error) { return nil, refused("ChangedPaths") },
+		carveChainFn:   func(context.Context, string, string, string, [][]string) error { return refused("CarveChain") },
+		carveCommitFn: func(context.Context, string, string, string, []string, string) (string, error) {
+			return "", refused("CarveCommit")
 		},
 		pushWithLeaseFn: func(context.Context, string, string, string, string) error { return refused("PushWithLease") },
 		moveBranchFn:    func(string, string, string) error { return refused("MoveBranch") },

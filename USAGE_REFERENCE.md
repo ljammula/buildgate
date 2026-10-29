@@ -821,6 +821,8 @@ fast_check_command: "make fast-check"  # cheap check run before verify_command e
 # allowed_paths:                                     # the only files a build may change; a change outside fails "diff_scope" whatever the ticket says
 #   - "src/"                                       # everything under src/, from the repository root
 #   - "docs/*.md"                                  # a glob of the whole path
+# pr_order:                                          # groups of paths that ship as separate, stacked pull requests, in order; see "Shipping parts of a change separately"
+#   - ["db/migrations/"]
 # required_binaries:                                 # bare executable names required in the final worker image; doctor checks the configured base image
 #   - cargo
 #   - rustc
@@ -1077,6 +1079,30 @@ When set, the `diff_scope` check fails a run that changed a file matching none
 of the patterns, for a direct run and a request's ticket alike. It is read from
 the commit of `.factory.yml`, and a ticket's `Allowed-Files:` or `amend-scope`
 never widens it.
+
+### Shipping parts of a change separately (`pr_order`)
+
+`pr_order` is a list of groups, each a list of patterns in `allowed_paths`
+syntax (`db/migrations/` for a directory, a glob of the whole path for a file;
+`**` is refused). A file belongs to the first group with a matching pattern;
+a file no group lists belongs to one group after the last listed one. It is read
+from the commit of `.factory.yml`.
+
+```yaml
+pr_order:
+  - ["db/migrations/"]      # migrations ship first, in their own pull request
+```
+
+| Step | What happens |
+|---|---|
+| A request ticket's accepted run changes files of more than one group | Its release decision is denied for `pr_order` and no pull request opens |
+| The host carves the result | One commit per touched group, in group order, each on the one before and the first on the run's diff base; together they make exactly the run's result tree |
+| The ticket is replaced | One ticket per commit, each the approved ticket byte for byte, built as a replay run of its carved commit (no model build): command gates and the code review run, `tests_red_on_base` and `diff_scope` do not. Each opens its own stacked pull request |
+| A later round of a carved ticket | A diff from its stack base that changes a file of another group is denied release, naming the file and group |
+| A carved commit a gate refuses, or a carve that cannot be made | The request goes `building -> planning` once, with the diff, its measurement and the groups; the plan drafted then waits at `plan_review` |
+| The request already went to planning for size or order, or its plan was handed over (`-plan-dir`) | A ticket that changes files of more than one group halts the request: no carve, no second re-plan |
+
+A single-ticket `factoryd run` ignores `pr_order`.
 
 `test_patterns` bounds the always-on `tests_red_on_base` gate, which finds the
 test files a run changed: a changed file that matches one of these globs (full

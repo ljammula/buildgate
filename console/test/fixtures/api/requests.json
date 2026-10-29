@@ -355,7 +355,20 @@
             ],
             "unheld": true
           }
-        ]
+        ],
+        "order": {
+          "source_run_id": "every-field source_run_id",
+          "groups": [
+            [
+              "every-field groups"
+            ]
+          ],
+          "group": 3,
+          "first": 3,
+          "commit": "every-field commit",
+          "onto": "every-field onto",
+          "branch": "every-field branch"
+        }
       }
     ],
     "dropped_reproductions": [
@@ -563,7 +576,12 @@
             ]
           }
         ]
-      }
+      },
+      "groups": [
+        [
+          "every-field groups"
+        ]
+      ]
     },
     "draft_halt": {
       "stage": "",

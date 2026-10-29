@@ -245,7 +245,12 @@
           ]
         }
       ]
-    }
+    },
+    "groups": [
+      [
+        "every-field groups"
+      ]
+    ]
   },
   "draft_halt": {
     "stage": "",
@@ -373,6 +378,19 @@
           "unheld": true
         }
       ],
+      "order": {
+        "source_run_id": "every-field source_run_id",
+        "groups": [
+          [
+            "every-field groups"
+          ]
+        ],
+        "group": 3,
+        "first": 3,
+        "commit": "every-field commit",
+        "onto": "every-field onto",
+        "branch": "every-field branch"
+      },
       "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "full_path": "/data/requests/req-every-field/tickets/001.spec.md"
     }

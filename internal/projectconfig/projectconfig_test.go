@@ -682,3 +682,27 @@ func TestAllowedPathsLoadsAndIsValidatedLikeTestPatterns(t *testing.T) {
 		}
 	}
 }
+
+func TestPROrderLoadsAndIsValidatedLikeAllowedPaths(t *testing.T) {
+	load := func(yml string) (*Config, error) {
+		root := t.TempDir()
+		initGitRepo(t, root)
+		if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _, err := Load(root)
+		return cfg, err
+	}
+	cfg, err := load("pr_order:\n  - [\"db/migrations/\"]\n  - [\"api/\", \"*.md\"]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"db/migrations/"}, {"api/", "*.md"}}; !reflect.DeepEqual(cfg.PROrder, want) {
+		t.Errorf("PROrder = %v, want %v", cfg.PROrder, want)
+	}
+	for _, yml := range []string{"pr_order:\n  - []\n", "pr_order:\n  - [\"\"]\n", "pr_order:\n  - [\"a/\", \"/b\"]\n", "pr_order:\n  - [\"db/**\"]\n", "pr_order:\n  - [\"[a\"]\n"} {
+		if _, err := load(yml); err == nil || !strings.Contains(err.Error(), "pr_order group") {
+			t.Errorf("%q: err = %v, want a refusal naming the pr_order group", yml, err)
+		}
+	}
+}

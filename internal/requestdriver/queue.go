@@ -89,6 +89,10 @@ type QueueEntry struct {
 	// NoTicketScope means this ticket is the approved spec itself, so a
 	// header-shaped line in its prose is not a ticket file list.
 	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
+	// OrderGroup is the 1-based pr_order group of a carved ticket: every build
+	// of it is told (-order-group), so a result that changes a file of
+	// another group is denied release.
+	OrderGroup int `json:"order_group,omitempty"`
 	// IssueRef is the fully-qualified "<owner>/<repo>#<N>" GitHub issue
 	// reference this entry was submitted from (`factoryd submit -issue
 	// <url>`), empty when it wasn't. Qualified with the ISSUE's own

@@ -113,6 +113,11 @@ type forgeBoundary interface {
 	replayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	pushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	moveBranch(dir string, branch string, sha string) error
+	// The git calls of a pr_order carve: object writes on dir's local
+	// repository, with no ref or worktree change.
+	changedPaths(dir string, base string, result string) ([]string, error)
+	carveChain(ctx context.Context, dir string, base string, result string, parts [][]string) error
+	carveCommit(ctx context.Context, dir string, parent string, result string, paths []string, message string) (string, error)
 	// restoreBranch points a local branch ahead of sha back at it, and
 	// commentOnPullRequest posts a comment on a pull request: an advice
 	// round's, when its result is not pushed and when it is.
