@@ -301,6 +301,21 @@ func TestRepositoryOwnerRunWorkflowInputFromFullFlagSetMatchesGolden(t *testing.
 // with -replay), plus -on-branch, -diff-base and -replay for a commit
 // replayed onto the workspace's head.
 func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
+	replayGolden(t, "run_workflow_input_replay.golden.json", nil)
+}
+
+// TestCarvedReplayRunWorkflowInputMatchesGolden is the same comparison for a
+// carved ticket's run: a replay whose record names a pr_order group, with
+// -order-group, so the flags a carved build is started with are accepted by
+// the run's own parser and reach the workflow.
+func TestCarvedReplayRunWorkflowInputMatchesGolden(t *testing.T) {
+	replayGolden(t, "run_workflow_input_carved.golden.json", &run.Carve{Groups: [][]string{{"db/"}}, Group: 1})
+}
+
+// replayGolden runs the replay golden run, with carve set on the record when
+// non-nil, and compares the workflow input with golden.
+func replayGolden(t *testing.T, golden string, carve *run.Carve) {
+	t.Helper()
 	var dataDir string
 	address, placeholders := runInputGoldenRunWith(t, "unused", func(workspace, inputs string, flags []string) ([]string, [][2]string) {
 		onto, head := replayedBranch(t, workspace, "buildgate/req-golden/t2-restack1")
@@ -320,7 +335,23 @@ func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 			}
 		}
 		dataDir = flags[slices.Index(flags, "-data-dir")+1]
-		flags = append(flags, "-on-branch", "buildgate/req-golden/t2-restack1", "-diff-base", onto, "-replay", writeReplayFile(t, inputs, onto, head))
+		replay := writeReplayFile(t, inputs, onto, head)
+		if carve != nil {
+			record, err := run.ReadReplayFile(replay)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Carve = carve
+			data, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(replay, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			flags = append(flags, "-order-group", strconv.Itoa(carve.Group))
+		}
+		flags = append(flags, "-on-branch", "buildgate/req-golden/t2-restack1", "-diff-base", onto, "-replay", replay)
 		return flags, [][2]string{{head, "<REPLAY_HEAD>"}}
 	})
 	entries, err := os.ReadDir(filepath.Join(dataDir, "runs"))
@@ -335,7 +366,7 @@ func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 	}
 	runID := runs[0]
 	placeholders = append([][2]string{{runID, "<RUN_ID>"}}, placeholders...)
-	compareRunInputGolden(t, "run_workflow_input_replay.golden.json", startedRunWorkflowInput(t, address, runID), placeholders)
+	compareRunInputGolden(t, golden, startedRunWorkflowInput(t, address, runID), placeholders)
 }
 
 // replayedBranch creates branch in workspace with one commit on its HEAD, as
