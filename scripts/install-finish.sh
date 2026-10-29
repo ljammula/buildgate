@@ -5,8 +5,11 @@
 #   Step     Does                                              Skipped when
 #   Link     symlinks ~/.local/bin/factoryd to the installed    the directory cannot be made or written,
 #            binary, so every shell with that on PATH finds it  or another factoryd already sits there
-#   PATH     appends `export PATH="$PATH:<bin dir>"` to the     `factoryd` already resolves on PATH (the link
-#            shell profile (~/.zshrc, ~/.bash_profile)          does that), in a new shell, or the profile names that directory
+#   PATH     macOS and others: appends                          `factoryd` already resolves on PATH (the link
+#            `export PATH="$PATH:<bin dir>"` to the shell       does that), in a new shell, or the profile names that directory
+#            profile (~/.zshrc, ~/.bash_profile).
+#            Linux: writes no profile; one "Left for you" line
+#            says to put ~/.local/bin on PATH
 #   GitHub   `gh auth login`                                    gh is logged in, or there is no terminal
 #   Model    `factoryd setup`: which model, and which coding    the config already names a model;
 #            agent where the route can run more than one        asks nothing with no terminal
@@ -53,9 +56,21 @@ link_into_user_bin() {
 	ln -sfn "$installed" "$link" || return 1
 	echo "Linked $link -> $installed"
 }
-link_into_user_bin || true
+linked=1
+link_into_user_bin || linked=0
 
-if ! have factoryd && ! in_new_shell; then
+# Linux writes no profile: creating ~/.bash_profile makes bash login shells
+# (ssh among them) stop reading ~/.profile, which is where Debian and Ubuntu
+# put ~/.local/bin on PATH. The link above is what puts factoryd on PATH.
+if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
+	if ! have factoryd && ! in_new_shell; then
+		if [ "$linked" = 1 ]; then
+			left "Put ~/.local/bin on your PATH (Debian's and Ubuntu's ~/.profile adds it at your next login now that it exists; elsewhere add export PATH=\"\$HOME/.local/bin:\$PATH\" to ~/.profile), then log in again."
+		else
+			left "Put $bindir on your PATH (add export PATH=\"\$PATH:$bindir\" to ~/.profile), then log in again."
+		fi
+	fi
+elif ! have factoryd && ! in_new_shell; then
 	line="export PATH=\"\$PATH:$bindir\""
 	case "${SHELL##*/}" in
 	zsh) profile="${ZDOTDIR:-$HOME}/.zshrc" ;;

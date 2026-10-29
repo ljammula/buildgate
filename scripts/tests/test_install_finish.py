@@ -1,8 +1,9 @@
 """Offline tests for scripts/install-finish.sh, `make install`'s last step.
 
 Each test runs the script with PATH holding only a temp directory with the
-utilities it needs and stand-in `gh` and `factoryd`; HOME is a temp directory
-too, so the shell profile it edits is the test's own.
+utilities it needs and stand-in `gh`, `factoryd` and `uname` (Darwin unless
+the test says Linux); HOME is a temp directory too, so the shell profile it
+edits is the test's own.
 """
 
 import os
@@ -32,11 +33,15 @@ class InstallFinishTest(unittest.TestCase):
         self.log = self.tmp / "calls.log"
         self.installed = self.gobin / "factoryd"
         self.stub(self.installed, 'echo "factoryd $*" >> "$LOG"; [ "$1" = setup ] && exit ${SETUP_EXIT:-0}; [ "$1" = restart ] && exit ${RESTART_EXIT:-0}; exit ${DOCTOR_EXIT:-0}')
+        self.system("Darwin")
         self.stub(self.bin / "gh", 'echo "gh $*" >> "$LOG"; [ "$1 $2" = "auth status" ] && exit ${GH_STATUS:-0}; exit 0')
 
     def stub(self, path, body):
         path.write_text("#!/bin/sh\n" + body + "\n")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def system(self, name):
+        self.stub(self.bin / "uname", f"echo {name}")
 
     def run_script(self, path=None, **extra):
         env = {"PATH": path or str(self.bin), "HOME": str(self.home), "SHELL": "/bin/zsh", "LOG": str(self.log), **extra}
@@ -123,6 +128,7 @@ class InstallFinishTest(unittest.TestCase):
         self.run_script(path=self.user_bin_on_path())
         self.assertEqual((self.userbin / "factoryd").resolve(), self.installed.resolve())
 
+    @unittest.skipIf(os.geteuid() == 0, "root writes a directory whatever its mode")
     def test_a_user_bin_that_cannot_be_written_falls_back_to_the_profile(self):
         self.userbin.mkdir(parents=True)
         self.userbin.chmod(0o555)
@@ -193,6 +199,41 @@ class InstallFinishTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("Left for you:", result.stdout)
         self.assertTrue(result.stdout.rstrip().endswith('Nothing is left to do. Run your first request: factoryd quickstart <repo> "<request>"'))
+
+    PROFILES = (".bash_profile", ".profile", ".bashrc", ".zshrc")
+
+    def assert_no_profile_written(self):
+        for name in self.PROFILES:
+            self.assertFalse((self.home / name).exists(), name)
+
+    def test_linux_relies_on_the_user_bin_and_writes_no_profile(self):
+        self.system("Linux")
+        result = self.run_script(path=self.user_bin_on_path(), SHELL="/bin/bash")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.userbin / "factoryd").is_symlink())
+        self.assert_no_profile_written()
+        self.assertIn("Nothing is left to do", result.stdout)
+
+    def test_linux_with_the_user_bin_off_path_leaves_one_line_and_writes_no_profile(self):
+        self.system("Linux")
+        for shell in ("/bin/bash", "/bin/zsh", "/usr/bin/fish"):
+            with self.subTest(shell=shell):
+                result = self.run_script(SHELL=shell)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assert_no_profile_written()
+                left = result.stdout.split("Left for you:")[1]
+                self.assertEqual(left.count("on your PATH"), 1, left)
+                self.assertIn("Put ~/.local/bin on your PATH", left)
+                self.assertIn("~/.profile", left)
+
+    def test_linux_with_another_factoryd_in_the_user_bin_names_the_install_directory(self):
+        self.system("Linux")
+        self.userbin.mkdir(parents=True)
+        self.stub(self.userbin / "factoryd", "exit 0")
+        result = self.run_script(SHELL="/bin/bash")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_no_profile_written()
+        self.assertIn(f"Put {self.gobin} on your PATH", result.stdout.split("Left for you:")[1])
 
 
 if __name__ == "__main__":

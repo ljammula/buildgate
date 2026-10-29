@@ -15,8 +15,11 @@ for command_name in make; do
 done
 
 if ! command -v git >/dev/null 2>&1; then
-	if command -v brew >/dev/null 2>&1; then
+	os=$(uname -s 2>/dev/null || true)
+	if [ "$os" = Darwin ] && command -v brew >/dev/null 2>&1; then
 		brew install git || fail "could not install git with Homebrew"
+	elif [ "$os" = Linux ]; then
+		fail "git is required to fetch the release; install it (sudo apt-get install git), then rerun this installer"
 	else
 		fail "git is required to fetch the release; install git or Homebrew, then rerun this installer"
 	fi

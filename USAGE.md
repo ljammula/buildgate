@@ -273,8 +273,13 @@ request text from that GitHub issue, `gh` must be logged in) and
 trailing request text `factoryd submit` takes; each must precede
 `<repo-path>` on the command line.
 
-**Prerequisites**: with Homebrew, `make install` installs the tools below
-that are missing, starts colima and runs `gh auth login`. Go, Docker (colima: `colima
+**Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
+that are missing, starts colima and runs `gh auth login`. On Linux it installs
+nothing and runs no `sudo`: it names each missing tool and stops, with Docker,
+buildx and Compose v2 from Docker's own apt repository
+(`docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
+distribution's `docker.io` or the snap; a Docker that does not answer gets the
+`sudo systemctl start docker` and docker-group hint. Go, Docker (colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
@@ -293,9 +298,11 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/ljammula/build
 The installer chooses the newest stable release with all three GHCR images
 published, checks out its source under `~/.local/share/buildgate/source` by
 default (or `$XDG_DATA_HOME/buildgate/source` when `XDG_DATA_HOME` is set),
-installs missing prerequisites with Homebrew, pulls the matching worker,
+installs missing prerequisites with Homebrew on macOS (on Linux it installs
+nothing and names each missing tool, Docker from Docker's own apt
+repository), pulls the matching worker,
 meter and registry-proxy images, and runs `factoryd doctor -fix`. It needs
-`bash`, `curl`, `make`, and `git` (or Homebrew to install Git). GHCR packages
+`bash`, `curl`, `make`, and `git` (or, on macOS, Homebrew to install Git). GHCR packages
 must be public for anonymous pulls.
 
 For development, clone the repository and build `factoryd` plus its images

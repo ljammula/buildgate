@@ -80,9 +80,11 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/ljammula/build
 The installer chooses the newest stable release with all three GHCR images
 published, checks out its source under `~/.local/share/buildgate/source` by
 default (or `$XDG_DATA_HOME/buildgate/source` when `XDG_DATA_HOME` is set),
-installs missing prerequisites with Homebrew, pulls the matching worker,
+installs missing prerequisites with Homebrew on macOS (on Linux it installs
+nothing and names each missing tool, Docker from Docker's own apt
+repository), pulls the matching worker,
 meter and registry-proxy images, and runs `factoryd doctor -fix`. It needs
-`bash`, `curl`, `make`, and `git` (or Homebrew to install Git). GHCR packages
+`bash`, `curl`, `make`, and `git` (or, on macOS, Homebrew to install Git). GHCR packages
 must be public for anonymous pulls.
 
 For development, clone the repository and build `factoryd` and its images
