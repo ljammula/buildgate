@@ -135,6 +135,29 @@ func (a *Activities) RunChallengerJobActivity(ctx context.Context, in Challenger
 	return res, nil
 }
 
+// readApprovedChallengeSpec reads the spec snapshot the challenger is given
+// and checks it twice: the whole snapshot against the hash taken with it, and
+// its leading ChallengeApprovedBytes (the approved spec.md; the rest is the
+// read-back answers) against the hash spec_review approved. cause is "" when
+// both match.
+func readApprovedChallengeSpec(in RunWorkflowInput) (spec []byte, cause string) {
+	spec, err := evidence.ReadHostileFile(in.ChallengeSpecPath, maxChallengeSpec)
+	if err != nil {
+		return nil, fmt.Sprintf("the approved spec could not be read: %v", err)
+	}
+	if sum := sha256.Sum256(spec); hex.EncodeToString(sum[:]) != in.ChallengeSpecSHA256 {
+		return nil, "the approved spec no longer matches the hash spec_review approved"
+	}
+	n := in.ChallengeApprovedBytes
+	if in.ChallengeApprovedSHA256 == "" || n < 1 || n > len(spec) {
+		return nil, "no approved hash was given for the spec"
+	}
+	if sum := sha256.Sum256(spec[:n]); hex.EncodeToString(sum[:]) != in.ChallengeApprovedSHA256 {
+		return nil, "the approved spec no longer matches the hash spec_review approved"
+	}
+	return spec, ""
+}
+
 func (a *Activities) runChallengerJob(ctx context.Context, in ChallengerJobInput) (res ChallengerJobResult) {
 	fail := func(format string, args ...any) ChallengerJobResult {
 		res.Cause = fmt.Sprintf(format, args...)
@@ -143,17 +166,9 @@ func (a *Activities) runChallengerJob(ctx context.Context, in ChallengerJobInput
 	if in.ChallengerRelayPolicy == nil || in.RoutePolicy == nil {
 		return fail("no challenger role is configured")
 	}
-	spec, err := evidence.ReadHostileFile(in.ChallengeSpecPath, maxChallengeSpec)
-	if err != nil {
-		return fail("the approved spec could not be read: %v", err)
-	}
-	if sum := sha256.Sum256(spec); hex.EncodeToString(sum[:]) != in.ChallengeSpecSHA256 {
-		return fail("the approved spec no longer matches the hash spec_review approved")
-	}
-	if n := in.ChallengeApprovedBytes; in.ChallengeApprovedSHA256 == "" || n < 1 || n > len(spec) {
-		return fail("no approved hash was given for the spec")
-	} else if sum := sha256.Sum256(spec[:n]); hex.EncodeToString(sum[:]) != in.ChallengeApprovedSHA256 {
-		return fail("the approved spec no longer matches the hash spec_review approved")
+	_, cause := readApprovedChallengeSpec(in.RunWorkflowInput)
+	if cause != "" {
+		return fail("%s", cause)
 	}
 	relay, err := a.challengerRelaySpec(ctx, in)
 	if err != nil {
