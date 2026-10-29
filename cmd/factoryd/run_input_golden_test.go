@@ -115,7 +115,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
 		"-challenge", "-challenge-spec", write("challenge-spec.md", "# Approved spec\n\n- `Parse` returns a map.\n"),
-		"-challenge-criteria", "3", "-challenge-answers", "2",
+		"-challenge-criteria", "3", "-challenge-answers", "2,5",
 		"-challenge-held", write("held.json", heldManifest), "-challenge-round",
 		"-resume-session-of", "golden-quarantined",
 	}

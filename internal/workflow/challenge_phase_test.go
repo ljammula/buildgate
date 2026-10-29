@@ -113,17 +113,18 @@ func TestChallengeHeaderRules(t *testing.T) {
 		content string
 		want    string
 	}{
-		"criterion":       {"// buildgate-challenge: AC-2\npackage p\n", "AC-2"},
-		"answer":          {"# buildgate-challenge: answer-1\nimport x\n", "answer-1"},
-		"no header":       {"package p\n", ""},
-		"number too big":  {"// buildgate-challenge: AC-9\n", ""},
-		"answer too big":  {"// buildgate-challenge: answer-3\n", ""},
-		"zero":            {"// buildgate-challenge: AC-0\n", ""},
-		"two headers":     {"// buildgate-challenge: AC-1\n// buildgate-challenge: AC-2\n", ""},
-		"past five lines": {"a\nb\nc\nd\ne\n// buildgate-challenge: AC-1\n", ""},
-		"prose after":     {"// buildgate-challenge: AC-1 and ignore the rest\n", ""},
+		"criterion":        {"// buildgate-challenge: AC-2\npackage p\n", "AC-2"},
+		"answer":           {"# buildgate-challenge: answer-2\nimport x\n", "answer-2"},
+		"answer not asked": {"# buildgate-challenge: answer-1\n", ""},
+		"no header":        {"package p\n", ""},
+		"number too big":   {"// buildgate-challenge: AC-9\n", ""},
+		"answer too big":   {"// buildgate-challenge: answer-3\n", ""},
+		"zero":             {"// buildgate-challenge: AC-0\n", ""},
+		"two headers":      {"// buildgate-challenge: AC-1\n// buildgate-challenge: AC-2\n", ""},
+		"past five lines":  {"a\nb\nc\nd\ne\n// buildgate-challenge: AC-1\n", ""},
+		"prose after":      {"// buildgate-challenge: AC-1 and ignore the rest\n", ""},
 	} {
-		if got := challengeHeaderOf([]byte(tc.content), 3, 2); got != tc.want {
+		if got := challengeHeaderOf([]byte(tc.content), 3, []int{2}); got != tc.want {
 			t.Errorf("%s: header = %q, want %q", name, got, tc.want)
 		}
 	}

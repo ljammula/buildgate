@@ -11,7 +11,10 @@
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,
   "challenge": true,
-  "challenge_answers": 2,
+  "challenge_answers": [
+    2,
+    5
+  ],
   "challenge_criteria": 3,
   "challenge_held": [
     {

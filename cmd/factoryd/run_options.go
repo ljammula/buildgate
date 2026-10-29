@@ -110,7 +110,7 @@ type runOptions struct {
 	ChallengeSpecPath     string
 	ChallengeSpecSHA256   string
 	ChallengeCriteria     int
-	ChallengeAnswers      int
+	ChallengeAnswers      []int
 	ChallengerThinking    string
 	ChallengerHarness     string
 	ChallengerRelayPolicy *sandbox.RoutePolicy

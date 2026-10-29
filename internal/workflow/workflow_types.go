@@ -530,13 +530,14 @@ type RunWorkflowInput struct {
 	// (SC-022): after every gate and the review the challenger job runs once.
 	// ChallengeSpecPath is the run's snapshot of the approved spec with the
 	// read-back answers appended, ChallengeSpecSHA256 its hash when the
-	// snapshot was taken, ChallengeCriteria and ChallengeAnswers how many
-	// numbered criteria and answers a file's header may cite.
+	// snapshot was taken, ChallengeCriteria how many numbered criteria a file's
+	// header may cite and ChallengeAnswers the numbers of the answered
+	// read-back questions it may cite.
 	Challenge           bool   `json:"challenge,omitempty"`
 	ChallengeSpecPath   string `json:"challenge_spec_path,omitempty"`
 	ChallengeSpecSHA256 string `json:"challenge_spec_sha256,omitempty"`
 	ChallengeCriteria   int    `json:"challenge_criteria,omitempty"`
-	ChallengeAnswers    int    `json:"challenge_answers,omitempty"`
+	ChallengeAnswers    []int  `json:"challenge_answers,omitempty"`
 	// ChallengerThinking, ChallengerHarness and ChallengerRelayPolicy are
 	// roles.challenger's resolved values, as the review's are; a nil policy
 	// with Challenge set means no challenger role is configured.

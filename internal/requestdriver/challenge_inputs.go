@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"buildgate/internal/request"
 	"buildgate/internal/run"
@@ -84,7 +86,7 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 		if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 			return fmt.Errorf("write the challenge input: %w", err)
 		}
-		entry.Challenge, entry.ChallengeSpecPath, entry.ChallengeCriteria, entry.ChallengeAnswers = true, path, criteria, len(answered)
+		entry.Challenge, entry.ChallengeSpecPath, entry.ChallengeCriteria, entry.ChallengeAnswers = true, path, criteria, answeredNumbers(answered)
 		return nil
 	}
 	if ticket.ChallengeRunID == "" {
@@ -104,6 +106,18 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 	}
 	entry.ChallengeHeld, entry.ChallengeRound = path, round
 	return nil
+}
+
+// answeredNumbers are the numbers of the answered read-back questions, the
+// n of each ID Q<n>: what a challenge file's answer-<n> header may cite.
+func answeredNumbers(answered []request.ReadBackQuestion) []int {
+	var ns []int
+	for _, q := range answered {
+		if n, err := strconv.Atoi(strings.TrimPrefix(q.ID, "Q")); err == nil {
+			ns = append(ns, n)
+		}
+	}
+	return ns
 }
 
 // heldChallengeFiles are the files of run id's challenge a later build runs

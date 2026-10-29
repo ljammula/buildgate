@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -307,7 +308,7 @@ type runFlags struct {
 	challenge                    *bool
 	challengeSpec                *string
 	challengeCriteria            *int
-	challengeAnswers             *int
+	challengeAnswers             *string
 	challengeHeld                *string
 	challengeRound               *bool
 }
@@ -352,7 +353,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.challenge = flags.Bool("challenge", false, "internal: after every gate and the review, run the challenger job once on the result (SC-022); a request's ticket build sets it")
 	f.challengeSpec = flags.String("challenge-spec", "", "internal: the request's approved spec.md with the read-back answers appended, which the challenger is given")
 	f.challengeCriteria = flags.Int("challenge-criteria", 0, "internal: how many numbered acceptance criteria a challenge file's header may cite")
-	f.challengeAnswers = flags.Int("challenge-answers", 0, "internal: how many numbered read-back answers a challenge file's header may cite")
+	f.challengeAnswers = flags.String("challenge-answers", "", "internal: the numbers of the answered read-back questions a challenge file's header may cite, comma-separated")
 	f.challengeHeld = flags.String("challenge-held", "", "internal: JSON list of the held challenge files of this ticket that the build runs again on its result")
 	f.challengeRound = flags.Bool("challenge-round", false, "internal: this build is the ticket's challenge round: the held files are mounted read-only, and a green result commits them")
 	f.priorRun = flags.String("prior-run", "", "id of an accepted run that this run follows in a multi-slice chain")
@@ -2685,7 +2686,7 @@ func (tr *ticketRun) dispatch() error {
 			ChallengeSpecPath:      tr.challengeSpecSnapshot,
 			ChallengeSpecSHA256:    tr.challengeSpecSHA256,
 			ChallengeCriteria:      *tr.rf.challengeCriteria,
-			ChallengeAnswers:       *tr.rf.challengeAnswers,
+			ChallengeAnswers:       challengeAnswerNumbers(*tr.rf.challengeAnswers),
 			ChallengerThinking:     tr.challengerThinking,
 			ChallengerHarness:      tr.challengerHarnessName,
 			ChallengeHeld:          tr.challengeHeld,
@@ -2857,4 +2858,17 @@ func (tr *ticketRun) runPROrder() *run.PROrder {
 		return nil
 	}
 	return &run.PROrder{Groups: tr.prOrder, TicketGroup: *tr.rf.orderGroup}
+}
+
+// challengeAnswerNumbers parses -challenge-answers: the comma-separated
+// numbers of the answered read-back questions. A token that is not a number
+// is dropped, so no header can cite it.
+func challengeAnswerNumbers(list string) []int {
+	var ns []int
+	for _, tok := range strings.Split(list, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(tok)); err == nil {
+			ns = append(ns, n)
+		}
+	}
+	return ns
 }

@@ -15,7 +15,7 @@ const edgeTest = "// buildgate-challenge: AC-1\npackage p\n\nimport \"testing\"\
 
 func holdFixture(t *testing.T) (*reproFixture, ChallengerJobInput) {
 	f := newReproFixture(t)
-	f.input.ChallengeCriteria, f.input.ChallengeAnswers = 2, 1
+	f.input.ChallengeCriteria, f.input.ChallengeAnswers = 2, []int{1}
 	return f, ChallengerJobInput{RunWorkflowInput: f.input, Commit: f.commit}
 }
 
@@ -272,5 +272,52 @@ func TestChallengeRoundMountStubIsExcludedFromGit(t *testing.T) {
 	exclude, _ := exec.Command("git", "-C", f.repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").Output()
 	if body, _ := os.ReadFile(strings.TrimSpace(string(exclude))); strings.Contains(string(body), "edge_test.go") {
 		t.Errorf("the exclude file kept the held path: %q", body)
+	}
+}
+
+// A spec with no numbered criteria under the exact heading makes every AC-n
+// header invalid, and the pull request is told why, once.
+func TestHoldChallengeFilesNamesAMissingCriteriaHeading(t *testing.T) {
+	f, in := holdFixture(t)
+	in.ChallengeCriteria = 0
+	writeFile(t, filepath.Join(f.repo, "p", "a_test.go"), edgeTest)
+	writeFile(t, filepath.Join(f.repo, "p", "b_test.go"), edgeTest)
+	files, notes, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 2 {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	named := 0
+	for _, n := range notes {
+		if strings.Contains(n, "Acceptance criteria") {
+			named++
+		}
+	}
+	if named != 1 {
+		t.Errorf("notes = %v, want exactly one naming the missing heading", notes)
+	}
+}
+
+// An answer-<n> header is valid for an answered question's own number, not
+// for the count of answered questions.
+func TestHoldChallengeFilesChecksAnswerNumbersAgainstTheAnsweredSet(t *testing.T) {
+	f, in := holdFixture(t)
+	in.ChallengeAnswers = []int{3}
+	writeFile(t, filepath.Join(f.repo, "p", "q3_test.go"), strings.Replace(edgeTest, "AC-1", "answer-3", 1))
+	writeFile(t, filepath.Join(f.repo, "p", "q1_test.go"), strings.Replace(edgeTest, "AC-1", "answer-1", 1))
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		switch file.Path {
+		case "p/q3_test.go":
+			if file.NotRun != "" || file.Criterion != "answer-3" {
+				t.Errorf("q3 = %+v, want held to run", file)
+			}
+		case "p/q1_test.go":
+			if file.NotRun == "" {
+				t.Errorf("q1 = %+v, want not run: question 1 was not answered", file)
+			}
+		}
 	}
 }

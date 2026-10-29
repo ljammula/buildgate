@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -86,9 +87,9 @@ type ChallengerJobResult struct {
 
 // challengeHeaderOf is the criterion label of content's header: exactly one
 // matching line in its first challengeHeaderLines lines, whose number is at
-// most criteria (AC) or answers (answer). "" when there is none or it is not
+// most criteria (AC) or one of the answered question numbers (answer). "" when there is none or it is not
 // valid.
-func challengeHeaderOf(content []byte, criteria, answers int) string {
+func challengeHeaderOf(content []byte, criteria int, answers []int) string {
 	lines := strings.Split(string(content), "\n")
 	if len(lines) > challengeHeaderLines {
 		lines = lines[:challengeHeaderLines]
@@ -103,11 +104,7 @@ func challengeHeaderOf(content []byte, criteria, answers int) string {
 			return ""
 		}
 		n, _ := strconv.Atoi(m[2])
-		limit := criteria
-		if m[1] == "answer" {
-			limit = answers
-		}
-		if n < 1 || n > limit {
+		if n < 1 || (m[1] == "answer" && !slices.Contains(answers, n)) || (m[1] != "answer" && n > criteria) {
 			return ""
 		}
 		found = m[1] + "-" + m[2]
@@ -348,7 +345,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 	dir := filepath.Join(a.logDirFor(in.RunWorkflowInput), run.ChallengeDirName)
 	var files []run.ChallengeFile
 	var notes []string
-	held, unnoted := 0, 0
+	held, unnoted, noCriteriaNoted := 0, 0, false
 	for _, p := range untracked {
 		if harnessStatePath(p) {
 			continue
@@ -400,6 +397,10 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 		if file.Criterion = challengeHeaderOf(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
 			file.NotRun = "no valid derivation header"
 			notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(p))
+			if in.ChallengeCriteria == 0 && !noCriteriaNoted {
+				noCriteriaNoted = true
+				notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
+			}
 		}
 		files = append(files, file)
 		held++

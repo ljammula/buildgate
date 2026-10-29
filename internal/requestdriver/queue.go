@@ -118,7 +118,7 @@ type QueueEntry struct {
 	Challenge         bool   `json:"challenge,omitempty"`
 	ChallengeSpecPath string `json:"challenge_spec_path,omitempty"`
 	ChallengeCriteria int    `json:"challenge_criteria,omitempty"`
-	ChallengeAnswers  int    `json:"challenge_answers,omitempty"`
+	ChallengeAnswers  []int  `json:"challenge_answers,omitempty"`
 	ChallengeHeld     string `json:"challenge_held,omitempty"`
 	ChallengeRound    bool   `json:"challenge_round,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
