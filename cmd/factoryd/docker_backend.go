@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -52,10 +53,17 @@ func (impl realDocker) backend(ctx context.Context, dockerBinary string) dockerb
 }
 
 // detectBackend runs the docker calls that name a backend, under its own
-// deadline (dockerBackendTimeout).
-func detectBackend(ctx context.Context, docker string) dockerbackend.Detection {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dockerBackendTimeout)
+// deadline (dockerBackendTimeout) rather than the caller's, but still ends
+// when the caller is cancelled (a stopped run, a Ctrl-C).
+func detectBackend(parent context.Context, docker string) dockerbackend.Detection {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), dockerBackendTimeout)
 	defer cancel()
+	stop := context.AfterFunc(parent, func() {
+		if errors.Is(parent.Err(), context.Canceled) {
+			cancel()
+		}
+	})
+	defer stop()
 	run := func(args ...string) (string, error) {
 		out, err := exec.CommandContext(ctx, docker, args...).Output()
 		return strings.TrimSpace(string(out)), err

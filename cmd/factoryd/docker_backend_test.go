@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/dockerbackend"
 )
@@ -156,5 +157,29 @@ func TestUninstallGatewayStateCommandFollowsTheBackend(t *testing.T) {
 	}
 	if got := (&uninstallEnv{}).gatewayStateRemoveCommand(); !strings.Contains(got, "colima ssh") || !strings.Contains(got, "machine Docker runs on") {
 		t.Errorf("unknown backend: %q", got)
+	}
+}
+
+// TestDetectBackendKeepsItsOwnDeadlineButEndsOnCancel: a caller's deadline
+// does not cut detection short, and a cancelled caller does.
+func TestDetectBackendKeepsItsOwnDeadlineButEndsOnCancel(t *testing.T) {
+	docker := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\nsleep 0.3\necho '{\"OSType\":\"linux\",\"ServerVersion\":\"28.5.1\"}'\n"
+	if err := writeExecutable(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if d := detectBackend(expired, docker); d.Err != nil {
+		t.Errorf("a caller past its deadline: %v, want detection to run on its own", d.Err)
+	}
+	cancelled, cancelNow := context.WithCancel(context.Background())
+	cancelNow()
+	start := time.Now()
+	if d := detectBackend(cancelled, docker); d.Err == nil {
+		t.Error("a cancelled caller's detection ran to the end")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("a cancelled detection took %s", time.Since(start))
 	}
 }
