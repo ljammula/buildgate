@@ -86,6 +86,9 @@ func isolatedTemporalAddress(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
+	// An operator's model credential in the environment must not change
+	// which routes a test finds usable; tests that need one set it.
+	os.Unsetenv("ANTHROPIC_API_KEY")
 	os.Exit(runTests(m))
 }
 
