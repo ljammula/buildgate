@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +63,7 @@ func TestOpenInBrowserNeverPutsURLOnArgv(t *testing.T) {
 // adversarial-review permission requirement above, since the file
 // transiently carries the same token the URL itself does.
 func TestWriteBrowserRedirectFilePermissions(t *testing.T) {
-	path, cleanup, err := writeBrowserRedirectFile("http://example/#t=abc")
+	path, cleanup, err := writeBrowserRedirectFile("", "http://example/#t=abc")
 	if err != nil {
 		t.Fatalf("writeBrowserRedirectFile: %v", err)
 	}
@@ -90,7 +92,7 @@ func TestWriteBrowserRedirectFilePermissions(t *testing.T) {
 // script or, worse, letting the "URL" inject arbitrary script.
 func TestWriteBrowserRedirectFileEscapesURLSafely(t *testing.T) {
 	tricky := `http://example/#t=abc"; alert(1); //`
-	path, cleanup, err := writeBrowserRedirectFile(tricky)
+	path, cleanup, err := writeBrowserRedirectFile("", tricky)
 	if err != nil {
 		t.Fatalf("writeBrowserRedirectFile: %v", err)
 	}
@@ -146,4 +148,43 @@ func dirOf(path string) string {
 		return "."
 	}
 	return path[:i]
+}
+
+// TestOpenInBrowserWritesWhereTheBrowserCanReadAndStopsWithNoBrowser: the
+// redirect file goes into the directory the host names (on Linux the data
+// root, which a snap browser can read), and a host with no browser to open
+// says so without starting anything.
+func TestOpenInBrowserWritesWhereTheBrowserCanReadAndStopsWithNoBrowser(t *testing.T) {
+	dp := newTestDeps(t)
+	dir := t.TempDir()
+	var gotArg string
+	fakeHostOf(dp).browserCommandFn = func(target string) *exec.Cmd { gotArg = target; return exec.Command("true") }
+	fakeHostOf(dp).browserRedirectDirFn = func() (string, error) { return dir, nil }
+	origDelay := openInBrowserCleanupDelay
+	openInBrowserCleanupDelay = time.Hour
+	t.Cleanup(func() { openInBrowserCleanupDelay = origDelay })
+
+	if err := openInBrowser(dp, "http://127.0.0.1:8090/#t=x"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(gotArg, dir+string(os.PathSeparator)) {
+		t.Errorf("redirect file %q is not under %q", gotArg, dir)
+	}
+
+	gotArg = ""
+	fakeHostOf(dp).browserRedirectDirFn = func() (string, error) { return "", errors.New("no graphical session here") }
+	if err := openInBrowser(dp, "http://127.0.0.1:8090/#t=x"); err == nil || gotArg != "" {
+		t.Errorf("no browser: err = %v, started %q", err, gotArg)
+	}
+}
+
+func TestRealBrowserRedirectDirWithNoGraphicalSession(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the Linux rule")
+	}
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	if _, err := (realHost{}).browserRedirectDir(); err == nil || !strings.Contains(err.Error(), "ssh -L") {
+		t.Errorf("err = %v, want the headless explanation", err)
+	}
 }

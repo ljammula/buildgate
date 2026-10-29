@@ -546,10 +546,29 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	if c, ok := doctorCheckTLSInterception(ctx, dp, fix); ok {
 		checks = append(checks, c)
 	}
-	if runtime.GOOS == "darwin" && os.Getenv(notify.DesktopNotificationsEnvironmentVariable) != "0" {
-		checks = append(checks, doctorCheckNotificationClick(dp.host.terminalNotifierOnPath()))
+	if os.Getenv(notify.DesktopNotificationsEnvironmentVariable) != "0" {
+		switch runtime.GOOS {
+		case "darwin":
+			checks = append(checks, doctorCheckNotificationClick(dp.host.terminalNotifierOnPath()))
+		case "linux":
+			_, err := notify.LinuxNotifier()
+			checks = append(checks, doctorCheckLinuxNotifications(err))
+		}
 	}
 	return checks, nil
+}
+
+// doctorCheckLinuxNotifications reports whether this session can show a
+// desktop notification (notify-send and a session bus). Advisory: the
+// console and `factoryd inbox` say the same, and a worker under systemd or
+// ssh usually has no desktop to show one on.
+func doctorCheckLinuxNotifications(notifierErr error) doctorCheck {
+	const name = "desktop notifications (notify-send)"
+	if notifierErr != nil {
+		return doctorCheck{Name: name, Advisory: true, Err: notifierErr,
+			Fix: "install libnotify-bin and run the worker from a desktop session to see banners; otherwise the console and `factoryd inbox` list what waits for you"}
+	}
+	return doctorCheck{Name: name}
 }
 
 func (realHost) terminalNotifierOnPath() bool {

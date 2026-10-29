@@ -147,6 +147,10 @@ type hostBoundary interface {
 	// for a symlink or submodule, errBlobTooLarge over 1 MiB.
 	blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommand(target string) *exec.Cmd
+	// browserRedirectDir is where a browser can read the redirect file
+	// openInBrowser writes ("" is the OS temp directory), or why no browser
+	// can be opened on this machine.
+	browserRedirectDir() (string, error)
 	executable() (string, error)
 	// rootTreeAtCommit lists the entries of commit's root tree in repoDir
 	// (name, mode, type, object) from git objects, never from a worktree.

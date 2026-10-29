@@ -43,6 +43,53 @@ var desktopClickNotifierLookPath = func() (string, error) {
 	return exec.LookPath("terminal-notifier")
 }
 
+// desktopLinuxNotifierLookPath resolves notify-send, the freedesktop.org
+// notification client on Linux -- a package-level var, like the macOS
+// ones above, so a test can point it at a stand-in.
+var desktopLinuxNotifierLookPath = func() (string, error) {
+	return exec.LookPath("notify-send")
+}
+
+// LinuxNotifier is how a Linux desktop notification would be shown here:
+// notify-send's path, or why none can be (not on PATH, or no session bus
+// for it to reach a notification daemon over, as in an ssh login or a
+// systemd user service with no desktop session).
+func LinuxNotifier() (path string, err error) {
+	path, err = desktopLinuxNotifierLookPath()
+	if err != nil {
+		return "", fmt.Errorf("notify-send is not on PATH (Debian/Ubuntu: libnotify-bin)")
+	}
+	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+		if _, statErr := os.Stat(filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "bus")); os.Getenv("XDG_RUNTIME_DIR") == "" || statErr != nil {
+			return "", fmt.Errorf("no desktop session bus to reach a notification daemon over")
+		}
+	}
+	return path, nil
+}
+
+// notifyLinux shows n through notify-send. It has no click action: like the
+// osascript banner, a request's says where to act on it.
+func notifyLinux(ctx context.Context, n Notification) {
+	path, err := LinuxNotifier()
+	if err != nil {
+		return
+	}
+	title, subtitle, message := desktopText(n)
+	if n.Ask != "" {
+		message += " Open the console to act on it (`factoryd console`)."
+	}
+	body := strings.TrimSpace(subtitle + "\n" + message)
+	cmd := exec.CommandContext(ctx, path, "--app-name=factoryd", "--", title, notifySendMarkupEscape(body))
+	cmd.WaitDelay = time.Second
+	_ = cmd.Run()
+}
+
+// notifySendMarkupEscape escapes the body markup notification daemons
+// interpret (a subset of HTML), so a request's text is shown as written.
+func notifySendMarkupEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
 // buildgateIcon is the Buildgate mark (rendered from
 // assets/brand/buildgate.svg by scripts/render-icons.sh), attached to
 // terminal-notifier banners as -contentImage. That is the only icon slot
@@ -90,7 +137,8 @@ func desktopIconPath() string {
 	return path
 }
 
-// DesktopNotifier shows a single macOS desktop notification. It is a
+// DesktopNotifier shows a single desktop notification: on macOS as below, on
+// Linux through notify-send (notifyLinux). It is a
 // best-effort, out-of-band channel alongside LogNotifier (the durable audit
 // trail), and per the Notifier contract it never errors: every failure mode
 // (opted out, wrong OS, no notifier binary on PATH, the command itself
@@ -111,10 +159,14 @@ func desktopIconPath() string {
 type DesktopNotifier struct{}
 
 // Notify shows a desktop notification for n, or silently does nothing
-// when desktop notifications are opted out of, the OS isn't darwin, or
-// neither notifier binary is on PATH.
+// when desktop notifications are opted out of, the OS is neither darwin nor
+// linux, or no notifier can be run.
 func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 	if os.Getenv(DesktopNotificationsEnvironmentVariable) == "0" {
+		return nil
+	}
+	if desktopOS == "linux" {
+		notifyLinux(ctx, n)
 		return nil
 	}
 	if desktopOS != "darwin" {

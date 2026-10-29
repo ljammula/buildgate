@@ -49,8 +49,10 @@ services:
       - SQL_MAX_IDLE_CONNS=6
       - SQL_VIS_MAX_CONNS=2
       - SQL_VIS_MAX_IDLE_CONNS=2
+    # Loopback only, both ports: the frontend takes workflow signals with no
+    # authentication, so no other machine may reach it.
     ports:
-      - "7233:7233" # gRPC frontend (client.DefaultHostPort / TEMPORAL_ADDRESS)
+      - "127.0.0.1:7233:7233" # gRPC frontend (client.DefaultHostPort / TEMPORAL_ADDRESS)
     restart: unless-stopped
 
   temporal-ui:
@@ -60,7 +62,7 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
     ports:
-      - "8233:8080" # Web UI
+      - "127.0.0.1:8233:8080" # Web UI
     restart: unless-stopped
 
   # One-shot: registers the three custom search attributes

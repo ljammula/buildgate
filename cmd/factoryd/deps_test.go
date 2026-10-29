@@ -196,6 +196,7 @@ type fakeHost struct {
 	baselineCheckFn      func(args []string) error
 	blobAtCommitFn       func(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommandFn     func(target string) *exec.Cmd
+	browserRedirectDirFn func() (string, error)
 	executableFn         func() (string, error)
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
@@ -228,6 +229,7 @@ func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit 
 	return f.rootTreeAtCommitFn(ctx, repoDir, commit)
 }
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
+func (f *fakeHost) browserRedirectDir() (string, error)    { return f.browserRedirectDirFn() }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
 func (f *fakeHost) baselineCheck(args []string) error      { return f.baselineCheckFn(args) }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
@@ -419,7 +421,10 @@ func newTestDeps(t testing.TB) *deps {
 		blobAtCommitFn:     realHost.blobAtCommit,
 		rootTreeAtCommitFn: realHost.rootTreeAtCommit,
 		browserCommandFn:   realHost.browserCommand,
-		executableFn:       realHost.executable,
+		// The OS temp directory, whatever the machine: no test depends on a
+		// graphical session.
+		browserRedirectDirFn: func() (string, error) { return "", nil },
+		executableFn:         realHost.executable,
 		// A passing check, decided in the test process: no run is started.
 		baselineCheckFn: func([]string) error { return nil },
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
