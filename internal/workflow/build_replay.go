@@ -35,6 +35,12 @@ func (a *Activities) ApplyReplayActivity(ctx context.Context, input RunWorkflowI
 	of, rp, err := checkReplay(ctx, a.dataDirFor(input), input)
 	if err != nil {
 		progressMark(ctx, logDir, replayStage, "end", "fail", err.Error())
+		var hostErr hostReadError
+		if errors.As(err, &hostErr) {
+			// A host read that failed says nothing about the replay: the
+			// Activity is retried, and a run it never judged is no verdict.
+			return BuildActivityResult{}, fmt.Errorf("the replay could not be checked: %w", err)
+		}
 		return BuildActivityResult{}, temporal.NewNonRetryableApplicationError("replay run refused: "+err.Error(), ReplayFailureType, nil)
 	}
 	detail := fmt.Sprintf("judging %s, the %d commit(s) of run %s replayed onto %s: nothing is built", shortSHA(rp.HeadSHA), len(rp.Commits), of.ID, shortSHA(rp.OntoSHA))
@@ -49,6 +55,18 @@ func (a *Activities) ApplyReplayActivity(ctx context.Context, input RunWorkflowI
 	result := runner.Result{Command: attempt.Command, ExitCode: 0, StartedAt: now, FinishedAt: now, ImageDigest: attempt.ImageDigest}
 	return BuildActivityResult{Result: result, Attempts: []run.Attempt{attempt}}, nil
 }
+
+// hostReadError is a replay check that could not read what it checks (a git
+// command, a run record): a transient host failure, not a finding that the
+// replay does not fit. ApplyReplayActivity retries it instead of refusing the
+// replay, so only a real mismatch is a refusal (ReplayFailureType).
+type hostReadError struct{ err error }
+
+func (e hostReadError) Error() string { return e.err.Error() }
+func (e hostReadError) Unwrap() error { return e.err }
+
+// hostRead marks err as a failed read.
+func hostRead(err error) error { return hostReadError{err} }
 
 // checkReplay checks a replay run against what the host can re-derive and
 // returns the run whose commits were replayed (Replay.OfRunID) and the
@@ -77,7 +95,7 @@ func checkReplay(ctx context.Context, dataDir string, input RunWorkflowInput) (*
 	}
 	self, err := run.Load(dataDir, input.RunID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load the run's own record: %w", err)
+		return nil, nil, hostRead(fmt.Errorf("load the run's own record: %w", err))
 	}
 	rp := self.Replay
 	if err := checkReplayRecord(self, input.Replay); err != nil {
@@ -240,7 +258,7 @@ func checkReplayedCommits(ctx context.Context, dir string, rp *run.Replay) error
 func replayRange(ctx context.Context, dir, side, from, to string) ([]string, error) {
 	commits, merges, err := runner.GitRevListRange(ctx, dir, from, to)
 	if err != nil {
-		return nil, fmt.Errorf("list the %s commits: %w", side, err)
+		return nil, hostRead(fmt.Errorf("list the %s commits: %w", side, err))
 	}
 	if len(merges) > 0 {
 		return nil, fmt.Errorf("the %s commits include merge commit %s", side, shortSHA(merges[0]))
@@ -333,8 +351,12 @@ func checkCarvedReplay(ctx context.Context, dataDir string, input RunWorkflowInp
 	if source.DiffBase() == "" || rp.UpstreamSHA != source.DiffBase() {
 		return nil, fmt.Errorf("the carve starts after %s, not after %s, the diff base of run %s", shortSHA(rp.UpstreamSHA), shortSHA(source.DiffBase()), source.ID)
 	}
-	if under, err := runner.GitReplayIsAncestor(ctx, input.WorkspacePath, rp.UpstreamSHA, rp.OntoSHA); err != nil || !under {
-		return nil, fmt.Errorf("the commit carved onto, %s, is not the diff base %s or a descendant of it (%v)", shortSHA(rp.OntoSHA), shortSHA(rp.UpstreamSHA), err)
+	under, err := runner.GitReplayIsAncestor(ctx, input.WorkspacePath, rp.UpstreamSHA, rp.OntoSHA)
+	if err != nil {
+		return nil, hostRead(fmt.Errorf("read whether %s is under %s: %w", shortSHA(rp.UpstreamSHA), shortSHA(rp.OntoSHA), err))
+	}
+	if !under {
+		return nil, fmt.Errorf("the commit carved onto, %s, is not the diff base %s or a descendant of it", shortSHA(rp.OntoSHA), shortSHA(rp.UpstreamSHA))
 	}
 	commits, err := replayRange(ctx, input.WorkspacePath, "carved", rp.OntoSHA, rp.HeadSHA)
 	if err != nil {
@@ -345,7 +367,7 @@ func checkCarvedReplay(ctx context.Context, dataDir string, input RunWorkflowInp
 	}
 	changed, err := runner.GitDiffNameOnly(input.WorkspacePath, source.DiffBase(), source.ResultSHA)
 	if err != nil {
-		return nil, fmt.Errorf("list the files run %s changed: %w", source.ID, err)
+		return nil, hostRead(fmt.Errorf("list the files run %s changed: %w", source.ID, err))
 	}
 	var files []string
 	for _, part := range prorder.Order(rp.Carve.Groups).Carve(changed) {
@@ -358,11 +380,11 @@ func checkCarvedReplay(ctx context.Context, dataDir string, input RunWorkflowInp
 	}
 	want, err := workspace.CarveTree(ctx, input.WorkspacePath, rp.OntoSHA, source.ResultSHA, files)
 	if err != nil {
-		return nil, fmt.Errorf("derive the carved tree: %w", err)
+		return nil, hostRead(fmt.Errorf("derive the carved tree: %w", err))
 	}
 	got, err := workspace.TreeOf(ctx, input.WorkspacePath, rp.HeadSHA)
 	if err != nil {
-		return nil, err
+		return nil, hostRead(err)
 	}
 	if got != want {
 		return nil, fmt.Errorf("the carved commit %s holds tree %s, not the tree %s that %d file(s) of run %s carved onto %s make", shortSHA(rp.HeadSHA), shortSHA(got), shortSHA(want), len(files), source.ID, shortSHA(rp.OntoSHA))
@@ -379,7 +401,7 @@ func checkCarveSource(dataDir, id, repoDir string, self *run.Run) (*run.Run, err
 	source, err := run.Load(dataDir, id)
 	switch {
 	case err != nil:
-		return nil, fmt.Errorf("load run %s carved from: %w", id, err)
+		return nil, hostRead(fmt.Errorf("load run %s carved from: %w", id, err))
 	case source.State != run.StateAccepted:
 		return nil, fmt.Errorf("run %s carved from is %s, not accepted", id, source.State)
 	case !source.Sandboxed():
@@ -396,7 +418,7 @@ func checkCarveSource(dataDir, id, repoDir string, self *run.Run) (*run.Run, err
 	decision, err := release.LoadDecision(dataDir, release.ProjectOf(source), id)
 	switch {
 	case err != nil:
-		return nil, fmt.Errorf("load the release decision of run %s carved from: %w", id, err)
+		return nil, hostRead(fmt.Errorf("load the release decision of run %s carved from: %w", id, err))
 	case decision == nil:
 		return nil, fmt.Errorf("run %s carved from has no release decision", id)
 	case decision.Invalidated || decision.Allowed:
