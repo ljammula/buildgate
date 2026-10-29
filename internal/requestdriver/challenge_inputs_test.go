@@ -3,10 +3,13 @@ package requestdriver_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/requestdriver/requestdrivertest"
+	"buildgate/internal/run"
 )
 
 func challengeArgsFixture(t *testing.T) (dataDir string, r *request.Request, ticket request.Ticket) {
@@ -73,4 +76,33 @@ func requestdrivertestHas(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+// Only files a run launches are mounted into the round and set aside by
+// diff_scope: a file held without a derivation header is neither.
+func TestHeldChallengeFilesLeaveOutFilesHeldAndNotRun(t *testing.T) {
+	dataDir, r, ticket := challengeArgsFixture(t)
+	hostDir := filepath.Join(dataDir, "runs", "r1", "challenge", "0")
+	if err := os.MkdirAll(hostDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	rec := &run.Run{ID: "r1", Challenge: &run.ChallengeRecord{Files: []run.ChallengeFile{
+		{Path: "a_test.go", SHA256: strings.Repeat("a", 64), HostPath: filepath.Join(hostDir, "a_test.go"), Criterion: "AC-1"},
+		{Path: "b_test.go", SHA256: strings.Repeat("b", 64), HostPath: filepath.Join(hostDir, "b_test.go"), NotRun: "no valid derivation header"},
+	}}}
+	if err := rec.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	ticket.Challenged, ticket.ChallengeRunID = true, "r1"
+	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(requestdrivertest.ArgValue(args, "-challenge-held"))
+	if err != nil {
+		t.Fatalf("no held manifest: %v (%v)", err, args)
+	}
+	if !strings.Contains(string(manifest), "a_test.go") || strings.Contains(string(manifest), "b_test.go") {
+		t.Fatalf("manifest = %s, want only the file that carries a header", manifest)
+	}
 }

@@ -2212,7 +2212,7 @@ func quarantineRequest(dataDir string, r *request.Request, reason string, now ti
 
 // quarantineRequestWithCheck is quarantineRequest's own extended form:
 // check, when non-empty, is recorded on r.QuarantineCheck (e.g.
-// request.QuarantineCheckReviewReproduction) so NextAction can name the one
+// request.QuarantineCheckDiffScope) so NextAction can name the one
 // command that actually addresses that cause (Follow-up B) -- set AFTER
 // r.Quarantine, since advance() itself unconditionally clears
 // QuarantineCheck on every transition, the same way it clears HaltKind.

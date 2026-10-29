@@ -1,6 +1,8 @@
 package requestdriver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -59,9 +61,16 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 		if err != nil {
 			return fmt.Errorf("read the approved spec: %w", err)
 		}
+		// The bytes given to the challenger are the bytes hashed here, so a
+		// change between the check and the read cannot reach it.
+		if sum := sha256.Sum256(spec); hex.EncodeToString(sum[:]) != r.ApprovedSHA256[requestSpecFile] {
+			log.Printf("request %s ticket %d: no challenge: %s changed while it was read", r.ID, ticket.Index, requestSpecFile)
+			return nil
+		}
 		criteria, err := request.SpecAcceptanceCriteriaCount(string(spec))
 		if err != nil {
 			criteria = 0
+			log.Printf("request %s ticket %d: no AC-n header can be valid for the challenger: %v", r.ID, ticket.Index, err)
 		}
 		answered := r.ReadBack.Answered()
 		if r.ReadBack == nil {
@@ -98,7 +107,7 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 }
 
 // heldChallengeFiles are the files of run id's challenge a later build runs
-// again: held copies with a header, in the order the job handed them over.
+// again: held copies with a header (a file held and not run is not one), in the order the job handed them over.
 func heldChallengeFiles(dataDir, id string) ([]run.ChallengeFile, error) {
 	rec, err := run.Load(dataDir, id)
 	if err != nil {
@@ -109,7 +118,7 @@ func heldChallengeFiles(dataDir, id string) ([]run.ChallengeFile, error) {
 	}
 	var held []run.ChallengeFile
 	for _, f := range rec.Challenge.Files {
-		if f.Refused == "" && f.HostPath != "" && f.SHA256 != "" {
+		if f.Refused == "" && f.NotRun == "" && f.HostPath != "" && f.SHA256 != "" {
 			held = append(held, f)
 		}
 	}

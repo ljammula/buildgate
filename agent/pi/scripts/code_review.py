@@ -144,10 +144,10 @@ def code_review_evidence(
 	"""Builds the CODE_REVIEW_EVIDENCE.json shape from an already-parsed
 	(available, findings) pair and the underlying turn's own error string
 	used by combined_review.py's run_combined_review, so the outcome
-	of findings (succeeded, stopped_reason) has one home. notes are the caps' notes (cap_reproductions), kept under
+	of findings (succeeded, stopped_reason) has one home. notes are the review's own notes, kept under
 	"notes" only when there are any."""
-	# A finding never fails the review (SC-022: it blocks only through a
-	# reproduction the factory runs); a review fails only by giving no verdict.
+	# A finding never fails the review (SC-022: a finding is advice); a review
+	# fails only by giving no verdict.
 	high = [f for f in findings if f["severity"] == "high"]
 	if not available:
 		succeeded = review_policy == "advisory"

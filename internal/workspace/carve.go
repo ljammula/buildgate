@@ -54,20 +54,11 @@ func CarveTree(ctx context.Context, repoDir, parent, result string, paths []stri
 		if p == "" || strings.ContainsAny(p, "\x00\n") {
 			return "", fmt.Errorf("carve a tree: %q is not a path", p)
 		}
-		entry, err := git(nil, "ls-tree", "-z", result, "--", p)
+		line, err := carveIndexLine(git, parent, result, p)
 		if err != nil {
 			return "", err
 		}
-		if len(entry) == 0 {
-			fmt.Fprintf(&info, "0 %s\t%s\x00", strings.Repeat("0", 40), p)
-			continue
-		}
-		meta, name, ok := strings.Cut(strings.TrimSuffix(string(entry), "\x00"), "\t")
-		fields := strings.Fields(meta)
-		if !ok || name != p || len(fields) != 3 || fields[1] == "tree" {
-			return "", fmt.Errorf("carve a tree: %q is not a file of %s", p, result)
-		}
-		fmt.Fprintf(&info, "%s %s\t%s\x00", fields[0], fields[2], p)
+		info.WriteString(line)
 	}
 	if _, err := git(info.Bytes(), "update-index", "-z", "--index-info"); err != nil {
 		return "", err
@@ -135,4 +126,36 @@ func CarveChain(ctx context.Context, repoDir, base, result string, parts [][]str
 		return nil, fmt.Errorf("the last carved tree %s is not the result's %s: the parts do not hold the whole change", last, want)
 	}
 	return commits, nil
+}
+
+// carveIndexLine is the --index-info line that makes path p in the carved tree
+// what result holds it as: its mode and blob, or a removal when result has no
+// such file. A file the result replaced by a directory is a removal (the
+// directory's files are listed under their own paths); a path that is a
+// directory in both is refused.
+func carveIndexLine(git func([]byte, ...string) ([]byte, error), parent, result, p string) (string, error) {
+	entry, err := git(nil, "ls-tree", "-z", result, "--", p)
+	if err != nil {
+		return "", err
+	}
+	removal := fmt.Sprintf("0 %s\t%s\x00", strings.Repeat("0", 40), p)
+	if len(entry) == 0 {
+		return removal, nil
+	}
+	meta, name, ok := strings.Cut(strings.TrimSuffix(string(entry), "\x00"), "\t")
+	fields := strings.Fields(meta)
+	if !ok || name != p || len(fields) != 3 {
+		return "", fmt.Errorf("carve a tree: %q is not a file of %s", p, result)
+	}
+	if fields[1] != "tree" {
+		return fmt.Sprintf("%s %s\t%s\x00", fields[0], fields[2], p), nil
+	}
+	was, err := git(nil, "ls-tree", "-z", parent, "--", p)
+	if err != nil {
+		return "", err
+	}
+	if wasFields := strings.Fields(strings.SplitN(string(was), "\t", 2)[0]); len(wasFields) == 3 && wasFields[1] == "blob" {
+		return removal, nil
+	}
+	return "", fmt.Errorf("carve a tree: %q is not a file of %s", p, result)
 }

@@ -98,3 +98,25 @@ func TestCarveChainEndsAtTheResultTreeAndRefusesPartsThatMissAFile(t *testing.T)
 		t.Error("parts that leave db/old.sql's deletion out were accepted")
 	}
 }
+
+// A file the result replaced by a directory carves as the file's deletion; the
+// directory's files carve under their own paths.
+func TestCarveTreeCarvesAFileReplacedByADirectory(t *testing.T) {
+	repo := newFixtureRepo(t)
+	commitFile(t, repo, "keep.txt", "keep\n")
+	commitFile(t, repo, "cfg", "a file\n")
+	base := headOf(t, repo)
+	gitT(t, repo, "rm", "-q", "cfg")
+	if err := os.MkdirAll(filepath.Join(repo, "cfg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, repo, "cfg/x.txt", "x\n")
+	result := headOf(t, repo)
+	commits, err := CarveChain(context.Background(), repo, base, result, [][]string{{"cfg", "cfg/x.txt"}})
+	if err != nil {
+		t.Fatalf("a file replaced by a directory was not carved: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("commits = %v", commits)
+	}
+}

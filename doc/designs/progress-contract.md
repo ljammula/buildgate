@@ -60,7 +60,9 @@ the Activities in `internal/workflow/activities_*.go`, via the
 (the one review launch, when `code_review` is enabled; the feeds of older
 runs may instead hold `conformity_review` or `code_review`),
 `review_reproduction` (only in the feeds of older runs: one `start`/`end` per
-launch of a reviewer's reproduction),
+launch of a reviewer's reproduction), `challenge` (a request ticket's first build
+after its review: the challenger job and the factory's run of the files it held,
+or a later build's rerun of them; SC-022),
 `evaluate`, `finished`.
 
 A build attempt that resumes after a lost worker also writes one

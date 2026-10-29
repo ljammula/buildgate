@@ -100,6 +100,7 @@ const stageOrder: readonly string[] = [
   "code_review",
   "review",
   "review_reproduction",
+  "challenge",
   "evaluate",
   "finished",
 ];
@@ -120,6 +121,7 @@ export const stageLabels: Readonly<Record<string, string>> = {
   review: "Review",
   tests_red_on_base: "Changed tests on base and result",
   review_reproduction: "Reviewer reproduction",
+  challenge: "Challenge",
   evaluate: "Evaluate",
   finished: "Finished",
 };
