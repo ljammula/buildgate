@@ -30,19 +30,26 @@ import time
 import live_challenge as lc
 
 
-def oversize_problems(request, run_json, progress):
-	"""Why a request and its first ticket's run do not show an oversized
-	ticket routed back to planning unreviewed, or []."""
+def oversize_problems(request, run_dirs):
+	"""Why a request and its runs (run directories) do not show an oversized
+	ticket routed back to planning unreviewed, or []. At least one run must
+	exist: no run proves nothing was reviewed."""
 	problems = []
+	if not run_dirs:
+		problems.append("the request has no run record: nothing was built to measure")
 	moves = [(h.get("from"), h.get("to")) for h in request.get("history") or []]
 	if ("building", "planning") not in moves:
 		problems.append("the request never moved building -> planning")
 	if request.get("state") != "plan_review":
 		problems.append(f"the request is in {request.get('state')!r}, want plan_review (the re-plan waits there)")
-	if any(e.get("stage") == "review" and e.get("event") == "start" for e in progress):
-		problems.append("the oversized run's code review started: it was reviewed")
-	if run_json.get("pr_url") or run_json.get("pull_request_url"):
-		problems.append("the oversized run has a pull request")
+	for d in run_dirs:
+		d = pathlib.Path(d)
+		progress = [json.loads(l) for l in (d / "progress.jsonl").read_text().splitlines() if l.strip()] if (d / "progress.jsonl").exists() else []
+		run_json = json.loads((d / "run.json").read_text()) if (d / "run.json").exists() else {}
+		if any(e.get("stage") == "review" and e.get("event") == "start" for e in progress):
+			problems.append(f"{d.name}: the code review started: it was reviewed")
+		if run_json.get("pr_url") or run_json.get("pull_request_url"):
+			problems.append(f"{d.name}: the run has a pull request")
 	return problems
 
 
@@ -87,13 +94,11 @@ class Oversize(lc.Challenge):
 		try:
 			self.submit_spec_only(lc.fresh_repo(self.fixture, self.root))
 			request = self.to_replan()
-			ticket = (request.get("tickets") or [{}])[0]
-			run_dir = self.data_dir / "runs" / (ticket.get("run_id") or "none")
-			run_json = json.loads((run_dir / "run.json").read_text()) if (run_dir / "run.json").exists() else {}
-			progress = [json.loads(l) for l in (run_dir / "progress.jsonl").read_text().splitlines()] if (run_dir / "progress.jsonl").exists() else []
-			problems = oversize_problems(request, run_json, progress)
-			record["problems"], record["run"] = problems, run_dir.name
-			record["change_size"] = run_json.get("change_size")
+			# The re-plan replaces the request's tickets, so the oversized run
+			# is found by its request's id, not through a ticket.
+			runs = sorted((self.data_dir / "runs").glob(f"{self.request}-*"))
+			problems = oversize_problems(request, runs)
+			record["problems"], record["runs"] = problems, [r.name for r in runs]
 			for p in problems:
 				print(f"live-oversize: {p}", file=sys.stderr)
 			if not problems:
