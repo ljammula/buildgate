@@ -175,6 +175,15 @@ class CIRound(unittest.TestCase):
 		self.assertIsNone(live_round.ci_round([{"rounds": [{"index": 1, "ci_check": "lint"}]}], "ci"))
 		self.assertIsNone(live_round.ci_round([{}], "ci"))
 
+	def test_a_round_counts_once_pushed_and_at_the_head(self):
+		rnd = {"run_id": "r1", "outcome": "accepted", "pushed": True}
+		tickets = [{"round_tags": [{"run_id": "r1", "sha": "abc"}]}]
+		self.assertTrue(live_round.ci_round_pushed(rnd, tickets, "abc"))
+		self.assertFalse(live_round.ci_round_pushed(rnd, tickets, "def"))
+		self.assertFalse(live_round.ci_round_pushed(dict(rnd, pushed=False), tickets, "abc"))
+		self.assertFalse(live_round.ci_round_pushed(dict(rnd, outcome="quarantined"), tickets, "abc"))
+		self.assertFalse(live_round.ci_round_pushed(None, tickets, "abc"))
+
 	def test_check_conclusion_reads_runs_and_statuses(self):
 		rollup = [{"name": "ci", "conclusion": "failure"}, {"context": "legacy", "state": "success"}]
 		self.assertEqual(live_round.check_conclusion(rollup, "ci"), "FAILURE")

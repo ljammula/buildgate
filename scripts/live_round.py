@@ -69,7 +69,10 @@ require that check (a ruleset's required status check) on the default branch:
 the fixture's `.github/workflows/ci.yml` fails while `main.go` has a
 `/version` route and no `no-store`. The run passes when the factory starts a
 CI round for that check (its round carries `ci_check`), the round is
-accepted and pushed, and the check then concludes SUCCESS on the new head.
+accepted and pushed, and the pull request's head is the commit that round built.
+The check's conclusion on that head is recorded as ci_conclusion, not judged: it
+is the CI's own run of the new head (a repository whose Actions cannot start, as
+a private repository over its Actions quota, leaves it failed).
 
     LIVE_ROUND_DATA_DIR  required in CI mode as in stacked mode; no LIVE_ROUND_REVIEWER is needed
 
@@ -253,6 +256,18 @@ def ci_round(tickets, check):
 	return None
 
 
+def ci_round_pushed(rnd, tickets, head):
+	"""Whether a CI round was accepted and pushed, and the pull request's head
+	(a commit id) is the commit that round built."""
+	if rnd is None or rnd.get("outcome") != "accepted" or not rnd.get("pushed"):
+		return False
+	for t in tickets or []:
+		for tag in t.get("round_tags") or []:
+			if tag.get("run_id") == rnd.get("run_id") and tag.get("sha") == head:
+				return True
+	return False
+
+
 def check_conclusion(rollup, name):
 	"""The conclusion of the check run or status named name in a pull
 	request's statusCheckRollup, "" while it has none."""
@@ -429,9 +444,10 @@ class Round:
 			elif rnd.get("outcome") != "accepted":
 				note = f"CI round {rnd.get('index')} for {check!r}: {rnd.get('outcome') or 'running'}"
 			else:
-				got = check_conclusion(self.pr_json("statusCheckRollup")["statusCheckRollup"], check)
-				note = f"CI round accepted, check {check!r} on the new head: {got or 'pending'}"
-				if got == "SUCCESS":
+				pr = self.pr_json("headRefOid,statusCheckRollup")
+				note = f"CI round accepted, pushed={bool(rnd.get('pushed'))}, check {check!r} on the head: {check_conclusion(pr['statusCheckRollup'], check) or 'pending'}"
+				if ci_round_pushed(rnd, req.get("tickets"), pr["headRefOid"]):
+					record["ci_conclusion"] = check_conclusion(pr["statusCheckRollup"], check)
 					return rnd, note
 			if state in STOPPED:
 				raise RuntimeError(f"request stopped: {state}: {note}")
