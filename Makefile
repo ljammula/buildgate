@@ -1,4 +1,4 @@
-.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test live-challenge live-challenge-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test live-challenge live-challenge-test live-oversize live-oversize-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
 
 # source remains the default for development checkouts. Release users can
 # install the published, digest-pinned images with IMAGE_SOURCE=ghcr.
@@ -249,6 +249,15 @@ live-challenge:
 # live-challenge-test: offline unit tests for live_challenge.py's own verdict.
 live-challenge-test:
 	python3 -m unittest scripts/tests/test_live_challenge.py -v
+
+# live-oversize: one real oversized request ticket (a config whose
+# release_max_changed_lines is below the fixture's change) must go back to
+# planning once and never be reviewed (scripts/live_oversize.py's doc comment).
+live-oversize:
+	python3 scripts/live_oversize.py
+
+live-oversize-test:
+	python3 -m unittest scripts/tests/test_live_oversize.py -v
 
 # probe-instruction-paths: which repository paths each pinned harness really
 # loads (scripts/probe_instruction_paths.py): one fake-model container per
