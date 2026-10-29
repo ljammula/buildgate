@@ -12,6 +12,7 @@ import { GatesBlock } from "@/features/run-detail/GatesBlock";
 import { listKeys } from "@/features/run-detail/listKeys";
 import { OverrideSection } from "@/features/run-detail/OverrideSection";
 import { RunFactsCard } from "@/features/run-detail/RunFactsCard";
+import { RunChallengeCard } from "@/features/run-detail/RunChallengeCard";
 import { RunHandoffCard } from "@/features/run-detail/RunHandoffCard";
 import { RunPromptsCard } from "@/features/run-detail/RunPromptsCard";
 import { RunReleaseCard } from "@/features/run-detail/RunReleaseCard";
@@ -62,6 +63,7 @@ export function RunOverview({ run, progress, streamError, temporalUiUrl }: RunOv
         {over ? <RunVerdictLine run={run} /> : null}
         <RunStopCallout run={run} />
         <RunHandoffCard run={run} />
+        <RunChallengeCard run={run} />
         {gatesFailed ? gates : null}
         {attemptsFailed ? attempts : null}
         <StartupSteps runId={run.id} steps={run.startupSteps} live={!over} />

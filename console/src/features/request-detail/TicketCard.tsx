@@ -17,6 +17,7 @@ import { StatusChip, StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
 import { AdviceRounds } from "./AdviceRounds";
+import { ChallengeRounds } from "./ChallengeRounds";
 import { Restacks } from "./Restacks";
 import { ReviewRounds } from "./ReviewRounds";
 import { RoundLedger } from "./RoundLedger";
@@ -130,6 +131,7 @@ export function TicketCard({
       <MergeReadinessLine ticket={ticket} />
       <Restacks ticket={ticket} />
       <AdviceRounds ticket={ticket} />
+      <ChallengeRounds ticket={ticket} />
       <ReviewRounds ticket={ticket} />
       {request === undefined ? null : <RoundLedger request={request} ticket={ticket} />}
       {ticket.runId === "" ? null : (

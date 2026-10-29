@@ -1,6 +1,7 @@
 // A run: one build of one ticket, as GET /runs, GET /runs/{id} and the run
 // event stream send it (internal/api's runView, which embeds run.Run).
 // Only the fields the console reads are decoded; the rest are ignored.
+import { type Challenge, decodeChallenge } from "@/domain/challenge";
 import {
   type JsonObject,
   decodeList,
@@ -448,6 +449,8 @@ export interface Run {
   readonly triage: string;
   /** Non-empty when the run left a handoff: GET /runs/{id}/handoff has it. */
   readonly handoffSha256: string;
+  /** The ticket's challenge as this run saw it (SC-022); null when it ran none. */
+  readonly challenge: Challenge | null;
   /**
    * Mirrors run.Run.HaltConfirmed; see runIsTerminal for why a "halted"
    * state alone is not enough to know a run is truly done. Absent on a
@@ -545,6 +548,7 @@ export function decodeRun(o: JsonObject, at: string): Run {
     haltReasonCode: optString(o, "halt_reason_code", at),
     triage: optString(o, "triage", at),
     handoffSha256: optString(o, "handoff_sha256", at),
+    challenge: optObject(o, "challenge", at, decodeChallenge),
     haltConfirmed: optBoolean(o, "halt_confirmed", at),
     baseSha: reqString(o, "base_sha", at),
     resultSha: stringOrNull(o, "result_sha", at),

@@ -112,6 +112,7 @@ describe("fixtures", () => {
     );
     expect(r.haltConfirmed).toBe(true);
     expect(r.resultSha).toBe("every-field result_sha");
+    expect(r.challenge?.verdict).toBe("every-field verdict");
     expect(r.changedFiles).toEqual(["every-field changed_files"]);
     expect(r.diffStat).toEqual({ filesChanged: 3, insertions: 3, deletions: 3 });
     expect(r.diffAvailable).toBe(true);

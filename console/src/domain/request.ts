@@ -108,6 +108,8 @@ export interface RequestTicket {
   readonly advice: TicketAdvice | null;
   /** The advice rounds that have ended on this ticket, oldest first. */
   readonly adviceRounds: readonly ReviewRound[];
+  /** The challenge round that ended on this ticket (at most one), oldest first. */
+  readonly challengeRounds: readonly ReviewRound[];
   /** The round ledger: every build round that ended in a commit, oldest first. */
   readonly roundTags: readonly RoundTag[];
   /** The planner's declared `Estimated-Changed-Lines`; 0 when the ticket declares none. */
@@ -147,7 +149,7 @@ export interface RoundTag {
   /** The round number, per ticket, from 1. */
   readonly n: number;
   readonly runId: string;
-  /** "build", "corrective", "conformity", "pr_review", "restack" or "advice"; server-owned, so a string. */
+  /** "build", "corrective", "conformity", "pr_review", "restack", "advice" or "challenge"; server-owned, so a string. */
   readonly kind: string;
   readonly sha: string;
   readonly ref: string;
@@ -225,10 +227,13 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
   return {
     // A round with another kind is a corrective round before any pull
     // request exists (the build's business, not the review's), a restack,
-    // or an advice round.
+    // an advice round or a challenge round.
     reviewRounds: rounds.filter((entry) => entry.kind === "").map((entry) => entry.round),
     restackRounds: rounds.filter((entry) => entry.kind === "restack").map((entry) => entry.round),
     adviceRounds: rounds.filter((entry) => entry.kind === "advice").map((entry) => entry.round),
+    challengeRounds: rounds
+      .filter((entry) => entry.kind === "challenge")
+      .map((entry) => entry.round),
     advice: optObject(o, "advice", at, (a, aAt) => ({
       of: optString(a, "of", aAt),
       runId: optString(a, "run_id", aAt),

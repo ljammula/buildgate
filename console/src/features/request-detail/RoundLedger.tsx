@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 
+import { roundKindLabel } from "@/domain/challenge";
 import type { RequestSummary, RequestTicket } from "@/domain/request";
 import { runPath } from "@/routes/paths";
 import { RetryDialog } from "@/shared/approval/RetryDialog";
@@ -43,7 +44,7 @@ export function RoundLedger({
           <li key={tag.n} className="flex flex-col gap-0.5">
             <div className="flex flex-wrap items-center gap-2">
               <span>{`Round ${tag.n}`}</span>
-              <span className="text-fg-muted">{tag.kind}</span>
+              <span className="text-fg-muted">{roundKindLabel(tag.kind)}</span>
               <StatusChipForToken token={tag.outcome} />
               <span className="text-fg-muted font-mono text-xs">{tag.sha.slice(0, 12)}</span>
               {tag.at === "" ? null : (

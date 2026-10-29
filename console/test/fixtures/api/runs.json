@@ -358,7 +358,10 @@
             "every-field groups"
           ]
         ],
-        "group": 3
+        "group": 3,
+        "notes": [
+          "every-field notes"
+        ]
       }
     },
     "pr_order": {
