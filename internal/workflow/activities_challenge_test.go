@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"testing"
 
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 )
 
 const edgeTest = "// buildgate-challenge: AC-1\npackage p\n\nimport \"testing\"\n\nfunc TestEdge(t *testing.T) {\n\tif Add(0, 0) != 0 {\n\t\tt.Fatal(\"zero\")\n\t}\n}\n"
@@ -318,6 +321,44 @@ func TestHoldChallengeFilesChecksAnswerNumbersAgainstTheAnsweredSet(t *testing.T
 			if file.NotRun == "" {
 				t.Errorf("q1 = %+v, want not run: question 1 was not answered", file)
 			}
+		}
+	}
+}
+
+// The challenger is given the spec only when its approved prefix still has
+// the hash spec_review approved: the snapshot's own hash is not enough.
+func TestChallengerJobComparesTheSpecWithTheApprovedHash(t *testing.T) {
+	f, _ := holdFixture(t)
+	spec := "# Spec\n"
+	body := spec + "\nAnswered.\n"
+	path := filepath.Join(t.TempDir(), "spec.snapshot.md")
+	writeFile(t, path, body)
+	whole := sha256.Sum256([]byte(body))
+	approved := sha256.Sum256([]byte(spec))
+	for name, tc := range map[string]struct {
+		sha   string
+		bytes int
+		want  string
+	}{
+		"approved hash differs":  {strings.Repeat("0", 64), len(spec), "no longer matches"},
+		"no approved hash":       {"", 0, "no approved hash"},
+		"matching approved hash": {hex.EncodeToString(approved[:]), len(spec), ""},
+	} {
+		in := f.input
+		in.ChallengeSpecPath, in.ChallengeSpecSHA256 = path, hex.EncodeToString(whole[:])
+		in.ChallengeApprovedSHA256, in.ChallengeApprovedBytes = tc.sha, tc.bytes
+		in.RoutePolicy, in.ChallengerRelayPolicy = &sandbox.RoutePolicy{}, &sandbox.RoutePolicy{}
+		res := f.acts.runChallengerJob(context.Background(), ChallengerJobInput{
+			RunWorkflowInput: in, Commit: f.commit,
+		})
+		if tc.want == "" {
+			if strings.Contains(res.Cause, "approved") {
+				t.Errorf("%s: cause %q, want past the hash check", name, res.Cause)
+			}
+			continue
+		}
+		if !strings.Contains(res.Cause, tc.want) {
+			t.Errorf("%s: cause %q, want it to contain %q", name, res.Cause, tc.want)
 		}
 	}
 }

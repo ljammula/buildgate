@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -114,7 +117,8 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
-		"-challenge", "-challenge-spec", write("challenge-spec.md", "# Approved spec\n\n- `Parse` returns a map.\n"),
+		"-challenge", "-challenge-spec", write("challenge-spec.md", challengeGoldenSpec+"\nAnswered.\n"),
+		"-challenge-approved-sha256", challengeGoldenSpecSHA256(), "-challenge-approved-bytes", strconv.Itoa(len(challengeGoldenSpec)),
 		"-challenge-criteria", "3", "-challenge-answers", "2,5",
 		"-challenge-held", write("held.json", heldManifest), "-challenge-round",
 		"-resume-session-of", "golden-quarantined",
@@ -309,7 +313,7 @@ func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 				flags = slices.Delete(flags, i, i+1)
 			}
 		}
-		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers"} {
+		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers", "-challenge-approved-sha256", "-challenge-approved-bytes"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
 			}
@@ -382,4 +386,13 @@ func commitFactoryYML(t *testing.T, workspace, content string) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
+}
+
+// challengeGoldenSpec is the approved spec the golden's challenge flags name;
+// the file holds it followed by the read-back answers.
+const challengeGoldenSpec = "# Approved spec\n\n- `Parse` returns a map.\n"
+
+func challengeGoldenSpecSHA256() string {
+	sum := sha256.Sum256([]byte(challengeGoldenSpec))
+	return hex.EncodeToString(sum[:])
 }

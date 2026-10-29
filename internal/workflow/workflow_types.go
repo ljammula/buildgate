@@ -538,6 +538,10 @@ type RunWorkflowInput struct {
 	ChallengeSpecSHA256 string `json:"challenge_spec_sha256,omitempty"`
 	ChallengeCriteria   int    `json:"challenge_criteria,omitempty"`
 	ChallengeAnswers    []int  `json:"challenge_answers,omitempty"`
+	// ChallengeApprovedSHA256 is the hash spec_review approved for spec.md,
+	// which the first ChallengeApprovedBytes bytes of the snapshot must match.
+	ChallengeApprovedSHA256 string `json:"challenge_approved_sha256,omitempty"`
+	ChallengeApprovedBytes  int    `json:"challenge_approved_bytes,omitempty"`
 	// ChallengerThinking, ChallengerHarness and ChallengerRelayPolicy are
 	// roles.challenger's resolved values, as the review's are; a nil policy
 	// with Challenge set means no challenger role is configured.

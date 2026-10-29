@@ -15,6 +15,8 @@
     2,
     5
   ],
+  "challenge_approved_bytes": 42,
+  "challenge_approved_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
   "challenge_criteria": 3,
   "challenge_held": [
     {
@@ -26,7 +28,7 @@
   ],
   "challenge_round": true,
   "challenge_spec_path": "<DATA_DIR>/runs/<RUN_ID>/challenge-spec.snapshot.md",
-  "challenge_spec_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
+  "challenge_spec_sha256": "a2fbbbb147e92fff41b60f2cd1746d76e2bf9a22aa1519f52c9839885f395e70",
   "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
   "code_review_policy": "advisory",
   "compose_services_allowed_registries": [

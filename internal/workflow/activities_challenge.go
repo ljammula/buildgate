@@ -150,6 +150,11 @@ func (a *Activities) runChallengerJob(ctx context.Context, in ChallengerJobInput
 	if sum := sha256.Sum256(spec); hex.EncodeToString(sum[:]) != in.ChallengeSpecSHA256 {
 		return fail("the approved spec no longer matches the hash spec_review approved")
 	}
+	if n := in.ChallengeApprovedBytes; in.ChallengeApprovedSHA256 == "" || n < 1 || n > len(spec) {
+		return fail("no approved hash was given for the spec")
+	} else if sum := sha256.Sum256(spec[:n]); hex.EncodeToString(sum[:]) != in.ChallengeApprovedSHA256 {
+		return fail("the approved spec no longer matches the hash spec_review approved")
+	}
 	relay, err := a.challengerRelaySpec(ctx, in)
 	if err != nil {
 		return fail("the challenger's route could not be bound: %v", err)

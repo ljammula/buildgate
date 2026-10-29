@@ -74,6 +74,7 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 			criteria = 0
 			log.Printf("request %s ticket %d: no AC-n header can be valid for the challenger: %v", r.ID, ticket.Index, err)
 		}
+		approvedBytes := len(spec)
 		answered := r.ReadBack.Answered()
 		if r.ReadBack == nil {
 			answered = nil
@@ -87,6 +88,7 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 			return fmt.Errorf("write the challenge input: %w", err)
 		}
 		entry.Challenge, entry.ChallengeSpecPath, entry.ChallengeCriteria, entry.ChallengeAnswers = true, path, criteria, answeredNumbers(answered)
+		entry.ChallengeApprovedSHA256, entry.ChallengeApprovedBytes = r.ApprovedSHA256[requestSpecFile], approvedBytes
 		return nil
 	}
 	if ticket.ChallengeRunID == "" {

@@ -115,12 +115,14 @@ type QueueEntry struct {
 	// (SC-022): Challenge and its spec and counts for a ticket's first
 	// reviewed build; ChallengeHeld, the manifest of held files, for every
 	// later build; ChallengeRound for the ticket's challenge round.
-	Challenge         bool   `json:"challenge,omitempty"`
-	ChallengeSpecPath string `json:"challenge_spec_path,omitempty"`
-	ChallengeCriteria int    `json:"challenge_criteria,omitempty"`
-	ChallengeAnswers  []int  `json:"challenge_answers,omitempty"`
-	ChallengeHeld     string `json:"challenge_held,omitempty"`
-	ChallengeRound    bool   `json:"challenge_round,omitempty"`
+	Challenge               bool   `json:"challenge,omitempty"`
+	ChallengeSpecPath       string `json:"challenge_spec_path,omitempty"`
+	ChallengeCriteria       int    `json:"challenge_criteria,omitempty"`
+	ChallengeAnswers        []int  `json:"challenge_answers,omitempty"`
+	ChallengeApprovedSHA256 string `json:"challenge_approved_sha256,omitempty"`
+	ChallengeApprovedBytes  int    `json:"challenge_approved_bytes,omitempty"`
+	ChallengeHeld           string `json:"challenge_held,omitempty"`
+	ChallengeRound          bool   `json:"challenge_round,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request
 	// execution-role harness pick (request.Request.Harnesses["execution"],
