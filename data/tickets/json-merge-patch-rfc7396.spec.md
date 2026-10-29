@@ -95,7 +95,8 @@ Allowed-Files: merge.go, merge_test.go
 Verify-Command: go build ./... && go vet ./... && go test ./...
 
 - `go build ./...`, `go vet ./...`, and `go test ./...` all succeed. The
-  last runs `verify/rfc7396_oracle_test.go` against your `MergePatch`,
+  last runs `verify/rfc7396_oracle_test.go` (`TestRFC7396MergePatchOracle`,
+  failing until `MergePatch` is implemented) against your `MergePatch`,
   checking all 15 of RFC 7396 Appendix A's published test cases against
   their independently-published expected results. It is not agent-authored
   and cannot be satisfied by tests that assert against your own
