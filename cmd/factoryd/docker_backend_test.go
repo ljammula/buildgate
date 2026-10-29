@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,7 +15,7 @@ import (
 
 // stubBackend makes dp's Docker the given backend.
 func stubBackend(dp *deps, b dockerbackend.Backend) {
-	fakeDockerOf(dp).backendFn = func(context.Context) dockerbackend.Detection {
+	fakeDockerOf(dp).backendFn = func(context.Context, string) dockerbackend.Detection {
 		return dockerbackend.Detection{Backend: b, Facts: dockerbackend.Facts{Context: "ctx", Endpoint: "unix:///sock"}}
 	}
 }
@@ -35,10 +36,9 @@ esac
 	if err := writeExecutable(docker, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fakeDockerOf(dp).dockerBinaryFn = func() string { return docker }
 	t.Setenv("DOCKER_HOST", "")
 
-	d := realDocker{dp: dp}.backend(context.Background())
+	d := realDocker{dp: dp}.backend(context.Background(), docker)
 	if d.Err != nil {
 		t.Fatal(d.Err)
 	}
@@ -53,14 +53,27 @@ esac
 		t.Errorf("backend = %q, want %q", d.Backend, want)
 	}
 
+	// Once read, a binary's detection is kept for the process: a changed
+	// DOCKER_HOST is not seen by the same deps, and is by fresh ones.
 	t.Setenv("DOCKER_HOST", "unix:///home/op/.colima/default/docker.sock")
-	if d := (realDocker{dp: dp}).backend(context.Background()); d.Facts.Endpoint != "unix:///home/op/.colima/default/docker.sock" || d.Backend != dockerbackend.Colima {
+	if again := (realDocker{dp: dp}).backend(context.Background(), docker); again.Backend != d.Backend {
+		t.Errorf("a second read = %q, want the kept %q", again.Backend, d.Backend)
+	}
+	fresh := newTestDeps(t)
+	if d := (realDocker{dp: fresh}).backend(context.Background(), docker); d.Facts.Endpoint != "unix:///home/op/.colima/default/docker.sock" || d.Backend != dockerbackend.Colima {
 		t.Errorf("with DOCKER_HOST: %+v", d)
 	}
 
-	fakeDockerOf(dp).dockerBinaryFn = func() string { return filepath.Join(t.TempDir(), "no-docker") }
-	if d := (realDocker{dp: dp}).backend(context.Background()); d.Err == nil || d.Backend != "" || d.Refused() != nil {
+	// A Docker that does not answer is not kept: the next read asks again.
+	missing := filepath.Join(t.TempDir(), "no-docker")
+	if d := (realDocker{dp: dp}).backend(context.Background(), missing); d.Err == nil || d.Backend != "" || d.Refused() != nil {
 		t.Errorf("an unreachable Docker = %+v, want an error and no refusal", d)
+	}
+	if err := os.Symlink(docker, missing); err != nil {
+		t.Fatal(err)
+	}
+	if d := (realDocker{dp: dp}).backend(context.Background(), missing); d.Err != nil {
+		t.Errorf("a Docker that answers after an unanswered read: %v", d.Err)
 	}
 }
 
@@ -99,7 +112,7 @@ func TestGatewayRuntimeRefusesARefusedBackend(t *testing.T) {
 	if asked {
 		t.Error("the meter was asked after a refusal")
 	}
-	fakeDockerOf(dp).backendFn = func(context.Context) dockerbackend.Detection {
+	fakeDockerOf(dp).backendFn = func(context.Context, string) dockerbackend.Detection {
 		return dockerbackend.Detection{Err: errors.New("docker info: timed out")}
 	}
 	if err := newGatewayRuntime(dp).Ready(context.Background()); err == nil || !strings.Contains(err.Error(), "timed out") || asked {

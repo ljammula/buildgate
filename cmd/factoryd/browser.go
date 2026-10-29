@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
-
-	"buildgate/internal/sessionconfig"
 )
 
 // browserCommand builds the OS-appropriate "open a file/URL in the
@@ -29,12 +27,12 @@ func (impl realHost) browserCommand(target string) *exec.Cmd {
 
 // browserRedirectDir is where openInBrowser writes its redirect file ("" is
 // the OS temp directory), or why no browser can be opened here. On macOS it
-// is the per-user temp directory. On Linux it is the data root under
-// $HOME, never /tmp, which a snap browser (Ubuntu's default Firefox and
-// Chromium) sees only as its own private copy, nor a hidden directory,
-// which a snap cannot read either; and with no graphical session (an ssh
-// login, a server) there is no browser to open: the link is printed
-// instead.
+// is the per-user temp directory. On Linux it is $XDG_RUNTIME_DIR: the
+// user's own 0700 directory, which no VM shares, since the file holds the
+// console tokens and colima shares ~/buildgate into its VM. A snap browser
+// (Ubuntu's default Firefox and Chromium) may not read it; the link is
+// printed either way. With no graphical session (an ssh login, a server)
+// there is no browser to open, and the printed link is the way in.
 func (impl realHost) browserRedirectDir() (string, error) {
 	if runtime.GOOS == "darwin" {
 		return "", nil
@@ -45,11 +43,7 @@ func (impl realHost) browserRedirectDir() (string, error) {
 	if _, err := exec.LookPath("xdg-open"); err != nil {
 		return "", errors.New("xdg-open is not installed: open the link above in a browser")
 	}
-	dir := sessionconfig.DataRoot()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create %s for the browser redirect file: %w", dir, err)
-	}
-	return dir, nil
+	return os.Getenv("XDG_RUNTIME_DIR"), nil
 }
 
 // openInBrowserCleanupDelay bounds how long the redirect file

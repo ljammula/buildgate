@@ -47,8 +47,9 @@ func TestDefinitionPath(t *testing.T) {
 	if err != nil || got != filepath.Join(home, ".config", "systemd", "user", "factoryd-worker.service") {
 		t.Errorf("systemd worker = %q, %v", got, err)
 	}
+	// The user manager's search path, not this shell's XDG_CONFIG_HOME.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
-	if got, _ := Systemd.DefinitionPath(ServeService); got != filepath.Join(home, "xdg", "systemd", "user", "factoryd-serve.service") {
+	if got, _ := Systemd.DefinitionPath(ServeService); got != filepath.Join(home, ".config", "systemd", "user", "factoryd-serve.service") {
 		t.Errorf("systemd serve = %q", got)
 	}
 	if got, _ := Launchd.DefinitionPath(ServeService); got != filepath.Join(home, "Library", "LaunchAgents", ServeServiceLabel+".plist") {
@@ -112,7 +113,7 @@ func TestRestartServiceUsesTheManager(t *testing.T) {
 func TestStopLeavesASystemdSupervisedWorkerRunning(t *testing.T) {
 	dp := newFakeDeps(t)
 	dp.serviceManagerFn = func() ServiceManager { return Systemd }
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	unitPath, _ := Systemd.DefinitionPath(WorkerService)
 	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {

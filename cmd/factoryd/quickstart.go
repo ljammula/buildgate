@@ -1480,12 +1480,13 @@ func quickstartCheckRepoMountVisible(dp *deps, opts *quickstartOptions, configPa
 	if err != nil || cfg.SandboxImage == nil || *cfg.SandboxImage == "" {
 		return nil
 	}
+	backend := dp.docker.backend(context.Background(), opts.SandboxDocker).Backend
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if !sandbox.ImagePresent(ctx, opts.SandboxDocker, *cfg.SandboxImage) {
 		return nil
 	}
-	check := doctorCheckMountVisibilityFor(ctx, dp.docker.backend(ctx).Backend, opts.SandboxDocker, *cfg.SandboxImage, repoRoot,
+	check := doctorCheckMountVisibilityFor(ctx, backend, opts.SandboxDocker, *cfg.SandboxImage, repoRoot,
 		"repository", "pass a real, existing git checkout as <repo-path>")
 	if check.Err == nil {
 		return nil

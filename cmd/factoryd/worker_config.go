@@ -527,6 +527,8 @@ func (impl realDocker) workerChecks(ctx context.Context, in doctorInputs) []doct
 // mount visibility and Temporal are per-run or per-entry concerns
 // worker has no value for, so those are the ones skipped here.
 func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir string) error {
+	// Read before the checks' clock starts, under its own deadline.
+	backend := dp.docker.backend(context.Background(), cfg.Settings.SandboxDocker).Backend
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	fmt.Println("Running factoryd doctor first -- pass -skip-doctor to bypass:")
@@ -597,7 +599,7 @@ func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir 
 		if err := os.MkdirAll(dataDir, 0o750); err != nil {
 			checks = append(checks, doctorCheck{Name: name, Err: fmt.Errorf("create -data-dir: %w", err)})
 		} else {
-			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, dp.docker.backend(ctx).Backend, in.sandboxDocker, in.sandboxImage, dataDir))
+			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, backend, in.sandboxDocker, in.sandboxImage, dataDir))
 		}
 	}
 	if failed := runDoctorChecks(checks, os.Stdout); failed > 0 {

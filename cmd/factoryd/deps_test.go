@@ -22,7 +22,7 @@ import (
 // fakeDocker is a dockerBoundary whose every method is a field, set by newTestDeps
 // to the real method and replaced by a test that needs another answer.
 type fakeDocker struct {
-	backendFn          func(ctx context.Context) dockerbackend.Detection
+	backendFn          func(ctx context.Context, dockerBinary string) dockerbackend.Detection
 	colimaBinaryFn     func() string
 	dockerBinaryFn     func() string
 	imageToolsFn       func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
@@ -57,8 +57,8 @@ func (refusingInstallImages) SweepRunLocal(context.Context, string, func(string)
 }
 
 func (f *fakeDocker) colimaBinary() string { return f.colimaBinaryFn() }
-func (f *fakeDocker) backend(ctx context.Context) dockerbackend.Detection {
-	return f.backendFn(ctx)
+func (f *fakeDocker) backend(ctx context.Context, dockerBinary string) dockerbackend.Detection {
+	return f.backendFn(ctx, dockerBinary)
 }
 func (f *fakeDocker) dockerBinary() string { return f.dockerBinaryFn() }
 func (f *fakeDocker) imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error) {
@@ -347,7 +347,7 @@ func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal)
 //	sandbox.runtime      the gateway runtime: none, in either build variant
 //	sandbox.startStack   starts containers: refused
 func newTestDeps(t testing.TB) *deps {
-	dp := &deps{}
+	dp := &deps{backends: &backendMemo{}}
 	realDocker := realDocker{dp: dp}
 	dp.docker = &fakeDocker{
 		colimaBinaryFn: realDocker.colimaBinary,
@@ -488,7 +488,7 @@ func newTestDeps(t testing.TB) *deps {
 	fakeDockerOf(dp).colimaBinaryFn = func() string { return "factoryd-test-no-such-colima" }
 	// No test asks the machine's Docker which backend it is: one it could
 	// not ask, which refuses nothing.
-	fakeDockerOf(dp).backendFn = func(context.Context) dockerbackend.Detection {
+	fakeDockerOf(dp).backendFn = func(context.Context, string) dockerbackend.Detection {
 		return dockerbackend.Detection{Err: errors.New("test docker: no backend is read")}
 	}
 	fakeTemporalOf(dp).ensureFn = func(context.Context, io.Writer) string { return "" }

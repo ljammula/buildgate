@@ -389,8 +389,8 @@ func doctorMain(dp *deps, args []string) error {
 		// of Phase A found these should be re-probed only when data_dir
 		// actually changed (fix (c) repointed it), not on every -fix run.
 		if in.dataDir != oldDataDir {
+			in.dockerBackend = dp.docker.backend(context.Background(), in.sandboxDocker).Backend
 			mountCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			in.dockerBackend = dp.docker.backend(mountCtx).Backend
 			checks = doctorReevaluateDataDirDependentChecks(mountCtx, checks, in)
 			cancel()
 		}
@@ -529,10 +529,12 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	// A fresh clock for the regular checks: a -fix build above can take
 	// minutes, and a context started before it would already be expired
 	// here, failing every later probe spuriously (Sonnet review).
+	// The backend is read before that clock starts: its detection has its
+	// own deadline and leaves the checks theirs.
+	backend := dp.docker.backend(context.Background(), in.sandboxDocker)
+	in.dockerBackend = backend.Backend
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	backend := dp.docker.backend(ctx)
-	in.dockerBackend = backend.Backend
 	checks := append(built, doctorChecksFor(ctx, in)...)
 	if c, ok := doctorCheckDockerBackend(backend); ok {
 		checks = append(checks, c)
@@ -1620,6 +1622,7 @@ func runDoctorChecks(checks []doctorCheck, w io.Writer) (failed int) {
 // inside a container. a boundary method so the in-process init/onboard
 // tests can stub it instead of needing a live Docker daemon.
 func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir string) []doctorCheck {
+	backend := impl.backend(ctx, dockerBinary).Backend
 	checks := []doctorCheck{doctorCheckDockerReachable(ctx, dockerBinary)}
 	if image == "" {
 		return append(checks, doctorCheck{
@@ -1631,7 +1634,7 @@ func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir 
 	return append(checks,
 		doctorCheckImagePresent(ctx, dockerBinary, "sandbox image", image,
 			"run `make install` from the buildgate checkout to build or pull and configure the image"),
-		doctorCheckMountVisibility(ctx, impl.backend(ctx).Backend, dockerBinary, image, dir),
+		doctorCheckMountVisibility(ctx, backend, dockerBinary, image, dir),
 	)
 }
 

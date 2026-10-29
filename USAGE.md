@@ -544,11 +544,12 @@ already-running daemon is left alone.
 the console as services: two launchd agents on macOS (`dev.factoryd.worker`,
 `dev.factoryd.serve`), two systemd user units on Linux
 (`factoryd-worker.service`, `factoryd-serve.service` under
-`~/.config/systemd/user`); `-no-serve` installs only the worker. On Linux it
-refuses until the user lingers (`sudo loginctl enable-linger $USER`, once),
-since otherwise the units start only at a login and stop at its end, and it
-must run in a login of that user (ssh or a desktop), not under `su` or
-`sudo -u`, which have no user manager. `factoryd doctor` reports the
+`~/.config/systemd/user`); `-no-serve` installs only the worker. On Linux
+the units run while you are logged in, as a LaunchAgent does; to have them
+start at boot and run with nobody logged in, the user must linger
+(`sudo loginctl enable-linger $USER`, once), which `install-service` warns
+about until it is on. It must run in a login of that user (ssh or a
+desktop), not under `su` or `sudo -u`, which have no user manager. `factoryd doctor` reports the
 worker service's state; `factoryd uninstall-service` removes both.
 `factoryd console [-open]` reprints the tokenized console link at any later
 point without re-running `quickstart`.
@@ -1525,6 +1526,10 @@ docker compose -f docker-compose.temporal.yml down -v   # stop, wipe data
   unreachable explicit server halts the run ([`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#temporal-repository-owners-daemons-observing)).
 - `factoryd doctor` fails its Temporal check when Temporal is unreachable
   (builds need it); `doctor -fix` starts it.
+- The stack publishes its frontend (7233) and Web UI (8233) on `127.0.0.1`
+  only: the frontend takes workflow signals with no authentication, so no
+  other machine reaches it. From another machine, forward the ports over ssh
+  (`ssh -L 7233:127.0.0.1:7233 -L 8233:127.0.0.1:8233 <host>`).
 
 ### Requests under the worker
 
@@ -1711,7 +1716,7 @@ What changes for a build:
 | Containers left behind after killing a run | The process died before cleanup | `docker ps`, then `docker rm -f` only the `factoryd-*` containers |
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
 | `factoryd worker`, `doctor -fix` or a launch says `refusing to run sandboxes on this Docker (<backend>; ...)` | The Docker CLI reaches a backend sandboxes do not run on (Docker Desktop, Docker Desktop for Linux, rootless, `userns-remap`, the snap, podman, WSL2, or one `factoryd` cannot name) | Follow the reason the line ends with: on Linux, Docker Engine from Docker's apt repository and `docker context use default`, or colima; on a Mac, colima |
-| `install-service` on Linux says `turn on lingering with sudo loginctl enable-linger $USER` | Without linger, systemd starts the user's units only at a login and stops them at its end | Run that command once (it needs an administrator), then `factoryd install-service` again |
+| `install-service` on Linux warns `this user does not linger` | Without linger, systemd starts the user's units at the first login and stops them at the last logout, so nothing builds at boot or with nobody logged in | Run `sudo loginctl enable-linger $USER` once (it needs an administrator); the installed units then start at boot |
 | `install-service` on Linux says `no systemd user manager answers` | The shell came from `su` or `sudo -u`, which start no user manager | Log in as that user directly (ssh or a desktop session) and rerun |
 | `quickstart` or `console -open` on Linux says `no graphical session here` | An ssh login or a server has no browser to open | Open the printed link; from another machine, forward the port first: `ssh -L 8090:127.0.0.1:8090 <host>` |
 | `gh auth status` fails with "no oauth token found" in an ssh session on a Mac | An ssh session cannot read the login keychain that holds the GitHub login; a process started from that session gets the same answer | Check `gh auth status` in the session that starts `worker`. If it fails, start `worker` and `serve` in the desktop login session: a terminal there, or launchd agents (`factoryd install-service`) |

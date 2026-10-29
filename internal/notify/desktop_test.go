@@ -81,26 +81,24 @@ func TestDesktopNotifierNoOpsOnAnotherOS(t *testing.T) {
 		called = true
 		return "/usr/bin/osascript", nil
 	})
-	withDesktopLinuxNotifierLookPath(t, func() (string, error) {
-		called = true
-		return "/usr/bin/notify-send", nil
-	})
+	// A notify-send that records its run, on an otherwise empty PATH.
+	dir := t.TempDir()
+	ran := filepath.Join(dir, "ran")
+	if err := os.WriteFile(filepath.Join(dir, "notify-send"), []byte("#!/bin/sh\n: > "+ran+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 
 	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if called {
-		t.Error("a notifier was looked up, want the OS check to short-circuit before it")
+		t.Error("osascript was looked up, want the OS check to short-circuit before it")
 	}
-}
-
-// withDesktopLinuxNotifierLookPath temporarily overrides
-// desktopLinuxNotifierLookPath.
-func withDesktopLinuxNotifierLookPath(t *testing.T, fn func() (string, error)) {
-	t.Helper()
-	orig := desktopLinuxNotifierLookPath
-	desktopLinuxNotifierLookPath = fn
-	t.Cleanup(func() { desktopLinuxNotifierLookPath = orig })
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("notify-send ran on another OS")
+	}
 }
 
 // TestDesktopNotifierUsesNotifySendOnLinux: on Linux the banner goes through
@@ -119,7 +117,7 @@ func TestDesktopNotifierUsesNotifySendOnLinux(t *testing.T) {
 	if err := os.WriteFile(stand, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > "+argvLog+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	withDesktopLinuxNotifierLookPath(t, func() (string, error) { return stand, nil })
+	t.Setenv("PATH", dir)
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 
 	n := Notification{RequestID: "req-1", Ask: "Approve the plan", Subject: "req-1", Reason: "3 tickets <and> a & b"}
@@ -148,6 +146,10 @@ func TestDesktopNotifierUsesNotifySendOnLinux(t *testing.T) {
 	}
 	if _, err := LinuxNotifier(); err == nil || !strings.Contains(err.Error(), "session bus") {
 		t.Errorf("LinuxNotifier = %v, want the missing bus named", err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if _, err := LinuxNotifier(); err == nil || !strings.Contains(err.Error(), "not on PATH") {
+		t.Errorf("LinuxNotifier = %v, want notify-send named as missing", err)
 	}
 }
 

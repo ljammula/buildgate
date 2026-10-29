@@ -122,51 +122,17 @@ func TestKeepAwakeIsANoOpWhenItsBinaryCannotStart(t *testing.T) {
 	HostKeepAwake{GOOS: "linux", SystemdInhibit: missing}.Hold(os.Getpid())()
 }
 
-// TestRunKeepsTheMacAwakeForTheDockerClient: Run holds caffeinate on the
-// docker client's own PID for the life of the launch.
-func TestRunKeepsTheMacAwakeForTheDockerClient(t *testing.T) {
-	dir := t.TempDir()
-	dockerPIDFile := filepath.Join(dir, "docker-pid")
-	fake := newFakeKeepAwake(t, "caffeinate")
-	docker := filepath.Join(dir, "docker-fake")
-	// The fake `docker run` of the worker lives until caffeinate has recorded its pid
-	// (30 s at most): Run stops caffeinate when docker exits, and on a busy
-	// machine that could be before the fake caffeinate had run its first line.
-	waitForPID := "i=0\nwhile [ ! -s " + fake.pidFile + " ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n"
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\ncase \"$*\" in run*factory-worker-*) ;; *) exit 0 ;; esac\necho $$ > "+dockerPIDFile+"\n"+waitForPID+"exit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	spec := validSpec()
-	spec.WorkDir = t.TempDir()
-	spec.InputDir = ""
-	spec.LogPath = filepath.Join(dir, "worker.log")
-	spec.DataDir = t.TempDir()
-	spec.KeepAwake = HostKeepAwake{GOOS: "darwin", Caffeinate: fake.binary}
-	if _, err := Run(context.Background(), docker, spec); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	dockerPID, err := os.ReadFile(dockerPIDFile)
-	if err != nil {
-		t.Fatalf("read fake docker pid: %v", err)
-	}
-	args, pid, ok := fake.started()
-	if !ok {
-		t.Fatal("caffeinate was not started")
-	}
-	if got, want := strings.Join(args, " "), "-i -w "+strings.TrimSpace(string(dockerPID)); got != want {
-		t.Fatalf("caffeinate args = %q, want %q", got, want)
-	}
-	assertProcessGone(t, pid)
-}
-
-// heldRuntime is a workerRuntime whose Create first waits for the fake
-// keep-awake to be running, and records that it was.
+// heldRuntime is a workerRuntime that names its host's KeepAwake, and
+// whose Create first waits for the fake keep-awake to be running, and
+// records that it was.
 type heldRuntime struct {
 	*workerRuntime
-	fake fakeKeepAwake
-	held bool
+	fake  fakeKeepAwake
+	awake KeepAwake
+	held  bool
 }
+
+func (h *heldRuntime) KeepAwake() KeepAwake { return h.awake }
 
 func (h *heldRuntime) Create(ctx context.Context, req SandboxRequest) (SandboxRef, error) {
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
@@ -194,7 +160,8 @@ func TestRunWorkerThroughRuntimeKeepsTheHostAwakeForTheLaunch(t *testing.T) {
 			fake := newFakeKeepAwake(t, "keep-awake")
 			spec := runtimeSpec(t)
 			spec.Name = "factoryd-temporal-worker-1"
-			rt := &heldRuntime{workerRuntime: &workerRuntime{lines: []string{"ok"}, startedAt: "t"}, fake: fake}
+			rt := &heldRuntime{workerRuntime: &workerRuntime{lines: []string{"ok"}, startedAt: "t"}, fake: fake,
+				awake: HostKeepAwake{GOOS: tc.goos, Caffeinate: fake.binary, SystemdInhibit: fake.binary}}
 			w := RuntimeWorker{}
 			if tc.route {
 				ledgerRoot := t.TempDir()
@@ -204,7 +171,6 @@ func TestRunWorkerThroughRuntimeKeepsTheHostAwakeForTheLaunch(t *testing.T) {
 					complete("a"))
 				w = runtimeWorker(chatGPTRelaySpec(workerTestNow.Add(24*time.Hour)), ledgerRoot)
 			}
-			w.KeepAwake = HostKeepAwake{GOOS: tc.goos, Caffeinate: fake.binary, SystemdInhibit: fake.binary}
 
 			if _, err := RunWorkerThroughRuntime(context.Background(), rt, spec, w); err != nil {
 				t.Fatal(err)
@@ -251,23 +217,12 @@ func TestHostKeepAwakeReleaseEndsItsChildToo(t *testing.T) {
 	t.Fatalf("the keep-awake's child (pid %d) outlived its release", pid)
 }
 
-// awakeRuntime is a Runtime that names its host's KeepAwake.
-type awakeRuntime struct {
-	Runtime
-	k KeepAwake
-}
-
-func (a awakeRuntime) KeepAwake() KeepAwake { return a.k }
-
-func TestRuntimeKeepAwakePrefersTheLaunchsThenTheRuntimes(t *testing.T) {
-	own, launch := HostKeepAwake{GOOS: "darwin"}, HostKeepAwake{GOOS: "linux"}
-	if got := runtimeKeepAwake(awakeRuntime{k: own}, RuntimeWorker{}); got != own {
-		t.Errorf("no launch KeepAwake: %v, want the runtime's", got)
+func TestRuntimeKeepAwakeIsTheRuntimesOwn(t *testing.T) {
+	own := HostKeepAwake{GOOS: "darwin"}
+	if got := runtimeKeepAwake(&heldRuntime{awake: own}); got != own {
+		t.Errorf("a runtime with a KeepAwake: %v, want it", got)
 	}
-	if got := runtimeKeepAwake(awakeRuntime{k: own}, RuntimeWorker{KeepAwake: launch}); got != launch {
-		t.Errorf("a launch KeepAwake: %v, want the launch's", got)
-	}
-	if got := runtimeKeepAwake(&workerRuntime{}, RuntimeWorker{}); got != nil {
+	if got := runtimeKeepAwake(&workerRuntime{}); got != nil {
 		t.Errorf("a runtime with none: %v, want nil", got)
 	}
 }

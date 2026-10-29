@@ -151,8 +151,8 @@ func dirOf(path string) string {
 }
 
 // TestOpenInBrowserWritesWhereTheBrowserCanReadAndStopsWithNoBrowser: the
-// redirect file goes into the directory the host names (on Linux the data
-// root, which a snap browser can read), and a host with no browser to open
+// redirect file goes into the directory the host names (on Linux
+// $XDG_RUNTIME_DIR, which no VM shares), and a host with no browser to open
 // says so without starting anything.
 func TestOpenInBrowserWritesWhereTheBrowserCanReadAndStopsWithNoBrowser(t *testing.T) {
 	dp := newTestDeps(t)

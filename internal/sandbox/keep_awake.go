@@ -14,10 +14,10 @@ const keepAwakeWhy = "a BuildGate worker launch is running"
 // KeepAwake keeps the host from idle sleep while a launch runs, so a build
 // left unattended is not cut off when the machine idles to sleep (a sleeping
 // host stops the Temporal Worker's heartbeats and the run halts). Hold
-// starts it for pid and returns the func that releases it. A launch with no
-// KeepAwake holds nothing: the command gives its gateway runtime a
-// HostKeepAwake (KeepsHostAwake), and tests leave it unset or pass a
-// stand-in, so no test takes a real sleep lock.
+// starts it for pid and returns the func that releases it. A launch holds
+// the KeepAwake of the runtime it goes through (KeepsHostAwake): the command
+// gives its gateway runtime a HostKeepAwake, and a test runtime has none or
+// a stand-in, so no test takes a real sleep lock.
 type KeepAwake interface {
 	Hold(pid int) (release func())
 }
@@ -101,11 +101,9 @@ type KeepsHostAwake interface {
 	KeepAwake() KeepAwake
 }
 
-// runtimeKeepAwake is w's KeepAwake, else rt's own when it has one.
-func runtimeKeepAwake(rt Runtime, w RuntimeWorker) KeepAwake {
-	if w.KeepAwake != nil {
-		return w.KeepAwake
-	}
+// runtimeKeepAwake is rt's KeepAwake when it has one: a worker launched
+// through rt holds it on factoryd's own pid while the sandbox runs.
+func runtimeKeepAwake(rt Runtime) KeepAwake {
 	if k, ok := rt.(KeepsHostAwake); ok {
 		return k.KeepAwake()
 	}

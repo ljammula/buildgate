@@ -27,9 +27,6 @@ type RuntimeWorker struct {
 	MeterLedgerRoot string
 	// Now is time.Now when nil.
 	Now func() time.Time
-	// KeepAwake is held on factoryd's own pid while the sandbox runs; nil
-	// holds the runtime's own (KeepsHostAwake), or nothing.
-	KeepAwake KeepAwake
 }
 
 // routeEnvironmentKeys are the worker environment entries a route sets;
@@ -68,7 +65,7 @@ func withEnvironment(existing []string, dropKeys []string, add ...string) []stri
 func RunWorkerThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, w RuntimeWorker) (Result, error) {
 	launch := RuntimeLaunch{Nonce: s.Name}
 	if w.Relay == nil {
-		defer holdAwake(runtimeKeepAwake(rt, w), os.Getpid())()
+		defer holdAwake(runtimeKeepAwake(rt), os.Getpid())()
 		result, _, err := RunThroughRuntime(ctx, rt, s, launch)
 		return result, err
 	}
@@ -101,7 +98,7 @@ func RunWorkerThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, w Ru
 	}
 	s.Environment = withEnvironment(s.Environment, routeEnvironmentKeys, access.Environment...)
 
-	defer holdAwake(runtimeKeepAwake(rt, w), os.Getpid())()
+	defer holdAwake(runtimeKeepAwake(rt), os.Getpid())()
 	result, ref, runErr := RunThroughRuntime(ctx, rt, s, launch)
 	result.RelayFacts = RouteLaunchFacts{
 		CredentialMode:             policy.AuthMode,

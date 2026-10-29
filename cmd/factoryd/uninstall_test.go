@@ -407,7 +407,7 @@ func TestUninstallRemovesSystemdUnitsWhenPresent(t *testing.T) {
 	dp := newTestDeps(t)
 	f := newUninstallFixture(dp, t)
 	f.env.manager = hostcontrol.Systemd
-	dir := filepath.Join(f.env.xdgConfg, "systemd", "user")
+	dir := filepath.Join(f.home, ".config", "systemd", "user")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

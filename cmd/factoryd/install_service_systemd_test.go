@@ -194,20 +194,45 @@ func mustDefinitionPath(t *testing.T, svc hostcontrol.Service) string {
 	return path
 }
 
-// TestInstallServiceSystemdRefusesWithoutLinger: without linger the units
-// start only at a login, so nothing is written and the one command that
-// turns it on is named.
-func TestInstallServiceSystemdRefusesWithoutLinger(t *testing.T) {
-	dp, h := systemdTestDeps(t, "no")
-	err := installServiceMain(dp, []string{"-config", writeServiceTestConfig(t), "-data-dir", t.TempDir()})
-	if err == nil || !strings.Contains(err.Error(), "sudo loginctl enable-linger $USER") {
-		t.Fatalf("err = %v, want the linger command", err)
+// TestInstallServiceSystemdWarnsWithoutLinger: without linger the units run
+// only while the user is logged in, as a LaunchAgent does, so they are
+// installed, with a warning naming the one command that makes them start at
+// boot. logind's error for a user that is neither logged in nor lingering
+// reads as linger off.
+func TestInstallServiceSystemdWarnsWithoutLinger(t *testing.T) {
+	for name, loginctl := range map[string]func(...string) ([]byte, error){
+		"linger off": func(...string) ([]byte, error) { return []byte("Linger=no\n"), nil },
+		"logind does not know the user": func(...string) ([]byte, error) {
+			return []byte("Failed to get user: User ID 1000 is not logged in or lingering"), errors.New("exit status 1")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dp, h := systemdTestDeps(t, "yes")
+			fakeHostOf(dp).loginctlFn = loginctl
+			out := captureStdout(t, func() {
+				if err := installServiceMain(dp, []string{"-config", writeServiceTestConfig(t), "-data-dir", t.TempDir()}); err != nil {
+					t.Fatalf("install-service: %v", err)
+				}
+			})
+			if !strings.Contains(out, "sudo loginctl enable-linger $USER") {
+				t.Errorf("no linger warning:\n%s", out)
+			}
+			if _, err := os.Stat(mustDefinitionPath(t, hostcontrol.WorkerService)); err != nil {
+				t.Errorf("the worker unit was not installed: %v", err)
+			}
+			if !strings.Contains(strings.Join(h.calls, ";"), "--user restart factoryd-worker.service") {
+				t.Errorf("the units were not started: %q", h.calls)
+			}
+		})
 	}
-	if _, statErr := os.Stat(mustDefinitionPath(t, hostcontrol.WorkerService)); !errors.Is(statErr, os.ErrNotExist) {
-		t.Error("a unit was written despite the refusal")
-	}
-	if got := strings.Join(h.calls, ";"); got != "--user show-environment" {
-		t.Errorf("systemctl calls = %q, want only the user-manager probe", got)
+	dp, _ := systemdTestDeps(t, "yes")
+	out := captureStdout(t, func() {
+		if err := installServiceMain(dp, []string{"-config", writeServiceTestConfig(t), "-data-dir", t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "linger") {
+		t.Errorf("a lingering user was warned:\n%s", out)
 	}
 }
 

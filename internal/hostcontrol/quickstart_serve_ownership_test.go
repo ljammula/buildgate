@@ -195,7 +195,7 @@ func TestServeVerifiedOursIgnoresAnotherDataDirsLaunchAgent(t *testing.T) {
 func TestServeVerifiedOursIgnoresAnotherDataDirsSystemdUnit(t *testing.T) {
 	dp := newFakeDeps(t)
 	dp.serviceManagerFn = func() ServiceManager { return Systemd }
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	serviceDir, otherDir := t.TempDir(), t.TempDir()
 	unitPath, err := Systemd.DefinitionPath(ServeService)
 	if err != nil {

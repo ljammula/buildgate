@@ -48,11 +48,13 @@ type deps struct {
 	// gateway is the runtime over this machine's OpenShell gateway, which
 	// sandbox reaches; it connects on first use.
 	gateway *openshell.Lazy
+	// backends keeps docker.backend's detections for the process.
+	backends *backendMemo
 }
 
 // newDeps returns the real implementations.
 func newDeps() *deps {
-	dp := &deps{}
+	dp := &deps{backends: &backendMemo{}}
 	dp.docker = realDocker{dp: dp}
 	dp.forge = realForge{dp: dp}
 	dp.host = realHost{dp: dp}
@@ -63,10 +65,10 @@ func newDeps() *deps {
 }
 
 type dockerBoundary interface {
-	// backend names the Docker sandboxes would run on (colima, Docker
-	// Engine on this Linux host, or one buildgate refuses), read once by
-	// each caller that decides on it.
-	backend(ctx context.Context) dockerbackend.Detection
+	// backend names the Docker that the docker CLI dockerBinary reaches
+	// ("" is the default CLI): colima, Docker Engine on this Linux host, or
+	// one buildgate refuses. Read once per process and binary.
+	backend(ctx context.Context, dockerBinary string) dockerbackend.Detection
 	colimaBinary() string
 	dockerBinary() string
 	// imageToolchains runs image once and reads the versions of its

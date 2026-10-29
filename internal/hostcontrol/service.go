@@ -59,8 +59,8 @@ func (m ServiceManager) Name(s Service) string {
 }
 
 // DefinitionPath is the file install-service writes for s: the plist under
-// ~/Library/LaunchAgents, or the unit under $XDG_CONFIG_HOME/systemd/user
-// (default ~/.config). An error with no service manager.
+// ~/Library/LaunchAgents, or the unit under ~/.config/systemd/user
+// (SystemdUserUnitDir). An error with no service manager.
 func (m ServiceManager) DefinitionPath(s Service) (string, error) {
 	switch m {
 	case Launchd:
@@ -78,18 +78,17 @@ func (m ServiceManager) DefinitionPath(s Service) (string, error) {
 	return "", fmt.Errorf("no service manager on this OS")
 }
 
-// SystemdUserUnitDir is where systemd looks for a user's own units:
-// $XDG_CONFIG_HOME/systemd/user, default ~/.config/systemd/user.
+// SystemdUserUnitDir is where the user's systemd manager looks for the
+// user's own units: ~/.config/systemd/user. It is the manager's
+// environment that decides, not this shell's, and a user manager started at
+// login or by linger normally has no XDG_CONFIG_HOME, so this shell's
+// XDG_CONFIG_HOME is not followed: a unit written there would not be found.
 func SystemdUserUnitDir() (string, error) {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home directory: %w", err)
-		}
-		base = filepath.Join(home, ".config")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
 	}
-	return filepath.Join(base, "systemd", "user"), nil
+	return filepath.Join(home, ".config", "systemd", "user"), nil
 }
 
 // ProgramArgs reads the command line back out of a definition this package's

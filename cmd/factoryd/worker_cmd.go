@@ -59,7 +59,7 @@ func workerMain(dp *deps, args []string) error {
 	}
 	// The backend is read once: a refused one starts no worker, and the
 	// heartbeat records the one this worker launches on.
-	backend := dp.docker.backend(context.Background())
+	backend := dp.docker.backend(context.Background(), cfg.Settings.SandboxDocker)
 	if err := backend.Refused(); err != nil {
 		return fmt.Errorf("factoryd worker: %w", err)
 	}

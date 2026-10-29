@@ -138,10 +138,11 @@ and runs no `sudo`: it names what is missing.
    desktop (an ssh login), nothing opens a browser: forward the console's
    port from your own machine (`ssh -L 8090:127.0.0.1:8090 <host>`) and open
    the link `quickstart` prints.
-5. To keep the worker and console running across reboots with no login:
-   `sudo loginctl enable-linger $USER` once, then `factoryd install-service`,
-   which installs `factoryd-worker.service` and `factoryd-serve.service` as
-   systemd user units.
+5. To keep the worker and console running as services:
+   `factoryd install-service`, which installs `factoryd-worker.service` and
+   `factoryd-serve.service` as systemd user units. They run while you are
+   logged in; for them to start at boot and run with nobody logged in, run
+   `sudo loginctl enable-linger $USER` once.
 
 `factoryd doctor` names the Docker backend. Docker Engine on the host runs
 sandboxes with no VM between them and the machine, and doctor warns about

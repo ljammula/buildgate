@@ -141,29 +141,34 @@ type systemdUnitFile struct {
 	body []byte
 }
 
-// systemdServiceReady refuses, with the one step that fixes it, a machine
-// whose user units would not run as installed: no user manager answers
-// (a shell under su or sudo -u has none), or the user does not linger, so
-// the units would start only at a login and stop at its end. Turning linger
-// on needs an administrator's polkit grant, so it is named, never run.
+// systemdServiceReady refuses a shell whose user units cannot be managed: no
+// user manager answers (a shell under su or sudo -u has none).
 func systemdServiceReady(dp *deps) error {
 	if out, err := dp.host.systemctl("--user", "show-environment"); err != nil {
 		return fmt.Errorf("install-service: no systemd user manager answers (%v: %s); log in as this user directly (ssh or a desktop session), not through su or sudo -u, and rerun", err, strings.TrimSpace(string(out)))
 	}
-	user := strconv.Itoa(os.Getuid())
-	out, err := dp.host.loginctl("show-user", user, "--property=Linger")
-	if err != nil {
-		return fmt.Errorf("install-service: could not ask logind whether this user's services start at boot (%v: %s)", err, strings.TrimSpace(string(out)))
-	}
-	if hostcontrol.SystemdProperties(out)["Linger"] != "yes" {
-		return errors.New("install-service: this user's services would start only at a login and stop at its end; turn on lingering with `sudo loginctl enable-linger $USER`, then rerun")
-	}
 	return nil
 }
 
+// systemdLingerWarning is what to tell an operator whose user does not
+// linger, "" when it does. Without linger the user's units start at the
+// first login and stop at the last logout, as a LaunchAgent does, so the
+// install goes on; only a machine that must run builds with nobody logged
+// in needs it. logind answers with an error for a user that neither lingers
+// nor is logged in, which is linger off too. Turning it on needs an
+// administrator's polkit grant, so it is named, never run.
+func systemdLingerWarning(dp *deps) string {
+	out, err := dp.host.loginctl("show-user", strconv.Itoa(os.Getuid()), "--property=Linger")
+	if err == nil && hostcontrol.SystemdProperties(out)["Linger"] == "yes" {
+		return ""
+	}
+	return "warning: this user does not linger, so the worker and console run only while you are logged in and do not start at boot; `sudo loginctl enable-linger $USER` makes them run with nobody logged in"
+}
+
 // installSystemdServices writes the worker unit, and the serve unit unless
-// serve is nil, then enables and (re)starts them. Nothing is written when a
-// check fails or a unit exists without force.
+// serve is nil, then enables and (re)starts them, and warns when the user
+// does not linger. Nothing is written with no user manager or when a unit
+// exists without force.
 func installSystemdServices(dp *deps, worker workerPlistConfig, serve *servePlistConfig, requireTokens, force bool) error {
 	if err := systemdServiceReady(dp); err != nil {
 		return err
@@ -207,6 +212,9 @@ func installSystemdServices(dp *deps, worker workerPlistConfig, serve *servePlis
 	}
 	for _, u := range units {
 		fmt.Printf("installed %s, enabled and started it (systemctl --user)\n", u.path)
+	}
+	if warning := systemdLingerWarning(dp); warning != "" {
+		fmt.Println(warning)
 	}
 	if serve != nil {
 		printServeTokenNote(serve, requireTokens)

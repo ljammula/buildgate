@@ -43,19 +43,13 @@ var desktopClickNotifierLookPath = func() (string, error) {
 	return exec.LookPath("terminal-notifier")
 }
 
-// desktopLinuxNotifierLookPath resolves notify-send, the freedesktop.org
-// notification client on Linux -- a package-level var, like the macOS
-// ones above, so a test can point it at a stand-in.
-var desktopLinuxNotifierLookPath = func() (string, error) {
-	return exec.LookPath("notify-send")
-}
-
 // LinuxNotifier is how a Linux desktop notification would be shown here:
-// notify-send's path, or why none can be (not on PATH, or no session bus
+// the path of notify-send (the freedesktop.org notification client) on
+// PATH, or why none can be (not on PATH, or no session bus
 // for it to reach a notification daemon over, as in an ssh login or a
 // systemd user service with no desktop session).
 func LinuxNotifier() (path string, err error) {
-	path, err = desktopLinuxNotifierLookPath()
+	path, err = exec.LookPath("notify-send")
 	if err != nil {
 		return "", fmt.Errorf("notify-send is not on PATH (Debian/Ubuntu: libnotify-bin)")
 	}

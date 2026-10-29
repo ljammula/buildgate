@@ -115,7 +115,7 @@ func newUninstallEnv(dp *deps, home, exe string, out io.Writer) *uninstallEnv {
 		stop:    func(a0 []string) error { return stopKeepingColima(dp, a0) },
 		service: func() error { return uninstallServiceMain(dp, nil) },
 		manager: dp.host.serviceManager(),
-		backend: dp.docker.backend(context.Background()).Backend,
+		backend: dp.docker.backend(context.Background(), dp.docker.dockerBinary()).Backend,
 		out:     out,
 	}
 	env.xdgConfg = os.Getenv("XDG_CONFIG_HOME")
@@ -169,7 +169,7 @@ func (e *uninstallEnv) serviceDefinitions() []string {
 		case hostcontrol.Launchd:
 			p = filepath.Join(e.home, "Library", "LaunchAgents", svc.Label+".plist")
 		case hostcontrol.Systemd:
-			p = filepath.Join(e.xdgConfg, "systemd", "user", svc.Unit)
+			p = filepath.Join(e.home, ".config", "systemd", "user", svc.Unit)
 		default:
 			continue
 		}
