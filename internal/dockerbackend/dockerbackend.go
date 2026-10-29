@@ -79,9 +79,11 @@ func Classify(f Facts) Backend {
 	switch {
 	case (len(in.Host) > 0 && in.ServerVersion == "") || strings.Contains(f.Endpoint, "podman"):
 		return Podman
-	case f.Context == "desktop-linux":
+	// Docker Desktop names its context desktop-linux on macOS too: only on
+	// a Linux host is that Docker Desktop for Linux.
+	case f.GOOS == "linux" && f.Context == "desktop-linux":
 		return DesktopLinux
-	case in.OperatingSystem == "Docker Desktop":
+	case in.OperatingSystem == "Docker Desktop" || f.Context == "desktop-linux":
 		return DockerDesktop
 	case strings.Contains(strings.ToLower(in.KernelVersion), "microsoft"):
 		return WSL2
@@ -113,10 +115,12 @@ func hasSecurityOption(options []string, name string) bool {
 }
 
 // isColima recognises colima by its context (colima, colima-<profile>), its
-// socket under ~/.colima, or its VM's host name.
+// socket under ~/.colima or $XDG_CONFIG_HOME/colima, or its VM's host name
+// (colima, colima-<profile>, or lima-colima on older VMs).
 func isColima(f Facts, in info) bool {
 	named := func(s string) bool { return s == "colima" || strings.HasPrefix(s, "colima-") }
-	return named(f.Context) || strings.Contains(f.Endpoint, "/.colima/") || named(in.Name)
+	socket := strings.Contains(f.Endpoint, "/.colima/") || strings.Contains(f.Endpoint, "/colima/")
+	return named(f.Context) || socket || named(in.Name) || strings.HasPrefix(in.Name, "lima-colima")
 }
 
 // isLocalSocket reports whether endpoint is the host's own Docker Engine

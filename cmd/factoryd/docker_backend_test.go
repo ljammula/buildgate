@@ -99,6 +99,12 @@ func TestGatewayRuntimeRefusesARefusedBackend(t *testing.T) {
 	if asked {
 		t.Error("the meter was asked after a refusal")
 	}
+	fakeDockerOf(dp).backendFn = func(context.Context) dockerbackend.Detection {
+		return dockerbackend.Detection{Err: errors.New("docker info: timed out")}
+	}
+	if err := newGatewayRuntime(dp).Ready(context.Background()); err == nil || !strings.Contains(err.Error(), "timed out") || asked {
+		t.Errorf("an unread backend: Ready = %v, meter asked %v; want a refusal before the meter", err, asked)
+	}
 	stubBackend(dp, dockerbackend.NativeLinux)
 	if err := newGatewayRuntime(dp).Ready(context.Background()); err == nil || !asked {
 		t.Errorf("native-linux: Ready = %v, meter asked %v; want it to go on to the meter", err, asked)

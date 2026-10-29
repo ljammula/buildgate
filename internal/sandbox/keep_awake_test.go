@@ -71,7 +71,7 @@ func assertProcessGone(t *testing.T, pid int) {
 
 func TestKeepAwakeHoldsCaffeinateForThePIDOnMacOSAndReleases(t *testing.T) {
 	fake := newFakeKeepAwake(t, "caffeinate")
-	release := keepAwake{goos: "darwin", caffeinate: fake.binary}.hold(4242)
+	release := HostKeepAwake{GOOS: "darwin", Caffeinate: fake.binary}.Hold(4242)
 	args, pid := fake.waitStarted(t)
 	if got, want := strings.Join(args, " "), "-i -w 4242"; got != want {
 		t.Fatalf("caffeinate args = %q, want %q", got, want)
@@ -82,9 +82,9 @@ func TestKeepAwakeHoldsCaffeinateForThePIDOnMacOSAndReleases(t *testing.T) {
 
 func TestKeepAwakeHoldsSystemdInhibitOnLinuxAndReleases(t *testing.T) {
 	fake := newFakeKeepAwake(t, "systemd-inhibit")
-	release := keepAwake{goos: "linux", systemdInhibit: fake.binary}.hold(4242)
+	release := HostKeepAwake{GOOS: "linux", SystemdInhibit: fake.binary}.Hold(4242)
 	args, pid := fake.waitStarted(t)
-	want := []string{"--what=sleep:idle", "--mode=block", "--who=factoryd", "--why=" + keepAwakeWhy, "sleep", "infinity"}
+	want := []string{"--what=sleep:idle", "--mode=block", "--who=factoryd", "--why=" + keepAwakeWhy, "tail", "--pid=4242", "-f", "/dev/null"}
 	if strings.Join(args, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("systemd-inhibit args = %q, want %q", args, want)
 	}
@@ -95,7 +95,7 @@ func TestKeepAwakeHoldsSystemdInhibitOnLinuxAndReleases(t *testing.T) {
 func TestKeepAwakeFindsSystemdInhibitOnPATHOnLinux(t *testing.T) {
 	fake := newFakeKeepAwake(t, "systemd-inhibit")
 	t.Setenv("PATH", filepath.Dir(fake.binary))
-	cmd := keepAwake{goos: "linux"}.command(1)
+	cmd := HostKeepAwake{GOOS: "linux"}.command(1)
 	if cmd == nil || cmd.Path != fake.binary {
 		t.Fatalf("command = %v, want %s", cmd, fake.binary)
 	}
@@ -103,22 +103,23 @@ func TestKeepAwakeFindsSystemdInhibitOnPATHOnLinux(t *testing.T) {
 
 func TestKeepAwakeIsANoOpWhereNothingKeepsTheHostAwake(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	for _, k := range []keepAwake{
-		{goos: "linux"},   // no systemd-inhibit on PATH
-		{goos: "windows"}, // no keep-awake at all
-		{goos: "freebsd"},
+	for _, k := range []HostKeepAwake{
+		{GOOS: "linux"},   // no systemd-inhibit on PATH
+		{GOOS: "windows"}, // no keep-awake at all
+		{GOOS: "freebsd"},
 	} {
 		if cmd := k.command(os.Getpid()); cmd != nil {
-			t.Errorf("%s: command = %v, want none", k.goos, cmd.Args)
+			t.Errorf("%s: command = %v, want none", k.GOOS, cmd.Args)
 		}
-		k.hold(os.Getpid())() // must not panic or block
+		k.Hold(os.Getpid())() // must not panic or block
 	}
+	holdAwake(nil, os.Getpid())() // an unset KeepAwake holds nothing
 }
 
 func TestKeepAwakeIsANoOpWhenItsBinaryCannotStart(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
-	keepAwake{goos: "darwin", caffeinate: missing}.hold(os.Getpid())()
-	keepAwake{goos: "linux", systemdInhibit: missing}.hold(os.Getpid())()
+	HostKeepAwake{GOOS: "darwin", Caffeinate: missing}.Hold(os.Getpid())()
+	HostKeepAwake{GOOS: "linux", SystemdInhibit: missing}.Hold(os.Getpid())()
 }
 
 // TestRunKeepsTheMacAwakeForTheDockerClient: Run holds caffeinate on the
@@ -141,7 +142,7 @@ func TestRunKeepsTheMacAwakeForTheDockerClient(t *testing.T) {
 	spec.InputDir = ""
 	spec.LogPath = filepath.Join(dir, "worker.log")
 	spec.DataDir = t.TempDir()
-	spec.keepAwake = keepAwake{goos: "darwin", caffeinate: fake.binary}
+	spec.KeepAwake = HostKeepAwake{GOOS: "darwin", Caffeinate: fake.binary}
 	if _, err := Run(context.Background(), docker, spec); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestRunWorkerThroughRuntimeKeepsTheHostAwakeForTheLaunch(t *testing.T) {
 		wantArgs   string
 	}{
 		{name: "macOS, no route", goos: "darwin", wantArgs: "-i -w " + strconv.Itoa(os.Getpid())},
-		{name: "Linux, with a route", goos: "linux", route: true, wantArgs: strings.Join(systemdInhibitArgs(), " ")},
+		{name: "Linux, with a route", goos: "linux", route: true, wantArgs: strings.Join(systemdInhibitArgs(os.Getpid()), " ")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := newFakeKeepAwake(t, "keep-awake")
@@ -203,7 +204,7 @@ func TestRunWorkerThroughRuntimeKeepsTheHostAwakeForTheLaunch(t *testing.T) {
 					complete("a"))
 				w = runtimeWorker(chatGPTRelaySpec(workerTestNow.Add(24*time.Hour)), ledgerRoot)
 			}
-			w.keepAwake = keepAwake{goos: tc.goos, caffeinate: fake.binary, systemdInhibit: fake.binary}
+			w.KeepAwake = HostKeepAwake{GOOS: tc.goos, Caffeinate: fake.binary, SystemdInhibit: fake.binary}
 
 			if _, err := RunWorkerThroughRuntime(context.Background(), rt, spec, w); err != nil {
 				t.Fatal(err)
@@ -217,5 +218,56 @@ func TestRunWorkerThroughRuntimeKeepsTheHostAwakeForTheLaunch(t *testing.T) {
 			}
 			assertProcessGone(t, pid)
 		})
+	}
+}
+
+// TestHostKeepAwakeReleaseEndsItsChildToo: release kills the keep-awake's
+// process group, so a child it started (systemd-inhibit's tail) does not
+// outlive it.
+func TestHostKeepAwakeReleaseEndsItsChildToo(t *testing.T) {
+	dir := t.TempDir()
+	childPID := filepath.Join(dir, "child")
+	binary := filepath.Join(dir, "systemd-inhibit")
+	script := "#!/bin/sh\nsleep 60 &\necho $! > " + childPID + ".tmp\nmv " + childPID + ".tmp " + childPID + "\nwait\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	release := HostKeepAwake{GOOS: "linux", SystemdInhibit: binary}.Hold(os.Getpid())
+	var pid int
+	for deadline := time.Now().Add(30 * time.Second); pid == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if b, err := os.ReadFile(childPID); err == nil {
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		}
+	}
+	if pid == 0 {
+		t.Fatal("the stand-in did not start its child")
+	}
+	release()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return
+		}
+	}
+	t.Fatalf("the keep-awake's child (pid %d) outlived its release", pid)
+}
+
+// awakeRuntime is a Runtime that names its host's KeepAwake.
+type awakeRuntime struct {
+	Runtime
+	k KeepAwake
+}
+
+func (a awakeRuntime) KeepAwake() KeepAwake { return a.k }
+
+func TestRuntimeKeepAwakePrefersTheLaunchsThenTheRuntimes(t *testing.T) {
+	own, launch := HostKeepAwake{GOOS: "darwin"}, HostKeepAwake{GOOS: "linux"}
+	if got := runtimeKeepAwake(awakeRuntime{k: own}, RuntimeWorker{}); got != own {
+		t.Errorf("no launch KeepAwake: %v, want the runtime's", got)
+	}
+	if got := runtimeKeepAwake(awakeRuntime{k: own}, RuntimeWorker{KeepAwake: launch}); got != launch {
+		t.Errorf("a launch KeepAwake: %v, want the launch's", got)
+	}
+	if got := runtimeKeepAwake(&workerRuntime{}, RuntimeWorker{}); got != nil {
+		t.Errorf("a runtime with none: %v, want nil", got)
 	}
 }

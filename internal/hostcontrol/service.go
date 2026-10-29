@@ -220,6 +220,14 @@ func SystemdQuote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
+// SystemdQuoteEnvironment quotes one NAME=value assignment of an
+// Environment= line, which expands specifiers but not variables: like
+// SystemdQuote, with "$" left as it is.
+func SystemdQuoteEnvironment(assignment string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%")
+	return `"` + r.Replace(assignment) + `"`
+}
+
 var execStartLine = regexp.MustCompile(`(?m)^ExecStart=(.*)$`)
 
 // SystemdExecStartArgs reads the words of a unit's first ExecStart= line,

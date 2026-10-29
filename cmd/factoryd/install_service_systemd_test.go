@@ -58,7 +58,6 @@ func writeServiceTestConfig(t *testing.T) string {
 
 func TestBuildSystemdWorkerUnit(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "unix:///run/user/1000/docker.sock")
-	t.Setenv("DOCKER_CONTEXT", "")
 	cfg := workerPlistConfig{
 		BinaryPath:      "/home/op/.local/share/buildgate/factoryd",
 		ConfigPath:      "/home/op/.config/factoryd/config.yml",
@@ -66,8 +65,8 @@ func TestBuildSystemdWorkerUnit(t *testing.T) {
 		HomeDir:         "/home/op",
 		TemporalAddress: "localhost:7233",
 	}
-	unit := buildSystemdWorkerUnit(cfg)
-	if !bytes.Equal(unit, buildSystemdWorkerUnit(cfg)) {
+	unit := buildSystemdWorkerUnit(cfg, nil)
+	if !bytes.Equal(unit, buildSystemdWorkerUnit(cfg, nil)) {
 		t.Fatal("the unit is not deterministic")
 	}
 	want := []string{cfg.BinaryPath, "worker", "-config", cfg.ConfigPath, "-data-dir", cfg.DataDir, "-temporal-address", cfg.TemporalAddress}
@@ -89,7 +88,7 @@ func TestBuildSystemdWorkerUnit(t *testing.T) {
 			t.Errorf("unit lacks %q:\n%s", line, s)
 		}
 	}
-	for _, dir := range []string{"/home/op/.local/bin", "/home/op/go/bin", "/usr/bin", "/snap/bin"} {
+	for _, dir := range []string{"/home/op/.local/bin", "/home/op/go/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/bin", "/snap/bin"} {
 		if !strings.Contains(s, dir) {
 			t.Errorf("unit PATH lacks %s:\n%s", dir, s)
 		}
@@ -106,7 +105,7 @@ func TestBuildSystemdServeUnitCarriesNoToken(t *testing.T) {
 		DataDir:      "/home/op/buildgate/data",
 		HomeDir:      "/home/op",
 		AllowedHosts: []string{"host.docker.internal:8090"},
-	})
+	}, nil)
 	want := []string{"/usr/local/bin/factoryd", "serve", "-data-dir", "/home/op/buildgate/data", "-config", "/home/op/.config/factoryd/config.yml", "-allowed-host", "host.docker.internal:8090"}
 	if got := hostcontrol.SystemdExecStartArgs(unit); !reflect.DeepEqual(got, want) {
 		t.Errorf("ExecStart = %q, want %q", got, want)
@@ -263,7 +262,7 @@ func TestDoctorCheckSystemdWorkerServiceNamesEachState(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(unitPath, buildSystemdWorkerUnit(workerPlistConfig{BinaryPath: binary, ConfigPath: "/c.yml", DataDir: "/d", HomeDir: "/h"}), 0o644); err != nil {
+	if err := os.WriteFile(unitPath, buildSystemdWorkerUnit(workerPlistConfig{BinaryPath: binary, ConfigPath: "/c.yml", DataDir: "/d", HomeDir: "/h"}, nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for show, want := range map[string]string{
@@ -300,7 +299,7 @@ func TestQuickstartEnsureDaemonRestartsMatchingSystemdServiceWhenRestartNeeded(t
 	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(unitPath, buildSystemdWorkerUnit(workerPlistConfig{BinaryPath: binary, ConfigPath: configPath, DataDir: dataDir, HomeDir: home}), 0o644); err != nil {
+	if err := os.WriteFile(unitPath, buildSystemdWorkerUnit(workerPlistConfig{BinaryPath: binary, ConfigPath: configPath, DataDir: dataDir, HomeDir: home}, nil), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	fakeHostOf(dp).systemctlFn = func(args ...string) ([]byte, error) {
@@ -350,5 +349,29 @@ func TestUpgradeRestartsSystemdServicesInsteadOfSpawning(t *testing.T) {
 	}
 	if !strings.Contains(out, "restart: serve ("+dir+"), systemd factoryd-serve.service") {
 		t.Errorf("plan lacks the systemd serve:\n%s", out)
+	}
+}
+
+// TestSystemdUnitEnvironmentKeepsDollarSigns: Environment= expands
+// specifiers but not variables, so "%" is doubled there and "$" is not,
+// unlike in ExecStart=.
+func TestSystemdUnitEnvironmentKeepsDollarSigns(t *testing.T) {
+	unit := string(buildSystemdUnit(systemdUnitConfig{
+		Args:    []string{"/bin/factoryd", "a$b"},
+		HomeDir: "/home/op",
+		Env:     []string{"DOCKER_CONTEXT=ci$1%x"},
+	}))
+	if !strings.Contains(unit, `Environment="DOCKER_CONTEXT=ci$1%%x"`+"\n") {
+		t.Errorf("environment line:\n%s", unit)
+	}
+	if !strings.Contains(unit, `ExecStart="/bin/factoryd" "a$$b"`+"\n") {
+		t.Errorf("ExecStart line:\n%s", unit)
+	}
+}
+
+func TestSystemdServicePATHPutsTheFoundToolsFirstOnce(t *testing.T) {
+	got := systemdServicePATH("/home/op", []string{"/opt/docker/bin", "/usr/bin", "/opt/docker/bin"})
+	if !strings.HasPrefix(got, "/opt/docker/bin:/usr/bin:/home/op/.local/bin:") || strings.Count(got, "/opt/docker/bin") != 1 || strings.Count(got, ":/usr/bin:") != 1 {
+		t.Errorf("PATH = %q", got)
 	}
 }

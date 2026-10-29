@@ -15,17 +15,43 @@ import (
 
 // systemdServicePATH is the PATH a systemd user unit runs with: a user
 // manager does not read the operator's shell profile, so the tools a build
-// runs (gh, docker, git, python3, go) must be on this fixed list. It covers
-// the user's own bin directories, Go's tarball install, the system
-// directories and snap's.
-func systemdServicePATH(home string) string {
-	return strings.Join([]string{
+// runs (gh, docker, colima, git, python3, go) must be on this list. toolDirs
+// (where install-service found them) come first, then the user's own bin
+// directories, Go's tarball install, Linuxbrew's, the system directories
+// and snap's, each once.
+func systemdServicePATH(home string, toolDirs []string) string {
+	dirs := append(append([]string(nil), toolDirs...),
 		filepath.Join(home, ".local", "bin"),
 		filepath.Join(home, "go", "bin"),
 		"/usr/local/go/bin",
+		"/home/linuxbrew/.linuxbrew/bin",
+		filepath.Join(home, ".linuxbrew", "bin"),
 		"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin",
 		"/snap/bin",
-	}, ":")
+	)
+	var out []string
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		if d != "" && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return strings.Join(out, ":")
+}
+
+// systemdToolDirs are the directories this shell finds the tools a worker
+// runs in, so the unit finds the same ones.
+func systemdToolDirs() []string {
+	var dirs []string
+	for _, tool := range []string{"docker", "colima", "gh", "git", "go"} {
+		if p, err := exec.LookPath(tool); err == nil {
+			if abs, err := filepath.Abs(p); err == nil {
+				dirs = append(dirs, filepath.Dir(abs))
+			}
+		}
+	}
+	return dirs
 }
 
 // systemdUnitConfig is every value buildSystemdUnit needs, already resolved.
@@ -34,6 +60,8 @@ type systemdUnitConfig struct {
 	// Args is the command line, binary first.
 	Args    []string
 	HomeDir string
+	// ToolDirs go first on the unit's PATH (systemdServicePATH).
+	ToolDirs []string
 	// Env is extra NAME=value entries (DOCKER_HOST, DOCKER_CONTEXT).
 	Env       []string
 	StdoutLog string
@@ -56,9 +84,9 @@ func buildSystemdUnit(cfg systemdUnitConfig) []byte {
 	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", strings.Join(quoted, " "))
 	b.WriteString("Restart=always\nRestartSec=60\nUMask=0077\n")
-	env := append([]string{"PATH=" + systemdServicePATH(cfg.HomeDir), "HOME=" + cfg.HomeDir}, cfg.Env...)
+	env := append([]string{"PATH=" + systemdServicePATH(cfg.HomeDir, cfg.ToolDirs), "HOME=" + cfg.HomeDir}, cfg.Env...)
 	for _, kv := range env {
-		fmt.Fprintf(&b, "Environment=%s\n", hostcontrol.SystemdQuote(kv))
+		fmt.Fprintf(&b, "Environment=%s\n", hostcontrol.SystemdQuoteEnvironment(kv))
 	}
 	fmt.Fprintf(&b, "StandardOutput=append:%s\n", systemdPathValue(cfg.StdoutLog))
 	fmt.Fprintf(&b, "StandardError=append:%s\n", systemdPathValue(cfg.StderrLog))
@@ -82,22 +110,24 @@ func systemdDockerEnv() []string {
 	return env
 }
 
-func buildSystemdWorkerUnit(cfg workerPlistConfig) []byte {
+func buildSystemdWorkerUnit(cfg workerPlistConfig, toolDirs []string) []byte {
 	return buildSystemdUnit(systemdUnitConfig{
 		Description: "buildgate factoryd worker",
 		Args:        []string{cfg.BinaryPath, "worker", "-config", cfg.ConfigPath, "-data-dir", cfg.DataDir, "-temporal-address", cfg.TemporalAddress},
 		HomeDir:     cfg.HomeDir,
+		ToolDirs:    toolDirs,
 		Env:         systemdDockerEnv(),
 		StdoutLog:   filepath.Join(cfg.DataDir, "logs", "queue-run.out.log"),
 		StderrLog:   filepath.Join(cfg.DataDir, "logs", "queue-run.err.log"),
 	})
 }
 
-func buildSystemdServeUnit(cfg servePlistConfig) []byte {
+func buildSystemdServeUnit(cfg servePlistConfig, toolDirs []string) []byte {
 	return buildSystemdUnit(systemdUnitConfig{
 		Description: "buildgate factoryd console (serve)",
 		Args:        serveServiceArgs(cfg),
 		HomeDir:     cfg.HomeDir,
+		ToolDirs:    toolDirs,
 		Env:         systemdDockerEnv(),
 		StdoutLog:   filepath.Join(cfg.DataDir, "logs", "serve.out.log"),
 		StderrLog:   filepath.Join(cfg.DataDir, "logs", "serve.err.log"),
@@ -138,9 +168,9 @@ func installSystemdServices(dp *deps, worker workerPlistConfig, serve *servePlis
 	if err := systemdServiceReady(dp); err != nil {
 		return err
 	}
-	units := []systemdUnitFile{{svc: hostcontrol.WorkerService, body: buildSystemdWorkerUnit(worker)}}
+	units := []systemdUnitFile{{svc: hostcontrol.WorkerService, body: buildSystemdWorkerUnit(worker, systemdToolDirs())}}
 	if serve != nil {
-		units = append(units, systemdUnitFile{svc: hostcontrol.ServeService, body: buildSystemdServeUnit(*serve)})
+		units = append(units, systemdUnitFile{svc: hostcontrol.ServeService, body: buildSystemdServeUnit(*serve, systemdToolDirs())})
 	}
 	for i := range units {
 		path, err := hostcontrol.Systemd.DefinitionPath(units[i].svc)
@@ -187,9 +217,9 @@ func installSystemdServices(dp *deps, worker workerPlistConfig, serve *servePlis
 // printSystemdUnits is install-service -print under systemd: each unit
 // under a comment naming where it would be written.
 func printSystemdUnits(worker workerPlistConfig, serve *servePlistConfig) error {
-	units := []systemdUnitFile{{svc: hostcontrol.WorkerService, body: buildSystemdWorkerUnit(worker)}}
+	units := []systemdUnitFile{{svc: hostcontrol.WorkerService, body: buildSystemdWorkerUnit(worker, systemdToolDirs())}}
 	if serve != nil {
-		units = append(units, systemdUnitFile{svc: hostcontrol.ServeService, body: buildSystemdServeUnit(*serve)})
+		units = append(units, systemdUnitFile{svc: hostcontrol.ServeService, body: buildSystemdServeUnit(*serve, systemdToolDirs())})
 	}
 	for i, u := range units {
 		path, err := hostcontrol.Systemd.DefinitionPath(u.svc)
