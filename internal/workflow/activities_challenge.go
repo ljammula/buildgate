@@ -528,12 +528,64 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 		removeMountParents(made)
 		return ctx, func() {}, err
 	}
+	unexclude, err := excludeMountsFromGit(ctx, input.WorkspacePath, masks)
+	if err != nil {
+		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
+		removeMountParents(made)
+		return ctx, func() {}, err
+	}
 	cleanup := func() {
+		unexclude()
 		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
 		removeMountParents(made)
 		_ = os.RemoveAll(root)
 	}
 	return withWorkspaceMasks(ctx, masks), cleanup, nil
+}
+
+// excludeMountsFromGit lists each mountpoint in the repository's
+// info/exclude, so `git add -A` in the round's worktree never stages the
+// empty stub a held file's mount leaves on the host (the build would commit
+// an empty file where the held content is only visible through the mount).
+// The returned function puts the file back as it was.
+func excludeMountsFromGit(ctx context.Context, workDir string, masks []sandbox.WorkspaceMask) (func(), error) {
+	out, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(workDir), "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("find the git exclude file: %w", err)
+	}
+	path := strings.TrimSpace(string(out))
+	prior, err := os.ReadFile(path)
+	existed := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read the git exclude file: %w", err)
+	}
+	var b strings.Builder
+	b.Write(prior)
+	if len(prior) > 0 && prior[len(prior)-1] != '\n' {
+		b.WriteByte('\n')
+	}
+	for _, m := range masks {
+		b.WriteString("/" + escapeExcludePattern(m.Target) + "\n")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("write the git exclude file: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return nil, fmt.Errorf("write the git exclude file: %w", err)
+	}
+	return func() {
+		if existed {
+			_ = os.WriteFile(path, prior, 0o644)
+			return
+		}
+		_ = os.Remove(path)
+	}, nil
+}
+
+// escapeExcludePattern escapes the characters a gitignore pattern reads as
+// syntax, so a held path matches only itself.
+func escapeExcludePattern(p string) string {
+	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`, "#", `\#`, "!", `\!`, " ", `\ `).Replace(p)
 }
 
 // makeMountParents creates the directories a held file's path needs that the

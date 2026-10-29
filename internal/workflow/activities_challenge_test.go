@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -235,5 +236,41 @@ func TestChallengeRoundBuildMountsAFileInANewDirectory(t *testing.T) {
 	cleanup()
 	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge")); !os.IsNotExist(err) {
 		t.Errorf("the made directory was left: %v", err)
+	}
+}
+
+// A mount's empty stub is excluded from git while the round builds, so
+// `git add -A` never stages it, and the exclude file is put back after.
+func TestChallengeRoundMountStubIsExcludedFromGit(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge", "edge_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 || files[0].Refused != "" {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	if err := os.RemoveAll(filepath.Join(f.repo, "p", "edge")); err != nil {
+		t.Fatal(err)
+	}
+	input := f.input
+	input.ChallengeHeld, input.ChallengeRound = files, true
+	_, cleanup, err := f.acts.withChallengeMounts(context.Background(), input)
+	if err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	add := exec.Command("git", "-C", f.repo, "add", "-A")
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	staged, err := exec.Command("git", "-C", f.repo, "diff", "--cached", "--name-only").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(staged), "edge_test.go") {
+		t.Errorf("the mount stub was staged: %q", staged)
+	}
+	cleanup()
+	exclude, _ := exec.Command("git", "-C", f.repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").Output()
+	if body, _ := os.ReadFile(strings.TrimSpace(string(exclude))); strings.Contains(string(body), "edge_test.go") {
+		t.Errorf("the exclude file kept the held path: %q", body)
 	}
 }
