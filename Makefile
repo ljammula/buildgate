@@ -1,4 +1,4 @@
-.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test live-challenge live-challenge-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
 
 # source remains the default for development checkouts. Release users can
 # install the published, digest-pinned images with IMAGE_SOURCE=ghcr.
@@ -238,6 +238,17 @@ live-round-results:
 # live-round-test: offline unit tests for live_round.py's own logic.
 live-round-test:
 	python3 -m unittest scripts/tests/test_live_round.py -v
+
+# live-challenge: one real challenger job (SC-022) through a request, which
+# live-smoke's single-ticket path never reaches (scripts/live_challenge.py's
+# doc comment): it FAILS unless the accepted run's record shows the job ran.
+# Needs a worker on LIVE_CHALLENGE_DATA_DIR and roles.challenger configured.
+live-challenge:
+	python3 scripts/live_challenge.py
+
+# live-challenge-test: offline unit tests for live_challenge.py's own verdict.
+live-challenge-test:
+	python3 -m unittest scripts/tests/test_live_challenge.py -v
 
 # probe-instruction-paths: which repository paths each pinned harness really
 # loads (scripts/probe_instruction_paths.py): one fake-model container per

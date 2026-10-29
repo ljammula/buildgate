@@ -331,6 +331,12 @@ reviewed by a second `gh` account (`LIVE_ROUND_REVIEWER`, in the config's
 answered by a pushed commit within `max_review_rounds`. A change to the
 restack of stacked tickets (`internal/requestdriver/restack.go`, the replay
 run) runs it with `LIVE_ROUND_STACKED=1`.
+A change to the challenger (SC-022: `internal/workflow/challenge_phase.go`,
+`activities_challenge.go`, `internal/requestdriver/challenge_*.go`, the
+challenger job) also runs `make live-challenge`: one real request on
+`scripts/live-challenge/math-ops` with a worker on `LIVE_CHALLENGE_DATA_DIR`
+and `roles.challenger` set. `live-smoke` drives the single-ticket path, where
+no challenger exists, so only this fails when no challenger job ran.
 `make live-round-results` prints the share of reviewer comments resolved
 within the cap over the recorded runs; `scripts/live_round.py`'s doc comment
 has the settings.

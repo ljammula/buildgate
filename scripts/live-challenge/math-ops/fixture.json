@@ -1,0 +1,6 @@
+{
+  "repo": "math_ops",
+  "source": "testdata/fixtures/math_ops",
+  "verify_command": "python3 -m unittest discover -s tests",
+  "preflight_profile": ""
+}
