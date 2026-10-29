@@ -78,6 +78,12 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 	for j := len(r.Tickets); j > idx; j-- {
 		t := r.Tickets[j-1]
 		to := pathOf(j + extra)
+		if _, statErr := os.Lstat(to); statErr == nil {
+			// A carve a crash cut short already moved this file: the request's
+			// record still holds the old numbers, and the rename would destroy
+			// another ticket's file.
+			return fmt.Errorf("request %s: %s already exists, so ticket %d cannot move onto it; an earlier carve of this request was cut short", r.ID, filepath.Base(to), j)
+		}
 		if err := os.Rename(t.SpecPath, to); err != nil {
 			return fmt.Errorf("request %s: move ticket %d to %d: %w", r.ID, j, j+extra, err)
 		}
