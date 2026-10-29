@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -49,5 +51,32 @@ func TestEveryBuildOfACarvedTicketIsCarved(t *testing.T) {
 				t.Fatalf("carved = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// Every build of a carved ticket records the opt-out for tests_red_on_base,
+// whatever the ticket's own spec declares; an ordinary ticket records only its
+// own.
+func TestCarvedTicketRecordsTheTestsRequiredOptOut(t *testing.T) {
+	spec := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(spec, []byte("# Spec\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	two, zero := 2, 0
+	for name, tc := range map[string]struct {
+		group *int
+		want  string
+	}{
+		"carved":   {&two, carvedTestsRequiredReason},
+		"ordinary": {&zero, ""},
+	} {
+		tr := &ticketRun{specSnapshotPath: spec, rf: runFlags{orderGroup: &two}}
+		tr.rf.orderGroup = tc.group
+		if err := tr.parseTestsRequiredOpt(); err != nil {
+			t.Fatalf("%s: parseTestsRequiredOpt: %v", name, err)
+		}
+		if tr.testsRequiredOptOut != tc.want {
+			t.Errorf("%s: opt-out = %q, want %q", name, tr.testsRequiredOptOut, tc.want)
+		}
 	}
 }

@@ -1991,12 +1991,11 @@ func (tr *ticketRun) carved() bool {
 	return (tr.replay != nil && tr.replay.Carve != nil) || *tr.rf.orderGroup > 0
 }
 
-// checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
-func (tr *ticketRun) checkScope() error {
+// parseTestsRequiredOpt reads the ticket's own tests_red_on_base opt-out, the
+// gate boundary's exception (ticketspec.ParseTestsRequiredOptOut); every
+// build of a carved ticket records carvedTestsRequiredReason instead.
+func (tr *ticketRun) parseTestsRequiredOpt() error {
 	var err error
-	// The tests_red_on_base gate boundary: the ticket's own declared
-	// exception, if any -- see ticketspec.ParseTestsRequiredOptOut's own
-	// doc comment.
 	tr.testsRequiredOptOut, err = ticketspec.ParseTestsRequiredOptOut(tr.specSnapshotPath)
 	if err != nil {
 		return fmt.Errorf("parse ticket tests-required opt-out: %w", err)
@@ -2006,6 +2005,14 @@ func (tr *ticketRun) checkScope() error {
 		// a part of a change whose tests_red_on_base was judged on the run
 		// that was carved, and a part may hold no test.
 		tr.testsRequiredOptOut = carvedTestsRequiredReason
+	}
+	return nil
+}
+
+// checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
+func (tr *ticketRun) checkScope() error {
+	if err := tr.parseTestsRequiredOpt(); err != nil {
+		return err
 	}
 
 	// build_app.py, and everything ticketspec parses above (Verify-Command:/
