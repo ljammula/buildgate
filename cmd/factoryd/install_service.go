@@ -239,9 +239,9 @@ func newInstallServiceFlags() (*flag.FlagSet, *installServiceFlags) {
 	f := &installServiceFlags{allowedHosts: &stringListFlag{}}
 	f.configPath = flags.String("config", "", "session config path or profile name the worker reads; default: the active session config")
 	f.dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the resolved session config's data dir (its data_dir, or ~/buildgate/data when it sets none)")
-	f.force = flags.Bool("force", false, "overwrite an already-installed plist")
-	f.print = flags.Bool("print", false, "print the generated worker plist to stdout and install nothing")
-	f.noServe = flags.Bool("no-serve", false, "install only the worker LaunchAgent; skip installing dev.factoryd.serve alongside it")
+	f.force = flags.Bool("force", false, "overwrite already-installed service definitions (plists on macOS, systemd units on Linux)")
+	f.print = flags.Bool("print", false, "print what would be installed (the worker plist on macOS, both systemd units on Linux) and install nothing")
+	f.noServe = flags.Bool("no-serve", false, "install only the worker service, not the console (serve) beside it")
 	f.requireTokens = flags.Bool("require-tokens", false, "make the console require a token for every read and write, even from this machine; needed when containers can reach it (colima)")
 	flags.Var(f.allowedHosts, "allowed-host", "extra Host header values (host[:port]) the console accepts, such as host.docker.internal:8090 for containers; comma-separated, repeatable")
 	finishFlags(flags)

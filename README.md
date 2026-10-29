@@ -114,6 +114,42 @@ OpenShell gateway and meter, a worker and the console, then stops at
 `spec_review` and prints the exact `factoryd approve` command. The Docker VM
 cannot see repositories under `/tmp`.
 
+### A new Linux machine, start to finish
+
+Ubuntu 24.04 is the Linux host this is written for; it is not live-proven
+yet ([Known limits](#known-limits)). `make install` installs nothing on Linux
+and runs no `sudo`: it names what is missing.
+
+1. Docker Engine with the buildx and Compose plugins from
+   [Docker's own apt repository](https://docs.docker.com/engine/install/ubuntu/)
+   (`docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not
+   the distribution's `docker.io` or the snap, which `factoryd` refuses. Then
+   `sudo usermod -aG docker $USER` and log in again. Membership of the
+   `docker` group is root on this machine.
+2. Go, `python3`, `git`, `gh` and `make` (`sudo apt-get install golang-go
+   python3 git gh make`, or Go from go.dev when the distribution's is older
+   than `go.mod` asks for), then `gh auth login`. A worker that runs as a
+   service or over ssh cannot unlock the desktop keyring: `gh auth login
+   --insecure-storage` keeps the token in `~/.config/gh/hosts.yml` (0600).
+3. Clone and `make install`, as above. It links `factoryd` into
+   `~/.local/bin`, which Ubuntu puts on `PATH` from `~/.profile`; it writes no
+   shell profile.
+4. `factoryd quickstart ~/code/your-repo "Add X to Y"`. On a machine with no
+   desktop (an ssh login), nothing opens a browser: forward the console's
+   port from your own machine (`ssh -L 8090:127.0.0.1:8090 <host>`) and open
+   the link `quickstart` prints.
+5. To keep the worker and console running across reboots with no login:
+   `sudo loginctl enable-linger $USER` once, then `factoryd install-service`,
+   which installs `factoryd-worker.service` and `factoryd-serve.service` as
+   systemd user units.
+
+`factoryd doctor` names the Docker backend. Docker Engine on the host runs
+sandboxes with no VM between them and the machine, and doctor warns about
+it; colima on Linux (QEMU, with `/dev/kvm`) keeps the VM layer, set up as on
+a Mac ([USAGE.md § Data directory and colima](USAGE.md#quick-start-existing-repo)).
+Docker Desktop, rootless Docker, `userns-remap`, the snap, podman and WSL2
+are refused before any sandbox starts, each with its reason.
+
 For issue-based requests, route selection and each setup step, see
 [USAGE.md § Quick start](USAGE.md#quick-start-existing-repo). To drive requests
 from an agent, see [USAGE.md § Drive Buildgate from a coding agent](USAGE.md#drive-buildgate-from-a-coding-agent).
@@ -151,7 +187,8 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 - **A gate script is protected only under `.factory/`.** That directory is mounted read-only into every build, verify and gate sandbox as the commit `.factory.yml` was read from holds it; a script there that calls files outside it runs the build's copy of them, as `verify_command: make test` does.
 - **A restack of stacked pull requests is not live-proven yet**, and has limits: only SHA-1 repositories; the host's git must be 2.41 or later; a ticket whose runs predate `stack_base_sha` is never restacked; each restack reruns every review, at the model cost of those reviews; the replay run's worktree checkout is an ordinary build checkout. See [STATUS.md](STATUS.md#known-limits).
 - **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
-- **Docker Desktop cannot run a sandbox.** Its VM has neither Landlock nor AppArmor; use colima, with `sshfs` or `virtiofs` mounts (not `9p`).
+- **Docker Desktop cannot run a sandbox.** Its VM has neither Landlock nor AppArmor; use colima, with `sshfs` or `virtiofs` mounts (not `9p`). Docker Desktop for Linux, rootless Docker, `userns-remap`, the snap, podman and WSL2 are refused too, before any sandbox starts.
+- **Linux is not live-proven.** The install, the systemd services and the Docker backend checks are tested by unit tests only. On Docker Engine on the host there is no VM between a sandbox and the machine, the safety contract does not yet describe that setup, and the worker image's user (65532) shares no group with you, so files it writes in a worktree may be ones `factoryd` cannot remove; colima on Linux keeps the VM layer.
 - **On colima, any container can act as the local console** and approve a gate: colima's `host.docker.internal` reaches `serve` as a local caller. `factoryd install-service -force -require-tokens` closes it; open the console on this machine with `factoryd console`, whose link carries a token that does not expire.
 - **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
 - **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.
@@ -305,7 +342,7 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 | Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; refused while a request is building) |
 | Switch session-config profile | `factoryd use [<name>]` |
 | Upgrade to the newest release tag | `factoryd upgrade` |
-| Keep the worker and console alive across reboots (macOS) | `factoryd install-service` |
+| Keep the worker and console alive across reboots (launchd on macOS, systemd user units on Linux) | `factoryd install-service` |
 | Fail closed every release for a project | `factoryd kill-switch -project <p> -state engaged -by <who> -reason <why>` |
 | Clean up after a killed run | `factoryd reconcile -workspace <path> -data-dir <dir>` |
 

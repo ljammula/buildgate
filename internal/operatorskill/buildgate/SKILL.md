@@ -188,7 +188,9 @@ request sits in a queue nobody drains.
    is nothing to start first. After submitting, run `factoryd status -n 5`;
    if it still prints `worker not running` (the submit output says why),
    ask the operator to start `factoryd worker` (or
-   `factoryd install-service` for a permanent `worker`) and wait for it.
+   `factoryd install-service` for a permanent `worker`: launchd on macOS,
+   systemd user units on Linux, where the operator first runs
+   `sudo loginctl enable-linger $USER` once) and wait for it.
 3. **Draft the request** into a file outside the repo. When the operator
    names an existing spec or request file ("implement `x_spec.md` in
    `<repo>`"), that file is the request: submit it unchanged with

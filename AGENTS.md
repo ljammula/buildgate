@@ -92,6 +92,7 @@ go doc ./internal/<package>                                       # the whole pa
 | A run's steps | `RunWorkflow` in `internal/workflow/workflow.go`, then `activities_<phase>.go` |
 | Why a run quarantined, halted or waits in `resume_review` | `internal/policy` (gates), `internal/triage` (the sentence), `internal/unresolved` (no-verdict causes) |
 | A sandbox launch | `internal/sandbox` (the request), `internal/openshell` (the gateway), `containment-matrix.md` |
+| Which Docker sandboxes run on, and the host's service manager | `internal/dockerbackend` (the backend, its refusals), `internal/hostcontrol/service.go` (launchd, systemd) |
 | A session-config or `.factory.yml` key | `internal/sessionconfig`, `internal/projectconfig`, and the key tables in `USAGE_REFERENCE.md` |
 | Preparing a target repository for BuildGate | `factoryd doctor -target-repo <repo>` reports root-marker matches and reviewable `.factory.yml` candidates, then runs the baseline check (`factoryd -baseline-check`: verify and full-suite commands in the sandbox, no model call); `factoryd content -show language-profile:<id>` shows compiled profile data. Profiles are advisory; `.factory.yml` remains the execution contract. See `doc/designs/language-profiles.md` for fields, limits, and the extension point |
 | A console screen or API route | `console/README.md`'s module layout; the route in `internal/api` |
