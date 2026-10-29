@@ -20,6 +20,7 @@ const (
 	RoundTagPRReview   = "pr_review"
 	RoundTagRestack    = RestackRoundKind
 	RoundTagAdvice     = AdviceRoundKind
+	RoundTagChallenge  = ChallengeRoundKind
 )
 
 // RoundTag is one entry of a ticket's round ledger: the commit a build round
@@ -191,6 +192,9 @@ type TicketAdvice struct {
 	Of    string `json:"of"`
 	RunID string `json:"run_id,omitempty"`
 	Since string `json:"since"`
+	// Challenge marks the ticket's challenge round (ChallengeRoundKind): the
+	// same in-flight marker, settled by the same pass.
+	Challenge bool `json:"challenge,omitempty"`
 }
 
 // LiveRunID is the run of the ticket's that may be running now: its advice

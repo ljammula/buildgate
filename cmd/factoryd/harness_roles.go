@@ -19,7 +19,7 @@ func requireHarnessSandboxImage(role string, d harness.Descriptor, sandboxImage 
 	return nil
 }
 
-var sessionRoles = []modelrole.Role{modelrole.RolePlanning, modelrole.RoleExecution, modelrole.RoleReview}
+var sessionRoles = []modelrole.Role{modelrole.RolePlanning, modelrole.RoleExecution, modelrole.RoleReview, modelrole.RoleChallenger}
 
 // harnessRoleSets is every harness each role can resolve to: its default
 // harness plus everything in allowed_harnesses (a request may pick any of
@@ -40,6 +40,8 @@ func harnessRoleSets(settings sessionconfig.Settings) (map[string][]harness.Desc
 				rc = settings.Roles.Execution
 			case modelrole.RoleReview:
 				rc = settings.Roles.Review
+			case modelrole.RoleChallenger:
+				rc = settings.Roles.Challenger
 			}
 			if rc != nil {
 				names = append([]string{rc.HarnessName()}, rc.AllowedHarnessNames()...)

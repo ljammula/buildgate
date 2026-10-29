@@ -462,6 +462,9 @@ type Roles struct {
 	Planning  *RoleConfig `yaml:"planning,omitempty"`
 	Execution *RoleConfig `yaml:"execution,omitempty"`
 	Review    *RoleConfig `yaml:"review,omitempty"`
+	// Challenger is the role of the challenger job (SC-022); unset, no
+	// challenger job runs.
+	Challenger *RoleConfig `yaml:"challenger,omitempty"`
 }
 
 // validThinkingLevels is the closed set RoleConfig.Thinking may name --

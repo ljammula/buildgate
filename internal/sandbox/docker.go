@@ -2064,6 +2064,7 @@ var HarnessSiblingModules = map[string]bool{
 	"combined_review.diff_inline.prompt.md":      true,
 	"combined_review.diff_self.prompt.md":        true,
 	"combined_review.prompt.md":                  true,
+	"challenge.prompt.md":                        true,
 	"draft_feedback.prompt.md":                   true,
 	"draft_agents.prompt.md":                     true,
 	"draft_spec.design_guide.prompt.md":          true,

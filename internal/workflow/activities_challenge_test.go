@@ -1,0 +1,181 @@
+package workflow
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"buildgate/internal/run"
+)
+
+const edgeTest = "// buildgate-challenge: AC-1\npackage p\n\nimport \"testing\"\n\nfunc TestEdge(t *testing.T) {\n\tif Add(0, 0) != 0 {\n\t\tt.Fatal(\"zero\")\n\t}\n}\n"
+
+func holdFixture(t *testing.T) (*reproFixture, ChallengerJobInput) {
+	f := newReproFixture(t)
+	f.input.ChallengeCriteria, f.input.ChallengeAnswers = 2, 1
+	return f, ChallengerJobInput{RunWorkflowInput: f.input, Commit: f.commit}
+}
+
+// The hold keeps a copy of each new test file that passes the shape rules,
+// pins its hash, reads its header, and records what it refused or did not run,
+// each with a note; harness state is ignored.
+func TestHoldChallengeFilesAppliesTheShapeRules(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	writeFile(t, filepath.Join(f.repo, "p", "nohdr_test.go"), "package p\n\nfunc TestNoHeader() {}\n")
+	writeFile(t, filepath.Join(f.repo, "p", "bignum_test.go"), "// buildgate-challenge: AC-9\npackage p\n")
+	writeFile(t, filepath.Join(f.repo, "p", "helper.go"), "package p\n")
+	writeFile(t, filepath.Join(f.repo, ".pi-challenge-session", "x_test.go"), "package p\n")
+	files, notes, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]run.ChallengeFile{}
+	for _, file := range files {
+		by[file.Path] = file
+	}
+	if len(files) != 4 {
+		t.Fatalf("files = %+v, want the four outside the harness state", files)
+	}
+	edge := by["p/edge_test.go"]
+	if edge.Refused != "" || edge.NotRun != "" || edge.Criterion != "AC-1" || edge.Runner != "go-test-json" || len(edge.TestIDs) != 1 || edge.HostPath == "" || edge.SHA256 != "" && len(edge.SHA256) != 64 {
+		t.Errorf("p/edge_test.go = %+v, want held with its header, runner and pinned hash", edge)
+	}
+	if info, err := os.Stat(edge.HostPath); err != nil || info.Mode().Perm() != 0o444 {
+		t.Errorf("host copy: %v, %v; want a read-only file", info, err)
+	}
+	for _, name := range []string{"p/nohdr_test.go", "p/bignum_test.go"} {
+		if by[name].NotRun == "" || by[name].HostPath == "" {
+			t.Errorf("%s = %+v, want held and not run for want of a valid header", name, by[name])
+		}
+	}
+	if by["p/helper.go"].Refused == "" || by["p/helper.go"].HostPath != "" {
+		t.Errorf("p/helper.go = %+v, want refused and not held: it is no test file", by["p/helper.go"])
+	}
+	if len(notes) != 3 {
+		t.Errorf("notes = %v, want one per refusal and per missing header", notes)
+	}
+}
+
+func TestHoldChallengeFilesCapsTheCount(t *testing.T) {
+	f, in := holdFixture(t)
+	for i := 0; i < maxChallengeFiles+2; i++ {
+		writeFile(t, filepath.Join(f.repo, "p", "e"+string(rune('a'+i))+"_test.go"), edgeTest)
+	}
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, refused := 0, 0
+	for _, file := range files {
+		if file.Refused == "" {
+			held++
+		} else if strings.Contains(file.Refused, "more than") {
+			refused++
+		}
+	}
+	if held != maxChallengeFiles || refused != 2 {
+		t.Errorf("held %d, over the cap %d, want %d and 2", held, refused, maxChallengeFiles)
+	}
+}
+
+// The commit step commits the held files as a child of the result commit with
+// the pinned hash re-read from it.
+func TestCommitChallengeCommitsPinnedFilesAsAChildOfTheResult(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	if err := os.Remove(filepath.Join(f.repo, "p", "edge_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.acts.CommitChallengeActivity(context.Background(), CommitChallengeInput{RunWorkflowInput: f.input, ResultSHA: f.commit, Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.SHA == "" || out.SHA == f.commit {
+		t.Fatalf("new head = %q, want a child of %s", out.SHA, f.commit)
+	}
+	files[0].SHA256 = strings.Repeat("0", 64)
+	if _, err := f.acts.CommitChallengeActivity(context.Background(), CommitChallengeInput{RunWorkflowInput: f.input, ResultSHA: out.SHA, Files: files}); err == nil {
+		t.Error("a file whose pinned hash does not match its copy was committed")
+	}
+}
+
+// diff_scope sets a committed challenge file aside by its pinned hash, never
+// by its path: the same path with other content is still a changed file.
+func TestSetAsideChallengeFilesIsByHashNeverByPath(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	head := trustedCommit(t, f.repo)
+	changed := []string{"p/add.go", "p/edge_test.go"}
+	if got := setAsideChallengeFiles(f.repo, head, changed, files); len(got) != 1 || got[0] != "p/add.go" {
+		t.Errorf("set aside = %v, want only p/add.go left", got)
+	}
+	files[0].SHA256 = strings.Repeat("1", 64)
+	if got := setAsideChallengeFiles(f.repo, head, changed, files); len(got) != 2 {
+		t.Errorf("set aside with another hash = %v, want both files still judged", got)
+	}
+}
+
+func TestHoldChallengeFilesRefusesAFileOverTheSizeCap(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "big_test.go"), "// buildgate-challenge: AC-1\n"+strings.Repeat("//\n", maxChallengeBytes))
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 || files[0].Refused == "" || files[0].HostPath != "" {
+		t.Errorf("files = %+v, %v; want the oversize file refused and not held", files, err)
+	}
+}
+
+// A challenge round's build gets each held file mounted read-only at its
+// path, from a staged copy whose hash is checked first; the empty mountpoint
+// is removed afterwards. Any other build gets nothing.
+func TestChallengeRoundBuildMountsTheHeldFilesReadOnly(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	if err := os.Remove(filepath.Join(f.repo, "p", "edge_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	input := f.input
+	input.ChallengeHeld = files
+	if ctx, cleanup, err := f.acts.withChallengeMounts(context.Background(), input); err != nil || len(workspaceMasksFrom(ctx)) != 0 {
+		cleanup()
+		t.Fatalf("a build that is not the round: masks %v, %v; want none", workspaceMasksFrom(ctx), err)
+	}
+	input.ChallengeRound = true
+	ctx, cleanup, err := f.acts.withChallengeMounts(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	masks := workspaceMasksFrom(ctx)
+	if len(masks) != 1 || masks[0].Target != "p/edge_test.go" {
+		t.Fatalf("masks = %+v, want the held file at its path", masks)
+	}
+	if info, err := os.Stat(masks[0].Source); err != nil || info.Mode().Perm()&0o222 != 0 {
+		t.Errorf("staged copy: %v, %v; want a read-only file", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge_test.go")); err != nil {
+		t.Errorf("no mountpoint was made: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge_test.go")); !os.IsNotExist(err) {
+		t.Errorf("the mountpoint was left in the worktree: %v", err)
+	}
+	input.ChallengeHeld[0].SHA256 = strings.Repeat("0", 64)
+	if _, cleanup, err := f.acts.withChallengeMounts(context.Background(), input); err == nil {
+		cleanup()
+		t.Error("a held file whose copy no longer matches its hash was mounted")
+	}
+}

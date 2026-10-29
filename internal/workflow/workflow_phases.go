@@ -76,6 +76,10 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
 	}
 
+	if err := runChallenge(ctx, ids, buildVerifyCtx, *input, current, result, reviews, passed && version == 1 && !overSizeCap(*input, result.ChangeSize), worktreePath, branch); err != nil {
+		return err
+	}
+
 	// Marks the executions that no longer commit a reference oracle's bytes
 	// or verify the committed tree (referenceOracleRemovedChange).
 	temporalworkflow.GetVersion(ctx, referenceOracleRemovedChange, temporalworkflow.DefaultVersion, 1)
@@ -418,6 +422,7 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		RepoGatesFailed:   gates.repoGatesFailed,
 		CheckpointDir:     input.CheckpointDir,
 		LogDir:            input.LogDir,
+		SetAside:          input.ChallengeHeld,
 	}
 	current.Stage, current.StartedAt = "evidence", temporalworkflow.Now(ctx)
 	if err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "collect-evidence"), CollectEvidenceActivityName, collectInput).Get(ctx, &evidenceResult); err != nil {

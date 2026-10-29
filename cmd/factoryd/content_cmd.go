@@ -308,7 +308,7 @@ func promptSourceEntries(scriptFS fs.FS) ([]contentEntry, error) {
 		if !strings.HasPrefix(source.ID, "prompt-source:") || seen[source.ID] || source.Kind != "inline-assembly" || source.SourcePath == "" || filepath.IsAbs(source.SourcePath) || strings.Contains(source.SourcePath, "..") || source.Fragment == "" || source.Description == "" {
 			return nil, fmt.Errorf("embedded prompt source registry contains an invalid entry %q", source.ID)
 		}
-		if source.Role != "planning" && source.Role != "execution" && source.Role != "review" {
+		if source.Role != "planning" && source.Role != "execution" && source.Role != "review" && source.Role != "challenger" {
 			return nil, fmt.Errorf("embedded prompt source %s has invalid role %q", source.ID, source.Role)
 		}
 		seen[source.ID] = true
@@ -550,6 +550,8 @@ func promptRoleStage(name string) (string, string) {
 		return "review", "combined review"
 	case strings.HasPrefix(name, "review."):
 		return "review", "review setup"
+	case strings.HasPrefix(name, "challenge."):
+		return "challenger", "challenge"
 	case strings.HasPrefix(name, "draft_spec."):
 		return "planning", "spec drafting"
 	case name == "draft_feedback.prompt.md":

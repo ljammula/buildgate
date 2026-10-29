@@ -47,6 +47,9 @@ func roleConfig(s Settings, role string) (*RoleConfig, error) {
 	case "execution":
 		return s.Roles.Execution, nil
 	}
+	if role == "challenger" {
+		return s.Roles.Challenger, nil
+	}
 	return s.Roles.Review, nil
 }
 

@@ -413,6 +413,16 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		ReviewSkills:                     o.Skills.Review,
 		Thinking:                         o.Thinking,
 		ReviewThinking:                   o.ReviewThinking,
+		Challenge:                        o.Challenge,
+		ChallengeSpecPath:                o.ChallengeSpecPath,
+		ChallengeSpecSHA256:              o.ChallengeSpecSHA256,
+		ChallengeCriteria:                o.ChallengeCriteria,
+		ChallengeAnswers:                 o.ChallengeAnswers,
+		ChallengerThinking:               o.ChallengerThinking,
+		ChallengerHarness:                o.ChallengerHarness,
+		ChallengerRelayPolicy:            o.ChallengerRelayPolicy,
+		ChallengeHeld:                    o.ChallengeHeld,
+		ChallengeRound:                   o.ChallengeRound,
 		ReviewRelayPolicy:                o.ReviewRelayPolicy,
 	}
 }

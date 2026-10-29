@@ -191,6 +191,18 @@
       "kind": "inline-assembly",
       "template_refs": [],
       "description": "Invokes the harness-native /spec-plan and /contract-plan commands with file or project paths; command definitions and harness-provided context are opaque and out of scope."
+    },
+    {
+      "id": "prompt-source:challenge",
+      "source_path": "agent/pi/scripts/challenge.py",
+      "fragment": "challenge_prompt",
+      "role": "challenger",
+      "stage": "challenge",
+      "kind": "inline-assembly",
+      "template_refs": [
+        "challenge.prompt.md"
+      ],
+      "description": "Assembles the challenger prompt: the approved spec with the read-back answers, the paths the change touches, the file cap and the derivation-header rule."
     }
   ]
 }

@@ -29,7 +29,7 @@ def test_inventory_is_json_serializable_and_sources_exist():
 		}
 		assert source["id"].startswith("prompt-source:")
 		assert isinstance(source["fragment"], str) and source["fragment"]
-		assert source["role"] in {"planning", "execution", "review"}
+		assert source["role"] in {"planning", "execution", "review", "challenger"}
 		assert isinstance(source["stage"], str) and source["stage"]
 		assert source["kind"] == "inline-assembly"
 		assert isinstance(source["description"], str) and source["description"]

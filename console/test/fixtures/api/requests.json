@@ -329,8 +329,12 @@
         "advice": {
           "of": "every-field of",
           "run_id": "every-field run_id",
-          "since": "every-field since"
+          "since": "every-field since",
+          "challenge": true
         },
+        "challenged": true,
+        "challenge_run_id": "every-field challenge_run_id",
+        "challenge_rounded": true,
         "retarget": {
           "from": "every-field from",
           "to": "every-field to",

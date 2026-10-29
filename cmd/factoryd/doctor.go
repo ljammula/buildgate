@@ -1236,6 +1236,7 @@ var doctorRoleSpecs = []struct {
 	{"planning", modelrole.RolePlanning},
 	{"execution", modelrole.RoleExecution},
 	{"review", modelrole.RoleReview},
+	{"challenger", modelrole.RoleChallenger},
 }
 
 // doctorRoleSelection is one selection doctorRoutesModeChecks resolves the
@@ -1256,6 +1257,9 @@ type doctorRoleSelection struct {
 func doctorRoleSelections(settings sessionconfig.Settings) []doctorRoleSelection {
 	var selections []doctorRoleSelection
 	for _, spec := range doctorRoleSpecs {
+		if spec.role == modelrole.RoleChallenger && !doctorRoleConfigured(settings, spec.name) {
+			continue
+		}
 		selections = append(selections, doctorRoleSelection{name: spec.name, role: spec.role, label: spec.name})
 		if spec.role != modelrole.RoleExecution || settings.Roles == nil {
 			continue
@@ -1283,6 +1287,8 @@ func doctorRoleConfigured(s sessionconfig.Settings, roleName string) bool {
 		rc = s.Roles.Execution
 	case "review":
 		rc = s.Roles.Review
+	case "challenger":
+		rc = s.Roles.Challenger
 	}
 	return rc != nil && rc.Model != ""
 }

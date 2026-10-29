@@ -263,6 +263,16 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}
+	if entry.Challenge {
+		args = append(args, "-challenge", "-challenge-spec", entry.ChallengeSpecPath,
+			"-challenge-criteria", strconv.Itoa(entry.ChallengeCriteria), "-challenge-answers", strconv.Itoa(entry.ChallengeAnswers))
+	}
+	if entry.ChallengeHeld != "" {
+		args = append(args, "-challenge-held", entry.ChallengeHeld)
+		if entry.ChallengeRound {
+			args = append(args, "-challenge-round")
+		}
+	}
 	if cfg.OpenPullRequest {
 		args = append(args, "-open-pull-request")
 	}

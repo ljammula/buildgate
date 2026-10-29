@@ -102,6 +102,20 @@ type runOptions struct {
 	Thinking          string
 	ReviewThinking    string
 	ReviewRelayPolicy *sandbox.RoutePolicy
+
+	// Challenge..ChallengeRound and the Challenger fields are -challenge's
+	// flags and roles.challenger's resolved values; see the RunWorkflowInput
+	// fields of the same names.
+	Challenge             bool
+	ChallengeSpecPath     string
+	ChallengeSpecSHA256   string
+	ChallengeCriteria     int
+	ChallengeAnswers      int
+	ChallengerThinking    string
+	ChallengerHarness     string
+	ChallengerRelayPolicy *sandbox.RoutePolicy
+	ChallengeHeld         []run.ChallengeFile
+	ChallengeRound        bool
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not

@@ -60,6 +60,8 @@ const (
 const (
 	AttemptRoleExecution = "execution"
 	AttemptRoleReview    = "review"
+	// AttemptRoleChallenger is the challenger job's role (SC-022).
+	AttemptRoleChallenger = "challenger"
 )
 
 // RetainBuildArtifacts copies what a build left in workspace that removing
@@ -1760,18 +1762,10 @@ type Run struct {
 	// separate one-turn launch -- see internal/codereview's package doc
 	// comment). Nil for a run that never ran this gate.
 	CodeReview *CodeReviewResult `json:"code_review,omitempty"`
-	// ReviewReproductionRechecks are a corrective build's runs of the
-	// reproductions an earlier run's review held (-recheck-reproductions,
-	// SC-022): one per reproduction, its one run on this run's result
-	// commit, and Verdict "passes" or "still_failing". Nil for every other
-	// run.
-	ReviewReproductionRechecks []ReviewReproduction `json:"review_reproduction_rechecks,omitempty"`
-	// ReviewReproductionRechecksGiven are the -recheck-reproductions entries
-	// this run was given, recorded when it starts, whether or not its
-	// workflow reached the recheck (a run whose gates failed does not).
-	// Evidence only: what a later build rechecks is the ticket's list on the
-	// request (request.Ticket.Reproductions).
-	ReviewReproductionRechecksGiven []RecheckEntry `json:"review_reproduction_rechecks_given,omitempty"`
+	// Challenge is the ticket's challenge as this run saw it (SC-022): the
+	// challenger job's held files and the factory's run of them. Nil for a
+	// run that was not challenged and re-ran no held file.
+	Challenge *ChallengeRecord `json:"challenge,omitempty"`
 	// BaselineVerify is the verify command's result on the base commit,
 	// run before the build's first round (see BaselineVerify's own doc
 	// comment). Read from the run's baseline record by cmd/factoryd's save,
@@ -2314,3 +2308,61 @@ func (r *Run) DiffBase() string {
 	}
 	return r.BaseSHA
 }
+
+// ChallengeFile is one test file of a challenge (SC-022): where it is
+// committed, the hash of the host's copy, the criterion it cites and what the
+// factory's runs of it decided. Never the file's content.
+type ChallengeFile struct {
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256,omitempty"`
+	HostPath string `json:"host_path,omitempty"`
+	// Criterion is the header's label, "AC-<n>" or "answer-<n>".
+	Criterion string   `json:"criterion,omitempty"`
+	Runner    string   `json:"runner,omitempty"`
+	TestIDs   []string `json:"test_ids,omitempty"`
+	// Refused is the shape rule that kept the file out (not held); NotRun is
+	// why a held file was not run (no valid header).
+	Refused string `json:"refused,omitempty"`
+	NotRun  string `json:"not_run,omitempty"`
+	// Verdict is "green", "red", "broken" (a compile or collection error, or
+	// no report) or "advice" (red once, then green); "" for a file not run.
+	Verdict  string             `json:"verdict,omitempty"`
+	Failures []ChallengeFailure `json:"failures,omitempty"`
+}
+
+// ChallengeFailure is one failing test of a red challenge file: its name and
+// its assertion, each one cleaned line.
+type ChallengeFailure struct {
+	Test      string `json:"test"`
+	Assertion string `json:"assertion,omitempty"`
+}
+
+// ChallengeRecord is a run's challenge (SC-022): Verdict "green", "red" or
+// "no_verdict" (Cause names why); Rerun marks a run that ran held files of an
+// earlier challenge instead of a new job; CommittedSHA is the commit that
+// holds the green files, the run's ResultSHA then.
+type ChallengeRecord struct {
+	Verdict      string            `json:"verdict"`
+	Cause        string            `json:"cause,omitempty"`
+	Rerun        bool              `json:"rerun,omitempty"`
+	Files        []ChallengeFile   `json:"files,omitempty"`
+	Notes        []string          `json:"notes,omitempty"`
+	CommittedSHA string            `json:"committed_sha,omitempty"`
+	Launches     []ReproductionRun `json:"launches,omitempty"`
+	// SnapshotSHA256, MaskedPaths and RemovedPaths are the challenger job's
+	// instruction-file snapshot (SC-019), as an attempt records them.
+	SnapshotSHA256 string   `json:"snapshot_sha256,omitempty"`
+	MaskedPaths    []string `json:"masked_paths,omitempty"`
+	RemovedPaths   []string `json:"removed_paths,omitempty"`
+}
+
+// ChallengeDirName is the directory, in the run directory, of a challenge's
+// held copies.
+const ChallengeDirName = "challenge"
+
+// The verdicts of a ChallengeRecord.
+const (
+	ChallengeGreen     = "green"
+	ChallengeRed       = "red"
+	ChallengeNoVerdict = "no_verdict"
+)

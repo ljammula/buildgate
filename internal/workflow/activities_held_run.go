@@ -184,6 +184,11 @@ type ReproductionRunInput struct {
 	// the tests_red_on_base proof, "" (reproductionAttemptKind) for a held
 	// reviewer's reproduction. It changes nothing else about the launch.
 	AttemptKind string `json:"attempt_kind,omitempty"`
+	// Group, with Held.Runner empty, is a launch of the repository's own
+	// verify command with every file of Group mounted read-only at its path:
+	// a challenge's files no reproduction runner covers (SC-022). Its verdict
+	// is the command's exit status alone.
+	Group []run.HeldReproduction `json:"group,omitempty"`
 }
 
 // kind is the launch's attempt kind.
@@ -308,6 +313,50 @@ type reproductionLaunch struct {
 	helpers string
 	cmd     reproduction.Command
 	runner  reproduction.Runner
+	// masks are the held files mounted read-only at their paths; checks the
+	// staged copies and the hashes each must still have before a launch;
+	// group marks a verify-command launch of several files.
+	masks  []sandbox.WorkspaceMask
+	checks []stagedCheck
+	group  bool
+}
+
+// stagedCheck is one staged copy and the hash it must have.
+type stagedCheck struct{ path, sha256 string }
+
+// stageGroupLaunch stages every file of input.Group (each after its hash
+// check) and its mountpoint, for a launch of the repository's verify command.
+func (a *Activities) stageGroupLaunch(input ReproductionRunInput, root, scratch string, tree []string) (reproductionLaunch, error) {
+	l := reproductionLaunch{scratch: scratch, group: true, helpers: filepath.Join(root, "helpers")}
+	if err := os.MkdirAll(l.helpers, 0o755); err != nil {
+		return l, fmt.Errorf("create the helper directory: %w", err)
+	}
+	for i, h := range input.Group {
+		if dir := path.Dir(h.Path); dir != "." && pathInTree(tree, dir) {
+			return l, errUnstageable
+		}
+		content, err := evidence.ReadHostileFile(h.HostPath, reproduction.MaxHeldBytes)
+		if err != nil {
+			return l, unheld("read the host copy: %v", err)
+		}
+		if err := checkHeldHash(content, h.SHA256); err != nil {
+			return l, err
+		}
+		staged := filepath.Join(root, fmt.Sprintf("held-%d", i))
+		if err := os.WriteFile(staged, content, 0o444); err != nil {
+			return l, unheld("stage the held file: %v", err)
+		}
+		if err := makeMountpoint(scratch, h.Path); err != nil {
+			return l, err
+		}
+		l.masks = append(l.masks, sandbox.WorkspaceMask{Source: staged, Target: h.Path})
+		l.checks = append(l.checks, stagedCheck{staged, h.SHA256})
+	}
+	if err := wsisolation.EnableWorkerGroupWrite(scratch, os.Getgid()); err != nil {
+		return l, fmt.Errorf("make the scratch worktree writable for the worker: %w", err)
+	}
+	l.cmd = reproduction.Command{Script: a.verifyCommandFor(input.RunWorkflowInput), Timeout: reproduction.LaunchTimeout}
+	return l, nil
 }
 
 // runReproduction checks out input.Commit in a scratch worktree, stages the
@@ -315,9 +364,13 @@ type reproductionLaunch struct {
 // classifies its report. The scratch directory is removed afterwards.
 func (a *Activities) runReproduction(ctx context.Context, input ReproductionRunInput, root string) (ReproductionRunResult, error) {
 	res := ReproductionRunResult{Run: run.ReproductionRun{Pass: input.Pass, Commit: input.Commit, ReproductionSHA256: input.Held.SHA256}}
-	r, ok := reproduction.ByID(input.Held.Runner)
-	if !ok {
-		return res, unheld("no runner %q", input.Held.Runner)
+	group := input.Held.Runner == "" && len(input.Group) > 0
+	var r reproduction.Runner
+	if !group {
+		var ok bool
+		if r, ok = reproduction.ByID(input.Held.Runner); !ok {
+			return res, unheld("no runner %q", input.Held.Runner)
+		}
 	}
 	if err := os.RemoveAll(root); err != nil {
 		return res, fmt.Errorf("remove an earlier scratch directory: %w", err)
@@ -347,7 +400,12 @@ func (a *Activities) runReproduction(ctx context.Context, input ReproductionRunI
 		// failing, with nothing launched (reproduction.Recheck).
 		return res, nil
 	}
-	launch, err := stageReproductionLaunch(input, r, root, scratch, tree)
+	var launch reproductionLaunch
+	if group {
+		launch, err = a.stageGroupLaunch(input, root, scratch, tree)
+	} else {
+		launch, err = stageReproductionLaunch(input, r, root, scratch, tree)
+	}
 	if errors.Is(err, errUnstageable) {
 		// Nothing written, nothing launched: advice (reproduction.Decide).
 		res.Run.Outcome = string(reproduction.OutcomeUnstaged)
@@ -389,6 +447,8 @@ func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, 
 	if err := removeInRoot(scratch, reproductionReportName); err != nil {
 		return l, fmt.Errorf("remove a report the commit holds: %w", err)
 	}
+	l.masks = []sandbox.WorkspaceMask{{Source: l.staged, Target: input.Held.Path}}
+	l.checks = []stagedCheck{{l.staged, input.Held.SHA256}}
 	l.cmd = r.Command(reproduction.Invocation{Path: input.Held.Path, TestIDs: input.Held.TestIDs, ReportPath: "/workspace/" + reproductionReportName, HelperDir: reproductionHelperDir})
 	if err := os.MkdirAll(l.helpers, 0o755); err != nil {
 		return l, fmt.Errorf("create the helper directory: %w", err)
@@ -474,14 +534,16 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 	logPath := activityLogPath(activityExecutionLogPath(ctx, a.logDirFor(input.RunWorkflowInput), fmt.Sprintf("review-repro-%d-%s.log", input.Held.Finding, input.Pass)))
 	before := func(attempt int) error {
 		// SC-012: the bytes mounted are the bytes the review held.
-		staged, err := evidence.ReadHostileFile(l.staged, reproduction.MaxHeldBytes)
-		if err != nil {
-			return unheld("read the staged reproduction: %v", err)
+		for _, c := range l.checks {
+			staged, err := evidence.ReadHostileFile(c.path, reproduction.MaxHeldBytes)
+			if err != nil {
+				return unheld("read the staged reproduction: %v", err)
+			}
+			if err := checkHeldHash(staged, c.sha256); err != nil {
+				return err
+			}
 		}
-		if err := checkHeldHash(staged, input.Held.SHA256); err != nil {
-			return err
-		}
-		_, err = recordActivityAttemptIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), attempt, input.kind(), command, time.Now().UTC().Format(time.RFC3339))
+		_, err := recordActivityAttemptIntent(ctx, a.checkpointDirFor(input.RunWorkflowInput), attempt, input.kind(), command, time.Now().UTC().Format(time.RFC3339))
 		return err
 	}
 	before = a.leaseChecked(ctx, a.checkpointDirFor(input.RunWorkflowInput), before)
@@ -504,7 +566,7 @@ func (a *Activities) launchReproduction(ctx context.Context, input ReproductionR
 			return a.runWithRetriesFn()(launchCtx, l.scratch, logPath, 1, before, after, command[0], command[1:]...)
 		}
 		mounted := withWorkspaceMasks(withInputMounts(relaunchUnstartedOnly(launchCtx), sandbox.InputMount{Source: l.helpers, Target: "reproduction"}),
-			[]sandbox.WorkspaceMask{{Source: l.staged, Target: input.Held.Path}})
+			l.masks)
 		// nil relay: a reproduction calls no model and carries no credential.
 		return a.runSandboxWithRetries(mounted, onScratch, logPath, a.verifyMaxAttemptsFor(input.RunWorkflowInput), before, after, nil, registrySpec, composeSpec, nil, nil, command[0], command[1:]...)
 	})
@@ -554,6 +616,14 @@ func capExceededReproduction(input ReproductionRunInput, result runner.Result, r
 // classifyReproduction reads the launch's report from the scratch worktree
 // and has the runner classify it.
 func classifyReproduction(l reproductionLaunch, input ReproductionRunInput, result runner.Result, res ReproductionRunResult) (ReproductionRunResult, error) {
+	if l.group {
+		// The verify command's exit status alone is the verdict.
+		res.Run.Outcome, res.Run.ExitCode, res.Run.LogPath = string(reproduction.OutcomeFailed), result.ExitCode, result.LogPath
+		if result.ExitCode == 0 {
+			res.Run.Outcome = string(reproduction.OutcomePassed)
+		}
+		return res, nil
+	}
 	report, err := evidence.ReadHostileFile(filepath.Join(l.scratch, reproductionReportName), maxReproductionReport)
 	if err != nil {
 		report = nil

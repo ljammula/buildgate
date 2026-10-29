@@ -943,6 +943,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	}
 	writeNotesSection(&b, r.Notes)
 	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
+	b.WriteString(renderChallengeMarkdown(r.Challenge))
 	writeRepoGatesSection(&b, r)
 	writeChangedFilesAndDependencies(&b, r)
 	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
@@ -1327,4 +1328,43 @@ func invalidateStoredReleaseDecision(dataDir, project, runID, reason string) {
 	if err := release.InvalidateDecision(dataDir, project, runID, reason, time.Now().Format(time.RFC3339)); err != nil {
 		log.Printf("run %s: warning: could not invalidate release decision: %v", runID, err)
 	}
+}
+
+// renderChallengeMarkdown renders the "## Challenge" PR-body section (SC-022):
+// the committed tests (path and criterion), the red ones, and the notes (no
+// challenger role, no verdict and why, files held and not run, shape refusals,
+// collection not proven). Every value is cleaned like the review's; never a
+// file's content. nil renders nothing.
+func renderChallengeMarkdown(c *run.ChallengeRecord) string {
+	if c == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Challenge\n\n")
+	switch c.Verdict {
+	case run.ChallengeNoVerdict:
+		fmt.Fprintf(&b, "No verdict: %s.\n\n", handoff.CleanSentence(c.Cause))
+	case run.ChallengeRed:
+		b.WriteString("Held tests that fail on this change (not committed):\n\n")
+	default:
+		if c.Rerun {
+			b.WriteString("The held tests of the earlier challenge pass on this change.\n\n")
+		} else {
+			b.WriteString("Tests committed on this branch by the factory:\n\n")
+		}
+	}
+	for _, f := range c.Files {
+		if (c.Verdict == run.ChallengeGreen && f.Verdict != run.ChallengeGreen) || (c.Verdict == run.ChallengeRed && f.Verdict != run.ChallengeRed) {
+			continue
+		}
+		if c.Verdict == run.ChallengeNoVerdict || f.Refused != "" {
+			continue
+		}
+		fmt.Fprintf(&b, "- `%s` (%s)\n", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion))
+	}
+	for _, note := range c.Notes {
+		fmt.Fprintf(&b, "- Note: %s\n", handoff.CleanSentence(note))
+	}
+	b.WriteString("\n")
+	return b.String()
 }

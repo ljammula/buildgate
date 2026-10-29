@@ -10,6 +10,20 @@
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,
+  "challenge": true,
+  "challenge_answers": 2,
+  "challenge_criteria": 3,
+  "challenge_held": [
+    {
+      "criterion": "AC-1",
+      "host_path": "<DATA_DIR>/runs/golden-quarantined/challenge/0/edge_test.go",
+      "path": "edge_test.go",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "challenge_round": true,
+  "challenge_spec_path": "<DATA_DIR>/runs/<RUN_ID>/challenge-spec.snapshot.md",
+  "challenge_spec_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
   "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
   "code_review_policy": "advisory",
   "compose_services_allowed_registries": [

@@ -5,6 +5,8 @@ import (
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 
 	"go.temporal.io/sdk/activity"
@@ -168,7 +170,7 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 
 	result = CollectedEvidence{
 		ResultSHA:    resultSHA,
-		ChangedFiles: evidence.UnionSorted(committedChanged, uncommittedChanged),
+		ChangedFiles: setAsideChallengeFiles(input.WorkspacePath, resultSHA, evidence.UnionSorted(committedChanged, uncommittedChanged), input.SetAside),
 		Committed:    committed,
 	}
 	packageLockChanges, err := runner.PackageLockDependencyChanges(input.WorkspacePath, input.BaseSHA, result.ChangedFiles)
@@ -240,4 +242,31 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 	}
 
 	return result, nil
+}
+
+// setAsideChallengeFiles drops from changed each file of set that the result
+// commit holds with exactly the pinned SHA-256: the factory's own committed
+// challenge files (SC-022), set aside by hash and never by path, so a file
+// of the same path with any other content is judged like any changed file.
+func setAsideChallengeFiles(dir, resultSHA string, changed []string, set []run.ChallengeFile) []string {
+	if len(set) == 0 {
+		return changed
+	}
+	pinned := make(map[string]string, len(set))
+	for _, f := range set {
+		pinned[f.Path] = f.SHA256
+	}
+	kept := make([]string, 0, len(changed))
+	for _, p := range changed {
+		if want, ok := pinned[p]; ok && want != "" {
+			if content, existed, err := runner.GitShowFile(dir, resultSHA, p); err == nil && existed {
+				sum := sha256.Sum256([]byte(content))
+				if hex.EncodeToString(sum[:]) == want {
+					continue
+				}
+			}
+		}
+		kept = append(kept, p)
+	}
+	return kept
 }

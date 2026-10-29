@@ -1217,6 +1217,37 @@ structured report on the host. A copy that cannot be held, no longer matches
 its hash before a launch, or whose mount is refused halts the run with the
 unresolved cause `reproduction_unheld`.
 
+### The challenger
+
+A request's ticket is challenged once (SC-022): after every gate and the code
+review passed, with the review giving a verdict and the change within the
+size caps, the first such run of the ticket launches the `challenger` role
+(progress stage and attempt kind `challenge`, script `agent/pi/scripts/challenge.py`)
+on a scratch worktree of the result commit, discarded afterwards. The job is
+given the approved spec (re-hashed against the hash `spec_review` approved)
+with the read-back answers appended and the list of changed paths, and none of
+the build's session, handoff, notes or review findings; it reads the base
+commit's instruction files. With no `roles.challenger` no job runs and the
+pull request says so. A bare `factoryd -ticket` run, a restack's replay run
+and a carved ticket's replay run never challenge.
+
+| Step | What the factory does |
+|---|---|
+| Hold | The job writes at most 5 new test files in the repository's own framework, each with a header line `buildgate-challenge: AC-<n>` or `buildgate-challenge: answer-<n>` in its first 5 lines. The host takes the new files from git, keeps those that are a new clean relative path matching `test_patterns`, not tracked (case-folded), not an instruction, `.factory/` or protected path, of at most 64 KiB, copies each once to `<run dir>/challenge/` (mode 0444) and pins its SHA-256. A refused file is a note naming the rule; a file with no valid header is held, not run, and a note |
+| Run | Each held file runs in a gate sandbox on a scratch worktree of the result commit (the run's image, setup commands, `.factory/`, registry proxy, no model route), mounted read-only after its hash is checked. A file a reproduction runner covers (Go, Vitest, pytest, Maven Surefire, Minitest) runs under that runner's command: every ID passed is green, a failed ID red, a compile or collection error or a missing report a broken challenge (a note, no round). Other files run together under the repository's `verify_command`, whose exit status is the verdict, with a note that collection is not proven. A red result is run once more as a separate launch and is red only if both are; red then green is advice |
+| Green | The factory commits the green files as a child of the result commit, re-reading each from the commit against its pinned hash; that commit is the run's result. `diff_scope` sets the files aside by their pinned hash, never by path |
+| Red | The run is judged and released as usual; the record carries each red file (path, criterion, failing tests, at most 20 lines each). One challenge round follows once the pull request is open: a build on the run's branch with the ticket's unchanged spec on the execution role's model, given the failing files as its `-earlier-attempt` record (paths, criteria and failing tests, never content), with the held files mounted read-only. It is judged by every gate and a fresh review and the held files run again on it: accepted with a green challenge it is pushed and replaces the run (one comment); any other outcome leaves the run, restores the branch and posts the advice (path, criterion and the build's one-line reason) |
+| No verdict | A launch that never started, a copy, hash or mount failure, a spec that no longer matches its hash, and a job that handed over nothing are a stated cause on the record (`challenge.cause`) and a note in the pull request; nothing halts |
+
+Every later build of the ticket (a corrective, PR-review, CI or advice round, a
+retry, a resume) runs the held files again on its result: the record and a pull
+request note, never a round. The challenge round counts against neither
+`review_corrective_rounds` nor `max_review_rounds`. The pull request body's
+**Challenge** section lists the committed tests (path, criterion), the red
+tests and the notes. Known limits: a failing test is recorded with its name and
+kind, not its assertion text; files no runner covers run together under the
+verify command.
+
 | Restriction | Why |
 |---|---|
 | No `sandbox_image` key | The API's `-api-allowed-sandbox-images` allowlist check happens in `serve` before this file is read — a repo-committed image would bypass it. |
@@ -1587,6 +1618,10 @@ roles:
   two differently-named routes to the identical real upstream still
   count as one backend -- is refused outright unless
   `roles.review.allow_shared_model: true` waives it.
+- `roles.challenger` (optional, the keys of `roles.review`) names the model,
+  thinking level and harness of the challenger job (SC-022, "The
+  challenger"); unset, no challenger job runs. `quickstart` writes it with
+  `gpt-6.1-terra` when the route configures that model.
   `allow_shared_model` set with no `routes:`/`models:` configured at all
   is refused too, naming the key, rather than silently doing nothing.
 - A model's `extra_json` may not set `id`, `api`, or `baseUrl` at all, nor

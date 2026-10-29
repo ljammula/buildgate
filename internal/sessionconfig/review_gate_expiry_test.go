@@ -149,3 +149,22 @@ func TestRetiredReviewReproductionsKeyIsRefused(t *testing.T) {
 		t.Fatal("retired review_reproductions key was accepted")
 	}
 }
+
+// roles.challenger (SC-022) is an ordinary role: it loads, names a model the
+// routes configure, and is absent by default.
+func TestChallengerRoleIsValidatedLikeTheOthers(t *testing.T) {
+	if DefaultSettings().Roles != nil && DefaultSettings().Roles.Challenger != nil {
+		t.Error("a challenger role is set by default")
+	}
+	cfg, err := Load(writeConfig(t, "roles:\n  challenger:\n    model: terra\n    thinking: high\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s, err := cfg.ApplySettings(DefaultSettings())
+	if err != nil || s.Roles == nil || s.Roles.Challenger == nil || s.Roles.Challenger.Model != "terra" {
+		t.Fatalf("settings = %+v, %v; want roles.challenger read", s.Roles, err)
+	}
+	if _, err := Load(writeConfig(t, "roles:\n  challenger:\n    nonsense: 1\n")); err == nil {
+		t.Error("an unknown roles.challenger key was accepted")
+	}
+}

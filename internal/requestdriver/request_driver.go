@@ -1076,6 +1076,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 }
 
 func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, reason string, idx int, now time.Time) error {
+	noteChallenge(ticket, runRecord)
 	switch runRecord.State {
 	case run.StateAccepted:
 		if handled, err := handleOversizedRun(dataDir, r, runRecord, now); handled {
@@ -1756,6 +1757,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if err != nil {
 			return true, fmt.Errorf("request %s: ticket %d: load quarantined %s run %q: %w", r.ID, ticket.Index, plan.label, loadID, err)
 		}
+		noteChallenge(ticket, nextRun)
 		if !plan.eligible(nextRun) {
 			// Quarantined again, but with nothing a further round of this
 			// kind could fix: a check a build is not told of failed this
@@ -1797,7 +1799,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 // PR-review round (runRoundAttempt) is not built here, and stays on the
 // role's model.
 func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string) ([]string, error) {
-	return correctiveBuildArgs(dataDir, r, ticket, cfg, specPath, roundID, branch, diffBase, false)
+	return correctiveBuildArgs(dataDir, r, ticket, cfg, specPath, roundID, branch, diffBase, false, false)
 }
 
 // correctiveBuildArgs is BuildCorrectiveArgs. onOpenPR is true for an advice
@@ -1806,9 +1808,12 @@ func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Tick
 // forced off and it gets no -pr-closes-issue or -pr-base, and, not being
 // recovery from a failure, it runs on the execution role's model, never the
 // escalation.
-func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR bool) ([]string, error) {
+func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR, challengeRound bool) ([]string, error) {
 	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath)
 	if err != nil {
+		return nil, err
+	}
+	if err := withChallenge(entry, dataDir, r, ticket, challengeRound); err != nil {
 		return nil, err
 	}
 	if onOpenPR {
@@ -2462,6 +2467,9 @@ func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket,
 	}
 	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath)
 	if err != nil {
+		return nil, err
+	}
+	if err := withChallenge(entry, dataDir, r, ticket, false); err != nil {
 		return nil, err
 	}
 	if escalated {

@@ -450,64 +450,58 @@
       }
     ]
   },
-  "review_reproduction_rechecks": [
-    {
-      "path": "every-field path",
-      "sha256": "every-field sha256",
-      "runner": "every-field runner",
-      "test_ids": [
-        "every-field test_ids"
-      ],
-      "refused": "every-field refused",
-      "runs": [
-        {
-          "pass": "every-field pass",
-          "commit": "every-field commit",
-          "outcome": "every-field outcome",
-          "tests": {
-            "every-field key": "every-field tests"
-          },
-          "exit_code": 3,
-          "log_path": "every-field log_path",
-          "report_sha256": "every-field report_sha256",
-          "reproduction_sha256": "every-field reproduction_sha256",
-          "cap_exceeded": true
-        }
-      ],
-      "verdict": "every-field verdict",
-      "reason": "every-field reason",
-      "recheck": {
-        "run_id": "every-field run_id",
-        "finding": 3,
+  "challenge": {
+    "verdict": "every-field verdict",
+    "cause": "every-field cause",
+    "rerun": true,
+    "files": [
+      {
         "path": "every-field path",
-        "refused": "every-field refused",
         "sha256": "every-field sha256",
         "host_path": "every-field host_path",
-        "spec_line": 3,
+        "criterion": "every-field criterion",
+        "runner": "every-field runner",
         "test_ids": [
           "every-field test_ids"
         ],
-        "runner": "every-field runner",
-        "holds_literal": true
+        "refused": "every-field refused",
+        "not_run": "every-field not_run",
+        "verdict": "every-field verdict",
+        "failures": [
+          {
+            "test": "every-field test",
+            "assertion": "every-field assertion"
+          }
+        ]
       }
-    }
-  ],
-  "review_reproduction_rechecks_given": [
-    {
-      "run_id": "every-field run_id",
-      "finding": 3,
-      "path": "every-field path",
-      "refused": "every-field refused",
-      "sha256": "every-field sha256",
-      "host_path": "every-field host_path",
-      "spec_line": 3,
-      "test_ids": [
-        "every-field test_ids"
-      ],
-      "runner": "every-field runner",
-      "holds_literal": true
-    }
-  ],
+    ],
+    "notes": [
+      "every-field notes"
+    ],
+    "committed_sha": "every-field committed_sha",
+    "launches": [
+      {
+        "pass": "every-field pass",
+        "commit": "every-field commit",
+        "outcome": "every-field outcome",
+        "tests": {
+          "every-field key": "every-field tests"
+        },
+        "exit_code": 3,
+        "log_path": "every-field log_path",
+        "report_sha256": "every-field report_sha256",
+        "reproduction_sha256": "every-field reproduction_sha256",
+        "cap_exceeded": true
+      }
+    ],
+    "snapshot_sha256": "every-field snapshot_sha256",
+    "masked_paths": [
+      "every-field masked_paths"
+    ],
+    "removed_paths": [
+      "every-field removed_paths"
+    ]
+  },
   "baseline_verify": {
     "command": "every-field command",
     "base_sha": "every-field base_sha",

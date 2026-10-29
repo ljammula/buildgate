@@ -204,6 +204,8 @@ func roleConfig(s sessionconfig.Settings, r Role) *sessionconfig.RoleConfig {
 		return s.Roles.Execution
 	case RoleReview:
 		return s.Roles.Review
+	case RoleChallenger:
+		return s.Roles.Challenger
 	default:
 		return nil
 	}

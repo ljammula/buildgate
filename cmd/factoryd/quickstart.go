@@ -1807,13 +1807,23 @@ func (b *quickstartConfigBuild) askHarness(route string) error {
 // operator who accidentally reuses a builder's own model as its
 // reviewer, which cannot happen here since there is only ever one model
 // to begin with.
-func quickstartSingleModelRoles(model string) *sessionconfig.Roles {
-	return &sessionconfig.Roles{
+func quickstartSingleModelRoles(model, modelID string) *sessionconfig.Roles {
+	roles := &sessionconfig.Roles{
 		Planning:  &sessionconfig.RoleConfig{Model: model},
 		Execution: &sessionconfig.RoleConfig{Model: model},
 		Review:    &sessionconfig.RoleConfig{Model: model, AllowSharedModel: true},
 	}
+	// The challenger role (SC-022) is written only when its model is the one
+	// the route configures; otherwise it stays unset and no challenger runs.
+	if modelID == challengerModelID {
+		roles.Challenger = &sessionconfig.RoleConfig{Model: model, AllowSharedModel: true}
+	}
+	return roles
 }
+
+// challengerModelID is the model roles.challenger takes when the route
+// configures it.
+const challengerModelID = "gpt-6.1-terra"
 
 // quickstartConfigBuild is what the route cases of one quickstartBuildConfig
 // call share: its parameters, the config being filled and the credential
@@ -2099,7 +2109,7 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 			ContextWindow: contextWindow,
 		},
 	}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	return nil, nil, nil
 }
 
@@ -2172,7 +2182,7 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 			ContextWindow: contextWindow,
 		},
 	}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	return nil, nil, nil
 }
 
@@ -2411,7 +2421,7 @@ func (b *quickstartConfigBuild) copilotRoute() (*sessionconfig.Config, []string,
 		copilotModel.API = workerAPI
 	}
 	b.cfg.Models = map[string]sessionconfig.Model{modelKey: copilotModel}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	return nil, nil, nil
 }
 
@@ -2507,7 +2517,7 @@ func (b *quickstartConfigBuild) chatGPTCodexRoute() (*sessionconfig.Config, []st
 		Routes:        []string{routeName},
 		ContextWindow: contextWindow,
 	}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	if modelID == chatGPTCodexDefaultModelID {
 		// The Luna profile: the default model declares its reasoning
 		// levels (Pi clamps an undeclared xhigh/max silently) and plans,

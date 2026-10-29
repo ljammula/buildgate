@@ -119,6 +119,8 @@ func replayConflicts(f runFlags, carved bool) []string {
 		{"-pr-base", *f.prBase != "" && !carved},
 		{"-repository", *f.repository != ""},
 		{"-run-id", *f.runID != ""},
+		{"-challenge", *f.challenge},
+		{"-challenge-held", *f.challengeHeld != ""},
 	} {
 		if c.on {
 			set = append(set, c.name)
@@ -302,6 +304,12 @@ type runFlags struct {
 	orderGroup                   *int
 	configPath                   *string
 	scopeApproval                *string
+	challenge                    *bool
+	challengeSpec                *string
+	challengeCriteria            *int
+	challengeAnswers             *int
+	challengeHeld                *string
+	challengeRound               *bool
 }
 
 // newRunFlags builds `factoryd <run>`'s FlagSet in isolation from parsing,
@@ -341,6 +349,12 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts it with Docker if it is down; with FACTORYD_AUTOSTART=0 the address is required. An unreachable server halts the run")
 	f.repository = flags.String("repository", "", "repository name; runs that pass the same name run one at a time")
 	f.runID = flags.String("run-id", "", "internal: the run's id, set by serve for a run it starts")
+	f.challenge = flags.Bool("challenge", false, "internal: after every gate and the review, run the challenger job once on the result (SC-022); a request's ticket build sets it")
+	f.challengeSpec = flags.String("challenge-spec", "", "internal: the request's approved spec.md with the read-back answers appended, which the challenger is given")
+	f.challengeCriteria = flags.Int("challenge-criteria", 0, "internal: how many numbered acceptance criteria a challenge file's header may cite")
+	f.challengeAnswers = flags.Int("challenge-answers", 0, "internal: how many numbered read-back answers a challenge file's header may cite")
+	f.challengeHeld = flags.String("challenge-held", "", "internal: JSON list of the held challenge files of this ticket that the build runs again on its result")
+	f.challengeRound = flags.Bool("challenge-round", false, "internal: this build is the ticket's challenge round: the held files are mounted read-only, and a green result commits them")
 	f.priorRun = flags.String("prior-run", "", "id of an accepted run that this run follows in a multi-slice chain")
 	f.skipProjectCheck = flags.Bool("skip-project-check", false, "skip the project-bootstrap preflight")
 	f.architectureRequiredSections = flags.String("architecture-required-sections", "", "comma-separated section headings the project-bootstrap preflight requires in ARCHITECTURE.md, in order")
@@ -448,6 +462,12 @@ type ticketRun struct {
 	reviewOK                              bool
 	execSelection                         *modelrole.Selection
 	reviewSelection                       *modelrole.Selection
+	challengerSelection                   *modelrole.Selection
+	challengerThinking                    string
+	challengerHarnessName                 string
+	challengeSpecSnapshot                 string
+	challengeSpecSHA256                   string
+	challengeHeld                         []run.ChallengeFile
 	sandboxDocker                         *string
 	sandboxUser                           *string
 	sandboxWorkerUID                      *int
@@ -562,6 +582,9 @@ func runMainWithReady(dp *deps, lifecycleCtx context.Context, args []string, onR
 		return err
 	}
 	if err := tr.snapshotSpec(); err != nil {
+		return err
+	}
+	if err := tr.snapshotChallengeInputs(); err != nil {
 		return err
 	}
 	if err := tr.checkScope(); err != nil {
@@ -861,7 +884,7 @@ func (tr *ticketRun) selectRoleRoutes() error {
 		tr.reviewOK = true
 		tr.reviewThinking = revSel.Thinking
 	}
-	return nil
+	return tr.resolveChallenger()
 }
 
 // applyProjectDefaults requires the ticket, workspace and spec, then applies
@@ -2651,6 +2674,18 @@ func (tr *ticketRun) dispatch() error {
 			Thinking:               tr.executionThinking,
 			ReviewThinking:         tr.reviewThinking,
 			ReviewRelayPolicy:      reviewRelayPolicy,
+			Challenge:              *tr.rf.challenge,
+			ChallengeSpecPath:      tr.challengeSpecSnapshot,
+			ChallengeSpecSHA256:    tr.challengeSpecSHA256,
+			ChallengeCriteria:      *tr.rf.challengeCriteria,
+			ChallengeAnswers:       *tr.rf.challengeAnswers,
+			ChallengerThinking:     tr.challengerThinking,
+			ChallengerHarness:      tr.challengerHarnessName,
+			ChallengeHeld:          tr.challengeHeld,
+			ChallengeRound:         *tr.rf.challengeRound,
+		}
+		if tr.challengerSelection != nil {
+			opts.ChallengerRelayPolicy = &tr.challengerSelection.Policy
 		}
 		if opts.Repository != "" {
 			return runViaRepositoryOwner(tr.dp, tr.lifecycleCtx, temporalClient, tr.r, opts)

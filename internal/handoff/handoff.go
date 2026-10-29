@@ -114,6 +114,11 @@ type Document struct {
 	// review, present only in the record an advice round's build is given
 	// (Advice): each value cut and cleaned like every other value here.
 	AdviceFindings []AdviceFinding `json:"advice_findings,omitempty"`
+	// ChallengeFiles are the held challenge files that failed on an accepted
+	// run (SC-022), present only in the record a challenge round's build is
+	// given: path, the criterion cited and each failing test, never a
+	// file's content.
+	ChallengeFiles []ChallengeFile `json:"challenge_files,omitempty"`
 	// CIFailure is the required CI check that failed on the pull request,
 	// present only in the record a CI round's build is given (CI).
 	CIFailure *CIFailure `json:"ci_failure,omitempty"`
@@ -235,6 +240,70 @@ func Advice(r *run.Run) Document {
 		})
 	}
 	return doc
+}
+
+// ChallengeFile is one failing challenge file as the challenge round's build
+// is told it. Every string is cleaned.
+type ChallengeFile struct {
+	Path      string   `json:"path"`
+	Criterion string   `json:"criterion,omitempty"`
+	Failures  []string `json:"failures,omitempty"`
+}
+
+// maxChallengeFailureLines bounds the failing tests listed per challenge file.
+const maxChallengeFailureLines = 20
+
+// Challenge is the record a challenge round's build is given about r, an
+// accepted run whose challenge was red: each failing held file's path, the
+// criterion it cites and each failing test with its assertion, one cleaned
+// line each. Built from the run record alone; never saved as a handoff.
+func Challenge(r *run.Run) Document {
+	doc := Document{
+		SchemaVersion: SchemaVersion, RunID: r.ID, Ticket: r.Ticket, State: string(r.State),
+		BaseSHA: clean(r.BaseSHA, maxNameLen), ResultSHA: clean(r.ResultSHA, maxNameLen),
+		ChangedFiles: cleanList(r.ChangedFiles, maxFilesListed, maxNameLen),
+	}
+	if r.Challenge == nil {
+		return doc
+	}
+	for _, f := range r.Challenge.Files {
+		if f.Verdict != run.ChallengeRed || len(doc.ChallengeFiles) == maxAdviceFindings {
+			continue
+		}
+		cf := ChallengeFile{Path: clean(f.Path, maxNameLen), Criterion: clean(f.Criterion, maxWordLen)}
+		for _, fl := range f.Failures {
+			if len(cf.Failures) == maxChallengeFailureLines {
+				break
+			}
+			line := fl.Test
+			if fl.Assertion != "" {
+				line += ": " + fl.Assertion
+			}
+			cf.Failures = append(cf.Failures, clean(line, maxSentenceLen))
+		}
+		doc.ChallengeFiles = append(doc.ChallengeFiles, cf)
+	}
+	return doc
+}
+
+// challengeIntro opens the challenge section.
+const challengeIntro = "That attempt passed every check and was accepted. The factory then ran the tests below, which another model wrote from the approved specification alone, and they failed on it. Each file is mounted read-only in your workspace at its path: read it, never edit it. Decide for each failure whether the code is wrong or the test is: fix the code where it is wrong; where the test is wrong, leave the code as it is and say why in one line in your notes. Every check, and a fresh review, runs again on what this build commits, and the tests run again on it.\n\n"
+
+// line is the challenge file's one list line.
+func (f ChallengeFile) line() string {
+	cited := ""
+	if f.Criterion != "" {
+		cited = " (" + f.Criterion + ")"
+	}
+	failures := ""
+	if len(f.Failures) > 0 {
+		quoted := make([]string, len(f.Failures))
+		for i, s := range f.Failures {
+			quoted[i] = quote(s)
+		}
+		failures = ": failing " + strings.Join(quoted, "; ")
+	}
+	return fmt.Sprintf("- `%s`%s%s\n", f.Path, cited, failures)
 }
 
 // adviceIntro opens the advice section: what the findings are and what the
@@ -524,6 +593,14 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
+	if len(d.ChallengeFiles) > 0 {
+		b.WriteString("## Tests written against the accepted change that fail\n\n")
+		b.WriteString(challengeIntro)
+		for _, f := range d.ChallengeFiles {
+			b.WriteString(f.line())
+		}
+		b.WriteString("\n")
+	}
 	if len(d.AdviceFindings) > 0 {
 		b.WriteString("## A reviewer's concerns about the accepted change\n\n")
 		b.WriteString(adviceIntro)
@@ -609,4 +686,21 @@ func fileList(files []string) string {
 // value cannot close its own quotation.
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, "'") + `"`
+}
+
+// NoteLine is the first line of the build agent's retained notes of the run in
+// runDir (a heading is not one), cleaned as every value here is: what a
+// challenge round's build said about a failing test it would not make pass. ""
+// when the run kept no notes.
+func NoteLine(runDir string) string {
+	text, ok := evidence.ReadRetainedAgentNotes(runDir)
+	if !ok {
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			return clean(line, maxSentenceLen)
+		}
+	}
+	return ""
 }

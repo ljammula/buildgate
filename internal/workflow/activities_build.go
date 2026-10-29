@@ -363,11 +363,12 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 				args...,
 			)
 		}
-		skills, err := a.boundSkills(relayRoleExecution, input.Skills)
+		skills, launchCtx, unmount, err := a.buildLaunchInputs(runCtx, input)
+		defer unmount()
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(forBuildLaunch(launchCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
 	})
 	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
 	runErr = withModelRouteFailure(runErr, subResult)

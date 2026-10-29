@@ -111,6 +111,16 @@ type QueueEntry struct {
 	// earlier build's unmerged instruction text as genuine. Empty on a
 	// ticket's first build: the run then records its own base.
 	InstructionBase string `json:"instruction_base,omitempty"`
+	// Challenge..ChallengeRound are forwarded as the -challenge flags
+	// (SC-022): Challenge and its spec and counts for a ticket's first
+	// reviewed build; ChallengeHeld, the manifest of held files, for every
+	// later build; ChallengeRound for the ticket's challenge round.
+	Challenge         bool   `json:"challenge,omitempty"`
+	ChallengeSpecPath string `json:"challenge_spec_path,omitempty"`
+	ChallengeCriteria int    `json:"challenge_criteria,omitempty"`
+	ChallengeAnswers  int    `json:"challenge_answers,omitempty"`
+	ChallengeHeld     string `json:"challenge_held,omitempty"`
+	ChallengeRound    bool   `json:"challenge_round,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request
 	// execution-role harness pick (request.Request.Harnesses["execution"],

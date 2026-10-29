@@ -209,6 +209,9 @@ type RouteCredentials struct {
 const (
 	relayRoleExecution = "execution"
 	relayRoleReview    = "review"
+	// relayRoleChallenger is the role name passed for a routed
+	// ChallengerRelayPolicy (SC-022).
+	relayRoleChallenger = "challenger"
 )
 
 // checkAndResolveRoute is the check-then-resolve half of the routes:

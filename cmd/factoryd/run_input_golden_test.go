@@ -75,6 +75,15 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 	if err := (&run.Run{ID: "golden-quarantined", RequestID: "req-golden", TicketIndex: 1, ProjectPath: workspace}).Save(dataDir); err != nil {
 		t.Fatalf("save the quarantined run: %v", err)
 	}
+	// A held challenge file of the quarantined run, for -challenge-held.
+	held := filepath.Join(dataDir, "runs", "golden-quarantined", run.ChallengeDirName, "0", "edge_test.go")
+	if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
+		t.Fatalf("create the held file's directory: %v", err)
+	}
+	if err := os.WriteFile(held, []byte("package p\n"), 0o444); err != nil {
+		t.Fatalf("write the held file: %v", err)
+	}
+	heldManifest := fmt.Sprintf(`[{"path":"edge_test.go","sha256":"%s","host_path":%q,"criterion":"AC-1"}]`, strings.Repeat("a", 64), held)
 	head, err := runGit(t, workspace, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("read the workspace's head: %v", err)
@@ -105,6 +114,9 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
+		"-challenge", "-challenge-spec", write("challenge-spec.md", "# Approved spec\n\n- `Parse` returns a map.\n"),
+		"-challenge-criteria", "3", "-challenge-answers", "2",
+		"-challenge-held", write("held.json", heldManifest), "-challenge-round",
 		"-resume-session-of", "golden-quarantined",
 	}
 }
@@ -288,6 +300,16 @@ func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 	address, placeholders := runInputGoldenRunWith(t, "unused", func(workspace, inputs string, flags []string) ([]string, [][2]string) {
 		onto, head := replayedBranch(t, workspace, "buildgate/req-golden/t2-restack1")
 		for _, refused := range []string{"-earlier-attempt", "-run-id", "-resume-session-of"} {
+			if i := slices.Index(flags, refused); i >= 0 {
+				flags = slices.Delete(flags, i, i+2)
+			}
+		}
+		for _, refused := range []string{"-challenge", "-challenge-round"} {
+			if i := slices.Index(flags, refused); i >= 0 {
+				flags = slices.Delete(flags, i, i+1)
+			}
+		}
+		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
 			}

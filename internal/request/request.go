@@ -209,6 +209,13 @@ type Ticket struct {
 	// learns the round was interrupted and settles it before anything else,
 	// never starting a second one.
 	Advice *TicketAdvice `json:"advice,omitempty"`
+	// Challenged is set once a run of the ticket ran the challenger job
+	// (SC-022), so no later build starts another; ChallengeRunID is that run,
+	// whose record holds the held files every later build runs again, and
+	// ChallengeRounded that the ticket's one challenge round was started.
+	Challenged       bool   `json:"challenged,omitempty"`
+	ChallengeRunID   string `json:"challenge_run_id,omitempty"`
+	ChallengeRounded bool   `json:"challenge_rounded,omitempty"`
 	// Retarget is the last retarget of the ticket's pull request the factory
 	// made (`gh pr edit --base`, off a merged earlier ticket). A base GitHub
 	// changed on its own is never recorded here.
@@ -277,6 +284,12 @@ const RestackRoundKind = "restack"
 // review_advice_rounds per ticket, each after a pushed one, counted against
 // neither round budget.
 const AdviceRoundKind = "advice"
+
+// ChallengeRoundKind marks a Round as the ticket's one challenge round
+// (SC-022): a build on the run's branch, given the held challenge files that
+// failed on the accepted result. It counts against neither
+// review_corrective_rounds nor max_review_rounds.
+const ChallengeRoundKind = "challenge"
 
 // Round is one corrective build run against a ticket's own branch, in
 // response either to a batch of newly-surfaced unresolved PR review

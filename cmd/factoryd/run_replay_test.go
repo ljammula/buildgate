@@ -81,6 +81,8 @@ func TestReplayFlagRefusals(t *testing.T) {
 		{"-pr-base", "main"},
 		{"-repository", "acme"},
 		{"-run-id", "served-1"},
+		{"-challenge"},
+		{"-challenge-held", "held.json"},
 		{"-on-branch", ""},
 		{"-diff-base", ""},
 		{"-diff-base", head},

@@ -1165,6 +1165,9 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if err != nil {
 		return roundAttempt{}, err
 	}
+	if err := withChallenge(entry, dataDir, r, *ticket, false); err != nil {
+		return roundAttempt{}, err
+	}
 	// A round opens no PR of its own (roundCfg.OpenPullRequest above), so
 	// it has no draft PR body for -pr-closes-issue to land in and no base
 	// to stack on.

@@ -20,6 +20,9 @@ const (
 	RolePlanning  Role = "planning"
 	RoleExecution Role = "execution"
 	RoleReview    Role = "review"
+	// RoleChallenger is the job that writes edge-case tests against a built
+	// change (SC-022); no roles.challenger means no challenger job.
+	RoleChallenger Role = "challenger"
 )
 
 // Stage is a build pipeline stage name, matching the stage constants this
@@ -56,7 +59,7 @@ func ForStage(stage Stage) Role {
 // ForStage's treatment of an unrecognized Stage.
 func isValidRole(r Role) bool {
 	switch r {
-	case RolePlanning, RoleExecution, RoleReview:
+	case RolePlanning, RoleExecution, RoleReview, RoleChallenger:
 		return true
 	default:
 		return false

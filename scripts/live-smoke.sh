@@ -278,6 +278,21 @@ EOF_FIXTURE
 		problems="$problems
 Temporal path expected but run.json has no temporal_workflow_id (did the run reach Temporal?)"
 	fi
+	# SC-022: an accepted run of a request's ticket carries a challenge record
+	# with a verdict or a stated no-verdict cause. A single-ticket run (no
+	# request_id) is never challenged and is not checked.
+	if [ "$state" = "accepted" ] && ! python3 -c '
+import json, sys
+r = json.load(open(sys.argv[1]))
+if not r.get("request_id"):
+    sys.exit(0)
+c = r.get("challenge") or {}
+ok = c.get("verdict") in ("green", "red") or (c.get("verdict") == "no_verdict" and c.get("cause"))
+sys.exit(0 if ok else 1)
+' "$run_json" 2>/dev/null; then
+		problems="$problems
+an accepted request-ticket run has no challenge record with a verdict or a stated no-verdict cause (SC-022)"
+	fi
 	problems="$(printf '%s' "$problems" | sed '/^$/d')"
 	if [ -z "$problems" ]; then ok=1; else printf '%s\n' "$problems"; fi
 

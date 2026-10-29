@@ -526,6 +526,29 @@ type RunWorkflowInput struct {
 	// reproductions earlier runs' reviews held, each run once after the gates.
 	ReviewReproduction   bool               `json:"review_reproduction,omitempty"`
 	RecheckReproductions []run.RecheckEntry `json:"recheck_reproductions,omitempty"`
+	// Challenge is set by the request driver for a ticket's first build only
+	// (SC-022): after every gate and the review the challenger job runs once.
+	// ChallengeSpecPath is the run's snapshot of the approved spec with the
+	// read-back answers appended, ChallengeSpecSHA256 its hash when the
+	// snapshot was taken, ChallengeCriteria and ChallengeAnswers how many
+	// numbered criteria and answers a file's header may cite.
+	Challenge           bool   `json:"challenge,omitempty"`
+	ChallengeSpecPath   string `json:"challenge_spec_path,omitempty"`
+	ChallengeSpecSHA256 string `json:"challenge_spec_sha256,omitempty"`
+	ChallengeCriteria   int    `json:"challenge_criteria,omitempty"`
+	ChallengeAnswers    int    `json:"challenge_answers,omitempty"`
+	// ChallengerThinking, ChallengerHarness and ChallengerRelayPolicy are
+	// roles.challenger's resolved values, as the review's are; a nil policy
+	// with Challenge set means no challenger role is configured.
+	ChallengerThinking    string               `json:"challenger_thinking,omitempty"`
+	ChallengerHarness     string               `json:"challenger_harness,omitempty"`
+	ChallengerRelayPolicy *sandbox.RoutePolicy `json:"challenger_relay_policy,omitempty"`
+	// ChallengeHeld are the held files of the ticket's earlier challenge: a
+	// later build runs them again on its result (advice only), diff_scope sets
+	// them aside by their pinned hash, and with ChallengeRound a green result
+	// commits them and the round's build gets them mounted read-only.
+	ChallengeHeld  []run.ChallengeFile `json:"challenge_held,omitempty"`
+	ChallengeRound bool                `json:"challenge_round,omitempty"`
 }
 
 // ReplayInput is RunWorkflowInput.Replay: what a replay run's
@@ -825,8 +848,11 @@ type PostBuildResult struct {
 
 // CollectEvidenceInput is CollectEvidenceActivity's input.
 type CollectEvidenceInput struct {
-	WorkspacePath string `json:"workspace_path"`
-	BaseSHA       string `json:"base_sha"`
+	// SetAside are the committed challenge files diff_scope sets aside by
+	// their pinned hash (SC-022).
+	SetAside      []run.ChallengeFile `json:"set_aside,omitempty"`
+	WorkspacePath string              `json:"workspace_path"`
+	BaseSHA       string              `json:"base_sha"`
 	// BuildExitCode/VerifyExitCode gate the verification-output
 	// safety-net commit below: found live (review), committing
 	// verification's dirt unconditionally advanced HEAD even when build
@@ -1046,7 +1072,9 @@ type RunWorkflowResult struct {
 	// took no proof. Notes are policy.EvaluateRunResult.Notes
 	// (run.Run.Notes).
 	TestsRedOnBase *run.TestsRedOnBase `json:"tests_red_on_base,omitempty"`
-	Notes          []string            `json:"notes,omitempty"`
+	// Challenge is the run's challenge record (SC-022); nil when none ran.
+	Challenge *run.ChallengeRecord `json:"challenge,omitempty"`
+	Notes     []string             `json:"notes,omitempty"`
 }
 
 // BaselineVerifyResult is RunBaselineVerifyActivity's result for a run that
