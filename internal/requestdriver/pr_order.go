@@ -217,3 +217,60 @@ func mixedChallengeNotes(source *run.Run) []string {
 	}
 	return notes
 }
+
+// restackCarvedOntoPredecessor puts a carved ticket's commit on the head its
+// predecessor's branch has now, before the ticket is built. Carving fixes each
+// ticket's commit on the carved commit before it, and an advice or challenge
+// round on that earlier ticket moves its branch on; a ticket built on the old
+// commit would be judged without the fix, and its pull request would stack on
+// a branch holding commits its own head lacks. The ticket's files are carried
+// over unchanged when the earlier head left them alone (the commit is made
+// again on the head, from the source run's result); an earlier head that
+// changed one of them is a conflict, and the request parks in resume_review
+// with the reason, never builds a stale tree. parked is true when it parked.
+func restackCarvedOntoPredecessor(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) (parked bool, err error) {
+	o := ticket.Order
+	if o == nil || o.Commit == "" || ticket.Index <= o.First || ticket.Pushed() {
+		return false, nil
+	}
+	prev, err := TicketAt(r, ticket.Index-1)
+	if err != nil || prev.Order == nil || prev.Order.SourceRunID != o.SourceRunID || prev.PRHeadRunID() == "" {
+		return false, nil
+	}
+	headRun, err := run.Load(dataDir, prev.PRHeadRunID())
+	if err != nil || headRun.ResultSHA == "" || headRun.ResultSHA == o.Onto {
+		return false, nil
+	}
+	head := headRun.ResultSHA
+	park := func(why string) (bool, error) {
+		return true, parkRequest(dp, dataDir, r, fmt.Sprintf("carved ticket %d/%d cannot be stacked on ticket %d's branch, which moved on to %s: %s; its carved commit %s was not built on that head", ticket.Index, r.TicketCount, prev.Index, shortSHA(head), why, shortSHA(o.Commit)), now)
+	}
+	source, err := run.Load(dataDir, o.SourceRunID)
+	if err != nil {
+		return park(fmt.Sprintf("the run it was carved from cannot be read: %v", err))
+	}
+	files, err := dp.ChangedPaths(r.Workspace, o.Onto, o.Commit)
+	if err != nil {
+		return park(fmt.Sprintf("list the files it carries: %v", err))
+	}
+	moved, err := dp.ChangedPaths(r.Workspace, o.Onto, head)
+	if err != nil {
+		return park(fmt.Sprintf("list the files the earlier branch changed: %v", err))
+	}
+	for _, f := range files {
+		if slices.Contains(moved, f) {
+			return park(fmt.Sprintf("the earlier branch changed %s, which this ticket also carries", f))
+		}
+	}
+	message := fmt.Sprintf("%s of request %s", prorder.Order(o.Groups).Label(o.Group-1), r.ID)
+	commit, err := dp.CarveCommit(ctx, r.Workspace, head, source.ResultSHA, files, message)
+	if err != nil {
+		return park(fmt.Sprintf("commit it on that head: %v", err))
+	}
+	if err := dp.MoveBranch(r.Workspace, o.Branch, commit); err != nil {
+		return park(fmt.Sprintf("move its branch %s: %v", o.Branch, err))
+	}
+	log.Printf("request %s: ticket %d/%d: carved commit %s restacked onto %s as %s", r.ID, ticket.Index, r.TicketCount, shortSHA(o.Commit), shortSHA(head), shortSHA(commit))
+	o.Onto, o.Commit = head, commit
+	return false, r.Save(dataDir)
+}

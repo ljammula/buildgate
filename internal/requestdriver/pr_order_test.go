@@ -285,3 +285,62 @@ func TestCarvedFirstTicketCarriesTheMixedRunsChallengeFiles(t *testing.T) {
 		t.Errorf("first ticket's carve notes = %v, want one line for the red file and one for the broken file", first)
 	}
 }
+
+// A carved ticket is built on the head its predecessor's branch has now: an
+// earlier head that left its files alone gets its commit made again on it;
+// one that changed a file of it parks the request in resume_review.
+func TestCarvedTicketIsRestackedOntoItsPredecessorsMovedHead(t *testing.T) {
+	const moved = "9999999999999999999999999999999999999999"
+	for name, tc := range map[string]struct {
+		movedPaths []string
+		parked     bool
+	}{
+		"the earlier head left its files alone":     {[]string{"db/migrations/002.sql"}, false},
+		"the earlier head changed one of its files": {[]string{"app/main.go"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dp, _ := orderDeps(t)
+			dataDir, id := orderRequest(t)
+			advanceOrder(t, dp, dataDir, id, mixedTicketRunner(t, dataDir, id, "mixed-1"))
+			r := requestdrivertest.LoadRequest(t, dataDir, id)
+			first, second := &r.Tickets[0], &r.Tickets[1]
+			first.RunID = "carved-1"
+			if err := (&run.Run{ID: "carved-1", RequestID: id, TicketIndex: 1, Project: "app", State: run.StateAccepted, ResultSHA: moved}).Save(dataDir); err != nil {
+				t.Fatal(err)
+			}
+			oldCommit := second.Order.Commit
+			dp.changedPathsFn = func(_, base, result string) ([]string, error) {
+				if result == moved {
+					return tc.movedPaths, nil
+				}
+				return []string{"app/main.go"}, nil
+			}
+			var parent string
+			dp.carveCommitFn = func(_ context.Context, _, p, _ string, paths []string, _ string) (string, error) {
+				parent = p
+				return "7777777777777777777777777777777777777777", nil
+			}
+			var branchAt string
+			dp.moveBranchFn = func(_, _, sha string) error { branchAt = sha; return nil }
+			parked, err := requestdriver.RestackCarvedOntoPredecessor(dp, context.Background(), dataDir, r, second, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parked != tc.parked {
+				t.Fatalf("parked = %v, want %v (state %s, error %q)", parked, tc.parked, r.State, r.Error)
+			}
+			if tc.parked {
+				if r.State != request.StateResumeReview || !strings.Contains(r.Error, "app/main.go") {
+					t.Errorf("state %s error %q, want resume_review naming the file", r.State, r.Error)
+				}
+				if second.Order.Commit != oldCommit {
+					t.Errorf("a parked ticket's commit moved to %s", second.Order.Commit)
+				}
+				return
+			}
+			if parent != moved || branchAt != "7777777777777777777777777777777777777777" || second.Order.Onto != moved || second.Order.Commit != branchAt {
+				t.Errorf("committed on %s, branch at %s, order %+v; want the commit made again on the moved head and the branch on it", parent, branchAt, second.Order)
+			}
+		})
+	}
+}

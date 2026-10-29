@@ -948,6 +948,9 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if held, err := holdForEarlierTicket(dp, ctx, dataDir, r, idx, cfg, now); held || err != nil {
 		return err
 	}
+	if parked, err := restackCarvedOntoPredecessor(dp, ctx, dataDir, r, ticket, now); parked || err != nil {
+		return err
+	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
 	args, recordOf, onBranch, escalated, err := ticketBuildStart(dp, dataDir, r, ticket, cfg, resumeRunID, escalated)
 	if err != nil {
