@@ -40,6 +40,7 @@ func runInputGoldenConfig(t *testing.T) string {
 		"roles:\n" +
 		"  execution: { model: builder, thinking: medium, escalation: { model: builder, thinking: low } }\n" +
 		"  review: { model: reviewer, thinking: high }\n" +
+		"  challenger: { model: reviewer, thinking: low, harness: codex, allow_shared_model: true }\n" +
 		"registry_proxy_image: registry-proxy@sha256:" + strings.Repeat("c", 64) + "\n" +
 		"compose_services_memory: 3g\n" +
 		"compose_services_cpus: \"1.5\"\n" +

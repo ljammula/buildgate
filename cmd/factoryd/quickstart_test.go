@@ -2859,3 +2859,18 @@ func TestQuickstartRefusesARepositoryWithoutAgentsFileBeforeAnySetup(t *testing.
 		t.Fatalf("quickstart printed more than the repository line before refusing:\n%s", out.String())
 	}
 }
+
+// roles.challenger is written only when the route's model is the challenger's:
+// any other model leaves the role unset, so no challenger runs.
+func TestQuickstartSingleModelRolesWritesTheChallengerOnlyForItsModel(t *testing.T) {
+	roles := quickstartSingleModelRoles("local", challengerModelID)
+	if roles.Challenger == nil || roles.Challenger.Model != "local" || !roles.Challenger.AllowSharedModel {
+		t.Errorf("Challenger = %+v, want the route's model, shared allowed", roles.Challenger)
+	}
+	if roles.Execution == nil || roles.Review == nil || roles.Planning == nil {
+		t.Errorf("roles = %+v, want planning, execution and review", roles)
+	}
+	if other := quickstartSingleModelRoles("local", "some-other-model"); other.Challenger != nil {
+		t.Errorf("Challenger = %+v for another model, want unset", other.Challenger)
+	}
+}
