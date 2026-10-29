@@ -29,3 +29,25 @@ func TestRunPROrderIsRecordedOnlyForARequestTicket(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryBuildOfACarvedTicketIsCarved(t *testing.T) {
+	zero, two := 0, 2
+	for _, tc := range []struct {
+		name   string
+		replay *run.Replay
+		group  *int
+		want   bool
+	}{
+		{"ordinary ticket", nil, &zero, false},
+		{"replay of a carved commit", &run.Replay{Carve: &run.Carve{Group: 1}}, &zero, true},
+		{"later round of a carved ticket", nil, &two, true},
+		{"restack replay of a carved ticket", &run.Replay{}, &two, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &ticketRun{replay: tc.replay, rf: runFlags{orderGroup: tc.group}}
+			if got := tr.carved(); got != tc.want {
+				t.Fatalf("carved = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

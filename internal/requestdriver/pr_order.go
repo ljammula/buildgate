@@ -93,16 +93,24 @@ func carveTicket(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 		numbers[i], parent = part.Group+1, commits[i]
 	}
 	first := ticket.Index
+	// Every git effect comes before the request's files move, so a failure or
+	// a restart in between leaves the request exactly as it was.
+	branches := make([]string, len(parts))
+	for i := range parts {
+		branches[i] = fmt.Sprintf("buildgate/%s/t%d-carve", r.ID, first+i)
+		if err := dp.MoveBranch(r.Workspace, branches[i], commits[i]); err != nil {
+			return fmt.Sprintf("branch %s: %v", branches[i], err)
+		}
+	}
 	if err := r.ReplaceWithCarved(dataDir, first, record.ID, groups, numbers); err != nil {
 		return err.Error()
 	}
 	for i := range parts {
 		carved := r.Tickets[first-1+i].Order
-		carved.Commit, carved.Onto = commits[i], onto[i]
-		carved.Branch = fmt.Sprintf("buildgate/%s/t%d-carve", r.ID, first+i)
-		if err := dp.MoveBranch(r.Workspace, carved.Branch, commits[i]); err != nil {
-			return fmt.Sprintf("branch %s: %v", carved.Branch, err)
-		}
+		carved.Commit, carved.Onto, carved.Branch = commits[i], onto[i], branches[i]
+	}
+	if err := r.Save(dataDir); err != nil {
+		return fmt.Sprintf("save the carved tickets: %v", err)
 	}
 	return ""
 }
@@ -115,6 +123,10 @@ func carvedRunRefused(dataDir string, r *request.Request, ticket *request.Ticket
 		return false, nil
 	}
 	if record.State != run.StateQuarantined && record.HaltReasonCode != run.HaltReasonReplayRefused {
+		return false, nil
+	}
+	if reviewNoVerdictCause(record) != "" {
+		// Nothing was judged: a person resumes it (SC-017), the carve stands.
 		return false, nil
 	}
 	source, loadErr := run.Load(dataDir, ticket.Order.SourceRunID)

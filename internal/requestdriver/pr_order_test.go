@@ -204,3 +204,46 @@ func TestRunWithoutPROrderIsNotCarved(t *testing.T) {
 		t.Fatalf("%d tickets, replan %+v; a run with no pr_order is neither carved nor re-planned", len(r.Tickets), r.SizeReplan)
 	}
 }
+
+func TestCarvedReplayWhoseReviewGaveNoVerdictWaitsInResumeReview(t *testing.T) {
+	dp, _ := orderDeps(t)
+	dataDir, id := orderRequest(t)
+	advanceOrder(t, dp, dataDir, id, mixedTicketRunner(t, dataDir, id, "mixed-1"))
+	r := advanceOrder(t, dp, dataDir, id, func(_ context.Context, _ []string, onReady func(*run.Run)) error {
+		onReady(&run.Run{ID: "carved-1", State: run.StateReady})
+		record := &run.Run{
+			ID: "carved-1", RequestID: id, TicketIndex: 1, Project: "app", State: run.StateQuarantined,
+			Replay:      &run.Replay{Carve: &run.Carve{Groups: orderGroups, Group: 1}},
+			GateResults: []run.GateResult{{Check: "code_review", Passed: false}},
+			CodeReview:  &run.CodeReviewResult{Policy: "required", Available: false},
+		}
+		return record.Save(dataDir)
+	})
+	if r.State == request.StatePlanning || r.SizeReplan != nil {
+		t.Fatalf("state %s, replan %+v: a review with no verdict used up the move to planning", r.State, r.SizeReplan)
+	}
+	if r.State != request.StateResumeReview {
+		t.Fatalf("state %s, want resume_review", r.State)
+	}
+}
+
+// A branch that cannot be made leaves the request's tickets and their files
+// as they were: the move to planning saves the record that describes the files.
+func TestCarveThatFailsAfterTheCommitsLeavesTheTicketFilesAlone(t *testing.T) {
+	dp, _ := orderDeps(t)
+	dp.moveBranchFn = func(string, string, string) error { return fmt.Errorf("ref locked") }
+	dataDir, id := orderRequest(t)
+	before := requestdrivertest.LoadRequest(t, dataDir, id)
+	r := advanceOrder(t, dp, dataDir, id, mixedTicketRunner(t, dataDir, id, "mixed-1"))
+	if r.State != request.StatePlanning || len(r.Tickets) != len(before.Tickets) {
+		t.Fatalf("state %s, %d tickets (was %d); want planning with the tickets unchanged", r.State, len(r.Tickets), len(before.Tickets))
+	}
+	for _, tk := range r.Tickets {
+		if tk.Order != nil {
+			t.Errorf("ticket %d is carved after a failed carve", tk.Index)
+		}
+	}
+	if err := requestdriver.VerifyApprovedHashes(dataDir, r); err != nil {
+		t.Fatalf("hashes no longer describe the files: %v", err)
+	}
+}

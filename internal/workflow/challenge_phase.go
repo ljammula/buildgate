@@ -24,6 +24,10 @@ const (
 	challengePass2 = "challenge2"
 )
 
+// challengeBroken is a file's verdict when it could not be judged: a compile
+// or collection error, no report, or nothing launched.
+const challengeBroken = "broken"
+
 // maxChallengeFailureLines caps the failing tests a red challenge file records.
 const maxChallengeFailureLines = 20
 
@@ -152,12 +156,19 @@ func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 		if verdict.note != "" {
 			rec.Notes = append(rec.Notes, verdict.note+": "+cleanNoteName(f.Path))
 		}
+		if f.Verdict == challengeBroken {
+			rec.Notes = append(rec.Notes, "a challenge file did not compile, was not collected or left no report, so it gave no verdict: "+cleanNoteName(f.Path))
+		}
 	}
 	if len(group) > 0 {
 		whole := run.HeldReproduction{Finding: -1}
 		verdict, launches := runChallengeLaunches(ctx, ids, rctx, input, result, commit, whole, group, func(r run.ReproductionRun) (string, []run.ChallengeFailure) {
-			if r.Outcome == string(reproduction.OutcomePassed) {
+			switch reproduction.Outcome(r.Outcome) {
+			case reproduction.OutcomePassed:
 				return run.ChallengeGreen, nil
+			case reproduction.OutcomeUnstaged:
+				// Nothing launched: no verdict, never a red.
+				return challengeBroken, nil
 			}
 			return run.ChallengeRed, []run.ChallengeFailure{{Test: "verify command", Assertion: fmt.Sprintf("exit status %d", r.ExitCode)}}
 		})
@@ -165,6 +176,9 @@ func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 			rec.Files[i].Verdict, rec.Files[i].Failures = verdict.verdict, verdict.failures
 		}
 		rec.Launches = append(rec.Launches, launches...)
+		if verdict.verdict == challengeBroken {
+			rec.Notes = append(rec.Notes, fmt.Sprintf("%d challenge file(s) run under the repository's verify command could not be launched, so they gave no verdict", len(group)))
+		}
 		rec.Notes = append(rec.Notes, "collection not proven for "+fmt.Sprintf("%d challenge file(s) run under the repository's verify command", len(group)))
 		if verdict.note != "" {
 			rec.Notes = append(rec.Notes, verdict.note)
@@ -208,7 +222,7 @@ func classifyChallengeRun(r run.ReproductionRun) (string, []run.ChallengeFailure
 		}
 		return run.ChallengeRed, out
 	}
-	return "broken", nil
+	return challengeBroken, nil
 }
 
 // runChallengeLaunches launches h (or group) once, and once more after a red
@@ -281,10 +295,15 @@ func commitChallenge(ctx temporalworkflow.Context, ids *activityIDs, input RunWo
 		if ctx.Err() != nil {
 			return wrapActivityFailure("commit the challenge files", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 		}
-		rec.Notes = append(rec.Notes, "the green challenge files were not committed: "+cleanCause(err.Error()))
+		// Files that are not committed are not a green result: nothing
+		// replaces a run for them (SC-022).
+		rec.Verdict, rec.Cause = run.ChallengeNoVerdict, "the green challenge files were not committed: "+cleanCause(err.Error())
+		rec.Notes = append(rec.Notes, rec.Cause)
 		return nil
 	}
 	result.ResultSHA, rec.CommittedSHA = out.SHA, out.SHA
+	// The committed files are part of the change the pr_order check judges.
+	result.ChangedFiles = withPaths(result.ChangedFiles, files)
 	return nil
 }
 
@@ -295,4 +314,21 @@ func cleanCause(s string) string {
 		s = string(runes[:240]) + "..."
 	}
 	return s
+}
+
+// withPaths is changed with the paths of files added, once each, sorted.
+func withPaths(changed []string, files []run.ChallengeFile) []string {
+	seen := map[string]bool{}
+	for _, p := range changed {
+		seen[p] = true
+	}
+	out := append([]string(nil), changed...)
+	for _, f := range files {
+		if !seen[f.Path] {
+			seen[f.Path] = true
+			out = append(out, f.Path)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

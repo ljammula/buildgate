@@ -44,6 +44,10 @@ const (
 	challengeRunDirName  = "challenge-run"
 	challengeScript      = "challenge.py"
 	maxChallengeFiles    = 5
+	// maxChallengeRecords and maxChallengeNotes bound how many refused files a
+	// run record and the pull request name; the rest are counted in one note.
+	maxChallengeRecords  = 20
+	maxChallengeNotes    = 20
 	maxChallengeBytes    = 64 << 10
 	maxChallengeSpec     = 1 << 20
 	maxChallengePaths    = 200
@@ -302,7 +306,7 @@ func (a *Activities) challengerRelaySpec(ctx context.Context, in ChallengerJobIn
 // track, NUL-separated (-z), by a host git that runs nothing of the
 // repository's.
 func untrackedPaths(ctx context.Context, scratch string) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(scratch), "ls-files", "--others", "-z")...).Output()
+	out, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(scratch), "ls-files", "--others", "--exclude-standard", "-z")...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list the files the challenger added: %w", err)
 	}
@@ -344,12 +348,15 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 	dir := filepath.Join(a.logDirFor(in.RunWorkflowInput), run.ChallengeDirName)
 	var files []run.ChallengeFile
 	var notes []string
+	held, unnoted := 0, 0
 	for _, p := range untracked {
 		if harnessStatePath(p) {
 			continue
 		}
 		file := run.ChallengeFile{Path: p}
-		if len(files) >= maxChallengeFiles {
+		// The cap counts files held, not files refused: refused files
+		// (setup output, caches) must not use up the room a test needs.
+		if held >= maxChallengeFiles {
 			file.Refused = fmt.Sprintf("more than %d files", maxChallengeFiles)
 		} else if err := reproduction.CheckPath(p, judged); err != nil {
 			file.Refused = err.Error()
@@ -361,8 +368,14 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 			}
 		}
 		if file.Refused != "" {
-			files = append(files, file)
-			notes = append(notes, fmt.Sprintf("a file the challenger wrote was not held (%s): %s", file.Refused, cleanNoteName(p)))
+			if len(files) < maxChallengeRecords {
+				files = append(files, file)
+			}
+			if len(notes) < maxChallengeNotes {
+				notes = append(notes, fmt.Sprintf("a file the challenger wrote was not held (%s): %s", file.Refused, cleanNoteName(p)))
+			} else {
+				unnoted++
+			}
 			continue
 		}
 		acc := reproduction.Accepted{Path: p}
@@ -389,6 +402,10 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 			notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(p))
 		}
 		files = append(files, file)
+		held++
+	}
+	if unnoted > 0 {
+		notes = append(notes, fmt.Sprintf("%d more files the challenger wrote were not held", unnoted))
 	}
 	return files, notes, nil
 }
@@ -502,14 +519,56 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 		masks = append(masks, sandbox.WorkspaceMask{Source: staged, Target: f.Path, AbsentInWorktree: true})
 	}
 	manifest := reviewStubManifestPath(a.dataDirFor(input), input.WorkspacePath)
+	made, err := makeMountParents(input.WorkspacePath, masks)
+	if err != nil {
+		removeMountParents(made)
+		return ctx, func() {}, err
+	}
 	if err := createReviewStubs(input.WorkspacePath, manifest, masks); err != nil {
+		removeMountParents(made)
 		return ctx, func() {}, err
 	}
 	cleanup := func() {
 		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
+		removeMountParents(made)
 		_ = os.RemoveAll(root)
 	}
 	return withWorkspaceMasks(ctx, masks), cleanup, nil
+}
+
+// makeMountParents creates the directories a held file's path needs that the
+// worktree lacks (a test in a new directory), one component at a time with
+// Mkdir so a link is never followed, and returns the ones it made, deepest
+// first. A component that exists and is not a directory is left for
+// createReviewStubs to refuse.
+func makeMountParents(workDir string, masks []sandbox.WorkspaceMask) ([]string, error) {
+	var made []string
+	for _, m := range masks {
+		if !filepath.IsLocal(filepath.FromSlash(m.Target)) {
+			return made, fmt.Errorf("mask target %q is not inside the workspace", m.Target)
+		}
+		dir := workDir
+		parts := strings.Split(m.Target, "/")
+		for _, part := range parts[:len(parts)-1] {
+			dir = filepath.Join(dir, part)
+			if _, err := os.Lstat(dir); err == nil {
+				continue
+			}
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				return made, fmt.Errorf("create the directory for held file %q: %w", m.Target, err)
+			}
+			made = append([]string{dir}, made...)
+		}
+	}
+	return made, nil
+}
+
+// removeMountParents removes the directories makeMountParents made, deepest
+// first, when still empty.
+func removeMountParents(dirs []string) {
+	for _, d := range dirs {
+		_ = os.Remove(d)
+	}
 }
 
 // buildLaunchInputs is what a build's sandbox launch is given besides its

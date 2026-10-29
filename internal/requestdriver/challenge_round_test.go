@@ -67,6 +67,15 @@ func challengeFixture(t *testing.T, verdict string) *adviceFixture {
 	return f
 }
 
+// committedFor is the commit a green challenge round records: the files are
+// committed only when it is green.
+func committedFor(verdict string) string {
+	if verdict == run.ChallengeGreen {
+		return roundSHA(2)
+	}
+	return ""
+}
+
 // challengeRoundRun is the challenge round's run as its stand-in saves it:
 // accepted on the first run's branch with an allowed decision and the given
 // challenge verdict.
@@ -76,7 +85,7 @@ func (f *adviceFixture) challengeRoundRun(t *testing.T, id, verdict string) *run
 		ID: id, Ticket: id, Project: "app", State: run.StateAccepted, Branch: f.branch(), BaseSHA: f.resultSHA, DiffBaseSHA: f.baseSHA, ResultSHA: roundSHA(1),
 		WorkspacePath: t.TempDir(), Attempts: []run.Attempt{{}},
 		CodeReview: &run.CodeReviewResult{Policy: "required", Available: true},
-		Challenge:  &run.ChallengeRecord{Verdict: verdict, Rerun: true, Files: []run.ChallengeFile{{Path: "internal/sum/sum_edge_test.go", Criterion: "AC-2", Verdict: verdict}}},
+		Challenge:  &run.ChallengeRecord{Verdict: verdict, Rerun: true, CommittedSHA: committedFor(verdict), Files: []run.ChallengeFile{{Path: "internal/sum/sum_edge_test.go", Criterion: "AC-2", Verdict: verdict}}},
 	}
 	if err := release.SaveDecision(f.dataDir, release.Decision{RunID: id, Project: "app", Allowed: true, Evaluated: time.Now().UTC().Format(time.RFC3339)}); err != nil {
 		t.Fatal(err)
@@ -185,5 +194,23 @@ func TestGreenChallengeStartsNoRound(t *testing.T) {
 	}
 	if requestdrivertest.HasFlag(later, "-challenge") || requestdrivertest.ArgValue(later, "-challenge-held") == "" || requestdrivertest.HasFlag(later, "-challenge-round") {
 		t.Errorf("a later build = %v, want the held files to run again and no new job or round", later)
+	}
+}
+
+// A round whose green files did not commit does not replace the run it
+// followed: nothing is pushed and the first run stands.
+func TestChallengeRoundWithUncommittedGreenFilesDoesNotReplaceTheRun(t *testing.T) {
+	f := challengeFixture(t, run.ChallengeRed)
+	requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+		rr := f.challengeRoundRun(t, id, run.ChallengeGreen)
+		rr.Challenge.CommittedSHA = ""
+		return rr
+	})
+	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	tk := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0]
+	if len(f.pushed) != 0 || tk.RunID != requestdrivertest.TicketRunID(f.id, 1) {
+		t.Errorf("pushed %v, ticket run %s; want nothing pushed and the first run to stand", f.pushed, tk.RunID)
 	}
 }

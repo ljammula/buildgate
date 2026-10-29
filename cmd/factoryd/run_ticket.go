@@ -1980,6 +1980,12 @@ func (tr *ticketRun) checkSnapshotHeaders() error {
 	return nil
 }
 
+// carved reports whether this build is of a ticket the host carved by
+// pr_order: its replay run, or any later build of it (-order-group).
+func (tr *ticketRun) carved() bool {
+	return (tr.replay != nil && tr.replay.Carve != nil) || *tr.rf.orderGroup > 0
+}
+
 // checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
 func (tr *ticketRun) checkScope() error {
 	var err error
@@ -1990,9 +1996,10 @@ func (tr *ticketRun) checkScope() error {
 	if err != nil {
 		return fmt.Errorf("parse ticket tests-required opt-out: %w", err)
 	}
-	if tr.replay != nil && tr.replay.Carve != nil {
-		// A carved commit is a part of a change whose tests_red_on_base was
-		// judged on the run that was carved, and a part may hold no test.
+	if tr.carved() {
+		// A carved ticket (its replay run, and every later build of it) holds
+		// a part of a change whose tests_red_on_base was judged on the run
+		// that was carved, and a part may hold no test.
 		tr.testsRequiredOptOut = carvedTestsRequiredReason
 	}
 

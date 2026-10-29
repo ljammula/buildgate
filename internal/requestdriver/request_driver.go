@@ -2318,7 +2318,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		VerifyCommand:    verifyCommand,
 		FullSuiteCommand: fullSuiteCommand,
 		FullSuiteSource:  fullSuiteSource,
-		Bug:              r.Bug && ticket.Index == 1,
+		Bug:              r.Bug && ticket.Index == 1 && ticket.Order == nil,
 		// ExecutionHarness: r.Harnesses["execution"] is `factoryd submit
 		// -harness execution=...` / the API's own "harnesses" field, already
 		// validated at submit time (sessionconfig.ValidateRequestHarnesses)

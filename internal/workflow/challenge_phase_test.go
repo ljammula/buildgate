@@ -2,10 +2,12 @@ package workflow
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
 	"buildgate/internal/reproduction"
@@ -34,6 +36,13 @@ type challengeRun struct {
 }
 
 func runChallengePhase(t *testing.T, input RunWorkflowInput, job ChallengerJobResult, launch func(ReproductionRunInput) ReproductionRunResult, version temporalworkflow.Version) challengeRun {
+	t.Helper()
+	return runChallengePhaseCommitting(t, input, job, launch, version, nil)
+}
+
+// runChallengePhaseCommitting is runChallengePhase with commitErr, when set,
+// the error the commit Activity fails with.
+func runChallengePhaseCommitting(t *testing.T, input RunWorkflowInput, job ChallengerJobResult, launch func(ReproductionRunInput) ReproductionRunResult, version temporalworkflow.Version, commitErr error) challengeRun {
 	t.Helper()
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
@@ -68,6 +77,9 @@ func runChallengePhase(t *testing.T, input RunWorkflowInput, job ChallengerJobRe
 		mu.Lock()
 		out.commits = append(out.commits, in.Files)
 		mu.Unlock()
+		if commitErr != nil {
+			return CommitChallengeResult{}, commitErr
+		}
 		return CommitChallengeResult{SHA: "c0ffee"}, nil
 	}, activity.RegisterOptions{Name: CommitChallengeActivityName})
 	env.ExecuteWorkflow(RunWorkflow, input)
@@ -230,5 +242,54 @@ func TestHistoryRecordedBeforeTheChallengeReplaysWithoutIt(t *testing.T) {
 	p := runChallengePhase(t, challengeInput(), job, passAll, temporalworkflow.DefaultVersion)
 	if p.err != nil || p.jobs != 0 || len(p.launches) != 0 || p.result.Challenge != nil {
 		t.Errorf("err %v, jobs %d, launches %v, challenge %+v; want none at DefaultVersion", p.err, p.jobs, p.launches, p.result.Challenge)
+	}
+}
+
+// A green challenge whose files did not commit is no verdict, so no round
+// replaces a run for it, and the result stays the build's own.
+func TestChallengeGreenThatFailedToCommitIsNoVerdict(t *testing.T) {
+	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
+	p := runChallengePhaseCommitting(t, challengeInput(), job, passAll, 1, temporal.NewNonRetryableApplicationError("path exists", "git", nil))
+	c := p.result.Challenge
+	if p.err != nil || c == nil || c.Verdict != run.ChallengeNoVerdict || c.CommittedSHA != "" || c.Cause == "" || p.result.ResultSHA == "c0ffee" {
+		t.Fatalf("err %v, challenge %+v, sha %q; want no_verdict with a cause, nothing committed", p.err, c, p.result.ResultSHA)
+	}
+}
+
+// Committed challenge files are part of the change the pr_order check reads.
+func TestCommittedChallengeFilesJoinTheChangedFiles(t *testing.T) {
+	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
+	p := runChallengePhase(t, challengeInput(), job, passAll, 1)
+	found := false
+	for _, f := range p.result.ChangedFiles {
+		found = found || f == "p/edge_test.go"
+	}
+	if !found {
+		t.Fatalf("changed files = %v, want p/edge_test.go", p.result.ChangedFiles)
+	}
+}
+
+// A file that does not compile or leaves no report is named in a note, and a
+// verify-command run that never launched is no verdict, not red.
+func TestChallengeBrokenFilesGetANoteAndAnUnlaunchedGroupIsNotRed(t *testing.T) {
+	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
+	broken := func(ReproductionRunInput) ReproductionRunResult {
+		return reproRun(reproduction.OutcomeCompile, reproduction.KindPass)
+	}
+	p := runChallengePhase(t, challengeInput(), job, broken, 1)
+	found := false
+	for _, n := range p.result.Challenge.Notes {
+		found = found || strings.Contains(n, "p/edge_test.go") && strings.Contains(n, "no verdict")
+	}
+	if p.err != nil || !found || p.result.Challenge.Verdict != run.ChallengeNoVerdict {
+		t.Errorf("err %v, challenge %+v; want a note naming the broken file and no verdict", p.err, p.result.Challenge)
+	}
+	group := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("a_test.rb", "AC-1", "")}}
+	unstaged := func(ReproductionRunInput) ReproductionRunResult {
+		return ReproductionRunResult{Run: run.ReproductionRun{Outcome: string(reproduction.OutcomeUnstaged)}}
+	}
+	p = runChallengePhase(t, challengeInput(), group, unstaged, 1)
+	if p.err != nil || p.result.Challenge.Verdict == run.ChallengeRed || len(p.launches) != 1 {
+		t.Errorf("err %v, challenge %+v, launches %v; want no red and no second launch", p.err, p.result.Challenge, p.launches)
 	}
 }

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"buildgate/internal/evidence"
@@ -90,7 +92,7 @@ func loadChallengeHeld(dataDir, path string) ([]run.ChallengeFile, error) {
 		return nil, err
 	}
 	for _, f := range held {
-		if f.Path == "" || filepath.IsAbs(f.Path) || strings.Contains(f.Path, "..") || !challengeSHA256.MatchString(f.SHA256) {
+		if f.Path == "" || filepath.IsAbs(f.Path) || !cleanHeldPath(f.Path) || !challengeSHA256.MatchString(f.SHA256) {
 			return nil, fmt.Errorf("file %q is not a clean relative path with a SHA-256", f.Path)
 		}
 		rel, err := filepath.Rel(runs, f.HostPath)
@@ -105,7 +107,19 @@ func loadChallengeHeld(dataDir, path string) ([]run.ChallengeFile, error) {
 // resolveChallenger resolves roles.challenger's route, thinking and harness
 // for a run that launches the challenger job; nothing when the role is unset
 // (the job then records "no challenger role configured").
+//
+// A route that cannot be resolved (an expired credential, a missing model id)
+// is a challenger with no verdict, never a build that does not start
+// (SC-022): the failure is logged and the job runs as if no role were set.
 func (tr *ticketRun) resolveChallenger() error {
+	if err := tr.resolveChallengerRoute(); err != nil {
+		log.Printf("challenger: no challenge for this build: %v", err)
+		tr.challengerSelection, tr.challengerThinking, tr.challengerHarnessName = nil, "", ""
+	}
+	return nil
+}
+
+func (tr *ticketRun) resolveChallengerRoute() error {
 	if !*tr.rf.challenge || tr.settings.Roles == nil || tr.settings.Roles.Challenger == nil {
 		return nil
 	}
@@ -137,4 +151,11 @@ func (tr *ticketRun) resolveChallenger() error {
 		}
 	}
 	return nil
+}
+
+// cleanHeldPath reports whether p is a relative path inside the worktree with
+// no `..` component; a name that merely contains two dots (parse..edge_test.go)
+// is clean.
+func cleanHeldPath(p string) bool {
+	return filepath.IsLocal(filepath.FromSlash(p)) && !slices.Contains(strings.Split(p, "/"), "..")
 }

@@ -30,7 +30,7 @@ var challengeFlavor = roundFlavor{
 	name: challengeRoundName, kind: request.ChallengeRoundKind, tag: request.RoundTagChallenge,
 	comment: challengeComment,
 	replaces: func(round *run.Run) bool {
-		return round.Challenge != nil && round.Challenge.Verdict == run.ChallengeGreen
+		return round.Challenge != nil && round.Challenge.Verdict == run.ChallengeGreen && round.Challenge.CommittedSHA != ""
 	},
 	declined: challengeDeclinedComment,
 }

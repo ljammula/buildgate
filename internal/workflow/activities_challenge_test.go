@@ -179,3 +179,61 @@ func TestChallengeRoundBuildMountsTheHeldFilesReadOnly(t *testing.T) {
 		t.Error("a held file whose copy no longer matches its hash was mounted")
 	}
 }
+
+// Ignored output (a cache the challenger's own test run wrote) is never listed,
+// and files refused for another reason do not use up the cap a test needs.
+func TestHoldChallengeFilesIgnoresIgnoredOutputAndRefusalsDoNotFillTheCap(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, ".gitignore"), ".cache/\n")
+	for i := 0; i < maxChallengeFiles+3; i++ {
+		writeFile(t, filepath.Join(f.repo, ".cache", "c"+string(rune('a'+i))), "x")
+		writeFile(t, filepath.Join(f.repo, "a"+string(rune('a'+i))+".txt"), "x")
+	}
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	files, notes, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var heldEdge bool
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, ".cache/") {
+			t.Errorf("ignored file %s was listed", file.Path)
+		}
+		if file.Path == "p/edge_test.go" && file.Refused == "" {
+			heldEdge = true
+		}
+	}
+	if !heldEdge {
+		t.Errorf("the test file was not held behind refused files: %+v", files)
+	}
+	if len(notes) > maxChallengeNotes+1 {
+		t.Errorf("%d notes, want at most %d and one summary", len(notes), maxChallengeNotes)
+	}
+}
+
+// A held file in a directory the worktree lacks is mounted: the directory is
+// made for the build and removed with the mountpoint.
+func TestChallengeRoundBuildMountsAFileInANewDirectory(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge", "deep", "edge_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 || files[0].Refused != "" {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	if err := os.RemoveAll(filepath.Join(f.repo, "p", "edge")); err != nil {
+		t.Fatal(err)
+	}
+	input := f.input
+	input.ChallengeHeld, input.ChallengeRound = files, true
+	_, cleanup, err := f.acts.withChallengeMounts(context.Background(), input)
+	if err != nil {
+		t.Fatalf("a held file in a new directory was not mounted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge", "deep", "edge_test.go")); err != nil {
+		t.Errorf("no mountpoint: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge")); !os.IsNotExist(err) {
+		t.Errorf("the made directory was left: %v", err)
+	}
+}

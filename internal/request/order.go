@@ -63,6 +63,17 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 			return fmt.Errorf("request %s: ticket %d's file %s is not %s, so the tickets cannot be renumbered", r.ID, j, r.Tickets[j-1].SpecPath, filepath.Base(pathOf(j)))
 		}
 	}
+	// A failure part-way puts every file and pin back, so the record on disk
+	// still describes the files.
+	var undo []func()
+	done := false
+	defer func() {
+		if !done {
+			for i := len(undo) - 1; i >= 0; i-- {
+				undo[i]()
+			}
+		}
+	}()
 	later := append([]Ticket(nil), r.Tickets[idx:]...)
 	for j := len(r.Tickets); j > idx; j-- {
 		t := r.Tickets[j-1]
@@ -70,10 +81,19 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 		if err := os.Rename(t.SpecPath, to); err != nil {
 			return fmt.Errorf("request %s: move ticket %d to %d: %w", r.ID, j, j+extra, err)
 		}
-		if hash, ok := r.ApprovedSHA256[rel(t.SpecPath)]; ok {
-			delete(r.ApprovedSHA256, rel(t.SpecPath))
+		from := t.SpecPath
+		hash, hashed := r.ApprovedSHA256[rel(from)]
+		if hashed {
+			delete(r.ApprovedSHA256, rel(from))
 			r.ApprovedSHA256[rel(to)] = hash
 		}
+		undo = append(undo, func() {
+			_ = os.Rename(to, from)
+			if hashed {
+				delete(r.ApprovedSHA256, rel(to))
+				r.ApprovedSHA256[rel(from)] = hash
+			}
+		})
 		t.Index, t.SpecPath = j+extra, to
 		later[j-idx-1] = t
 	}
@@ -84,6 +104,10 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 			if err := os.WriteFile(path, content, 0o600); err != nil {
 				return fmt.Errorf("request %s: write carved ticket %d: %w", r.ID, idx+k, err)
 			}
+			undo = append(undo, func() {
+				_ = os.Remove(path)
+				delete(r.ApprovedSHA256, rel(path))
+			})
 			r.pinCarved(dataDir, path)
 		}
 		carved = append(carved, Ticket{
@@ -96,6 +120,7 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 	tickets := append(append(append([]Ticket{}, r.Tickets[:idx-1]...), carved...), later...)
 	r.Tickets = tickets
 	r.TicketCount = len(tickets)
+	done = true
 	return nil
 }
 

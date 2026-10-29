@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"buildgate/internal/run"
+	"buildgate/internal/sessionconfig"
 )
 
 func writeHeldManifest(t *testing.T, dataDir, hostPath, path, sha string) string {
@@ -70,5 +71,31 @@ func TestRenderChallengeMarkdownNamesFilesAndNotesNeverContent(t *testing.T) {
 	}
 	if renderChallengeMarkdown(nil) != "" {
 		t.Error("a run with no challenge renders a section")
+	}
+}
+
+// A name that merely contains two dots is a clean path; a `..` component is not.
+func TestHeldPathWithDotsInANameIsClean(t *testing.T) {
+	for p, want := range map[string]bool{
+		"parse..edge_test.go": true, "p/a..b_test.go": true, "p/edge_test.go": true,
+		"../x_test.go": false, "p/../x_test.go": false, "/abs_test.go": false, "": false,
+	} {
+		if got := cleanHeldPath(p); got != want {
+			t.Errorf("cleanHeldPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+// A challenger role whose route cannot be resolved never stops the build: the
+// job then runs as if no role were set (SC-022: no verdict, nothing halts).
+func TestUnresolvableChallengerRoleDoesNotStopTheBuild(t *testing.T) {
+	yes := true
+	tr := &ticketRun{rf: runFlags{challenge: &yes}}
+	tr.settings.Roles = &sessionconfig.Roles{Challenger: &sessionconfig.RoleConfig{Model: "no-such-model"}}
+	if err := tr.resolveChallenger(); err != nil {
+		t.Fatalf("resolveChallenger = %v, want nil", err)
+	}
+	if tr.challengerSelection != nil {
+		t.Fatalf("a failed route left a selection: %+v", tr.challengerSelection)
 	}
 }

@@ -3,6 +3,7 @@ package requestdriver
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -34,9 +35,20 @@ func challengeEnabled(dataDir string, r *request.Request) (approved string, ok b
 // build also gets the held files mounted read-only and whose green result
 // commits them.
 func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket request.Ticket, round bool) error {
+	if ticket.Order != nil {
+		// A carved ticket's change was challenged (or not) on the run that
+		// was carved: no challenger starts for it, now or on a later build.
+		return nil
+	}
 	approved, ok, err := challengeEnabled(dataDir, r)
-	if err != nil || !ok {
-		return err
+	if err != nil {
+		// An approved spec that cannot be given (it changed since approval) is
+		// a challenger with no verdict, never a build that does not start.
+		log.Printf("request %s ticket %d: no challenge: %v", r.ID, ticket.Index, err)
+		return nil
+	}
+	if !ok {
+		return nil
 	}
 	dir := filepath.Join(request.Dir(dataDir, r.ID), "challenge")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
