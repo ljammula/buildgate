@@ -223,6 +223,9 @@ type LaunchSpec struct {
 	// without exposing repository metadata for writes.
 	gitCommonDir       string
 	gitCommonDirTarget string
+	// keepAwake is the host Run keeps from idle sleep; the zero value is
+	// this host.
+	keepAwake keepAwake
 }
 
 // InputMount describes a read-only host directory exposed under /inputs.
@@ -1084,7 +1087,7 @@ func Run(ctx context.Context, dockerBinary string, s LaunchSpec) (Result, error)
 	if err := cmd.Start(); err != nil {
 		return result, fmt.Errorf("start sandbox: %w", err)
 	}
-	defer keepAwake(cmd.Process.Pid)()
+	defer s.keepAwake.hold(cmd.Process.Pid)()
 	writer := io.MultiWriter(os.Stdout, logFile)
 	if err := relayWorkerOutput(stdout, writer, s); err != nil {
 		if cleanupErr := reapContainer(cmd, dockerBinary, s.Name, s.WorkerUmask != ""); cleanupErr != nil {
