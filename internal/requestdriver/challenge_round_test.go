@@ -236,3 +236,85 @@ func TestChallengeRoundPushThatFailsHaltsNothing(t *testing.T) {
 		t.Errorf("ticket run %q rounds %+v, want the accepted run standing and one unpushed round noted as no verdict", tk.RunID, tk.Rounds)
 	}
 }
+
+// A worker that stops mid-round leaves the challenge round in flight; the next
+// pass settles it from its run and never builds it again: a green accepted
+// round is pushed and replaces the run, one whose run never started leaves the
+// accepted run standing, and neither starts a second round.
+func TestChallengeRoundInterruptedIsSettledNotRelaunched(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		started  bool
+		wantPush bool
+	}{
+		{"the round's run was accepted with a green challenge", true, true},
+		{"the round's run never started", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := challengeFixture(t, run.ChallengeRed)
+			ctx, cancel := context.WithCancel(context.Background())
+			calls := 0
+			orig := requestdriver.ReviewCorrectiveRunner
+			t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
+			requestdriver.ReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
+				calls++
+				defer cancel()
+				if tc.started {
+					id := requestdrivertest.ArgValue(args, "-ticket")
+					onReady(&run.Run{ID: id})
+					if err := f.challengeRoundRun(t, id, run.ChallengeGreen).Save(f.dataDir); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return errors.New("stopping")
+			}
+			if err := f.drive(t, ctx, f.buildRunner); err == nil {
+				t.Fatal("drive with the worker stopping mid-round returned no error")
+			}
+			original := requestdrivertest.TicketRunID(f.id, 1)
+			tk := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0]
+			if tk.Advice == nil || !tk.Advice.Challenge || len(tk.Rounds) != 0 || tk.RunID != original {
+				t.Fatalf("after the stop: in flight %+v rounds %+v run %q, want the challenge round in flight and the accepted run the ticket's", tk.Advice, tk.Rounds, tk.RunID)
+			}
+			if err := f.drive(t, context.Background(), requestdrivertest.FailingBuildRunner(t)); err != nil {
+				t.Fatalf("drive after the restart: %v", err)
+			}
+			if calls != 1 {
+				t.Errorf("challenge round builds = %d, want the one before the stop", calls)
+			}
+			loaded := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
+			tk = loaded.Tickets[0]
+			if loaded.State != request.StatePRReview || tk.Advice != nil || len(tk.Rounds) != 1 || tk.Rounds[0].Kind != request.ChallengeRoundKind {
+				t.Fatalf("State %q in flight %+v rounds %+v, want pr_review with one challenge round", loaded.State, tk.Advice, tk.Rounds)
+			}
+			wantRun := original
+			if tc.wantPush {
+				wantRun = original + "-challenge1"
+			}
+			if tk.RunID != wantRun || (len(f.pushed) == 1) != tc.wantPush {
+				t.Errorf("ticket run %q pushed %v, want run %q and a push %t", tk.RunID, f.pushed, wantRun, tc.wantPush)
+			}
+		})
+	}
+}
+
+// A challenge round that would push the request past its token budget does
+// not start: the accepted run stands, the request moves on, nothing halts.
+func TestChallengeRoundRefusedByTheLaunchBudgetStartsNothing(t *testing.T) {
+	f := challengeFixture(t, run.ChallengeRed)
+	// The accepted run spent 800 tokens: 1000 leaves 200.
+	f.cfg.Settings.RequestTokenBudget = 1000
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+		return f.challengeRoundRun(t, id, run.ChallengeGreen)
+	})
+	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("challenge round builds = %d, want none", *calls)
+	}
+	loaded := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
+	if loaded.State == request.StateHalted || len(loaded.Tickets[0].Rounds) != 0 || loaded.Tickets[0].RunID != requestdrivertest.TicketRunID(f.id, 1) {
+		t.Errorf("State %q rounds %+v run %q, want the accepted run standing and no round", loaded.State, loaded.Tickets[0].Rounds, loaded.Tickets[0].RunID)
+	}
+}
