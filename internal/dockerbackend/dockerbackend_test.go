@@ -22,6 +22,8 @@ func TestClassify(t *testing.T) {
 			Info: []byte(`{"Name":"lima-colima","OSType":"linux","ServerVersion":"24.0.7"}`)}, Colima},
 		{"an older colima VM's host name", Facts{GOOS: "darwin", Context: "default", Endpoint: "unix:///var/run/docker.sock",
 			Info: []byte(`{"Name":"lima-colima","OSType":"linux","ServerVersion":"24.0.7"}`)}, Colima},
+		{"factoryd inside colima's VM, on its local socket", Facts{GOOS: "linux", Context: "default", Endpoint: "unix:///var/run/docker.sock",
+			Info: []byte(`{"Name":"colima","OSType":"linux","ServerVersion":"27.4.0","SecurityOptions":["name=apparmor"]}`)}, NativeLinux},
 		{"Docker Engine on Ubuntu", Facts{GOOS: "linux", Context: "default", Endpoint: "unix:///var/run/docker.sock", Info: []byte(engine)}, NativeLinux},
 		{"Docker Engine, endpoint unset", Facts{GOOS: "linux", Info: []byte(engine)}, NativeLinux},
 		{"Docker Engine reached from a Mac", Facts{GOOS: "darwin", Context: "default", Endpoint: "unix:///var/run/docker.sock", Info: []byte(engine)}, Other},

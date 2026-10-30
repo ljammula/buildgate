@@ -118,11 +118,20 @@ func hasSecurityOption(options []string, name string) bool {
 
 // isColima recognises colima by its context (colima, colima-<profile>), its
 // socket under ~/.colima or $XDG_CONFIG_HOME/colima, or its VM's host name
-// (colima, colima-<profile>, or lima-colima on older VMs).
+// (colima, colima-<profile>, or lima-colima on older VMs). The host name
+// alone does not count for a Linux machine's own local socket: that is the
+// Docker Engine of the machine factoryd runs on (factoryd inside colima's
+// VM, say), whatever the machine is called.
 func isColima(f Facts, in info) bool {
 	named := func(s string) bool { return s == "colima" || strings.HasPrefix(s, "colima-") }
 	socket := strings.Contains(f.Endpoint, "/.colima/") || strings.Contains(f.Endpoint, "/colima/")
-	return named(f.Context) || socket || named(in.Name) || strings.HasPrefix(in.Name, "lima-colima")
+	if named(f.Context) || socket {
+		return true
+	}
+	if f.GOOS == "linux" && isLocalSocket(f.Endpoint) {
+		return false
+	}
+	return named(in.Name) || strings.HasPrefix(in.Name, "lima-colima")
 }
 
 // isLocalSocket reports whether endpoint is the host's own Docker Engine
