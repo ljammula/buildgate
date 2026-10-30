@@ -9,6 +9,7 @@ import (
 
 	"buildgate/internal/harness"
 	"buildgate/internal/modelrole"
+	"buildgate/internal/prices"
 	"buildgate/internal/sessionconfig"
 )
 
@@ -16,8 +17,9 @@ const testPiforkImage = "localhost:5050/pifork-worker@sha256:" + "b1b2b3b4b5b6b1
 
 // TestQuickstartChatGPTCodexWritesLunaProfile: the default Luna model is
 // written with its declared reasoning levels, and the roles get the
-// profile the operator runs (max for planning, execution and review). The
-// written config must still pass ValidateRouting's thinking-level checks.
+// profile the operator runs (max for planning, execution and review, and a
+// challenger on gpt-6.1-terra at max). The written config must still pass
+// ValidateRouting's thinking-level checks.
 func TestQuickstartChatGPTCodexWritesLunaProfile(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("CODEX_HOME", t.TempDir())
@@ -27,13 +29,25 @@ func TestQuickstartChatGPTCodexWritesLunaProfile(t *testing.T) {
 	if !model.Reasoning || model.ThinkingLevelMap["max"] != "max" || model.ThinkingLevelMap["xhigh"] != "xhigh" {
 		t.Errorf("model = %+v, want reasoning: true and thinking_level_map {xhigh: xhigh, max: max}", model)
 	}
-	for role, want := range map[modelrole.Role]string{modelrole.RolePlanning: "max", modelrole.RoleExecution: "max", modelrole.RoleReview: "max"} {
+	for role, want := range map[modelrole.Role]string{modelrole.RolePlanning: "max", modelrole.RoleExecution: "max", modelrole.RoleReview: "max", modelrole.RoleChallenger: "max"} {
 		sel, err := modelrole.SelectRoute(settings, role, "", "", "", quickstartRouteProbeAlwaysOK)
 		if err != nil {
 			t.Fatalf("SelectRoute(%s): %v", role, err)
 		}
 		if sel.Thinking != want {
 			t.Errorf("roles.%s.thinking = %q, want %q", role, sel.Thinking, want)
+		}
+	}
+	if rc := cfg.Roles.Challenger; rc == nil || rc.Model != challengerModelID {
+		t.Errorf("roles.challenger = %+v, want model %q", rc, challengerModelID)
+	}
+	if m := cfg.Models[challengerModelID]; m.ID != challengerModelID || m.ContextWindow != chatGPTCodexChallengerContextWindow || !m.Reasoning || m.ThinkingLevelMap["max"] != "max" {
+		t.Errorf("models[%s] = %+v, want its id, context window and reasoning levels", challengerModelID, m)
+	}
+	// An unpriced model meters at $0, so a budget would not count its spend.
+	for key, m := range cfg.Models {
+		if _, err := prices.Lookup(m.ID); err != nil {
+			t.Errorf("models[%s]: prices.Lookup(%q) = %v, want a price", key, m.ID, err)
 		}
 	}
 }
@@ -49,6 +63,9 @@ func TestQuickstartChatGPTCodexCustomModelKeepsPiDefaults(t *testing.T) {
 	}
 	if th := cfg.Roles.Execution.Thinking; th != "" {
 		t.Errorf("roles.execution.thinking = %q, want empty", th)
+	}
+	if cfg.Roles.Challenger != nil || len(cfg.Models) != 1 {
+		t.Errorf("roles.challenger = %+v, models = %v, want no challenger for a non-default model", cfg.Roles.Challenger, cfg.Models)
 	}
 }
 
@@ -91,13 +108,13 @@ func TestQuickstartWritesNoHarnessForPi(t *testing.T) {
 }
 
 // TestQuickstartCodexWritesHarnessOnEveryRole: -harness codex on the
-// chatgpt-codex route writes roles.<role>.harness: codex into every role
-// and leaves the Pi sandbox image alone.
+// chatgpt-codex route writes roles.<role>.harness: codex into every role,
+// the challenger included, and leaves the Pi sandbox image alone.
 func TestQuickstartCodexWritesHarnessOnEveryRole(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("CODEX_HOME", t.TempDir())
 	cfg, _, _ := quickstartBuildWriteReload(dp, t, &quickstartOptions{NonInteractive: true, Route: "chatgpt-codex", Harness: harness.Codex})
-	for role, rc := range map[string]*sessionconfig.RoleConfig{"planning": cfg.Roles.Planning, "execution": cfg.Roles.Execution, "review": cfg.Roles.Review} {
+	for role, rc := range map[string]*sessionconfig.RoleConfig{"planning": cfg.Roles.Planning, "execution": cfg.Roles.Execution, "review": cfg.Roles.Review, "challenger": cfg.Roles.Challenger} {
 		if rc == nil || rc.Harness != harness.Codex {
 			t.Errorf("roles.%s = %+v, want harness %q", role, rc, harness.Codex)
 		}
