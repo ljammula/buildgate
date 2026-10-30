@@ -8,14 +8,22 @@ import (
 
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
+	"buildgate/internal/codereview"
 	"buildgate/internal/reproduction"
 	"buildgate/internal/run"
 )
 
 // challengeChange is the GetVersion change ID from which RunWorkflow runs the
-// challenge phase (SC-022) after the review and before the verdict. A history
-// recorded before it replays without the phase.
+// challenge phase (SC-022) before the verdict. A history recorded before it
+// replays without the phase.
 const challengeChange = "challenge"
+
+// parallelChallengeChange is the GetVersion change ID from which the challenger
+// job and its held runs start with the review steps, on the same commit, and
+// the green files are committed after both finish, when the review gave a
+// verdict. A history before it replays the serial order: the review, then the
+// challenge phase.
+const parallelChallengeChange = "challenge-with-review"
 
 // Passes of the factory's run of a held challenge file: one launch, and a
 // second, separate one only after the first was red.
@@ -40,8 +48,9 @@ const challengeJobActivityLimit = challengeJobLimit + 20*time.Minute
 // challenger job and its hold, and every held-run launch the phase can make
 // (runHeldChallenge: at most one launch unit per held file, the files under
 // the verify command sharing one, and a red unit launched once more). The
-// phase runs after review, so a build that used the whole of
-// -timeout-minutes still has the time its challenge phase is bounded by.
+// phase runs with the review (from parallelChallengeChange; after it before),
+// so a build that used the whole of -timeout-minutes still has the time its
+// challenge phase is bounded by.
 const ChallengePhaseAllowance = challengeJobActivityLimit + 2*maxChallengeFiles*reproductionActivityLimit
 
 // challengeContext is ctx with the challenge Activities' options: the
@@ -53,7 +62,8 @@ func challengeContext(buildVerifyCtx temporalworkflow.Context) temporalworkflow.
 	return temporalworkflow.WithActivityOptions(buildVerifyCtx, options)
 }
 
-// runChallenge is the challenge phase (SC-022). A first build of a ticket
+// runChallenge is the challenge phase (SC-022) in its serial order, before
+// parallelChallengeChange: after the review. A first build of a ticket
 // (input.Challenge) whose every gate passed, whose review gave a verdict and
 // whose size is within the caps runs the challenger job once and then the
 // factory's run of the files it held; a later build (input.ChallengeHeld) runs
@@ -73,6 +83,17 @@ func runChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 		return nil
 	}
 	current.Stage, current.StartedAt = challengeAttemptKind, temporalworkflow.Now(ctx)
+	if err := judgeChallenge(ctx, ids, buildVerifyCtx, input, result, worktreePath, branch); err != nil {
+		return err
+	}
+	return commitGreenChallenge(ctx, ids, input, result, worktreePath, branch)
+}
+
+// judgeChallenge runs the challenger job (a fresh run) or takes the held files
+// (a rerun), then the factory's run of the runnable files, and leaves the
+// record, with its verdicts, on result.Challenge. It commits nothing.
+func judgeChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) error {
+	fresh, rerun := input.Challenge, len(input.ChallengeHeld) > 0
 	rec := &run.ChallengeRecord{Rerun: !fresh || rerun}
 	result.Challenge = rec
 	commit := result.ResultSHA
@@ -85,19 +106,76 @@ func runChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 	} else {
 		rec.Files = append([]run.ChallengeFile(nil), input.ChallengeHeld...)
 	}
-	runnable := runnableChallengeFiles(rec.Files)
-	if len(runnable) == 0 {
+	if len(runnableChallengeFiles(rec.Files)) == 0 {
 		rec.Verdict, rec.Cause = run.ChallengeNoVerdict, "no held challenge file carries a valid derivation header"
 		return nil
 	}
-	if err := runHeldChallenge(ctx, ids, buildVerifyCtx, input, result, rec, commit); err != nil {
-		return err
-	}
-	commitGreen := rec.Verdict == run.ChallengeGreen && (!rec.Rerun || input.ChallengeRound)
-	if commitGreen {
+	return runHeldChallenge(ctx, ids, buildVerifyCtx, input, result, rec, commit)
+}
+
+// commitGreenChallenge commits result.Challenge's green files when it is a
+// green verdict of a first build or of a challenge round.
+func commitGreenChallenge(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) error {
+	rec := result.Challenge
+	if rec != nil && rec.Verdict == run.ChallengeGreen && (!rec.Rerun || input.ChallengeRound) {
 		return commitChallenge(ctx, ids, input, result, rec, worktreePath, branch)
 	}
 	return nil
+}
+
+// reviewAndChallenge runs the review steps and the challenge phase of a run
+// that passed its gates up to the review. Before parallelChallengeChange the
+// challenge phase follows the review. From it the challenge phase runs in a
+// coroutine started just before the review steps, on the same result commit,
+// and is joined after them; the run's stage stays the review's while both run
+// (the challenge sets none). The green files are committed after the join, and
+// only when the review gave a verdict. A review error is returned before a
+// challenge error; the coroutine is always joined.
+func reviewAndChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, sizeVersion temporalworkflow.Version, passed bool, worktreePath, branch string) (reviewOutcome, error) {
+	parallel := temporalworkflow.GetVersion(ctx, parallelChallengeChange, temporalworkflow.DefaultVersion, 1) == 1
+	within := !overSizeCap(input, result.ChangeSize)
+	var reviews reviewOutcome
+	if sizeVersion == temporalworkflow.DefaultVersion || passed && within {
+		if parallel {
+			return reviewWithChallenge(ctx, ids, buildVerifyCtx, input, current, result, gates, passed && sizeVersion == 1, worktreePath, branch)
+		}
+		var err error
+		if reviews, err = runReviewSteps(ctx, ids, buildVerifyCtx, input, current, result, gates, worktreePath, branch); err != nil {
+			return reviews, err
+		}
+	} else {
+		result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
+	}
+	return reviews, runChallenge(ctx, ids, buildVerifyCtx, input, current, result, reviews, passed && sizeVersion == 1 && within, worktreePath, branch)
+}
+
+// reviewWithChallenge is reviewAndChallenge's parallel order.
+func reviewWithChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, passedForChallenge bool, worktreePath, branch string) (reviewOutcome, error) {
+	challenging := temporalworkflow.GetVersion(ctx, challengeChange, temporalworkflow.DefaultVersion, 1) == 1 &&
+		(input.Challenge || len(input.ChallengeHeld) > 0) && passedForChallenge && !overSizeCap(input, result.ChangeSize)
+	var joined temporalworkflow.Future
+	if challenging {
+		future, settable := temporalworkflow.NewFuture(ctx)
+		joined = future
+		temporalworkflow.Go(ctx, func(gctx temporalworkflow.Context) {
+			settable.SetError(judgeChallenge(gctx, ids, buildVerifyCtx, input, result, worktreePath, branch))
+		})
+	}
+	reviews, reviewErr := runReviewSteps(ctx, ids, buildVerifyCtx, input, current, result, gates, worktreePath, branch)
+	if joined == nil {
+		return reviews, reviewErr
+	}
+	challengeErr := joined.Get(ctx, nil)
+	if reviewErr != nil {
+		return reviews, reviewErr
+	}
+	if challengeErr != nil {
+		return reviews, challengeErr
+	}
+	if reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0 {
+		return reviews, commitGreenChallenge(ctx, ids, input, result, worktreePath, branch)
+	}
+	return reviews, nil
 }
 
 // challengeJob runs the challenger job and records what it left. ok is false
