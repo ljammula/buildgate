@@ -47,6 +47,9 @@ func meterLedgerRoot() string {
 // container, while one outside the stack publishes a port of the stack: the
 // start would wait out its timeout on a service that cannot bind.
 func (impl realSandboxRuntime) startStack(ctx context.Context, w io.Writer, meterImage string) error {
+	if err := impl.dp.docker.backend(ctx, impl.dp.docker.dockerBinary()).Refused(); err != nil {
+		return err
+	}
 	if holders := impl.portHolders(ctx, hostcontrol.OpenShellGatewayAddr, hostcontrol.OpenShellGatewayHealthAddr, hostcontrol.OpenShellMeterAddr); len(holders) > 0 {
 		return fmt.Errorf("%s; stop that container or publish it on another host port", strings.Join(holders, "; "))
 	}

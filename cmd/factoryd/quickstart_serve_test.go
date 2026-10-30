@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -205,11 +204,7 @@ func TestQuickstartEnsureServeGivesNoTokenUntilItsOwnServeIsRecorded(t *testing.
 // /healthz and (on macOS) no serve LaunchAgent plist is installed.
 func TestQuickstartEnsureServeSpawnsWhenNotListening(t *testing.T) {
 	dp := newTestDeps(t)
-	if runtime.GOOS == "darwin" {
-		// Isolate from this developer's own real ~/Library/LaunchAgents --
-		// same reasoning as TestQuickstartEnsureDaemonRestartsAliveChildWhenConfigRewritten.
-		t.Setenv("HOME", t.TempDir())
-	}
+	t.Setenv("HOME", t.TempDir())
 
 	restoreHealthz := fakeHostOf(dp).serveHealthzOKFn
 	fakeHostOf(dp).serveHealthzOKFn = func(addr string) bool { return false }
@@ -340,9 +335,7 @@ func TestQuickstartEnsureServeWaitsForItsOwnStartingServe(t *testing.T) {
 // started at the default address.
 func TestQuickstartEnsureServeDistrustsAStaleRecord(t *testing.T) {
 	dp := newTestDeps(t)
-	if runtime.GOOS == "darwin" {
-		t.Setenv("HOME", t.TempDir())
-	}
+	t.Setenv("HOME", t.TempDir())
 	origListening := consolelink.Listening
 	t.Cleanup(func() { consolelink.Listening = origListening })
 	consolelink.Listening = func(string) bool { return true }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"buildgate/internal/dockerbackend"
 	"buildgate/internal/forge"
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/openshell"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
@@ -43,11 +45,13 @@ type deps struct {
 	// gateway is the runtime over this machine's OpenShell gateway, which
 	// sandbox reaches; it connects on first use.
 	gateway *openshell.Lazy
+	// backends keeps docker.backend's detections for the process.
+	backends *backendMemo
 }
 
 // newDeps returns the real implementations.
 func newDeps() *deps {
-	dp := &deps{}
+	dp := &deps{backends: &backendMemo{}}
 	dp.docker = realDocker{dp: dp}
 	dp.forge = realForge{dp: dp}
 	dp.host = realHost{dp: dp}
@@ -58,6 +62,10 @@ func newDeps() *deps {
 }
 
 type dockerBoundary interface {
+	// backend names the Docker that the docker CLI dockerBinary reaches
+	// ("" is the default CLI): colima, Docker Engine on this Linux host, or
+	// one buildgate refuses. Read once per process and binary.
+	backend(ctx context.Context, dockerBinary string) dockerbackend.Detection
 	colimaBinary() string
 	dockerBinary() string
 	// imageToolchains runs image once and reads the versions of its
@@ -146,6 +154,10 @@ type hostBoundary interface {
 	// for a symlink or submodule, errBlobTooLarge over 1 MiB.
 	blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommand(target string) *exec.Cmd
+	// browserRedirectDir is where a browser can read the redirect file
+	// openInBrowser writes ("" is the OS temp directory), or why no browser
+	// can be opened on this machine.
+	browserRedirectDir() (string, error)
 	executable() (string, error)
 	// rootTreeAtCommit lists the entries of commit's root tree in repoDir
 	// (name, mode, type, object) from git objects, never from a worktree.
@@ -158,14 +170,21 @@ type hostBoundary interface {
 	launchctl(args ...string) ([]byte, error)
 	launchctlBinary() string
 	launchdServicePID(domain string) (int, bool)
-	lsof(port string) ([]byte, error)
+	portListeners(port string) ([]byte, error)
 	pidAlive(pid int) bool
 	pidLooksLikeWorker(pid int) bool
 	processUID(pid int) (int, bool)
 	runUpgradeCommand(c upgradeCmd) ([]byte, error)
 	serveHealthzOK(addr string) bool
 	serveVerifiedOurs(dataDir string, addr string) (int, bool)
-	shippedRootsPEM(ctx context.Context) ([]byte, error)
+	// serviceManager is what supervises install-service's services on this
+	// OS (launchd, systemd or none).
+	serviceManager() hostcontrol.ServiceManager
+	// systemctl and loginctl run those commands and return their combined
+	// output: the systemd user units install-service manages, and whether
+	// the user's units start at boot (linger).
+	systemctl(args ...string) ([]byte, error)
+	loginctl(args ...string) ([]byte, error)
 	sleep(d time.Duration)
 	spawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	// terminalNotifierOnPath reports whether terminal-notifier, which gives

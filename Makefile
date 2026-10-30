@@ -265,16 +265,16 @@ live-oversize-test:
 probe-instruction-paths:
 	python3 scripts/probe_instruction_paths.py
 
-# install-prereqs is `make install`'s first step: Homebrew installs the
-# tools the later steps need and this machine lacks, Docker's buildx plugin
-# is linked for image builds and automatic toolchain derivation. Docker that
-# does not answer is started through colima; see scripts/install-prereqs.sh's
-# header for the table.
+# install-prereqs is `make install`'s first step: on macOS Homebrew installs
+# the tools the later steps need and this machine lacks, Docker's buildx plugin
+# is linked for image builds and automatic toolchain derivation. On Linux it
+# installs nothing and names what is missing. Docker that does not answer is
+# started through colima; see scripts/install-prereqs.sh's header for the table.
 install-prereqs:
 	@FACTORYD_IMAGE_SOURCE="$(IMAGE_SOURCE)" scripts/install-prereqs.sh
 
 # install-prereqs-test: offline tests for scripts/install-prereqs.sh and
-# scripts/install-finish.sh against stand-in brew, docker, colima, gh and
+# scripts/install-finish.sh against stand-in uname, brew, docker, colima, gh and
 # factoryd. Installs and starts nothing.
 install-prereqs-test:
 	python3 -m unittest scripts/tests/test_install_prereqs.py scripts/tests/test_install_finish.py -v

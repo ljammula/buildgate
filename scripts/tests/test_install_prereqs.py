@@ -2,6 +2,7 @@
 
 Each test runs the script with PATH holding only a temp directory: the few
 system utilities the script needs, the tools that test says are installed,
+a stand-in `uname` naming the system (Darwin unless the test says Linux),
 and a stand-in `brew` that records its arguments and "installs" a formula by
 dropping its command into that directory. Nothing is installed for real.
 """
@@ -40,10 +41,12 @@ done
 """
 
 # `docker buildx version` works only once the plugin is linked where Docker
-# looks; `docker info` only once the daemon marker exists.
+# looks; `docker info` only once the daemon marker exists; `docker compose
+# version` unless the no-compose marker exists.
 DOCKER = """#!/bin/sh
 if [ "$1" = buildx ]; then [ -e "$HOME/.docker/cli-plugins/docker-buildx" ]; exit $?; fi
 if [ "$1" = info ]; then [ -e "$HOME/docker-up" ]; exit $?; fi
+if [ "$1" = compose ]; then [ ! -e "$HOME/no-compose" ]; exit $?; fi
 exit 0
 """
 
@@ -70,6 +73,23 @@ class InstallPrereqsTest(unittest.TestCase):
         self.colima_stub.write_text(COLIMA)
         for name in UTILITIES:
             os.symlink(shutil.which(name), self.bin / name)
+        # A Mac that already has terminal-notifier, unless a test says
+        # otherwise: the tests of the install path then see only its calls.
+        self.system("Darwin")
+        self.install("terminal-notifier")
+        # Logs any call: nothing here may run sudo or start dockerd.
+        for name in ("sudo", "dockerd", "systemctl"):
+            self.install(name, f'#!/bin/sh\necho "{name} $*" >> "$HOME/privileged.log"\n')
+
+    def system(self, name):
+        self.install("uname", f"#!/bin/sh\necho {name}\n")
+
+    def without_terminal_notifier(self):
+        (self.bin / "terminal-notifier").unlink()
+
+    def privileged_calls(self):
+        log = self.home / "privileged.log"
+        return log.read_text().splitlines() if log.exists() else []
 
     def install(self, name, body="#!/bin/sh\n"):
         path = self.bin / name
@@ -119,7 +139,7 @@ class InstallPrereqsTest(unittest.TestCase):
 
     def test_a_mac_without_terminal_notifier_gets_it(self):
         self.have(*EVERYTHING)
-        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        self.without_terminal_notifier()
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.brew_calls(), ["install terminal-notifier", "--prefix"])
@@ -130,7 +150,7 @@ class InstallPrereqsTest(unittest.TestCase):
 
     def test_a_new_terminal_notifier_is_launched_as_an_application_once(self):
         self.have(*EVERYTHING)
-        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        self.without_terminal_notifier()
         self.install("open", '#!/bin/sh\necho "$*" >> "$HOME/open.log"\n')
         app = self.prefix / "opt" / "terminal-notifier" / "terminal-notifier.app"
         app.mkdir(parents=True)
@@ -146,21 +166,20 @@ class InstallPrereqsTest(unittest.TestCase):
 
     def test_a_mac_with_terminal_notifier_is_left_alone(self):
         self.have(*EVERYTHING, "terminal-notifier")
-        self.install("uname", "#!/bin/sh\necho Darwin\n")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.brew_calls(), [])
 
     def test_no_terminal_notifier_and_no_homebrew_is_not_a_failure(self):
         self.have(*EVERYTHING, brew=False)
-        self.install("uname", "#!/bin/sh\necho Darwin\n")
+        self.without_terminal_notifier()
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("desktop notifications will have no click", result.stderr)
 
     def test_another_system_is_not_given_terminal_notifier(self):
         self.have(*EVERYTHING)
-        self.install("uname", "#!/bin/sh\necho Linux\n")
+        self.system("Linux")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.brew_calls(), [])
@@ -372,6 +391,99 @@ fi
         self.have("python3", "git", "npm", "docker", "colima", brew=False)
         self.install("brew", "#!/bin/sh\nexit 1\n")
         self.assertNotEqual(self.run_script().returncode, 0)
+
+    def test_linux_with_everything_installs_nothing_even_with_homebrew(self):
+        self.have(*EVERYTHING)
+        self.system("Linux")
+        self.without_terminal_notifier()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+        self.assertEqual(self.colima_calls(), [])
+        self.assertEqual(self.privileged_calls(), [])
+        self.assertEqual(result.stdout, "")
+
+    def test_linux_names_each_missing_tool_and_fails_without_brew_or_sudo(self):
+        self.have("python3", "docker")
+        self.system("Linux")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        for named in ("go: https://go.dev", "gh: https://github.com/cli/cli", "git: sudo apt-get install git", "npm (Node 20+", "colima (sandboxes run in its VM"):
+            self.assertIn(named, result.stderr)
+        self.assertNotIn("python3:", result.stderr)
+        self.assertNotIn("Docker's apt repository", result.stderr)
+        self.assertNotIn("brew.sh", result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+        self.assertEqual(self.privileged_calls(), [])
+
+    def test_linux_without_docker_names_dockers_apt_repository(self):
+        self.have("go", "python3", "gh", "git", "npm", "colima")
+        self.system("Linux")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("https://docs.docker.com/engine/install/ubuntu/", result.stderr)
+        self.assertIn("sudo apt-get install docker-ce-cli docker-buildx-plugin docker-compose-plugin", result.stderr)
+        self.assertNotIn("install docker.io", result.stderr)
+        self.assertNotIn("snap install", result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+        self.assertEqual(self.colima_calls(), [])
+        self.assertEqual(self.privileged_calls(), [])
+
+    def test_linux_without_compose_v2_fails_and_names_the_plugin(self):
+        self.have(*EVERYTHING)
+        self.system("Linux")
+        (self.home / "no-compose").write_text("")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("docker compose (the Compose v2 plugin)", result.stderr)
+        self.assertIn("sudo apt-get install docker-compose-plugin ", result.stderr)
+
+    def test_linux_without_buildx_names_the_plugin_and_links_nothing(self):
+        self.have(*EVERYTHING, buildx=False)
+        self.system("Linux")
+        plugin = self.prefix / "lib/docker/cli-plugins/docker-buildx"
+        plugin.parent.mkdir(parents=True)
+        plugin.write_text("#!/bin/sh\n")
+        plugin.chmod(0o755)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("docker buildx: Docker's apt repository", result.stderr)
+        self.assertIn("sudo apt-get install docker-buildx-plugin ", result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+        self.assertFalse((self.home / ".docker" / "cli-plugins" / "docker-buildx").exists())
+
+    def test_linux_missing_npm_alone_is_not_a_failure(self):
+        self.have("go", "python3", "gh", "git", "docker", "colima")
+        self.system("Linux")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("placeholder", result.stderr)
+        self.assertEqual(self.brew_calls(), [])
+
+    def test_linux_without_colima_names_it_and_fails(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker")
+        self.system("Linux")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("colima (sandboxes run in its VM; it needs QEMU and /dev/kvm)", result.stderr)
+        self.assertNotIn("systemctl", result.stderr)
+        self.assertEqual(self.privileged_calls(), [])
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_linux_docker_down_with_colima_starts_colima(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.system("Linux")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), ["start --memory 4"])
+        self.assertNotIn("systemctl", result.stderr)
+        self.assertEqual(self.privileged_calls(), [])
+
+    def test_a_mac_with_docker_down_and_no_colima_gets_no_systemd_hint(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker", docker_up=False)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":

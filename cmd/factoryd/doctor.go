@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/dockerbackend"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -376,6 +377,7 @@ func doctorMain(dp *deps, args []string) error {
 		// of Phase A found these should be re-probed only when data_dir
 		// actually changed (fix (c) repointed it), not on every -fix run.
 		if in.dataDir != oldDataDir {
+			in.dockerBackend = dp.docker.backend(context.Background(), in.sandboxDocker).Backend
 			mountCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			checks = doctorReevaluateDataDirDependentChecks(mountCtx, checks, in)
 			cancel()
@@ -452,10 +454,10 @@ func doctorReplaceChecksWithPrefix(checks []doctorCheck, prefix string, fresh []
 func doctorReevaluateDataDirDependentChecks(ctx context.Context, checks []doctorCheck, in doctorInputs) []doctorCheck {
 	image := in.sandboxImage
 	if in.workspace != "" && !in.noRelay {
-		checks = doctorReplaceCheck(checks, doctorCheckDataDirMountVisibility(ctx, in.sandboxDocker, image, in.dataDir))
+		checks = doctorReplaceCheck(checks, doctorCheckDataDirMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir))
 	}
 	if in.checkRequestSourceRepos && in.dataDir != "" {
-		checks = doctorReplaceChecksWithPrefix(checks, "mount visibility (request ", doctorChecksRequestSourceRepos(ctx, in.sandboxDocker, image, in.dataDir, in.workspace))
+		checks = doctorReplaceChecksWithPrefix(checks, "mount visibility (request ", doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace))
 	}
 	return checks
 }
@@ -515,11 +517,18 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	// A fresh clock for the regular checks: a -fix build above can take
 	// minutes, and a context started before it would already be expired
 	// here, failing every later probe spuriously (Sonnet review).
+	// The backend is read before that clock starts: its detection has its
+	// own deadline and leaves the checks theirs.
+	backend := dp.docker.backend(context.Background(), in.sandboxDocker)
+	in.dockerBackend = backend.Backend
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	checks := append(built, doctorChecksFor(ctx, in)...)
-	if plistPath, plistErr := hostcontrol.WorkerPlistPath(); plistErr == nil {
-		checks = append(checks, doctorCheckWorkerService(ctx, "launchctl", plistPath))
+	if c, ok := doctorCheckDockerBackend(backend); ok {
+		checks = append(checks, c)
+	}
+	if path, pathErr := dp.host.serviceManager().DefinitionPath(hostcontrol.WorkerService); pathErr == nil {
+		checks = append(checks, doctorCheckWorkerService(ctx, dp, path))
 	}
 	if selfPath, selfErr := os.Executable(); selfErr == nil {
 		checks = append(checks, doctorCheckPathShadowing(selfPath, os.Getenv("PATH"), fix))
@@ -527,10 +536,29 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	if c, ok := doctorCheckTLSInterception(ctx, dp, fix); ok {
 		checks = append(checks, c)
 	}
-	if runtime.GOOS == "darwin" && os.Getenv(notify.DesktopNotificationsEnvironmentVariable) != "0" {
-		checks = append(checks, doctorCheckNotificationClick(dp.host.terminalNotifierOnPath()))
+	if os.Getenv(notify.DesktopNotificationsEnvironmentVariable) != "0" {
+		switch runtime.GOOS {
+		case "darwin":
+			checks = append(checks, doctorCheckNotificationClick(dp.host.terminalNotifierOnPath()))
+		case "linux":
+			_, err := notify.LinuxNotifier()
+			checks = append(checks, doctorCheckLinuxNotifications(err))
+		}
 	}
 	return checks, nil
+}
+
+// doctorCheckLinuxNotifications reports whether this session can show a
+// desktop notification (notify-send and a session bus). Advisory: the
+// console and `factoryd inbox` say the same, and a worker under systemd or
+// ssh usually has no desktop to show one on.
+func doctorCheckLinuxNotifications(notifierErr error) doctorCheck {
+	const name = "desktop notifications (notify-send)"
+	if notifierErr != nil {
+		return doctorCheck{Name: name, Advisory: true, Err: notifierErr,
+			Fix: "install libnotify-bin and run the worker from a desktop session to see banners; otherwise the console and `factoryd inbox` list what waits for you"}
+	}
+	return doctorCheck{Name: name}
 }
 
 func (realHost) terminalNotifierOnPath() bool {
@@ -732,6 +760,9 @@ func factoryVersionOf(path string) string {
 // doctorChecksFor (see resolveDoctorSandboxImage).
 type doctorInputs struct {
 	sandboxDocker string
+	// dockerBackend is the Docker backend sandboxDocker reaches; "" when
+	// it was not read or Docker did not answer.
+	dockerBackend dockerbackend.Backend
 	sandboxImage  string
 	// meterImage is session config meter_image; empty makes the OpenShell
 	// checks report "not configured".
@@ -915,7 +946,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 			checks = append(checks, doctorCheckScratchOwned(ctx, in.sandboxDocker, image))
 			checks = append(checks, doctorCheckSandboxKernel(ctx, in.sandboxDocker, image))
 			checks = append(checks, doctorCheckProfileImages(ctx, in.sandboxDocker, image, in.profileImages)...)
-			if runtime.GOOS == "darwin" {
+			if in.dockerBackend == dockerbackend.Colima {
 				checks = append(checks, doctorCheckHomeNotShared(ctx, in.sandboxDocker, image))
 			}
 		}
@@ -947,7 +978,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	checks = append(checks, doctorCheckSkills(in))
 	checks = append(checks, doctorCheckDesignGuide(in))
 	if in.workspace != "" {
-		checks = append(checks, doctorCheckMountVisibility(ctx, in.sandboxDocker, image, in.workspace))
+		checks = append(checks, doctorCheckMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.workspace))
 		checks = append(checks, doctorCheckMonorepoModuleRoot(in.workspace))
 		checks = append(checks, doctorCheckDataDirOutsideWorkspace(in.workspace, in.dataDir))
 		checks = append(checks, doctorCheckGitCredentialsNotExposed(in.workspace))
@@ -969,11 +1000,11 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 			// doctorCheckDataDirMountVisibility preflight runs
 			// regardless) -- this is advance warning for an operator
 			// running `doctor` directly.
-			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, in.sandboxDocker, image, in.dataDir))
+			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir))
 		}
 	}
 	if in.checkRequestSourceRepos && in.dataDir != "" {
-		checks = append(checks, doctorChecksRequestSourceRepos(ctx, in.sandboxDocker, image, in.dataDir, in.workspace)...)
+		checks = append(checks, doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace)...)
 	}
 	if in.temporalAddress != "" {
 		checks = append(checks, doctorCheckTemporalReachable(ctx, in.temporalAddress))
@@ -1559,6 +1590,7 @@ func runDoctorChecks(checks []doctorCheck, w io.Writer) (failed int) {
 // inside a container. a boundary method so the in-process init/onboard
 // tests can stub it instead of needing a live Docker daemon.
 func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir string) []doctorCheck {
+	backend := impl.backend(ctx, dockerBinary).Backend
 	checks := []doctorCheck{doctorCheckDockerReachable(ctx, dockerBinary)}
 	if image == "" {
 		return append(checks, doctorCheck{
@@ -1570,7 +1602,7 @@ func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir 
 	return append(checks,
 		doctorCheckImagePresent(ctx, dockerBinary, "sandbox image", image,
 			"run `make install` from the buildgate checkout to build or pull and configure the image"),
-		doctorCheckMountVisibility(ctx, dockerBinary, image, dir),
+		doctorCheckMountVisibility(ctx, backend, dockerBinary, image, dir),
 	)
 }
 
@@ -1605,7 +1637,7 @@ func dockerReachableFix() string {
 	case "darwin":
 		return "run `brew install colima docker && colima start` (the Mac backend), and confirm -sandbox-docker names a real executable"
 	case "linux":
-		return "run `sudo systemctl start docker` (and add yourself to the docker group), and confirm -sandbox-docker names a real executable"
+		return "run `colima start` (sandboxes run in colima's VM on Linux as on a Mac: README's Linux section), and confirm -sandbox-docker names a real executable"
 	default:
 		return "start Docker and confirm -sandbox-docker names a real executable"
 	}
@@ -2456,8 +2488,8 @@ func doctorCheckTmpfsSize(tmpfsSize string) doctorCheck {
 // mount it read-only into a throwaway container from image, and confirm
 // the marker is visible from inside it. A failure here names exactly the
 // trap of a path colima does not share, which this session found live.
-func doctorCheckMountVisibility(ctx context.Context, dockerBinary, image, workspace string) doctorCheck {
-	return doctorCheckMountVisibilityFor(ctx, dockerBinary, image, workspace,
+func doctorCheckMountVisibility(ctx context.Context, backend dockerbackend.Backend, dockerBinary, image, workspace string) doctorCheck {
+	return doctorCheckMountVisibilityFor(ctx, backend, dockerBinary, image, workspace,
 		"-workspace", "pass a real, existing git checkout to -workspace")
 }
 
@@ -2471,8 +2503,8 @@ func doctorCheckMountVisibility(ctx context.Context, dockerBinary, image, worksp
 // -data-dir is checked on every worker/`factoryd <run>`
 // invocation, common enough that the reported name/Fix text should name
 // the right flag.
-func doctorCheckDataDirMountVisibility(ctx context.Context, dockerBinary, image, dataDir string) doctorCheck {
-	return doctorCheckMountVisibilityFor(ctx, dockerBinary, image, dataDir,
+func doctorCheckDataDirMountVisibility(ctx context.Context, backend dockerbackend.Backend, dockerBinary, image, dataDir string) doctorCheck {
+	return doctorCheckMountVisibilityFor(ctx, backend, dockerBinary, image, dataDir,
 		"-data-dir", "pass a real, existing directory to -data-dir")
 }
 
@@ -2482,7 +2514,7 @@ func doctorCheckDataDirMountVisibility(ctx context.Context, dockerBinary, image,
 // existHint is the Fix text for a missing/non-directory target (the only
 // piece that isn't just a substituted flag name: -workspace's hint talks
 // about a git checkout, -data-dir's about a plain directory).
-func doctorCheckMountVisibilityFor(ctx context.Context, dockerBinary, image, dir, flagLabel, existHint string) doctorCheck {
+func doctorCheckMountVisibilityFor(ctx context.Context, backend dockerbackend.Backend, dockerBinary, image, dir, flagLabel, existHint string) doctorCheck {
 	name := fmt.Sprintf("mount visibility (%s reachable inside a container)", flagLabel)
 	dirAbs, err := filepath.Abs(dir)
 	if err != nil {
@@ -2508,9 +2540,20 @@ func doctorCheckMountVisibilityFor(ctx context.Context, dockerBinary, image, dir
 		return doctorCheck{Name: name, Err: markerErr}
 	} else if probeErr != nil {
 		return doctorCheck{Name: name, Err: fmt.Errorf("the probe container could not see the marker file: %s", out),
-			Fix: fmt.Sprintf("the configured Docker backend does not share %s's own path into its containers -- add it to colima's mounts (USAGE.md, \"Data directory and colima\": data dirs under %s read-write, repositories read-only)", flagLabel, sessionconfig.DataRoot()) + doctorMountVisibilityHint(dirAbs)}
+			Fix: doctorMountVisibilityFix(backend, flagLabel, dirAbs)}
 	}
 	return doctorCheck{Name: name}
+}
+
+// doctorMountVisibilityFix says why a container cannot see dirAbs on
+// backend. A VM backend shares only the paths it is told to. Docker Engine
+// on this Linux host mounts every path as it is, and no sandbox runs there
+// yet (the docker backend row), so no permission change is the fix.
+func doctorMountVisibilityFix(backend dockerbackend.Backend, flagLabel, dirAbs string) string {
+	if backend == dockerbackend.NativeLinux {
+		return fmt.Sprintf("Docker Engine on this host mounts %s's path as it is, and sandboxes do not run on it yet (the docker backend row says why): use colima on this machine", flagLabel)
+	}
+	return fmt.Sprintf("the configured Docker backend does not share %s's own path into its containers -- add it to colima's mounts (USAGE.md, \"Data directory and colima\": data dirs under %s read-write, repositories read-only)", flagLabel, sessionconfig.DataRoot()) + doctorMountVisibilityHint(dirAbs)
 }
 
 // doctorCheckHomeNotShared warns (Advisory) when the Docker backend's VM
@@ -2519,8 +2562,8 @@ func doctorCheckMountVisibilityFor(ctx context.Context, dockerBinary, image, dir
 // harness auth, shell profiles, the session configs), not just the data
 // dirs and repositories a run mounts. It probes a marker at the top of
 // $HOME, which a VM sharing only sessionconfig.DataRoot and the
-// repositories cannot see. Only meaningful where Docker runs in a VM
-// (macOS); on native Linux the daemon sees the whole host regardless.
+// repositories cannot see. Run on colima, on macOS or Linux; Docker Engine
+// on a Linux host has no VM, and its daemon sees the whole host regardless.
 func doctorCheckHomeNotShared(ctx context.Context, dockerBinary, image string) doctorCheck {
 	const name = "Docker VM does not share all of $HOME"
 	home, err := os.UserHomeDir()
@@ -2674,11 +2717,11 @@ func doctorInFlightSourceRepos(dataDir, skip string) []doctorRequestSourceRepo {
 // or /var/folders) mounts as an empty directory, so the build's agent writes
 // files the host never sees and the harness reports "no changes made to the
 // workspace". Needs Docker, never a model.
-func doctorChecksRequestSourceRepos(ctx context.Context, dockerBinary, image, dataDir, workspace string) []doctorCheck {
+func doctorChecksRequestSourceRepos(ctx context.Context, backend dockerbackend.Backend, dockerBinary, image, dataDir, workspace string) []doctorCheck {
 	var checks []doctorCheck
 	for _, repo := range doctorInFlightSourceRepos(dataDir, workspace) {
 		label := fmt.Sprintf("request %s source repo", repo.requestID)
-		checks = append(checks, doctorCheckMountVisibilityFor(ctx, dockerBinary, image, repo.path, label,
+		checks = append(checks, doctorCheckMountVisibilityFor(ctx, backend, dockerBinary, image, repo.path, label,
 			fmt.Sprintf("request %s's source repo %s no longer exists: restore it, or cancel/resubmit the request against a repo that does", repo.requestID, repo.path)))
 	}
 	return checks
@@ -3293,4 +3336,19 @@ func doctorSizingChecksAfterFix(fix bool, in doctorInputs, checks []doctorCheck)
 		in = doctorApplyBuiltImageRefs(in, checks)
 	}
 	return doctorDockerSizingChecks(context.Background(), in)
+}
+
+// doctorCheckDockerBackend names the Docker backend sandboxes run on. A
+// backend buildgate refuses, Docker Engine on this Linux host among them,
+// fails with its reason. No row when Docker did not answer: the
+// reachability check already fails.
+func doctorCheckDockerBackend(d dockerbackend.Detection) (doctorCheck, bool) {
+	if d.Err != nil {
+		return doctorCheck{}, false
+	}
+	name := "docker backend: " + string(d.Backend)
+	if !d.Backend.Supported() {
+		return doctorCheck{Name: name, Err: d.Refused(), Fix: d.Backend.Refusal()}, true
+	}
+	return doctorCheck{Name: name}, true
 }

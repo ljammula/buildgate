@@ -225,11 +225,11 @@ func TestQuickstartCheckRepoMountVisible(t *testing.T) {
 	}
 	opts := &quickstartOptions{SandboxDocker: "docker"}
 
-	if err := quickstartCheckRepoMountVisible(opts, configPath, inside); err != nil {
+	if err := quickstartCheckRepoMountVisible(newTestDeps(t), opts, configPath, inside); err != nil {
 		t.Errorf("repo under home: err = %v, want nil (no sandbox_image recorded, so no probe)", err)
 	}
 	for name, repo := range map[string]string{"outside home": outside, "symlink out of home": link} {
-		err := quickstartCheckRepoMountVisible(opts, configPath, repo)
+		err := quickstartCheckRepoMountVisible(newTestDeps(t), opts, configPath, repo)
 		if err == nil {
 			t.Errorf("%s: err = nil, want a refusal", name)
 			continue

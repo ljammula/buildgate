@@ -276,8 +276,13 @@ request text from that GitHub issue, `gh` must be logged in) and
 trailing request text `factoryd submit` takes; each must precede
 `<repo-path>` on the command line.
 
-**Prerequisites**: with Homebrew, `make install` installs the tools below
-that are missing, starts colima and runs `gh auth login`. Go, Docker (colima: `colima
+**Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
+that are missing, starts colima and runs `gh auth login`. On Linux it installs
+nothing and runs no `sudo`: it names each missing tool and stops, with the
+docker CLI, buildx and Compose v2 from Docker's own apt repository
+(`docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
+distribution's `docker.io` or the snap, and colima, whose VM runs Docker as on
+a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
@@ -296,9 +301,11 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/ljammula/build
 The installer chooses the newest stable release with all three GHCR images
 published, checks out its source under `~/.local/share/buildgate/source` by
 default (or `$XDG_DATA_HOME/buildgate/source` when `XDG_DATA_HOME` is set),
-installs missing prerequisites with Homebrew, pulls the matching worker,
+installs missing prerequisites with Homebrew on macOS (on Linux it installs
+nothing and names each missing tool, Docker from Docker's own apt
+repository), pulls the matching worker,
 meter and registry-proxy images, and runs `factoryd doctor -fix`. It needs
-`bash`, `curl`, `make`, and `git` (or Homebrew to install Git). GHCR packages
+`bash`, `curl`, `make`, and `git` (or, on macOS, Homebrew to install Git). GHCR packages
 must be public for anonymous pulls.
 
 For development, clone the repository and build `factoryd` plus its images
@@ -349,12 +356,17 @@ make install
   |
   BUILD_CA_BUNDLE given? -- yes --> use that file
   | no
-  registry.npmjs.org signed by a root macOS ships? -- yes --> no bundle
+  registry.npmjs.org signed by a public root? -- yes --> no bundle
   | no
-  that root in the keychain? -- no --> warning: pass BUILD_CA_BUNDLE yourself
+  that root trusted by this machine? -- no --> warning: pass BUILD_CA_BUNDLE yourself
   | yes
-  write it and macOS's roots to ~/.config/factoryd/build-ca.pem, use that
+  write it and the public roots to ~/.config/factoryd/build-ca.pem, use that
 ```
+
+A public root is one in the Mozilla root bundle compiled into `factoryd`, so
+the lookup is the same on macOS and Linux; "trusted by this machine" is the
+operating system's own trust store (the keychain on macOS, the system CA
+bundle on Linux).
 
 | Consumer | How it reads the bundle |
 |---|---|
@@ -370,8 +382,8 @@ make install
 | `ok ... (not intercepted, none needed)` | No bundle is used |
 | `ok ... (intercepted by <CA>; make install uses this bundle)` with `use: BUILD_CA_BUNDLE=...` | The bundle is written |
 | `warn ... signed by "<CA>"` | Intercepted, bundle not written yet: `make install` or `doctor -fix` writes it |
-| `warn ... a CA this machine does not trust` | The proxy's CA is not in the keychain: get it as a PEM file and run `BUILD_CA_BUNDLE=/path/to/ca.pem make install` |
-| no row | The registry is unreachable, or the machine is not a Mac |
+| `warn ... a CA this machine does not trust` | The proxy's CA is not in the machine's trust store: get it as a PEM file and run `BUILD_CA_BUNDLE=/path/to/ca.pem make install` |
+| no row | The registry is unreachable |
 
 **Upgrade.** `factoryd upgrade [-to <tag|ref>] [-source <checkout>] [-yes]
 [-wait]` takes this machine to the newest release tag (or `-to`) in one
@@ -531,12 +543,36 @@ path. Run `quickstart` again after any mid-sequence failure — an existing
 config is reused, an already-scaffolded repo is skipped, an
 already-running daemon is left alone.
 
-**Survive a reboot.** `factoryd install-service` (macOS only) installs
-two launchd agents (`dev.factoryd.worker`, `dev.factoryd.serve`;
-`-no-serve` installs only the former). `factoryd doctor` reports each
-one's state; `factoryd uninstall-service` removes both. `factoryd console
-[-open]` reprints the tokenized console link at any later point without
-re-running `quickstart`.
+**Survive a reboot.** `factoryd install-service` installs the worker and
+the console as services: two launchd agents on macOS (`dev.factoryd.worker`,
+`dev.factoryd.serve`), two systemd user units on Linux
+(`factoryd-worker.service`, `factoryd-serve.service` under
+`~/.config/systemd/user`); `-no-serve` installs only the worker. On Linux
+the units run while you are logged in, as a LaunchAgent does; to have them
+start at boot and run with nobody logged in, the user must linger
+(`sudo loginctl enable-linger $USER`, once), which `install-service` warns
+about until it is on. It must run in a login of that user (ssh or a
+desktop), not under `su` or `sudo -u`, which have no user manager. `factoryd doctor` reports the
+worker service's state; `factoryd uninstall-service` removes both.
+`factoryd console [-open]` reprints the tokenized console link at any later
+point without re-running `quickstart`.
+
+**On Linux.** `factoryd doctor` names the Docker backend:
+
+| Backend | What it means |
+|---|---|
+| `colima` | colima's VM, as on a Mac (QEMU, which needs `/dev/kvm` and so a machine with KVM: most cloud VMs have none); narrow its mounts as above. The one backend sandboxes run on, and not yet live-proven on Linux |
+| `native-linux` | Docker Engine on this host. Refused: the worker runs as the image's user 65532, which cannot use factoryd's launch directories with no VM between them, so no worker command would start |
+| `docker-desktop`, `desktop-linux`, `rootless`, `userns`, `snap`, `podman`, `wsl2`, `other` | Refused before any sandbox, the OpenShell stack or a worker starts, with the reason |
+
+A machine with no desktop session (a server reached over ssh) opens no
+browser: forward the console's port from your own machine
+(`ssh -L 8090:127.0.0.1:8090 <host>`) and open the link `quickstart` or
+`factoryd console` prints. Desktop notifications go through `notify-send`
+(`libnotify-bin`) when the worker runs in a desktop session. A worker
+running as a systemd unit or over ssh cannot unlock the desktop keyring
+where `gh` keeps its token: log in once with `gh auth login
+--insecure-storage`, which keeps it in `~/.config/gh/hosts.yml` (0600).
 
 **Missing an image?**
 `factoryd doctor -fix -repo-root ~/code/buildgate` builds any absent
@@ -1083,7 +1119,7 @@ every request verb takes `-config`):
 | New run and the Projects screen's stats and release without a build-time token | The `#t=<token>` fragment in `serve`'s printed URL is captured into the browser on first load and reused thereafter. Changes on every `serve` restart — re-open the newly printed link. `quickstart`/`install-service` instead generate a *stable* token file, reused across restarts; `factoryd console [-open]` reprints it. After `install-service -require-tokens`, the link also carries the console token (`&c=`), which every tab keeps |
 | Quick offline run summary | `factoryd status` — first line `profile: <name> (<config path>) · data dir <dir>` (`-json`: `profile`, `config_path`), then one line per request (id, project, state, age, time in this state, ticket, PR URL or reason) and per run (ticket and launch suffix, project, state, elapsed, cost, PR URL or reason). `-project`, `-state`, `-n` (default 20), `-json`. On `chatgpt-codex`/`github-copilot`, cost reads `(API-price est.; billed to your subscription)` (aggregates: `(includes subscription-billed runs; API-price est.)`). While `worker` is alive, also prints `worker route: <credential-mode> · <worker-model>` — which subscription is billed; the route itself is daemon-wide, changed by the operator via `worker`/`quickstart -route`, not per request |
 | Remove buildgate from this machine | `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]`: stops everything `stop -all` does, then removes the launchd services, the Temporal containers (`docker compose -p buildgate down`), the OpenShell gateway and meter containers (`docker compose -p buildgate-openshell down`), the `factoryd-local-registry` container, the images `make install` built (`localhost:5050/{buildgate-worker,factoryd-meter,factoryd-registry-proxy,buildgate-pifork,project-worker}:local`), the `buildgate` skill in `~/.agents/skills` and `~/.claude/skills` (only a real directory holding a `SKILL.md`; a symlink is left), and the `factoryd` binary. Only steps whose target exists are listed. If a daemon cannot be stopped (a request is building) nothing else is removed; `-force` cancels the build. `~/.config/factoryd` and `~/buildgate` stay unless `-purge` (also drops the Temporal volumes and the gateway's state; you type `purge` to confirm). With `-purge` the gateway's own state on the Docker VM (`/var/lib/openshell`: its database, keys and stored credentials) is deleted too, through a throwaway container of the worker image run before that image is removed; if the image is already gone it prints the manual command (`colima ssh -- sudo rm -rf /var/lib/openshell`) instead. Reinstall with `make install` |
-| Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. A launchd-supervised one is left running with a pointer to `factoryd uninstall-service`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when colima is the Docker provider and no other container runs, `colima stop` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`); it refuses while any `worker` is still live unless `-force` |
+| Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. One that launchd or systemd supervises (`install-service`) is left running with a pointer to `factoryd uninstall-service`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when colima is the Docker provider and no other container runs, `colima stop` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`); it refuses while any `worker` is still live unless `-force` |
 | Everything waiting on you, across profiles | `factoryd inbox [-config <profile>] [-project <name>] [-json]`: every request in `spec_review`, `plan_review`, `pr_review`, `resume_review`, `halted` or `quarantined` in each distinct profile data dir, oldest first. Each entry: `<age>  <profile>  <state>  <id>  <title>`, then the `factoryd approve -config <profile> <id>` / `factoryd reject -config <profile> -reason "..." <id>` commands (the PR URL for `pr_review`; `reason:` and `next:` for halted/quarantined), then `look before deciding: factoryd inspect -config <profile> <id>` when there is anything to look at, then `console: <link>` when a console link resolves. A memory request's title is prefixed `[memory]` (and its `factoryd status` row ends with `[memory]`). Prints `Nothing is waiting on you.` when empty |
 | Look at the work before deciding | `factoryd inspect -config <profile> <id>`, or the console request page's **Commands to look at the work** panel: at a spec or plan review, the commands that open the drafted files; for built work, each ticket's worktree and `git -C <repository> log`/`diff` of exactly the commits the gates checked, a `git worktree add` line for a copy of your own, the verdict and report files and the logs. Try or change the work in your own copy (or `gh pr checkout`), never in the factory's worktree, and remember that running the tests on your Mac runs model-written code outside the sandbox |
 | What a run did before its first round | The console run page's **Start-up** list, above the Timeline: the six steps image, workspace, verify (the baseline), install (registry proxy and sidecars), sandbox and agent, each pending, running, done, failed or skipped, with what it did, the lock it waits on when it is the step waiting, and a log where the factory recorded one (`GET /runs/{id}` `startup_steps`, `GET /runs/{id}/log?step=<name>`). `factoryd watch` leads its footer with `start-up 4/6: install (running 42s)` until the first round |
@@ -1435,6 +1471,10 @@ docker compose -f docker-compose.temporal.yml down -v   # stop, wipe data
   unreachable explicit server halts the run ([`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#temporal-repository-owners-daemons-observing)).
 - `factoryd doctor` fails its Temporal check when Temporal is unreachable
   (builds need it); `doctor -fix` starts it.
+- The stack publishes its frontend (7233) and Web UI (8233) on `127.0.0.1`
+  only: the frontend takes workflow signals with no authentication, so no
+  other machine reaches it. From another machine, forward the ports over ssh
+  (`ssh -L 7233:127.0.0.1:7233 -L 8233:127.0.0.1:8233 <host>`).
 
 ### Requests under the worker
 
@@ -1495,7 +1535,7 @@ on the final commit as usual.
 
 | Situation | What happens |
 |---|---|
-| Lid closed or Mac asleep mid-build | The step is lost when its heartbeat stops: the worker puts the request in `resume_review`. An idle Mac does not sleep mid-build (`caffeinate`) |
+| Lid closed or Mac asleep mid-build | The step is lost when its heartbeat stops: the worker puts the request in `resume_review`. An idle Mac does not sleep mid-build (`caffeinate`); on Linux `systemd-inhibit` holds sleep and idle the same way |
 | `factoryd stop -force`, `kill -9`, crash, reboot (`worker`) | The request building it enters `resume_review` at the next `worker` start; `factoryd resume <id>` continues it |
 | A build lost with its process (halted as above, or `factoryd` stopped with SIGTERM) | A request's run keeps its worktree and branch, flagged `kept_for_resume`, until a human decides (`resume`, `resume -from scratch`, `cancel`, or `retry` of a halted request reaps it); its containers are still removed. `factoryd -resume-worktree-of <run-id>` starts a run that adopts the kept worktree and continues from its round state. A build that had returned before a later step was lost left no round state in the worktree (it is removed, with the build's evidence file moved to the run's directory as `BUILD_EVIDENCE.json`, before any review works there): its resume starts at round 1 on the kept files |
 
@@ -1616,6 +1656,10 @@ What changes for a build:
 | Runs stall with no error | A local/private model host is single-instance; `internal/modelhost` serializes callers automatically. Likewise only `compose_services_concurrency` runs at a time have compose sidecars | `factoryd watch`/console show a `model_host_lock` or `compose_services_lock` `waiting` line naming the holder |
 | Containers left behind after killing a run | The process died before cleanup | `docker ps`, then `docker rm -f` only the `factoryd-*` containers |
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
+| `factoryd worker`, `doctor -fix` or a launch says `refusing to run sandboxes on this Docker (<backend>; ...)` | The Docker CLI reaches a backend sandboxes do not run on (Docker Engine on a Linux host, Docker Desktop, Docker Desktop for Linux, rootless, `userns-remap`, the snap, podman, WSL2, or one `factoryd` cannot name) | Run Docker in colima (`colima start`, then `docker context use colima`), on Linux as on a Mac |
+| `install-service` on Linux warns `this user does not linger` | Without linger, systemd starts the user's units at the first login and stops them at the last logout, so nothing builds at boot or with nobody logged in | Run `sudo loginctl enable-linger $USER` once (it needs an administrator); the installed units then start at boot |
+| `install-service` on Linux says `no systemd user manager answers` | The shell came from `su` or `sudo -u`, which start no user manager | Log in as that user directly (ssh or a desktop session) and rerun |
+| `quickstart` or `console -open` on Linux says `no graphical session here` | An ssh login or a server has no browser to open | Open the printed link; from another machine, forward the port first: `ssh -L 8090:127.0.0.1:8090 <host>` |
 | `gh auth status` fails with "no oauth token found" in an ssh session on a Mac | An ssh session cannot read the login keychain that holds the GitHub login; a process started from that session gets the same answer | Check `gh auth status` in the session that starts `worker`. If it fails, start `worker` and `serve` in the desktop login session: a terminal there, or launchd agents (`factoryd install-service`) |
 | A build fails: "sandbox runtime: ... run `factoryd doctor -fix`" | The OpenShell gateway or the meter is not running (a reboot, a colima restart, `stop -all`) | `factoryd doctor -fix` starts both; `worker` and a single-ticket run start them too unless `FACTORYD_AUTOSTART=0` |
 | `doctor`, `doctor -fix`, `worker` or a run reports `port N is published by container ...` | Another container in the Docker VM publishes one of the stack's ports (`17670`, `17671`, `17672`); the gateway shares the VM's network, so it cannot bind | Stop that container or publish it on another host port, then `factoryd doctor -fix` |
@@ -1624,7 +1668,7 @@ What changes for a build:
 | A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
-| A request halts with `was accepted but the pull request could not be opened: git push ...: fatal: could not read Username for 'https://github.com'` | The worker runs in a session that cannot use the GitHub login. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token, so a worker started over ssh builds and then cannot push | `factoryd doctor` warns `worker's GitHub login` for such a worker, and the worker says so when it starts. Start it from a desktop terminal or with `factoryd install-service`, then `factoryd retry <id>` opens the pull request with no rebuild |
+| A request halts with `was accepted but the pull request could not be opened: git push ...: fatal: could not read Username for 'https://github.com'` | The worker runs in a session that cannot use the GitHub login. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token, so a worker started over ssh builds and then cannot push; on Linux, a systemd unit or an ssh session usually has no unlocked keyring either | `factoryd doctor` warns `worker's GitHub login` for such a worker, and the worker says so when it starts. On a Mac, start it from a desktop terminal or with `factoryd install-service`; on Linux, `gh auth login --insecure-storage` once, then `factoryd restart`. Then `factoryd retry <id>` opens the pull request with no rebuild |
 | A change you installed has no effect on a request's builds | The worker was started before the install: it runs every build in its own process, with the code it started with | `factoryd doctor` warns `worker runs this factoryd`; `factoryd restart` (`make install` runs it, unless a request was building) |
 | A build fails on `<module>: 404 Not Found`, `could not read Username for 'https://github.com'` or `unrecognized import path` for a company module | The module is private, and either this machine's Go settings do not mark it so (no `go modules:` line in the run's log) or the host could not fetch it (a `go modules: N left out` line names it) | `go env -w GOPRIVATE=<its path prefix>` and make your own `go mod download` of the repository work on this machine, then `factoryd retry <id>` ([USAGE_REFERENCE.md § Private Go modules](USAGE_REFERENCE.md#private-go-modules)) |
 | `no request "<id>" under ...` for a request you submitted | The request was recorded in another data dir. Every command that resolves one prints `data dir: ... (source: ...)` first, and a `note:` when `data` in the current directory holds records it is not using. Usual causes: the request was submitted before the config had a `data_dir` (commands then used `data` in the directory they ran in), or with an explicit `-data-dir` | Set `data_dir:` in the session config to the folder that holds the request (the `note:` line prints it), then `factoryd restart` |

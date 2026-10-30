@@ -55,9 +55,15 @@ func workerMain(dp *deps, args []string) error {
 	heartbeatMode, heartbeatModel := heartbeatRoute(cfg)
 	githubLogin := dp.forge.githubLogin(context.Background())
 	if githubLogin == daemonheartbeat.GitHubLoginUnusable {
-		log.Printf("factoryd worker: this session cannot read a GitHub token (`gh auth token` failed): an accepted ticket's branch cannot be pushed and its pull request cannot be opened. To fix: %s", workerGitHubLoginFix)
+		log.Printf("factoryd worker: this session cannot read a GitHub token (`gh auth token` failed): an accepted ticket's branch cannot be pushed and its pull request cannot be opened. To fix: %s", workerGitHubLoginFix(dp.host.serviceManager()))
 	}
-	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, githubLogin, cfg.Settings.MaxParallelJobs)
+	// The backend is read once: a refused one starts no worker, and the
+	// heartbeat records the one this worker launches on.
+	backend := dp.docker.backend(context.Background(), cfg.Settings.SandboxDocker)
+	if err := backend.Refused(); err != nil {
+		return fmt.Errorf("factoryd worker: %w", err)
+	}
+	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, githubLogin, string(backend.Backend), cfg.Settings.MaxParallelJobs)
 	if err != nil {
 		return err
 	}

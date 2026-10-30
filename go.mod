@@ -1,6 +1,6 @@
 module buildgate
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/NVIDIA/OpenShell/sdk/go v0.0.0-20260928030816-6648bd0c290e
@@ -10,6 +10,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	go.temporal.io/api v1.63.4
 	go.temporal.io/sdk v1.48.0
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261027005312-1da6254a58cf
 	golang.org/x/term v0.45.0
 	golang.org/x/text v0.41.0
 	google.golang.org/grpc v1.83.2

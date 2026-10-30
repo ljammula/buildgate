@@ -64,10 +64,16 @@ func doctorNotifyTest(flags *flag.FlagSet, dataDir, configPath string) error {
 // operator to confirm.
 func doctorNotifyTestMain(dataDir string) error {
 	mechanism := "none (no notifier binary on PATH)"
-	switch {
-	case runtime.GOOS != "darwin":
-		mechanism = "none (not macOS -- desktop notifications are darwin-only)"
+	switch runtime.GOOS {
 	default:
+		mechanism = "none (desktop notifications are shown on macOS and Linux only)"
+	case "linux":
+		if _, err := notify.LinuxNotifier(); err != nil {
+			mechanism = "none (" + err.Error() + ")"
+		} else {
+			mechanism = "notify-send (not clickable)"
+		}
+	case "darwin":
 		if _, err := exec.LookPath("terminal-notifier"); err == nil {
 			mechanism = "terminal-notifier"
 		} else if _, err := exec.LookPath("osascript"); err == nil {

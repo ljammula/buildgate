@@ -1000,7 +1000,6 @@ func Run(ctx context.Context, dockerBinary string, s LaunchSpec) (Result, error)
 	if err := cmd.Start(); err != nil {
 		return result, fmt.Errorf("start sandbox: %w", err)
 	}
-	defer keepAwake(cmd.Process.Pid)()
 	writer := io.MultiWriter(os.Stdout, logFile)
 	if err := relayWorkerOutput(stdout, writer, s); err != nil {
 		if cleanupErr := reapContainer(cmd, dockerBinary, s.Name, s.WorkerUmask != ""); cleanupErr != nil {

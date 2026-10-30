@@ -86,10 +86,12 @@ func upgradeMain(dp *deps, args []string) error {
 
 // upgradeProcess is one worker or serve that was running for a data dir.
 type upgradeProcess struct {
-	Kind       string // "worker" or "serve"
-	DataDir    string
-	Launchd    bool
-	Label      string
+	Kind    string // "worker" or "serve"
+	DataDir string
+	// Supervisor is the service manager that runs it, "" when it was
+	// started detached; Service names it there.
+	Supervisor hostcontrol.ServiceManager
+	Service    hostcontrol.Service
 	ServeAddr  string
 	ConfigPath string
 	// TemporalAddress is the address a worker serves, restarted with.
@@ -97,8 +99,8 @@ type upgradeProcess struct {
 }
 
 func (p upgradeProcess) how() string {
-	if p.Launchd {
-		return "launchd " + p.Label
+	if p.Supervisor != "" {
+		return string(p.Supervisor) + " " + p.Supervisor.Name(p.Service)
 	}
 	return "detached"
 }
@@ -329,24 +331,33 @@ func upgradeRunning(dp *deps, profiles []profileInfo, dirs []string, now time.Ti
 				configPath = p.Path
 			}
 		}
-		if launchd := hostcontrol.LaunchdSupervises(dp, hostcontrol.WorkerServiceLabel, hostcontrol.WorkerPlistPath, dir); launchd || len(hostcontrol.WorkerPIDs(dp, dir, now)) > 0 {
+		if sup := upgradeSupervisor(dp, hostcontrol.WorkerService, dir); sup != "" || len(hostcontrol.WorkerPIDs(dp, dir, now)) > 0 {
 			// A running process that is not a worker (an old worker)
 			// has no Temporal address; it is replaced by a worker.
 			workerAddr := ""
 			if hb, err := daemonheartbeat.Read(workerHeartbeatPath(dir)); err == nil && hb.Worker() {
 				workerAddr = hb.TemporalAddress
 			}
-			out = append(out, upgradeProcess{Kind: "worker", DataDir: dir, Launchd: launchd, Label: hostcontrol.WorkerServiceLabel, ConfigPath: configPath, TemporalAddress: workerAddr})
+			out = append(out, upgradeProcess{Kind: "worker", DataDir: dir, Supervisor: sup, Service: hostcontrol.WorkerService, ConfigPath: configPath, TemporalAddress: workerAddr})
 		}
-		if launchd := hostcontrol.LaunchdSupervises(dp, hostcontrol.ServeServiceLabel, hostcontrol.ServePlistPath, dir); launchd || len(hostcontrol.ServePIDs(dp, dir)) > 0 {
+		if sup := upgradeSupervisor(dp, hostcontrol.ServeService, dir); sup != "" || len(hostcontrol.ServePIDs(dp, dir)) > 0 {
 			addr := consolelink.ServeAddress(dir)
 			if addr == "" {
 				addr = consolelink.DefaultServeAddr
 			}
-			out = append(out, upgradeProcess{Kind: "serve", DataDir: dir, Launchd: launchd, Label: hostcontrol.ServeServiceLabel, ServeAddr: addr, ConfigPath: configPath})
+			out = append(out, upgradeProcess{Kind: "serve", DataDir: dir, Supervisor: sup, Service: hostcontrol.ServeService, ServeAddr: addr, ConfigPath: configPath})
 		}
 	}
 	return out
+}
+
+// upgradeSupervisor is the service manager running svc for dir, "" when
+// none does.
+func upgradeSupervisor(dp *deps, svc hostcontrol.Service, dir string) hostcontrol.ServiceManager {
+	if hostcontrol.ServiceSupervises(dp, svc, dir) {
+		return dp.host.serviceManager()
+	}
+	return ""
 }
 
 // upgradeSkillTargets are the skill parent directories to refresh: those
@@ -436,7 +447,7 @@ func upgradeDrain(w io.Writer, dirs []string, wait, tty bool) error {
 // running: the new binary lands at the same path and a kickstart re-execs it.
 func upgradeStop(dp *deps, w io.Writer, dirs []string, running []upgradeProcess, state *upgradeState) error {
 	for _, p := range running {
-		if !p.Launchd {
+		if p.Supervisor == "" {
 			state.stopped = append(state.stopped, p)
 		}
 	}
@@ -496,13 +507,13 @@ func upgradeRestart(dp *deps, w io.Writer, binary string, running []upgradeProce
 	var out []string
 	for _, p := range running {
 		switch {
-		case p.Launchd:
-			domain := fmt.Sprintf("gui/%d/%s", os.Getuid(), p.Label)
-			if o, err := dp.host.runUpgradeCommand(upgradeCmd{Name: "launchctl", Args: []string{"kickstart", "-k", domain}}); err != nil {
-				fmt.Fprintf(w, "%s (%s): `launchctl kickstart -k %s` failed: %s\n", p.Kind, p.DataDir, domain, sanitize.Line(hostcontrol.LastLine(string(o))))
+		case p.Supervisor != "":
+			name, args := p.Supervisor.RestartCommand(p.Service)
+			if o, err := dp.host.runUpgradeCommand(upgradeCmd{Name: name, Args: args}); err != nil {
+				fmt.Fprintf(w, "%s (%s): `%s %s` failed: %s\n", p.Kind, p.DataDir, name, strings.Join(args, " "), sanitize.Line(hostcontrol.LastLine(string(o))))
 				continue
 			}
-			out = append(out, fmt.Sprintf("%s (%s): restarted by launchd", p.Kind, p.DataDir))
+			out = append(out, fmt.Sprintf("%s (%s): restarted by %s", p.Kind, p.DataDir, p.Supervisor))
 		case p.Kind == "worker":
 			pidPath := filepath.Join(p.DataDir, "quickstart-queue-run.pid")
 			addr := p.TemporalAddress

@@ -30,11 +30,16 @@ type Deps interface {
 	GatewayHealthy(ctx context.Context) error
 	Launchctl(args ...string) ([]byte, error)
 	LaunchdServicePID(domain string) (int, bool)
-	Lsof(port string) ([]byte, error)
+	PortListeners(port string) ([]byte, error)
 	// MeterHealthy returns nil when the meter accepts a connection on the
 	// VM's loopback.
 	MeterHealthy(ctx context.Context) error
 	PidLooksLikeWorker(pid int) bool
+	// ServiceManager is what supervises install-service's services on this
+	// machine.
+	ServiceManager() ServiceManager
+	// Systemctl runs `systemctl <args...>` and returns its combined output.
+	Systemctl(args ...string) ([]byte, error)
 	ProcessUID(pid int) (int, bool)
 	// SandboxNames lists the sandboxes the OpenShell gateway runs.
 	SandboxNames(ctx context.Context) ([]string, error)
@@ -44,9 +49,9 @@ type Deps interface {
 	SpawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	SpawnWorker(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
 	TemporalHealthy(ctx context.Context, addr string) error
-	// WorkerServiceState is the launchd worker service's state line for
-	// plistPath ("... loaded, running ...").
-	WorkerServiceState(ctx context.Context, plistPath string) string
+	// WorkerServiceState is the installed worker service's state line for
+	// its definition at path ("... loaded, running ...").
+	WorkerServiceState(ctx context.Context, path string) string
 	// ServeStartToken returns the stable serve start token for configPath,
 	// creating it if needed, and the path it is kept at.
 	ServeStartToken(configPath string) (token, path string, err error)
@@ -173,7 +178,7 @@ func ensureDocker(dp Deps, ctx context.Context, w io.Writer, subject string) err
 	}
 	profile, isColima := colimaToStart(dp, ctx)
 	if !isColima {
-		return fmt.Errorf("%s and docker is not usable: %v", subject, err)
+		return fmt.Errorf("%s and docker is not usable (start it: `colima start`): %v", subject, err)
 	}
 	if cerr := startColima(dp, ctx, w, profile); cerr != nil {
 		return fmt.Errorf("%s and docker is not usable (%v): %v", subject, err, cerr)

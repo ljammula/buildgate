@@ -212,8 +212,10 @@ func heartbeatRoute(cfg requestdriver.WorkerConfig) (credentialMode, workerModel
 // own doc comment for why these two fields exist and why nothing else
 // route-related is written here. slots is how many jobs the process runs at
 // once (1 for worker); temporalAddress is set only by `factoryd worker`.
-// githubLogin is forge.githubLogin's answer for this process.
-func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin string, slots int) (stop func(), err error) {
+// githubLogin is forge.githubLogin's answer for this process, and
+// dockerBackend the Docker backend it launches on ("" when Docker did not
+// answer at its start).
+func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin, dockerBackend string, slots int) (stop func(), err error) {
 	path := workerHeartbeatPath(dataDir)
 	startedAt := time.Now().Format(time.RFC3339Nano)
 	write := func() error {
@@ -232,6 +234,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			RepositoryWaits:     repositoryWaits.snapshot(),
 			JobSlots:            slots,
 			TemporalAddress:     temporalAddress,
+			DockerBackend:       dockerBackend,
 		})
 	}
 	if err := write(); err != nil {
@@ -544,8 +547,17 @@ func (impl realForge) githubLogin(ctx context.Context) string {
 }
 
 // workerGitHubLoginFix is what to do about a worker whose session cannot use
-// the GitHub login.
-const workerGitHubLoginFix = "start the worker from a session that has the login: a desktop terminal, or `factoryd install-service`. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token; if this session should have its own login, run `gh auth login` in it. Then `factoryd retry <id>` opens the pull request of a request that halted on it, with no rebuild"
+// the GitHub login, on a machine whose services m runs. Where gh keeps the
+// token differs: the macOS login keychain, which an ssh session cannot read;
+// on Linux the Secret Service keyring, which a systemd user service or an
+// ssh session usually has no unlocked copy of.
+func workerGitHubLoginFix(m hostcontrol.ServiceManager) string {
+	const retry = " Then `factoryd retry <id>` opens the pull request of a request that halted on it, with no rebuild"
+	if m == hostcontrol.Systemd {
+		return "a systemd user service or an ssh session has no unlocked keyring, where `gh auth login` keeps the token by default: in a terminal as this user, run `gh auth login --insecure-storage`, which keeps it in ~/.config/gh/hosts.yml (mode 0600), then restart the worker (`factoryd restart`)." + retry
+	}
+	return "start the worker from a session that has the login: a desktop terminal, or `factoryd install-service`. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token; if this session should have its own login, run `gh auth login` in it." + retry
+}
 
 // doctorWorkerGitHubLoginChecks is the row for a running worker of dataDir
 // whose own session could not read a GitHub token when it started: its
@@ -570,6 +582,6 @@ func doctorWorkerGitHubLoginChecks(dp *deps, dataDir string, now time.Time) []do
 		Name:     "worker's GitHub login",
 		Advisory: true,
 		Err:      fmt.Errorf("the running worker (pid %d) could not read a GitHub token when it started (`gh auth token` failed in its session): it will build and accept a ticket, then fail to push the branch and open the pull request", hb.PID),
-		Fix:      workerGitHubLoginFix,
+		Fix:      workerGitHubLoginFix(dp.host.serviceManager()),
 	}}
 }

@@ -116,6 +116,10 @@ type Heartbeat struct {
 	// endpoint override in effect on either side).
 	DockerHost    string `json:"docker_host,omitempty"`
 	DockerContext string `json:"docker_context,omitempty"`
+	// DockerBackend is the Docker backend the worker launches sandboxes on
+	// (colima, native-linux), read once at its start; "" when Docker did
+	// not answer then.
+	DockerBackend string `json:"docker_backend,omitempty"`
 	// RouteCredentialMode/RouteWorkerModel are the daemon-wide model route
 	// (relay_credential_mode and relay worker model id, after session-config/
 	// flag resolution) `factoryd worker` is actually using -- surfaced so

@@ -102,7 +102,7 @@ func TestHeartbeatCarriesRepositoryWaits(t *testing.T) {
 	t.Cleanup(repositoryWaits.reset)
 	repositoryWaits.markBusy("req-1", time.Date(2026, 10, 20, 10, 3, 0, 0, time.UTC))
 	dir := t.TempDir()
-	stop, err := startWorkerHeartbeat(t.Context(), dir, "", "", "localhost:7233", "", 1)
+	stop, err := startWorkerHeartbeat(t.Context(), dir, "", "", "localhost:7233", "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

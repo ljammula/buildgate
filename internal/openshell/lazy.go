@@ -24,12 +24,19 @@ type Lazy struct {
 	// Warn is the runtime's Warn: where it reports a cleanup it left for the
 	// sweep; nil discards.
 	Warn func(format string, args ...any)
+	// Awake is what keeps this host from idle sleep while a worker launched
+	// through the runtime runs (sandbox.HostKeepAwake); nil holds nothing.
+	Awake sandbox.KeepAwake
 
 	mu sync.Mutex
 	rt *Runtime
 }
 
 var _ sandbox.Runtime = (*Lazy)(nil)
+
+// KeepAwake is l.Awake: a worker launched through l holds it
+// (sandbox.RunWorkerThroughRuntime).
+func (l *Lazy) KeepAwake() sandbox.KeepAwake { return l.Awake }
 
 func (l *Lazy) runtime(ctx context.Context) (*Runtime, error) {
 	l.mu.Lock()

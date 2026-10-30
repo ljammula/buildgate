@@ -1631,7 +1631,7 @@ func TestDoctorCheckMountVisibilityRejectsAMissingWorkspace(t *testing.T) {
 	t.Run("nonexistent path fails without creating it", func(t *testing.T) {
 		dir := t.TempDir()
 		missing := filepath.Join(dir, "does-not-exist")
-		check := doctorCheckMountVisibility(context.Background(), "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", missing)
+		check := doctorCheckMountVisibility(context.Background(), "", "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", missing)
 		if check.Err == nil {
 			t.Fatal("Err = nil, want it flagged")
 		}
@@ -1645,7 +1645,7 @@ func TestDoctorCheckMountVisibilityRejectsAMissingWorkspace(t *testing.T) {
 		if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 			t.Fatalf("write file: %v", err)
 		}
-		check := doctorCheckMountVisibility(context.Background(), "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", file)
+		check := doctorCheckMountVisibility(context.Background(), "", "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", file)
 		if check.Err == nil {
 			t.Fatal("Err = nil, want it flagged: -workspace must be a directory")
 		}
@@ -1706,7 +1706,7 @@ func TestDoctorCheckDataDirMountVisibilityNamesDataDirNotWorkspace(t *testing.T)
 	t.Run("missing -data-dir names -data-dir, not -workspace", func(t *testing.T) {
 		dir := t.TempDir()
 		missing := filepath.Join(dir, "does-not-exist")
-		check := doctorCheckDataDirMountVisibility(context.Background(), "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", missing)
+		check := doctorCheckDataDirMountVisibility(context.Background(), "", "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", missing)
 		if check.Err == nil {
 			t.Fatal("Err = nil, want it flagged")
 		}
@@ -1719,7 +1719,7 @@ func TestDoctorCheckDataDirMountVisibilityNamesDataDirNotWorkspace(t *testing.T)
 	})
 	t.Run("a real directory but an unreachable docker binary names the colima cause against -data-dir", func(t *testing.T) {
 		dir := t.TempDir()
-		check := doctorCheckDataDirMountVisibility(context.Background(), "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", dir)
+		check := doctorCheckDataDirMountVisibility(context.Background(), "", "factoryd-doctor-test-nonexistent-binary", "irrelevant-image", dir)
 		if check.Err == nil {
 			t.Fatal("Err = nil, want the probe container failure flagged")
 		}

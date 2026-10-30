@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -208,10 +207,7 @@ func TestStopRefusesWhileAWorkerRunsSeveralRequestsUnlessForced(t *testing.T) {
 }
 
 func TestStopLeavesALaunchdSupervisedWorkerAlone(t *testing.T) {
-	dp := newTestDeps(t)
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd is macOS only")
-	}
+	dp := launchdTestDeps(t)
 	stubStopSeams(dp, t)
 	dir := t.TempDir()
 	plistPath, err := hostcontrol.WorkerPlistPath()

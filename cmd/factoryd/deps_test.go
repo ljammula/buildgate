@@ -1,7 +1,9 @@
 package main
 
 import (
+	"buildgate/internal/dockerbackend"
 	"buildgate/internal/forge"
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
@@ -20,6 +22,7 @@ import (
 // fakeDocker is a dockerBoundary whose every method is a field, set by newTestDeps
 // to the real method and replaced by a test that needs another answer.
 type fakeDocker struct {
+	backendFn          func(ctx context.Context, dockerBinary string) dockerbackend.Detection
 	colimaBinaryFn     func() string
 	dockerBinaryFn     func() string
 	imageToolsFn       func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
@@ -54,6 +57,9 @@ func (refusingInstallImages) SweepRunLocal(context.Context, string, func(string)
 }
 
 func (f *fakeDocker) colimaBinary() string { return f.colimaBinaryFn() }
+func (f *fakeDocker) backend(ctx context.Context, dockerBinary string) dockerbackend.Detection {
+	return f.backendFn(ctx, dockerBinary)
+}
 func (f *fakeDocker) dockerBinary() string { return f.dockerBinaryFn() }
 func (f *fakeDocker) imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error) {
 	return f.imageToolsFn(ctx, dockerBinary, image)
@@ -206,13 +212,14 @@ type fakeHost struct {
 	baselineCheckFn      func(args []string) error
 	blobAtCommitFn       func(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommandFn     func(target string) *exec.Cmd
+	browserRedirectDirFn func() (string, error)
 	executableFn         func() (string, error)
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchctlBinaryFn    func() string
 	launchdServicePIDFn  func(domain string) (int, bool)
-	lsofFn               func(port string) ([]byte, error)
+	portListenersFn      func(port string) ([]byte, error)
 	pidAliveFn           func(pid int) bool
 	pidLooksLikeWorkerFn func(pid int) bool
 	processUIDFn         func(pid int) (int, bool)
@@ -222,7 +229,9 @@ type fakeHost struct {
 	tailscaleFn          func(ctx context.Context, args ...string) ([]byte, error)
 	terminalNotifierFn   func() bool
 	serveVerifiedOursFn  func(dataDir string, addr string) (int, bool)
-	shippedRootsPEMFn    func(ctx context.Context) ([]byte, error)
+	serviceManagerFn     func() hostcontrol.ServiceManager
+	systemctlFn          func(args ...string) ([]byte, error)
+	loginctlFn           func(args ...string) ([]byte, error)
 	sleepFn              func(d time.Duration)
 	spawnServeFn         func(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	spawnWorkerFn        func(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
@@ -236,6 +245,7 @@ func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit 
 	return f.rootTreeAtCommitFn(ctx, repoDir, commit)
 }
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
+func (f *fakeHost) browserRedirectDir() (string, error)    { return f.browserRedirectDirFn() }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
 func (f *fakeHost) baselineCheck(args []string) error      { return f.baselineCheckFn(args) }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
@@ -247,21 +257,21 @@ func (f *fakeHost) headCommit(ctx context.Context, repoDir string) (string, erro
 func (f *fakeHost) launchctl(args ...string) ([]byte, error)       { return f.launchctlFn(args...) }
 func (f *fakeHost) launchctlBinary() string                        { return f.launchctlBinaryFn() }
 func (f *fakeHost) launchdServicePID(domain string) (int, bool)    { return f.launchdServicePIDFn(domain) }
-func (f *fakeHost) lsof(port string) ([]byte, error)               { return f.lsofFn(port) }
+func (f *fakeHost) portListeners(port string) ([]byte, error)      { return f.portListenersFn(port) }
 func (f *fakeHost) pidAlive(pid int) bool                          { return f.pidAliveFn(pid) }
 func (f *fakeHost) pidLooksLikeWorker(pid int) bool                { return f.pidLooksLikeWorkerFn(pid) }
 func (f *fakeHost) processUID(pid int) (int, bool)                 { return f.processUIDFn(pid) }
 func (f *fakeHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) { return f.runUpgradeCommandFn(c) }
 func (f *fakeHost) serveHealthzOK(addr string) bool                { return f.serveHealthzOKFn(addr) }
 func (f *fakeHost) terminalNotifierOnPath() bool                   { return f.terminalNotifierFn() }
+func (f *fakeHost) serviceManager() hostcontrol.ServiceManager     { return f.serviceManagerFn() }
+func (f *fakeHost) systemctl(args ...string) ([]byte, error)       { return f.systemctlFn(args...) }
+func (f *fakeHost) loginctl(args ...string) ([]byte, error)        { return f.loginctlFn(args...) }
 func (f *fakeHost) tailscale(ctx context.Context, args ...string) ([]byte, error) {
 	return f.tailscaleFn(ctx, args...)
 }
 func (f *fakeHost) serveVerifiedOurs(dataDir string, addr string) (int, bool) {
 	return f.serveVerifiedOursFn(dataDir, addr)
-}
-func (f *fakeHost) shippedRootsPEM(ctx context.Context) ([]byte, error) {
-	return f.shippedRootsPEMFn(ctx)
 }
 func (f *fakeHost) sleep(d time.Duration) { f.sleepFn(d) }
 func (f *fakeHost) tlsRoot(ctx context.Context, host string) (*x509.Certificate, error) {
@@ -353,7 +363,7 @@ func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal)
 //	sandbox.runtime      the gateway runtime: none, in either build variant
 //	sandbox.startStack   starts containers: refused
 func newTestDeps(t testing.TB) *deps {
-	dp := &deps{}
+	dp := &deps{backends: &backendMemo{}}
 	realDocker := realDocker{dp: dp}
 	dp.docker = &fakeDocker{
 		colimaBinaryFn: realDocker.colimaBinary,
@@ -439,7 +449,10 @@ func newTestDeps(t testing.TB) *deps {
 		blobAtCommitFn:     realHost.blobAtCommit,
 		rootTreeAtCommitFn: realHost.rootTreeAtCommit,
 		browserCommandFn:   realHost.browserCommand,
-		executableFn:       realHost.executable,
+		// The OS temp directory, whatever the machine: no test depends on a
+		// graphical session.
+		browserRedirectDirFn: func() (string, error) { return "", nil },
+		executableFn:         realHost.executable,
 		// A passing check, decided in the test process: no run is started.
 		baselineCheckFn: func([]string) error { return nil },
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
@@ -450,7 +463,7 @@ func newTestDeps(t testing.TB) *deps {
 		launchctlFn:          realHost.launchctl,
 		launchctlBinaryFn:    realHost.launchctlBinary,
 		launchdServicePIDFn:  realHost.launchdServicePID,
-		lsofFn:               realHost.lsof,
+		portListenersFn:      realHost.portListeners,
 		pidAliveFn:           realHost.pidAlive,
 		pidLooksLikeWorkerFn: realHost.pidLooksLikeWorker,
 		processUIDFn:         realHost.processUID,
@@ -463,11 +476,17 @@ func newTestDeps(t testing.TB) *deps {
 			return nil, errors.New("test host: no tailscale")
 		},
 		serveVerifiedOursFn: realHost.serveVerifiedOurs,
-		// No test reaches a public host or the machine's keychain: the
-		// TLS-interception check is skipped unless a test sets these.
-		shippedRootsPEMFn: func(context.Context) ([]byte, error) {
-			return nil, errors.New("test host: no shipped roots")
+		// No test reads or changes the developer's own services: no service
+		// manager unless a test names one, and systemd is never asked.
+		serviceManagerFn: func() hostcontrol.ServiceManager { return hostcontrol.NoServiceManager },
+		systemctlFn: func(...string) ([]byte, error) {
+			return nil, errors.New("test host: no systemctl")
 		},
+		loginctlFn: func(...string) ([]byte, error) {
+			return nil, errors.New("test host: no loginctl")
+		},
+		// No test reaches a public host: the TLS-interception check is
+		// skipped unless a test sets this.
 		tlsRootFn: func(context.Context, string) (*x509.Certificate, error) {
 			return nil, errors.New("test host: no public TLS probe")
 		},
@@ -495,6 +514,11 @@ func newTestDeps(t testing.TB) *deps {
 	}
 	fakeDockerOf(dp).initChecksFn = func(context.Context, string, string, string) []doctorCheck { return nil }
 	fakeDockerOf(dp).colimaBinaryFn = func() string { return "factoryd-test-no-such-colima" }
+	// No test asks the machine's Docker which backend it is: one it could
+	// not ask, which refuses nothing.
+	fakeDockerOf(dp).backendFn = func(context.Context, string) dockerbackend.Detection {
+		return dockerbackend.Detection{Err: errors.New("test docker: no backend is read")}
+	}
 	fakeTemporalOf(dp).ensureFn = func(context.Context, io.Writer) string { return "" }
 	fakeTemporalOf(dp).healthyFn = func(context.Context, string) error { return errors.New("stubbed in tests") }
 	fakeHostOf(dp).spawnWorkerFn = func(io.Writer, string, string, string, []string, string, string) error {

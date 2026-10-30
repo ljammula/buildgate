@@ -86,13 +86,13 @@ func restartRun(dp *deps, args []string, w io.Writer) error {
 }
 
 // withoutStillRunning drops from running the processes of dir that out says
-// did not stop, and adds each to notStopped as "<kind> (<dir>)". A launchd
-// service stays: stop leaves it alone and upgradeRestart kickstarts it.
+// did not stop, and adds each to notStopped as "<kind> (<dir>)". A supervised
+// service stays: stop leaves it alone and upgradeRestart restarts it.
 func withoutStillRunning(running []upgradeProcess, notStopped []string, dir string, out hostcontrol.StopOutcome) ([]upgradeProcess, []string) {
 	var kept []upgradeProcess
 	for _, p := range running {
 		left := (p.Kind == "worker" && out.QueueLive) || (p.Kind == "serve" && out.ServeLive)
-		if p.DataDir != dir || p.Launchd || !left {
+		if p.DataDir != dir || p.Supervisor != "" || !left {
 			kept = append(kept, p)
 			continue
 		}

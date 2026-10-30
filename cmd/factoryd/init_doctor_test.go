@@ -208,7 +208,7 @@ func TestDoctorMountProbeNeverTouchesAPreExistingFile(t *testing.T) {
 	defer cancel()
 	// A nonexistent docker binary: the probe fails after the marker
 	// step, which is the path that used to remove the fixed file.
-	_ = doctorCheckMountVisibility(ctx, filepath.Join(dir, "no-such-docker"), "img", dir)
+	_ = doctorCheckMountVisibility(ctx, "", filepath.Join(dir, "no-such-docker"), "img", dir)
 	got, err := os.ReadFile(existing)
 	if err != nil {
 		t.Fatalf("pre-existing file was removed: %v", err)

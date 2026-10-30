@@ -165,6 +165,17 @@ func newGatewayRuntime(dp *deps) *openshell.Lazy {
 			return hostcontrol.OpenShellMTLSDir(stack), nil
 		},
 		Ready: func(ctx context.Context) error {
+			// The process connects to the gateway only once this passes, so
+			// no sandbox starts on a refused backend, nor on one that could
+			// not be read: the connection is kept for the process's life
+			// and the backend is not asked again.
+			backend := dp.docker.backend(ctx, dp.docker.dockerBinary())
+			if backend.Err != nil {
+				return fmt.Errorf("could not tell which Docker sandboxes would run on (%v): start Docker, then retry", backend.Err)
+			}
+			if err := backend.Refused(); err != nil {
+				return err
+			}
 			if err := dp.sandbox.meterHealthy(ctx); err != nil {
 				return fmt.Errorf("the meter does not answer (%v): run `factoryd doctor -fix` to start the OpenShell stack", err)
 			}
@@ -176,5 +187,6 @@ func newGatewayRuntime(dp *deps) *openshell.Lazy {
 		Containers: &openshell.DockerContainers{Binary: dp.docker.dockerBinary(), MeterProject: hostcontrol.OpenShellProject},
 		Volumes:    &openshell.DockerVolumes{Binary: dp.docker.dockerBinary()},
 		Warn:       log.Printf,
+		Awake:      sandbox.HostKeepAwake{},
 	}
 }
