@@ -362,3 +362,37 @@ func TestChallengerJobComparesTheSpecWithTheApprovedHash(t *testing.T) {
 		}
 	}
 }
+
+// A job that exited non-zero (a provider that refused its last turn, a turn
+// that ran out of time) still has the files it left held, with a note; a job
+// that left none, or only files the shape rules refused, gives no verdict.
+func TestChallengeFilesAreHeldWhateverTheJobsExitStatus(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	held, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(held) != 1 || held[0].Refused != "" {
+		t.Fatalf("held %+v, %v; want one held file", held, err)
+	}
+	refused := []run.ChallengeFile{{Path: "notes.txt", Refused: "not a test path"}}
+	for name, tc := range map[string]struct {
+		exit        int
+		files       []run.ChallengeFile
+		cause, note string
+	}{
+		"clean exit, held":      {0, held, "", ""},
+		"clean exit, none":      {0, nil, "handed over no test file", ""},
+		"clean exit, refused":   {0, refused, "handed over no test file", ""},
+		"refused turn, held":    {42, held, "", "exit status 42; the test files it left were held"},
+		"refused turn, none":    {42, nil, "exit status 42 and handed over no test", ""},
+		"refused turn, refused": {42, refused, "exit status 42 and handed over no test", ""},
+		"failed setup, none":    {95, nil, "exit status 95", ""},
+	} {
+		cause, note := challengeHoldOutcome(tc.exit, tc.files)
+		if (tc.cause == "") != (cause == "") || !strings.Contains(cause, tc.cause) {
+			t.Errorf("%s: cause %q, want %q", name, cause, tc.cause)
+		}
+		if (tc.note == "") != (note == "") || !strings.Contains(note, tc.note) {
+			t.Errorf("%s: note %q, want %q", name, note, tc.note)
+		}
+	}
+}

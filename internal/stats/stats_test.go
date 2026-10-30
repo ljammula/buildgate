@@ -497,3 +497,26 @@ func TestAdviceRoundsAreCountedApartFromTheirTicket(t *testing.T) {
 		t.Errorf("opened/sent back = %d/%d, want 1/0", pr.Opened, pr.SentBack)
 	}
 }
+
+// A restack's replay run joins its ticket's series; an accepted one decides
+// nothing of its outcome: a one-shot ticket restacked after the ticket under it merged
+// stays one ticket, one-shot and accepted, with no corrective build.
+func TestRestackRunsJoinTheirTicketAndDecideNothing(t *testing.T) {
+	a := mk("req-1-002", run.StateAccepted, "2026-10-01T00:00:00Z", passRound(1))
+	a.RequestID = "req-1"
+	r1 := mk("req-1-002-restack1", run.StateAccepted, "2026-10-01T03:00:00Z")
+	r1.RequestID = "req-1"
+	m := Compute([]*run.Run{a, r1}, Options{Project: "app"}).Overall
+	if m.Tickets != 1 || m.OneShot != 1 || m.Accepted != 1 {
+		t.Errorf("tickets %d one-shot %d accepted %d, want 1 1 1", m.Tickets, m.OneShot, m.Accepted)
+	}
+	if m.CorrectiveBuilds != (Corrective{}) || m.AdviceRounds != (Corrective{}) {
+		t.Errorf("corrective %+v advice %+v, want none", m.CorrectiveBuilds, m.AdviceRounds)
+	}
+	// A replay its gates quarantined is the ticket's last run: not accepted.
+	r1.State = run.StateQuarantined
+	m = Compute([]*run.Run{a, r1}, Options{Project: "app"}).Overall
+	if m.Tickets != 1 || m.OneShot != 0 || m.Accepted != 0 {
+		t.Errorf("after a quarantined replay: tickets %d one-shot %d accepted %d, want 1 0 0", m.Tickets, m.OneShot, m.Accepted)
+	}
+}

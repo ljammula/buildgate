@@ -255,18 +255,44 @@ func (a *Activities) runChallengerJob(ctx context.Context, in ChallengerJobInput
 	if runErr != nil {
 		return fail("the challenger's sandbox did not finish: %v", runErr)
 	}
-	if result.ExitCode != 0 {
-		return fail("the challenger job ended with exit status %d and handed over no test", result.ExitCode)
-	}
+	// The files are held whatever the job's exit status: a turn the provider
+	// cut off or that ran out of time may have left tests, and nothing the
+	// job says, its exit status included, decides what the host takes.
 	files, notes, err := a.holdChallengeFiles(ctx, in, scratch)
 	res.Files, res.Notes = files, notes
 	if err != nil {
 		return fail("the challenge files could not be held: %v", err)
 	}
-	if len(files) == 0 {
-		return fail("the challenger handed over no test file")
+	cause, note := challengeHoldOutcome(result.ExitCode, files)
+	if cause != "" {
+		return fail("%s", cause)
+	}
+	if note != "" {
+		res.Notes = append(res.Notes, note)
 	}
 	return res
+}
+
+// challengeHoldOutcome is what the job's exit status and the files it left
+// mean for the challenge: a cause (no verdict) when none was held (a file the
+// shape rules refused is a note, not a held file), and a note when files were
+// held from a job that did not exit 0.
+func challengeHoldOutcome(exitCode int, files []run.ChallengeFile) (cause, note string) {
+	held := 0
+	for _, f := range files {
+		if f.Refused == "" {
+			held++
+		}
+	}
+	switch {
+	case held == 0 && exitCode != 0:
+		return fmt.Sprintf("the challenger job ended with exit status %d and handed over no test", exitCode), ""
+	case held == 0:
+		return "the challenger handed over no test file", ""
+	case exitCode != 0:
+		return "", fmt.Sprintf("the challenger job ended with exit status %d; the test files it left were held", exitCode)
+	}
+	return "", ""
 }
 
 // challengeAttempt is the run record's attempt for the challenger launch.
