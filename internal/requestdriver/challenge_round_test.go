@@ -290,40 +290,46 @@ func TestRedStaysRedRoundsRunToTheBudgetAndCommittedTestsAreNotCommittedAgain(t 
 // A round that turns a held test that was green on the head red is not pushed:
 // the branch is put back, the head stands and no further round follows.
 func TestRoundThatRegressesAGreenHeldTestIsNotPushed(t *testing.T) {
-	f := challengeFixture(t, run.ChallengeRed)
-	f.cfg.Settings.ReviewAdviceRounds = 3
-	other := run.ChallengeFile{Path: "internal/sum/sum_other_test.go", Criterion: "AC-1"}
-	first := f.buildRunner
-	f.buildRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		if err := first(ctx, args, onReady); err != nil {
-			return err
-		}
-		rec, err := run.Load(f.dataDir, requestdrivertest.ArgValue(args, "-ticket"))
-		if err != nil {
-			return err
-		}
-		g := other
-		g.Verdict = run.ChallengeGreen
-		rec.Challenge.Files = append(rec.Challenge.Files, g)
-		return rec.Save(f.dataDir)
-	}
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
-		broken := other
-		broken.Verdict = run.ChallengeRed
-		return f.roundChallengeRun(t, id, run.ChallengeGreen, broken)
-	})
-	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
-		t.Fatalf("drive: %v", err)
-	}
-	if *calls != 1 || len(f.pushed) != 0 || len(f.restored) != 1 {
-		t.Fatalf("builds %d pushed %v restored %v; want one round, nothing pushed, the branch put back", *calls, f.pushed, f.restored)
-	}
-	tk := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0]
-	if len(tk.Rounds) != 1 || tk.Rounds[0].Pushed || tk.RunID != requestdrivertest.TicketRunID(f.id, 1) {
-		t.Errorf("ticket = %+v, want the first run to stand with one unpushed round", tk)
-	}
-	if len(f.comments) != 1 || !strings.Contains(f.comments[0], "sum_edge_test.go") {
-		t.Errorf("comments = %v, want one declined comment naming the red file", f.comments)
+	// "broken" is the workflow's verdict for a held file that no longer
+	// compiles or reports.
+	for _, verdict := range []string{run.ChallengeRed, "broken"} {
+		t.Run(verdict, func(t *testing.T) {
+			f := challengeFixture(t, run.ChallengeRed)
+			f.cfg.Settings.ReviewAdviceRounds = 3
+			other := run.ChallengeFile{Path: "internal/sum/sum_other_test.go", Criterion: "AC-1"}
+			first := f.buildRunner
+			f.buildRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+				if err := first(ctx, args, onReady); err != nil {
+					return err
+				}
+				rec, err := run.Load(f.dataDir, requestdrivertest.ArgValue(args, "-ticket"))
+				if err != nil {
+					return err
+				}
+				g := other
+				g.Verdict = run.ChallengeGreen
+				rec.Challenge.Files = append(rec.Challenge.Files, g)
+				return rec.Save(f.dataDir)
+			}
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+				broken := other
+				broken.Verdict = verdict
+				return f.roundChallengeRun(t, id, run.ChallengeGreen, broken)
+			})
+			if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
+				t.Fatalf("drive: %v", err)
+			}
+			if *calls != 1 || len(f.pushed) != 0 || len(f.restored) != 1 {
+				t.Fatalf("builds %d pushed %v restored %v; want one round, nothing pushed, the branch put back", *calls, f.pushed, f.restored)
+			}
+			tk := requestdrivertest.LoadRequest(t, f.dataDir, f.id).Tickets[0]
+			if len(tk.Rounds) != 1 || tk.Rounds[0].Pushed || tk.RunID != requestdrivertest.TicketRunID(f.id, 1) {
+				t.Errorf("ticket = %+v, want the first run to stand with one unpushed round", tk)
+			}
+			if len(f.comments) != 1 || !strings.Contains(f.comments[0], "sum_edge_test.go") {
+				t.Errorf("comments = %v, want one declined comment naming the red file", f.comments)
+			}
+		})
 	}
 }
 
@@ -344,7 +350,7 @@ func TestAdviceOnlyRoundWithNoFewerHighFindingsIsPushedAndEndsTheRounds(t *testi
 
 // A push that failed once sent ends a round whose head had a red held test as
 // no verdict with a note: a challenge never halts (SC-022).
-func TestChallengeRoundPushThatFailsHaltsNothing(t *testing.T) {
+func TestRoundGivenRedTestsWhosePushFailsHalts(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
 	f.dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return errors.New("remote hung up") }
 	requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
@@ -354,12 +360,11 @@ func TestChallengeRoundPushThatFailsHaltsNothing(t *testing.T) {
 		t.Fatalf("drive: %v", err)
 	}
 	loaded := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
-	if loaded.State == request.StateHalted {
-		t.Fatalf("request halted: %q", loaded.Error)
+	if loaded.State != request.StateHalted {
+		t.Fatalf("state = %s, want halted: the commit may be on the remote and a person reconciles the branch", loaded.State)
 	}
-	tk := loaded.Tickets[0]
-	if tk.RunID != requestdrivertest.TicketRunID(f.id, 1) || len(tk.Rounds) != 1 || tk.Rounds[0].Pushed || !strings.Contains(tk.Rounds[0].Error, "no verdict") {
-		t.Errorf("ticket run %q rounds %+v, want the accepted run standing and one unpushed round noted as no verdict", tk.RunID, tk.Rounds)
+	if tk := loaded.Tickets[0]; tk.RunID != requestdrivertest.TicketRunID(f.id, 1) {
+		t.Errorf("ticket run %q, want the accepted run standing", tk.RunID)
 	}
 }
 
@@ -407,11 +412,14 @@ func TestChallengeRoundInterruptedIsSettledNotRelaunched(t *testing.T) {
 			if err := r.Save(f.dataDir); err != nil {
 				t.Fatal(err)
 			}
+			// Rounds left in the budget: an old challenge round that was not
+			// pushed still ends the rounds.
+			f.cfg.Settings.ReviewAdviceRounds = 3
 			if err := f.drive(t, context.Background(), requestdrivertest.FailingBuildRunner(t)); err != nil {
 				t.Fatalf("drive after the restart: %v", err)
 			}
 			if calls != 1 {
-				t.Errorf("round builds = %d, want the one before the stop", calls)
+				t.Errorf("round builds = %d, want the one before the stop and none after it", calls)
 			}
 			loaded := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 			tk := loaded.Tickets[0]

@@ -34,7 +34,6 @@ import (
 //	                                                    -> the head stands, the local branch
 //	                                                       is put back on it
 //	a push that failed once sent                        -> halt, as a PR-review round's
-//	                                                       (a no-verdict note when the head had a red test)
 //
 // Rounds follow while open items remain, after a pushed round, up to the key
 // (at least one for a head with a red held test, even at 0). A round whose
@@ -81,8 +80,9 @@ func heldReds(ticket *request.Ticket, current *run.Run) []run.ChallengeFile {
 	return reds
 }
 
-// heldRegressed reports whether a held file that was green on current is red
-// on round: a round that fixes one thing and breaks another is not pushed.
+// heldRegressed reports whether a held file that was green on current has
+// another verdict on round (red, or broken: it no longer compiles or reports):
+// a round that fixes one thing and breaks another is not pushed.
 func heldRegressed(current, round *run.Run) bool {
 	if current.Challenge == nil || round.Challenge == nil {
 		return false
@@ -94,7 +94,7 @@ func heldRegressed(current, round *run.Run) bool {
 		}
 	}
 	for _, f := range round.Challenge.Files {
-		if f.Verdict == run.ChallengeRed && green[f.Path] {
+		if f.Verdict != "" && f.Verdict != run.ChallengeGreen && green[f.Path] {
 			return true
 		}
 	}
@@ -293,16 +293,15 @@ const challengeStart = startsOnItsBranch + " That attempt was accepted: what fol
 // concludeRound records the round that followed current (ended is how its
 // build ended; kind is its Round kind) and settles which run is the ticket's:
 // the round's, returned as pushed, once it was accepted, no held test green
-// on current is red on it, and its result is confirmed on the pull request's
+// on current fails on it, and its result is confirmed on the pull request's
 // branch (pushRoundResult, afterRoundPushed), after which the pull request
 // gets one comment saying what it fixed (roundComment); current otherwise,
 // with the local branch put back on current's result (restoreUnpushed) and a
 // declined comment when current had a red held test. A push check that
 // refuses leaves the remote untouched and current standing. A push or
 // read-back that failed once the push was sent halts the request, as for a
-// PR-review round (a head with a red held test ends the round as no verdict
-// instead: a challenge never halts, SC-022): the commit may be on the remote,
-// and a human reconciles the branch. Nothing is saved here: the caller's next
+// PR-review round, whatever the round was given: the commit may be on the
+// remote, and a human reconciles the branch. Nothing is saved here: the caller's next
 // save records the round with the ticket's next step, and until then the
 // round stays in flight on disk, so a pass that is lost in between settles it
 // again (a repeated push of the same commit is a no-op).
@@ -328,23 +327,16 @@ func concludeRound(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 		return notPushed(nil, note)
 	}
 	if heldRegressed(current, roundRun) {
-		log.Printf("request %s: ticket %d/%d: %s %s accepted but a held test green on run %s is red on it; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, current.ID, current.ID)
+		log.Printf("request %s: ticket %d/%d: %s %s accepted but a held test green on run %s fails on it; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, current.ID, current.ID)
 		return notPushed(roundRun, "the round was accepted but a held test that passed on the run it followed fails on it")
 	}
 	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, adviceRoundName)
 	switch {
-	case failed != "" && len(heldReds(ticket, current)) > 0:
-		log.Printf("request %s: ticket %d/%d: %s %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, failed, current.ID)
-		ticket.Rounds[slice].Error = "no verdict: " + failed
-		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
-		return nil, stop, err
 	case failed != "":
 		return nil, true, HaltRequest(dataDir, r, failed, now)
 	case refused != "":
 		log.Printf("request %s: ticket %d/%d: %s %s accepted but not pushed: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, refused, current.ID)
-		ticket.Rounds[slice].Error = refused
-		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
-		return nil, stop, err
+		return notPushed(roundRun, refused)
 	}
 	afterRoundPushed(dp, ctx, r, ticket, slice, roundRun)
 	ticket.RunID = roundRun.ID
@@ -565,11 +557,9 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	if stop {
 		return err
 	}
+	// A round not pushed, an old challenge round's included, ends the rounds.
 	last := current
-	if pushed == nil && kind == request.ChallengeRoundKind {
-		pushed = current
-	}
-	if pushed != nil && (pushed == current || !noProgress(ticket, current, pushed)) {
+	if pushed != nil && !noProgress(ticket, current, pushed) {
 		if last, stop, err = runRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
 			return err
 		}

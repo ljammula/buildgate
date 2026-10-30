@@ -72,7 +72,7 @@ accepted run, pull request open
         |                                  |
         |                     round build (gates + fresh review + held tests re-run)
         |                                  |
-        |              accepted, and no held test that was green on the head is red?
+        |              accepted, and no held test that was green on the head fails?
         |                     yes: push, the round's run is the new head
         |                     no:  restore the branch, post the advice
         |                                  |
@@ -84,7 +84,7 @@ accepted run, pull request open
 | Open items | The head run's red held tests (from its challenge record, a re-run included) and its `high` review findings |
 | Brief | One record file: the red tests first (path, criterion, failing test names, never content), then the review findings (at most 5, by severity). Where a finding and a red test name the same file, the brief says so once; agreement does not raise a severity |
 | Budget | `review_advice_rounds` (0 to 3, 3 by default) counts every round. A head with a red test gets at least one round even at 0, the one round a red challenge always had |
-| Push | An accepted round is pushed unless a held test green on the head is red on the round |
+| Push | An accepted round is pushed unless a held test green on the head is red or broken on the round. A push that failed once sent halts the request, whatever the round was given: the commit may be on the remote |
 | Commit of the tests | Every round while the tests are not yet committed runs the held files with the commit allowed; the first round whose held tests are all green commits them on the branch |
 | Stop | No open items; the budget is spent; a round not pushed; a launch-budget refusal; or a round with no red test open that left the count of `high` findings no lower than its head |
 | Counts against | Neither `review_corrective_rounds` nor `max_review_rounds`; the launch budget, as every launch |
