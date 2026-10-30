@@ -212,7 +212,9 @@ type Ticket struct {
 	// Challenged is set once a run of the ticket ran the challenger job
 	// (SC-022), so no later build starts another; ChallengeRunID is that run,
 	// whose record holds the held files every later build runs again, and
-	// ChallengeRounded that the ticket's one challenge round was started.
+	// ChallengeRounded that a record written before the challenge round was
+	// one of the advice rounds had started it; no longer written, read so
+	// that such a ticket is not given a second challenge round.
 	Challenged       bool   `json:"challenged,omitempty"`
 	ChallengeRunID   string `json:"challenge_run_id,omitempty"`
 	ChallengeRounded bool   `json:"challenge_rounded,omitempty"`
@@ -285,10 +287,10 @@ const RestackRoundKind = "restack"
 // neither round budget.
 const AdviceRoundKind = "advice"
 
-// ChallengeRoundKind marks a Round as the ticket's one challenge round
-// (SC-022): a build on the run's branch, given the held challenge files that
-// failed on the accepted result. It counts against neither
-// review_corrective_rounds nor max_review_rounds.
+// ChallengeRoundKind marks a Round of a record written before the challenge
+// round was one of the advice rounds (AdviceRoundKind): a build on the run's
+// branch, given the held challenge files that failed on the accepted result.
+// It is no longer written, and still read and settled.
 const ChallengeRoundKind = "challenge"
 
 // Round is one corrective build run against a ticket's own branch, in

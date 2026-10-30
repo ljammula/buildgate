@@ -15,63 +15,38 @@ import (
 	"buildgate/internal/workflow"
 )
 
-// Advice rounds (session key review_advice_rounds, 0 to 3, 3 by default).
+// The rounds after the pull request opens (session key review_advice_rounds,
+// 0 to 3, 3 by default; SC-022).
 //
 // A finding of a ticket run's code review refuses the run only through a
-// reproduction the factory runs (SC-022); every other finding is advice,
-// listed in the pull request body. With the key above 0, an accepted ticket
-// run whose review recorded at least one high-severity finding gets another
-// build before the request moves on: on the run's own branch, given those
-// findings as the record of the attempt it follows (-earlier-attempt), with
-// the ticket's unchanged spec, every gate and a fresh review, on the
-// execution role's model. It never refuses anything:
+// reproduction the factory runs; every other finding is advice, listed in the
+// pull request body. A challenge's held test that failed on an accepted run is
+// evidence the factory ran. Both are open items of the run at the head of the
+// pull request's branch, and one loop of rounds works on them: each round is
+// one build on that branch, given one brief (the red held tests, then the
+// high-severity review findings; handoff.Review) as -earlier-attempt, with the
+// ticket's unchanged spec, every gate, a fresh review and the held tests run
+// again, on the execution role's model. A round never refuses anything:
 //
-//	round accepted, decision allowed, push confirmed -> the round's run is the ticket's
-//	anything else (not accepted, a push check refuses)  -> the run it followed stands,
-//	                                                       the local branch is put back on it
+//	round accepted, decision allowed, no held test green on the head now red,
+//	push confirmed                                      -> the round's run is the head
+//	anything else (not accepted, a regression, a push check refuses)
+//	                                                    -> the head stands, the local branch
+//	                                                       is put back on it
 //	a push that failed once sent                        -> halt, as a PR-review round's
+//	                                                       (a no-verdict note when the head had a red test)
 //
-// A pushed round whose own review recorded a high-severity finding is
-// followed by the next, given that round's findings, up to the key; any
-// other round ends them. The request stays in building throughout, so
-// pr_review still means the factory's work on every ticket is done. Advice
-// rounds count against neither round budget, and run only where the run's
-// pull request is open (pull requests on): with them off nothing is pushed,
-// so there is nothing to replace the accepted run with.
+// Rounds follow while open items remain, after a pushed round, up to the key
+// (at least one for a head with a red held test, even at 0). A round whose
+// head had no red held test and that left no fewer high-severity findings may
+// be pushed and ends the loop. The request stays in building throughout, so
+// pr_review still means the factory's work on every ticket is done. Rounds
+// count against neither round budget, and run only where the run's pull
+// request is open (pull requests on): with them off nothing is pushed, so
+// there is nothing to replace the accepted run with.
 
 // adviceRoundName names an advice round in logs and push reasons.
 const adviceRoundName = "advice round"
-
-// roundFlavor is what differs between the rounds that follow an accepted run
-// on its open pull request's branch and share the push, comment and restore
-// rules (SC-022): the advice round and the challenge round.
-type roundFlavor struct {
-	name string
-	kind string
-	tag  string
-	// comment is the one PR comment after a confirmed push.
-	comment func(current, round *run.Run) string
-	// replaces, when set, decides whether an accepted round's result replaces
-	// current: a challenge round's only when its challenge is green.
-	replaces func(round *run.Run) bool
-	// declined, when set, is the PR comment for a round whose result was not
-	// pushed (current stands): "" posts nothing.
-	declined func(dataDir string, current, round *run.Run) string
-	// pushFailureEndsRound, when set, makes a push or read-back that failed
-	// once sent end the round as no verdict, with a note, instead of halting
-	// the request: a challenge never halts (SC-022).
-	pushFailureEndsRound bool
-}
-
-var adviceFlavor = roundFlavor{name: adviceRoundName, kind: request.AdviceRoundKind, tag: request.RoundTagAdvice, comment: adviceComment}
-
-// flavorOf is the flavor of the round left in flight on a ticket.
-func flavorOf(adv *request.TicketAdvice) roundFlavor {
-	if adv != nil && adv.Challenge {
-		return challengeFlavor
-	}
-	return adviceFlavor
-}
 
 // adviceStart is the sentence an advice round's record opens with: where the
 // build starts, and that the attempt it follows was accepted.
@@ -90,75 +65,148 @@ func highFindings(runRecord *run.Run) []run.CodeReviewFinding {
 	return codereview.Blocking(runRecord.CodeReview.Findings)
 }
 
-// adviceRoundApplies reports whether current, the ticket's last pushed run
-// (its accepted run, or its last advice round's), is followed by an advice
-// round: fewer advice rounds than review_advice_rounds are recorded, the last
-// of them (if any) was pushed, none is in flight, the ticket's pull request is
-// open on current's branch, and current's review recorded a high-severity
-// finding.
-func adviceRoundApplies(ticket *request.Ticket, current *run.Run, cfg WorkerConfig) bool {
+// heldReds are the held challenge files that failed on current, the head of
+// the ticket's pull request (its own challenge record, or the held files'
+// re-run on it); none unless the ticket is challenged.
+func heldReds(ticket *request.Ticket, current *run.Run) []run.ChallengeFile {
+	if !ticket.Challenged || current.Challenge == nil || current.Challenge.Verdict != run.ChallengeRed {
+		return nil
+	}
+	var reds []run.ChallengeFile
+	for _, f := range current.Challenge.Files {
+		if f.Verdict == run.ChallengeRed {
+			reds = append(reds, f)
+		}
+	}
+	return reds
+}
+
+// heldRegressed reports whether a held file that was green on current is red
+// on round: a round that fixes one thing and breaks another is not pushed.
+func heldRegressed(current, round *run.Run) bool {
+	if current.Challenge == nil || round.Challenge == nil {
+		return false
+	}
+	green := map[string]bool{}
+	for _, f := range current.Challenge.Files {
+		if f.Verdict == run.ChallengeGreen {
+			green[f.Path] = true
+		}
+	}
+	for _, f := range round.Challenge.Files {
+		if f.Verdict == run.ChallengeRed && green[f.Path] {
+			return true
+		}
+	}
+	return false
+}
+
+// heldCommitted reports whether the held files are committed on the ticket's
+// branch: the head, the run that ran the challenger, or a pushed round of the
+// ticket recorded the commit that holds them (ChallengeRecord.CommittedSHA).
+func heldCommitted(dataDir string, ticket *request.Ticket, head *run.Run) bool {
+	if head.Challenge != nil && head.Challenge.CommittedSHA != "" {
+		return true
+	}
+	ids := []string{ticket.ChallengeRunID}
+	for _, rnd := range ticket.Rounds {
+		if rnd.Pushed {
+			ids = append(ids, rnd.RunID)
+		}
+	}
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if rec, err := run.Load(dataDir, id); err == nil && rec.Challenge != nil && rec.Challenge.CommittedSHA != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// roundBudget is the rounds the ticket may have: review_advice_rounds, and at
+// least one for a head with a red held test that has had no round (the one
+// round a red challenge always had).
+func roundBudget(ticket *request.Ticket, n int, reds []run.ChallengeFile, cfg WorkerConfig) int {
+	if n == 0 && len(reds) > 0 && !ticket.ChallengeRounded {
+		return max(cfg.Settings.ReviewAdviceRounds, 1)
+	}
+	return cfg.Settings.ReviewAdviceRounds
+}
+
+// roundApplies reports whether current, the ticket's last pushed run (its
+// accepted run, or its last round's), is followed by a round: it has open
+// items (a red held test, a high-severity finding), fewer rounds than the
+// budget are recorded, the last of them (if any) was pushed, none is in
+// flight, and the ticket's pull request is open on current's branch.
+func roundApplies(ticket *request.Ticket, current *run.Run, cfg WorkerConfig) bool {
+	reds := heldReds(ticket, current)
+	if len(reds) == 0 && len(highFindings(current)) == 0 {
+		return false
+	}
 	n, lastPushed := ticket.AdviceRounds()
-	return n < cfg.Settings.ReviewAdviceRounds && (n == 0 || lastPushed) && ticket.Advice == nil &&
-		cfg.OpenPullRequest && ticket.PRURL != "" && current.Branch != "" &&
-		len(highFindings(current)) > 0
+	return n < roundBudget(ticket, n, reds, cfg) && (n == 0 || lastPushed) && ticket.Advice == nil &&
+		cfg.OpenPullRequest && (ticket.PRURL != "" || current.PullRequestURL != "") && current.Branch != ""
 }
 
 // acceptAfterAdvice accepts accepted as the ticket's outcome and advances the
-// request (acceptTicketRun), after the challenge and advice rounds that
-// apply. The pull request and branch recorded are accepted's: the rounds
-// build on that branch and open nothing, so a pushed round's run, which has
-// no pull request of its own, is the head the next round builds on and never
-// the run the ticket's pull request is read from.
+// request (acceptTicketRun), after the rounds that apply. The pull request and
+// branch recorded are accepted's: the rounds build on that branch and open
+// nothing, so a pushed round's run, which has no pull request of its own, is
+// the head the next round builds on and never the run the ticket's pull
+// request is read from.
 func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, accepted *run.Run, cfg WorkerConfig, now time.Time) error {
 	noteChallenge(ticket, accepted)
-	if (cfg.Settings.ReviewAdviceRounds > 0 || challengeRoundApplies(ticket, accepted, cfg)) && accepted.PullRequestURL != "" {
+	if roundApplies(ticket, accepted, cfg) && accepted.PullRequestURL != "" {
 		// The rounds push to the run's open pull request: the ticket records
 		// it before the first, as acceptTicketRun would.
 		ticket.Branch, ticket.PRURL = accepted.Branch, accepted.PullRequestURL
 	}
-	head := accepted
-	if challengeRoundApplies(ticket, accepted, cfg) {
-		pushed, stop, err := runChallengeRound(dp, ctx, dataDir, r, ticket, accepted, cfg, now)
-		if stop {
-			return err
-		}
-		if pushed != nil {
-			head, now = pushed, time.Now()
-		}
-	}
-	if _, stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, head, cfg, now); stop {
+	if _, stop, err := runRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
 		return err
 	}
 	return acceptTicketRun(dataDir, r, ticket, accepted, cfg.OpenPullRequest, time.Now())
 }
 
-// runAdviceRounds runs advice rounds after current while they apply
-// (adviceRoundApplies), each after the round before it was pushed, and
-// returns the last run whose result is the pull request's head. stop is true
-// when the caller must return err at once (runAdviceRound).
-func runAdviceRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (last *run.Run, stop bool, err error) {
-	for adviceRoundApplies(ticket, current, cfg) {
-		pushed, stop, err := runAdviceRound(dp, ctx, dataDir, r, ticket, current, cfg, now)
+// runRounds runs rounds after current while they apply (roundApplies), each
+// after the round before it was pushed, and returns the last run whose result
+// is the pull request's head. stop is true when the caller must return err at
+// once (runRound). A pushed round that followed a head with no red held test
+// and left no fewer high-severity findings ends the loop (noProgress).
+func runRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (last *run.Run, stop bool, err error) {
+	for roundApplies(ticket, current, cfg) {
+		pushed, stop, err := runRound(dp, ctx, dataDir, r, ticket, current, cfg, now)
 		if stop || pushed == nil {
 			return current, stop, err
+		}
+		if noProgress(ticket, current, pushed) {
+			return pushed, false, nil
 		}
 		current, now = pushed, time.Now()
 	}
 	return current, false, nil
 }
 
-// runAdviceRound runs the advice round that follows current and settles it
-// (concludeAdviceRound); pushed is the round's run when its result was
-// pushed, nil otherwise. A round that cannot start (a launch budget is
-// reached, cannot be read, or has less left than current spent; its
-// arguments cannot be made) is skipped with a log line: current stands. stop
-// is true when the caller must return err at once: the worker is stopping or
-// the request left building mid-round (the round stays in flight on the
-// ticket, Ticket.Advice, for the next pass to settle), or the request was
-// halted.
-func runAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (pushed *run.Run, stop bool, err error) {
+// noProgress reports whether pushed, a round's run that replaced head, only
+// chased review advice without result: head had no red held test and pushed's
+// review left no fewer high-severity findings. A red test is evidence the
+// factory ran, a finding is an opinion.
+func noProgress(ticket *request.Ticket, head, pushed *run.Run) bool {
+	return len(heldReds(ticket, head)) == 0 && len(highFindings(pushed)) >= len(highFindings(head))
+}
+
+// runRound runs the round that follows current and settles it
+// (concludeRound); pushed is the round's run when its result was pushed, nil
+// otherwise. A round that cannot start (a launch budget is reached, cannot be
+// read, or has less left than current spent; its arguments cannot be made) is
+// skipped with a log line: current stands. stop is true when the caller must
+// return err at once: the worker is stopping or the request left building
+// mid-round (the round stays in flight on the ticket, Ticket.Advice, for the
+// next pass to settle), or the request was halted.
+func runRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (pushed *run.Run, stop bool, err error) {
 	if why := adviceBudgetRefusal(dataDir, r, current, cfg, now); why != "" {
-		log.Printf("request %s: ticket %d/%d: no advice round: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, why, current.ID)
+		log.Printf("request %s: ticket %d/%d: no %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, why, current.ID)
 		return nil, false, nil
 	}
 	n, _ := ticket.AdviceRounds()
@@ -166,19 +214,19 @@ func runAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Req
 	roundRunID := fmt.Sprintf("%s-%03d-advice%d", r.ID, ticket.Index, k)
 	args, err := adviceRoundArgs(dataDir, r, ticket, current, cfg, roundRunID, k)
 	if err != nil {
-		log.Printf("request %s: ticket %d/%d: no advice round: %v; run %s stands", r.ID, ticket.Index, r.TicketCount, err, current.ID)
+		log.Printf("request %s: ticket %d/%d: no %s: %v; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, err, current.ID)
 		return nil, false, nil
 	}
 	ticket.Advice = &request.TicketAdvice{Of: current.ID, Since: now.UTC().Format(time.RFC3339Nano)}
 	if err := r.Save(dataDir); err != nil {
 		return nil, true, err
 	}
-	log.Printf("request %s: ticket %d/%d: run %s accepted with %d high-severity review finding(s); advice round %d/%d", r.ID, ticket.Index, r.TicketCount, current.ID, len(highFindings(current)), k, cfg.Settings.ReviewAdviceRounds)
+	log.Printf("request %s: ticket %d/%d: run %s accepted with %d red held test file(s) and %d high-severity review finding(s); %s %d/%d", r.ID, ticket.Index, r.TicketCount, current.ID, len(heldReds(ticket, current)), len(highFindings(current)), adviceRoundName, k, roundBudget(ticket, n, heldReds(ticket, current), cfg))
 	launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, adviceRoundName, "", run.StackBase(dataDir, current), false, true)
 	if stop {
 		return nil, true, err
 	}
-	return concludeAdviceRound(dp, ctx, dataDir, r, ticket, current, launched, adviceFlavor, time.Now())
+	return concludeRound(dp, ctx, dataDir, r, ticket, current, launched, request.AdviceRoundKind, time.Now())
 }
 
 // adviceBudgetRefusal is why an advice round after current may not launch,
@@ -197,13 +245,20 @@ func adviceBudgetRefusal(dataDir string, r *request.Request, current *run.Run, c
 	return reason
 }
 
-// adviceRoundArgs is advice round k's build argv: the ticket's unchanged
-// build spec, current's branch and diff base, no pull request of its own,
-// the execution role's model, and the record of current with its
-// high-severity findings (handoff.Advice) as -earlier-attempt.
+// adviceRoundArgs is round k's build argv: the ticket's unchanged build spec,
+// current's branch and diff base, no pull request of its own, the execution
+// role's model, and the one record of current (handoff.Review: its red held
+// tests, then its high-severity findings) as -earlier-attempt. While the held
+// files are not committed on the branch the round also gets them mounted
+// read-only with -challenge-round, which commits them once all are green.
 func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, roundRunID string, k int) ([]string, error) {
 	roundDir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-advice%d", ticket.Index, k))
-	recordPath, err := writeRecordFile(roundDir, handoff.Advice(current), adviceStart)
+	reds := heldReds(ticket, current)
+	start := adviceStart
+	if len(reds) > 0 {
+		start = challengeStart
+	}
+	recordPath, err := writeRecordFile(roundDir, handoff.Review(current), start)
 	if err != nil {
 		return nil, err
 	}
@@ -211,90 +266,110 @@ func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("build spec: %w", err)
 	}
-	argv, err := correctiveBuildArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, current.DiffBase(), true, false)
+	uncommitted := ticket.Challenged && !heldCommitted(dataDir, ticket, current)
+	argv, err := correctiveBuildArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, current.DiffBase(), true, uncommitted)
 	if err != nil {
 		return nil, err
+	}
+	if len(reds) > 0 && uncommitted && !hasFlagArg(argv, "-challenge-round") {
+		return nil, fmt.Errorf("the ticket has no held challenge file to give the round")
 	}
 	return withRoundSession(append(argv, "-earlier-attempt", recordPath), cfg, current), nil
 }
 
-// concludeAdviceRound records the advice round that followed current (ended
-// is how its build ended) and settles which run is the ticket's: the
-// round's, returned as pushed, once it was accepted and its result is
-// confirmed on the pull request's branch (pushRoundResult, afterRoundPushed),
-// after which the pull request gets one comment saying so (adviceComment);
-// current otherwise, with the local branch put back on current's result
-// (restoreUnpushed). A push check that refuses leaves the remote untouched
-// and current standing. A push or read-back that failed once the push was
-// sent halts the request, as for a PR-review round: the commit may be on the
-// remote, and a human reconciles the branch. Nothing is saved here: the
-// caller's next save records the round with the ticket's next step, and
-// until then the round stays in flight on disk, so a pass that is lost in
-// between settles it again (a repeated push of the same commit is a no-op).
-func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, fl roundFlavor, now time.Time) (pushed *run.Run, stop bool, err error) {
-	slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, fl, now)
-	if ended.outcome != request.RoundAccepted {
-		log.Printf("request %s: ticket %d/%d: %s %s %s; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, ended.loadID, ended.outcome, current.ID)
-		if fl.declined != nil {
-			roundRun, _ := run.Load(dataDir, ended.loadID)
-			commentDeclined(dp, ctx, dataDir, r, ticket, fl, current, roundRun)
+func hasFlagArg(argv []string, flag string) bool {
+	for _, a := range argv {
+		if a == flag {
+			return true
 		}
+	}
+	return false
+}
+
+// challengeStart is the sentence a round's record opens with when it carries
+// red held tests: where the build starts, and that the attempt was accepted.
+const challengeStart = startsOnItsBranch + " That attempt was accepted: what follows is not a failure of a check but tests written against it that fail, and any reviewer's concerns about it."
+
+// concludeRound records the round that followed current (ended is how its
+// build ended; kind is its Round kind) and settles which run is the ticket's:
+// the round's, returned as pushed, once it was accepted, no held test green
+// on current is red on it, and its result is confirmed on the pull request's
+// branch (pushRoundResult, afterRoundPushed), after which the pull request
+// gets one comment saying what it fixed (roundComment); current otherwise,
+// with the local branch put back on current's result (restoreUnpushed) and a
+// declined comment when current had a red held test. A push check that
+// refuses leaves the remote untouched and current standing. A push or
+// read-back that failed once the push was sent halts the request, as for a
+// PR-review round (a head with a red held test ends the round as no verdict
+// instead: a challenge never halts, SC-022): the commit may be on the remote,
+// and a human reconciles the branch. Nothing is saved here: the caller's next
+// save records the round with the ticket's next step, and until then the
+// round stays in flight on disk, so a pass that is lost in between settles it
+// again (a repeated push of the same commit is a no-op).
+func concludeRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, kind string, now time.Time) (pushed *run.Run, stop bool, err error) {
+	slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, kind, now)
+	notPushed := func(roundRun *run.Run, note string) (*run.Run, bool, error) {
+		if note != "" {
+			ticket.Rounds[slice].Error = note
+		}
+		commentDeclined(dp, ctx, dataDir, r, ticket, current, roundRun)
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
 		return nil, stop, err
+	}
+	if ended.outcome != request.RoundAccepted {
+		log.Printf("request %s: ticket %d/%d: %s %s %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, ended.loadID, ended.outcome, current.ID)
+		roundRun, _ := run.Load(dataDir, ended.loadID)
+		return notPushed(roundRun, "")
 	}
 	roundRun, err := run.Load(dataDir, ended.loadID)
-	if err == nil && fl.replaces != nil && !fl.replaces(roundRun) {
-		ticket.Rounds[slice].Error = "the round was accepted but its challenge is not green"
-		log.Printf("request %s: ticket %d/%d: %s %s accepted without a green challenge; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, roundRun.ID, current.ID)
-		commentDeclined(dp, ctx, dataDir, r, ticket, fl, current, roundRun)
-		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
-		return nil, stop, err
-	}
 	if err != nil {
-		ticket.Rounds[slice].Error = fmt.Sprintf("load the round's run: %v", err)
-		log.Printf("request %s: ticket %d/%d: advice round %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, ended.loadID, ticket.Rounds[slice].Error, current.ID)
-		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
-		return nil, stop, err
+		note := fmt.Sprintf("load the round's run: %v", err)
+		log.Printf("request %s: ticket %d/%d: %s %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, ended.loadID, note, current.ID)
+		return notPushed(nil, note)
 	}
-	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, fl.name)
+	if heldRegressed(current, roundRun) {
+		log.Printf("request %s: ticket %d/%d: %s %s accepted but a held test green on run %s is red on it; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, current.ID, current.ID)
+		return notPushed(roundRun, "the round was accepted but a held test that passed on the run it followed fails on it")
+	}
+	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, adviceRoundName)
 	switch {
-	case failed != "" && fl.pushFailureEndsRound:
+	case failed != "" && len(heldReds(ticket, current)) > 0:
+		log.Printf("request %s: ticket %d/%d: %s %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, failed, current.ID)
 		ticket.Rounds[slice].Error = "no verdict: " + failed
-		log.Printf("request %s: ticket %d/%d: %s %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, roundRun.ID, failed, current.ID)
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
 		return nil, stop, err
 	case failed != "":
 		return nil, true, HaltRequest(dataDir, r, failed, now)
 	case refused != "":
+		log.Printf("request %s: ticket %d/%d: %s %s accepted but not pushed: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, refused, current.ID)
 		ticket.Rounds[slice].Error = refused
-		log.Printf("request %s: ticket %d/%d: advice round %s accepted but not pushed: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, roundRun.ID, refused, current.ID)
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
 		return nil, stop, err
 	}
 	afterRoundPushed(dp, ctx, r, ticket, slice, roundRun)
 	ticket.RunID = roundRun.ID
-	log.Printf("request %s: ticket %d/%d: advice round %s accepted and pushed to %s as %s", r.ID, ticket.Index, r.TicketCount, roundRun.ID, current.Branch, roundRun.ResultSHA)
+	log.Printf("request %s: ticket %d/%d: %s %s accepted and pushed to %s as %s", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, current.Branch, roundRun.ResultSHA)
 	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, fl.comment(current, roundRun)); err != nil {
-		log.Printf("request %s: ticket %d: comment on %s about advice round %s: %v", r.ID, ticket.Index, ticket.PRURL, roundRun.ID, err)
+	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, roundComment(ticket, current, roundRun)); err != nil {
+		log.Printf("request %s: ticket %d: comment on %s about %s %s: %v", r.ID, ticket.Index, ticket.PRURL, adviceRoundName, roundRun.ID, err)
 	}
 	return roundRun, false, nil
 }
 
-// recordAdviceRound records the advice round that followed current, ended
-// as ended, on ticket, ends it in flight, makes current the ticket's run
+// recordAdviceRound records the round (of Round kind kind) that followed
+// current, ended as ended, on ticket, ends it in flight, makes current the ticket's run
 // again and tags the round's commit; it returns the round's index in
 // ticket.Rounds.
-func recordAdviceRound(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, fl roundFlavor, now time.Time) int {
+func recordAdviceRound(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, kind string, now time.Time) int {
 	ticket.Advice = nil
 	ticket.RunID = current.ID
 	ticket.Rounds = append(ticket.Rounds, request.Round{
-		Index: ticket.NextRoundIndex(), Kind: fl.kind, RunID: ended.loadID, Outcome: ended.outcome,
+		Index: ticket.NextRoundIndex(), Kind: kind, RunID: ended.loadID, Outcome: ended.outcome,
 		StartFailure: ended.startFailure, Unresolved: ended.unresolved, Error: ended.errText,
 		At: now.UTC().Format(time.RFC3339Nano),
 	})
-	tagRoundByID(dp, dataDir, r, ticket, ended.loadID, fl.tag, now)
+	tagRoundByID(dp, dataDir, r, ticket, ended.loadID, kind, now)
 	return len(ticket.Rounds) - 1
 }
 
@@ -329,6 +404,91 @@ func restoreUnpushed(dp Deps, dataDir string, r *request.Request, ticket *reques
 
 // maxCommentFindings bounds the findings an advice round's comment lists.
 const maxCommentFindings = 20
+
+// roundComment is the one comment a round's confirmed push leaves on the pull
+// request, saying what it fixed: the held tests that failed on current and
+// pass on the round (challengeComment) and the high-severity findings current
+// was given (adviceComment), whichever there were.
+func roundComment(ticket *request.Ticket, current, roundRun *run.Run) string {
+	var parts []string
+	if reds := heldReds(ticket, current); len(reds) > 0 {
+		parts = append(parts, challengeComment(reds, current, roundRun))
+	}
+	if len(highFindings(current)) > 0 {
+		parts = append(parts, adviceComment(current, roundRun))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// challengeComment is the part of a round's comment about its held tests:
+// which of current's red files are green on the round (path and criterion,
+// never content), whether they are committed on the branch, and which are
+// still red.
+func challengeComment(reds []run.ChallengeFile, current, roundRun *run.Run) string {
+	verdict := map[string]string{}
+	if roundRun.Challenge != nil {
+		for _, f := range roundRun.Challenge.Files {
+			verdict[f.Path] = f.Verdict
+		}
+	}
+	var fixed, still strings.Builder
+	for _, f := range reds {
+		line := fmt.Sprintf("\n- `%s` (%s)", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion))
+		if verdict[f.Path] == run.ChallengeGreen {
+			fixed.WriteString(line)
+		} else {
+			still.WriteString(line)
+		}
+	}
+	var b strings.Builder
+	if fixed.Len() > 0 {
+		fmt.Fprintf(&b, "A round fixed the change: it now passes the held challenge tests that failed on the earlier head (%s):\n%s", shortSHA(current.ResultSHA), fixed.String())
+		if roundRun.Challenge != nil && roundRun.Challenge.CommittedSHA != "" {
+			b.WriteString("\n\nThe tests are committed on this branch.")
+		}
+	}
+	if still.Len() > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "These held challenge tests still fail on it, and a person decides whether the code or the test is wrong:\n%s", still.String())
+	}
+	return b.String()
+}
+
+// challengeDeclinedComment is the comment for a round that left the run it
+// followed as the ticket's while that run had red held tests: each red file's
+// path, the criterion it cites and the build's one-line reason, cleaned;
+// never a file's content.
+func challengeDeclinedComment(dataDir string, reds []run.ChallengeFile, roundRun *run.Run) string {
+	reason := "the round gave no reason"
+	if roundRun != nil {
+		if line := handoff.NoteLine(run.Dir(dataDir, roundRun.ID)); line != "" {
+			reason = line
+		}
+	}
+	var b strings.Builder
+	b.WriteString("A challenge test the factory ran against this change still fails; a round did not make it pass, so the tests are not committed. For each one a person decides whether the code or the test is wrong:\n")
+	for _, f := range reds {
+		fmt.Fprintf(&b, "\n- `%s` (%s): %s", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion), reason)
+	}
+	return b.String()
+}
+
+// commentDeclined posts the declined comment on the ticket's pull request
+// when current had red held tests (a round that only followed review advice
+// posts nothing); a failed comment is logged.
+func commentDeclined(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current, roundRun *run.Run) {
+	reds := heldReds(ticket, current)
+	if len(reds) == 0 {
+		return
+	}
+	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, challengeDeclinedComment(dataDir, reds, roundRun)); err != nil {
+		log.Printf("request %s: ticket %d: comment on %s about the %s: %v", r.ID, ticket.Index, ticket.PRURL, adviceRoundName, err)
+	}
+}
 
 // adviceComment is the comment an advice round's confirmed push leaves on the
 // pull request: the high-severity findings the round was given, its run and
@@ -366,14 +526,24 @@ func writeFindingLines(b *strings.Builder, findings []run.CodeReviewFinding) {
 	}
 }
 
+// roundKindOf is the Round kind of the round left in flight: a record written
+// before the rounds were one loop may mark it a challenge round, which is
+// settled as any round and recorded as it was.
+func roundKindOf(adv *request.TicketAdvice) string {
+	if adv != nil && adv.Challenge {
+		return request.ChallengeRoundKind
+	}
+	return request.AdviceRoundKind
+}
+
 // settleInterruptedAdviceRound settles the advice round a pass left in flight
 // (Ticket.Advice: the worker stopped or was lost mid-round), never starting
 // it again: its run, once ended, is concluded as any round's
-// (concludeAdviceRound); one that never started is a start failure; and one
+// (concludeRound); one that never started is a start failure; and one
 // whose run has not ended, or whose outcome cannot be read, is waited for
 // (the pass ends with an error and the step is tried again) until
 // adviceSettleBound has passed since the round started, then settled as
-// halted. The rounds that still apply follow a pushed one (runAdviceRounds),
+// halted. The rounds that still apply follow a pushed one (runRounds),
 // and the request then advances. A decision a lost round's resume_review
 // asked for is used up, and a kept worktree is reaped.
 func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) error {
@@ -390,19 +560,21 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	if err := ClearKeptRunsOfRequest(dataDir, r.ID); err != nil {
 		log.Printf("request %s: ticket %d: discard the advice round's kept worktree: %v", r.ID, ticket.Index, err)
 	}
-	fl := flavorOf(ticket.Advice)
-	pushed, stop, err := concludeAdviceRound(dp, ctx, dataDir, r, ticket, current, ended, fl, now)
+	kind := roundKindOf(ticket.Advice)
+	pushed, stop, err := concludeRound(dp, ctx, dataDir, r, ticket, current, ended, kind, now)
 	if stop {
 		return err
 	}
 	last := current
-	if pushed == nil && fl.kind == request.ChallengeRoundKind {
+	if pushed == nil && kind == request.ChallengeRoundKind {
 		pushed = current
 	}
-	if pushed != nil {
-		if last, stop, err = runAdviceRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
+	if pushed != nil && (pushed == current || !noProgress(ticket, current, pushed)) {
+		if last, stop, err = runRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
 			return err
 		}
+	} else if pushed != nil {
+		last = pushed
 	}
 	return advanceAcceptedTicket(dataDir, r, ticket, last, cfg.OpenPullRequest, time.Now())
 }
@@ -467,7 +639,7 @@ func abandonInFlightAdvice(dp Deps, dataDir string, r *request.Request, now time
 			return false, fmt.Errorf("request %s: ticket %d: %w", r.ID, ticket.Index, wait)
 		}
 		log.Printf("request %s: ticket %d: the advice round left in flight (run %s, %s) is recorded as not pushed; run %s stands", r.ID, ticket.Index, ended.loadID, ended.outcome, current.ID)
-		slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, flavorOf(ticket.Advice), now)
+		slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, roundKindOf(ticket.Advice), now)
 		ticket.Rounds[slice].Error = strings.TrimPrefix(ticket.Rounds[slice].Error+"; the request left building before the advice round was settled, so nothing was pushed", "; ")
 		if stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now); stop {
 			return true, err

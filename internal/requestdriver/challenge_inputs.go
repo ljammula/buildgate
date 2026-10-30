@@ -35,9 +35,9 @@ func challengeEnabled(dataDir string, r *request.Request) (approved string, ok b
 // withChallenge sets entry's challenge inputs for a build of ticket (SC-022):
 // a ticket not yet challenged gets the challenger job (its first build that
 // reaches the review), one challenged gets the held files of its challenge to
-// run again on the result. round marks the ticket's challenge round, whose
-// build also gets the held files mounted read-only and whose green result
-// commits them.
+// run again on the result. round marks a round while the held files are not
+// yet committed on the branch: its build also gets them mounted read-only, and
+// its green result commits them.
 func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket request.Ticket, round bool) error {
 	if ticket.Order != nil {
 		// A carved ticket's change was challenged (or not) on the run that

@@ -33,3 +33,19 @@ func TestChallengeRecordNamesFailingFilesAndNeverContent(t *testing.T) {
 		}
 	}
 }
+
+// Review is one record: the failing held files first, then the high findings,
+// the attempt's intro said once.
+func TestReviewRecordHasBothSectionsAndOneIntro(t *testing.T) {
+	r := &run.Run{ID: "run-a", Ticket: "t", State: run.StateAccepted,
+		Challenge:  &run.ChallengeRecord{Verdict: run.ChallengeRed, Files: []run.ChallengeFile{{Path: "sum_edge_test.go", Criterion: "AC-2", Verdict: run.ChallengeRed}}},
+		CodeReview: &run.CodeReviewResult{Findings: []run.CodeReviewFinding{{Severity: "high", Summary: "a leak"}}}}
+	md := Review(r).Markdown()
+	tests, concerns := strings.Index(md, "## Tests written against"), strings.Index(md, "## A reviewer's concerns")
+	if tests < 0 || concerns < tests || !strings.Contains(md, "a leak") {
+		t.Errorf("the record lacks both sections in order:\n%s", md)
+	}
+	if n := strings.Count(md, "That attempt passed every check and was accepted."); n != 1 {
+		t.Errorf("the intro appears %d times, want 1:\n%s", n, md)
+	}
+}
