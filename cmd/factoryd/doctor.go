@@ -305,7 +305,7 @@ func doctorMain(dp *deps, args []string) error {
 		checks = append(checks, doctorCheckTemporal(dp, context.Background(), false, os.Stdout))
 	}
 	checks = append(checks, doctorOpenShellChecks(dp, context.Background(), in, *fix, os.Stdout)...)
-	checks = append(checks, doctorSizingChecksAfterFix(*fix, in, checks)...)
+	checks = append(checks, doctorSizingChecksAfterFix(dp, *fix, in, checks)...)
 	checks = append(checks, doctorWorkerBinaryChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorWorkerGitHubLoginChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorGateTokenChecks(in.configPath, time.Now())...)
@@ -3331,11 +3331,11 @@ func doctorCheckProfileImages(ctx context.Context, dockerBinary, activeImage str
 
 // doctorSizingChecksAfterFix runs the Docker sizing rows against the sandbox
 // image doctor ends up using: with -fix it may have been rebuilt just now.
-func doctorSizingChecksAfterFix(fix bool, in doctorInputs, checks []doctorCheck) []doctorCheck {
+func doctorSizingChecksAfterFix(dp *deps, fix bool, in doctorInputs, checks []doctorCheck) []doctorCheck {
 	if fix {
 		in = doctorApplyBuiltImageRefs(in, checks)
 	}
-	return doctorDockerSizingChecks(context.Background(), in)
+	return doctorDockerSizingChecks(dp, context.Background(), in)
 }
 
 // doctorCheckDockerBackend names the Docker backend sandboxes run on. A

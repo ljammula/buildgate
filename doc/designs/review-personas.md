@@ -45,6 +45,15 @@ build -> verify -> repository gates -> evidence -> tests_red_on_base -> size
   change is within the size caps, the rule the challenger had after the
   review. The review no longer has to pass first: the challenger's start
   does not wait for it.
+- The order is chosen per run, on the host, from Docker's memory: together
+  only where it holds both sandboxes of every parallel job at their limits
+  (`max_parallel_jobs` × 2 × `sandbox_memory`), else the challenge phase runs
+  after the review (a Docker VM of 4 GiB on a default laptop). A memory that
+  cannot be read means after. The choice is a run input
+  (`ChallengeWithReview`), not a key; the run's challenge record names the
+  order as `challenge.with_review`, and `factoryd doctor`'s memory row counts
+  sandboxes by the same rule. Overlap only saves time: the round loop is what
+  makes the result correct.
 - The join waits for both. The review keeps its own limit and the challenger
   keeps its own launch deadline, so one stuck job never holds the other's
   result past its limit.

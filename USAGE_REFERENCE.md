@@ -1229,7 +1229,9 @@ unresolved cause `reproduction_unheld`.
 A request's ticket is challenged once (SC-022): once every gate before the
 code review passed, with the change within the size caps, the first such run
 of the ticket launches the `challenger` role, together with the code review on
-the same commit (neither sees the other's output),
+the same commit (neither sees the other's output) where Docker's memory holds
+both at the limits (`max_parallel_jobs` × 2 × `sandbox_memory`), else after it;
+the run's challenge record shows which as `with_review`,
 (progress stage and attempt kind `challenge`, script `agent/pi/scripts/challenge.py`)
 on a scratch worktree of the result commit, discarded afterwards. The job is
 given the approved spec (re-hashed against the hash `spec_review` approved)

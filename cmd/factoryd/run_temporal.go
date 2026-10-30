@@ -422,6 +422,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		ChallengeApprovedBytes:           o.ChallengeApprovedBytes,
 		ChallengerThinking:               o.ChallengerThinking,
 		ChallengerHarness:                o.ChallengerHarness,
+		ChallengeWithReview:              o.ChallengeWithReview,
 		ChallengerRelayPolicy:            o.ChallengerRelayPolicy,
 		ChallengeHeld:                    o.ChallengeHeld,
 		ChallengeRound:                   o.ChallengeRound,

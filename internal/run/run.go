@@ -2342,9 +2342,13 @@ type ChallengeFailure struct {
 // earlier challenge instead of a new job; CommittedSHA is the commit that
 // holds the green files, the run's ResultSHA then.
 type ChallengeRecord struct {
-	Verdict      string            `json:"verdict"`
-	Cause        string            `json:"cause,omitempty"`
-	Rerun        bool              `json:"rerun,omitempty"`
+	Verdict string `json:"verdict"`
+	Cause   string `json:"cause,omitempty"`
+	Rerun   bool   `json:"rerun,omitempty"`
+	// WithReview records the order: the challenger job ran together with the
+	// code review (true) or after it, because Docker's memory did not hold
+	// both at the limits.
+	WithReview   bool              `json:"with_review,omitempty"`
 	Files        []ChallengeFile   `json:"files,omitempty"`
 	Notes        []string          `json:"notes,omitempty"`
 	CommittedSHA string            `json:"committed_sha,omitempty"`

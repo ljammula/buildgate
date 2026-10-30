@@ -548,6 +548,11 @@ type RunWorkflowInput struct {
 	ChallengerThinking    string               `json:"challenger_thinking,omitempty"`
 	ChallengerHarness     string               `json:"challenger_harness,omitempty"`
 	ChallengerRelayPolicy *sandbox.RoutePolicy `json:"challenger_relay_policy,omitempty"`
+	// ChallengeWithReview is the order of the challenger job and the code
+	// review, decided by the host once per run from Docker's memory: true
+	// runs them together (max_parallel_jobs × 2 × sandbox_memory fits), false
+	// runs the challenge phase after the review. Derived, not configured.
+	ChallengeWithReview bool `json:"challenge_with_review,omitempty"`
 	// ChallengeHeld are the held files of the ticket's earlier challenge: a
 	// later build runs them again on its result (advice only), diff_scope sets
 	// them aside by their pinned hash, and with ChallengeRound a green result

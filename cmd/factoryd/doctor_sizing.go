@@ -30,13 +30,13 @@ var defaultSizingTimeouts = sizingTimeouts{info: 15 * time.Second, run: 30 * tim
 // the Docker VM: its memory (limits, not measured use) and the free space of
 // the filesystem Docker stores images, containers and volumes on. Both rows
 // are advisory.
-func doctorDockerSizingChecks(ctx context.Context, in doctorInputs) []doctorCheck {
-	return doctorDockerSizingChecksWith(ctx, in, defaultSizingTimeouts)
+func doctorDockerSizingChecks(dp *deps, ctx context.Context, in doctorInputs) []doctorCheck {
+	return doctorDockerSizingChecksWith(dp, ctx, in, defaultSizingTimeouts)
 }
 
-func doctorDockerSizingChecksWith(ctx context.Context, in doctorInputs, to sizingTimeouts) []doctorCheck {
+func doctorDockerSizingChecksWith(dp *deps, ctx context.Context, in doctorInputs, to sizingTimeouts) []doctorCheck {
 	return []doctorCheck{
-		doctorCheckParallelMemory(ctx, in.sandboxDocker, in.settings, to),
+		doctorCheckParallelMemory(dp, ctx, in.sandboxDocker, in.settings, to),
 		doctorCheckDockerDisk(ctx, in.sandboxDocker, in.sandboxImage, in.settings, to),
 	}
 }
@@ -66,44 +66,75 @@ func parallelMemoryFix(settings sessionconfig.Settings) string {
 
 // doctorCheckParallelMemory warns (advisory) when max_parallel_jobs (the
 // number of activities that run at once, model jobs included) times the
-// sandboxes one job can hold (two with roles.challenger: a ticket build's
-// review and challenger run at once) times sandbox_memory exceeds Docker's
-// total memory: the kernel then OOM-kills a container if they all grow to
-// their limits. One sandbox at a time passes without asking Docker.
-func doctorCheckParallelMemory(ctx context.Context, dockerBinary string, settings sessionconfig.Settings, to sizingTimeouts) doctorCheck {
+// sandboxes one job can hold times sandbox_memory exceeds Docker's total
+// memory: the kernel then OOM-kills a container if they all grow to their
+// limits. A job holds two sandboxes (a ticket build's review and challenger
+// at once) only where reviewAndChallengerTogether holds, else one: with
+// roles.challenger set and Docker's memory under that, the row passes and says
+// the two run one after the other. One sandbox at a time passes without
+// asking Docker.
+func doctorCheckParallelMemory(dp *deps, ctx context.Context, dockerBinary string, settings sessionconfig.Settings, to sizingTimeouts) doctorCheck {
 	name := fmt.Sprintf("memory limits: max_parallel_jobs %d × sandbox_memory %s within Docker's memory", settings.MaxParallelJobs, settings.SandboxMemory)
-	sandboxes := settings.MaxParallelJobs * sandboxesPerJob(settings)
-	if sandboxes <= 1 {
+	challenger := hasChallenger(settings)
+	if settings.MaxParallelJobs <= 1 && !challenger {
 		return doctorCheck{Name: name}
 	}
 	each, problem := sandboxMemoryBytes(settings.SandboxMemory)
 	if problem != nil {
 		return doctorCheck{Name: name, Err: problem, Advisory: true}
 	}
-	out, err := dockerOutput(ctx, to.info, dockerBinary, "info", "--format", "{{.MemTotal}}")
+	total, err := dp.docker.memTotal(ctx, dockerBinary, to.info)
 	if err != nil {
-		return doctorCheck{Name: name, Err: fmt.Errorf("%s info: %w", dockerBinary, err), Advisory: true}
+		return doctorCheck{Name: name, Err: err, Advisory: true}
 	}
-	total, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
-	if err != nil {
-		return doctorCheck{Name: name, Err: fmt.Errorf("parse Docker MemTotal %q: %w", strings.TrimSpace(string(out)), err), Advisory: true}
+	sandboxes, detail := settings.MaxParallelJobs, ""
+	switch {
+	case reviewAndChallengerTogether(settings, total):
+		sandboxes *= 2
+	case challenger:
+		detail = fmt.Sprintf("the review and the challenger run one after the other: Docker's memory (%s) is under max_parallel_jobs × 2 × sandbox_memory (%s)", formatGiB(total), formatGiB(int64(settings.MaxParallelJobs)*2*each))
 	}
 	if need := each * int64(sandboxes); need > total {
 		return doctorCheck{Name: name, Advisory: true,
 			Err: fmt.Errorf("limits add up to %s (%d × %s), Docker has %s -- limits, not measured use: builds can still fit, but if they all grew to their limits the kernel would OOM-kill one", formatGiB(need), sandboxes, formatGiB(each), formatGiB(total)),
 			Fix: parallelMemoryFix(settings)}
 	}
-	return doctorCheck{Name: name}
+	return doctorCheck{Name: name, Detail: detail}
 }
 
-// sandboxesPerJob is how many sandboxes one job can hold at once: two when
-// roles.challenger is set (a ticket build's code review and challenger run
-// together), one otherwise.
-func sandboxesPerJob(settings sessionconfig.Settings) int {
-	if settings.Roles != nil && settings.Roles.Challenger != nil {
-		return 2
+// memTotal reads Docker's total memory, the VM's on a Mac, within timeout.
+func (impl realDocker) memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error) {
+	out, err := dockerOutput(ctx, timeout, dockerBinary, "info", "--format", "{{.MemTotal}}")
+	if err != nil {
+		return 0, fmt.Errorf("%s info: %w", dockerBinary, err)
 	}
-	return 1
+	total, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse Docker MemTotal %q: %w", strings.TrimSpace(string(out)), err)
+	}
+	return total, nil
+}
+
+// hasChallenger reports whether roles.challenger is set.
+func hasChallenger(settings sessionconfig.Settings) bool {
+	return settings.Roles != nil && settings.Roles.Challenger != nil
+}
+
+// reviewAndChallengerTogether is the one rule for the order of a ticket
+// build's code review and challenger job (SC-022): together only where
+// Docker's memory (memTotal) holds both at the limits of every parallel job,
+// max_parallel_jobs × 2 × sandbox_memory, else one after the other. False
+// when no challenger role is set or sandbox_memory does not parse. A memTotal
+// that could not be read is the caller's: it passes 0.
+func reviewAndChallengerTogether(settings sessionconfig.Settings, memTotal int64) bool {
+	if !hasChallenger(settings) {
+		return false
+	}
+	each, err := sandboxMemoryBytes(settings.SandboxMemory)
+	if err != nil {
+		return false
+	}
+	return memTotal >= int64(settings.MaxParallelJobs)*2*each
 }
 
 // sandboxMemoryBytes parses sandbox_memory the way the launch reads it: an

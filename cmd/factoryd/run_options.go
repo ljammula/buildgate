@@ -115,9 +115,12 @@ type runOptions struct {
 	ChallengeApprovedBytes  int
 	ChallengerThinking      string
 	ChallengerHarness       string
-	ChallengerRelayPolicy   *sandbox.RoutePolicy
-	ChallengeHeld           []run.ChallengeFile
-	ChallengeRound          bool
+	// ChallengeWithReview is the order resolveChallenger decided from
+	// Docker's memory: the challenger job with the review, or after it.
+	ChallengeWithReview   bool
+	ChallengerRelayPolicy *sandbox.RoutePolicy
+	ChallengeHeld         []run.ChallengeFile
+	ChallengeRound        bool
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not

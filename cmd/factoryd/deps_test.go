@@ -29,6 +29,7 @@ type fakeDocker struct {
 	initChecksFn       func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImageFn        func(repoRoot string, target string, vars ...string) (string, error)
 	toolImageFn        func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
+	memTotalFn         func(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
 	requiredBinariesFn func(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
 	workerChecksFn     func(ctx context.Context, in doctorInputs) []doctorCheck
 	installImagesFn    func() workflow.InstallImages
@@ -75,6 +76,9 @@ func (f *fakeDocker) toolchainImage(ctx context.Context, dockerBinary string, ba
 }
 func (f *fakeDocker) requiredBinaries(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error) {
 	return f.requiredBinariesFn(ctx, dockerBinary, image, user, names)
+}
+func (f *fakeDocker) memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error) {
+	return f.memTotalFn(ctx, dockerBinary, timeout)
 }
 func (f *fakeDocker) workerChecks(ctx context.Context, in doctorInputs) []doctorCheck {
 	return f.workerChecksFn(ctx, in)
@@ -346,11 +350,12 @@ func (f *fakeTemporal) wakeRequest(ctx context.Context, dataDir string, requestI
 func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal) }
 
 // newTestDeps returns the deps of one test: every boundary is a fake whose
-// methods call the real ones, except the ten below, where a real call
+// methods call the real ones, except the eleven below, where a real call
 // would leave the test process. A test that needs another answer sets the
 // field (fakeHostOf(dp).spawnWorkerFn = ...); a test of a real method calls
 // it on realHost{dp: dp} and its siblings.
 //
+//	docker.memTotal      reads Docker's memory: an error (review and challenger in turn)
 //	docker.initChecks    needs a live Docker daemon: all-pass
 //	docker.docker.colimaBinary  the operator's Colima VM: a binary that does not exist
 //	temporal.ensure      starts containers: no address
@@ -378,6 +383,10 @@ func newTestDeps(t testing.TB) *deps {
 		},
 		requiredBinariesFn: func(context.Context, string, string, string, []string) ([]string, error) {
 			return nil, errors.New("test docker: no image is probed for required binaries")
+		},
+		// Docker's memory is not read: the review and challenger run in turn.
+		memTotalFn: func(context.Context, string, time.Duration) (int64, error) {
+			return 0, errors.New("test docker: Docker's memory is not read")
 		},
 		workerChecksFn:  realDocker.workerChecks,
 		installImagesFn: func() workflow.InstallImages { return refusingInstallImages{} },

@@ -58,8 +58,12 @@ type challengeFixture struct {
 	size      *run.ChangeSize
 	onReview  func()
 	onJob     func()
-	order     *[]string
-	orderMu   sync.Mutex
+	// inTurn runs the input as the host sets it where Docker's memory does not
+	// hold both (ChallengeWithReview false); legacy replays a history recorded
+	// with parallelChallengeChange and without challengeWithReviewByMemoryChange.
+	inTurn, legacy bool
+	order          *[]string
+	orderMu        sync.Mutex
 }
 
 func (f *challengeFixture) record(name string) {
@@ -92,6 +96,10 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 	if fx.serial {
 		env.OnGetVersion(parallelChallengeChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
+	if fx.legacy {
+		env.OnGetVersion(challengeWithReviewByMemoryChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
+	input.ChallengeWithReview = !fx.inTurn && !fx.legacy
 	if fx.size != nil {
 		env.RegisterActivityWithOptions(func(context.Context, MeasureChangeSizeInput) (*run.ChangeSize, error) { return fx.size, nil },
 			activity.RegisterOptions{Name: MeasureChangeSizeActivityName})
@@ -356,6 +364,16 @@ func edgeJob() ChallengerJobResult {
 // The challenger job runs with the review on the same commit: each activity
 // waits for the other to have started, which the serial order could not meet.
 func TestChallengerJobOverlapsTheReview(t *testing.T) {
+	p := runOverlapping(t, &challengeFixture{})
+	if p.result.Challenge == nil || !p.result.Challenge.WithReview {
+		t.Errorf("challenge %+v; want WithReview recorded", p.result.Challenge)
+	}
+}
+
+// runOverlapping runs the challenge phase with fx, where each activity waits
+// for the other to have started, and fails unless the run is green and committed.
+func runOverlapping(t *testing.T, fx *challengeFixture) challengeRun {
+	t.Helper()
 	reviewIn, jobIn := make(chan struct{}), make(chan struct{})
 	var once1, once2 sync.Once
 	wait := func(c chan struct{}) {
@@ -365,13 +383,32 @@ func TestChallengerJobOverlapsTheReview(t *testing.T) {
 			t.Error("the other activity never started: the two do not overlap")
 		}
 	}
-	fx := challengeFixture{
-		onReview: func() { once1.Do(func() { close(reviewIn) }); wait(jobIn) },
-		onJob:    func() { once2.Do(func() { close(jobIn) }); wait(reviewIn) },
-	}
-	p := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, &fx)
+	fx.onReview = func() { once1.Do(func() { close(reviewIn) }); wait(jobIn) }
+	fx.onJob = func() { once2.Do(func() { close(jobIn) }); wait(reviewIn) }
+	p := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, fx)
 	if p.err != nil || p.jobs != 1 || len(p.commits) != 1 || p.result.ResultSHA != "c0ffee" || p.result.Challenge == nil || p.result.Challenge.Verdict != run.ChallengeGreen {
 		t.Fatalf("err %v, jobs %d, commits %v, sha %q, challenge %+v; want a green challenge committed after both", p.err, p.jobs, p.commits, p.result.ResultSHA, p.result.Challenge)
+	}
+	return p
+}
+
+// A history recorded on the logic that always overlapped (parallelChallengeChange,
+// no challengeWithReviewByMemoryChange marker, no input field) replays
+// together, as it ran.
+func TestHistoryRecordedBeforeTheMemoryMarkerReplaysTogether(t *testing.T) {
+	p := runOverlapping(t, &challengeFixture{legacy: true})
+	if p.result.Challenge == nil || !p.result.Challenge.WithReview {
+		t.Errorf("challenge %+v; want WithReview recorded", p.result.Challenge)
+	}
+}
+
+// With ChallengeWithReview false the challenger job follows the review, and
+// the record says so.
+func TestChallengerJobFollowsTheReviewWhenTheHostSaysSo(t *testing.T) {
+	var order []string
+	p := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, &challengeFixture{inTurn: true, order: &order})
+	if p.err != nil || strings.Join(order, ",") != "review-start,review-end,job-start,job-end" || len(p.commits) != 1 || p.result.Challenge == nil || p.result.Challenge.WithReview {
+		t.Fatalf("err %v, order %v, commits %v, challenge %+v; want the review, then the job, WithReview false", p.err, order, p.commits, p.result.Challenge)
 	}
 }
 

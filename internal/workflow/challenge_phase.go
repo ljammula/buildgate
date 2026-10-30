@@ -25,6 +25,13 @@ const challengeChange = "challenge"
 // challenge phase.
 const parallelChallengeChange = "challenge-with-review"
 
+// challengeWithReviewByMemoryChange is the GetVersion change ID from which the
+// order of the review and the challenger job follows RunWorkflowInput's
+// ChallengeWithReview (Docker's memory, decided by the host): together when it
+// is set, else in turn. A history recorded with parallelChallengeChange and
+// without this marker replays together, as it ran.
+const challengeWithReviewByMemoryChange = "challenge-with-review-by-memory"
+
 // Passes of the factory's run of a held challenge file: one launch, and a
 // second, separate one only after the first was red.
 const (
@@ -83,7 +90,7 @@ func runChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 		return nil
 	}
 	current.Stage, current.StartedAt = challengeAttemptKind, temporalworkflow.Now(ctx)
-	if err := judgeChallenge(ctx, ids, buildVerifyCtx, input, result, worktreePath, branch); err != nil {
+	if err := judgeChallenge(ctx, ids, buildVerifyCtx, input, result, false, worktreePath, branch); err != nil {
 		return err
 	}
 	return commitGreenChallenge(ctx, ids, input, result, worktreePath, branch)
@@ -91,10 +98,11 @@ func runChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 
 // judgeChallenge runs the challenger job (a fresh run) or takes the held files
 // (a rerun), then the factory's run of the runnable files, and leaves the
-// record, with its verdicts, on result.Challenge. It commits nothing.
-func judgeChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) error {
+// record, with its verdicts and the order it ran in (withReview), on
+// result.Challenge. It commits nothing.
+func judgeChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, withReview bool, worktreePath, branch string) error {
 	fresh, rerun := input.Challenge, len(input.ChallengeHeld) > 0
-	rec := &run.ChallengeRecord{Rerun: !fresh || rerun}
+	rec := &run.ChallengeRecord{Rerun: !fresh || rerun, WithReview: withReview}
 	result.Challenge = rec
 	commit := result.ResultSHA
 	if !rec.Rerun {
@@ -133,6 +141,9 @@ func commitGreenChallenge(ctx temporalworkflow.Context, ids *activityIDs, input 
 // challenge error; the coroutine is always joined.
 func reviewAndChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, sizeVersion temporalworkflow.Version, passed bool, worktreePath, branch string) (reviewOutcome, error) {
 	parallel := temporalworkflow.GetVersion(ctx, parallelChallengeChange, temporalworkflow.DefaultVersion, 1) == 1
+	if byMemory := temporalworkflow.GetVersion(ctx, challengeWithReviewByMemoryChange, temporalworkflow.DefaultVersion, 1) == 1; byMemory {
+		parallel = parallel && input.ChallengeWithReview
+	}
 	within := !overSizeCap(input, result.ChangeSize)
 	var reviews reviewOutcome
 	if sizeVersion == temporalworkflow.DefaultVersion || passed && within {
@@ -158,7 +169,7 @@ func reviewWithChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVe
 		future, settable := temporalworkflow.NewFuture(ctx)
 		joined = future
 		temporalworkflow.Go(ctx, func(gctx temporalworkflow.Context) {
-			settable.SetError(judgeChallenge(gctx, ids, buildVerifyCtx, input, result, worktreePath, branch))
+			settable.SetError(judgeChallenge(gctx, ids, buildVerifyCtx, input, result, true, worktreePath, branch))
 		})
 	}
 	reviews, reviewErr := runReviewSteps(ctx, ids, buildVerifyCtx, input, current, result, gates, worktreePath, branch)
