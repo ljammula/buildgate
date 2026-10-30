@@ -457,6 +457,7 @@
     "verdict": "every-field verdict",
     "cause": "every-field cause",
     "rerun": true,
+    "with_review": true,
     "files": [
       {
         "path": "every-field path",

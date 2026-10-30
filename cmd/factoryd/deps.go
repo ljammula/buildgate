@@ -84,6 +84,10 @@ type dockerBoundary interface {
 	// PATH as the worker identity.
 	requiredBinaries(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
 	workerChecks(ctx context.Context, in doctorInputs) []doctorCheck
+	// memTotal is Docker's total memory in bytes (the VM's, on a Mac), read
+	// within timeout; the rule for running a build's review and challenger
+	// together (reviewAndChallengerTogether) and doctor's memory row use it.
+	memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
 }
 
 // realDocker is the real dockerBoundary; its methods are beside the code that uses them.

@@ -453,23 +453,26 @@ type ticketRun struct {
 	replay *run.Replay
 	// resumeSession is the kept build session of the run -resume-session-of
 	// names (resumeSessionPathOf), "" for none.
-	resumeSession                         string
-	args                                  []string
-	settings                              sessionconfig.Settings
-	executionHarnessName                  string
-	reviewHarnessName                     string
-	executionHarnessDescriptor            harness.Descriptor
-	reviewHarnessDescriptor               harness.Descriptor
-	executionSkills                       []sandbox.SkillSource
-	reviewSkills                          []sandbox.SkillSource
-	executionThinking                     string
-	reviewThinking                        string
-	reviewOK                              bool
-	execSelection                         *modelrole.Selection
-	reviewSelection                       *modelrole.Selection
-	challengerSelection                   *modelrole.Selection
-	challengerThinking                    string
-	challengerHarnessName                 string
+	resumeSession              string
+	args                       []string
+	settings                   sessionconfig.Settings
+	executionHarnessName       string
+	reviewHarnessName          string
+	executionHarnessDescriptor harness.Descriptor
+	reviewHarnessDescriptor    harness.Descriptor
+	executionSkills            []sandbox.SkillSource
+	reviewSkills               []sandbox.SkillSource
+	executionThinking          string
+	reviewThinking             string
+	reviewOK                   bool
+	execSelection              *modelrole.Selection
+	reviewSelection            *modelrole.Selection
+	challengerSelection        *modelrole.Selection
+	challengerThinking         string
+	challengerHarnessName      string
+	// challengeWithReview is resolveChallenger's order for the review and the
+	// challenger job: together (true) or in turn.
+	challengeWithReview                   bool
 	challengeSpecSnapshot                 string
 	challengeSpecSHA256                   string
 	challengeHeld                         []run.ChallengeFile
@@ -2703,6 +2706,7 @@ func (tr *ticketRun) dispatch() error {
 			ChallengeApprovedBytes:  *tr.rf.challengeApprovedBytes,
 			ChallengerThinking:      tr.challengerThinking,
 			ChallengerHarness:       tr.challengerHarnessName,
+			ChallengeWithReview:     tr.challengeWithReview,
 			ChallengeHeld:           tr.challengeHeld,
 			ChallengeRound:          *tr.rf.challengeRound,
 		}

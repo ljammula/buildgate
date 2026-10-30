@@ -116,7 +116,25 @@ func (tr *ticketRun) resolveChallenger() error {
 		log.Printf("challenger: no challenge for this build: %v", err)
 		tr.challengerSelection, tr.challengerThinking, tr.challengerHarnessName = nil, "", ""
 	}
+	tr.challengeWithReview = tr.challengerSelection != nil && tr.challengeFitsWithReview()
 	return nil
+}
+
+// challengeFitsWithReview decides, once for the run, the order of its code
+// review and challenger job: together where Docker's memory holds both at the
+// limits (reviewAndChallengerTogether), else in turn. A memory that cannot be
+// read is in turn.
+func (tr *ticketRun) challengeFitsWithReview() bool {
+	total, err := tr.dp.docker.memTotal(tr.lifecycleCtx, tr.settings.SandboxDocker, defaultSizingTimeouts.info)
+	if err != nil {
+		log.Printf("challenger: the review and the challenger run in turn: %v", err)
+		return false
+	}
+	together := reviewAndChallengerTogether(tr.settings, total)
+	if !together {
+		log.Printf("challenger: the review and the challenger run in turn: Docker's memory is under max_parallel_jobs × 2 × sandbox_memory")
+	}
+	return together
 }
 
 func (tr *ticketRun) resolveChallengerRoute() error {

@@ -60,6 +60,15 @@ func readArgv(t *testing.T, path string) string {
 // hanging-docker cases test the timeout itself with their own short ones.
 var quickTimeouts = sizingTimeouts{info: 30 * time.Second, run: 30 * time.Second}
 
+// realMemDeps is test deps whose Docker memory is read from the fake docker
+// script, as the real boundary reads it.
+func realMemDeps(t *testing.T) *deps {
+	t.Helper()
+	dp := newTestDeps(t)
+	fakeDockerOf(dp).memTotalFn = realDocker{dp: dp}.memTotal
+	return dp
+}
+
 func TestDoctorCheckParallelMemory(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -84,7 +93,7 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 			s := sessionconfig.DefaultSettings()
 			s.MaxParallelJobs, s.SandboxMemory, s.ComposeServicesMemory = tc.jobs, tc.memory, tc.compose
 			docker, argv := sizingFake{memTotal: tc.memTotal}.install(t)
-			c := doctorCheckParallelMemory(context.Background(), docker, s, quickTimeouts)
+			c := doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
 			checkSizingRow(t, c, tc.wantErr)
 			if !strings.Contains(c.Fix, tc.wantFix) {
 				t.Errorf("fix = %q, want it to contain %q", c.Fix, tc.wantFix)
@@ -97,27 +106,51 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 			}
 		})
 	}
-	t.Run("a challenger doubles each job", func(t *testing.T) {
+	t.Run("a challenger doubles each job where Docker's memory holds both", func(t *testing.T) {
+		s := sessionconfig.DefaultSettings()
+		s.MaxParallelJobs, s.SandboxMemory = 2, "4g"
+		s.Roles = &sessionconfig.Roles{Challenger: &sessionconfig.RoleConfig{Model: "m"}}
+		docker, _ := sizingFake{memTotal: "17179869184"}.install(t)
+		c := doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
+		checkSizingRow(t, c, "")
+		if c.Detail != "" {
+			t.Errorf("detail = %q, want none when both run together within memory", c.Detail)
+		}
+		// Too little for both at once and for the jobs one at a time: the
+		// serial count (4 × 4 GiB) still warns.
+		s.MaxParallelJobs = 4
+		docker, _ = sizingFake{memTotal: "12884901888"}.install(t)
+		checkSizingRow(t, doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts), "limits add up to 16.0 GiB (4 × 4.0 GiB), Docker has 12.0 GiB")
+	})
+	t.Run("a challenger runs after the review where Docker's memory is under jobs x 2 x sandbox_memory", func(t *testing.T) {
 		s := sessionconfig.DefaultSettings()
 		s.MaxParallelJobs, s.SandboxMemory = 2, "4g"
 		s.Roles = &sessionconfig.Roles{Challenger: &sessionconfig.RoleConfig{Model: "m"}}
 		docker, _ := sizingFake{memTotal: "12884901888"}.install(t)
-		checkSizingRow(t, doctorCheckParallelMemory(context.Background(), docker, s, quickTimeouts), "limits add up to 16.0 GiB (4 × 4.0 GiB), Docker has 12.0 GiB")
+		c := doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
+		checkSizingRow(t, c, "")
+		if !strings.Contains(c.Detail, "one after the other") {
+			t.Errorf("detail = %q, want it to say the review and challenger run one after the other", c.Detail)
+		}
 		s.MaxParallelJobs = 1
 		docker, _ = sizingFake{memTotal: "4294967296"}.install(t)
-		checkSizingRow(t, doctorCheckParallelMemory(context.Background(), docker, s, quickTimeouts), "limits add up to 8.0 GiB (2 × 4.0 GiB)")
+		c = doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
+		checkSizingRow(t, c, "")
+		if !strings.Contains(c.Detail, "one after the other") {
+			t.Errorf("one job: detail = %q", c.Detail)
+		}
 	})
 	t.Run("docker failure", func(t *testing.T) {
 		s := sessionconfig.DefaultSettings()
 		s.MaxParallelJobs, s.SandboxMemory = 4, "4g"
-		checkSizingRow(t, doctorCheckParallelMemory(context.Background(), filepath.Join(t.TempDir(), "absent"), s, quickTimeouts), " info: ")
+		checkSizingRow(t, doctorCheckParallelMemory(realMemDeps(t), context.Background(), filepath.Join(t.TempDir(), "absent"), s, quickTimeouts), " info: ")
 	})
 	t.Run("hanging docker", func(t *testing.T) {
 		s := sessionconfig.DefaultSettings()
 		s.MaxParallelJobs, s.SandboxMemory = 4, "4g"
 		docker, _ := sizingFake{hang: true}.install(t)
 		start := time.Now()
-		checkSizingRow(t, doctorCheckParallelMemory(context.Background(), docker, s, sizingTimeouts{info: 100 * time.Millisecond}), "did not answer within 100ms")
+		checkSizingRow(t, doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, sizingTimeouts{info: 100 * time.Millisecond}), "did not answer within 100ms")
 		if time.Since(start) > 10*time.Second {
 			t.Errorf("took %s", time.Since(start))
 		}
@@ -193,7 +226,7 @@ func TestDoctorSizingRowsWarnNeverFail(t *testing.T) {
 	s := sessionconfig.DefaultSettings()
 	s.MaxParallelJobs, s.SandboxMemory = 4, "4g"
 	docker, _ := sizingFake{memTotal: "8589934592", runOut: "h\noverlay 1 2 1024 4 /"}.install(t)
-	checks := doctorDockerSizingChecksWith(context.Background(), doctorInputs{sandboxDocker: docker, sandboxImage: "worker:1", settings: s}, quickTimeouts)
+	checks := doctorDockerSizingChecksWith(realMemDeps(t), context.Background(), doctorInputs{sandboxDocker: docker, sandboxImage: "worker:1", settings: s}, quickTimeouts)
 	var out strings.Builder
 	if failed := runDoctorChecks(checks, &out); failed != 0 {
 		t.Fatalf("failed = %d, want 0:\n%s", failed, out.String())
@@ -232,5 +265,26 @@ func checkSizingRow(t *testing.T, c doctorCheck, wantErr string) {
 	}
 	if !c.Advisory {
 		t.Errorf("row must be advisory, never a FAIL")
+	}
+}
+
+// The rule is shared by doctor and the run input: together only where
+// jobs × 2 × sandbox_memory fits, and never without a challenger or with an
+// unparseable sandbox_memory.
+func TestReviewAndChallengerTogetherRule(t *testing.T) {
+	s := sessionconfig.DefaultSettings()
+	s.MaxParallelJobs, s.SandboxMemory = 2, "4g"
+	if reviewAndChallengerTogether(s, 1<<40) {
+		t.Error("no challenger role: want false")
+	}
+	s.Roles = &sessionconfig.Roles{Challenger: &sessionconfig.RoleConfig{Model: "m"}}
+	for total, want := range map[int64]bool{16 << 30: true, 16<<30 - 1: false, 0: false} {
+		if got := reviewAndChallengerTogether(s, total); got != want {
+			t.Errorf("memTotal %d: got %v, want %v", total, got, want)
+		}
+	}
+	s.SandboxMemory = "lots"
+	if reviewAndChallengerTogether(s, 1<<40) {
+		t.Error("unparseable sandbox_memory: want false")
 	}
 }
