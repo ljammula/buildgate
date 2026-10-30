@@ -684,7 +684,7 @@ func TestEvaluateProjectBootstrapChecksBrownfieldProfileSkipsSpecAndContract(t *
 	contractPath := filepath.Join(root, "spec", "contract.md")
 	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
 
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, "", 0, nil, preflightProfileBrownfield, false)
+	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, "", 0, nil, preflightProfileBrownfield, nil)
 
 	if !allPassed {
 		t.Fatalf("allPassed = false under brownfield profile with no ticket declared, want true (only architecture_structure ran, and it's advisory): %+v", results)
@@ -716,7 +716,7 @@ func TestEvaluateProjectBootstrapChecksBrownfieldMissingTicketIsAdvisory(t *test
 	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
 	missingTicket := filepath.Join(root, "spec", "tickets", "001-missing.md")
 
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, missingTicket, 1, nil, preflightProfileBrownfield, false)
+	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, missingTicket, 1, nil, preflightProfileBrownfield, nil)
 	if !allPassed {
 		t.Fatalf("allPassed = false under brownfield with a missing auto-discovered ticket, want true: %+v", results)
 	}
@@ -741,13 +741,13 @@ func TestEvaluateProjectBootstrapChecksBrownfieldMissingTicketIsAdvisory(t *test
 	if err := os.WriteFile(presentTicket, []byte("# not a ticket\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	results, allPassed = evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, presentTicket, 2, nil, preflightProfileBrownfield, false)
+	results, allPassed = evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, presentTicket, 2, nil, preflightProfileBrownfield, nil)
 	if allPassed {
 		t.Fatalf("allPassed = true under brownfield with a malformed ticket that exists, want false: %+v", results)
 	}
 
 	// Strict profile: a missing ticket still fails.
-	_, allPassed = evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, missingTicket, 1, nil, "", false)
+	_, allPassed = evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, missingTicket, 1, nil, "", nil)
 	if allPassed {
 		t.Fatal("allPassed = true under the strict profile with a missing ticket, want false")
 	}
@@ -811,7 +811,7 @@ func TestEvaluateProjectBootstrapChecksStrictProfileUnaffected(t *testing.T) {
 	contractPath := filepath.Join(root, "spec", "contract.md")
 	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
 
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, "", 0, nil, "", false)
+	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, "", 0, nil, "", nil)
 
 	if allPassed {
 		t.Fatal("allPassed = true against three nonexistent artifacts under the strict profile, want false")
@@ -859,12 +859,12 @@ func TestRunProjectBootstrapCheckBrownfieldProfileAcceptsRealRepoLayout(t *testi
 	contractPath := filepath.Join(root, "spec", "contract.md")
 	dataDir := t.TempDir()
 
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, ticketPath, 1, nil, preflightProfileBrownfield, false)
+	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, ticketPath, 1, nil, preflightProfileBrownfield, nil)
 	if err != nil {
 		t.Fatalf("runProjectBootstrapCheck under brownfield profile: %v", err)
 	}
 
-	_, _, strictErr := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project-strict", specPath, contractPath, architecturePath, ticketPath, 1, nil, "", false)
+	_, _, strictErr := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project-strict", specPath, contractPath, architecturePath, ticketPath, 1, nil, "", nil)
 	if strictErr == nil {
 		t.Fatal("runProjectBootstrapCheck under the strict profile succeeded against the same layout, want it rejected (no spec.md/contract.md at all)")
 	}
@@ -886,7 +886,7 @@ func TestRunProjectBootstrapCheckNeverOnboardedNamesTheOnboardCommand(t *testing
 	specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(root)
 	dataDir := t.TempDir()
 
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, "", 0, nil, "", false)
+	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, "", 0, nil, "", nil)
 	if err == nil {
 		t.Fatal("runProjectBootstrapCheck against a never-onboarded repo succeeded, want it rejected")
 	}
@@ -918,7 +918,7 @@ func TestRunProjectBootstrapCheckPartiallyOnboardedDoesNotSuggestOnboard(t *test
 	}
 	dataDir := t.TempDir()
 
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, "", 0, nil, "", false)
+	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, "", 0, nil, "", nil)
 	if err == nil {
 		t.Fatal("runProjectBootstrapCheck against an unfrozen spec succeeded, want it rejected")
 	}
@@ -949,7 +949,7 @@ func TestRunProjectBootstrapCheckBrownfieldNeverSuggestsOnboard(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, ticketPath, 1, nil, preflightProfileBrownfield, false)
+	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, ticketPath, 1, nil, preflightProfileBrownfield, nil)
 	if err == nil {
 		t.Fatal("runProjectBootstrapCheck under brownfield with a malformed ticket succeeded, want it rejected")
 	}

@@ -181,9 +181,15 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 		// Temporal run on a format mismatch.
 		var passed bool
 		var reasons []string
-		if input.RequestTicket {
+		switch {
+		case input.RequestTicket && input.NoTicketScope:
+			// A ticket the factory built with no ticket scope: the
+			// request's verbatim spec ticket, in whichever shape the spec
+			// was approved, or a carved replay's input.
+			passed, reasons = request.SpecTicketStructure(string(content))
+		case input.RequestTicket:
 			passed, reasons = request.RequestTicketStructure(string(content))
-		} else {
+		default:
 			passed, reasons = policy.TicketStructure(string(content), input.TicketNumber)
 		}
 		if !passed {

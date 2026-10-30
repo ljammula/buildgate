@@ -1,6 +1,7 @@
 package request
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -92,15 +93,25 @@ func ApproveShown(dataDir, id, by string, now time.Time, expectedSHA256 map[stri
 }
 
 // validateTicketSpecs is approve's re-validation of every ticket under
-// review (see its call for why an approval repeats the editor's check).
+// review (see its call for why an approval repeats the editor's check). A
+// ticket whose bytes are the approved spec's is the factory's spec ticket and
+// is judged by SpecTicketStructure.
 func validateTicketSpecs(dataDir, id string, specRelPaths []string) error {
+	spec, err := os.ReadFile(filepath.Join(Dir(dataDir, id), specFileName))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("request %s: read %s: %w", id, specFileName, err)
+	}
 	for _, relPath := range specRelPaths {
 		content, err := os.ReadFile(filepath.Join(Dir(dataDir, id), relPath))
 		if err != nil {
 			return fmt.Errorf("request %s: read %s: %w", id, relPath, err)
 		}
-		if err := ValidateTicketSpecContent(string(content)); err != nil {
-			return fmt.Errorf("request %s: %s: %w", id, relPath, err)
+		check := RequestTicketStructure
+		if spec != nil && bytes.Equal(content, spec) {
+			check = SpecTicketStructure
+		}
+		if ok, reasons := check(string(content)); !ok {
+			return fmt.Errorf("request %s: %s: %s", id, relPath, strings.Join(reasons, "; "))
 		}
 	}
 	return nil

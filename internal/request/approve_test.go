@@ -577,6 +577,39 @@ func TestApprovePlanRefusesWithoutTicketFiles(t *testing.T) {
 // the malformed edit only failed much later, at build start, via
 // -request-ticket's own fail-closed preflight. Approve's own plan_review
 // branch must now refuse it before any state change, naming the reason.
+// The factory's spec ticket is the approved spec byte for byte; a spec handed
+// over in its own shape is approved as that ticket, and the same content in a
+// ticket that is not the spec is refused.
+func TestApprovePlanAcceptsTheSpecTicketOfAHandedOverSpec(t *testing.T) {
+	const spec = "# Spec\n\n## Problem\n\np\n\n## Wanted behaviour\n\n- one\n- two\n"
+	for _, tc := range []struct {
+		name, ticket string
+		wantErr      bool
+	}{
+		{"the spec itself", spec, false},
+		{"not the spec", spec + "\n- three\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			newApprovableRequest(t, dataDir, "req-1", StatePlanReview, true)
+			dir := Dir(dataDir, "req-1")
+			if err := os.WriteFile(filepath.Join(dir, specFileName), []byte(spec), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(dir, "tickets", "002.spec.md")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "tickets", "001.spec.md"), []byte(tc.ticket), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Approve(dataDir, "req-1", "alice", fixedNow, nil)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Approve: %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestApprovePlanRefusesHandEditedTicketMissingVerifyCommand(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StatePlanReview, true)

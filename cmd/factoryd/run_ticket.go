@@ -1762,7 +1762,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	if !*tr.skipProjectCheck {
 		err := withStage(*tr.dataDir, tr.id, "preflight", func() (outcome, detail string, err error) {
 			specArtifact, contractArtifact, architectureArtifact := projectBootstrapArtifactPaths(*tr.workspace)
-			tr.productSpecSHA256, tr.contractSHA256, err = runProjectBootstrapCheck(*tr.dataDir, tr.dataDirInsideWorkspace, tr.resolvedWorkspaceForRecordCheck, tr.repositoryRoot, tr.project, specArtifact, contractArtifact, architectureArtifact, tr.piTicketPath, tr.piTicketNumber, splitTrimmedCSV(*tr.architectureRequiredSections), *tr.preflightProfile, *tr.requestTicket)
+			tr.productSpecSHA256, tr.contractSHA256, err = runProjectBootstrapCheck(*tr.dataDir, tr.dataDirInsideWorkspace, tr.resolvedWorkspaceForRecordCheck, tr.repositoryRoot, tr.project, specArtifact, contractArtifact, architectureArtifact, tr.piTicketPath, tr.piTicketNumber, splitTrimmedCSV(*tr.architectureRequiredSections), *tr.preflightProfile, tr.requestTicketCheck())
 			if err != nil {
 				return "fail", err.Error(), err
 			}

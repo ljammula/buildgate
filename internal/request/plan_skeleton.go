@@ -138,6 +138,21 @@ func RequestTicketStructure(content string) (bool, []string) {
 	return true, nil
 }
 
+// SpecTicketStructure is RequestTicketStructure for the one ticket the
+// factory writes from the approved spec for a request submitted without a
+// plan, which is that spec byte for byte: it also accepts the shape a spec
+// handed over with -spec-file is approved in (ValidateHandedOverSpec), which
+// need not be the drafted skeleton. Callers use it only where the content is
+// known to be that ticket (its bytes equal the approved spec, or the build was
+// started for it with no ticket scope), never on content alone: a hand-edited
+// ticket that lost a required part is still judged by RequestTicketStructure.
+func SpecTicketStructure(content string) (bool, []string) {
+	if ValidateHandedOverSpec(content) == nil {
+		return true, nil
+	}
+	return RequestTicketStructure(content)
+}
+
 // ValidatePlanCoverage reports an error listing every acceptance
 // criterion number from 1 to specCriteriaCount that appears in NO
 // ticket's own "### Acceptance criteria covered" section -- the plan's

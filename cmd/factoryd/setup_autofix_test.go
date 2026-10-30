@@ -121,6 +121,35 @@ func TestSpecTicketHasNoTicketScope(t *testing.T) {
 	}
 }
 
+// The start-of-build structure check judges the verbatim spec ticket (no
+// ticket scope) in the shape a handed-over spec was approved in, any other
+// request ticket in the ticket shape, and a run outside a request not at all.
+func TestRequestTicketCheckFollowsTheTicketScope(t *testing.T) {
+	handedOver := "# Spec\n\n## Problem\n\np\n\n## Wanted behaviour\n\n- one\n- two\n"
+	for _, tc := range []struct {
+		requestTicket bool
+		scope         string
+		wantNil, ok   bool
+	}{
+		{true, "none", false, true},
+		{true, "approved", false, false},
+		{false, "", true, false},
+	} {
+		requestTicket, scope := tc.requestTicket, tc.scope
+		tr := &ticketRun{rf: runFlags{scopeApproval: &scope}, requestTicket: &requestTicket}
+		check := tr.requestTicketCheck()
+		if (check == nil) != tc.wantNil {
+			t.Fatalf("request ticket %v, scope %q: check nil = %v, want %v", requestTicket, scope, check == nil, tc.wantNil)
+		}
+		if check == nil {
+			continue
+		}
+		if ok, reasons := check(handedOver); ok != tc.ok {
+			t.Errorf("request ticket %v, scope %q: handed-over spec ok = %v (%v), want %v", requestTicket, scope, ok, reasons, tc.ok)
+		}
+	}
+}
+
 func headOf(t *testing.T, workspace string) string {
 	t.Helper()
 	out, err := runGit(t, workspace, "rev-parse", "HEAD")
