@@ -1624,7 +1624,9 @@ roles:
 - `roles.challenger` (optional, the keys of `roles.review`) names the model,
   thinking level and harness of the challenger job (SC-022, "The
   challenger"); unset, no challenger job runs. `quickstart` writes it with
-  `gpt-6.1-terra` when the route configures that model.
+  `gpt-6.1-terra` at `max`: on the chatgpt-codex route with the default
+  model as a second `models:` entry, on any route whose model is
+  `gpt-6.1-terra` as that model.
   `allow_shared_model` set with no `routes:`/`models:` configured at all
   is refused too, naming the key, rather than silently doing nothing.
 - A model's `extra_json` may not set `id`, `api`, or `baseUrl` at all, nor

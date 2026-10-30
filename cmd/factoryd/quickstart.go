@@ -1759,7 +1759,7 @@ func (b *quickstartConfigBuild) applyHarness(route string) error {
 	if err := b.askHarness(route); err != nil {
 		return err
 	}
-	roles := []*sessionconfig.RoleConfig{b.cfg.Roles.Planning, b.cfg.Roles.Execution, b.cfg.Roles.Review}
+	roles := []*sessionconfig.RoleConfig{b.cfg.Roles.Planning, b.cfg.Roles.Execution, b.cfg.Roles.Review, b.cfg.Roles.Challenger}
 	if b.opts.Harness == harness.Pifork || b.opts.Harness == harness.Codex {
 		for _, rc := range roles {
 			if rc != nil {
@@ -1814,8 +1814,9 @@ func quickstartSingleModelRoles(model, modelID string) *sessionconfig.Roles {
 		Execution: &sessionconfig.RoleConfig{Model: model},
 		Review:    &sessionconfig.RoleConfig{Model: model, AllowSharedModel: true},
 	}
-	// The challenger role (SC-022) is written only when its model is the one
-	// the route configures; otherwise it stays unset and no challenger runs.
+	// The challenger role (SC-022) is written here only when its model is the
+	// one the route configures; chatgpt-codex adds it as a second model for
+	// its default model. Otherwise it stays unset and no challenger runs.
 	if modelID == challengerModelID {
 		roles.Challenger = &sessionconfig.RoleConfig{Model: model, AllowSharedModel: true}
 	}
@@ -2532,8 +2533,25 @@ func (b *quickstartConfigBuild) chatGPTCodexRoute() (*sessionconfig.Config, []st
 		b.cfg.Roles.Review.Thinking = "max"
 	}
 	b.cfg.Models = map[string]sessionconfig.Model{modelKey: model}
+	if modelID == chatGPTCodexDefaultModelID {
+		// The challenger runs on a second model of the same route, the
+		// pairing the live walks measured: gpt-6.1-terra at max, while
+		// gpt-6-luna plans, builds and reviews.
+		b.cfg.Models[challengerModelID] = sessionconfig.Model{
+			ID:               challengerModelID,
+			Routes:           []string{routeName},
+			ContextWindow:    chatGPTCodexChallengerContextWindow,
+			Reasoning:        true,
+			ThinkingLevelMap: map[string]string{"xhigh": "xhigh", "max": "max"},
+		}
+		b.cfg.Roles.Challenger = &sessionconfig.RoleConfig{Model: challengerModelID, Thinking: "max"}
+	}
 	return nil, nil, nil
 }
+
+// chatGPTCodexChallengerContextWindow is the context window the ChatGPT plan
+// lists for challengerModelID.
+const chatGPTCodexChallengerContextWindow = 500000
 
 // userLogin runs `gh api user --jq .login`, resolving the
 // currently authenticated GitHub user -- a boundary method so tests can
