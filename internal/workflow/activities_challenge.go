@@ -263,7 +263,7 @@ func (a *Activities) runChallengerJob(ctx context.Context, in ChallengerJobInput
 	if err != nil {
 		return fail("the challenge files could not be held: %v", err)
 	}
-	cause, note := challengeHoldOutcome(result.ExitCode, len(files))
+	cause, note := challengeHoldOutcome(result.ExitCode, files)
 	if cause != "" {
 		return fail("%s", cause)
 	}
@@ -273,10 +273,17 @@ func (a *Activities) runChallengerJob(ctx context.Context, in ChallengerJobInput
 	return res
 }
 
-// challengeHoldOutcome is what the job's exit status and the number of files
-// held mean for the challenge: a cause (no verdict) when nothing was held, and
-// a note when files were held from a job that did not exit 0.
-func challengeHoldOutcome(exitCode, held int) (cause, note string) {
+// challengeHoldOutcome is what the job's exit status and the files it left
+// mean for the challenge: a cause (no verdict) when none was held (a file the
+// shape rules refused is a note, not a held file), and a note when files were
+// held from a job that did not exit 0.
+func challengeHoldOutcome(exitCode int, files []run.ChallengeFile) (cause, note string) {
+	held := 0
+	for _, f := range files {
+		if f.Refused == "" {
+			held++
+		}
+	}
 	switch {
 	case held == 0 && exitCode != 0:
 		return fmt.Sprintf("the challenger job ended with exit status %d and handed over no test", exitCode), ""

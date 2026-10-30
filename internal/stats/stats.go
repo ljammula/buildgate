@@ -64,8 +64,9 @@ func isPRReviewRound(r *run.Run) bool {
 var adviceRun = regexp.MustCompile(`-\d{3}-advice\d+$`)
 
 // restackRun matches a restack's replay run (<request>-<ticket>-restack<n>):
-// it replays the ticket's pushed commits onto a moved base and builds
-// nothing, so it decides nothing of its ticket's outcome either.
+// it replays the ticket's pushed commits onto a moved base and judges them
+// with every gate and review. An accepted one decides nothing of its ticket's
+// outcome; one that did not end accepted stays in the series as its last run.
 var restackRun = regexp.MustCompile(`-\d{3}-restack\d+$`)
 
 // Options narrows and shapes a report.
@@ -380,12 +381,12 @@ func metricsOf(list []series) Metrics {
 }
 
 // withoutAdviceRounds counts s's advice-round runs in m.AdviceRounds and
-// returns s without them or its restack runs: the ticket's outcome is its
-// other runs'.
+// returns s without them or its accepted restack runs: the ticket's outcome
+// is its other runs'.
 func (m *Metrics) withoutAdviceRounds(s series) series {
 	kept := make([]*run.Run, 0, len(s.runs))
 	for _, r := range s.runs {
-		if restackRun.MatchString(ticketName(r)) {
+		if restackRun.MatchString(ticketName(r)) && r.State == run.StateAccepted {
 			continue
 		}
 		if !adviceRun.MatchString(ticketName(r)) {
