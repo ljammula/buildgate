@@ -94,10 +94,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 	activities := opts.activities()
 	activities.Sandboxes, activities.MeterLedgerRoot = dp.sandbox.runtime(), meterLedgerRoot()
 	activities.InstallImages = dp.docker.installImages()
-	effectiveTimeout := opts.OverallTimeout
-	if effectiveTimeout == 0 {
-		effectiveTimeout = time.Duration(opts.TimeoutMinutes+5) * time.Minute
-	}
+	effectiveTimeout := opts.overallTimeout()
 	ownerWorker := temporalworker.New(temporalClient, ownerTaskQueue, workflow.BoundedWorkerOptions(workerStopTimeout))
 	ownerWorker.RegisterWorkflow(workflow.RepositoryOwnerWorkflow)
 	if err := ownerWorker.Start(); err != nil {

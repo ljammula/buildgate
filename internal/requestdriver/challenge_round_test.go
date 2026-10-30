@@ -99,7 +99,8 @@ func (f *adviceFixture) challengeRoundRun(t *testing.T, id, verdict string) *run
 // challenge starts one challenge round, given the failing files' paths,
 // criteria and failing tests as its record and the held files read-only, never
 // a file's content; an accepted round with a green challenge is pushed and
-// becomes the ticket's run, with one comment.
+// becomes the ticket's run, with one comment, and the ticket keeps the first
+// build's pull request and branch: the round opens none of its own.
 func TestRedChallengeStartsOneRoundWhichWhenGreenIsPushed(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
 	var roundArgs [][]string
@@ -136,14 +137,28 @@ func TestRedChallengeStartsOneRoundWhichWhenGreenIsPushed(t *testing.T) {
 			t.Errorf("a held file's content reached the round's input:\n%s", body)
 		}
 	}
+	f.assertChallengeRoundIsTheTicketsRun(t)
+	if len(f.comments) != 1 || !strings.Contains(f.comments[0], "internal/sum/sum_edge_test.go") {
+		t.Errorf("comments = %v, want one naming the committed file", f.comments)
+	}
+}
+
+// assertChallengeRoundIsTheTicketsRun checks the request reached pr_review
+// with one pushed challenge round as the ticket's run, on the first build's
+// pull request and branch.
+func (f *adviceFixture) assertChallengeRoundIsTheTicketsRun(t *testing.T) {
+	t.Helper()
 	loaded := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
+	if loaded.State != request.StatePRReview {
+		t.Fatalf("State = %q, want %q (%s)", loaded.State, request.StatePRReview, loaded.Error)
+	}
 	tk := loaded.Tickets[0]
 	roundRunID := requestdrivertest.TicketRunID(f.id, 1) + "-challenge1"
 	if len(tk.Rounds) != 1 || tk.Rounds[0].Kind != request.ChallengeRoundKind || !tk.Rounds[0].Pushed || tk.RunID != roundRunID || !tk.ChallengeRounded || !tk.Challenged || tk.Advice != nil {
 		t.Fatalf("ticket = %+v, want one pushed challenge round that is the ticket's run", tk)
 	}
-	if len(f.comments) != 1 || !strings.Contains(f.comments[0], "internal/sum/sum_edge_test.go") {
-		t.Errorf("comments = %v, want one naming the committed file", f.comments)
+	if tk.PRURL != f.prURL || tk.Branch != f.branch() {
+		t.Errorf("ticket PR %q branch %q, want the first build's %q %q", tk.PRURL, tk.Branch, f.prURL, f.branch())
 	}
 }
 

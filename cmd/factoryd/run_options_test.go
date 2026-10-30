@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -75,5 +76,28 @@ func TestRunDirOfCheckpointDirIsTheRunsOwnDirectory(t *testing.T) {
 	opts := runOptions{DataDir: filepath.Join("some", "data"), ID: "ticket-20261008-1"}
 	if got, want := runDirOfCheckpointDir(opts.checkpointDir()), run.Dir(opts.DataDir, opts.ID); got != want {
 		t.Errorf("runDirOfCheckpointDir = %q, want %q", got, want)
+	}
+}
+
+// TestRunThatMayChallengeGetsTheChallengePhasesTime: a run's deadline is
+// -timeout-minutes plus five minutes, and a run that may challenge (a first
+// build with -challenge, or a challenge round given held files) has the
+// challenge phase's own time on top, so a build that used its whole budget is
+// not halted by the phase that follows review. An explicit -timeout stands.
+func TestRunThatMayChallengeGetsTheChallengePhasesTime(t *testing.T) {
+	base := 50 * time.Minute
+	for _, tc := range []struct {
+		name string
+		opts runOptions
+		want time.Duration
+	}{
+		{"no challenge", runOptions{TimeoutMinutes: 45}, base},
+		{"first build with -challenge", runOptions{TimeoutMinutes: 45, Challenge: true}, base + workflow.ChallengePhaseAllowance},
+		{"challenge round", runOptions{TimeoutMinutes: 45, ChallengeHeld: []run.ChallengeFile{{Path: "a_test.go"}}}, base + workflow.ChallengePhaseAllowance},
+		{"explicit -timeout", runOptions{TimeoutMinutes: 45, Challenge: true, OverallTimeout: 20 * time.Minute}, 20 * time.Minute},
+	} {
+		if got := tc.opts.overallTimeout(); got != tc.want {
+			t.Errorf("%s: overallTimeout() = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

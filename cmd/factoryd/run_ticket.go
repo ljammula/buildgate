@@ -329,7 +329,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.codeReviewPolicy = flags.String("code-review-policy", codereview.DefaultPolicy, "AI code review after the other checks pass: off, advisory (findings recorded, never blocks) or required (a review that gives no verdict quarantines the run). Unset uses the session config's value")
 	f.maxRounds = flags.Int("max-rounds", requestdriver.DefaultMaxRounds, "most build rounds the coding agent gets")
 	f.timeoutMinutes = flags.Int("timeout-minutes", 45, "minutes the coding agent may run in one build round")
-	f.timeout = flags.Duration("timeout", 0, "time limit for the whole run; 0 means -timeout-minutes plus 5 minutes")
+	f.timeout = flags.Duration("timeout", 0, "time limit for the whole run; 0 means -timeout-minutes plus 5 minutes, plus the challenge's own time when the run may challenge")
 	f.verifyCommand = flags.String("verify-command", "make verify", "command that decides pass or fail, run in the workspace")
 	f.fastCheckCommand = flags.String("fast-check-command", "", "cheap check (format, lint, compile) run in the workspace before -verify-command each round; empty skips it")
 	f.verifyMaxAttempts = flags.Int("verify-max-attempts", 2, "launches verification gets in total after an infrastructure failure; also the limit for a review, full-suite or gate step whose sandbox never starts")
