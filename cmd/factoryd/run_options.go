@@ -66,7 +66,7 @@ type runOptions struct {
 	TimeoutMinutes      int
 	BuildAppMaxAttempts int
 	VerifyMaxAttempts   int
-	// OverallTimeout is -timeout; zero means TimeoutMinutes plus five minutes.
+	// OverallTimeout is -timeout; zero means overallTimeout's default.
 	OverallTimeout time.Duration
 
 	SandboxImage         string
@@ -134,6 +134,20 @@ func (o runOptions) checkpointDir() string {
 // checkpointDir() this is, for a caller that was handed only that.
 func runDirOfCheckpointDir(checkpointDir string) string {
 	return run.Dir(filepath.Dir(filepath.Dir(checkpointDir)), filepath.Base(checkpointDir))
+}
+
+// overallTimeout is the whole run's deadline: -timeout when set, else
+// TimeoutMinutes plus five minutes, plus the challenge phase's own time
+// (workflow.ChallengePhaseAllowance) for a run that may challenge.
+func (o runOptions) overallTimeout() time.Duration {
+	if o.OverallTimeout != 0 {
+		return o.OverallTimeout
+	}
+	timeout := time.Duration(o.TimeoutMinutes+5) * time.Minute
+	if o.Challenge || len(o.ChallengeHeld) > 0 {
+		timeout += workflow.ChallengePhaseAllowance
+	}
+	return timeout
 }
 
 // activities is the Activities value this process's own worker registers for

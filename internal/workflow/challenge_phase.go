@@ -31,12 +31,25 @@ const challengeBroken = "broken"
 // maxChallengeFailureLines caps the failing tests a red challenge file records.
 const maxChallengeFailureLines = 20
 
+// challengeJobActivityLimit is the challenger job Activity's start-to-close:
+// the job and its hold.
+const challengeJobActivityLimit = challengeJobLimit + 20*time.Minute
+
+// ChallengePhaseAllowance is the time a run that may challenge (a first build
+// with -challenge, or one given held files) adds to its overall deadline: the
+// challenger job and its hold, and every held-run launch the phase can make
+// (runHeldChallenge: at most one launch unit per held file, the files under
+// the verify command sharing one, and a red unit launched once more). The
+// phase runs after review, so a build that used the whole of
+// -timeout-minutes still has the time its challenge phase is bounded by.
+const ChallengePhaseAllowance = challengeJobActivityLimit + 2*maxChallengeFiles*reproductionActivityLimit
+
 // challengeContext is ctx with the challenge Activities' options: the
 // build/verify options with one attempt and a start-to-close that covers the
 // job and its hold.
 func challengeContext(buildVerifyCtx temporalworkflow.Context) temporalworkflow.Context {
 	options := temporalworkflow.GetActivityOptions(buildVerifyCtx)
-	options.StartToCloseTimeout = challengeJobLimit + 20*time.Minute
+	options.StartToCloseTimeout = challengeJobActivityLimit
 	return temporalworkflow.WithActivityOptions(buildVerifyCtx, options)
 }
 

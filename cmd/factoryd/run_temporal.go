@@ -468,10 +468,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 	activities := opts.activities()
 	activities.Sandboxes, activities.MeterLedgerRoot = dp.sandbox.runtime(), meterLedgerRoot()
 	activities.InstallImages = dp.docker.installImages()
-	effectiveTimeout := opts.OverallTimeout
-	if effectiveTimeout == 0 {
-		effectiveTimeout = time.Duration(opts.TimeoutMinutes+5) * time.Minute
-	}
+	effectiveTimeout := opts.overallTimeout()
 	// activityCtx is the worker's Activity context. awaitRunWorkflow cancels
 	// it once a signalled run's workflow is terminated, so the in-flight build
 	// Activity stops at once (its sandbox launcher kills the container on

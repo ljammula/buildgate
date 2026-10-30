@@ -104,9 +104,11 @@ func adviceRoundApplies(ticket *request.Ticket, current *run.Run, cfg WorkerConf
 }
 
 // acceptAfterAdvice accepts accepted as the ticket's outcome and advances the
-// request (acceptTicketRun), after the advice rounds that apply. The pull
-// request and branch recorded are accepted's: the rounds build on that
-// branch and open nothing.
+// request (acceptTicketRun), after the challenge and advice rounds that
+// apply. The pull request and branch recorded are accepted's: the rounds
+// build on that branch and open nothing, so a pushed round's run, which has
+// no pull request of its own, is the head the next round builds on and never
+// the run the ticket's pull request is read from.
 func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, accepted *run.Run, cfg WorkerConfig, now time.Time) error {
 	noteChallenge(ticket, accepted)
 	if (cfg.Settings.ReviewAdviceRounds > 0 || challengeRoundApplies(ticket, accepted, cfg)) && accepted.PullRequestURL != "" {
@@ -114,16 +116,17 @@ func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.
 		// it before the first, as acceptTicketRun would.
 		ticket.Branch, ticket.PRURL = accepted.Branch, accepted.PullRequestURL
 	}
+	head := accepted
 	if challengeRoundApplies(ticket, accepted, cfg) {
 		pushed, stop, err := runChallengeRound(dp, ctx, dataDir, r, ticket, accepted, cfg, now)
 		if stop {
 			return err
 		}
 		if pushed != nil {
-			accepted, now = pushed, time.Now()
+			head, now = pushed, time.Now()
 		}
 	}
-	if _, stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
+	if _, stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, head, cfg, now); stop {
 		return err
 	}
 	return acceptTicketRun(dataDir, r, ticket, accepted, cfg.OpenPullRequest, time.Now())

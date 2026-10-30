@@ -19,7 +19,7 @@
 26 cmd/factoryd/quickstart.go quickstartBuildConfig
 45 cmd/factoryd/reclaim.go reconcileIsolationMarkersWith
 29 cmd/factoryd/reclaim.go reconcileReclaimedRun
-30 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
+29 cmd/factoryd/run_repository_owner.go runViaRepositoryOwner
 26 cmd/factoryd/run_ticket.go (*ticketRun).createRunRecord
 28 cmd/factoryd/run_ticket.go (*ticketRun).prepareSandbox
 26 cmd/factoryd/run_ticket.go (*ticketRun).snapshotSpec
