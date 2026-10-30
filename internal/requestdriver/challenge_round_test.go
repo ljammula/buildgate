@@ -348,8 +348,8 @@ func TestAdviceOnlyRoundWithNoFewerHighFindingsIsPushedAndEndsTheRounds(t *testi
 	}
 }
 
-// A push that failed once sent ends a round whose head had a red held test as
-// no verdict with a note: a challenge never halts (SC-022).
+// A push that failed once sent halts the request even when the round was
+// given red held tests: the commit may be on the remote (SC-022).
 func TestRoundGivenRedTestsWhosePushFailsHalts(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
 	f.dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return errors.New("remote hung up") }

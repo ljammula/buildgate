@@ -56,6 +56,10 @@ build -> verify -> repository gates -> evidence -> tests_red_on_base -> size
   the review's outcome.
 - The change sits behind its own `GetVersion` marker in `RunWorkflow`; a
   history recorded before it replays the serial order.
+- A run's own worker runs at most two Activities at once
+  (`workflow.RunWorkerOptions`), and only these two use it; a task queue
+  shared by several runs keeps one. A ticket build can so hold two sandboxes,
+  which `factoryd doctor`'s memory row counts when `roles.challenger` is set.
 
 ## One loop: the rounds after the pull request opens
 
