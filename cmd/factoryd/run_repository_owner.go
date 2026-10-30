@@ -110,7 +110,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 	}
 	defer ownerWorker.Stop()
 
-	runWorker := temporalworker.New(temporalClient, runTaskQueue, workflow.BoundedWorkerOptions(workerStopTimeout))
+	runWorker := temporalworker.New(temporalClient, runTaskQueue, workflow.RunWorkerOptions(workerStopTimeout))
 	runWorker.RegisterWorkflow(workflow.RunWorkflow)
 	runWorker.RegisterActivity(activities)
 	if err := runWorker.Start(); err != nil {

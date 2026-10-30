@@ -31,6 +31,10 @@ var adviceFindings = []run.CodeReviewFinding{
 // A later round's review, still with a high finding.
 var stillHigh = []run.CodeReviewFinding{{Severity: "high", Summary: "nested drafts still leak a proxy"}}
 
+// twoHigh is a review with two high findings, so that a round whose review
+// still has one made progress and may be followed by another.
+var twoHigh = append([]run.CodeReviewFinding{{Severity: "high", Summary: "an earlier second high concern"}}, adviceFindings...)
+
 // adviceFixture is a request in building whose ticket builds are accepted
 // with a pull request and the review findings given, plus the advice round's
 // stand-in runner and the pull request's push, branch and comment seams.
@@ -500,7 +504,7 @@ func TestAdviceRoundsCount(t *testing.T) {
 		{"the count reached: stops", 1, stillHigh, true, 1, "-advice1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newAdviceFixture(t, adviceFindings)
+			f := newAdviceFixture(t, twoHigh)
 			f.cfg.Settings.ReviewAdviceRounds = tc.count
 			f.roundFindings[1] = tc.round1
 			var args [][]string
@@ -663,7 +667,7 @@ func TestAdviceRoundInterruptedIsSettledNotRelaunched(t *testing.T) {
 // TestAdviceRoundInterruptedInRoundTwo: a restart mid-round 2 relaunches
 // neither round: round 1 stays as recorded, round 2 is settled from its run.
 func TestAdviceRoundInterruptedInRoundTwo(t *testing.T) {
-	f := newAdviceFixture(t, adviceFindings)
+	f := newAdviceFixture(t, twoHigh)
 	f.cfg.Settings.ReviewAdviceRounds = 2
 	f.roundFindings[1] = stillHigh
 	calls := f.stopMidRound(t, 2, true)

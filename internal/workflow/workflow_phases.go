@@ -67,16 +67,8 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 			return err
 		}
 	}
-	if version == temporalworkflow.DefaultVersion || passed && !overSizeCap(*input, result.ChangeSize) {
-		reviews, err = runReviewSteps(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
-		if err != nil {
-			return err
-		}
-	} else {
-		result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
-	}
-
-	if err := runChallenge(ctx, ids, buildVerifyCtx, *input, current, result, reviews, passed && version == 1 && !overSizeCap(*input, result.ChangeSize), worktreePath, branch); err != nil {
+	reviews, err = reviewAndChallenge(ctx, ids, buildVerifyCtx, *input, current, result, gates, version, passed, worktreePath, branch)
+	if err != nil {
 		return err
 	}
 

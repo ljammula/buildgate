@@ -29,7 +29,7 @@ func TestEveryTemporalWorkerBoundsTheHeartbeatThrottle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := regexp.MustCompile(`temporalworker\.New\([^,]+,[^,]+, (workflow\.BoundedWorkerOptions\(|jobsWorkerOptions\(|lightWorkerOptions\(|workerOptions\)|workflow\.BoundedWorkerOptions\(\s*$)`)
+	allowed := regexp.MustCompile(`temporalworker\.New\([^,]+,[^,]+, (workflow\.BoundedWorkerOptions\(|workflow\.RunWorkerOptions\(|jobsWorkerOptions\(|lightWorkerOptions\(|workerOptions\)|workflow\.BoundedWorkerOptions\(\s*$)`)
 	found := 0
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {

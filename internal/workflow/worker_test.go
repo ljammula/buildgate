@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+func TestRunWorkerOptionsLetTheReviewAndTheChallengerRunTogether(t *testing.T) {
+	options := RunWorkerOptions(time.Second)
+	if options.MaxConcurrentActivityExecutionSize != 2 || options.WorkerStopTimeout != time.Second || options.MaxHeartbeatThrottleInterval != HeartbeatThrottle {
+		t.Fatalf("RunWorkerOptions = %+v, want two Activities at once and the bounded options otherwise", options)
+	}
+}
+
 func TestBoundedWorkerOptionsUsesSmallConcurrencyCaps(t *testing.T) {
 	const stopTimeout = 17 * time.Second
 	options := BoundedWorkerOptions(stopTimeout)

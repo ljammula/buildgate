@@ -65,13 +65,15 @@ func parallelMemoryFix(settings sessionconfig.Settings) string {
 }
 
 // doctorCheckParallelMemory warns (advisory) when max_parallel_jobs (the
-// number of activities that run at once, model jobs included) times
-// sandbox_memory exceeds Docker's total memory: the kernel then OOM-kills a
-// container if they all grow to their limits. One job at a time passes
-// without asking Docker.
+// number of activities that run at once, model jobs included) times the
+// sandboxes one job can hold (two with roles.challenger: a ticket build's
+// review and challenger run at once) times sandbox_memory exceeds Docker's
+// total memory: the kernel then OOM-kills a container if they all grow to
+// their limits. One sandbox at a time passes without asking Docker.
 func doctorCheckParallelMemory(ctx context.Context, dockerBinary string, settings sessionconfig.Settings, to sizingTimeouts) doctorCheck {
 	name := fmt.Sprintf("memory limits: max_parallel_jobs %d × sandbox_memory %s within Docker's memory", settings.MaxParallelJobs, settings.SandboxMemory)
-	if settings.MaxParallelJobs <= 1 {
+	sandboxes := settings.MaxParallelJobs * sandboxesPerJob(settings)
+	if sandboxes <= 1 {
 		return doctorCheck{Name: name}
 	}
 	each, problem := sandboxMemoryBytes(settings.SandboxMemory)
@@ -86,12 +88,22 @@ func doctorCheckParallelMemory(ctx context.Context, dockerBinary string, setting
 	if err != nil {
 		return doctorCheck{Name: name, Err: fmt.Errorf("parse Docker MemTotal %q: %w", strings.TrimSpace(string(out)), err), Advisory: true}
 	}
-	if need := each * int64(settings.MaxParallelJobs); need > total {
+	if need := each * int64(sandboxes); need > total {
 		return doctorCheck{Name: name, Advisory: true,
-			Err: fmt.Errorf("limits add up to %s (%d × %s), Docker has %s -- limits, not measured use: builds can still fit, but if they all grew to their limits the kernel would OOM-kill one", formatGiB(need), settings.MaxParallelJobs, formatGiB(each), formatGiB(total)),
+			Err: fmt.Errorf("limits add up to %s (%d × %s), Docker has %s -- limits, not measured use: builds can still fit, but if they all grew to their limits the kernel would OOM-kill one", formatGiB(need), sandboxes, formatGiB(each), formatGiB(total)),
 			Fix: parallelMemoryFix(settings)}
 	}
 	return doctorCheck{Name: name}
+}
+
+// sandboxesPerJob is how many sandboxes one job can hold at once: two when
+// roles.challenger is set (a ticket build's code review and challenger run
+// together), one otherwise.
+func sandboxesPerJob(settings sessionconfig.Settings) int {
+	if settings.Roles != nil && settings.Roles.Challenger != nil {
+		return 2
+	}
+	return 1
 }
 
 // sandboxMemoryBytes parses sandbox_memory the way the launch reads it: an

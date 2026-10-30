@@ -192,8 +192,9 @@ type TicketAdvice struct {
 	Of    string `json:"of"`
 	RunID string `json:"run_id,omitempty"`
 	Since string `json:"since"`
-	// Challenge marks the ticket's challenge round (ChallengeRoundKind): the
-	// same in-flight marker, settled by the same pass.
+	// Challenge marks a challenge round of a record written before the
+	// challenge round was one of the advice rounds (ChallengeRoundKind): the
+	// same in-flight marker, settled by the same pass; no longer written.
 	Challenge bool `json:"challenge,omitempty"`
 }
 

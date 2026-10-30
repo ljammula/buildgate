@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
@@ -44,27 +45,80 @@ func runChallengePhase(t *testing.T, input RunWorkflowInput, job ChallengerJobRe
 // the error the commit Activity fails with.
 func runChallengePhaseCommitting(t *testing.T, input RunWorkflowInput, job ChallengerJobResult, launch func(ReproductionRunInput) ReproductionRunResult, version temporalworkflow.Version, commitErr error) challengeRun {
 	t.Helper()
+	return runChallengePhaseWith(t, input, job, launch, version, commitErr, &challengeFixture{})
+}
+
+// challengeFixture varies runChallengePhaseWith: the review's exit code (zero
+// is a verdict), a serial history (the parallel marker at DefaultVersion), a
+// failing gate, a measured size, and hooks entered by the review and the job.
+type challengeFixture struct {
+	noVerdict bool
+	serial    bool
+	gateFails bool
+	size      *run.ChangeSize
+	onReview  func()
+	onJob     func()
+	order     *[]string
+	orderMu   sync.Mutex
+}
+
+func (f *challengeFixture) record(name string) {
+	if f.order == nil {
+		return
+	}
+	f.orderMu.Lock()
+	*f.order = append(*f.order, name)
+	f.orderMu.Unlock()
+}
+
+func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJobResult, launch func(ReproductionRunInput) ReproductionRunResult, version temporalworkflow.Version, commitErr error, fx *challengeFixture) challengeRun {
+	t.Helper()
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
 		},
 		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: 0}}, nil
+			exit := 0
+			if fx.gateFails {
+				exit = 1
+			}
+			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: exit}}, nil
 		},
 		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
 		},
 	)
 	env.OnGetVersion(challengeChange, temporalworkflow.DefaultVersion, 1).Return(version)
+	if fx.serial {
+		env.OnGetVersion(parallelChallengeChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
+	if fx.size != nil {
+		env.RegisterActivityWithOptions(func(context.Context, MeasureChangeSizeInput) (*run.ChangeSize, error) { return fx.size, nil },
+			activity.RegisterOptions{Name: MeasureChangeSizeActivityName})
+	}
 	env.RegisterActivityWithOptions(func(context.Context, ReviewStepInput) (VerifyActivityResult, error) {
-		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "combined_review.py"}, ExitCode: reviewstep.CombinedExitBase}}, nil
+		fx.record("review-start")
+		if fx.onReview != nil {
+			fx.onReview()
+		}
+		fx.record("review-end")
+		exit := reviewstep.CombinedExitBase
+		if fx.noVerdict {
+			exit = 1
+		}
+		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "combined_review.py"}, ExitCode: exit}}, nil
 	}, activity.RegisterOptions{Name: RunReviewStepActivityName})
 	var out challengeRun
 	var mu sync.Mutex
 	env.RegisterActivityWithOptions(func(context.Context, ChallengerJobInput) (ChallengerJobResult, error) {
+		fx.record("job-start")
+		if fx.onJob != nil {
+			fx.onJob()
+		}
 		mu.Lock()
 		out.jobs++
 		mu.Unlock()
+		fx.record("job-end")
 		return job, nil
 	}, activity.RegisterOptions{Name: RunChallengerJobActivityName})
 	env.RegisterActivityWithOptions(func(ctx context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
@@ -292,5 +346,71 @@ func TestChallengeBrokenFilesGetANoteAndAnUnlaunchedGroupIsNotRed(t *testing.T) 
 	p = runChallengePhase(t, challengeInput(), group, unstaged, 1)
 	if p.err != nil || p.result.Challenge.Verdict == run.ChallengeRed || len(p.launches) != 1 {
 		t.Errorf("err %v, challenge %+v, launches %v; want no red and no second launch", p.err, p.result.Challenge, p.launches)
+	}
+}
+
+func edgeJob() ChallengerJobResult {
+	return ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
+}
+
+// The challenger job runs with the review on the same commit: each activity
+// waits for the other to have started, which the serial order could not meet.
+func TestChallengerJobOverlapsTheReview(t *testing.T) {
+	reviewIn, jobIn := make(chan struct{}), make(chan struct{})
+	var once1, once2 sync.Once
+	wait := func(c chan struct{}) {
+		select {
+		case <-c:
+		case <-time.After(30 * time.Second):
+			t.Error("the other activity never started: the two do not overlap")
+		}
+	}
+	fx := challengeFixture{
+		onReview: func() { once1.Do(func() { close(reviewIn) }); wait(jobIn) },
+		onJob:    func() { once2.Do(func() { close(jobIn) }); wait(reviewIn) },
+	}
+	p := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, &fx)
+	if p.err != nil || p.jobs != 1 || len(p.commits) != 1 || p.result.ResultSHA != "c0ffee" || p.result.Challenge == nil || p.result.Challenge.Verdict != run.ChallengeGreen {
+		t.Fatalf("err %v, jobs %d, commits %v, sha %q, challenge %+v; want a green challenge committed after both", p.err, p.jobs, p.commits, p.result.ResultSHA, p.result.Challenge)
+	}
+}
+
+// A history recorded before parallelChallengeChange runs the review, then the
+// challenge phase.
+func TestHistoryRecordedBeforeTheParallelChallengeReplaysSerially(t *testing.T) {
+	var order []string
+	p := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, &challengeFixture{serial: true, order: &order})
+	if p.err != nil || strings.Join(order, ",") != "review-start,review-end,job-start,job-end" || len(p.commits) != 1 {
+		t.Fatalf("err %v, order %v, commits %v; want the review, then the job, then a commit", p.err, order, p.commits)
+	}
+}
+
+// With no review verdict the challenge still runs and is recorded, and
+// nothing is committed.
+func TestChallengeRunsWithoutAReviewVerdictAndCommitsNothing(t *testing.T) {
+	p := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, &challengeFixture{noVerdict: true})
+	c := p.result.Challenge
+	if p.err != nil || p.jobs != 1 || c == nil || c.Verdict != run.ChallengeGreen || len(p.commits) != 0 || c.CommittedSHA != "" || p.result.ResultSHA == "c0ffee" {
+		t.Fatalf("err %v, jobs %d, challenge %+v, commits %v; want a green record, no commit", p.err, p.jobs, c, p.commits)
+	}
+	serial := runChallengePhaseWith(t, challengeInput(), edgeJob(), passAll, 1, nil, &challengeFixture{noVerdict: true, serial: true})
+	if serial.jobs != 0 || serial.result.Challenge != nil {
+		t.Errorf("serial: jobs %d, challenge %+v; want none without a review verdict", serial.jobs, serial.result.Challenge)
+	}
+}
+
+// Failed gates or a change over the size cap start no challenger job.
+func TestNoChallengerJobWhenGatesFailedOrOverTheSizeCap(t *testing.T) {
+	for name, fx := range map[string]*challengeFixture{
+		"gates failed":   {gateFails: true},
+		"over the cap":   {size: &run.ChangeSize{SourceLines: 1 << 20, SourceFiles: 2}},
+		"over the files": {size: &run.ChangeSize{SourceLines: 1, SourceFiles: 1 << 10}},
+	} {
+		input := challengeInput()
+		input.ReleaseMaxChangedLines, input.ReleaseMaxFilesChanged = 1000, 25
+		p := runChallengePhaseWith(t, input, edgeJob(), passAll, 1, nil, fx)
+		if p.err != nil || p.jobs != 0 || len(p.launches) != 0 || len(p.commits) != 0 || p.result.Challenge != nil {
+			t.Errorf("%s: err %v, jobs %d, launches %v, challenge %+v; want no challenge", name, p.err, p.jobs, p.launches, p.result.Challenge)
+		}
 	}
 }

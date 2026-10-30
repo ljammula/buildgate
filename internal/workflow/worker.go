@@ -16,6 +16,13 @@ const (
 	// owner and child Workflow tasks to make progress while Activities are
 	// bounded independently.
 	DefaultMaxConcurrentWorkflowTaskExecutionSize = 4
+	// RunMaxConcurrentActivityExecutionSize is the cap of a worker whose task
+	// queue serves one run only (RunWorkerOptions): two, which only the code
+	// review and the challenger job use at once (reviewWithChallenge). They
+	// share no worktree: the challenger works on a scratch worktree of the
+	// result commit, and its files are committed after both have finished.
+	// Every other Activity of RunWorkflow starts alone.
+	RunMaxConcurrentActivityExecutionSize = 2
 )
 
 // BoundedWorkerOptions centralizes the Temporal worker concurrency guard so
@@ -29,4 +36,14 @@ func BoundedWorkerOptions(stopTimeout time.Duration) temporalworker.Options {
 		MaxConcurrentActivityExecutionSize:     DefaultMaxConcurrentActivityExecutionSize,
 		MaxConcurrentWorkflowTaskExecutionSize: DefaultMaxConcurrentWorkflowTaskExecutionSize,
 	}
+}
+
+// RunWorkerOptions are BoundedWorkerOptions for a worker whose task queue
+// serves one run's RunWorkflow and nothing else, so the review and the
+// challenger can run at once (RunMaxConcurrentActivityExecutionSize). A
+// queue shared by several runs keeps BoundedWorkerOptions.
+func RunWorkerOptions(stopTimeout time.Duration) temporalworker.Options {
+	options := BoundedWorkerOptions(stopTimeout)
+	options.MaxConcurrentActivityExecutionSize = RunMaxConcurrentActivityExecutionSize
+	return options
 }

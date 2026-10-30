@@ -97,6 +97,16 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a challenger doubles each job", func(t *testing.T) {
+		s := sessionconfig.DefaultSettings()
+		s.MaxParallelJobs, s.SandboxMemory = 2, "4g"
+		s.Roles = &sessionconfig.Roles{Challenger: &sessionconfig.RoleConfig{Model: "m"}}
+		docker, _ := sizingFake{memTotal: "12884901888"}.install(t)
+		checkSizingRow(t, doctorCheckParallelMemory(context.Background(), docker, s, quickTimeouts), "limits add up to 16.0 GiB (4 × 4.0 GiB), Docker has 12.0 GiB")
+		s.MaxParallelJobs = 1
+		docker, _ = sizingFake{memTotal: "4294967296"}.install(t)
+		checkSizingRow(t, doctorCheckParallelMemory(context.Background(), docker, s, quickTimeouts), "limits add up to 8.0 GiB (2 × 4.0 GiB)")
+	})
 	t.Run("docker failure", func(t *testing.T) {
 		s := sessionconfig.DefaultSettings()
 		s.MaxParallelJobs, s.SandboxMemory = 4, "4g"

@@ -475,7 +475,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 	// ctx.Done) instead of at its next heartbeat.
 	activityCtx, cancelActivities := context.WithCancel(context.Background())
 	defer cancelActivities()
-	workerOptions := workflow.BoundedWorkerOptions(workerStopTimeout)
+	workerOptions := workflow.RunWorkerOptions(workerStopTimeout)
 	workerOptions.BackgroundActivityContext = activityCtx
 	w := temporalworker.New(temporalClient, taskQueue, workerOptions)
 	w.RegisterWorkflow(workflow.RunWorkflow)

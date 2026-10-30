@@ -242,6 +242,16 @@ func Advice(r *run.Run) Document {
 	return doc
 }
 
+// Review is the one record a round's build is given about r, an accepted run
+// with open items: its failing held challenge files (Challenge) and its
+// high-severity findings (Advice), each section only when it has entries.
+// Built from the run record alone; never saved as a handoff.
+func Review(r *run.Run) Document {
+	doc := Advice(r)
+	doc.ChallengeFiles = Challenge(r).ChallengeFiles
+	return doc
+}
+
 // ChallengeFile is one failing challenge file as the challenge round's build
 // is told it. Every string is cleaned.
 type ChallengeFile struct {
@@ -308,7 +318,13 @@ func (f ChallengeFile) line() string {
 
 // adviceIntro opens the advice section: what the findings are and what the
 // build is asked to do with them.
-const adviceIntro = "That attempt passed every check and was accepted. Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks. Check each one against the code. Fix each one that is real, with a test that fails without the fix; leave the code as it is for each one that is not. Every check, and a fresh review, runs again on what this build commits.\n\n"
+const adviceIntro = adviceLead + adviceBody
+
+// adviceLead opens the advice section on its own; after a challenge section,
+// which already says it, the section starts at adviceBody.
+const adviceLead = "That attempt passed every check and was accepted. "
+
+const adviceBody = " passed every check and was accepted. Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks. Check each one against the code. Fix each one that is real, with a test that fails without the fix; leave the code as it is for each one that is not. Every check, and a fresh review, runs again on what this build commits.\n\n"
 
 // line is the finding's one list line, the reviewer's words quoted.
 func (f AdviceFinding) line() string {
@@ -603,7 +619,11 @@ func (d Document) Markdown() string {
 	}
 	if len(d.AdviceFindings) > 0 {
 		b.WriteString("## A reviewer's concerns about the accepted change\n\n")
-		b.WriteString(adviceIntro)
+		if len(d.ChallengeFiles) > 0 {
+			b.WriteString(adviceBody)
+		} else {
+			b.WriteString(adviceIntro)
+		}
 		for _, f := range d.AdviceFindings {
 			b.WriteString(f.line())
 		}
