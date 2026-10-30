@@ -20,7 +20,7 @@ func TestPlanningTakesHandedOverTicketsWithoutThePlanningJob(t *testing.T) {
 	ticket := requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)
 	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": ticket})
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -47,7 +47,7 @@ func TestPlanningTakesHandedOverTicketsWithoutThePlanningJob(t *testing.T) {
 func TestPlanningHaltsOnAHandedOverPlanThatFailsValidation(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": requestdrivertest.ValidBrownfieldTicket("make something-else", 1, 2)})
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -78,7 +78,7 @@ func TestPlanningStopsBeforeTakingImportedTicketsWhenSpecCriteriaChanged(t *test
 		t.Fatal(err)
 	}
 
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -115,7 +115,7 @@ func TestCriteriaChangeHaltRejectToPlanRunsPlanningJob(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	halted, err := request.Load(dataDir, id)
@@ -129,7 +129,7 @@ func TestCriteriaChangeHaltRejectToPlanRunsPlanningJob(t *testing.T) {
 		t.Fatalf("factoryd reject -to plan equivalent: %v", err)
 	}
 	runner, gotVerify := requestdrivertest.StubPlanTicketsRunner([]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)}}, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests after send-back: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -143,7 +143,7 @@ func TestCriteriaChangeHaltRejectToPlanRunsPlanningJob(t *testing.T) {
 
 func drivePlanHandoverPass(t *testing.T, dp requestdriver.Deps, dataDir string, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner) {
 	t.Helper()
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, specRunner, planRunner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, specRunner, planRunner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -184,7 +184,7 @@ func TestRevisedImportedPlanIsNotReimportedAfterASpecSendBack(t *testing.T) {
 	if err != nil || planReview.State != request.StatePlanReview || !planReview.PlanImported || !planReview.PlanImportEnded || planReview.PlanAsHandedOver() {
 		t.Fatalf("after revised plan: state = %q, PlanImported = %v, PlanImportEnded = %v, PlanAsHandedOver = %v, err = %v; want plan_review with import ended", planReview.State, planReview.PlanImported, planReview.PlanImportEnded, planReview.PlanAsHandedOver(), err)
 	}
-	if _, err := request.Reject(dataDir, id, "operator", "the revised plan still needs work", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "operator", "the revised plan still needs work", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan review: %v", err)
 	}
 	invalidRunner, _ := requestdrivertest.StubPlanTicketsRunner(
@@ -230,11 +230,11 @@ func TestPlanningRunsThePlanningJobAfterAPlanRejection(t *testing.T) {
 	ticket := requestdrivertest.ValidBrownfieldTicket(requestdrivertest.HandoverVerify, 1, 2)
 	dataDir, id := requestdrivertest.HandedOverPlanFixture(t, map[string]string{"001.spec.md": ticket})
 	drivePlanHandoverPass(t, dp, dataDir, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t))
-	if _, err := request.Reject(dataDir, id, "op", "name the migration file", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "op", "name the migration file", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan review: %v", err)
 	}
 	runner, gotVerify := requestdrivertest.StubPlanTicketsRunner([]requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: ticket}}, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	loaded, err := request.Load(dataDir, id)

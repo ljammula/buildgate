@@ -90,18 +90,10 @@ func validateMaskTarget(target string) error {
 
 // validateWorkspaceMask checks one mask: its source is an absolute path a
 // mount argument can carry to an existing regular file (or directory when Dir)
-// that is not a symlink, and its target is a safe relative path that does not
-// overlap the reference-oracle mount (oraclePath, "" when none), compared by
-// fold.
-func validateWorkspaceMask(m WorkspaceMask, oraclePath string) error {
+// that is not a symlink, and its target is a safe relative path.
+func validateWorkspaceMask(m WorkspaceMask) error {
 	if err := validateMaskTarget(m.Target); err != nil {
 		return err
-	}
-	if oraclePath != "" {
-		oracle := foldName(filepath.ToSlash(filepath.Clean(oraclePath)))
-		if t := foldName(m.Target); pathWithin(oracle, t) || pathWithin(t, oracle) {
-			return fmt.Errorf("workspace mask target %q overlaps the reference-oracle mount %q", m.Target, oraclePath)
-		}
 	}
 	if !filepath.IsAbs(m.Source) {
 		return fmt.Errorf("workspace mask source %q must be absolute", m.Source)
@@ -125,9 +117,9 @@ func validateWorkspaceMask(m WorkspaceMask, oraclePath string) error {
 }
 
 // validateWorkspaceMasks checks every mask and that no two overlap, by fold.
-func validateWorkspaceMasks(masks []WorkspaceMask, oraclePath string) error {
+func validateWorkspaceMasks(masks []WorkspaceMask) error {
 	for i, m := range masks {
-		if err := validateWorkspaceMask(m, oraclePath); err != nil {
+		if err := validateWorkspaceMask(m); err != nil {
 			return err
 		}
 		for _, other := range masks[:i] {

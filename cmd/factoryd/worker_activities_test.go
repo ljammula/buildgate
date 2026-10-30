@@ -25,8 +25,6 @@ func TestRequestStepForEveryState(t *testing.T) {
 		{request.StateSubmitted, workflow.RequestStep{Advance: workflow.RequestAdvanceLight}},
 		{request.StateSpecDrafting, workflow.RequestStep{Advance: workflow.RequestAdvanceJobs}},
 		{request.StateSpecReview, workflow.RequestStep{Wait: time.Hour, Remind: true}},
-		{request.StateOracleDrafting, workflow.RequestStep{Advance: workflow.RequestAdvanceJobs}},
-		{request.StateOracleReview, workflow.RequestStep{Wait: time.Hour, Remind: true}},
 		{request.StatePlanning, workflow.RequestStep{Advance: workflow.RequestAdvanceJobs}},
 		{request.StatePlanReview, workflow.RequestStep{Wait: time.Hour, Remind: true}},
 		{request.StateBuilding, workflow.RequestStep{Advance: workflow.RequestAdvanceJobs}},

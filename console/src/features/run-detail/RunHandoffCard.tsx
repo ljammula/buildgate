@@ -3,7 +3,7 @@ import { ApiError } from "@/domain/apiError";
 import { HANDOFF_NOT_JUDGED, handoffBinLabel, handoffNextSentence } from "@/domain/handoff";
 import type { Run } from "@/domain/run";
 import { RunHandoffNotes } from "@/features/run-detail/RunHandoffNotes";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { ErrorCallout } from "@/ui/ErrorDisplay";
 import { Spinner } from "@/ui/Feedback";

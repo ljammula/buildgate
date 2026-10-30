@@ -89,14 +89,14 @@
     {
       "index": 1,
       "spec_path": "/data/requests/req-plan-review/tickets/001.spec.md",
-      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\nEstimated-Changed-Lines: 220\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nEstimated-Changed-Lines: 220\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "full_path": "/data/requests/req-plan-review/tickets/001.spec.md",
       "estimated_changed_lines": 220
     },
     {
       "index": 2,
       "spec_path": "/data/requests/req-plan-review/tickets/002.spec.md",
-      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\nEstimated-Changed-Lines: 620\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "content": "Verify-Command: true\nAllowed-Files: a.go\nEstimated-Changed-Lines: 620\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "full_path": "/data/requests/req-plan-review/tickets/002.spec.md",
       "estimated_changed_lines": 620
     }

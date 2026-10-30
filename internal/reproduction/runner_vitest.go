@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -32,52 +33,65 @@ func (vitestJSON) Applies(p string, root RootFacts) bool {
 // vitestIDSep joins a test's describe titles and its own title into its ID.
 const vitestIDSep = " > "
 
-// TestIDs reads the file's describe/suite and it/test calls whose first
+// Tests reads the file's describe/suite and it/test calls whose first
 // argument is a plain string literal, outside comments and strings. A test
 // inside describes is "outer > inner > title". A call through .each or .for
-// has no static title and is not an ID.
-func (vitestJSON) TestIDs(_ string, content []byte) ([]string, error) {
+// has no static title and is not an ID. A test spans from the line of its call
+// to the line of its closing parenthesis.
+func (vitestJSON) Tests(_ string, content []byte) ([]TestSpan, error) {
 	s := jsScanner{src: string(content)}
-	var ids []string
 	for {
 		call, ok := s.nextCall()
 		if !ok {
 			break
 		}
-		if call.suite {
-			s.suites = append(s.suites, jsSuite{title: call.title, depth: call.depth})
-			continue
+		open := jsOpen{title: call.title, suite: call.suite, depth: call.depth, span: -1}
+		if !call.suite {
+			s.spans = append(s.spans, TestSpan{ID: s.qualified(call.title), Start: s.line(call.at), End: s.line(len(s.src))})
+			open.span = len(s.spans) - 1
 		}
-		ids = append(ids, s.qualified(call.title))
+		s.open = append(s.open, open)
 	}
-	return uniqueIDs(ids), nil
+	return uniqueSpans(s.spans), nil
 }
 
-type jsSuite struct {
+// jsOpen is a describe or test call whose parenthesis is still open: a
+// suite's title joins the IDs inside it; a test's span (an index in
+// jsScanner.spans, -1 for a suite) ends where its call closes.
+type jsOpen struct {
 	title string
-	depth int // paren depth inside the describe call
+	suite bool
+	depth int // paren depth inside the call
+	span  int
 }
 
 type jsCall struct {
 	title string
 	suite bool
 	depth int
+	at    int // offset of the callee
 }
 
 // jsScanner walks JavaScript source, skipping comments and string bodies
-// and tracking parenthesis depth, so a describe's body ends where its call
+// and tracking parenthesis depth, so a call's body ends where its call
 // closes.
 type jsScanner struct {
-	src    string
-	i      int
-	depth  int
-	suites []jsSuite
+	src   string
+	i     int
+	depth int
+	open  []jsOpen
+	spans []TestSpan
 }
 
+// line is the 1-based line of the offset.
+func (s *jsScanner) line(off int) int { return 1 + strings.Count(s.src[:min(off, len(s.src))], "\n") }
+
 func (s *jsScanner) qualified(title string) string {
-	parts := make([]string, 0, len(s.suites)+1)
-	for _, su := range s.suites {
-		parts = append(parts, su.title)
+	var parts []string
+	for _, o := range s.open {
+		if o.suite {
+			parts = append(parts, o.title)
+		}
 	}
 	return strings.Join(append(parts, title), vitestIDSep)
 }
@@ -105,9 +119,13 @@ func (s *jsScanner) nextCall() (jsCall, bool) {
 }
 
 func (s *jsScanner) closeParen() {
+	at := s.i
 	s.i++
-	for len(s.suites) > 0 && s.suites[len(s.suites)-1].depth == s.depth {
-		s.suites = s.suites[:len(s.suites)-1]
+	for len(s.open) > 0 && s.open[len(s.open)-1].depth == s.depth {
+		if top := s.open[len(s.open)-1]; top.span >= 0 {
+			s.spans[top.span].End = s.line(at)
+		}
+		s.open = s.open[:len(s.open)-1]
 	}
 	if s.depth > 0 {
 		s.depth--
@@ -197,7 +215,7 @@ func (s *jsScanner) identifier() (jsCall, bool) {
 	if title == "" {
 		return jsCall{}, false
 	}
-	return jsCall{title: title, suite: suite, depth: s.depth}, true
+	return jsCall{title: title, suite: suite, depth: s.depth, at: start}, true
 }
 
 // jsCallee: describe/suite (a suite) or it/test (a test), with modifiers
@@ -225,9 +243,30 @@ func skipSpace(s string, i int) int {
 }
 
 func (vitestJSON) Command(inv Invocation) Command {
-	script := fmt.Sprintf("npx --no-install vitest run %s --reporter=json --outputFile=%s --testTimeout=%d",
-		shellQuote(inv.Path), shellQuote(inv.ReportPath), PerTestTimeout.Milliseconds())
+	script := fmt.Sprintf("npx --no-install vitest run %s --reporter=json --outputFile=%s --testTimeout=%d%s",
+		shellQuote(inv.Path), shellQuote(inv.ReportPath), PerTestTimeout.Milliseconds(), vitestNamePattern(inv.TestIDs))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
+}
+
+// vitestNamePattern is the -t option that selects the invocation's tests by
+// full name: vitest matches the regexp against the describe titles and the
+// test's title joined by spaces, so each ID's parts are quoted, joined by a
+// space and anchored at the end (and at a word start, since the file's own
+// name may precede the first title). A test that matches only because its name
+// ends the same way runs too and is not judged. No IDs, no option.
+func vitestNamePattern(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	alts := make([]string, len(ids))
+	for i, id := range ids {
+		parts := strings.Split(id, vitestIDSep)
+		for j, p := range parts {
+			parts[j] = regexp.QuoteMeta(p)
+		}
+		alts[i] = strings.Join(parts, " ")
+	}
+	return " -t " + shellQuote("(?:^|\\s)(?:"+strings.Join(alts, "|")+")$")
 }
 
 // vitestReport is the part of vitest's JSON reporter output read here.

@@ -49,7 +49,6 @@ Something is broken.
 VALID_TICKET = """\
 Verify-Command: make verify
 Allowed-Files: internal/foo/foo.go, internal/foo/foo_test.go
-Required-Changed-Files: internal/foo/foo.go
 
 ## Goal
 
@@ -161,7 +160,8 @@ class BuildPromptTests(unittest.TestCase):
 			)
 		self.assertIn("Tests-Required: no -- <reason>", prompt)
 		self.assertIn("tests_red_on_base gate", prompt)
-		self.assertIn("Required-Changed-Files", prompt)
+		self.assertIn("Never write a `Required-Changed-Files:` or `Required-Content:` header line", prompt)
+		self.assertIn("the factory ignores these retired headers", prompt)
 
 	def test_states_the_multi_file_criterion_rule(self):
 		# Live evidence (example-app habit-insights request, 2026-09-28): a criterion

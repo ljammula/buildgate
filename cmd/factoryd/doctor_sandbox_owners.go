@@ -40,9 +40,8 @@ type sandboxOwner struct {
 }
 
 // sandboxDataDirDepth is how far under sessionconfig.DataRoot doctor looks
-// for a data dir: DataRoot/data, DataRoot/<name>/data, the scratch data dirs
-// the live scripts keep one level further down, and the deepest of them,
-// scripts/bar.sh's DataRoot/bar/run.<id>/<fixture>/data. A data dir deeper
+// for a data dir: DataRoot/data, DataRoot/<name>/data, and the scratch data dirs
+// the live scripts keep further down, as deep as DataRoot/<a>/<b>/<c>/data. A data dir deeper
 // than this hides a live build's sandbox from doctor.
 const sandboxDataDirDepth = 4
 

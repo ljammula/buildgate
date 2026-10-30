@@ -100,7 +100,7 @@ func (f *gateBaseFixture) tryGate(check, checkpointDir string) (VerifyActivityRe
 	if in.CheckpointDir == "" {
 		in.CheckpointDir = f.t.TempDir()
 	}
-	val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: in, Check: check, Command: "sh .factory/x.sh"})
+	val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: in, Check: check, Command: "sh .factory/x.sh"})
 	if err != nil {
 		return VerifyActivityResult{}, err
 	}
@@ -195,25 +195,6 @@ func TestFailedGateThatPassesOnTheBaseCommitRecordsThatItPasses(t *testing.T) {
 		t.Fatalf("base check = %+v, want passes on %s", bc, f.base)
 	}
 	f.assertRunUntouched()
-}
-
-// The green path costs nothing: a passing gate launches once and records no
-// base check; neither does the reference oracle, whose gate is not rerun.
-func TestPassingGateAndReferenceOracleAreNotRerunOnTheBaseCommit(t *testing.T) {
-	t.Run("a passing gate", func(t *testing.T) {
-		f := newGateBaseFixture(t, 0, 9)
-		res := f.runGate("lint", "")
-		if res.BaseCheck != nil || len(f.launched) != 1 {
-			t.Errorf("base check = %+v after %d launch(es), want none after one", res.BaseCheck, len(f.launched))
-		}
-	})
-	t.Run("a failed reference oracle", func(t *testing.T) {
-		f := newGateBaseFixture(t, 1, 9)
-		res := f.runGate(policy.ReferenceOracleGateID, "")
-		if res.BaseCheck != nil || len(f.launched) != 1 {
-			t.Errorf("base check = %+v after %d launch(es), want none after one", res.BaseCheck, len(f.launched))
-		}
-	})
 }
 
 // Whatever stops the rerun from reaching an exit code leaves the gate the
@@ -352,7 +333,7 @@ func TestBaseRerunIsNotStartedWithTooLittleOfTheGatesTimeLimitLeft(t *testing.T)
 	f := newGateBaseFixture(t, 1, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), gateBaseCheckReserve+sandboxAttemptTeardownMargin-time.Second)
 	defer cancel()
-	bc := f.acts.checkGateOnBase(ctx, NamedGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "true"}, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil)
+	bc := f.acts.checkGateOnBase(ctx, RepoGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "true"}, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil)
 	if bc.Outcome != run.GateBaseNotChecked || !strings.Contains(bc.Reason, "time limit") || bc.BaseSHA != f.base {
 		t.Errorf("base check = %+v, want not_checked for lack of time", bc)
 	}
@@ -503,7 +484,7 @@ func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *test
 	env := suite.NewTestActivityEnvironment()
 	var heartbeats atomic.Int32
 	env.SetOnActivityHeartbeatListener(func(*activity.Info, converter.EncodedValues) { heartbeats.Add(1) })
-	env.RegisterActivityWithOptions(func(ctx context.Context, in NamedGateActivityInput) (*run.GateBaseCheck, error) {
+	env.RegisterActivityWithOptions(func(ctx context.Context, in RepoGateActivityInput) (*run.GateBaseCheck, error) {
 		ctx, cancel := context.WithTimeout(ctx, gateBaseCheckReserve+wait)
 		defer cancel()
 		return f.acts.checkGateOnBase(ctx, in, runner.Result{ExitCode: 1}, []string{"sh", "-c", "true"}, nil), nil
@@ -517,7 +498,7 @@ func TestBaseRerunWaitingOnTheGitMetadataLockHeartbeatsAndEndsNotChecked(t *test
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		val, err := env.ExecuteActivity("checkGateOnBase", NamedGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "true"})
+		val, err := env.ExecuteActivity("checkGateOnBase", RepoGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "true"})
 		var bc *run.GateBaseCheck
 		if err == nil {
 			err = val.Get(&bc)
@@ -601,5 +582,15 @@ func TestBaseRerunOfAResumedRunThatCarriesADiffBaseUsesIt(t *testing.T) {
 	res := f.runGate("lint", "")
 	if bc := res.BaseCheck; bc == nil || bc.Outcome != run.GateBasePasses || bc.BaseSHA != f.base {
 		t.Errorf("base check = %+v, want passes on the carried diff base %s", bc, f.base)
+	}
+}
+
+// The green path costs nothing: a passing gate launches once and records no
+// base check.
+func TestAPassingGateIsNotRerunOnTheBaseCommit(t *testing.T) {
+	f := newGateBaseFixture(t, 0, 9)
+	res := f.runGate("lint", "")
+	if res.BaseCheck != nil || len(f.launched) != 1 {
+		t.Errorf("base check = %+v after %d launch(es), want none after one", res.BaseCheck, len(f.launched))
 	}
 }

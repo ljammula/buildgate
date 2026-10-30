@@ -41,6 +41,16 @@ func (impl realForge) pushWithLease(ctx context.Context, dir, sha, branch, expec
 func (impl realForge) moveBranch(dir, branch, sha string) error {
 	return workspace.MoveBranch(dir, branch, sha)
 }
+func (impl realForge) changedPaths(dir, base, result string) ([]string, error) {
+	return runner.GitDiffNameOnly(dir, base, result)
+}
+func (impl realForge) carveChain(ctx context.Context, dir, base, result string, parts [][]string) error {
+	_, err := workspace.CarveChain(ctx, dir, base, result, parts)
+	return err
+}
+func (impl realForge) carveCommit(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error) {
+	return workspace.CarveCommit(ctx, dir, parent, result, paths, message)
+}
 func (impl realForge) restoreBranch(dir, branch, sha string) (bool, error) {
 	return workspace.RestoreBranch(dir, branch, sha)
 }

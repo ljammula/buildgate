@@ -7,28 +7,6 @@ import (
 	"fmt"
 )
 
-// OracleDraftInput is what the oracle-drafting job is handed. The job's
-// own contract is to write request-level oracle files under OracleDir and
-// report how the pass ended; the driver, not the job, moves the request's state.
-type OracleDraftInput struct {
-	DataDir string
-	Request *request.Request
-	Cfg     WorkerConfig
-	// OracleDir is <request dir>/oracle, where a drafter writes its files.
-	OracleDir string
-	// FeedbackPath is the file holding the operator's accumulated oracle_review
-	// rejection reasons, or "" when there are none. Deliberately a separate
-	// file from request.md: the drafter must never read the raw request text.
-	FeedbackPath string
-}
-
-// OracleDraftRunner is the injectable oracle-drafting job, the same
-// injection style as SpecDraftRunner/PlanTicketsRunner. A returned error (or
-// a job that overran its own timeout) becomes status "failed" and never halts
-// the request; an *OracleDraftJobFailure sends it to resume_review instead --
-// see AdvanceOracleDrafting.
-type OracleDraftRunner func(ctx context.Context, in OracleDraftInput) (request.OracleDraft, error)
-
 // DraftedTicket is one ticket runPlanTicketsJob read back from
 // plan_tickets.py's own output directory: Filename is its bare NNN.spec.md
 // name (used to write it under <request>/tickets/ verbatim, preserving

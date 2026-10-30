@@ -111,7 +111,7 @@ func snapshotMarkdownFiles(dir string) (map[string][]byte, error) {
 //     guessing a human's judgment call. That is success for intakeMain's
 //     own job, not failure: goal_pilot.py's step 2 (draft spec.md +
 //     spec/tickets/*.md via /spec-plan, inject the
-//     Verify-Command:/Allowed-Files:/Required-Changed-Files: ticketspec
+//     Verify-Command:/Allowed-Files: ticketspec
 //     keys, write an ARCHITECTURE.md structural stub) already completed
 //     and persisted to disk before that checkpoint ever runs.
 //     spec/contract.md does NOT exist yet at this point -- it's

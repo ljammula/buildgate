@@ -156,7 +156,6 @@ func RecordEdit(dataDir string, r *Request, by, relPath, after string, now time.
 // cut would start a section in the middle of a diff line.
 var feedbackSectionHeadings = strings.NewReplacer(
 	"## Spec rejected ", "## Spec (rejected) ",
-	"## Oracle rejected ", "## Oracle (rejected) ",
 	"## Plan rejected ", "## Plan (rejected) ",
 )
 

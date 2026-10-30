@@ -166,7 +166,7 @@ func TestEveryVerifyClassLaunchRunsSetupFirst(t *testing.T) {
 
 		for _, gate := range []string{"lint", "repo-licenses"} {
 			a, l = launchRecorder(t)
-			execActivity(t, a.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: base(), Check: gate, Command: "make " + gate})
+			execActivity(t, a.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: base(), Check: gate, Command: "make " + gate})
 			check("gate "+gate, *l, "make "+gate)
 		}
 
@@ -175,35 +175,7 @@ func TestEveryVerifyClassLaunchRunsSetupFirst(t *testing.T) {
 		bin.WorkspacePath = baselineRepo(t)
 		execActivity(t, a.RunBaselineVerifyActivity, bin)
 		check("baseline verify", *l, "make verify")
-
-		pa, pl, in := postSetupFixture(t, setup)
-		_ = pa
-		if _, err := execPostVerify(t, pa, in, 1); err != nil {
-			t.Fatal(err)
-		}
-		if len(*pl) != 2 {
-			t.Fatalf("post-oracle-commit reruns: %d launches, want 2", len(*pl))
-		}
-		check("post-oracle-commit verify", (*pl)[:1], "make verify")
-		check("post-oracle-commit full suite", (*pl)[1:], "make full")
-
-		_, dockerArgs, _ := canaryGateWithSetup(t, map[string]string{"oracle_test.go": canaryTestOracleSrc}, 0, 1, "", setup)
-		if has := strings.Contains(dockerArgs, "buildgate-setup") && strings.Contains(dockerArgs, "echo one"); has != (len(setup) > 0) {
-			t.Errorf("oracle canary with setup %v: docker args carry the setup form = %v:\n%s", setup, has, dockerArgs)
-		}
-		if n := strings.Count(dockerArgs, "buildgate-setup"); len(setup) > 0 && n < 2 {
-			t.Errorf("oracle canary: %d launches carry the setup form, want both the real run and the canary", n)
-		}
 	}
-}
-
-func postSetupFixture(t *testing.T, setup []string) (*Activities, *[][]string, RunWorkflowInput) {
-	t.Helper()
-	a, l := launchRecorder(t)
-	_, input, _ := postVerifyFixture(t, func(string) int { return 0 }, nil)
-	a.LogDir = input.LogDir
-	input.SetupCommands = setup
-	return a, l, input
 }
 
 func TestReviewLaunchRunsNoSetup(t *testing.T) {
@@ -295,8 +267,8 @@ func TestVerifyAttemptCarriesTheSetupDigestThroughTheSandboxRuntime(t *testing.T
 }
 
 func TestBuildActivityArgsWithoutSetupAddsNothing(t *testing.T) {
-	without := buildActivityArgs("/b.py", "/ws", "/s.md", 3, 45, "sha", "make verify", "", "", "", "pi")
-	with := buildActivityArgs("/b.py", "/ws", "/s.md", 3, 45, "sha", "make verify", "", "", "", "pi", "echo one", "echo two")
+	without := buildActivityArgs("/b.py", "/ws", "/s.md", 3, 45, "sha", "make verify", "", "", "pi")
+	with := buildActivityArgs("/b.py", "/ws", "/s.md", 3, 45, "sha", "make verify", "", "", "pi", "echo one", "echo two")
 	if strings.Contains(strings.Join(without, " "), "--setup-command") {
 		t.Errorf("args %q carry --setup-command", without)
 	}

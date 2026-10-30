@@ -16,12 +16,11 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
-// inboxStates are the request states that wait on the operator: the four
+// inboxStates are the request states that wait on the operator: the three
 // human gates, a lost step awaiting a resume decision, and the two states
 // only a human can clear.
 var inboxStates = map[request.State]bool{
 	request.StateSpecReview:   true,
-	request.StateOracleReview: true,
 	request.StatePlanReview:   true,
 	request.StatePRReview:     true,
 	request.StateResumeReview: true,
@@ -206,7 +205,7 @@ func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, n
 		e.Inspect = fmt.Sprintf("factoryd inspect -config %s %s", profile, r.ID)
 	}
 	switch r.State {
-	case request.StateSpecReview, request.StateOracleReview, request.StatePlanReview:
+	case request.StateSpecReview, request.StatePlanReview:
 		e.Approve = fmt.Sprintf("factoryd approve -config %s %s", profile, r.ID)
 		e.Reject = fmt.Sprintf("factoryd reject -config %s -reason \"...\" %s", profile, r.ID)
 	case request.StatePRReview:

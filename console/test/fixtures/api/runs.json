@@ -271,7 +271,7 @@
         "log_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
       },
       {
-        "check": "lint",
+        "check": "repo-lint",
         "command": [
           "go",
           "vet",
@@ -351,7 +351,26 @@
           "original_patch_id": "every-field original_patch_id",
           "replayed_patch_id": "every-field replayed_patch_id"
         }
-      ]
+      ],
+      "carve": {
+        "groups": [
+          [
+            "every-field groups"
+          ]
+        ],
+        "group": 3,
+        "notes": [
+          "every-field notes"
+        ]
+      }
+    },
+    "pr_order": {
+      "groups": [
+        [
+          "every-field groups"
+        ]
+      ],
+      "ticket_group": 3
     },
     "diff_base_sha": "every-field diff_base_sha",
     "instruction_base_sha": "every-field instruction_base_sha",
@@ -394,32 +413,6 @@
       "result_sha256": "every-field result_sha256",
       "error": "every-field error"
     },
-    "oracles": {
-      "authored": [
-        {
-          "path": "every-field path",
-          "sha256": "every-field sha256"
-        }
-      ],
-      "deleted": [
-        "every-field deleted"
-      ],
-      "base_index_paths": [
-        "every-field base_index_paths"
-      ],
-      "base_index_sha256": {
-        "every-field key": "every-field base_index_sha256"
-      },
-      "result_sha256": {
-        "every-field key": "every-field result_sha256"
-      },
-      "base_sha256": {
-        "every-field key": "every-field base_sha256"
-      }
-    },
-    "failed_after_oracle_commit": [
-      "every-field failed_after_oracle_commit"
-    ],
     "dependency_lockfiles_touched": [
       "every-field dependency_lockfiles_touched"
     ],
@@ -461,6 +454,22 @@
       "insertions": 3,
       "deletions": 3
     },
+    "change_size": {
+      "source_lines": 3,
+      "source_files": 3,
+      "functions": 3,
+      "files": [
+        {
+          "path": "every-field path",
+          "insertions": 3,
+          "deletions": 3,
+          "functions": [
+            "every-field functions"
+          ]
+        }
+      ]
+    },
+    "pr_budget_lines": 3,
     "diff_available": true,
     "diff_truncated": true,
     "agent_evidence": {
@@ -574,7 +583,6 @@
           "docker_disk_free_after_delete": 3,
           "oom_killed": true
         },
-        "reference_oracle_sha256": "every-field reference_oracle_sha256",
         "role": "every-field role",
         "harness": "every-field harness",
         "thinking": "every-field thinking",
@@ -607,7 +615,6 @@
         "exit_code": 3,
         "duration_ms": 3,
         "log_sha256": "every-field log_sha256",
-        "reference_oracle_sha256": "every-field reference_oracle_sha256",
         "base_check": {
           "outcome": "every-field outcome",
           "base_sha": "every-field base_sha",
@@ -703,6 +710,12 @@
             }
           ]
         }
+      ],
+      "skipped_files": [
+        {
+          "path": "every-field path",
+          "reason": "every-field reason"
+        }
       ]
     },
     "notes": [
@@ -737,124 +750,61 @@
           "file": "every-field file",
           "line": 3,
           "summary": "every-field summary",
-          "failure_scenario": "every-field failure_scenario",
-          "spec_line": {
-            "number": 3,
-            "text": "every-field text"
-          },
-          "reproduction": {
-            "path": "every-field path",
-            "sha256": "every-field sha256",
-            "runner": "every-field runner",
-            "test_ids": [
-              "every-field test_ids"
-            ],
-            "refused": "every-field refused",
-            "runs": [
-              {
-                "pass": "every-field pass",
-                "commit": "every-field commit",
-                "outcome": "every-field outcome",
-                "tests": {
-                  "every-field key": "every-field tests"
-                },
-                "exit_code": 3,
-                "log_path": "every-field log_path",
-                "report_sha256": "every-field report_sha256",
-                "reproduction_sha256": "every-field reproduction_sha256",
-                "cap_exceeded": true
-              }
-            ],
-            "verdict": "every-field verdict",
-            "reason": "every-field reason",
-            "recheck": {
-              "run_id": "every-field run_id",
-              "finding": 3,
-              "path": "every-field path",
-              "refused": "every-field refused",
-              "sha256": "every-field sha256",
-              "host_path": "every-field host_path",
-              "spec_line": 3,
-              "test_ids": [
-                "every-field test_ids"
-              ],
-              "runner": "every-field runner",
-              "holds_literal": true
-            }
-          },
-          "disposition": "every-field disposition"
+          "failure_scenario": "every-field failure_scenario"
         }
       ]
     },
-    "review_reproduction_rechecks": [
-      {
-        "path": "every-field path",
-        "sha256": "every-field sha256",
-        "runner": "every-field runner",
-        "test_ids": [
-          "every-field test_ids"
-        ],
-        "refused": "every-field refused",
-        "runs": [
-          {
-            "pass": "every-field pass",
-            "commit": "every-field commit",
-            "outcome": "every-field outcome",
-            "tests": {
-              "every-field key": "every-field tests"
-            },
-            "exit_code": 3,
-            "log_path": "every-field log_path",
-            "report_sha256": "every-field report_sha256",
-            "reproduction_sha256": "every-field reproduction_sha256",
-            "cap_exceeded": true
-          }
-        ],
-        "verdict": "every-field verdict",
-        "reason": "every-field reason",
-        "recheck": {
-          "run_id": "every-field run_id",
-          "finding": 3,
+    "challenge": {
+      "verdict": "every-field verdict",
+      "cause": "every-field cause",
+      "rerun": true,
+      "files": [
+        {
           "path": "every-field path",
-          "refused": "every-field refused",
           "sha256": "every-field sha256",
           "host_path": "every-field host_path",
-          "spec_line": 3,
+          "criterion": "every-field criterion",
+          "runner": "every-field runner",
           "test_ids": [
             "every-field test_ids"
           ],
-          "runner": "every-field runner",
-          "holds_literal": true
+          "refused": "every-field refused",
+          "not_run": "every-field not_run",
+          "verdict": "every-field verdict",
+          "failures": [
+            {
+              "test": "every-field test",
+              "assertion": "every-field assertion"
+            }
+          ]
         }
-      }
-    ],
-    "review_reproduction_rechecks_given": [
-      {
-        "run_id": "every-field run_id",
-        "finding": 3,
-        "path": "every-field path",
-        "refused": "every-field refused",
-        "sha256": "every-field sha256",
-        "host_path": "every-field host_path",
-        "spec_line": 3,
-        "test_ids": [
-          "every-field test_ids"
-        ],
-        "runner": "every-field runner",
-        "holds_literal": true
-      }
-    ],
-    "reference_oracle_dir": "every-field reference_oracle_dir",
-    "oracles_not_committed_by_request": true,
-    "oracle_covered_criteria": [
-      "every-field oracle_covered_criteria"
-    ],
-    "oracle_canary": {
-      "verdict": "every-field verdict",
-      "ecosystem": "every-field ecosystem",
-      "real_exit_code": 3,
-      "canary_exit_code": 3,
-      "message": "every-field message"
+      ],
+      "notes": [
+        "every-field notes"
+      ],
+      "committed_sha": "every-field committed_sha",
+      "launches": [
+        {
+          "pass": "every-field pass",
+          "commit": "every-field commit",
+          "outcome": "every-field outcome",
+          "tests": {
+            "every-field key": "every-field tests"
+          },
+          "exit_code": 3,
+          "log_path": "every-field log_path",
+          "report_sha256": "every-field report_sha256",
+          "reproduction_sha256": "every-field reproduction_sha256",
+          "cap_exceeded": true
+        }
+      ],
+      "snapshot_sha256": "every-field snapshot_sha256",
+      "masked_paths": [
+        "every-field masked_paths"
+      ],
+      "removed_paths": [
+        "every-field removed_paths"
+      ]
     },
     "baseline_verify": {
       "command": "every-field command",
@@ -944,7 +894,7 @@
         "every-field protected_paths"
       ],
       "max_files_changed": 3,
-      "max_insertions": 3,
+      "max_changed_lines": 3,
       "rollback_plan": "every-field rollback_plan",
       "allow_overrides": true,
       "allow_dependency_lockfile_changes": true,

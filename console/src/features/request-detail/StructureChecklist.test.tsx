@@ -37,20 +37,19 @@ test("a complete spec ticks every row and says the server checks again", () => {
 test("a ticket is checked against the ticket rules, header lines first", () => {
   render(<StructureChecklist kind="ticket" text={"## Goal\n\ng\n"} />);
 
-  expect(failing().slice(0, 4)).toEqual([
+  expect(failing().slice(0, 3)).toEqual([
     "Problem: Verify-Command: (missing)",
     "Problem: Allowed-Files: (missing)",
-    "Problem: Required-Changed-Files: (missing)",
     "Problem: ## Plan (missing, or out of order)",
   ]);
   expect(within(checklist()).getByRole("status")).toHaveTextContent(
-    "10 to fix. The server refuses a save without them.",
+    "9 to fix. The server refuses a save without them.",
   );
 });
 
 test("agent-written text in a note is shown as text", () => {
   const ticket =
-    "Verify-Command: true\nAllowed-Files: a\nRequired-Changed-Files: a\n## Goal\ng\n## Plan\n" +
+    "Verify-Command: true\nAllowed-Files: a\n## Goal\ng\n## Plan\n" +
     "### Files to touch\n- a\n### Steps\n1. s\n### Tests to add\n- t\n" +
     "### Acceptance criteria covered\n- <img src=x onerror=alert(1)>\n## Out of scope\nnone\n";
   render(<StructureChecklist kind="ticket" text={ticket} />);

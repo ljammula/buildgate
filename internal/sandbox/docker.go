@@ -79,26 +79,8 @@ type LaunchSpec struct {
 	WorkDir  string
 	InputDir string
 	Inputs   []InputMount
-	// ReferenceOracleDir, when non-empty, is a host directory bind-mounted
-	// read-only at ReferenceOracleMountPath (a path relative to
-	// workerContainerWorkDir, e.g. "verify") -- a nested mount inside the
-	// otherwise-writable workspace, the same technique already used a few
-	// lines below to keep .git unwritable by the worker. Exists because
-	// "keep the reference-oracle script outside the ticket's
-	// Allowed-Files" is a convention diff_scope enforces only on the
-	// FINAL committed diff, not a structural guarantee during the build
-	// itself -- the worker can read, tamper with, and then revert the
-	// oracle before ever committing, defeating that convention entirely.
-	// Found by GitHub Codex App review, PR #151: this closes the actual
-	// gap safety-contract.md SC-004/SC-012 require ("the job cannot
-	// modify its canonical acceptance oracle"). Both fields empty means
-	// no overlay is mounted -- the caller falls back to the
-	// Allowed-Files-only convention, weaker but still the same behavior
-	// this repo had before this field existed.
-	ReferenceOracleDir       string
-	ReferenceOracleMountPath string
 	// WorkspaceMasks are read-only overlays bind-mounted over paths below
-	// /workspace, after the workspace and reference-oracle binds (see
+	// /workspace, after the workspace bind (see
 	// SnapshotReviewInstructions). Empty mounts nothing.
 	WorkspaceMasks []WorkspaceMask
 	LogPath        string
@@ -252,34 +234,16 @@ type Result struct {
 	Resources Resources
 }
 
-// ReferenceOracleSourceContained reports whether dir is equal to or
-// beneath workDir -- the exact containment rule Validate enforces for
-// ReferenceOracleDir, exported so a caller that snapshots
-// ReferenceOracleDir before ever constructing a LaunchSpec (both
-// cmd/factoryd's runGate and RunNamedGateActivity do, to close the
-// TOCTOU gap PR #152 fixed) can apply it to the operator's ORIGINALLY
-// CONFIGURED source first. Validate alone cannot catch this once
-// snapshotting is in the picture: by the time a LaunchSpec exists,
-// ReferenceOracleDir already names the snapshot destination, which sits
-// under a run's own data directory and is therefore never inside
-// WorkDir regardless of where the real source lived -- found via review,
-// PR #153, after PR #152's own snapshot fix had (unintentionally)
-// already defeated the round-2 containment check this same review round
-// added.
-//
-// Both paths are canonicalized (made absolute, then symlink-resolved)
-// before the comparison -- a purely lexical filepath.Rel on the raw
-// inputs either errors (returning "not contained", the unsafe default)
-// when workDir is absolute and a relative -reference-oracle-dir is
-// compared against it, or misses a dir whose resolved location is inside
-// workDir only via a symlinked ancestor. Found via review, PR #153 round
-// 3 (Codex), after round 2's fix had closed the snapshot-substitution
-// TOCTOU above but left this purely lexical comparison itself bypassable
-// on the operator's ORIGINAL configured source. Any canonicalization
-// failure (the path doesn't exist, or Abs/EvalSymlinks otherwise errors)
-// fails closed as contained/unsafe -- this function guards a security
-// boundary, so an unresolvable path must never read as "proven safe".
-func ReferenceOracleSourceContained(workDir, dir string) bool {
+// PathContained reports whether dir is equal to or beneath workDir. Both
+// paths are canonicalized (made absolute, then symlink-resolved) before the
+// comparison: a purely lexical filepath.Rel on the raw inputs either errors
+// (returning "not contained", the unsafe default) when workDir is absolute
+// and dir is relative, or misses a dir whose resolved location is inside
+// workDir only via a symlinked ancestor. Any canonicalization failure (the
+// path doesn't exist, or Abs/EvalSymlinks otherwise errors) fails closed as
+// contained/unsafe -- this function guards a security boundary, so an
+// unresolvable path must never read as "proven safe".
+func PathContained(workDir, dir string) bool {
 	if workDir == "" || dir == "" {
 		return false
 	}
@@ -288,14 +252,13 @@ func ReferenceOracleSourceContained(workDir, dir string) bool {
 	//  1. Lexical: Abs'd but NOT symlink-resolved. Catches a dir that is
 	//     literally beneath workDir even when an intermediate path
 	//     component is itself a symlink that later resolves elsewhere --
-	//     e.g. an operator-configured "-reference-oracle-dir
-	//     $WORKDIR/link/oracle" where "link" is a symlink to some
+	//     e.g. a configured "$WORKDIR/link/dir" where "link" is a symlink to some
 	//     external directory. That symlink's own target string is a
 	//     small file living INSIDE the writable workspace, so the worker
 	//     can rewrite it during build (before this gate ever runs,
 	//     post-build) to point wherever it likes -- letting the worker
-	//     choose its own "external" oracle location despite the
-	//     operator's original configuration looking safely external
+	//     choose its own "external" location despite the
+	//     original configuration looking safely external
 	//     lexically. Checking the raw, unresolved path rejects this
 	//     shape outright, regardless of where the symlink happens to
 	//     currently point (found via review, GitHub Codex App, PR #154
@@ -334,7 +297,7 @@ func ReferenceOracleSourceContained(workDir, dir string) bool {
 
 // pathBeneathOrEqual reports whether candidate is root itself or lies
 // beneath it, via a plain filepath.Rel comparison -- both callers in
-// ReferenceOracleSourceContained already resolved root/candidate to the
+// PathContained already resolved root/candidate to the
 // form (lexical-absolute, or canonical) they want compared before
 // calling this.
 func pathBeneathOrEqual(root, candidate string) bool {
@@ -343,10 +306,10 @@ func pathBeneathOrEqual(root, candidate string) bool {
 }
 
 // canonicalPathForContainmentCheck resolves p to an absolute,
-// symlink-free path -- the form ReferenceOracleSourceContained's second
+// symlink-free path -- the form PathContained's second
 // (canonical) check needs to be immune to both a relative input and a
 // symlinked ancestor. p must already exist (both real call sites pass a
-// path that must exist to be usable as an oracle source or a workspace
+// path that must exist to be usable as a source directory or a workspace
 // root at all).
 func canonicalPathForContainmentCheck(p string) (string, error) {
 	abs, err := filepath.Abs(p)
@@ -367,7 +330,7 @@ func (s LaunchSpec) Validate() error {
 	for _, check := range []func() error{
 		s.validateImageCommandAndWorkDir,
 		s.validateGitCommonDir,
-		s.validateInputAndOracleDirs,
+		s.validateInputDir,
 		s.validateInputMounts,
 		s.validateIdentityAndLimits,
 		s.validateNetworks,
@@ -423,40 +386,10 @@ func (s LaunchSpec) validateGitCommonDir() error {
 	return nil
 }
 
-// validateInputAndOracleDirs checks the input directory and the reference-oracle mount.
-func (s LaunchSpec) validateInputAndOracleDirs() error {
+// validateInputDir checks the input directory.
+func (s LaunchSpec) validateInputDir() error {
 	if s.InputDir != "" && !filepath.IsAbs(s.InputDir) {
 		return errors.New("sandbox input directory must be absolute")
-	}
-	if s.ReferenceOracleDir != "" && !filepath.IsAbs(s.ReferenceOracleDir) {
-		return errors.New("sandbox reference-oracle directory must be absolute")
-	}
-	if (s.ReferenceOracleDir == "") != (s.ReferenceOracleMountPath == "") {
-		return errors.New("sandbox reference-oracle directory and mount path must be set together")
-	}
-	if s.ReferenceOracleMountPath != "" && filepath.IsAbs(s.ReferenceOracleMountPath) {
-		return errors.New("sandbox reference-oracle mount path must be relative to the workspace, not absolute")
-	}
-	// A source directory equal to or beneath WorkDir defeats the entire
-	// point of this mount (GitHub Codex App review, PR #151, round 2):
-	// the build worker has full read-write access to WorkDir, so an
-	// oracle source living inside it is exactly as tamperable as the
-	// plain Allowed-Files convention this field exists to structurally
-	// improve on -- the later read-only mount would just expose the
-	// worker's own already-tampered bytes back to the gate.
-	//
-	// This check alone is NOT sufficient once a caller snapshots
-	// ReferenceOracleDir before calling Validate (both cmd/factoryd's
-	// runGate and RunNamedGateActivity do, to close the separate TOCTOU
-	// gap PR #152 fixed): by then s.ReferenceOracleDir is the snapshot
-	// destination, which is always outside WorkDir by construction, so
-	// THIS check trivially passes regardless of whether the operator's
-	// ORIGINAL configured source was inside the workspace. See
-	// ReferenceOracleSourceContained's own doc comment -- a caller that
-	// snapshots must call it themselves against the original source
-	// first (found via review, PR #153).
-	if s.ReferenceOracleDir != "" && ReferenceOracleSourceContained(s.WorkDir, s.ReferenceOracleDir) {
-		return errors.New("sandbox reference-oracle directory must not be inside the workspace")
 	}
 	return nil
 }
@@ -729,12 +662,6 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 		args = append(args, "--volume", gitPath+":/workspace/.git:ro")
 		args = append(args, "--volume", s.gitCommonDir+":"+s.gitCommonDirTarget+":ro")
 	}
-	if s.ReferenceOracleDir != "" {
-		// Nested read-only mount inside the writable /workspace bind mount
-		// above, the same technique as the .git:ro mounts just above --
-		// see LaunchSpec.ReferenceOracleDir's own doc comment for why.
-		args = append(args, "--volume", s.ReferenceOracleDir+":"+workerContainerWorkDir+"/"+s.ReferenceOracleMountPath+":ro")
-	}
 	for _, mask := range s.WorkspaceMasks {
 		args = append(args, "--volume", mask.Source+":"+workerContainerWorkDir+"/"+mask.Target+":ro")
 	}
@@ -836,13 +763,7 @@ func (s LaunchSpec) withResolvedMounts() (LaunchSpec, error) {
 			return LaunchSpec{}, fmt.Errorf("resolve sandbox input mount: %w", err)
 		}
 	}
-	if s.ReferenceOracleDir != "" {
-		s.ReferenceOracleDir, err = filepath.EvalSymlinks(s.ReferenceOracleDir)
-		if err != nil {
-			return LaunchSpec{}, fmt.Errorf("resolve sandbox reference-oracle mount: %w", err)
-		}
-	}
-	if s.WorkspaceMasks, err = resolveWorkspaceMasks(s.WorkspaceMasks, s.ReferenceOracleMountPath); err != nil {
+	if s.WorkspaceMasks, err = resolveWorkspaceMasks(s.WorkspaceMasks); err != nil {
 		return LaunchSpec{}, err
 	}
 	for i := range s.Inputs {
@@ -923,17 +844,12 @@ func (s LaunchSpec) validateMountPaths() error {
 			return fmt.Errorf("sandbox inputs: %w", err)
 		}
 	}
-	if s.ReferenceOracleDir != "" {
-		if err := validateMountPath(s.ReferenceOracleDir, false); err != nil {
-			return fmt.Errorf("sandbox reference-oracle mount: %w", err)
-		}
-	}
 	for _, mount := range s.Inputs {
 		if err := validateMountPath(mount.Source, false); err != nil {
 			return fmt.Errorf("sandbox input %s: %w", mount.Target, err)
 		}
 	}
-	if err := validateWorkspaceMasks(s.WorkspaceMasks, s.ReferenceOracleMountPath); err != nil {
+	if err := validateWorkspaceMasks(s.WorkspaceMasks); err != nil {
 		return fmt.Errorf("sandbox workspace mask: %w: %w", ErrWorkspaceMask, err)
 	}
 	return nil
@@ -947,11 +863,11 @@ var ErrWorkspaceMask = errors.New("workspace mask rejected")
 // resolveWorkspaceMasks validates masks (so a symlink source is refused
 // before it is followed) and returns a copy whose sources are resolved
 // through the symlinks of their parent directories.
-func resolveWorkspaceMasks(masks []WorkspaceMask, oraclePath string) ([]WorkspaceMask, error) {
+func resolveWorkspaceMasks(masks []WorkspaceMask) ([]WorkspaceMask, error) {
 	if len(masks) == 0 {
 		return nil, nil
 	}
-	if err := validateWorkspaceMasks(masks, oraclePath); err != nil {
+	if err := validateWorkspaceMasks(masks); err != nil {
 		return nil, fmt.Errorf("sandbox workspace mask: %w: %w", ErrWorkspaceMask, err)
 	}
 	out := make([]WorkspaceMask, len(masks))
@@ -1250,7 +1166,7 @@ const workerJavaTmpDir = "java-tmp"
 // and gate containers must not compile or replay what the build phase
 // (or an earlier attempt) left there -- sharing it let verify print Go's
 // "(cached)" for the build phase's own test results, so the canonical
-// oracle neither re-ran them nor could rule out a planted cache entry
+// verify neither re-ran them nor could rule out a planted cache entry
 // (found in the 2026-09-29 todo-kafka-service demo). Modules come back
 // through the registry proxy, which only serves read-only upstream
 // content. Run removes a launch's directory when its container exits;
@@ -2129,52 +2045,41 @@ var HarnessSiblingModules = map[string]bool{
 	"fill_responses_output.mjs": true,
 
 	// Prompt templates, read at import by the script they are named after.
-	"build_corrective.agent.prompt.md":                   true,
-	"build_corrective.closing.prompt.md":                 true,
-	"build_corrective.history.prompt.md":                 true,
-	"build_corrective.log.prompt.md":                     true,
-	"build_corrective.stuck.prompt.md":                   true,
-	"build_corrective.excerpt.prompt.md":                 true,
-	"build_corrective.intro.prompt.md":                   true,
-	"build_corrective.oracle.prompt.md":                  true,
-	"build_corrective.reviewer.prompt.md":                true,
-	"build_corrective.verify.prompt.md":                  true,
-	"build_handoff_notes.prompt.md":                      true,
-	"build_passed_notes.prompt.md":                       true,
-	"build_round_checklist.prompt.md":                    true,
-	"code_review.advice_scope_rule.prompt.md":            true,
-	"code_review.advice_severity_rule.prompt.md":         true,
-	"code_review.command_outcome_rule.prompt.md":         true,
-	"code_review.reproduction_rule.prompt.md":            true,
-	"code_review.scope_rule.prompt.md":                   true,
-	"code_review.severity_rule.prompt.md":                true,
-	"combined_review.advice.prompt.md":                   true,
-	"combined_review.diff_inline.prompt.md":              true,
-	"combined_review.diff_self.prompt.md":                true,
-	"combined_review.prompt.md":                          true,
-	"draft_acceptance_oracles.criterion_index.prompt.md": true,
-	"draft_acceptance_oracles.feedback.prompt.md":        true,
-	"draft_acceptance_oracles.go.prompt.md":              true,
-	"draft_acceptance_oracles.prior_imports.prompt.md":   true,
-	"draft_acceptance_oracles.answers.prompt.md":         true,
-	"draft_acceptance_oracles.python.prompt.md":          true,
-	"draft_acceptance_oracles.qualification.prompt.md":   true,
-	"draft_feedback.prompt.md":                           true,
-	"draft_agents.prompt.md":                             true,
-	"draft_spec.design_guide.prompt.md":                  true,
-	"draft_spec.example_check.prompt.md":                 true,
-	"draft_spec.keep_structure.prompt.md":                true,
-	"draft_spec.previous_draft.prompt.md":                true,
-	"draft_spec.prompt.md":                               true,
-	"draft_spec.scoped_sections.prompt.md":               true,
-	"plan_tickets.budget.prompt.md":                      true,
-	"plan_tickets.design_guide.prompt.md":                true,
-	"plan_tickets.no_budget.prompt.md":                   true,
-	"plan_tickets.previous_draft.prompt.md":              true,
-	"plan_tickets.prompt.md":                             true,
-	"plan_tickets.scoped_sections.prompt.md":             true,
-	"read_back.prompt.md":                                true,
-	"review.instructions_diff.prompt.md":                 true,
+	"build_corrective.agent.prompt.md":           true,
+	"build_corrective.closing.prompt.md":         true,
+	"build_corrective.history.prompt.md":         true,
+	"build_corrective.log.prompt.md":             true,
+	"build_corrective.stuck.prompt.md":           true,
+	"build_corrective.excerpt.prompt.md":         true,
+	"build_corrective.intro.prompt.md":           true,
+	"build_corrective.reviewer.prompt.md":        true,
+	"build_corrective.verify.prompt.md":          true,
+	"build_handoff_notes.prompt.md":              true,
+	"build_passed_notes.prompt.md":               true,
+	"build_round_checklist.prompt.md":            true,
+	"code_review.advice_scope_rule.prompt.md":    true,
+	"code_review.advice_severity_rule.prompt.md": true,
+	"code_review.command_outcome_rule.prompt.md": true,
+	"combined_review.diff_inline.prompt.md":      true,
+	"combined_review.diff_self.prompt.md":        true,
+	"combined_review.prompt.md":                  true,
+	"challenge.prompt.md":                        true,
+	"draft_feedback.prompt.md":                   true,
+	"draft_agents.prompt.md":                     true,
+	"draft_spec.design_guide.prompt.md":          true,
+	"draft_spec.example_check.prompt.md":         true,
+	"draft_spec.keep_structure.prompt.md":        true,
+	"draft_spec.previous_draft.prompt.md":        true,
+	"draft_spec.prompt.md":                       true,
+	"draft_spec.scoped_sections.prompt.md":       true,
+	"plan_tickets.budget.prompt.md":              true,
+	"plan_tickets.design_guide.prompt.md":        true,
+	"plan_tickets.no_budget.prompt.md":           true,
+	"plan_tickets.previous_draft.prompt.md":      true,
+	"plan_tickets.prompt.md":                     true,
+	"plan_tickets.scoped_sections.prompt.md":     true,
+	"read_back.prompt.md":                        true,
+	"review.instructions_diff.prompt.md":         true,
 }
 
 // StageSiblingModules copies scriptDir's own HarnessSiblingModules

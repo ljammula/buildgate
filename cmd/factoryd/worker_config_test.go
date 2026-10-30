@@ -381,7 +381,7 @@ sandbox_tmpfs_size: 2g
 // TestRunWorkerDoctorPreflightForwardsReleasePolicy is the regression
 // test for the worker half of a doctor preflight bug:
 // runWorkerDoctorPreflight's own doctorInputs left
-// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan at
+// releaseMaxFilesChanged/releaseMaxChangedLines/releaseRollbackPlan at
 // their zero value regardless of cfg.settings' own
 // resolved release policy, so doctorCheckReleasePolicy (always appended by
 // doctorChecksFor) reported "denies every PR unconditionally" even when
@@ -393,7 +393,7 @@ func TestRunWorkerDoctorPreflightForwardsReleasePolicy(t *testing.T) {
 	path := isolateSessionConfig(t)
 	writeSessionConfig(t, path, `sandbox_image: from-config@sha256:aaaa
 release_max_files_changed: 10
-release_max_insertions: 500
+release_max_changed_lines: 500
 release_rollback_plan: "git revert"
 `)
 	got := stubWorkerDoctorChecks(dp, t, []doctorCheck{{Name: "relay upstream", Err: errors.New("404")}})
@@ -406,8 +406,8 @@ release_rollback_plan: "git revert"
 		t.Fatal("doctor seam was not invoked")
 	}
 	in := **got
-	if in.releaseMaxFilesChanged != 10 || in.releaseMaxInsertions != 500 || in.releaseRollbackPlan != "git revert" {
-		t.Errorf("release policy forwarded to the doctor seam = (%d, %d, %q), want (10, 500, \"git revert\") from the session config -- a zero-value release policy here makes doctorCheckReleasePolicy always warn regardless of what the config actually says", in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan)
+	if in.releaseMaxFilesChanged != 10 || in.releaseMaxChangedLines != 500 || in.releaseRollbackPlan != "git revert" {
+		t.Errorf("release policy forwarded to the doctor seam = (%d, %d, %q), want (10, 500, \"git revert\") from the session config -- a zero-value release policy here makes doctorCheckReleasePolicy always warn regardless of what the config actually says", in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan)
 	}
 }
 

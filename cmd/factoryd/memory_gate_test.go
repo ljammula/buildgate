@@ -49,7 +49,7 @@ func TestMemoryGateRefusals(t *testing.T) {
 func TestKillSwitchStopsMemoryVerbs(t *testing.T) {
 	data, root := t.TempDir(), t.TempDir()
 	now := func() string { return "2026-10-09T00:00:00Z" }
-	if err := release.Engage(data, "proj", "operator", "halt", now); err != nil {
+	if err := engageKillSwitch(data, "proj", "operator", "halt", now); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := memoryGate(newTestDeps(t), memorySettings(root), data, root, "proj")
@@ -59,4 +59,16 @@ func TestKillSwitchStopsMemoryVerbs(t *testing.T) {
 	if _, statErr := memory.Open(data, "other"); statErr != nil {
 		t.Fatal(statErr)
 	}
+}
+
+// engageKillSwitch and disengageKillSwitch apply one kill-switch transition
+// and drop the resulting record.
+func engageKillSwitch(dir, project, by, reason string, now func() string) error {
+	_, err := release.SetKillSwitch(dir, project, by, reason, true, now)
+	return err
+}
+
+func disengageKillSwitch(dir, project, by, reason string, now func() string) error {
+	_, err := release.SetKillSwitch(dir, project, by, reason, false, now)
+	return err
 }

@@ -1,8 +1,10 @@
 package workflow
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,7 +52,8 @@ func (f *reproFixture) holdChanged(commit string, files ...string) (TestsRedHold
 // The hold copies each changed test file a runner takes, as the result commit
 // has it, once and read-only, into the run's own directory and records its
 // hash; a file with no test function (a helper) is left out and nothing is
-// written for it.
+// written for it. Only the test the change added is judged; TestAdd, whose
+// lines the change did not touch, is not.
 func TestHoldChangedTestsCopiesTheResultCommitsFileReadOnly(t *testing.T) {
 	f, result := redFixture(t)
 	res, err := f.holdChanged(result, "p/add_test.go", "p/helpers_test.go")
@@ -62,7 +65,7 @@ func TestHoldChangedTestsCopiesTheResultCommitsFileReadOnly(t *testing.T) {
 	}
 	h := res.Held[0]
 	want := filepath.Join(run.TestsRedOnBaseDir(f.acts.LogDir), "0", "p", "add_test.go")
-	if h.Path != "p/add_test.go" || h.SHA256 != sha256Of([]byte(redNewTest)) || h.HostPath != want || h.Runner != "go-test-json" || strings.Join(h.TestIDs, ",") != "TestAdd,TestAddNegative" {
+	if h.Path != "p/add_test.go" || h.SHA256 != sha256Of([]byte(redNewTest)) || h.HostPath != want || h.Runner != "go-test-json" || strings.Join(h.TestIDs, ",") != "TestAddNegative" {
 		t.Errorf("held = %+v, want the result commit's file at %s", h, want)
 	}
 	if info, err := os.Stat(h.HostPath); err != nil || info.Mode().Perm() != 0o444 {
@@ -85,8 +88,20 @@ func TestHoldChangedTestsCopiesTheResultCommitsFileReadOnly(t *testing.T) {
 func TestHoldChangedTestsWithNoRunnableFileSaysWhy(t *testing.T) {
 	f, result := redFixture(t)
 	res, err := f.holdChanged(result, "p/helpers_test.go", "README_test.md", "p/absent_test.go")
-	if err != nil || len(res.Held) != 0 || res.Reason == "" {
-		t.Errorf("hold = %+v, %v; want nothing held and a reason", res, err)
+	if err != nil || len(res.Held) != 0 || res.Reason == "" || strings.Contains(res.Reason, "test runner") {
+		t.Errorf("hold = %+v, %v; want nothing held and a reason that is not the runner sentence", res, err)
+	}
+	got := map[string]string{}
+	for _, s := range res.Skipped {
+		got[s.Path] = s.Reason
+	}
+	want := map[string]string{
+		"p/helpers_test.go": "the runner reads no test ID in it",
+		"README_test.md":    "it is empty, binary or could not be read at the result commit",
+		"p/absent_test.go":  "it is empty, binary or could not be read at the result commit",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("skipped = %v, want each file with the reason observed: %v", got, want)
 	}
 }
 
@@ -106,7 +121,7 @@ func TestChangedTestFileIsMountedOverTheBasesOwnCopyOnBothCommits(t *testing.T) 
 		for _, m := range req.Mounts {
 			switch m.Target {
 			case "/workspace":
-				if err := os.WriteFile(filepath.Join(m.Source, reproductionReportName), []byte(`{"Action":"pass","Test":"TestAdd"}`+"\n"), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(m.Source, reproductionReportName), []byte(`{"Action":"pass","Test":"TestAddNegative"}`+"\n"), 0o644); err != nil {
 					t.Errorf("write the report: %v", err)
 				}
 			case "/workspace/p/add_test.go":
@@ -129,8 +144,8 @@ func TestChangedTestFileIsMountedOverTheBasesOwnCopyOnBothCommits(t *testing.T) 
 		if err := val.Get(&got); err != nil {
 			t.Fatal(err)
 		}
-		if got.Run.Pass != pass || got.Run.Commit != commit || got.Run.Tests["TestAdd"] != string(reproduction.KindPass) {
-			t.Errorf("%s run = %+v, want TestAdd passing on %s", pass, got.Run, commit)
+		if got.Run.Pass != pass || got.Run.Commit != commit || got.Run.Tests["TestAddNegative"] != string(reproduction.KindPass) {
+			t.Errorf("%s run = %+v, want TestAddNegative passing on %s", pass, got.Run, commit)
 		}
 		if len(got.Attempts) != 1 || got.Attempts[0].Kind != testsRedAttemptKind {
 			t.Errorf("%s attempts = %+v, want one tests_red_on_base attempt", pass, got.Attempts)
@@ -168,5 +183,49 @@ func TestHoldChangedTestsHoldsAddedFilesBeforeModifiedOnes(t *testing.T) {
 	}
 	if want := "p/z_test.go,p/a_test.go,p/b_test.go"; strings.Join(paths, ",") != want {
 		t.Errorf("held = %v, want %s: the added file first, then the modified ones sorted", paths, want)
+	}
+}
+
+// A test file the base already holds is judged by its changed tests however
+// large it is and however many tests it has; a change outside any test, and a
+// file past the cap on files, are recorded with their reasons.
+func TestHoldChangedTestsJudgesAnExistingLargeFileByItsChangedTests(t *testing.T) {
+	f := newReproFixture(t)
+	var base strings.Builder
+	base.WriteString("package p\n\nimport \"testing\"\n\n")
+	for i := 0; i < 3*reproduction.MaxTestIDs; i++ {
+		fmt.Fprintf(&base, "func TestN%02d(t *testing.T) {\n\t_ = %d\n}\n\n", i, i)
+	}
+	base.WriteString(strings.Repeat("// padding padding padding padding\n", reproduction.MaxContentBytes/20))
+	if base.Len() <= reproduction.MaxContentBytes {
+		t.Fatal("the fixture must exceed the new-file cap")
+	}
+	writeFile(t, filepath.Join(f.repo, "p", "big_test.go"), base.String())
+	writeFile(t, filepath.Join(f.repo, "p", "comment_test.go"), redOldTest)
+	f.commit = trustedCommit(t, f.repo)
+	writeFile(t, filepath.Join(f.repo, "p", "big_test.go"), strings.Replace(base.String(), "_ = 7\n", "_ = 70\n", 1))
+	writeFile(t, filepath.Join(f.repo, "p", "comment_test.go"), "// a comment\n"+redOldTest)
+	result := trustedCommit(t, f.repo)
+	res, err := f.holdChanged(result, "p/big_test.go", "p/comment_test.go")
+	if err != nil || len(res.Held) != 1 || res.Held[0].Path != "p/big_test.go" || strings.Join(res.Held[0].TestIDs, ",") != "TestN07" {
+		t.Fatalf("hold = %+v, %v; want only TestN07 of the large file", res, err)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Path != "p/comment_test.go" || !strings.Contains(res.Skipped[0].Reason, "outside any test") {
+		t.Errorf("skipped = %+v, want the comment-only file with its reason", res.Skipped)
+	}
+}
+
+func TestHoldChangedTestsNamesTheFilesPastTheCap(t *testing.T) {
+	f := newReproFixture(t)
+	var files []string
+	for i := 0; i <= reproduction.MaxReproductions; i++ {
+		p := fmt.Sprintf("p/n%d_test.go", i)
+		files = append(files, p)
+		writeFile(t, filepath.Join(f.repo, p), strings.Replace(redOldTest, "TestAdd", fmt.Sprintf("TestN%d", i), 1))
+	}
+	result := trustedCommit(t, f.repo)
+	res, err := f.holdChanged(result, files...)
+	if err != nil || len(res.Held) != reproduction.MaxReproductions || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0].Reason, "came after them") {
+		t.Errorf("hold = %+v, %v; want the file past the cap named with its reason", res, err)
 	}
 }

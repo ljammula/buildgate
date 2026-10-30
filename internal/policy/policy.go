@@ -20,10 +20,8 @@ var (
 	numberedSectionRE = regexp.MustCompile(`^\d+(?:\.\d+)*[.)]?\s+`)
 )
 
-// AllGateChecks names every gate EvaluateRun can run, in the order it runs
-// them: the four built-in checks below, followed by CommandGateIDs()'s own
-// registry order (policy.CommandGates) -- lint, security_audit,
-// unit_tests, integration_tests, reference_oracle today. A caller that
+// AllGateChecks names every gate EvaluateRun runs for every run, in the order
+// it runs them (a repository's own gates, RepoGateChecks, come after). A caller that
 // wants to require "the strong gates actually ran" rather than merely "no
 // recorded gate failed" (internal/release.MergePolicy.RequiredGates
 // exists for exactly that -- see its doc comment) uses this as its
@@ -36,12 +34,12 @@ var (
 // with the review off would then deny release outright for a gate it was
 // never meant to satisfy. Add it here only alongside a merge_policy.go
 // exemption for "declared but not run", as full_suite_verify has.
-var AllGateChecks = append([]string{
+var AllGateChecks = []string{
 	"canonical_verify",
 	"diff_scope",
 	TestsRedOnBaseCheck,
 	"full_suite_verify",
-}, CommandGateIDs()...)
+}
 
 // CanonicalVerify evaluates the canonical-verification evidence.
 func CanonicalVerify(cmd []string, buildExitCode, verifyExitCode int, durationMs int64, logSHA256 string) run.GateResult {
@@ -109,8 +107,7 @@ func (v ScopeVerdict) Refused() []string {
 	return out
 }
 
-// Judge sorts changed (already stripped of harness byproducts and factory
-// oracles by the caller) against s.
+// Judge sorts changed (already stripped of harness byproducts by the caller) against s.
 func (s Scope) Judge(changed []string) ScopeVerdict {
 	var v ScopeVerdict
 	if s.AllowedFiles != nil {
@@ -168,23 +165,6 @@ func containsPath(list []string, f string) bool {
 	return false
 }
 
-// UnchangedRequiredFiles returns the files the ticket declared as required
-// that do not appear in the changed-file inventory. A passing canonical
-// verification only proves the ticket's Verify-Command exited 0, not that the
-// required implementation change was made; the missing files are listed as a
-// note on the pull request. They refuse nothing: a check that refuses must
-// execute something, and this one reads only file lists.
-func UnchangedRequiredFiles(changed, required []string) []string {
-	changedSet := stringSet(changed)
-	var missing []string
-	for _, f := range required {
-		if !changedSet[f] {
-			missing = append(missing, f)
-		}
-	}
-	return missing
-}
-
 // stringSet returns the members of list as a set.
 func stringSet(list []string) map[string]bool {
 	set := make(map[string]bool, len(list))
@@ -192,36 +172,6 @@ func stringSet(list []string) map[string]bool {
 		set[s] = true
 	}
 	return set
-}
-
-// AbsentRequiredContent returns the strings the ticket declared as required
-// that are not newly present in at least one required file's final content:
-// present now, and not already present in that same file at the run's base
-// commit. A file touched only cosmetically still has a diff, so a concrete
-// marker of the real change (a new widget's Key literal, a new test's function
-// name) is what shows the change was made. baseContent and finalContent are
-// keyed by the same required file paths. The result is a note on the pull
-// request and refuses nothing.
-//
-// Checked per file, not by concatenating every file's content into one blob:
-// concatenation discards the base/final pairing (a marker newly added to file
-// B would be masked by the same marker already in file A at base) and can
-// fabricate a match from fragments split across the seam of two files.
-func AbsentRequiredContent(baseContent, finalContent map[string]string, required []string) []string {
-	var missing []string
-	for _, s := range required {
-		found := false
-		for path, final := range finalContent {
-			if strings.Contains(final, s) && !strings.Contains(baseContent[path], s) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			missing = append(missing, s)
-		}
-	}
-	return missing
 }
 
 // DefaultTestPatterns is used when the project's .factory.yml doesn't
@@ -275,19 +225,17 @@ func IsTestFile(file string, patterns []string) bool {
 }
 
 // TestFiles returns the files of changed that count as tests under patterns
-// (DefaultTestPatterns when empty), after harness byproducts and the
-// factory-committed oracles are set aside: an oracle's own test file must not
-// satisfy the agent's obligation to add a test. A malformed pattern never
+// (DefaultTestPatterns when empty), after harness byproducts are set aside. A malformed pattern never
 // matches (patterns come from a committed .factory.yml, so a typo shows up as
 // "no test file changed", fixable by the repository owner, rather than
 // halting an unrelated run). These are the files the tests_red_on_base proof
 // runs.
-func TestFiles(changed, patterns []string, oracles *run.OracleEvidence) []string {
+func TestFiles(changed, patterns []string) []string {
 	if len(patterns) == 0 {
 		patterns = DefaultTestPatterns
 	}
 	var tests []string
-	for _, f := range ExcludeFactoryOracles(ExcludeHarnessByproducts(changed), oracles) {
+	for _, f := range ExcludeHarnessByproducts(changed) {
 		if IsTestFile(f, patterns) {
 			tests = append(tests, f)
 		}
@@ -306,22 +254,43 @@ const TestsRedOnBaseCheck = "tests_red_on_base"
 type TestsRedOnBaseInput struct {
 	Verdict string
 	Reason  string
+	// Skipped are the changed test files the proof neither ran nor judged;
+	// each is named, with its reason, in a note.
+	Skipped []run.TestsRedSkipped
+}
+
+// skippedNotes is one note line per changed test file the proof did not run or
+// judge.
+func skippedNotes(proof *TestsRedOnBaseInput) []string {
+	if proof == nil {
+		return nil
+	}
+	notes := make([]string, len(proof.Skipped))
+	for i, s := range proof.Skipped {
+		notes[i] = fmt.Sprintf("tests_red_on_base: %s was not run or judged: %s", s.Path, s.Reason)
+	}
+	return notes
 }
 
 // TestsRedOnBase evaluates the tests_red_on_base gate over tests (TestFiles),
 // the ticket's opt-out reason (ticketspec.ParseTestsRequiredOptOut's return
-// value; "" means none) and the proof, nil when the run took none. It
-// refuses, in order:
+// value; "" means none), whether the ticket may opt out at all (optOutRefused:
+// ticket 1 of a bug request may not) and the proof, nil when the run took
+// none. It refuses, in order:
 //
+//   - an opt-out the ticket may not make;
 //   - with no opt-out and no test file changed;
 //   - a proof that every test that ran also passes on the base commit.
 //
-// An opt-out passes with no proof (the pull request names the reason). A
+// An opt-out the ticket may make passes with no proof (the pull request names the reason). A
 // proof with no verdict, or none at all, passes and returns a note: a check
 // that executes something refuses only on what it saw run.
-func TestsRedOnBase(tests []string, optOutReason string, proof *TestsRedOnBaseInput) (run.GateResult, string) {
+func TestsRedOnBase(tests []string, optOutReason string, optOutRefused bool, proof *TestsRedOnBaseInput) (run.GateResult, string) {
 	gate := run.GateResult{Check: TestsRedOnBaseCheck, Passed: true}
 	switch {
+	case optOutReason != "" && optOutRefused:
+		gate.Passed = false
+		return gate, ""
 	case optOutReason != "":
 		return gate, ""
 	case len(tests) == 0:
@@ -348,7 +317,7 @@ func TestsRedOnBase(tests []string, optOutReason string, proof *TestsRedOnBaseIn
 // means no opt-out).
 //
 // Found live (a Flutter + Go app repo run 3, 2026-09-28): a drafted ticket's
-// Allowed-Files/Required-Changed-Files named only
+// Allowed-Files named only
 // backend/internal/handler/dispatch_mux.go, it declared no Tests-Required
 // opt-out, and its own "Tests to add" prose said the route would be
 // exercised by a *different* ticket's test -- a ticket that, by its own
@@ -423,8 +392,7 @@ func FullSuiteVerify(cmd []string, exitCode int, durationMs int64, logSHA256 str
 // entirely in that case, the same convention FullSuiteVerify already
 // follows. exitCode is the gate's exit code decoded from the launch
 // (reviewstep.ReviewExitCode): 0 when the reviewer gave a verdict, or under
-// "advisory" regardless; findings never fail it (SC-022: a finding refuses a
-// run only through its reproduction).
+// "advisory" regardless; findings never fail it (SC-022).
 func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
 	return run.GateResult{
 		Check:      "code_review",
@@ -436,69 +404,29 @@ func CodeReview(cmd []string, exitCode int, durationMs int64, logSHA256 string) 
 	}
 }
 
-// ReviewReproductionCheck is the check through which a reviewer's finding
-// refuses a run (SC-022).
-const ReviewReproductionCheck = "review_reproduction"
-
-// ReviewReproductionInput is the factory's runs of the reproductions a
-// review held (SC-022): how many it decided, and how many of those refuse
-// the run (a finding whose reproduction blocks, or, after a corrective build,
-// a held reproduction still failing on its result).
-type ReviewReproductionInput struct {
-	Decided  int
-	Refusing int
-}
-
-// ReviewReproduction evaluates the review_reproduction check: it fails iff
-// any reproduction refuses the run. A finding that is advice never fails it.
-func ReviewReproduction(in ReviewReproductionInput) run.GateResult {
-	exitCode := 0
-	if in.Refusing > 0 {
-		exitCode = 1
-	}
-	return run.GateResult{
-		Check:    "review_reproduction",
-		Passed:   in.Refusing == 0,
-		ExitCode: exitCode,
-	}
-}
-
-// NamedGateInput is one operator-configured named gate beyond the
-// built-in checks above -- lint/security_audit/unit_tests/
-// integration_tests, declared via .factory.yml's lint_command/
-// security_command/unit_test_command/integration_test_command. Command is
-// nil exactly when the project didn't configure this particular gate;
-// EvaluateRun skips it entirely in that case (never "passed"), the same
-// convention FullSuiteCommand already uses for full_suite_verify.
-type NamedGateInput struct {
+// RepoGateInput is one gate the target repository defines for itself in its
+// .factory.yml `gates:` list, beyond the built-in checks above.
+type RepoGateInput struct {
 	Check      string
 	Command    []string
 	ExitCode   int
 	DurationMs int64
 	LogSHA256  string
-	// ReferenceOracleSHA256 is meaningful only for the "reference_oracle"
-	// check -- see run.GateResult.ReferenceOracleSHA256's own doc
-	// comment. Left empty for every other named gate, and copied through
-	// verbatim (never computed here; policy stays pure/deterministic
-	// over already-collected evidence, the same reason LogSHA256 is
-	// passed in rather than hashed by this function).
-	ReferenceOracleSHA256 string
 	// BaseCheck is the gate's rerun on the base commit, copied through to
 	// run.GateResult.BaseCheck. It never decides Passed.
 	BaseCheck *run.GateBaseCheck
 }
 
-// NamedGate evaluates one NamedGateInput the same way FullSuiteVerify
+// RepoGate evaluates one RepoGateInput the same way FullSuiteVerify
 // evaluates the full-suite gate: pass iff the command exited zero.
-func NamedGate(check string, cmd []string, exitCode int, durationMs int64, logSHA256, referenceOracleSHA256 string) run.GateResult {
+func RepoGate(check string, cmd []string, exitCode int, durationMs int64, logSHA256 string) run.GateResult {
 	return run.GateResult{
-		Check:                 check,
-		Command:               cmd,
-		Passed:                exitCode == 0,
-		ExitCode:              exitCode,
-		DurationMs:            durationMs,
-		LogSHA256:             logSHA256,
-		ReferenceOracleSHA256: referenceOracleSHA256,
+		Check:      check,
+		Command:    cmd,
+		Passed:     exitCode == 0,
+		ExitCode:   exitCode,
+		DurationMs: durationMs,
+		LogSHA256:  logSHA256,
 	}
 }
 
@@ -511,9 +439,8 @@ func NamedGate(check string, cmd []string, exitCode int, durationMs int64, logSH
 // risking the two silently drifting apart (the same class of bug this
 // plan's --review-base-sha incident and CLAIMS.md's false-accept gaps
 // were both about: two things that were supposed to agree, didn't).
-// AllowedFiles, RequiredChangedFiles, and RequiredContent are nil exactly
-// when the ticket didn't declare the corresponding key — each check is
-// skipped entirely in that case, not evaluated against an empty list.
+// AllowedFiles is nil exactly when the ticket didn't declare the key — the
+// check is skipped entirely in that case, not evaluated against an empty list.
 type EvaluateRunInput struct {
 	VerifyCommand    []string
 	BuildExitCode    int
@@ -525,19 +452,14 @@ type EvaluateRunInput struct {
 	// rerun's when it ran; it never decides Passed itself.
 	VerifyRerun *run.VerifyRerun
 
-	ChangedFiles         []string
-	AllowedFiles         []string
-	RequiredChangedFiles []string
+	ChangedFiles []string
+	AllowedFiles []string
 
 	// ScopeUnapproved and AllowedPaths complete AllowedFiles into the run's
 	// Scope: the list is the model's guess (notes only), and the
 	// repository's .factory.yml allowed_paths (always refuses).
 	ScopeUnapproved bool
 	AllowedPaths    []string
-
-	RequiredContent           []string
-	RequiredContentBaseFiles  map[string]string
-	RequiredContentFinalFiles map[string]string
 
 	// TestPatterns/TestsRequiredOptOut/TestsRedOnBase feed the
 	// tests_red_on_base gate (TestsRedOnBase). Unlike AllowedFiles et al.,
@@ -546,7 +468,10 @@ type EvaluateRunInput struct {
 	// TestsRedOnBase is nil when the run took no proof.
 	TestPatterns        []string
 	TestsRequiredOptOut string
-	TestsRedOnBase      *TestsRedOnBaseInput
+	// TestsOptOutRefused is set for ticket 1 of a bug request: its
+	// Tests-Required opt-out is not honoured, and the gate fails on it.
+	TestsOptOutRefused bool
+	TestsRedOnBase     *TestsRedOnBaseInput
 
 	FullSuiteCommand    []string
 	FullSuiteExitCode   int
@@ -556,12 +481,9 @@ type EvaluateRunInput struct {
 	// canonical verification's.
 	FullSuiteRerun *run.VerifyRerun
 
-	// NamedGates is the lint/security_audit/unit_tests/
-	// integration_tests named gates, one entry per gate the project
-	// actually configured (an unconfigured gate is simply absent from this slice,
-	// not present with a nil Command) -- see NamedGateInput's own doc
-	// comment.
-	NamedGates []NamedGateInput
+	// RepoGates is the repository's own gates, one entry per gate it
+	// defines -- see RepoGateInput's own doc comment.
+	RepoGates []RepoGateInput
 
 	// CodeReviewCommand/CodeReviewExitCode/... mirror
 	// FullSuiteCommand's own nil-skips-the-gate convention -- nil
@@ -572,17 +494,6 @@ type EvaluateRunInput struct {
 	CodeReviewExitCode   int
 	CodeReviewDurationMs int64
 	CodeReviewLogSHA256  string
-
-	// ReviewReproduction is nil exactly when the run took no reproduction
-	// phase (a run without -review-reproduction, or one that never reached
-	// the review), and EvaluateRun then skips the review_reproduction check.
-	ReviewReproduction *ReviewReproductionInput
-
-	// Oracles is the host-collected committed-oracle evidence (nil for
-	// every run without one). It only ever REMOVES factory-authored,
-	// hash-verified paths from the diff_scope and test-file inventories
-	// (ExcludeFactoryOracles).
-	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
 }
 
 // EvaluateRunResult is EvaluateRun's outcome: every gate that actually ran
@@ -630,7 +541,7 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		// ExcludeHarnessByproducts' own doc comment for why DiffScope must
 		// stay a neutral matcher for internal/release's differently-scoped
 		// reuse of it.
-		verdict := scope.Judge(ExcludeFactoryOracles(ExcludeHarnessByproducts(input.ChangedFiles), input.Oracles))
+		verdict := scope.Judge(ExcludeHarnessByproducts(input.ChangedFiles))
 		refused := verdict.Refused()
 		scopeGate := run.GateResult{Check: "diff_scope", Passed: len(refused) == 0}
 		result.GateResults = append(result.GateResults, scopeGate)
@@ -644,21 +555,11 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		}
 	}
 
-	if input.RequiredChangedFiles != nil {
-		for _, f := range UnchangedRequiredFiles(input.ChangedFiles, input.RequiredChangedFiles) {
-			result.Notes = append(result.Notes, "required file not changed: "+f)
-		}
-	}
-	if input.RequiredContent != nil {
-		for _, c := range AbsentRequiredContent(input.RequiredContentBaseFiles, input.RequiredContentFinalFiles, input.RequiredContent) {
-			result.Notes = append(result.Notes, fmt.Sprintf("required content not newly present: %q", c))
-		}
-	}
-
-	testsGate, note := TestsRedOnBase(TestFiles(input.ChangedFiles, input.TestPatterns, input.Oracles), input.TestsRequiredOptOut, input.TestsRedOnBase)
+	testsGate, note := TestsRedOnBase(TestFiles(input.ChangedFiles, input.TestPatterns), input.TestsRequiredOptOut, input.TestsOptOutRefused, input.TestsRedOnBase)
 	if note != "" {
 		result.Notes = append(result.Notes, note)
 	}
+	result.Notes = append(result.Notes, skippedNotes(input.TestsRedOnBase)...)
 	accepted = result.add(testsGate) && accepted
 
 	if input.FullSuiteCommand != nil {
@@ -671,8 +572,8 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 		}
 	}
 
-	for _, g := range input.NamedGates {
-		gate := NamedGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256, g.ReferenceOracleSHA256)
+	for _, g := range input.RepoGates {
+		gate := RepoGate(g.Check, g.Command, g.ExitCode, g.DurationMs, g.LogSHA256)
 		gate.BaseCheck = g.BaseCheck
 		result.GateResults = append(result.GateResults, gate)
 		if !gate.Passed {
@@ -683,9 +584,6 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 
 	if input.CodeReviewCommand != nil {
 		accepted = result.add(CodeReview(input.CodeReviewCommand, input.CodeReviewExitCode, input.CodeReviewDurationMs, input.CodeReviewLogSHA256)) && accepted
-	}
-	if input.ReviewReproduction != nil {
-		accepted = result.add(ReviewReproduction(*input.ReviewReproduction)) && accepted
 	}
 
 	result.Accepted = accepted
@@ -808,13 +706,10 @@ var requiredBrownfieldTicketSections = []string{
 }
 
 // requiredBrownfieldTicketHeaderKeys are the internal/ticketspec header
-// lines every brownfield ticket must declare -- Required-Content: is
-// deliberately excluded, since the plan-drafting pass marks it
-// optional, matching ticketspec's own optional-key convention for it.
+// lines every brownfield ticket must declare.
 var requiredBrownfieldTicketHeaderKeys = []string{
 	"Verify-Command:",
 	"Allowed-Files:",
-	"Required-Changed-Files:",
 }
 
 // TicketStructureBrownfield checks the ticket shape the plan-drafting
@@ -838,7 +733,6 @@ func TicketStructureBrownfield(ticketContent string) (bool, []string) {
 			reasons = append(reasons, "ticket is missing required header line "+key)
 		}
 	}
-
 	_, sectionReasons := requiredMarkdownSections(ticketContent, "ticket", requiredBrownfieldTicketSections)
 	reasons = append(reasons, sectionReasons...)
 	return len(reasons) == 0, reasons
@@ -1270,28 +1164,6 @@ func ExcludeHarnessByproducts(changed []string) []string {
 	return filtered
 }
 
-// ExcludeFactoryOracles returns changed with every path the factory host
-// itself committed as an accepted acceptance oracle (or its index, or a
-// manifest-declared supersession deletion) removed -- but only where o
-// proves the blob at ResultSHA still hashes to the pinned hash (or the
-// deleted path is really absent). A path the agent also wrote, with
-// different bytes, therefore stays in the inventory. Like
-// ExcludeHarnessByproducts it is a sibling filter applied at EvaluateRun's
-// ticket-scope call sites, never inside DiffScope. nil o returns changed
-// untouched, which is every run that has no committed oracles.
-func ExcludeFactoryOracles(changed []string, o *run.OracleEvidence) []string {
-	if o == nil || (len(o.Authored) == 0 && len(o.Deleted) == 0) {
-		return changed
-	}
-	filtered := make([]string, 0, len(changed))
-	for _, f := range changed {
-		if !o.FactoryAuthoredIntact(f) {
-			filtered = append(filtered, f)
-		}
-	}
-	return filtered
-}
-
 // matchesAllowed reports whether changed file f satisfies one of a
 // ticket's declared Allowed-Files patterns. Three forms, checked in order:
 //
@@ -1305,11 +1177,6 @@ func ExcludeFactoryOracles(changed []string, o *run.OracleEvidence) []string {
 //     segment, "?" matches one character, no "/" crossing) — for a known
 //     filename pattern within a single directory, e.g.
 //     "app/l10n/app_localizations*.dart".
-//
-// This is deliberately not extended to Required-Changed-Files: a required
-// file names one specific file a human wants confirmed changed, and a
-// glob there would weaken that to "something in this set changed,"
-// defeating the check's own purpose.
 func matchesAllowed(f string, patterns []string) bool {
 	for _, pattern := range patterns {
 		if f == pattern {

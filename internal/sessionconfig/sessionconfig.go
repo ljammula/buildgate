@@ -193,10 +193,8 @@ type Config struct {
 	// ReviewCorrectiveRounds mirrors worker's own
 	// -review-corrective-rounds flag: the most
 	// automatic corrective builds a ticket gets when its run quarantines
-	// with checks a build can fix when told about them (a reviewer's
-	// reproduction that refused it included, SC-022), before the request
-	// quarantines, and the most fix attempts a PR-review corrective round
-	// gets when a reviewer's reproduction alone refuses it. Like
+	// with checks a build can fix when told about them, before the request
+	// quarantines. Like
 	// MaxReviewRounds, this is a per-invocation Tier-1 value
 	// (applySessionConfig fills the flag directly from this field), not a
 	// daemon-wide Tier-2 setting. 0 disables the corrective round
@@ -214,27 +212,17 @@ type Config struct {
 	HITLReminderInterval *string `yaml:"hitl_reminder_interval,omitempty"`
 
 	// ReviewGateExpiry is how long a request may wait in spec_review,
-	// oracle_review, plan_review or resume_review for a decision before it
+	// plan_review or resume_review for a decision before it
 	// is halted with halt kind gate_expired (`factoryd retry` reopens the
 	// same review). 0 or absent: a gate never expires. pr_review has no
 	// expiry: merging is a human act and a long-open pull request is normal.
 	ReviewGateExpiry *string `yaml:"review_gate_expiry,omitempty"`
 
-	// PRBudgetLines is the target size of one ticket's pull request in changed
-	// lines (insertions plus deletions, as git diff --shortstat counts them).
-	// Planning writes one ticket for a spec whose estimated change fits it and
-	// splits only an estimate over it, into the fewest tickets that each fit.
-	// Default 400; 0 is no budget (one ticket unless the spec's parts are
-	// independently shippable); negative is refused. It is a planning target,
-	// not a cap: release_max_insertions and release_max_files_changed stay the
-	// hard limits.
+	// PRBudgetLines is the source-line threshold for a pull request size note
+	// and the target when a planning job drafts tickets. Default 400; 0 disables
+	// the line threshold; negative is refused. The release size limits are
+	// release_max_changed_lines and release_max_files_changed.
 	PRBudgetLines *int `yaml:"pr_budget_lines,omitempty"`
-
-	// ReviewReproductions is whether a request's ticket build holds and runs
-	// its review's reproductions (SC-022). Default false: the review and its
-	// approved spec stay, so every finding is advice and no
-	// review_reproduction check is recorded. True holds and runs them.
-	ReviewReproductions *bool `yaml:"review_reproductions,omitempty"`
 
 	// ReviewAdviceRounds is how many advice rounds a request's accepted
 	// ticket run whose code review recorded a high-severity finding may get:
@@ -294,7 +282,7 @@ type Config struct {
 
 	// RequestTokenBudget/RequestCostBudgetMicroUSD cap one request's own
 	// total spend across every stage it can launch a relay-backed job
-	// through: spec/plan/oracle drafting plus every ticket build and
+	// through: spec/plan drafting plus every ticket build and
 	// every corrective round (review or PR-review). Unlike
 	// MeterTokenCeiling/MeterCostCeilingMicroUSD above (a per-job ceiling
 	// the relay itself enforces mid-job), these are checked host-side,
@@ -317,7 +305,7 @@ type Config struct {
 
 	ReleaseProtectedPaths                 *string `yaml:"release_protected_paths,omitempty"`
 	ReleaseMaxFilesChanged                *int    `yaml:"release_max_files_changed,omitempty"`
-	ReleaseMaxInsertions                  *int    `yaml:"release_max_insertions,omitempty"`
+	ReleaseMaxChangedLines                *int    `yaml:"release_max_changed_lines,omitempty"`
 	ReleaseRollbackPlan                   *string `yaml:"release_rollback_plan,omitempty"`
 	ReleaseAllowOverrides                 *bool   `yaml:"release_allow_overrides,omitempty"`
 	ReleaseAllowDependencyLockfileChanges *bool   `yaml:"release_allow_dependency_lockfile_changes,omitempty"`
@@ -474,6 +462,9 @@ type Roles struct {
 	Planning  *RoleConfig `yaml:"planning,omitempty"`
 	Execution *RoleConfig `yaml:"execution,omitempty"`
 	Review    *RoleConfig `yaml:"review,omitempty"`
+	// Challenger is the role of the challenger job (SC-022); unset, no
+	// challenger job runs.
+	Challenger *RoleConfig `yaml:"challenger,omitempty"`
 }
 
 // validThinkingLevels is the closed set RoleConfig.Thinking may name --
@@ -544,10 +535,6 @@ type Settings struct {
 	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
 	PRBudgetLines int
 
-	// ReviewReproductions is set when the config says
-	// review_reproductions: true; the zero value holds no reproduction.
-	ReviewReproductions bool
-
 	// ReviewAdviceRounds mirrors Config.ReviewAdviceRounds; 0 starts no
 	// advice round.
 	ReviewAdviceRounds int
@@ -587,7 +574,7 @@ type Settings struct {
 
 	ReleaseProtectedPaths                 string
 	ReleaseMaxFilesChanged                int
-	ReleaseMaxInsertions                  int
+	ReleaseMaxChangedLines                int
 	ReleaseRollbackPlan                   string
 	ReleaseAllowOverrides                 bool
 	ReleaseAllowDependencyLockfileChanges bool
@@ -891,13 +878,12 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	boolean(&s.ComposeServicesRequireDigest, c.ComposeServicesRequireDigest)
 	integer(&s.ComposeServicesConcurrency, c.ComposeServicesConcurrency)
 
-	boolean(&s.ReviewReproductions, c.ReviewReproductions)
 	boolean(&s.RoundSessionContinuity, c.RoundSessionContinuity)
 	boolean(&s.PlanReview, c.PlanReview)
 
 	str(&s.ReleaseProtectedPaths, c.ReleaseProtectedPaths)
 	integer(&s.ReleaseMaxFilesChanged, c.ReleaseMaxFilesChanged)
-	integer(&s.ReleaseMaxInsertions, c.ReleaseMaxInsertions)
+	integer(&s.ReleaseMaxChangedLines, c.ReleaseMaxChangedLines)
 	str(&s.ReleaseRollbackPlan, c.ReleaseRollbackPlan)
 	boolean(&s.ReleaseAllowOverrides, c.ReleaseAllowOverrides)
 	boolean(&s.ReleaseAllowDependencyLockfileChanges, c.ReleaseAllowDependencyLockfileChanges)
@@ -954,11 +940,11 @@ func (c *Config) applyListKeys(s *Settings) error {
 	return nil
 }
 
-// DefaultReleaseMaxFilesChanged/DefaultReleaseMaxInsertions/
+// DefaultReleaseMaxFilesChanged/DefaultReleaseMaxChangedLines/
 // DefaultReleaseRollbackPlan are the release-policy values a fresh
 // session config should carry so a first PR isn't silently denied. The
 // shipped zero-value Settings (see applySettings above:
-// ReleaseMaxFilesChanged/ReleaseMaxInsertions/ReleaseRollbackPlan default
+// ReleaseMaxFilesChanged/ReleaseMaxChangedLines/ReleaseRollbackPlan default
 // to the zero value) deny every PR unconditionally --
 // internal/release.MergePolicyCheck treats 0 files allowed and an empty
 // rollback plan as always-deny. These are the single source of truth for
@@ -976,7 +962,7 @@ func (c *Config) applyListKeys(s *Settings) error {
 // any other session config key.
 const (
 	DefaultReleaseMaxFilesChanged = 25
-	DefaultReleaseMaxInsertions   = 1000
+	DefaultReleaseMaxChangedLines = 1000
 	// DefaultReleaseRollbackPlan only needs to be non-empty --
 	// MergePolicyCheck checks presence, not content (see its own doc
 	// comment: "Checking that reference is present does not implement
@@ -1035,7 +1021,7 @@ const DefaultSandboxInstallCacheImages = 3
 // registry_proxy_image is omitted entirely -- see the comment below. The
 // model id must come from GET /v1/models. The
 // release_* keys below are DefaultReleaseMaxFilesChanged/
-// DefaultReleaseMaxInsertions/DefaultReleaseRollbackPlan spelled out as
+// DefaultReleaseMaxChangedLines/DefaultReleaseRollbackPlan spelled out as
 // YAML -- kept in sync with those constants by TestExampleMatchesReleaseDefaults.
 const Example = `# factoryd session config: the machine-side values every worker needs.
 # Each key mirrors a ` + "`factoryd worker`" + ` flag; a flag given on the command
@@ -1128,7 +1114,7 @@ registry_proxy: true
 # (0 files allowed, empty rollback plan) -- see DefaultReleaseMaxFilesChanged
 # and friends above.
 release_max_files_changed: 25
-release_max_insertions: 1000
+release_max_changed_lines: 1000
 release_rollback_plan: "git revert the merge commit on main"
 `
 

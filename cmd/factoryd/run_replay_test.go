@@ -66,7 +66,7 @@ func TestReplayFlagRefusals(t *testing.T) {
 		if err := flags.Parse(append(append([]string{}, ok...), extra...)); err != nil {
 			t.Fatal(err)
 		}
-		_, err := validateReplayFlags(*rf.replay, *rf.onBranch, *rf.diffBase, replayConflicts(rf))
+		_, err := validateReplayFlags(*rf.replay, *rf.onBranch, *rf.diffBase, func(carved bool) []string { return replayConflicts(rf, carved) })
 		return err
 	}
 	if err := check(); err != nil {
@@ -81,9 +81,8 @@ func TestReplayFlagRefusals(t *testing.T) {
 		{"-pr-base", "main"},
 		{"-repository", "acme"},
 		{"-run-id", "served-1"},
-		{"-review-reproduction"},
-		{"-review-spec", "spec.md"},
-		{"-recheck-reproductions", "recheck.json"},
+		{"-challenge"},
+		{"-challenge-held", "held.json"},
 		{"-on-branch", ""},
 		{"-diff-base", ""},
 		{"-diff-base", head},
@@ -95,5 +94,49 @@ func TestReplayFlagRefusals(t *testing.T) {
 	}
 	if replay, err := validateReplayFlags("", "", "", nil); replay != nil || err != nil {
 		t.Errorf("no -replay: %+v, %v; want nothing", replay, err)
+	}
+}
+
+// A carved replay (its record names a pr_order group) opens its own stacked
+// pull request, so -open-pull-request and -pr-base are accepted with it; every
+// other refusal stands, and an ordinary replay still refuses both.
+func TestCarvedReplayFlagsAcceptThePullRequestFlagsOnly(t *testing.T) {
+	dir := t.TempDir()
+	onto, head := strings.Repeat("a", 40), strings.Repeat("c", 40)
+	record, err := run.ReadReplayFile(writeReplayFile(t, dir, onto, head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Carve = &run.Carve{Groups: [][]string{{"db/"}}, Group: 1}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carved := filepath.Join(dir, "carved.json")
+	if err := os.WriteFile(carved, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := func(path string, extra ...string) error {
+		t.Helper()
+		flags, rf := newRunFlags()
+		args := append([]string{"-replay", path, "-on-branch", "buildgate/req-1/t1-carve", "-diff-base", onto}, extra...)
+		if err := flags.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		_, err := validateReplayFlags(*rf.replay, *rf.onBranch, *rf.diffBase, func(c bool) []string { return replayConflicts(rf, c) })
+		return err
+	}
+	for _, extra := range [][]string{{"-open-pull-request"}, {"-pr-base", "buildgate/req-1/t0"}} {
+		if err := check(carved, extra...); err != nil {
+			t.Errorf("a carved replay with %v refused: %v", extra, err)
+		}
+		if err := check(writeReplayFile(t, t.TempDir(), onto, head), extra...); err == nil {
+			t.Errorf("an ordinary replay with %v accepted", extra)
+		}
+	}
+	for _, extra := range [][]string{{"-challenge"}, {"-prior-run", "x"}, {"-earlier-attempt", "x.md"}, {"-run-id", "served-1"}} {
+		if err := check(carved, extra...); err == nil {
+			t.Errorf("a carved replay with %v accepted", extra)
+		}
 	}
 }

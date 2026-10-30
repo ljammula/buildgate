@@ -112,13 +112,13 @@ describe("fixtures", () => {
     );
     expect(r.haltConfirmed).toBe(true);
     expect(r.resultSha).toBe("every-field result_sha");
+    expect(r.challenge?.verdict).toBe("every-field verdict");
     expect(r.changedFiles).toEqual(["every-field changed_files"]);
     expect(r.diffStat).toEqual({ filesChanged: 3, insertions: 3, deletions: 3 });
     expect(r.diffAvailable).toBe(true);
     expect(r.diffTruncated).toBe(true);
     expect(r.requestId).toBe("req-done");
     expect(r.temporalWorkflowId).toBe("every-field temporal_workflow_id");
-    expect(r.referenceOracleDir).toBe("every-field reference_oracle_dir");
     // An attempt whose spend holds the meter's estimate: every token is
     // counted, and the figure is marked as one that may over-state.
     expect(r.tokensComplete).toBe(true);
@@ -358,16 +358,6 @@ describe("Run.fromJson progress fields", () => {
     expect(r.waitingReason).toBeNull();
     expect(r.stalled).toBe(false);
     expect(r.stalledSinceSeconds).toBeNull();
-  });
-
-  test("parses reference_oracle_dir when present", () => {
-    expect(run({ reference_oracle_dir: "/data/requests/req-1/oracle" }).referenceOracleDir).toBe(
-      "/data/requests/req-1/oracle",
-    );
-  });
-
-  test("reference_oracle_dir defaults to empty when absent", () => {
-    expect(run().referenceOracleDir).toBe("");
   });
 });
 

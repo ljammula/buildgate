@@ -10,6 +10,53 @@
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,
+  "challenge": true,
+  "challenge_answers": [
+    2,
+    5
+  ],
+  "challenge_approved_bytes": 42,
+  "challenge_approved_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
+  "challenge_criteria": 3,
+  "challenge_held": [
+    {
+      "criterion": "AC-1",
+      "host_path": "<DATA_DIR>/runs/golden-quarantined/challenge/0/edge_test.go",
+      "path": "edge_test.go",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "challenge_round": true,
+  "challenge_spec_path": "<DATA_DIR>/runs/<RUN_ID>/challenge-spec.snapshot.md",
+  "challenge_spec_sha256": "a2fbbbb147e92fff41b60f2cd1746d76e2bf9a22aa1519f52c9839885f395e70",
+  "challenger_harness": "codex",
+  "challenger_relay_policy": {
+    "allow_plaintext_upstream": false,
+    "allow_unauthenticated_upstream": false,
+    "allowed_path_prefix": "",
+    "auth_mode": "static",
+    "billing": "metered",
+    "cache_write_micro_usd_per_mtok": 0,
+    "cached_input_micro_usd_per_mtok": 0,
+    "cost_budget_micro_usd": 5000000,
+    "cost_budget_window": 3600000000000,
+    "cost_ceiling_micro_usd": 25000000,
+    "input_micro_usd_per_mtok": 0,
+    "max_request_bytes": 4194304,
+    "output_micro_usd_per_mtok": 0,
+    "requests_per_minute": 60,
+    "route": "review-route",
+    "token_budget": 1000000,
+    "token_budget_window": 3600000000000,
+    "token_ceiling": 5000000,
+    "upstream": "https://review.example.invalid",
+    "upstream_auth_header": "",
+    "usage_format": "openai-responses",
+    "worker_model_api": "openai-responses",
+    "worker_model_extra_json": "{\"reasoning\":true}",
+    "worker_model_id": "reviewer-model-id"
+  },
+  "challenger_thinking": "low",
   "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
   "code_review_policy": "advisory",
   "compose_services_allowed_registries": [
@@ -27,11 +74,7 @@
   "fast_check_command": "echo fast",
   "full_suite_command": "echo full",
   "gate_commands": {
-    "integration_tests": "echo integration",
-    "lint": "echo lint",
-    "reference_oracle": "sh verify/check.sh",
-    "security_audit": "echo security",
-    "unit_tests": "echo unit"
+    "repo-lint": "echo lint"
   },
   "harness": "pi",
   "instruction_base_sha": "<BASE_SHA>",
@@ -41,25 +84,7 @@
   "keep_build_session": true,
   "log_dir": "<DATA_DIR>/runs/<RUN_ID>",
   "max_rounds": 7,
-  "no_commit_oracles": true,
   "project_config_commit_sha": "<BASE_SHA>",
-  "recheck_reproductions": [
-    {
-      "finding": 0,
-      "host_path": "<DATA_DIR>/runs/golden-quarantined/review-repro/0/held_test.go",
-      "path": "held_test.go",
-      "run_id": "golden-quarantined",
-      "runner": "go-test-json",
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "spec_line": 3,
-      "test_ids": [
-        "TestHeld"
-      ]
-    }
-  ],
-  "reference_oracle_dir": "<INPUTS>/oracle",
-  "reference_oracle_in_loop_retry": true,
-  "reference_oracle_mount_path": "verify",
   "registry_proxy_policy": {
     "cache_bytes": 1073741824,
     "image": "registry-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -129,14 +154,13 @@
     "worker_model_extra_json": "{\"reasoning\":true}",
     "worker_model_id": "builder-model-id"
   },
+  "release_max_changed_lines": 77,
+  "release_max_files_changed": 7,
   "release_protected_paths": [
     "deploy/",
     ".github/"
   ],
   "request_ticket": true,
-  "required_changed_files": [
-    "content.txt"
-  ],
   "resume_session_path": "<DATA_DIR>/runs/golden-quarantined/build-session",
   "review_harness": "pi",
   "review_relay_policy": {
@@ -165,9 +189,6 @@
     "worker_model_extra_json": "{\"reasoning\":true}",
     "worker_model_id": "reviewer-model-id"
   },
-  "review_reproduction": true,
-  "review_spec_path": "<DATA_DIR>/runs/<RUN_ID>/approved-spec.snapshot.md",
-  "review_spec_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
   "review_thinking": "high",
   "run_id": "<RUN_ID>",
   "sandbox_docker": "<TESTDATA>/fake_docker.sh",

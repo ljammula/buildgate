@@ -3,7 +3,7 @@
 # proving-ground`) -- AGENTS.md's "Live validation" section. Drives a FIXED
 # corpus of pre-approved ticket specs (scripts/proving-ground/fixtures.json)
 # through factoryd's direct single-ticket path, one fixture at a time, the
-# same shape scripts/live-smoke.sh and scripts/bar.sh already use: fresh,
+# same shape scripts/live-smoke.sh already uses: fresh,
 # disposable clones, -ticket/-spec/-workspace/-data-dir, no drafting, no
 # human-approval gate (see live-smoke.sh's own doc comment for why this is
 # deliberately NOT the submit/worker request-driver path).
@@ -28,7 +28,7 @@
 # default session config -- how the same corpus is measured under different
 # roles.<role>.harness settings (each run's rows record the harness).
 # PROVING_GROUND_ALLOW_DIRTY=1: run on a dirty tree (recorded sha gets a
-# "-dirty" suffix) -- refused otherwise, same rule as scripts/bar.sh, so a
+# "-dirty" suffix) -- refused otherwise, so a
 # result is always attributable to a commit.
 # PROVING_GROUND_FIXTURES_FILE: overrides the fixtures file wholesale --
 # used only by scripts/tests/test_proving_ground.py to drive this script
@@ -39,7 +39,7 @@
 # PROVING_GROUND_RESULTS_FILE: overrides the results JSONL path (default
 # ~/buildgate/proving-ground/results.jsonl).
 #
-# Prerequisites (not checked here, same as live-smoke.sh/bar.sh): a
+# Prerequisites (not checked here, same as live-smoke.sh): a
 # `factoryd` built from the commit under test (FACTORYD_BIN override), a
 # working model route and sandbox runtime (`factoryd doctor` all-green), Docker
 # running, and each fixture's source repo present (testdata/fixtures/ for
@@ -167,7 +167,6 @@ for fx in $(python3 "$LIB" labels "$FIXTURES_FILE" --repo-root "$REPO_ROOT" --on
 	repo="$(field "$fx" repo)"
 	spec="$(field "$fx" spec)"
 	expect="$(field "$fx" expect)"
-	oracle_dir="$(field "$fx" oracle_dir)"
 
 	if [ ! -d "$repo" ]; then
 		echo "SKIP $fx: source repo not found at $repo"
@@ -175,10 +174,6 @@ for fx in $(python3 "$LIB" labels "$FIXTURES_FILE" --repo-root "$REPO_ROOT" --on
 	fi
 	if [ ! -f "$spec" ]; then
 		echo "SKIP $fx: ticket spec not found at $spec"
-		continue
-	fi
-	if [ -n "$oracle_dir" ] && [ ! -d "$oracle_dir" ]; then
-		echo "SKIP $fx: oracle dir not found at $oracle_dir"
 		continue
 	fi
 
@@ -207,14 +202,6 @@ for fx in $(python3 "$LIB" labels "$FIXTURES_FILE" --repo-root "$REPO_ROOT" --on
 		fi
 		if [ -n "${PROVING_GROUND_CONFIG:-}" ]; then
 			set -- "$@" -config "$PROVING_GROUND_CONFIG"
-		fi
-		if [ -n "$oracle_dir" ]; then
-			# Per-run copy outside -workspace: the agent can write the
-			# workspace, so the oracle must live somewhere it cannot reach.
-			oracle_copy="$SCRATCH/oracle-$label-$run_path"
-			mkdir -p "$oracle_copy" && cp "$oracle_dir"/* "$oracle_copy"/
-			set -- "$@" -reference-oracle-dir "$oracle_copy" -reference-oracle-mount-path .oracle \
-				-reference-oracle-command "$(cat "$oracle_copy/RUN_COMMAND.txt")"
 		fi
 
 		run_start="$(date +%s)"

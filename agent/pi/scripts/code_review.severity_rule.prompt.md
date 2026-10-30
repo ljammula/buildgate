@@ -1,1 +1,0 @@
-Severity: "high" is a finding that breaks a behaviour the approved spec states: cite that spec line in "spec_line". A defect that no spec line states is "medium" (real, non-blocking) or "low" (minor), whatever its consequence. Severity orders the advice only; a finding blocks through its reproduction alone.

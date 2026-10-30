@@ -48,8 +48,7 @@ export function describeError(error: unknown, { startClass = false } = {}): Erro
   if (error instanceof ApiError) {
     const raw = error.messageParts.join("\n");
     // A 403 is not always about a token: the server also refuses, with its
-    // reason, a workspace that is not allowlisted or an oracle file that was
-    // not shown. Its token refusals all read "<x> endpoint is not authorized"
+    // reason, a workspace that is not allowlisted. Its token refusals all read "<x> endpoint is not authorized"
     // (internal/api); anything else is a reason the operator must read, and
     // token advice in its place sent them to check a token that was fine
     // (found dogfooding, 2026-10-05).

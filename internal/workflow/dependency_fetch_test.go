@@ -128,7 +128,7 @@ var fetchSteps = []struct {
 		return executeVerifyStep(f.t, f.acts.RunFullSuiteVerifyActivity, f.input)
 	}},
 	{"named gate", func(f *fetchFixture) (VerifyActivityResult, error) {
-		return executeVerifyStep(f.t, f.acts.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "make lint"})
+		return executeVerifyStep(f.t, f.acts.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: f.input, Check: "lint", Command: "make lint"})
 	}},
 }
 

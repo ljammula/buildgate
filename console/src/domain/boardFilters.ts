@@ -22,7 +22,6 @@ export type RequestStageGroup = "review" | "working" | "done" | "failed" | "othe
 
 const REVIEW_STATES: ReadonlySet<string> = new Set([
   "spec_review",
-  "oracle_review",
   "plan_review",
   "halted",
   "quarantined",
@@ -33,7 +32,6 @@ const REVIEW_STATES: ReadonlySet<string> = new Set([
 const WORKING_STATES: ReadonlySet<string> = new Set([
   "submitted",
   "spec_drafting",
-  "oracle_drafting",
   "planning",
   "building",
   "pr_review",

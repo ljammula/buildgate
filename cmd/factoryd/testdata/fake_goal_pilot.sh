@@ -194,7 +194,6 @@ Fixture ticket drafted by fake_goal_pilot.sh. Nonce: $$-$(date +%s%N 2>/dev/null
 
 Verify-Command: true
 Allowed-Files: content.txt
-Required-Changed-Files: content.txt
 EOF
 fi
 

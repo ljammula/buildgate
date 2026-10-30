@@ -1,6 +1,5 @@
 Verify-Command: python -m pip install -q -e . pytest && python -m pytest -q tests
 Allowed-Files: src/click/globals.py, src/click/utils.py, src/click/termui.py, docs/utils.md, tests/test_utils/test_echo.py
-Required-Changed-Files: src/click/globals.py, src/click/utils.py, src/click/termui.py, docs/utils.md, tests/test_utils/test_echo.py
 
 ## Goal
 

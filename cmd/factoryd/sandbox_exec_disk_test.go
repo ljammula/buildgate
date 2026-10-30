@@ -36,7 +36,7 @@ func TestAModelJobLaunchIsRefusedBelowTheDiskFloorBeforeAnySidecar(t *testing.T)
 		return nil, errors.New("must not start")
 	}}
 	_, err := runSandboxWithRetriesVia(read(0), t.TempDir(), ctx, t.TempDir(), "", "", "", func(int) string { return t.TempDir() + "/x.log" }, 1,
-		"img@sha256:aa", "docker", "", 0, "run-1", t.TempDir(), "", "", "", nil, nil, registrySpec, hooks, nil, sandbox.ComposeServicesHooks{}, "", "", nil, nil, "sh")
+		"img@sha256:aa", "docker", "", 0, "run-1", t.TempDir(), "", "", "", nil, nil, registrySpec, hooks, nil, sandbox.ComposeServicesHooks{}, nil, nil, "sh")
 	if !errors.Is(err, sandbox.ErrSandboxDiskLow) || started {
 		t.Errorf("err = %v, proxy started = %v; want the refusal before any sidecar", err, started)
 	}

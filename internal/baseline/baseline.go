@@ -233,7 +233,7 @@ func Evaluate(command string, exitCode int, log, firstError, ticket string, crea
 }
 
 // CreatedPaths lists what a ticket is to create: each file it declares
-// (declared: its Allowed-Files and Required-Changed-Files, patterns left
+// (declared: its Allowed-Files, patterns left
 // out) that exists reports false for, and each directory above such a file
 // that exists reports false for too. Paths are slash-separated and relative
 // to the repository root.

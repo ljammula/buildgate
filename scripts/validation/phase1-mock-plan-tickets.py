@@ -4,8 +4,8 @@ Phase 1.7 of doc/designs/validation-plan.md: exercises the request
 pipeline's planning -> plan_review state machine without a real model
 round. Writes one ticket file satisfying internal/request's
 ValidateTicketPlan (fixed heading skeleton) and internal/policy's
-TicketStructureBrownfield (Verify-Command:/Allowed-Files:/
-Required-Changed-Files: header lines), claiming spec acceptance
+TicketStructureBrownfield (Verify-Command:/Allowed-Files:
+header lines), claiming spec acceptance
 criterion 1 (the only one phase1-mock-draft-spec.py's spec declares) so
 ValidatePlanCoverage is satisfied too. Also writes an evidence.json
 matching planTicketsEvidencePayload's own field names.
@@ -40,7 +40,6 @@ ticket = f"""This is an existing repo.
 
 Verify-Command: {args.verify_command}
 Allowed-Files: ARCHITECTURE.md, PROGRESS.md
-Required-Changed-Files: PROGRESS.md
 Tests-Required: no -- gate test, not app code
 
 ## Goal

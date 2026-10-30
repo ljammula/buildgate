@@ -19,7 +19,7 @@ export interface TriageOtherDetailProps {
 /**
  * A request that needs the operator but is not decided from this list: its
  * state, why it needs you, and the way to the request page where that
- * state's action lives (oracle files are approved there, hash by hash).
+ * state's action lives.
  */
 export function TriageOtherDetail({ request, now }: TriageOtherDetailProps) {
   return (

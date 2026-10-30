@@ -47,6 +47,26 @@ type Replay struct {
 	// both commits' patch ids (runner.GitPatchID: no context lines, every
 	// whitespace change counted).
 	Commits []ReplayedCommit `json:"commits"`
+	// Carve is set when the run judges a commit the host carved from an
+	// accepted run's result by pr_order, not commits replayed from a branch:
+	// the one pair of Commits is that result (Original) and its carved commit
+	// (Replayed), OntoSHA is the commit it was carved onto, and UpstreamSHA
+	// is the diff base the source run's change was measured from.
+	Carve *Carve `json:"carve,omitempty"`
+}
+
+// Carve is what a carved replay run's commit is derived from: the groups the
+// source run's change was split by and the group this commit holds.
+type Carve struct {
+	// Groups are the pr_order patterns the change was split by.
+	Groups [][]string `json:"groups"`
+	// Group is the 1-based group the commit holds (len(Groups)+1 for the
+	// files no group lists).
+	Group int `json:"group"`
+	// Notes are lines the first carved ticket's pull request body lists: the
+	// red and broken challenge files of the mixed run, for which no round ran
+	// (SC-022). Cleaned, never a file's content.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // ReplayedCommit is one commit of a replay and its original.
@@ -113,6 +133,14 @@ func (r *Replay) Validate() error {
 	for _, c := range r.Commits {
 		if err := c.validate(); err != nil {
 			return err
+		}
+	}
+	if r.Carve != nil {
+		if len(r.Commits) != 1 || r.Carve.Group < 1 || r.Carve.Group > len(r.Carve.Groups)+1 {
+			return errors.New("a carved replay holds one commit pair and one group of its pr_order")
+		}
+		if len(r.SourceRunIDs) != 1 {
+			return errors.New("a carved replay is of one source run")
 		}
 	}
 	last := r.Commits[len(r.Commits)-1]

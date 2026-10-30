@@ -51,7 +51,7 @@ func runSandboxWithSkills(t *testing.T, workspace, docker, logDir string, skills
 		"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", docker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"skills-run", t.TempDir(), "4g", "2", "256m", nil,
 		nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", nil, skills, "sh", "-c", "true",
+		nil, skills, "sh", "-c", "true",
 	)
 	return res.Skills, []string{res.SkillsSHA256}, res.RepoSkills, err
 }

@@ -95,7 +95,7 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		estimate, _ := ticketspec.EstimatedChangedLinesOf(string(content))
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed, Estimate: estimate})
 	}
-	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, OracleCoveredCriteria(dataDir, r), idNotes, r.PlanBudgetLines)
+	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines)
 }
 
 // planSkippedReview reports whether r is building on a plan the factory
@@ -189,9 +189,8 @@ func SpecReviewNotes(specContent string) []string {
 //     around its name say it changes (criterionClause.saysFileChanges).
 //     That reading of prose is the weaker note.
 //   - for a spec whose criteria carry IDs, "criterion N has no test": a
-//     ticket lists it as covered, none of the tickets listing it cites AC-N in
-//     its Tests to add, and the approved oracle (oracleCovered, by criterion
-//     number) does not cover it.
+//     ticket lists it as covered and none of the tickets listing it cites AC-N in
+//     its Tests to add.
 //   - "ticket T estimates N changed lines, over the B-line budget": a
 //     ticket declares Estimated-Changed-Lines above budgetLines, the budget
 //     the plan was drafted under (Request.PlanBudgetLines). Nothing when the
@@ -200,11 +199,11 @@ func SpecReviewNotes(specContent string) []string {
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
-func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool, budgetLines int) []string {
-	return planReviewNotes(criteria, tickets, workspace, oracleCovered, true, budgetLines)
+func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, budgetLines int) []string {
+	return planReviewNotes(criteria, tickets, workspace, true, budgetLines)
 }
 
-func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, oracleCovered map[int]bool, idNotes bool, budgetLines int) []string {
+func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))
@@ -228,7 +227,7 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 		}
 	}
 	if idNotes {
-		notes = append(notes, noTestNotes(criteria, tickets, oracleCovered)...)
+		notes = append(notes, noTestNotes(criteria, tickets)...)
 	}
 	return capReviewNotes(notes)
 }

@@ -1,6 +1,7 @@
 // A run: one build of one ticket, as GET /runs, GET /runs/{id} and the run
 // event stream send it (internal/api's runView, which embeds run.Run).
 // Only the fields the console reads are decoded; the rest are ignored.
+import { type Challenge, decodeChallenge } from "@/domain/challenge";
 import {
   type JsonObject,
   decodeList,
@@ -448,6 +449,8 @@ export interface Run {
   readonly triage: string;
   /** Non-empty when the run left a handoff: GET /runs/{id}/handoff has it. */
   readonly handoffSha256: string;
+  /** The ticket's challenge as this run saw it (SC-022); null when it ran none. */
+  readonly challenge: Challenge | null;
   /**
    * Mirrors run.Run.HaltConfirmed; see runIsTerminal for why a "halted"
    * state alone is not enough to know a run is truly done. Absent on a
@@ -530,13 +533,6 @@ export interface Run {
    * figures may over-state.
    */
   readonly estimated: boolean;
-  /**
-   * The -reference-oracle-dir this run was launched with: "" for a run with
-   * no oracle stage or one predating the field. Hides the commit_oracles and
-   * post_oracle_commit_verify timeline rows when there is no oracle stage to
-   * report on.
-   */
-  readonly referenceOracleDir: string;
 }
 
 export function decodeRun(o: JsonObject, at: string): Run {
@@ -552,6 +548,7 @@ export function decodeRun(o: JsonObject, at: string): Run {
     haltReasonCode: optString(o, "halt_reason_code", at),
     triage: optString(o, "triage", at),
     handoffSha256: optString(o, "handoff_sha256", at),
+    challenge: optObject(o, "challenge", at, decodeChallenge),
     haltConfirmed: optBoolean(o, "halt_confirmed", at),
     baseSha: reqString(o, "base_sha", at),
     resultSha: stringOrNull(o, "result_sha", at),
@@ -582,7 +579,6 @@ export function decodeRun(o: JsonObject, at: string): Run {
     byModel: objectList(o, "by_model", at, decodeModelUsage),
     tokensComplete: optBoolean(o, "tokens_complete", at, true),
     estimated: optBoolean(o, "estimated", at),
-    referenceOracleDir: optString(o, "reference_oracle_dir", at),
     composePhases: objectList(o, "compose_phases", at, decodeComposePhase),
   };
 }

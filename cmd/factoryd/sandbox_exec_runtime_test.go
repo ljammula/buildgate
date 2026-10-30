@@ -43,7 +43,7 @@ func TestRunSandboxWithRetriesViaLaunchesThroughTheSandboxRuntime(t *testing.T) 
 		"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", noDocker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"job-1", dataDir, "4g", "2", "256m", nil,
 		nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", []string{"K=V"}, nil, "sh", "-c", "true",
+		[]string{"K=V"}, nil, "sh", "-c", "true",
 	)
 	if err != nil {
 		t.Fatalf("runSandboxWithRetriesVia: %v", err)
@@ -71,7 +71,7 @@ func TestRunSandboxWithRetriesViaDoesNotRetryACommandStartedTwice(t *testing.T) 
 		"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", noDocker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"job-1", dataDir, "4g", "2", "256m", nil,
 		nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", nil, nil, "sh", "-c", "true",
+		nil, nil, "sh", "-c", "true",
 	)
 	if !errors.Is(err, sandbox.ErrSandboxRerun) {
 		t.Fatalf("err = %v, want ErrSandboxRerun", err)

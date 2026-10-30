@@ -37,7 +37,6 @@ func TestDraftingJobsUseTheirOwnRolesHarness(t *testing.T) {
 	}{
 		{"spec drafting", modelrole.StageSpecDrafting, "pifork"},
 		{"plan drafting", modelrole.StagePlanning, "pifork"},
-		{"oracle drafting", modelrole.StageOracleDrafting, "pifork"},
 	} {
 		got, err := resolveRequestJobRole(cfg, tc.stage, tc.name, "", "")
 		if err != nil {
@@ -52,14 +51,10 @@ func TestDraftingJobsUseTheirOwnRolesHarness(t *testing.T) {
 	}
 
 	// The planning choice picks a harness within allowed_harnesses for spec
-	// and plan drafting only; the review role never takes one.
+	// and plan drafting.
 	got, err := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", "", "pi")
 	if err != nil || got.Harness != "pi" || len(got.WorkerEnv) != 0 {
 		t.Errorf("planning choice pi: got %+v, err %v, want harness pi with no extra environment", got, err)
-	}
-	got, err = resolveRequestJobRole(cfg, modelrole.StageOracleDrafting, "oracle drafting", "", "pi")
-	if err != nil || got.Harness != "pifork" {
-		t.Errorf("oracle drafting with a planning harness choice: got %+v, err %v, want the review role's pifork, unaffected", got, err)
 	}
 	if _, err := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", "", "codex"); err == nil || !strings.Contains(err.Error(), "allowed_harnesses") {
 		t.Errorf("planning choice outside allowed_harnesses: err = %v, want a refusal naming allowed_harnesses", err)
@@ -78,10 +73,8 @@ func TestDraftingJobsUseTheirOwnRolesHarness(t *testing.T) {
 func TestDraftingJobArgvsAlwaysNameTheHarness(t *testing.T) {
 	for _, name := range []string{"pi", "pifork"} {
 		argvs := map[string][]string{
-			"draft_spec":  draftSpecArgs("/h/draft_spec.py", "/w", "/r.md", "/o.md", "/e.json", draftInputFiles{}, 10, "", name),
-			"plan":        planTicketsArgs("/h/plan_tickets.py", "/w", "/s.md", "/c.md", "/r.md", "make verify", "/o", "/e.json", draftInputFiles{}, 10, "", name, 0),
-			"oracle":      oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c.md", "", "", "/o", "/e.json", 9, 3, "", "", name),
-			"oracle-pair": oracleDraftArgs("/h/draft_acceptance_oracles.py", "/w", "/c.md", "/fb.md", "/s.md", "/o", "/e.json", 9, 3, draftEcosystem("go"), "max", name),
+			"draft_spec": draftSpecArgs("/h/draft_spec.py", "/w", "/r.md", "/o.md", "/e.json", draftInputFiles{}, 10, "", name),
+			"plan":       planTicketsArgs("/h/plan_tickets.py", "/w", "/s.md", "/c.md", "/r.md", "make verify", "/o", "/e.json", draftInputFiles{}, 10, "", name, 0),
 		}
 		for job, args := range argvs {
 			if !hasArgPair(args, "--harness", name) {

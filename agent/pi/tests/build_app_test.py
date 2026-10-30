@@ -582,103 +582,6 @@ class BuildAppTests(unittest.TestCase):
 		self.assertIn("canonical verification failed", real_failure)
 		self.assertNotIn("fast check failed", real_failure)
 
-	def test_run_reference_oracle_reports_pass_and_fail(self):
-		with tempfile.TemporaryDirectory() as directory:
-			root = Path(directory)
-			passed, tail = build_app.run_reference_oracle(root, oracle_command="true")
-			self.assertTrue(passed)
-
-			failed, tail = build_app.run_reference_oracle(root, oracle_command="echo boom >&2; exit 1")
-			self.assertFalse(failed)
-			self.assertIn("boom", tail)
-
-	def test_maybe_run_reference_oracle_only_runs_when_verify_passed(self):
-		# maybe_run_reference_oracle's own gating condition, tested directly
-		# rather than only through the round loop that calls it -- see its
-		# doc comment: the oracle must never run when verify itself didn't
-		# pass this round.
-		with tempfile.TemporaryDirectory() as directory:
-			root = Path(directory)
-			with mock.patch.object(build_app, "run_reference_oracle") as run_oracle:
-				run_oracle.return_value = (True, "")
-				command, passed, tail = build_app.maybe_run_reference_oracle(
-					root, oracle_command="true", verify_passed=True,
-				)
-				run_oracle.assert_called_once_with(root, oracle_command="true")
-				self.assertEqual(command, "true")
-				self.assertTrue(passed)
-
-			with mock.patch.object(build_app, "run_reference_oracle") as run_oracle:
-				command, passed, tail = build_app.maybe_run_reference_oracle(
-					root, oracle_command="true", verify_passed=False,
-				)
-				run_oracle.assert_not_called()
-				self.assertIsNone(command)
-				self.assertIsNone(passed)
-				self.assertEqual(tail, "")
-
-			with mock.patch.object(build_app, "run_reference_oracle") as run_oracle:
-				command, passed, tail = build_app.maybe_run_reference_oracle(
-					root, oracle_command="true", verify_passed=None,
-				)
-				run_oracle.assert_not_called()
-				self.assertIsNone(command)
-				self.assertIsNone(passed)
-
-			with mock.patch.object(build_app, "run_reference_oracle") as run_oracle:
-				command, passed, tail = build_app.maybe_run_reference_oracle(
-					root, oracle_command=None, verify_passed=True,
-				)
-				run_oracle.assert_not_called()
-				self.assertIsNone(command)
-				self.assertIsNone(passed)
-
-	def test_round_blockers_flags_a_failed_reference_oracle_only_once_verify_passed(self):
-		# oracle_passed is only ever True/False when run_build's own call
-		# site actually ran it (gated on verify_passed is True) -- when
-		# verify itself failed, oracle_passed is left at its None default
-		# and round_blockers must attribute the blocker to verify, not
-		# silently imply the oracle was also checked and failed.
-		verify_failed, _ = build_app.round_blockers(
-			verify_passed=False, pi_failed=False, pi_timed_out=False,
-			traces=[], review_policy="advisory", oracle_passed=None,
-		)
-		self.assertIn("canonical verification failed", verify_failed)
-		self.assertNotIn("reference oracle failed", verify_failed)
-
-		oracle_failed, _ = build_app.round_blockers(
-			verify_passed=True, pi_failed=False, pi_timed_out=False,
-			traces=[], review_policy="advisory", oracle_passed=False,
-		)
-		self.assertIn("reference oracle failed", oracle_failed)
-
-		both_clean, _ = build_app.round_blockers(
-			verify_passed=True, pi_failed=False, pi_timed_out=False,
-			traces=[], review_policy="advisory", oracle_passed=True,
-		)
-		self.assertNotIn("reference oracle failed", both_clean)
-
-	def test_corrective_prompt_includes_reference_oracle_failure_excerpt(self):
-		prompt = build_app.corrective_prompt(
-			round_index=1, max_rounds=3, verify_command="make verify", verify_tail="",
-			blockers=["reference oracle failed"], reviewer=build_app.ReviewSignal("clean"),
-			review_policy="advisory",
-			oracle_command="go test ./oracle/...", oracle_tail="--- FAIL: TestExpected",
-		)
-		self.assertIn("go test ./oracle/...", prompt)
-		self.assertIn("TestExpected", prompt)
-
-		# Unset oracle_command/oracle_tail (the default -- no oracle
-		# configured) must not add an empty "Reference-oracle command:"
-		# section, byte-for-byte identical to a call that never mentions
-		# oracles at all.
-		without_oracle = build_app.corrective_prompt(
-			round_index=1, max_rounds=3, verify_command="make verify", verify_tail="",
-			blockers=["canonical verification failed"], reviewer=build_app.ReviewSignal("clean"),
-			review_policy="advisory",
-		)
-		self.assertNotIn("Reference-oracle command", without_oracle)
-
 	def test_route_outage_stops_after_one_round_instead_of_burning_max_rounds(self):
 		# Every assistant turn errored out (the model route was unreachable),
 		# so no code was ever produced -- retrying more rounds against the
@@ -2052,67 +1955,6 @@ class RunBuildAgentsMdTests(unittest.TestCase):
 		self.assertNotIn("Follow the style guide.", second_round_prompt)
 		self.assertIn("did not earn completion", second_round_prompt)
 
-	def test_failing_reference_oracle_gets_targeted_retry_then_succeeds(self):
-		# End-to-end proof of the central claim for in-loop reference-oracle
-		# checks: a round that passes canonical verify but fails the
-		# in-loop reference-oracle check must NOT be treated
-		# as success, and the next round must get the same targeted-retry
-		# treatment (continue_session, the exact failure excerpt in its
-		# prompt) a canonical-verify failure already gets -- not a blind
-		# restart. verify_command_override="true" isolates the test to the
-		# oracle check specifically: canonical verify always passes, so any
-		# retry here is attributable only to the oracle.
-		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
-			root = Path(directory)
-			init_repo_with_commit(root)
-			spec = Path(spec_dir) / "spec.md"
-			spec.write_text("Write the expected output file")
-			marker = root / "oracle_marker.txt"
-			completions = [
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-				subprocess.CompletedProcess([], 0, pi_output("clean"), ""),
-			]
-			writes = [
-				# Round 1: changes the workspace (so no_changes doesn't
-				# also fire) but does NOT satisfy the oracle -- the
-				# failure under test.
-				lambda: (root / "attempt-one.txt").write_text("first try\n"),
-				# Round 2: the "smallest fix needed" a real agent would
-				# make in response to the round 1 corrective prompt.
-				lambda: marker.write_text("expected output\n"),
-			]
-			with (
-				mock.patch.object(build_app, "ensure_git_repo"),
-				mock.patch.object(
-					build_app, "run_agent_streaming", side_effect=scripted_pi_stream(completions, writes),
-				) as run,
-			):
-				result = build_app.run_build(
-					root, spec, max_rounds=2, timeout_minutes=1,
-					verify_command_override="true",
-					# `ls` (not `test -f`) deliberately: this test also
-					# asserts the failure excerpt reaches round 2's prompt,
-					# which needs the failing command to actually produce
-					# output -- `test -f` on a missing file prints nothing
-					# to redact, `ls` prints a real "No such file" message.
-					oracle_command=f"ls {marker}",
-				)
-
-			calls = agent_invocation_calls(run)
-
-		self.assertEqual(len(result.rounds), 2, "a failing oracle must not be silently treated as success after round 1")
-		self.assertTrue(result.rounds[0].verify_passed, "canonical verify must have passed round 1 (isolates the failure to the oracle)")
-		self.assertFalse(result.rounds[0].oracle_passed, "round 1 must record the oracle as failed, not skipped/unresolved")
-
-		second_round_prompt = calls[1].args[0][-1]
-		self.assertIn("reference oracle failed", second_round_prompt, "round 2's prompt must name the oracle as a blocking signal")
-		self.assertIn(f"ls {marker}", second_round_prompt, "round 2's prompt must name the exact oracle command that failed")
-		self.assertIn("No such file", second_round_prompt, "round 2's prompt must include the actual failure excerpt, not just the blocker name")
-
-		self.assertTrue(result.rounds[1].oracle_passed, "round 2's fix must be recognized as clearing the oracle")
-		self.assertTrue(result.succeeded)
-		self.assertEqual(result.stopped_reason, "canonical verification passed and independent review was clean")
-
 
 class ComposeServicesSentenceTests(unittest.TestCase):
 	def test_names_each_launched_service_with_its_port(self):
@@ -2424,7 +2266,7 @@ class ComposeServicesSentenceTests(unittest.TestCase):
 
 class AcceptanceCriteriaTests(unittest.TestCase):
 	"""Pure-function tests for the acceptance-criteria file and the
-	criterion comparison key the oracle drafter shares."""
+	criterion comparison key the reviewer and spec jobs share."""
 
 	def test_criterion_key_ignores_the_number_prefix_backticks_and_trailing_punctuation(self):
 		key = build_app.criterion_key
@@ -2526,7 +2368,7 @@ class AcceptanceCriteriaTests(unittest.TestCase):
 		self.assertIn(str(planted), build_commands[0])
 
 	def test_only_build_app_asks_for_the_target_repos_skills(self):
-		# Spec drafting, planning, oracle drafting and the pilot build their
+		# Spec drafting, planning and the pilot build their
 		# own invocation; none of them may opt in.
 		scripts = Path(build_app.__file__).resolve().parent
 		asking = sorted(

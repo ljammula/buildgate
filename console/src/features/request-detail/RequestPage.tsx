@@ -9,7 +9,6 @@ import { ContentSections } from "./ContentSections";
 import { CriteriaCoverage } from "./CriteriaCoverage";
 import { InspectPanel } from "./InspectPanel";
 import { NextActionBanner } from "./NextActionBanner";
-import { OracleSkipWarning } from "./OracleSkipWarning";
 import { Panel } from "./Panel";
 import { PendingComments } from "./PendingComments";
 import { PipelineStepper } from "./PipelineStepper";
@@ -39,7 +38,7 @@ export interface RequestPageProps {
 
 /**
  * A loaded request: header, the "Next" line, then a main column (the state's
- * own section, the oracle-skip warning, the revision compare, plan review's
+ * own section, the revision compare, plan review's
  * criteria coverage, the spec or plan files, the tickets) beside a side column of facts (request facts, the
  * pipeline, the audit trail). Once tickets build, they lead the main column.
  */
@@ -95,7 +94,6 @@ export function RequestPage({
               detailLoaded={detailLoaded}
               anyEditorOpen={editorOpen}
             />
-            <OracleSkipWarning request={request} />
             <PendingComments request={request} />
             {inspectBuilt ? <InspectPanel inspection={inspectBuilt} /> : null}
             {leads ? tickets : null}

@@ -42,6 +42,7 @@ type fakeDeps struct {
 	listReviewCommentsFn          func(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error)
 	markPullRequestReadyFn        func(ctx context.Context, prURL string) error
 	pushExistingBranchFn          func(ctx context.Context, workspaceDir string, sha string, branch string) error
+	readJobLogFn                  func(ctx context.Context, prURL string, jobID int64) (string, error)
 	readReviewStateFn             func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error)
 	remoteBranchHeadSHAFn         func(ctx context.Context, workspaceDir string, branch string) (string, error)
 	replyToReviewCommentFn        func(ctx context.Context, prURL string, commentID int64, body string) error
@@ -57,6 +58,9 @@ type fakeDeps struct {
 	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
 	patchIDFn                     func(dir, sha string) (string, error)
 	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
+	changedPathsFn                func(dir, base, result string) ([]string, error)
+	carveChainFn                  func(ctx context.Context, dir, base, result string, parts [][]string) error
+	carveCommitFn                 func(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error)
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
 	hostGitVersionFn              func(ctx context.Context) (string, error)
@@ -132,6 +136,15 @@ func (f *fakeDeps) PatchID(dir, sha string) (string, error) { return f.patchIDFn
 func (f *fakeDeps) ReplayCommits(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error) {
 	return f.replayCommitsFn(ctx, dir, worktreePath, branch, onto, commits)
 }
+func (f *fakeDeps) ChangedPaths(dir, base, result string) ([]string, error) {
+	return f.changedPathsFn(dir, base, result)
+}
+func (f *fakeDeps) CarveChain(ctx context.Context, dir, base, result string, parts [][]string) error {
+	return f.carveChainFn(ctx, dir, base, result, parts)
+}
+func (f *fakeDeps) CarveCommit(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error) {
+	return f.carveCommitFn(ctx, dir, parent, result, paths, message)
+}
 func (f *fakeDeps) PushWithLease(ctx context.Context, dir, sha, branch, expected string) error {
 	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
 }
@@ -141,6 +154,9 @@ func (f *fakeDeps) RestoreBranch(dir, branch, sha string) (bool, error) {
 }
 func (f *fakeDeps) CommentOnPullRequest(ctx context.Context, prURL, body string) error {
 	return f.commentOnPullRequestFn(ctx, prURL, body)
+}
+func (f *fakeDeps) ReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return f.readJobLogFn(ctx, prURL, jobID)
 }
 func (f *fakeDeps) HostGitVersion(ctx context.Context) (string, error) {
 	return f.hostGitVersionFn(ctx)
@@ -187,11 +203,19 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		replayCommitsFn: func(context.Context, string, string, string, string, []string) ([]string, error) {
 			return nil, refused("ReplayCommits")
 		},
+		changedPathsFn: func(string, string, string) ([]string, error) { return nil, refused("ChangedPaths") },
+		carveChainFn:   func(context.Context, string, string, string, [][]string) error { return refused("CarveChain") },
+		carveCommitFn: func(context.Context, string, string, string, []string, string) (string, error) {
+			return "", refused("CarveCommit")
+		},
 		pushWithLeaseFn: func(context.Context, string, string, string, string) error { return refused("PushWithLease") },
 		moveBranchFn:    func(string, string, string) error { return refused("MoveBranch") },
 		restoreBranchFn: func(string, string, string) (bool, error) { return false, refused("RestoreBranch") },
 		commentOnPullRequestFn: func(context.Context, string, string) error {
 			return refused("CommentOnPullRequest")
+		},
+		readJobLogFn: func(context.Context, string, int64) (string, error) {
+			return "", refused("ReadJobLog")
 		},
 		hostGitVersionFn: func(context.Context) (string, error) {
 			return "", refused("HostGitVersion")

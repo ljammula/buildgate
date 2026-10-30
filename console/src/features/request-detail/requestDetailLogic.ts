@@ -74,8 +74,8 @@ export function ticketsLeadContent(request: RequestSummary): boolean {
 // Once the operator has approved, the spec and each ticket's plan are receipts,
 // not a decision: they fold to one line. Written as the states that fold, never
 // as "every state but the review ones": a state added later keeps its
-// documents open until someone decides it should not, and spec_review,
-// oracle_review and plan_review are never in this set (the approval is bound
+// documents open until someone decides it should not, and spec_review and
+// plan_review are never in this set (the approval is bound
 // to the text on screen, so it is shown whole).
 const FOLDED_CONTENT_STATES: ReadonlySet<string> = new Set([
   "planning",
@@ -276,16 +276,10 @@ export function resumePlan(request: RequestSummary): ResumePlan {
 /** The pipeline's steps; the request's ends (done, closed) share the last. */
 const PIPELINE_STEPS = PIPELINE_STATES;
 
-// The two opt-in oracle steps (`-draft-oracles`): hidden unless the request
-// asked for them or has been in one.
-const OPTIONAL_ORACLE_STEPS: ReadonlySet<string> = new Set(["oracle_drafting", "oracle_review"]);
-
 const STEP_LABELS: Readonly<Record<string, string>> = {
   submitted: "Submitted",
   spec_drafting: "Spec drafting",
   spec_review: "Spec review",
-  oracle_drafting: "Oracle drafting",
-  oracle_review: "Oracle review",
   planning: "Planning",
   plan_review: "Plan review",
   building: "Building",
@@ -335,11 +329,7 @@ export function planReviewSkipped(request: RequestSummary): boolean {
 export function pipelineSteps(request: RequestSummary): PipelineStep[] {
   const terminal = TERMINAL_STATES.has(request.state);
   const resumeReview = request.state === "resume_review";
-  const visitedOracleStage =
-    request.draftOracles ||
-    OPTIONAL_ORACLE_STEPS.has(request.state) ||
-    request.history.some((e) => OPTIONAL_ORACLE_STEPS.has(e.to));
-  const steps = PIPELINE_STEPS.filter((s) => visitedOracleStage || !OPTIONAL_ORACLE_STEPS.has(s));
+  const steps = PIPELINE_STEPS;
   const stopped = terminal ? stoppedAt(request, steps) : null;
   // A closed request came to the pipeline's end like a merged one: its last
   // step is drawn as Closed.

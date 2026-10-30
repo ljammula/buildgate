@@ -158,9 +158,6 @@ describe("needsYouAsk", () => {
     expect(needsYouAsk(wire({ id: "a", state: "plan_review" }))).toBe(
       "Review the drafted tickets.",
     );
-    expect(needsYouAsk(wire({ id: "a", state: "oracle_review" }))).toBe(
-      "Review the drafted acceptance tests.",
-    );
     expect(needsYouAsk(wire({ id: "a", state: "resume_review" }))).toBe(
       "Decide how to resume the step a lost worker left.",
     );

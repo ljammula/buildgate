@@ -15,31 +15,8 @@
 # `factoryd`'s bare single-ticket invocation: -spec/-ticket/-workspace only,
 # no drafting, no HITL gate, nothing to approve.
 #
-# Oracle fixtures (a fixture's optional 4th field names a directory under
-# data/oracles/, the optional 5th is accept (default) or reject): the approved-
-# oracle path. The directory holds the operator-approved oracle tests, a
-# MANIFEST.json declaring each one's target_path, and RUN_COMMAND.txt (the
-# operator-authored reference_oracle command, read here and passed as
-# -reference-oracle-command). Both use the math_ops repo and ticket, one build
-# each, roughly 3-6 minutes apiece (build + verify + oracle gate + canary):
-#   live-smoke-mathops-oracle (accept): PASS only if the run is accepted AND
-#     run.json records a passed reference_oracle gate with its oracle tree hash,
-#     a TRUSTWORTHY runtime canary, and a passing verify_after_oracle_commit
-#     attempt, AND the result commit (the run's isolated branch) holds the manifest's target_path file and
-#     .buildgate/oracles.json (committed by the host). The host never executes target-repo code; factoryd's own sandboxed
-#     verify_after_oracle_commit attempt is the proof the committed tree verifies.
-#   live-smoke-mathops-oracle-reject (reject): the oracle asserts 3*4 == 13, which
-#     no build that follows the ticket can satisfy. PASS only if the run is
-#     quarantined with a FAILED reference_oracle gate in run.json and neither
-#     the oracle nor .buildgate/oracles.json reached the result commit -- the negative that
-#     proves the gate is real. (The oracle is mounted read-only from a per-run
-#     copy outside the workspace, so "agent edits the oracle" is a structural
-#     impossibility rather than a fixture; it is covered by Go tests.)
-# The oracles are plain-function Python (test_oracle_*.py) run by a stdlib-only
-# runner in RUN_COMMAND.txt, because the default sandbox image has no pytest and
-# unittest cannot collect the canary's non-TestCase classes.
 # LIVE_SMOKE_ONLY=<substring> runs only fixtures whose ticket prefix contains it
-# (e.g. LIVE_SMOKE_ONLY=oracle); a FAIL copies its runs/ evidence to
+# (e.g. LIVE_SMOKE_ONLY=jsonmerge); a FAIL copies its runs/ evidence to
 # ~/buildgate/live-smoke/failed-<ticket>/ before scratch cleanup; --list prints the fixtures and exits without
 # cloning, building or needing Docker/factoryd.
 #
@@ -78,8 +55,7 @@
 # already exists to catch what unit tests and code review alone can't.
 #
 # Usage: scripts/live-smoke.sh [--list | --results [N]]
-# Exit code: 0 iff every fixture met its expectation (accepted; or, for a reject
-# fixture, quarantined by the reference_oracle gate), nonzero otherwise.
+# Exit code: 0 iff every fixture met its expectation (accepted), nonzero otherwise.
 
 set -eu
 
@@ -132,14 +108,12 @@ fi
 FIXTURES="${LIVE_SMOKE_FIXTURES:-"
 $REPO_ROOT/testdata/fixtures/json-merge-patch-rfc7396:$REPO_ROOT/data/tickets/json-merge-patch-rfc7396.spec.md:live-smoke-jsonmerge
 $REPO_ROOT/testdata/fixtures/math_ops:$REPO_ROOT/data/tickets/math-ops-multiply.spec.md:live-smoke-mathops
-$REPO_ROOT/testdata/fixtures/math_ops:$REPO_ROOT/data/tickets/math-ops-multiply.spec.md:live-smoke-mathops-oracle:$REPO_ROOT/data/oracles/math-ops-multiply:accept
-$REPO_ROOT/testdata/fixtures/math_ops:$REPO_ROOT/data/tickets/math-ops-multiply.spec.md:live-smoke-mathops-oracle-reject:$REPO_ROOT/data/oracles/math-ops-multiply-unsatisfiable:reject
 "}"
 
 if [ "${1:-}" = "--list" ]; then
 	for fixture in $FIXTURES; do
 		[ -z "$fixture" ] && continue
-		echo "$fixture" | awk -F: '{ printf "%-32s repo=%s oracle=%s expect=%s\n", $3, $1, ($4 == "" ? "-" : $4), ($5 == "" ? "accept" : $5) }'
+		echo "$fixture" | awk -F: '{ printf "%-32s repo=%s\n", $3, $1 }'
 	done
 	exit 0
 fi
@@ -238,19 +212,15 @@ results=""
 
 for fixture in $FIXTURES; do
 	[ -z "$fixture" ] && continue
-	IFS=: read -r source_repo spec_file ticket_prefix oracle_dir expect <<EOF_FIXTURE
+	IFS=: read -r source_repo spec_file ticket_prefix <<EOF_FIXTURE
 $fixture
 EOF_FIXTURE
-	expect="${expect:-accept}"
+	expect=accept
 	if [ -n "${LIVE_SMOKE_ONLY:-}" ]; then
 		case "$ticket_prefix" in *"$LIVE_SMOKE_ONLY"*) ;; *) continue ;; esac
 	fi
 	selected=$((selected + 1))
 	repo_name="$(basename "$source_repo")"
-	if [ -n "$oracle_dir" ]; then
-		repo_name="${repo_name}-oracle"
-		[ "$expect" = reject ] && repo_name="${repo_name}-reject"
-	fi
 	ticket_id="${ticket_prefix}-$(date +%Y%m%d-%H%M%S)"
 	clone_dir="$SCRATCH/$repo_name"
 	data_dir="$SCRATCH/data-$repo_name"
@@ -277,8 +247,6 @@ EOF_FIXTURE
 	# disposable clones each run); brownfield skips that requirement
 	# without disabling the rest of the preflight the way -skip-project-check
 	# would.
-	# The oracle directory must live outside -workspace (the agent can write
-	# the workspace); a per-run copy under $SCRATCH keeps the fixture pristine.
 	set -- -ticket "$ticket_id" -spec "$spec_file" -workspace "$clone_dir" \
 		-data-dir "$data_dir" -preflight-profile brownfield -open-pull-request=false \
 		-code-review-policy "$LIVE_SMOKE_CODE_REVIEW_POLICY"
@@ -287,12 +255,6 @@ EOF_FIXTURE
 	fi
 	if [ -n "${LIVE_SMOKE_CONFIG:-}" ]; then
 		set -- "$@" -config "$LIVE_SMOKE_CONFIG"
-	fi
-	if [ -n "$oracle_dir" ]; then
-		oracle_copy="$SCRATCH/oracle-$repo_name"
-		mkdir -p "$oracle_copy" && cp "$oracle_dir"/* "$oracle_copy"/
-		set -- "$@" -reference-oracle-dir "$oracle_copy" -reference-oracle-mount-path .oracle \
-			-reference-oracle-command "$(cat "$oracle_copy/RUN_COMMAND.txt")"
 	fi
 	run_start="$(date +%s)"
 	if "$FACTORYD_BIN" "$@"; then
@@ -311,75 +273,25 @@ EOF_FIXTURE
 	# ok=1 only when the run met this fixture's expectation.
 	ok=0
 	problems=""
-	if [ -z "$oracle_dir" ]; then
-		[ "$state" = "accepted" ] || problems="state=$state, want accepted"
-	else
-		target_path="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[0]['target_path'])" "$oracle_dir/MANIFEST.json")"
-		# factoryd isolates each run in its own worktree branch (recorded in
-		# run.json), so the result lives on that branch, not at the clone's HEAD.
-		# Git object reads only; nothing from the result tree is executed.
-		branch="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('branch') or '')" "$run_json" 2>/dev/null || true)"
-		ref="${branch:-HEAD}"
-		has_oracle=0
-		has_index=0
-		git -C "$clone_dir" cat-file -e "$ref:$target_path" 2>/dev/null && has_oracle=1
-		git -C "$clone_dir" cat-file -e "$ref:.buildgate/oracles.json" 2>/dev/null && has_index=1
-		# Prints one line per failed check; empty output means every check held.
-		problems="$(python3 - "$run_json" "$expect" "$target_path" <<'PY'
-import json, sys
-path, expect, target = sys.argv[1:4]
-try:
-    r = json.load(open(path))
-except Exception as e:
-    print("run.json unreadable: %s" % e); sys.exit(0)
-gates = [g for g in r.get("gate_results") or [] if g.get("check") == "reference_oracle"]
-attempts = r.get("attempts") or []
-gate = gates[-1] if gates else None
-if expect == "reject":
-    if r.get("state") != "quarantined":
-        print("state=%s, want quarantined" % r.get("state"))
-    if not gate or gate.get("passed"):
-        print("reference_oracle gate not recorded as failed")
-    oa = [a for a in attempts if a.get("kind") == "reference_oracle"]
-    try:
-        log = open(oa[-1]["log_path"], errors="replace").read()
-    except Exception as e:
-        log = ""
-        print("reference_oracle log unreadable: %s" % e)
-    if not log:
-        print("reference_oracle log is empty: cannot tell an assertion failure from an environment failure")
-    elif "AssertionError" not in log and "FAILED (failures=" not in log:
-        print("reference_oracle failed but not with a test assertion failure (environment error?)")
-else:
-    if r.get("state") != "accepted":
-        print("state=%s, want accepted" % r.get("state"))
-    if not gate or not gate.get("passed") or not gate.get("reference_oracle_sha256"):
-        print("reference_oracle gate not recorded as passed with an oracle hash")
-    if (r.get("oracle_canary") or {}).get("verdict") != "TRUSTWORTHY":
-        print("oracle_canary verdict is not TRUSTWORTHY")
-    if not any(a.get("kind") == "verify_after_oracle_commit" and a.get("exit_code") == 0 for a in attempts):
-        print("no passing verify_after_oracle_commit attempt")
-    authored = [a.get("path") for a in (r.get("oracles") or {}).get("authored") or []]
-    for want in (target, ".buildgate/oracles.json"):
-        if want not in authored:
-            print("run.json oracles.authored lacks %s" % want)
-PY
-)"
-		if [ "$expect" = reject ]; then
-			[ "$has_oracle" = 0 ] || problems="$problems
-oracle test $target_path reached the result commit ($ref) of a run that must not commit it"
-			[ "$has_index" = 0 ] || problems="$problems
-.buildgate/oracles.json reached the result commit ($ref) of a run that must not commit it"
-		else
-			[ "$has_oracle" = 1 ] || problems="$problems
-oracle test $target_path missing from the result commit ($ref)"
-			[ "$has_index" = 1 ] || problems="$problems
-.buildgate/oracles.json missing from the result commit ($ref)"
-		fi
-	fi
+	[ "$state" = "accepted" ] || problems="state=$state, want accepted"
 	if ! python3 -c "import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get('temporal_workflow_id') else 1)" "$run_json" 2>/dev/null; then
 		problems="$problems
 Temporal path expected but run.json has no temporal_workflow_id (did the run reach Temporal?)"
+	fi
+	# SC-022: an accepted run of a request's ticket carries a challenge record
+	# with a verdict or a stated no-verdict cause. A single-ticket run (no
+	# request_id) is never challenged and is not checked.
+	if [ "$state" = "accepted" ] && ! python3 -c '
+import json, sys
+r = json.load(open(sys.argv[1]))
+if not r.get("request_id"):
+    sys.exit(0)
+c = r.get("challenge") or {}
+ok = c.get("verdict") in ("green", "red") or (c.get("verdict") == "no_verdict" and c.get("cause"))
+sys.exit(0 if ok else 1)
+' "$run_json" 2>/dev/null; then
+		problems="$problems
+an accepted request-ticket run has no challenge record with a verdict or a stated no-verdict cause (SC-022)"
 	fi
 	problems="$(printf '%s' "$problems" | sed '/^$/d')"
 	if [ -z "$problems" ]; then ok=1; else printf '%s\n' "$problems"; fi

@@ -2,7 +2,7 @@ import { formatLocalTimestamp } from "@/domain/elapsed";
 import type { Rejection } from "@/domain/request";
 import type { AnchoredChange } from "@/domain/reviewAnchors";
 import { anchorPlace } from "@/domain/reviewAnchors";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { TextDiffView } from "@/ui/DiffView";
 
 export interface RejectionNoteProps {

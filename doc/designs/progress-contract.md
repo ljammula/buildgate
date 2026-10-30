@@ -59,10 +59,11 @@ the Activities in `internal/workflow/activities_*.go`, via the
 (`detail` = gate name, e.g. `diff_scope`), `evidence`, `review`
 (the one review launch, when `code_review` is enabled; the feeds of older
 runs may instead hold `conformity_review` or `code_review`),
-`review_reproduction` (one `start`/`end` per launch of a reviewer's
-reproduction, SC-022; `detail` = `finding N <pass>`, the pass `head1`,
-`head2`, `base` or `recheck`; `pass` when every test passed),
-`commit_oracles`, `post_oracle_commit_verify`, `evaluate`, `finished`.
+`review_reproduction` (only in the feeds of older runs: one `start`/`end` per
+launch of a reviewer's reproduction), `challenge` (a request ticket's first build
+after its review: the challenger job and the factory's run of the files it held,
+or a later build's rerun of them; SC-022),
+`evaluate`, `finished`.
 
 A build attempt that resumes after a lost worker also writes one
 `build` `note` line, `detail` = `build attempt N resumed after the worker
@@ -87,7 +88,7 @@ Two factory `note` lines exist:
   behind <run-id>`, re-emitted when the holder changes) while a run waits
   for a single-instance model host's lock (`internal/modelhost`), then
   event `acquired` (no detail) once it holds the slot. Written by the
-  request-level jobs (`cmd/factoryd/sandbox_exec.go`: spec, plan and oracle
+  request-level jobs (`cmd/factoryd/sandbox_exec.go`: spec and plan
   drafting) and by a run's Activities
   (`internal/workflow/activities_sandbox.go`).
 - `compose_services_lock` — event `waiting` (same detail) while a run
@@ -179,7 +180,7 @@ when a stage starts, the lock is `acquired` or the run `finished`) and
 `waiting_kind` (the `request.WaitKind` of the stage that wait is recorded in). Consumers flag a non-terminal run as **stalled** when
 `now − last_progress_at` exceeds 5 minutes (or, with no lines, `now −
 created_at`). While a verify-family stage (`baseline_verify`, `verify`,
-`full_suite`, `post_oracle_commit_verify`, `gate`) is open, which writes only its start and end
+`full_suite`, `gate`) is open, which writes only its start and end
 lines, the threshold is the longer of 5 minutes and 1.5 times the longest
 verify-family stage the window shows completed; a run's first has no such
 reference and keeps 5 minutes.

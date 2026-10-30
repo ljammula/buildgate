@@ -481,7 +481,7 @@ func (a *Activities) runInstall(ctx context.Context, input RunWorkflowInput, scr
 	} else {
 		// nil relay and nil compose: the install calls no model and
 		// starts no services; it reaches registries only through the proxy.
-		res, err = a.runSandboxWithRetries(ctx, onInstall, logPath, 1, before, after, nil, registrySpec, nil, "", "", nil, nil, command[0], command[1:]...)
+		res, err = a.runSandboxWithRetries(ctx, onInstall, logPath, 1, before, after, nil, registrySpec, nil, nil, nil, command[0], command[1:]...)
 	}
 	if err != nil {
 		return attempts, installFailure("install image: the install could not be run: %v", err)

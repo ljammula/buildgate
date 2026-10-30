@@ -86,6 +86,9 @@ func isolatedTemporalAddress(t *testing.T) string {
 }
 
 func TestMain(m *testing.M) {
+	// An operator's model credential in the environment must not change
+	// which routes a test finds usable; tests that need one set it.
+	os.Unsetenv("ANTHROPIC_API_KEY")
 	os.Exit(runTests(m))
 }
 
@@ -339,28 +342,6 @@ func newFixtureRepo(t *testing.T) string {
 	repo := testfixture.NewGitRepo(t)
 	testfixture.CommitAgentsFile(t, repo)
 	return repo
-}
-
-// xdgOnlySandboxDockerOverride writes a session config setting
-// sandbox_docker to dockerBinary and returns env restoring the operator's
-// real HOME (see realHomeForLiveDocker's own comment -- TestMain has
-// already overwritten this process's own HOME package-wide, so there is
-// no "leave HOME alone" option left for this one subprocess) alongside an
-// XDG_CONFIG_HOME pointed at this override, so sessionconfig.DefaultPaths'
-// own first candidate finds it. Shared by every DOCKER_SANDBOX_LIVE=1 test
-// in this package that needs the real "docker" binary rather than the
-// package-wide testdata/fake_docker.sh fixture TestMain otherwise wires
-// in via HOME/XDG_CONFIG_HOME.
-func xdgOnlySandboxDockerOverride(t *testing.T, dockerBinary string) []string {
-	t.Helper()
-	xdg := filepath.Join(t.TempDir(), "xdg")
-	if err := os.MkdirAll(filepath.Join(xdg, "factoryd"), 0o750); err != nil {
-		t.Fatalf("mkdir session config dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(xdg, "factoryd", "config.yml"), []byte("sandbox_docker: "+dockerBinary+"\n"), 0o600); err != nil {
-		t.Fatalf("write session config: %v", err)
-	}
-	return []string{"HOME=" + realHomeForLiveDocker, "XDG_CONFIG_HOME=" + xdg}
 }
 
 // terminateRepositoryOwnerAtCleanup registers a t.Cleanup that terminates

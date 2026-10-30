@@ -69,7 +69,7 @@ func TestStagePreviousPlanAfterPlanReviewRejectUsesHandedOverTickets(t *testing.
 	if err := requestdriver.AdvancePlanning(newTestDeps(t), context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := request.Reject(dataDir, id, "operator", "revise the tickets", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "operator", "revise the tickets", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan review: %v", err)
 	}
 	rejected, err := request.Load(dataDir, id)

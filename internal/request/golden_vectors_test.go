@@ -34,11 +34,6 @@ type contentHashVectors struct {
 		} `json:"tickets"`
 		Want map[string]string `json:"want"`
 	} `json:"approvals"`
-	OracleApprovals []struct {
-		Name  string            `json:"name"`
-		Shown map[string]string `json:"shown"`
-		Want  map[string]string `json:"want"`
-	} `json:"oracle_approvals"`
 	ReadBackAnswers []struct {
 		Name      string             `json:"name"`
 		Questions []ReadBackQuestion `json:"questions"`
@@ -56,15 +51,15 @@ func loadContentHashVectors(t *testing.T) contentHashVectors {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		t.Fatalf("decode golden vectors: %v", err)
 	}
-	if len(v.Digests) == 0 || len(v.Approvals) == 0 || len(v.OracleApprovals) == 0 || len(v.ReadBackAnswers) == 0 {
-		t.Fatalf("golden vectors are missing a section: %d digests, %d approvals, %d oracle approvals, %d read-back answers", len(v.Digests), len(v.Approvals), len(v.OracleApprovals), len(v.ReadBackAnswers))
+	if len(v.Digests) == 0 || len(v.Approvals) == 0 || len(v.ReadBackAnswers) == 0 {
+		t.Fatalf("golden vectors are missing a section: %d digests, %d approvals, %d read-back answers", len(v.Digests), len(v.Approvals), len(v.ReadBackAnswers))
 	}
 	return v
 }
 
 // TestContentHashGoldenVectorDigests hashes every vector both ways the
-// server hashes approved content: sha256Hex over bytes in memory (oracle
-// files) and HashFile over a file on disk (spec.md, ticket specs).
+// server hashes approved content: sha256Hex over bytes in memory
+// and HashFile over a file on disk (spec.md, ticket specs).
 func TestContentHashGoldenVectorDigests(t *testing.T) {
 	for _, d := range loadContentHashVectors(t).Digests {
 		t.Run(d.Name, func(t *testing.T) {
@@ -169,23 +164,5 @@ func TestContentHashGoldenVectorReadBackAnswers(t *testing.T) {
 	}
 	if got := ReadBackShownSHA256(nil); got != sha256Hex(nil) {
 		t.Errorf("ReadBackShownSHA256(nil) = %s, want the digest of no bytes", got)
-	}
-}
-
-// TestContentHashGoldenVectorOracleKeys pins the key an oracle_review
-// approval names each shown file by.
-func TestContentHashGoldenVectorOracleKeys(t *testing.T) {
-	for _, o := range loadContentHashVectors(t).OracleApprovals {
-		t.Run(o.Name, func(t *testing.T) {
-			if len(o.Want) != len(o.Shown) {
-				t.Fatalf("want has %d keys for %d shown files", len(o.Want), len(o.Shown))
-			}
-			for name, hash := range o.Shown {
-				key := filepath.ToSlash(filepath.Join(RequestOracleDirName, name))
-				if got, ok := o.Want[key]; !ok || got != hash {
-					t.Errorf("want[%q] = %q (present %v), want %q", key, got, ok, hash)
-				}
-			}
-		})
 	}
 }

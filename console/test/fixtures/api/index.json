@@ -232,13 +232,6 @@
   },
   {
     "pattern": "GET /requests/{id}",
-    "path": "/requests/req-oracle-review",
-    "file": "request-oracle-review.json",
-    "status": 200,
-    "content_type": "application/json"
-  },
-  {
-    "pattern": "GET /requests/{id}",
     "path": "/requests/req-plan-review",
     "file": "request-plan-review.json",
     "status": 200,
@@ -278,34 +271,6 @@
     "file": "request-every-field.json",
     "status": 200,
     "content_type": "application/json"
-  },
-  {
-    "pattern": "GET /requests/{id}/oracle",
-    "path": "/requests/req-oracle-review/oracle",
-    "file": "request-oracle.json",
-    "status": 200,
-    "content_type": "application/json"
-  },
-  {
-    "pattern": "GET /requests/{id}/oracle/{name}",
-    "path": "/requests/req-oracle-review/oracle/RUN_COMMAND.txt",
-    "file": "request-oracle-file.txt",
-    "status": 200,
-    "content_type": "text/plain"
-  },
-  {
-    "pattern": "GET /requests/{id}/tickets/{n}/oracle",
-    "path": "/requests/req-plan-review/tickets/1/oracle",
-    "file": "ticket-oracle.json",
-    "status": 200,
-    "content_type": "application/json"
-  },
-  {
-    "pattern": "GET /requests/{id}/tickets/{n}/oracle/{name}",
-    "path": "/requests/req-plan-review/tickets/1/oracle/RUN_COMMAND.txt",
-    "file": "ticket-oracle-file.txt",
-    "status": 200,
-    "content_type": "text/plain"
   },
   {
     "pattern": "GET /requests/{id}/revisions",

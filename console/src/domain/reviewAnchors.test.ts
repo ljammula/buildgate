@@ -68,7 +68,7 @@ test("a plan offers each ticket file by its request-relative path, with its sect
   ]);
 });
 
-test.each(["oracle_review", "building", "quarantined"])("nothing to point at in %s", (state) => {
+test.each(["building", "quarantined"])("nothing to point at in %s", (state) => {
   expect(anchorTargets(request({ state, spec: SPEC }))).toEqual([]);
 });
 
@@ -108,7 +108,7 @@ test("an excerpt is null where the place does not exist or the file has no secti
   expect(anchorExcerpt(OLD_SPEC, anchor("spec.md", "## Acceptance criteria", 3))).toBeNull();
   expect(anchorExcerpt(OLD_SPEC, anchor("spec.md", "## Scope", 0))).toBeNull();
   expect(anchorExcerpt(OLD_SPEC, anchor("spec.md", "## Not a heading", 0))).toBeNull();
-  expect(anchorExcerpt("x", anchor("oracle/RUN_COMMAND.txt", "## Problem", 0))).toBeNull();
+  expect(anchorExcerpt("x", anchor("other/file.txt", "## Problem", 0))).toBeNull();
 });
 
 test("each anchored note is set against its place then and now", () => {
@@ -287,7 +287,7 @@ describe("anchorForSelection", () => {
     expect(anchorForSelection("spec.md", spec, 5, 5)).toBeNull();
     expect(anchorForSelection("spec.md", spec, 0, spec.length + 1)).toBeNull();
     expect(anchorForSelection("spec.md", "a\n\n\nb", 1, 3)).toBeNull();
-    expect(anchorForSelection("oracle/RUN_COMMAND.txt", spec, 0, 4)).toBeNull();
+    expect(anchorForSelection("other/file.txt", spec, 0, 4)).toBeNull();
   });
 
   test("a quote is cut at 2000 bytes between characters", () => {
@@ -305,7 +305,7 @@ test("a redraft is scoped only by comments with no reason and none on the whole 
   expect(redraftIsScoped([], "")).toBe(false);
   expect(redraftIsScoped([scope, anchor("spec.md", "", 0)], "")).toBe(false);
   expect(redraftIsScoped([anchor("tickets/001.spec.md", "", 0)], "")).toBe(true);
-  expect(redraftIsScoped([anchor("oracle/RUN_COMMAND.txt", "", 0)], "")).toBe(false);
+  expect(redraftIsScoped([anchor("other/file.txt", "", 0)], "")).toBe(false);
 });
 
 test("operator-shaped spec comments can scope any document heading", () => {

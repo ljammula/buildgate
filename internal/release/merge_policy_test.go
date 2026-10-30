@@ -96,14 +96,20 @@ func TestMergePolicyCheckRejectsMissingDiffStat(t *testing.T) {
 
 func TestMergePolicyCheckRejectsFilesChangedOverLimit(t *testing.T) {
 	r := cleanRun()
-	r.DiffStat.FilesChanged = 11
-	assertMergePolicyReason(t, r, cleanPolicy(), "11 files")
+	r.ChangeSize.SourceFiles = 11
+	assertMergePolicyReason(t, r, cleanPolicy(), "11 source files")
 }
 
-func TestMergePolicyCheckRejectsInsertionsOverLimit(t *testing.T) {
+func TestMergePolicyCheckRejectsChangedLinesOverLimit(t *testing.T) {
 	r := cleanRun()
-	r.DiffStat.Insertions = 101
-	assertMergePolicyReason(t, r, cleanPolicy(), "101 insertions")
+	r.ChangeSize.SourceLines = 101
+	assertMergePolicyReason(t, r, cleanPolicy(), "101 source lines")
+}
+
+func TestMergePolicyCheckRejectsMissingSourceChangeSize(t *testing.T) {
+	r := cleanRun()
+	r.ChangeSize = nil
+	assertMergePolicyReason(t, r, cleanPolicy(), "no source change size")
 }
 
 func TestMergePolicyCheckRejectsMissingRollbackPlan(t *testing.T) {
@@ -323,16 +329,16 @@ func TestMergePolicyCheckRejectsMissingDependencyLockfileEvidence(t *testing.T) 
 	assertMergePolicyReason(t, r, cleanPolicy(), "no dependency-lockfile evidence")
 }
 
-func TestMergePolicyCheckRejectsNegativeDiffStat(t *testing.T) {
+func TestMergePolicyCheckRejectsNegativeChangeSize(t *testing.T) {
 	r := cleanRun()
-	r.DiffStat.FilesChanged = -1
-	r.DiffStat.Insertions = -1
+	r.ChangeSize.SourceFiles = -1
+	r.ChangeSize.SourceLines = -1
 
 	passed, reasons := MergePolicyCheck(r, cleanPolicy())
 	if passed {
 		t.Fatal("MergePolicyCheck() passed, want false")
 	}
-	for _, want := range []string{"files changed must not be negative", "insertions must not be negative"} {
+	for _, want := range []string{"files changed must not be negative", "lines changed must not be negative"} {
 		if !containsReason(reasons, want) {
 			t.Errorf("MergePolicyCheck() reasons = %v, want one naming %q", reasons, want)
 		}
@@ -379,6 +385,7 @@ func cleanRun() run.Run {
 			Insertions:   40,
 			Deletions:    5,
 		},
+		ChangeSize: &run.ChangeSize{SourceFiles: 1, SourceLines: 45},
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Command: []string{"make", "verify"}, Passed: true, LogSHA256: "log123"},
 		},
@@ -396,7 +403,7 @@ func cleanPolicy() MergePolicy {
 	return MergePolicy{
 		ProtectedPaths:  []string{".github/workflows/release.yml", "deploy/production.yml"},
 		MaxFilesChanged: 10,
-		MaxInsertions:   100,
+		MaxChangedLines: 100,
 		RollbackPlan:    "release/rollback.md",
 	}
 }
@@ -419,4 +426,32 @@ func containsReason(reasons []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestMergePolicyCheckDeniesAChangeTouchingMoreThanOnePROrderGroup(t *testing.T) {
+	r := cleanRun()
+	r.PROrder = &run.PROrder{Groups: [][]string{{"db/migrations/"}}}
+	r.ChangedFiles = []string{"db/migrations/001.sql", "main.go"}
+	assertMergePolicyReason(t, r, cleanPolicy(), "db/migrations/001.sql in pr_order group 1")
+	assertMergePolicyReason(t, r, cleanPolicy(), "main.go in the files no pr_order group lists")
+	r.ChangedFiles = []string{"db/migrations/001.sql"}
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("a change inside one group is denied: %v", reasons)
+	}
+	r.PROrder = nil
+	r.ChangedFiles = []string{"db/migrations/001.sql", "main.go"}
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("a run with no pr_order is denied: %v", reasons)
+	}
+}
+
+func TestMergePolicyCheckDeniesACarvedTicketsFileOfAnotherGroup(t *testing.T) {
+	r := cleanRun()
+	r.PROrder = &run.PROrder{Groups: [][]string{{"db/migrations/"}}, TicketGroup: 1}
+	r.ChangedFiles = []string{"db/migrations/001.sql", "main.go"}
+	assertMergePolicyReason(t, r, cleanPolicy(), "main.go belongs to the files no pr_order group lists")
+	r.ChangedFiles = []string{"db/migrations/002.sql"}
+	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
+		t.Errorf("a carved ticket's own group is denied: %v", reasons)
+	}
 }

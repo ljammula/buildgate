@@ -91,3 +91,14 @@ func TestSpliceSectionsUsesTheSharedMaskForHTMLComments(t *testing.T) {
 		t.Fatalf("SpliceSections with a commented heading: %v", err)
 	}
 }
+
+// SectionText returns the text of the skeleton section heading opens in
+// content (its heading line included), and false when content has no such
+// heading.
+func SectionText(content string, headings []string, heading string) (string, bool) {
+	s, ok := parseSkeleton(content, headings).span(heading)
+	if !ok {
+		return "", false
+	}
+	return content[s.start:s.end], true
+}

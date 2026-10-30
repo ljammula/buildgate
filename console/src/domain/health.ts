@@ -72,7 +72,6 @@ function runningJob(id: string, requests: readonly RequestSummary[]): RunningJob
 export const workerJobStates: ReadonlySet<string> = new Set([
   "submitted",
   "spec_drafting",
-  "oracle_drafting",
   "planning",
   "building",
 ]);

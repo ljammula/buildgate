@@ -81,6 +81,12 @@ type ReviewState struct {
 	// or failing -- and otherwise reports whether every configured check
 	// succeeded.
 	ChecksPassing *bool
+	// Checks is every check of the PR head's status check rollup, with
+	// whether GitHub says it is required. RequiredUnknown is set, and every
+	// Required nil, when that flag could not be read. Checks is empty when
+	// the head moved between the reads of the PR and of its checks.
+	Checks          []Check
+	RequiredUnknown bool
 	// HeadSHA is GitHub's own current head commit SHA for this PR
 	// (headRefOid) -- a caller gating a side effect on a locally-recorded
 	// run's own release.Decision must confirm that run's ResultSHA is
@@ -695,7 +701,17 @@ func (o GHPullRequestOpener) ReadReviewState(ctx context.Context, prURL string, 
 		cursor = endCursor
 	}
 
+	checksHead, checks, requiredUnknown, err := readChecks(ctx, ghBinary, owner, repo, number)
+	if err != nil {
+		return ReviewState{}, err
+	}
+	if checksHead != headSHA {
+		checks, requiredUnknown = nil, false
+	}
+
 	return ReviewState{
+		Checks:             checks,
+		RequiredUnknown:    requiredUnknown,
 		IsDraft:            isDraft,
 		State:              state,
 		MergedAt:           mergedAt,

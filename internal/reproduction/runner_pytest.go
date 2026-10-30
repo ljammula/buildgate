@@ -30,22 +30,50 @@ var (
 	pyClassTest = regexp.MustCompile(`^[ \t]+(?:async\s+)?def\s+(test\w*)\s*\(`)
 )
 
-// TestIDs are pytest's default collection from the file's text: top-level
+// Tests are pytest's default collection from the file's text: top-level
 // test* functions as "name", and test* methods of top-level Test* classes as
-// "Class::name". Lines inside triple-quoted strings are skipped.
-func (pytestJUnit) TestIDs(_ string, content []byte) ([]string, error) {
-	var ids []string
+// "Class::name". Lines inside triple-quoted strings are skipped. A test spans
+// from its def line to the last line indented deeper than it (blank and
+// comment lines do not extend it).
+func (pytestJUnit) Tests(_ string, content []byte) ([]TestSpan, error) {
+	var spans []TestSpan
 	class := ""
+	open := -1 // index in spans of the test whose block is open
+	openIndent := 0
 	inString := false
-	for _, line := range strings.Split(string(content), "\n") {
+	for i, line := range strings.Split(string(content), "\n") {
+		no := i + 1
 		quoted := inString
 		inString = togglesTripleQuote(line, inString)
 		if quoted {
+			if open >= 0 {
+				spans[open].End = no
+			}
 			continue
 		}
-		ids, class = pyLine(line, class, ids)
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if open >= 0 && indent <= openIndent {
+			open = -1
+		}
+		if open >= 0 {
+			spans[open].End = no
+			continue
+		}
+		var id string
+		id, class = pyLine(line, class)
+		if id != "" {
+			spans = append(spans, TestSpan{ID: id, Start: no, End: no})
+			open, openIndent = len(spans)-1, indent
+		}
+		if inString && open >= 0 {
+			spans[open].End = no // the def line opens a string that runs on
+		}
 	}
-	return uniqueIDs(ids), nil
+	return uniqueSpans(spans), nil
 }
 
 // togglesTripleQuote reports whether a triple-quoted string is open after
@@ -56,29 +84,24 @@ func togglesTripleQuote(line string, open bool) bool {
 }
 
 // pyLine reads one line outside a string: a top-level line ends the current
-// class, and may open a Test* class or name a test.
-func pyLine(line, class string, ids []string) ([]string, string) {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-		return ids, class
-	}
+// class, and may open a Test* class or name a test (its ID, "" for none).
+func pyLine(line, class string) (id, newClass string) {
 	if line[0] != ' ' && line[0] != '\t' {
 		if strings.HasPrefix(line, "@") {
-			return ids, class // a decorator keeps the class open for the next line
+			return "", class // a decorator keeps the class open for the next line
 		}
-		class = ""
 		if m := pyClass.FindStringSubmatch(line); m != nil {
-			return ids, m[1]
+			return "", m[1]
 		}
 		if m := pyTopTest.FindStringSubmatch(line); m != nil {
-			ids = append(ids, m[1])
+			return m[1], ""
 		}
-		return ids, class
+		return "", ""
 	}
 	if m := pyClassTest.FindStringSubmatch(line); m != nil && class != "" && methodIndent(line) {
-		ids = append(ids, class+"::"+m[1])
+		return class + "::" + m[1], class
 	}
-	return ids, class
+	return "", class
 }
 
 // methodIndent: one level of indentation (four spaces or one tab), the
@@ -90,8 +113,21 @@ func methodIndent(line string) bool {
 
 func (pytestJUnit) Command(inv Invocation) Command {
 	script := fmt.Sprintf(`PYTHONPATH=%s"${PYTHONPATH:+:$PYTHONPATH}" BG_REPRO_TEST_TIMEOUT=%d python3 -m pytest -p no:cacheprovider -o addopts= -p bg_repro_timeout --junitxml=%s -q %s`,
-		shellQuote(inv.HelperDir), int(PerTestTimeout.Seconds()), shellQuote(inv.ReportPath), shellQuote(inv.Path))
+		shellQuote(inv.HelperDir), int(PerTestTimeout.Seconds()), shellQuote(inv.ReportPath), pytestNodeIDs(inv))
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(pytestTimeoutPlugin), Timeout: launchTimeout(inv.TestIDs)}
+}
+
+// pytestNodeIDs are the invocation's tests as pytest node IDs, so a launch
+// runs those tests and not the rest of the file; with none, the file.
+func pytestNodeIDs(inv Invocation) string {
+	if len(inv.TestIDs) == 0 {
+		return shellQuote(inv.Path)
+	}
+	words := make([]string, len(inv.TestIDs))
+	for i, id := range inv.TestIDs {
+		words[i] = shellQuote(inv.Path + "::" + id)
+	}
+	return strings.Join(words, " ")
 }
 
 // pyModuleError is Python's error for a module it cannot find.

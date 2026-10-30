@@ -71,8 +71,7 @@ type Check struct {
 	Finding string `json:"finding,omitempty"`
 	// Output is the lines of the gate's command output that report the
 	// failure (observation.Excerpt of its log's end), each cleaned and cut
-	// like every other value here. Present for a failed command gate; never
-	// for the reference oracle.
+	// like every other value here. Present for a failed command gate.
 	Output []string `json:"output,omitempty"`
 	// Environment is a sentence the factory writes from a reading taken
 	// outside the sandbox (never from the check's log): the step's worker was
@@ -111,15 +110,18 @@ type Document struct {
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	Rounds       []Round  `json:"rounds,omitempty"`
 	Checks       []Check  `json:"checks,omitempty"`
-	// ReproducedFindings are the review findings whose reproduction the
-	// factory ran and saw block the run (SC-022), present when
-	// review_reproduction failed: each one line, never the reproduction's
-	// content or the reviewer's failure scenario (SC-018).
-	ReproducedFindings []ReproducedFinding `json:"reproduced_findings,omitempty"`
 	// AdviceFindings are the high-severity findings of an accepted run's
 	// review, present only in the record an advice round's build is given
 	// (Advice): each value cut and cleaned like every other value here.
 	AdviceFindings []AdviceFinding `json:"advice_findings,omitempty"`
+	// ChallengeFiles are the held challenge files that failed on an accepted
+	// run (SC-022), present only in the record a challenge round's build is
+	// given: path, the criterion cited and each failing test, never a
+	// file's content.
+	ChallengeFiles []ChallengeFile `json:"challenge_files,omitempty"`
+	// CIFailure is the required CI check that failed on the pull request,
+	// present only in the record a CI round's build is given (CI).
+	CIFailure *CIFailure `json:"ci_failure,omitempty"`
 	// AgentNotes are the build agent's own notes for whoever attempts the
 	// ticket next: its view, not the factory's record. They never decide
 	// Next or a bin, and Markdown puts them last (SC-018).
@@ -142,8 +144,8 @@ func Build(r *run.Run, dataDir string) Document {
 		ChangedFiles: cleanList(r.ChangedFiles, maxFilesListed, maxNameLen),
 	}
 	// Only a halt gets the run's one-line reason. A quarantine's is the
-	// operator's sentence about its first failed check, which may name an
-	// oracle or quote its log; the checks below say the same without that.
+	// operator's sentence about its first failed check, which may quote its
+	// log; the checks below say the same without that.
 	if r.State == run.StateHalted {
 		doc.Stopped = clean(firstNonEmpty(r.Triage, triage.Run(r, dataDir)), maxSentenceLen)
 		if r.HaltReasonCode == run.HaltReasonReviewInstructionsFailed {
@@ -195,49 +197,11 @@ func Build(r *run.Run, dataDir string) Document {
 			NotJudged:   uncommitted && DiffChecks[finding.Check],
 		})
 	}
-	if failed[policy.ReviewReproductionCheck] {
-		doc.ReproducedFindings = reproducedFindings(r)
-	}
 	doc.Next = Next(r.State == run.StateHalted, doc.Checks)
 	if text, ok := evidence.ReadRetainedAgentNotes(runDir); ok {
 		doc.AgentNotes = parseNotes(text)
 	}
 	return doc
-}
-
-// ReproducedFinding is one blocking finding as a later build is told it:
-// the reviewer's severity and summary, the spec line it cited, the
-// reproduction's path, and one test ID with the failure kind the factory's
-// run recorded for it. Every string is cleaned.
-type ReproducedFinding struct {
-	Severity string `json:"severity"`
-	Summary  string `json:"summary"`
-	SpecLine int    `json:"spec_line,omitempty"`
-	Path     string `json:"path"`
-	TestID   string `json:"test_id,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-}
-
-// reproducedFindings lists the run's blocking findings, at most
-// maxReviewItems.
-func reproducedFindings(r *run.Run) []ReproducedFinding {
-	if r.CodeReview == nil {
-		return nil
-	}
-	var out []ReproducedFinding
-	for _, f := range r.CodeReview.Findings {
-		if f.Disposition != run.DispositionBlocks || f.Reproduction == nil || len(out) == maxReviewItems {
-			continue
-		}
-		rf := ReproducedFinding{Severity: clean(f.Severity, maxWordLen), Summary: clean(f.Summary, maxSentenceLen), Path: clean(f.Reproduction.Path, maxNameLen)}
-		if f.SpecLine != nil {
-			rf.SpecLine = f.SpecLine.Number
-		}
-		id, kind := f.Reproduction.FailedTest()
-		rf.TestID, rf.Kind = clean(id, maxNameLen), clean(kind, maxWordLen)
-		out = append(out, rf)
-	}
-	return out
 }
 
 // AdviceFinding is one high-severity finding of an accepted run's review as
@@ -276,6 +240,70 @@ func Advice(r *run.Run) Document {
 		})
 	}
 	return doc
+}
+
+// ChallengeFile is one failing challenge file as the challenge round's build
+// is told it. Every string is cleaned.
+type ChallengeFile struct {
+	Path      string   `json:"path"`
+	Criterion string   `json:"criterion,omitempty"`
+	Failures  []string `json:"failures,omitempty"`
+}
+
+// maxChallengeFailureLines bounds the failing tests listed per challenge file.
+const maxChallengeFailureLines = 20
+
+// Challenge is the record a challenge round's build is given about r, an
+// accepted run whose challenge was red: each failing held file's path, the
+// criterion it cites and each failing test with its assertion, one cleaned
+// line each. Built from the run record alone; never saved as a handoff.
+func Challenge(r *run.Run) Document {
+	doc := Document{
+		SchemaVersion: SchemaVersion, RunID: r.ID, Ticket: r.Ticket, State: string(r.State),
+		BaseSHA: clean(r.BaseSHA, maxNameLen), ResultSHA: clean(r.ResultSHA, maxNameLen),
+		ChangedFiles: cleanList(r.ChangedFiles, maxFilesListed, maxNameLen),
+	}
+	if r.Challenge == nil {
+		return doc
+	}
+	for _, f := range r.Challenge.Files {
+		if f.Verdict != run.ChallengeRed || len(doc.ChallengeFiles) == maxAdviceFindings {
+			continue
+		}
+		cf := ChallengeFile{Path: clean(f.Path, maxNameLen), Criterion: clean(f.Criterion, maxWordLen)}
+		for _, fl := range f.Failures {
+			if len(cf.Failures) == maxChallengeFailureLines {
+				break
+			}
+			line := fl.Test
+			if fl.Assertion != "" {
+				line += ": " + fl.Assertion
+			}
+			cf.Failures = append(cf.Failures, clean(line, maxSentenceLen))
+		}
+		doc.ChallengeFiles = append(doc.ChallengeFiles, cf)
+	}
+	return doc
+}
+
+// challengeIntro opens the challenge section.
+const challengeIntro = "That attempt passed every check and was accepted. The factory then ran the tests below, which another model wrote from the approved specification alone, and they failed on it. Each file is mounted read-only in your workspace at its path: read it, never edit it. Decide for each failure whether the code is wrong or the test is: fix the code where it is wrong; where the test is wrong, leave the code as it is and say why in one line in your notes. Every check, and a fresh review, runs again on what this build commits, and the tests run again on it.\n\n"
+
+// line is the challenge file's one list line.
+func (f ChallengeFile) line() string {
+	cited := ""
+	if f.Criterion != "" {
+		cited = " (" + f.Criterion + ")"
+	}
+	failures := ""
+	if len(f.Failures) > 0 {
+		quoted := make([]string, len(f.Failures))
+		for i, s := range f.Failures {
+			quoted[i] = quote(s)
+		}
+		failures = ": failing " + strings.Join(quoted, "; ")
+	}
+	return fmt.Sprintf("- `%s`%s%s\n", f.Path, cited, failures)
 }
 
 // adviceIntro opens the advice section: what the findings are and what the
@@ -339,8 +367,7 @@ func environmentSentence(r *run.Run, check string) string {
 //     build can make it pass, so it is the operator's (BinOperator) and no
 //     corrective build is spent on it. A rerun that failed in another way
 //     (the ticket's job may be to fix that gate), that passed, or that could
-//     not be made, leaves the gate where BinOf puts it. The reference oracle
-//     is never rerun.
+//     not be made, leaves the gate where BinOf puts it.
 func binFor(r *run.Run, finding triage.GateFinding) Bin {
 	switch {
 	case failsOnBase(r, finding.Check):
@@ -566,9 +593,10 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
-	if len(d.ReproducedFindings) > 0 {
-		b.WriteString("## Reproduced review findings\n\n")
-		for _, f := range d.ReproducedFindings {
+	if len(d.ChallengeFiles) > 0 {
+		b.WriteString("## Tests written against the accepted change that fail\n\n")
+		b.WriteString(challengeIntro)
+		for _, f := range d.ChallengeFiles {
 			b.WriteString(f.line())
 		}
 		b.WriteString("\n")
@@ -581,6 +609,7 @@ func (d Document) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
+	d.CIFailure.markdown(&b)
 	if len(d.Rounds) > 0 {
 		b.WriteString("## Build rounds\n\n")
 		for _, r := range d.Rounds {
@@ -614,27 +643,18 @@ func (d Document) Markdown() string {
 	}
 	b.WriteString(d.AgentNotes.markdown())
 	out := b.String()
-	if len(out) > maxMarkdownBytes {
-		cut := strings.LastIndex(out[:maxMarkdownBytes], "\n")
+	limit := maxMarkdownBytes
+	if d.CIFailure != nil {
+		limit += MaxCILogBytes
+	}
+	if len(out) > limit {
+		cut := strings.LastIndex(out[:limit], "\n")
 		if cut < 0 {
-			cut = maxMarkdownBytes
+			cut = limit
 		}
 		out = strings.ToValidUTF8(out[:cut], "") + "\n\n(The rest of this record was cut to fit.)\n"
 	}
 	return out
-}
-
-// ReproducedFindingLines is each blocking finding of r (at most
-// maxReviewItems) as the one list line a later build is told of it, for
-// text other than the Document: the reply a pull-request review round posts
-// on the reviewer's thread. Never the reproduction's content or the failure
-// scenario.
-func ReproducedFindingLines(r *run.Run) []string {
-	var lines []string
-	for _, f := range reproducedFindings(r) {
-		lines = append(lines, f.line())
-	}
-	return lines
 }
 
 // CleanSentence is s as this package makes a sentence someone else wrote
@@ -644,20 +664,6 @@ func CleanSentence(s string) string { return clean(s, maxSentenceLen) }
 
 // CleanWord: see CleanSentence.
 func CleanWord(s string) string { return clean(s, maxWordLen) }
-
-// line is the finding's one list line: the reviewer's words quoted, the
-// factory's in the sentence.
-func (f ReproducedFinding) line() string {
-	cited := ""
-	if f.SpecLine > 0 {
-		cited = fmt.Sprintf(" (spec line %d)", f.SpecLine)
-	}
-	failure := ""
-	if f.TestID != "" {
-		failure = fmt.Sprintf(": %s %s", quote(f.TestID), f.Kind)
-	}
-	return fmt.Sprintf("- %s %s%s: the factory's run of `%s` failed on the result%s\n", quote(f.Severity), quote(f.Summary), cited, f.Path, failure)
-}
 
 const maxFilesInLine = 12
 
@@ -680,4 +686,21 @@ func fileList(files []string) string {
 // value cannot close its own quotation.
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, "'") + `"`
+}
+
+// NoteLine is the first line of the build agent's retained notes of the run in
+// runDir (a heading is not one), cleaned as every value here is: what a
+// challenge round's build said about a failing test it would not make pass. ""
+// when the run kept no notes.
+func NoteLine(runDir string) string {
+	text, ok := evidence.ReadRetainedAgentNotes(runDir)
+	if !ok {
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			return clean(line, maxSentenceLen)
+		}
+	}
+	return ""
 }

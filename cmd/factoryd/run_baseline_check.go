@@ -54,7 +54,7 @@ func (tr *ticketRun) prepareBaselineCheck() error {
 	for name, set := range map[string]bool{
 		"-repository": *tr.repository != "", "-prior-run": *tr.priorRun != "", "-on-branch": *tr.onBranch != "",
 		"-request-ticket": *tr.rf.requestTicket, "-open-pull-request": *tr.rf.openPullRequest, "-ticket-file": *tr.rf.ticketFile != "",
-		"-reference-oracle-dir": *tr.rf.referenceOracleDir != "", "-resume-worktree-of": *tr.rf.resumeWorktreeOf != "", "-run-id": *tr.rf.runID != "",
+		"-resume-worktree-of": *tr.rf.resumeWorktreeOf != "", "-run-id": *tr.rf.runID != "",
 	} {
 		if set {
 			return fmt.Errorf("-baseline-check checks the repository's HEAD on its own and builds nothing: it takes no %s", name)

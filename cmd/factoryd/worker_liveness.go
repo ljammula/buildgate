@@ -364,7 +364,7 @@ func workerRouteStatusLine(dataDir string, now time.Time) string {
 // nothing further).
 func workerDependentState(s request.State) bool {
 	switch s {
-	case request.StateSubmitted, request.StateSpecDrafting, request.StateOracleDrafting, request.StatePlanning, request.StateBuilding:
+	case request.StateSubmitted, request.StateSpecDrafting, request.StatePlanning, request.StateBuilding:
 		return true
 	default:
 		return false

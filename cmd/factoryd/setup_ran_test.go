@@ -20,7 +20,7 @@ func acceptedWith(attempts ...run.Attempt) workflow.RunWorkflowResult {
 	return workflow.RunWorkflowResult{
 		State:       run.StateAccepted,
 		Attempts:    attempts,
-		GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "lint", Passed: true}},
+		GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "repo-lint", Passed: true}},
 	}
 }
 

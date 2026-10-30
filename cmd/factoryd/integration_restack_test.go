@@ -22,7 +22,7 @@ import (
 // content.txt, ticket 2 other.txt, each covering criterion 1 of the
 // request's spec (restackRequestSpec).
 func restackTicketSpec(file string) string {
-	return "Verify-Command: true\nAllowed-Files: " + file + "\nRequired-Changed-Files: " + file + "\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n\n## Goal\n\nChange " + file + ".\n\n## Plan\n\n### Files to touch\n\n- " + file + "\n\n### Steps\n\n1. Change it.\n\n### Tests to add\n\n- none\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nNothing else.\n"
+	return "Verify-Command: true\nAllowed-Files: " + file + "\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n\n## Goal\n\nChange " + file + ".\n\n## Plan\n\n### Files to touch\n\n- " + file + "\n\n### Steps\n\n1. Change it.\n\n### Tests to add\n\n- none\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nNothing else.\n"
 }
 
 // restackRequestSpec is the request's approved spec.

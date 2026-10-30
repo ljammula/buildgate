@@ -134,9 +134,15 @@ func planCorpusRefusal(t *testing.T, c planCorpusCase) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Exercise the planning job path with every original corpus ticket.
+	const feedback = "exercise corpus plan"
+	fixture.Rejections = append(fixture.Rejections, request.Rejection{By: request.FactoryActor, ForStage: request.StatePlanReview, Reason: feedback})
+	if err := fixture.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	testfixture.WriteEmptyFiles(t, fixture.Workspace, filepath.Join(planCorpusDir, planCorpusWorkspaces, c.project+".files"))
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(c.tickets, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		return "drive: " + err.Error()
 	}
 	loaded, err := request.Load(dataDir, id)
@@ -145,6 +151,9 @@ func planCorpusRefusal(t *testing.T, c planCorpusCase) string {
 	}
 	var reasons []string
 	for _, rejection := range loaded.Rejections {
+		if rejection.By == request.FactoryActor && rejection.Reason == feedback {
+			continue
+		}
 		reasons = append(reasons, rejection.Reason)
 	}
 	if loaded.Error != "" {

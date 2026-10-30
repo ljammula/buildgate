@@ -10,7 +10,7 @@ import (
 )
 
 // A repository command (canonical verify, the baseline verify, the full
-// suite, a named gate, and the setup commands that share its launch) that
+// suite, a repository gate, and the setup commands that share its launch) that
 // fails after Docker's disk ran out of room has not judged the work, and
 // neither has a baseline verify whose sandbox had a process killed for want
 // of memory. Both facts are read by the factory from outside the sandbox

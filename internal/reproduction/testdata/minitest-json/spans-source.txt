@@ -1,0 +1,24 @@
+require "test_helper"
+
+module Shop
+  class CartTest < ActiveSupport::TestCase
+    test "adds an item" do
+      cart.add(item)
+      assert_equal 1, cart.size
+    end
+
+    def test_empty?
+      assert cart.empty?
+    end
+
+    test "one line" do assert true end
+
+    test "braces" {
+      assert true
+    }
+
+    def helper
+      1
+    end
+  end
+end

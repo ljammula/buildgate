@@ -2,8 +2,6 @@ package workflow
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,7 +20,7 @@ import (
 func TestVerifyAndGateActivitiesLaunchWithNoModelRoute(t *testing.T) {
 	gate := func(check string) func(context.Context, *Activities, RunWorkflowInput) error {
 		return func(ctx context.Context, a *Activities, input RunWorkflowInput) error {
-			_, err := a.RunNamedGateActivity(ctx, NamedGateActivityInput{RunWorkflowInput: input, Check: check, Command: "make " + check})
+			_, err := a.RunNamedGateActivity(ctx, RepoGateActivityInput{RunWorkflowInput: input, Check: check, Command: "make " + check})
 			return err
 		}
 	}
@@ -48,26 +46,6 @@ func TestVerifyAndGateActivitiesLaunchWithNoModelRoute(t *testing.T) {
 		{name: "a named gate", launches: 1, run: gate("lint")},
 		// A failed gate is run again on the base commit.
 		{name: "a failed gate and its rerun on the base commit", exitCode: 1, launches: 2, run: gate("unit_tests")},
-		// The oracle gate passes, so its command runs again on the canary.
-		{name: "the reference oracle gate and its canary", launches: 2,
-			edit: func(input *RunWorkflowInput) {
-				input.ReferenceOracleDir = t.TempDir()
-				input.ReferenceOracleMountPath = ".oracle"
-				if err := os.WriteFile(filepath.Join(input.ReferenceOracleDir, "p_oracle_test.go"), []byte(canaryTestOracleSrc), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			},
-			run: func(ctx context.Context, a *Activities, input RunWorkflowInput) error {
-				_, err := a.RunNamedGateActivity(ctx, NamedGateActivityInput{RunWorkflowInput: input, Check: "reference_oracle", Command: "go test ./.oracle", OracleCanary: true})
-				return err
-			}},
-		// Canonical verify, the full suite and the lint gate, one after another.
-		{name: "verify after the oracle commit", launches: 3,
-			edit: func(input *RunWorkflowInput) { setGateCommand(input, "lint", "make lint") },
-			run: func(ctx context.Context, a *Activities, input RunWorkflowInput) error {
-				_, err := a.RunPostOracleCommitVerifyActivity(ctx, input)
-				return err
-			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

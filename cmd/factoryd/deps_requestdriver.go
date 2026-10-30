@@ -67,11 +67,23 @@ func (dp *deps) PushWithLease(ctx context.Context, dir string, sha string, branc
 func (dp *deps) MoveBranch(dir string, branch string, sha string) error {
 	return dp.forge.moveBranch(dir, branch, sha)
 }
+func (dp *deps) ChangedPaths(dir string, base string, result string) ([]string, error) {
+	return dp.forge.changedPaths(dir, base, result)
+}
+func (dp *deps) CarveChain(ctx context.Context, dir string, base string, result string, parts [][]string) error {
+	return dp.forge.carveChain(ctx, dir, base, result, parts)
+}
+func (dp *deps) CarveCommit(ctx context.Context, dir string, parent string, result string, paths []string, message string) (string, error) {
+	return dp.forge.carveCommit(ctx, dir, parent, result, paths, message)
+}
 func (dp *deps) RestoreBranch(dir string, branch string, sha string) (bool, error) {
 	return dp.forge.restoreBranch(dir, branch, sha)
 }
 func (dp *deps) CommentOnPullRequest(ctx context.Context, prURL string, body string) error {
 	return dp.forge.commentOnPullRequest(ctx, prURL, body)
+}
+func (dp *deps) ReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return dp.forge.readJobLog(ctx, prURL, jobID)
 }
 func (dp *deps) HostGitVersion(ctx context.Context) (string, error) {
 	return dp.forge.hostGitVersion(ctx)
@@ -85,6 +97,9 @@ func (dp *deps) RunTicket(ctx context.Context, args []string, onReady func(*run.
 
 func (impl realForge) readReviewState(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 	return requestdriver.RealReadReviewState(ctx, prURL, policy)
+}
+func (impl realForge) readJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return requestdriver.RealReadJobLog(ctx, prURL, jobID)
 }
 func (impl realForge) markPullRequestReady(ctx context.Context, prURL string) error {
 	return requestdriver.RealMarkPullRequestReady(ctx, prURL)

@@ -11,7 +11,7 @@ func TestKillSwitchEngageAndDisengage(t *testing.T) {
 	dir := t.TempDir()
 	now := func() string { return "2026-08-26T12:00:00Z" }
 
-	if err := Engage(dir, "widget", "alice", "pause releases", now); err != nil {
+	if err := engageKillSwitch(dir, "widget", "alice", "pause releases", now); err != nil {
 		t.Fatalf("Engage: %v", err)
 	}
 	engaged, err := IsEngaged(dir, "widget")
@@ -21,7 +21,7 @@ func TestKillSwitchEngageAndDisengage(t *testing.T) {
 	if !engaged {
 		t.Error("IsEngaged after Engage = false, want true")
 	}
-	if err := Disengage(dir, "widget", "bob", "release issue resolved", now); err != nil {
+	if err := disengageKillSwitch(dir, "widget", "bob", "release issue resolved", now); err != nil {
 		t.Fatalf("Disengage: %v", err)
 	}
 	engaged, err = IsEngaged(dir, "widget")
@@ -39,13 +39,13 @@ func TestKillSwitchTransitionsAreIdempotent(t *testing.T) {
 
 	// Redundant requests succeed but do not append history because no state
 	// transition occurred; this keeps the timeline limited to actual changes.
-	if err := Disengage(dir, "widget", "alice", "already safe", now); err != nil {
+	if err := disengageKillSwitch(dir, "widget", "alice", "already safe", now); err != nil {
 		t.Fatalf("initial Disengage: %v", err)
 	}
-	if err := Engage(dir, "widget", "alice", "pause releases", now); err != nil {
+	if err := engageKillSwitch(dir, "widget", "alice", "pause releases", now); err != nil {
 		t.Fatalf("Engage: %v", err)
 	}
-	if err := Engage(dir, "widget", "bob", "still investigating", now); err != nil {
+	if err := engageKillSwitch(dir, "widget", "bob", "still investigating", now); err != nil {
 		t.Fatalf("second Engage: %v", err)
 	}
 	record, err := LoadKillSwitch(dir, "widget")
@@ -76,10 +76,10 @@ func TestKillSwitchHistoryRoundTrips(t *testing.T) {
 		return at
 	}
 
-	if err := Engage(dir, "widget", "alice", "verification incident", nextTime); err != nil {
+	if err := engageKillSwitch(dir, "widget", "alice", "verification incident", nextTime); err != nil {
 		t.Fatalf("Engage: %v", err)
 	}
-	if err := Disengage(dir, "widget", "bob", "incident resolved", nextTime); err != nil {
+	if err := disengageKillSwitch(dir, "widget", "bob", "incident resolved", nextTime); err != nil {
 		t.Fatalf("Disengage: %v", err)
 	}
 
@@ -123,10 +123,10 @@ func TestKillSwitchConcurrentTransitionsRemainConsistent(t *testing.T) {
 				defer wg.Done()
 				now := func() string { return fmt.Sprintf("round-%d-caller-%d", round, caller) }
 				if engaged {
-					errs <- Engage(dir, "widget", "operator", "concurrent test", now)
+					errs <- engageKillSwitch(dir, "widget", "operator", "concurrent test", now)
 					return
 				}
-				errs <- Disengage(dir, "widget", "operator", "concurrent test", now)
+				errs <- disengageKillSwitch(dir, "widget", "operator", "concurrent test", now)
 			}(caller)
 		}
 		wg.Wait()
@@ -154,4 +154,16 @@ func TestKillSwitchConcurrentTransitionsRemainConsistent(t *testing.T) {
 			t.Errorf("History[%d].Engaged = %v, want %v", i, transition.Engaged, wantEngaged)
 		}
 	}
+}
+
+// engageKillSwitch and disengageKillSwitch apply one kill-switch transition
+// and drop the resulting record.
+func engageKillSwitch(dir, project, by, reason string, now func() string) error {
+	_, err := SetKillSwitch(dir, project, by, reason, true, now)
+	return err
+}
+
+func disengageKillSwitch(dir, project, by, reason string, now func() string) error {
+	_, err := SetKillSwitch(dir, project, by, reason, false, now)
+	return err
 }

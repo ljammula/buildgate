@@ -749,14 +749,14 @@ func TestIntegrationRejectsTicketWithPathTraversal(t *testing.T) {
 
 // TestIntegrationRequireDeclaredScopeFlagAbsentProceedsNormally verifies
 // that when -require-declared-scope is not passed (the default), a ticket
-// that declares neither Allowed-Files: nor Required-Changed-Files: runs
+// that declares no Allowed-Files: runs
 // normally and reaches state=accepted, proving zero behavior change when
 // the flag is off.
 func TestIntegrationRequireDeclaredScopeFlagAbsentProceedsNormally(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv, which panics if the
 	// test also calls t.Parallel.
 	ws := newFixtureRepo(t)
-	// Ticket with neither Allowed-Files: nor Required-Changed-Files:
+	// Ticket with no Allowed-Files:
 	specContent := "# Ticket: fixture\n\n## Acceptance\n\nno scope declared\n"
 	r := runFactorydWithSpec(t, ws, "commit", "true", specContent, "30s")
 
@@ -767,7 +767,7 @@ func TestIntegrationRequireDeclaredScopeFlagAbsentProceedsNormally(t *testing.T)
 
 // TestIntegrationRequireDeclaredScopeHaltsWhenKeysMissing verifies that
 // when -require-declared-scope is passed, a ticket declaring neither
-// Allowed-Files: nor Required-Changed-Files: causes factoryd to halt
+// Allowed-Files: causes factoryd to halt
 // before build_app.py is invoked at all. The run is halted (not quarantined
 // from a gate failure), and no attempt is recorded, proving the halt
 // happened early — before build_app.py ran.
@@ -777,7 +777,7 @@ func TestIntegrationRequireDeclaredScopeHaltsWhenKeysMissing(t *testing.T) {
 	ws := newFixtureRepo(t)
 	dataDir := t.TempDir()
 	specPath := filepath.Join(t.TempDir(), "spec.md")
-	// Ticket with neither Allowed-Files: nor Required-Changed-Files:
+	// Ticket with no Allowed-Files:
 	specContent := "# Ticket: fixture\n\n## Acceptance\n\nno scope declared\n"
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -841,16 +841,16 @@ func TestIntegrationRequireDeclaredScopeHaltsWhenKeysMissing(t *testing.T) {
 	}
 }
 
-// TestIntegrationRequireDeclaredScopeProceedsWhenBothKeysPresent verifies
+// TestIntegrationRequireDeclaredScopeProceedsWhenTheKeyIsPresent verifies
 // that when -require-declared-scope is passed and the ticket declares both
-// Allowed-Files: and Required-Changed-Files:, the run proceeds normally
+// Allowed-Files:, the run proceeds normally
 // and reaches state=accepted.
-func TestIntegrationRequireDeclaredScopeProceedsWhenBothKeysPresent(t *testing.T) {
+func TestIntegrationRequireDeclaredScopeProceedsWhenTheKeyIsPresent(t *testing.T) {
 	// not parallel-safe: newFixtureRepo calls t.Setenv, which panics if the
 	// test also calls t.Parallel.
 	ws := newFixtureRepo(t)
-	// Ticket with both Allowed-Files: and Required-Changed-Files:
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt\nRequired-Changed-Files: content.txt\n"
+	// Ticket with Allowed-Files:
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt\n"
 	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", specContent, "30s", nil, []string{"-require-declared-scope"})
 
 	if r.State != run.StateAccepted {

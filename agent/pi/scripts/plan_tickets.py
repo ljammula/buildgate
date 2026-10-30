@@ -9,7 +9,7 @@ own request driver (cmd/factoryd/request_driver.go) is what validates the
 result (internal/request.ValidateTicketPlan/ValidatePlanCoverage,
 internal/ticketspec, internal/policy.TicketStructureBrownfield) and
 decides whether to advance the request or halt it -- "agent output is
-evidence, never the oracle", same as draft_spec.py.
+evidence, never the verdict", same as draft_spec.py.
 
 Usage:
     python3 plan_tickets.py --spec spec.md --criteria-file criteria.md --request request.md \

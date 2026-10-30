@@ -394,7 +394,7 @@ func TestIntegrationRecordsDurableEventLog(t *testing.T) {
 // calculator-pilot-v2: the documented invocation
 // (USAGE.md) points -spec at an unchanging product
 // spec.md on every ticket while -ticket-file carries the actual per-ticket
-// Goal/Required changes/Allowed-Files:/Required-Changed-Files:. Since
+// Goal/Required changes/Allowed-Files:. Since
 // ticketspec parses (and build_app.py receives) only -spec's own snapshot,
 // the ticket's declared scope silently never reaches diff_scope
 // and the required-file note -- a build agent that changes nothing still gets
@@ -413,8 +413,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatch(t *testing.T) {
 		"## Verification\n`make verify` must pass.\n\n" +
 		"## Commit\nticket(001): fixture\n\n" +
 		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n" +
-		"Required-Changed-Files: ARCHITECTURE.md, PROGRESS.md\n"
+		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket file: %v", err)
 	}
@@ -441,7 +440,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected a nonzero exit for a -spec/-ticket-file scope mismatch, got success: %s", out)
 	}
-	for _, want := range []string{"Allowed-Files:", "Required-Changed-Files:", "Verify-Command:", ticketPath, specPath, "-allow-spec-ticket-scope-mismatch"} {
+	for _, want := range []string{"Allowed-Files:", "Verify-Command:", ticketPath, specPath, "-allow-spec-ticket-scope-mismatch"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
@@ -482,8 +481,8 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatch(t *testing.T) {
 
 // TestIntegrationRejectsMisprefixedAllowedFilesPath is the regression test
 // for a real live finding (2026-09-11, a brownfield run against
-// a Flutter + Go app repo): a ticket's Allowed-Files/Required-Changed-
-// Files declared a path relative to the target repo's own Go package
+// a Flutter + Go app repo): a ticket's Allowed-Files
+// declared a path relative to the target repo's own Go package
 // layout (e.g. "internal/service/note.go"), not realizing the repo's real
 // application code lives under a backend/ subdirectory relative to the git
 // checkout root -- a real, correct ~25-minute sandboxed build was
@@ -527,8 +526,7 @@ func TestIntegrationRejectsMisprefixedAllowedFilesPath(t *testing.T) {
 		// PROGRESS.md all correctly exist at the workspace root already
 		// (testfixture.NewGitRepo's own scaffold), so only the misprefixed
 		// entry should trigger this guard.
-		"Allowed-Files: content.txt, internal/service/note.go, ARCHITECTURE.md, PROGRESS.md\n" +
-		"Required-Changed-Files: internal/service/note.go, ARCHITECTURE.md, PROGRESS.md\n"
+		"Allowed-Files: content.txt, internal/service/note.go, ARCHITECTURE.md, PROGRESS.md\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket: %v", err)
 	}
@@ -567,7 +565,7 @@ func TestIntegrationRejectsMisprefixedAllowedFilesPath(t *testing.T) {
 
 // TestIntegrationAllowsAllowedFilesPathThatDoesNotExistAnywhereYet confirms
 // the guard above does not false-positive on the ordinary case: a
-// Required-Changed-Files entry naming a file the ticket is about to create
+// Allowed-Files entry naming a file the ticket is about to create
 // for the first time, which cannot exist anywhere in the workspace yet.
 func TestIntegrationAllowsAllowedFilesPathThatDoesNotExistAnywhereYet(t *testing.T) {
 	ws := newFixtureRepo(t)
@@ -575,7 +573,7 @@ func TestIntegrationAllowsAllowedFilesPathThatDoesNotExistAnywhereYet(t *testing
 		"# Ticket: fixture\n\nAllowed-Files: content.txt, brand/new/file.go, ARCHITECTURE.md, PROGRESS.md\n", "30s")
 
 	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q -- a Required-Changed-Files/Allowed-Files entry naming a file that doesn't exist anywhere is the ordinary new-file case, not a misprefix", r.State, run.StateAccepted)
+		t.Fatalf("state = %q, want %q -- an Allowed-Files entry naming a file that doesn't exist anywhere is the ordinary new-file case, not a misprefix", r.State, run.StateAccepted)
 	}
 }
 
@@ -653,7 +651,7 @@ func TestPreflightAllowsTicketWithOnlyRequiredHeaders(t *testing.T) {
 // TestIntegrationRejectsSpecTicketFileScopeMismatchWithDifferingValues
 // proves the guard compares actual declared values, not just presence
 // (found via review): a -spec that declares its own Allowed-Files/
-// Required-Changed-Files/Verify-Command -- just different ones than
+// Verify-Command -- just different ones than
 // -ticket-file's -- must still halt. A presence-only check would have let
 // this through, silently enforcing -spec's unrelated scope instead of the
 // ticket's, which is the same false-accept condition this guard exists to
@@ -670,8 +668,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchWithDifferingValues(t *tes
 	specContent := "# internal factoryd ticket spec\n\n" +
 		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
 		"Verify-Command: false\n" +
-		"Allowed-Files: unrelated.txt\n" +
-		"Required-Changed-Files: unrelated.txt\n"
+		"Allowed-Files: unrelated.txt\n"
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
@@ -683,8 +680,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchWithDifferingValues(t *tes
 		"## Verification\n`make verify` must pass.\n\n" +
 		"## Commit\nticket(001): fixture\n\n" +
 		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n" +
-		"Required-Changed-Files: ARCHITECTURE.md, PROGRESS.md\n"
+		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket file: %v", err)
 	}
@@ -711,7 +707,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchWithDifferingValues(t *tes
 	if err == nil {
 		t.Fatalf("expected a nonzero exit for a -spec/-ticket-file value mismatch, got success: %s", out)
 	}
-	for _, want := range []string{"Allowed-Files:", "Required-Changed-Files:", "Verify-Command:", ticketPath, specPath} {
+	for _, want := range []string{"Allowed-Files:", "Verify-Command:", ticketPath, specPath} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
@@ -742,8 +738,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchEvenWithSkipProjectCheck(t
 		"## Verification\n`make verify` must pass.\n\n" +
 		"## Commit\nticket(001): fixture\n\n" +
 		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n" +
-		"Required-Changed-Files: ARCHITECTURE.md, PROGRESS.md\n"
+		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket file: %v", err)
 	}
@@ -771,7 +766,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchEvenWithSkipProjectCheck(t
 	if err == nil {
 		t.Fatalf("expected a nonzero exit for a -spec/-ticket-file scope mismatch even under -skip-project-check, got success: %s", out)
 	}
-	for _, want := range []string{"Allowed-Files:", "Required-Changed-Files:", "Verify-Command:", ticketPath, specPath} {
+	for _, want := range []string{"Allowed-Files:", "Verify-Command:", ticketPath, specPath} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
@@ -790,7 +785,7 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatchEvenWithSkipProjectCheck(t
 // the guard's comparison is asymmetric, per field (found via review): a
 // native -ticket-file that declares only the required headings, alongside
 // a -spec that separately and legitimately declares its own
-// Allowed-Files:/Required-Changed-Files:/Verify-Command: (the supported
+// Allowed-Files:/Verify-Command: (the supported
 // two-file shape -- an "internal factoryd ticket spec" carrying the real
 // scope declarations, plus a pi-harness-native ticket file satisfying the
 // separate structure preflight), must not halt. There is no ticket-declared
@@ -802,8 +797,7 @@ func TestIntegrationAllowsSpecOwnScopeWhenTicketFileDoesNotDeclareIt(t *testing.
 	specContent := "# internal factoryd ticket spec\n\n" +
 		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
 		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt\n" +
-		"Required-Changed-Files: content.txt\n"
+		"Allowed-Files: content.txt\n"
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
 	}
@@ -853,7 +847,7 @@ func TestIntegrationAllowsSpecOwnScopeWhenTicketFileDoesNotDeclareIt(t *testing.
 // via its documented auto-discovery convention (found via review: an
 // earlier version of this guard checked only an explicitly-passed
 // -ticket-file, which missed a discovered ticket that genuinely declares
-// Allowed-Files:/Required-Changed-Files:/Verify-Command: just as much as an
+// Allowed-Files:/Verify-Command: just as much as an
 // explicit path would).
 func TestIntegrationRejectsAutoDiscoveredTicketFileScopeMismatch(t *testing.T) {
 	ws := newFixtureRepo(t)
@@ -870,8 +864,7 @@ func TestIntegrationRejectsAutoDiscoveredTicketFileScopeMismatch(t *testing.T) {
 		"## Verification\n`make verify` must pass.\n\n" +
 		"## Commit\nticket(001): fixture\n\n" +
 		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n" +
-		"Required-Changed-Files: ARCHITECTURE.md, PROGRESS.md\n"
+		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket file: %v", err)
 	}
@@ -897,7 +890,7 @@ func TestIntegrationRejectsAutoDiscoveredTicketFileScopeMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected a nonzero exit for a discovered ticket's scope mismatch, got success: %s", out)
 	}
-	for _, want := range []string{"Allowed-Files:", "Required-Changed-Files:", "Verify-Command:", ticketPath, specPath} {
+	for _, want := range []string{"Allowed-Files:", "Verify-Command:", ticketPath, specPath} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("output = %q, want it to contain %q", out, want)
 		}
@@ -1029,8 +1022,7 @@ func TestIntegrationAllowsSpecTicketFileScopeMismatchWithOptOut(t *testing.T) {
 		"## Required changes\nUpdate `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.\n\n" +
 		"## Verification\n`make verify` must pass.\n\n" +
 		"## Commit\nticket(001): fixture\n\n" +
-		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n" +
-		"Required-Changed-Files: ARCHITECTURE.md, PROGRESS.md\n"
+		"Allowed-Files: content.txt, ARCHITECTURE.md, PROGRESS.md\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket file: %v", err)
 	}
@@ -1083,74 +1075,10 @@ func TestIntegrationAllowsSpecTicketFileScopeMismatchWithOptOut(t *testing.T) {
 	// The durable, auditable record this opt-out's own doc comment
 	// promises (found via review): an accepted run that used it must be
 	// distinguishable from one whose -spec and -ticket-file simply agreed.
-	for _, want := range []string{"Allowed-Files:", "Required-Changed-Files:"} {
+	for _, want := range []string{"Allowed-Files:"} {
 		if !slices.Contains(r.SpecTicketScopeMismatchFields, want) {
 			t.Errorf("SpecTicketScopeMismatchFields = %v, want it to contain %q", r.SpecTicketScopeMismatchFields, want)
 		}
-	}
-}
-
-// TestIntegrationRejectsSpecTicketFileRequiredContentMismatch proves the
-// guard also compares Required-Content: (found via review: the guard
-// stopped after Verify-Command:, even though a run later parses
-// Required-Content exclusively from -spec's own snapshot too -- a ticket
-// declaring a marker -spec omits or changes recreates the exact
-// false-accept condition this guard exists to close, just for the
-// required-content note instead of diff_scope).
-func TestIntegrationRejectsSpecTicketFileRequiredContentMismatch(t *testing.T) {
-	ws := newFixtureRepo(t)
-
-	specPath := filepath.Join(t.TempDir(), "spec.md")
-	specContent := "# internal factoryd ticket spec\n\n" +
-		"Tests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n" +
-		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt\n" +
-		"Required-Changed-Files: content.txt\n" +
-		"Required-Content: SPEC_OWN_MARKER\n"
-	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-	ticketPath := filepath.Join(t.TempDir(), "001-ticket.md")
-	ticketContent := "This is a brand-new, empty, already-git-init-ed repo.\n\n" +
-		"## Goal\nexercise the guard's Required-Content comparison\n\n" +
-		"## Required changes\nUpdate `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.\n\n" +
-		"## Verification\n`make verify` must pass.\n\n" +
-		"## Commit\nticket(001): fixture\n\n" +
-		"Verify-Command: true\n" +
-		"Allowed-Files: content.txt\n" +
-		"Required-Changed-Files: content.txt\n" +
-		"Required-Content: TICKET_OWN_MARKER\n"
-	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
-		t.Fatalf("write ticket file: %v", err)
-	}
-
-	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
-	if err != nil {
-		t.Fatalf("abs script path: %v", err)
-	}
-	dataDir := t.TempDir()
-	cmd := factorydCommand(t,
-		"-ticket", "001",
-		"-ticket-file", ticketPath,
-		"-sandbox-image", fakeSandboxImage,
-		"-workspace", ws,
-		"-spec", specPath,
-		"-build-app-interpreter", "/bin/sh",
-		"-build-app-script", scriptPath,
-		"-timeout", "30s",
-		"-verify-command", "true",
-		"-data-dir", dataDir,
-	)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected a nonzero exit for a Required-Content mismatch, got success: %s", out)
-	}
-	if !strings.Contains(string(out), "Required-Content:") {
-		t.Errorf("output = %q, want it to name Required-Content: as the mismatched field", out)
-	}
-	if strings.Contains(string(out), "fake_build_app:") {
-		t.Errorf("output = %q, want build_app.py never invoked for a rejected pre-submission configuration", out)
 	}
 }
 

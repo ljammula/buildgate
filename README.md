@@ -23,7 +23,7 @@ only on factory-owned evidence.
 | "Done, all tests pass" | Nothing advances on the agent's say-so: each stage is a factory-owned policy decision against durable evidence (test results, diff shape, hashes) |
 | Breaks something it was not asked to touch | The repository's full suite (`full_suite_command`) runs in the sandbox before a pull request; a failure gets up to three corrective builds, each told what failed |
 | Spends until you notice | Model calls leave only through the sandbox's supervisor, under a per-run policy and buildgate's own spend meter |
-| Starts coding from a one-line prompt | You review the spec and the plan (and, opt-in, the acceptance tests) before code is written |
+| Starts coding from a one-line prompt | You review the spec before code is written and can opt to review the plan |
 
 **Measured against the agent alone** (`v0.0.18`): 10 requirements on five
 open-source repositories (Go, Java, Python, Ruby, TypeScript), two runs each,
@@ -58,15 +58,15 @@ build begin](demo/console-tour-preview.gif)](https://ljammula.github.io/buildgat
 
 ## How
 
-You approve the spec and plan. Buildgate then builds and checks each ticket in
-a sandbox and prepares a pull request.
+You approve the spec, and can opt to review the plan. Buildgate then builds
+and checks each ticket in a sandbox and prepares a pull request.
 
 ```text
    YOU                        BUILDGATE                               YOU
    ---                        ---------                               ---
  "Add X to Y" --> draft spec --> plan tickets --> build in a sealed --> draft PR
                       |               |           sandbox, then            |
-                 [you approve]   [you approve]    policy gates        [you merge]
+                 [you approve]   [optional review] policy gates       [you merge]
 ```
 
 ## Install
@@ -167,14 +167,14 @@ A longer live walkthrough is in [`DEMO.md`](DEMO.md).
 
 ## Status
 
-Latest release tag: **`v0.0.21`** (tags are `vX.Y.Z`), cut only after
+Latest release tag: **`v0.0.22`** (tags are `vX.Y.Z`), cut only after
 `make live-smoke` passes on that commit. Full table and every known limit: [`STATUS.md`](STATUS.md).
 
 | | Area |
 |---|---|
 | ✅ Works, live-proven | The request pipeline end to end (spec review, plan review, sandboxed build, gates, PR) on several real repos; accepted native verify/full-suite runs in Go, Python, Java/Maven, Ruby/Bundler, and React Native/TypeScript; every build on Temporal; the OpenShell sandbox runtime; `quickstart` onboarding; the operator console; `pi` and `codex` harnesses on every role; compose sidecars (Postgres, Kafka, Redis); up to 3 corrective rounds and, with code review on and a `high` finding, up to 3 advice rounds pushed to the pull request, each continuing the build's own harness session when it can (all on by default) |
-| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, none for a gate that fails the same way on the base commit, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:`, `autofix:` and an operator-approved `sandbox:` install block, cached as an install image built from the trusted commit (SC-021); gate scripts under `.factory/` mounted read-only from the commit the config was read from; comments on passages of a spec or plan, sent as one batch, so the redraft changes only the commented sections; acceptance criteria with IDs (`AC-N`) that plan steps and tests cite, with review notes for a criterion no test cites; a per-ticket PR budget (`pr_budget_lines`, default 400 changed lines: one ticket unless the planner estimates the change over it, a plan-review note for a ticket over it); operator-shaped handed-over specs derive structural list criteria, stay in their own shape after rejection, and stop handed-over planning when the criteria change; the halt names `factoryd reject -to plan -reason "..." <id>`, which feeds planning feedback and drafts revised tickets instead of reusing imported ones |
-| 🟡 Opt-in or partial | Generic language preflight (`required_binaries` with an operator-selected worker image) and advisory verify-command profiles for Rust, Ruby, PHP/Composer, Java/Maven, Java/Gradle, .NET and Dart; prompt source, skill, design-guide and editable spec-drafting guidance inventory (`factoryd content`); acceptance oracles (`submit -draft-oracles`, Go and Python); the read-back of a handed-over spec at spec review, answered by the operator (`factoryd answer`); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`), whose finding refuses a request's build only through a reproduction test the factory runs (SC-022; unit-tested, its corrective path not yet live-run), every other finding listed as advice in the pull request; GHCR image installs (starts with the next tagged release; earlier tags are not republished); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
+| ✅ Works | Cost rollups by role × model and launch budgets (`factoryd cost`); resume of an interrupted build from its kept worktree; a failed attempt tells the next one (a corrective build after a check failure, none for a gate that fails the same way on the base commit, `retry` continuing from the failed commit, the build agent's notes, a refused draft's reason); reviews read the instruction files the request started with, not the build's (SC-019); `.factory.yml` `setup:`, `autofix:` and an operator-approved `sandbox:` install block, cached as an install image built from the trusted commit (SC-021); gate scripts under `.factory/` mounted read-only from the commit the config was read from; comments on passages of a spec or plan, sent as one batch, so the redraft changes only the commented sections; acceptance criteria with IDs (`AC-N`) that plan steps and tests cite, with review notes for a criterion no test cites; a source-size note for PRs over `pr_budget_lines` or 25 functions; operator-shaped handed-over specs derive structural list criteria, stay in their own shape after rejection, and stop handed-over planning when the criteria change; the halt names `factoryd reject -to plan -reason "..." <id>`, which feeds planning feedback and drafts revised tickets instead of reusing imported ones |
+| 🟡 Opt-in or partial | Generic language preflight (`required_binaries` with an operator-selected worker image) and advisory verify-command profiles for Rust, Ruby, PHP/Composer, Java/Maven, Java/Gradle, .NET and Dart; prompt source, skill, design-guide and editable spec-drafting guidance inventory (`factoryd content`); the read-back of a handed-over spec at spec review, answered by the operator (`factoryd answer`); worker skills; team design guide; AI code review (`off` on the CLI, `required` from `quickstart`), whose findings are advice listed in the pull request and refuse nothing (SC-022); a challenger job (`roles.challenger`) that writes edge-case tests from the approved spec, which the factory runs itself, commits when green and gives one build round when red (unit-tested; not yet live-run); GHCR image installs (starts with the next tagged release; earlier tags are not republished); the GitHub Copilot route and Copilot CLI harness (proven on one small ticket, free plan); CI is manual (`make ci`) |
 | 🟡 Opt-in or partial | Repository memory (`factoryd memory`, off until a repository is listed under `memory.repositories`): candidate lines from build agents' notes, proposed by the operator as an ordinary request that rewrites the fenced section of `AGENTS.md` |
 | 🟡 Opt-in or partial | Restacking a stacked ticket's pull request when the earlier ticket's branch moves or merges: replayed onto the new tip, judged by a replay run with every gate and review, pushed with a lease. Unit-tested and covered by the stacked live-round fixture; its live run is pending |
 | ⬛ Never, by design | Automatic merge or deploy; a host-execution path |
@@ -198,8 +198,9 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 - **On colima, any container can act as the local console** and approve a gate: colima's `host.docker.internal` reaches `serve` as a local caller. `factoryd install-service -force -require-tokens` closes it; open the console on this machine with `factoryd console`, whose link carries a token that does not expire.
 - **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
 - **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.
-- **A review finding blocks only through a reproduction the factory can run.** Runners exist for Go, pytest, vitest, Maven Surefire and minitest; Gradle, jest, cargo, .NET and PHP reproductions are advice. A vitest reproduction can set its own per-test timeout (a hang is then cut by the launch's cap and reads as a timeout), one that fails the same way on the base blocks only with a literal of the cited line the base does not hold, a ticket of a multi-ticket request may cite any line of the approved spec, and the corrective build reruns a reproduction once.
+- **A review finding is advice.** It refuses nothing and starts no build; a review that gave no verdict hands the run to a person.
 - **Narrow live coverage.** Multi-module `go.work`, cgo and generated code are unproven. Private Go modules are proven on one fixture (`make live-private-module`), with a file `GOPROXY` standing in for a company's.
+- **Change-size measurement has limits.** Git hunk headers may miss changed functions, and production code in a path matching `test_patterns` counts as a test. The size-driven re-plan has not yet been live-proven.
 
 ## How a request flows
 
@@ -207,13 +208,7 @@ A request (`factoryd submit` / `quickstart`) moves through these states.
 `[brackets]` are the human gates; everything else is the factory.
 
 ```text
-submitted -> spec_drafting -> [spec_review] -----------------+
-                                    |                         |
-                    -draft-oracles (opt-in)                   |
-                                    v                         |
-                            oracle_drafting -> [oracle_review] |
-                                    |                          |
-                                    +------------> planning <--+
+submitted -> spec_drafting -> [spec_review] -> planning
                                                        |
                                       [plan_review] (several tickets,
                                        or -plan-review / plan_review: true)
@@ -250,8 +245,8 @@ Inside `building`, one ticket at a time:
   gates, all factory-owned:                              run halts, worktree is kept,
     canonical_verify        full_suite_verify            request waits in resume_review:
     diff_scope              code_review       (policy)     factoryd resume <id>
-    tests_red_on_base       reference_oracle  (oracles,    factoryd resume -from scratch <id>
-                                              + canary)    factoryd cancel <id>
+    tests_red_on_base                                  factoryd resume -from scratch <id>
+                                                       factoryd cancel <id>
        |              |
      pass            fail
        |              |
@@ -375,8 +370,6 @@ make proving-ground-results # recorded runs grouped by date/SHA, with the confid
 make proving-ground-test    # offline tests: classifier, fixtures schema, ticket specs
 make baseline            # one-shot acceptance, rounds to green, repeated failures, what quarantines runs, from recorded runs (BASELINE_DIRS)
 make baseline-test       # offline tests for the baseline script
-make bar                 # -draft-oracles default-on bar (hours; human at oracle_review) -- see AGENTS.md
-make bar-test            # offline tests for bar's verdict logic
 ```
 
 Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify](AGENTS.md#build-test-verify).
@@ -393,7 +386,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`demo/how-buildgate-works.html`](demo/how-buildgate-works.html) | Why, what and how, for an engineering team |
 | [`demo/console-tour.mp4`](demo/console-tour.mp4) | A captioned recording of the operator console (1 min 55 s): board, triage, spec and plan review, editing, a build, and what a stopped request shows |
 | [`STATUS.md`](STATUS.md) | What works, what is opt-in, every known limit |
-| [`USAGE.md`](USAGE.md) | End-to-end walkthrough: `quickstart`, `submit`/`worker`, oracles, how Temporal runs a request and what happens to a lost step |
+| [`USAGE.md`](USAGE.md) | End-to-end walkthrough: `quickstart`, `submit`/`worker`, how Temporal runs a request and what happens to a lost step |
 | [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | What each command does, the 25 flags used most, gotchas, harness/credential configs, session-config keys, repository-owner runs and daemons |
 | [`console/README.md`](console/README.md) | The operator console |
 | [`agent/pi/README.md`](agent/pi/README.md) | The in-sandbox build, drafting and review scripts and their harness adapters |

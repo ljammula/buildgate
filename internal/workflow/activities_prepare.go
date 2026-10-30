@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"buildgate/internal/policy"
+	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/ticketspec"
@@ -110,7 +111,7 @@ func (a *Activities) CheckChainSuccessorActivity(_ context.Context, input CheckC
 
 // PreflightActivity runs before RunBuildActivity ever starts. When supplied,
 // it first validates the pi-harness-native ticket structure, then checks
-// whether the ticket's declared Allowed-Files/Required-Changed-Files name a
+// whether the ticket's declared Allowed-Files name a
 // path missing a real subdirectory prefix (e.g. a monorepo whose real
 // application code lives under backend/, not the checkout root -- see
 // ticketspec.MisprefixedWorkspacePaths's own doc comment for the real
@@ -148,7 +149,11 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 	// already fails closed if it's genuinely missing.
 	if input.SpecPath != "" {
 		if _, statErr := os.Stat(input.SpecPath); statErr == nil {
-			problems, err := ticketspec.HeaderStrictnessProblems(input.SpecPath)
+			checkHeaders := ticketspec.HeaderStrictnessProblems
+			if input.RequestTicket && input.NoTicketScope {
+				checkHeaders = ticketspec.SpecTicketHeaderStrictnessProblems
+			}
+			problems, err := checkHeaders(input.SpecPath)
 			if err != nil {
 				return temporal.NewApplicationErrorWithCause("check ticket header strictness", InfrastructureFailureType, err)
 			}
@@ -177,7 +182,7 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 		var passed bool
 		var reasons []string
 		if input.RequestTicket {
-			passed, reasons = policy.TicketStructureBrownfield(string(content))
+			passed, reasons = request.RequestTicketStructure(string(content))
 		} else {
 			passed, reasons = policy.TicketStructure(string(content), input.TicketNumber)
 		}
@@ -190,14 +195,14 @@ func (a *Activities) PreflightActivity(ctx context.Context, input PreflightInput
 	}
 	// An Allowed-Files list no person approved is the model's guess and
 	// refuses nothing (policy.Scope), so a wrong prefix in it halts nothing.
-	declared := input.RequiredChangedFiles
+	var declared []string
 	if !input.ScopeUnapproved {
-		declared = append(slices.Clone(input.AllowedFiles), input.RequiredChangedFiles...)
+		declared = slices.Clone(input.AllowedFiles)
 	}
 	if scopePaths := dedupStrings(declared); len(scopePaths) > 0 {
 		corrections, err := ticketspec.MisprefixedWorkspacePaths(input.WorkspacePath, scopePaths)
 		if err != nil {
-			return temporal.NewApplicationErrorWithCause("check ticket Allowed-Files/Required-Changed-Files against the workspace", InfrastructureFailureType, err)
+			return temporal.NewApplicationErrorWithCause("check ticket Allowed-Files against the workspace", InfrastructureFailureType, err)
 		}
 		if len(corrections) > 0 {
 			names := make([]string, 0, len(corrections))

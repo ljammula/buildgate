@@ -24,12 +24,9 @@ import (
 // a long-lived struct (ticketRun, daemonRun, serveRun, requestActivities)
 // holds it. A test builds its own with newTestDeps (deps_test.go).
 //
-// Seven package-level function variables remain, none of them one of these
-// boundaries. Four are here:
+// Four package-level function variables remain, none of them one of these
+// boundaries. One is here:
 //
-//	launchOracleDraft, resolveOracleRelaySpec, oracleDraftClock
-//	                           the oracle-draft job's sandbox launch, relay
-//	                           spec and clock, stubbed by its own tests
 //	listGitHubCopilotModelsFn  doctor's model listing over HTTP
 //
 // and three in internal/requestdriver:
@@ -124,6 +121,11 @@ type forgeBoundary interface {
 	replayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	pushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	moveBranch(dir string, branch string, sha string) error
+	// The git calls of a pr_order carve: object writes on dir's local
+	// repository, with no ref or worktree change.
+	changedPaths(dir string, base string, result string) ([]string, error)
+	carveChain(ctx context.Context, dir string, base string, result string, parts [][]string) error
+	carveCommit(ctx context.Context, dir string, parent string, result string, paths []string, message string) (string, error)
 	// restoreBranch points a local branch ahead of sha back at it, and
 	// commentOnPullRequest posts a comment on a pull request: an advice
 	// round's, when its result is not pushed and when it is.
@@ -132,6 +134,9 @@ type forgeBoundary interface {
 	// hostGitVersion is the host's `git version` output, which a restack
 	// checks against workspace.GitFloor.
 	hostGitVersion(ctx context.Context) (string, error)
+	// readJobLog is the log of a GitHub Actions job of the pull request's
+	// repository, which a CI round gives its build the tail of.
+	readJobLog(ctx context.Context, prURL string, jobID int64) (string, error)
 	userLogin() (string, error)
 }
 

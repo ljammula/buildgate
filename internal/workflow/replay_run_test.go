@@ -128,7 +128,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 	f := newReplayFixture(t)
 	input := replayFixtureInput()
 	input.FullSuiteCommand = "make full"
-	setGateCommand(&input, "lint", "make lint")
+	setGateCommand(&input, "repo-lint", "make lint")
 	setGateCommand(&input, "repo-docs", "make docs")
 	input.CodeReviewPolicy = "advisory"
 	var mu sync.Mutex
@@ -140,7 +140,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 		mu.Unlock()
 		return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make full"}, ExitCode: 0}}, nil
 	}, activity.RegisterOptions{Name: RunFullSuiteVerifyActivityName})
-	f.env.RegisterActivityWithOptions(func(_ context.Context, in NamedGateActivityInput) (VerifyActivityResult, error) {
+	f.env.RegisterActivityWithOptions(func(_ context.Context, in RepoGateActivityInput) (VerifyActivityResult, error) {
 		mu.Lock()
 		gates = append(gates, in.Check)
 		mu.Unlock()
@@ -159,7 +159,7 @@ func TestRunWorkflowReplayRunsEveryGateAndReview(t *testing.T) {
 	if err != nil || result.State != run.StateAccepted {
 		t.Fatalf("replay run: err=%v state=%q, want accepted", err, result.State)
 	}
-	for _, check := range []string{"full_suite_verify", "lint", "repo-docs"} {
+	for _, check := range []string{"full_suite_verify", "repo-lint", "repo-docs"} {
 		if !slices.Contains(gates, check) {
 			t.Errorf("gates run = %v, want %s among them", gates, check)
 		}
@@ -246,7 +246,7 @@ func TestReplayRunReviewSchedulesNoReproduction(t *testing.T) {
 	f.env.RegisterActivityWithOptions(func(context.Context, ReproductionRunInput) (ReproductionRunResult, error) {
 		t.Error("a replay run launched a reproduction")
 		return ReproductionRunResult{}, nil
-	}, activity.RegisterOptions{Name: RunReviewReproductionActivityName})
+	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 
 	result, err := f.run(t, input)
 	if err != nil || result.State != run.StateAccepted {
@@ -255,10 +255,7 @@ func TestReplayRunReviewSchedulesNoReproduction(t *testing.T) {
 	if !slices.Contains(f.started, ApplyReplayActivityName) || !slices.Contains(f.started, RunReviewStepActivityName) {
 		t.Errorf("Activities started = %v, want the replay applied and the review run", f.started)
 	}
-	if slices.Contains(f.started, RunReviewReproductionActivityName) || result.ReviewReproductions != nil {
+	if slices.Contains(f.started, RunHeldTestActivityName) || result.ReviewReproductions != nil {
 		t.Errorf("Activities started = %v, findings %+v; want no reproduction", f.started, result.ReviewReproductions)
-	}
-	if _, ok := reproductionGate(result); ok {
-		t.Errorf("gates = %+v, want no review_reproduction check", result.GateResults)
 	}
 }

@@ -3,7 +3,7 @@ import { CircleAlert, CircleCheck } from "lucide-react";
 import type { GateResult } from "@/domain/run";
 import { formatGateDuration, gateBaseCheckText, gatesSummary } from "@/domain/runSummary";
 import { listKeys } from "@/features/run-detail/listKeys";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { CompactId } from "@/ui/CompactId";
 import { Disclosure } from "@/ui/Disclosure";
 import { cn } from "@/ui/cn";

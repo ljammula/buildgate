@@ -276,15 +276,6 @@ type DaemonController interface {
 	Stop(context.Context, string) error
 }
 
-// WithPollInterval changes how often SSE streams check the durable record.
-func WithPollInterval(interval time.Duration) Option {
-	return func(s *Server) {
-		if interval > 0 {
-			s.pollInterval = interval
-		}
-	}
-}
-
 // WithOverrideToken enables POST /runs/{id}/override, requiring every
 // request to present it as `Authorization: Bearer <token>`. The endpoint is
 // independently authenticated from POST /runs, and every read route this
@@ -499,13 +490,6 @@ func WithProjectStatsProvider(provider ProjectStatsProvider) Option {
 	return func(s *Server) {
 		s.projectStatsProvider = provider
 	}
-}
-
-// withStatsClock fixes the clock GET /stats reads, for a test that compares
-// its response with a committed file: the route's buckets are counted back
-// from the current day, so on the real clock that response changes daily.
-func withStatsClock(now func() time.Time) Option {
-	return func(s *Server) { s.statsNow = now }
 }
 
 // WithDaemonController supplies the lifecycle implementation used by
@@ -743,11 +727,6 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("PUT /requests/{id}/spec", s.updateRequestSpec)
 	s.mux.HandleFunc("PUT /requests/{id}/read-back/answers/{qid}", s.answerRequestReadBack)
 	s.mux.HandleFunc("PUT /requests/{id}/tickets/{n}", s.updateRequestTicket)
-	s.mux.HandleFunc("GET /requests/{id}/oracle", s.listRequestOracle)
-	s.mux.HandleFunc("GET /requests/{id}/oracle/{name}", s.getRequestOracleFile)
-	s.mux.HandleFunc("PUT /requests/{id}/oracle/{name}", s.putRequestOracleFile)
-	s.mux.HandleFunc("GET /requests/{id}/tickets/{n}/oracle", s.listTicketOracle)
-	s.mux.HandleFunc("GET /requests/{id}/tickets/{n}/oracle/{name}", s.getTicketOracleFile)
 	s.mux.HandleFunc("GET /requests/{id}/revisions", s.listRequestRevisions)
 	s.mux.HandleFunc("GET /requests/{id}/revisions/{n}", s.getRequestRevision)
 	s.mux.HandleFunc("GET /console-config.json", s.consoleConfig)
@@ -774,7 +753,7 @@ type consoleConfigView struct {
 	// WritesEnabled reports whether a same-origin request from this
 	// console (the very request this route just answered) would be
 	// allowed to call the request write routes (approve, reject, spec/
-	// ticket/oracle edits, retry, cancel) with no bearer token of its own
+	// ticket edits, retry, cancel) with no bearer token of its own
 	// -- true exactly when the loopback relaxation applies to this
 	// request (loopbackSameOriginWrite), false when an override token is
 	// configured (the console has no way to supply one -- see this
@@ -816,7 +795,7 @@ func (s *Server) consoleConfig(w http.ResponseWriter, r *http.Request) {
 		Gate:          s.consoleGate(r),
 	}
 	if s.releasePolicy.CanNeverAllow() {
-		view.ReleasePolicyWarning = "release policy denies every PR unconditionally (release_max_files_changed/release_max_insertions is 0 or release_rollback_plan is empty) -- add release_max_files_changed, release_max_insertions, and release_rollback_plan to your session config (factoryd init-config's own scaffold now includes them)"
+		view.ReleasePolicyWarning = "release policy denies every PR unconditionally (release_max_files_changed/release_max_changed_lines is 0 or release_rollback_plan is empty) -- add release_max_files_changed, release_max_changed_lines, and release_rollback_plan to your session config (factoryd init-config's own scaffold now includes them)"
 	}
 	writeJSON(w, http.StatusOK, view)
 }
@@ -1304,7 +1283,7 @@ type composeServiceView struct {
 	Digest string `json:"digest,omitempty"`
 }
 
-// composePhaseOrder ranks the phases every run has ahead of named gates.
+// composePhaseOrder ranks the phases every run has ahead of repository gates.
 var composePhaseOrder = map[string]int{"build": 0, "verify": 1, "full_suite_verify": 2}
 
 // readComposePhases reads each services*.json under the run's compose
@@ -2636,13 +2615,6 @@ type retryOrCancelRequestBody struct {
 	From string `json:"from,omitempty"`
 }
 
-// WithReviewGateExpiry sets a fixed review_gate_expiry: a decision on a gate
-// that has waited this long is refused under the request's lock, which halts
-// the request (gate_expired). 0, the default, is off.
-func WithReviewGateExpiry(d time.Duration) Option {
-	return WithReviewGateExpirySource(func() (time.Duration, error) { return d, nil })
-}
-
 // WithReviewGateExpirySource is WithReviewGateExpiry read afresh at every
 // decision (serve reads the session config each time, so a changed key applies
 // without a restart). A source that fails refuses the decision: the expiry is
@@ -2824,18 +2796,8 @@ func (s *Server) buildProgressFor(req *request.Request, runs []*run.Run) *buildP
 // internal/run (each ticket's own Run.AgentEvidence), a package
 // internal/request does not import.
 type CostSummary struct {
-	Spec float64 `json:"spec"`
-	Plan float64 `json:"plan"`
-	// Oracle is the oracle-drafting stage's own relay-measured cost
-	// (request.OracleDraft.Spend), rolled in here for the same reason
-	// Spec/Plan are: a request opted into -draft-oracles spends real
-	// money on that stage too, and Total (and CostPerAcceptedTicketMicroUSD
-	// below) must include it to be a true "total request spend". Unlike
-	// Spec/Plan, this has no pre-existing self-reported-Usage fallback --
-	// draft_acceptance_oracles.py's own evidence.json was never rolled up
-	// here before Spend existed, so this field is simply 0 for a request
-	// that never drafted oracles or whose draft ran with no relay.
-	Oracle   float64 `json:"oracle,omitempty"`
+	Spec     float64 `json:"spec"`
+	Plan     float64 `json:"plan"`
 	Runs     float64 `json:"runs"`
 	Total    float64 `json:"total"`
 	Currency string  `json:"currency"`
@@ -2921,7 +2883,7 @@ type CostSummary struct {
 // relay that doesn't pin one) -- still counted in Tokens. Role=="" means
 // tokens/cost whose contributing evidence recorded no factory-authored
 // role at all: run.Attempt.Role is empty for any attempt Kind other than
-// the build and the review step (verify/full_suite_verify/reference_oracle,
+// the build and the review step (verify/full_suite_verify,
 // none of which ever call a model, so this case should never actually
 // carry nonzero tokens/cost) and for an attempt recorded before Role
 // existed -- a display layer must render this "unknown", never coerce it
@@ -3060,7 +3022,7 @@ func costFromUsage(usage map[string]any) (float64, bool) {
 // to finish, not a lost evidence file.
 func pastSpecDrafting(state request.State) bool {
 	switch state {
-	case request.StateSpecReview, request.StateOracleDrafting, request.StateOracleReview,
+	case request.StateSpecReview,
 		request.StatePlanning, request.StatePlanReview,
 		request.StateBuilding, request.StatePRReview, request.StateDone, request.StateClosed:
 		return true
@@ -3199,20 +3161,6 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 		cs.Complete = false
 		cs.TokensComplete = false
 	}
-	// OracleDraft has no pre-Spend self-reported-Usage rollup to fall back
-	// to (see CostSummary.Oracle's own doc comment) -- a nil Spend here
-	// (no relay, or a request that never drafted oracles at all) simply
-	// contributes nothing, never marks the rollup incomplete: unlike
-	// Spec/Plan, there was never a "we know a real cost was incurred but
-	// can't read it" case to distinguish from "this stage never ran".
-	if req.OracleDraft != nil && req.OracleDraft.Spend != nil {
-		sp := req.OracleDraft.Spend
-		cs.Oracle = float64(sp.CostMicroUSD) / 1e6
-		if sp.SpendPartial {
-			cs.Estimated = true
-		}
-		acc.addJobSpend(sp)
-	}
 	// Runs: every run.Run record this request ever spent on, found by
 	// scanning dataDir/runs for RequestID == req.ID (runsByRequest, built
 	// once by run.ListByRequestID -- see ComputeCostSummary's own doc
@@ -3302,14 +3250,14 @@ func (s *Server) computeCostSummary(req *request.Request, runsByRequest map[stri
 			cs.AcceptedTickets++
 		}
 	}
-	cs.Total = cs.Spec + cs.Plan + cs.Oracle + cs.Runs
+	cs.Total = cs.Spec + cs.Plan + cs.Runs
 	cs.ByModel = acc.finish()
 	for _, m := range cs.ByModel {
 		cs.Tokens += m.Tokens
 	}
 	if cs.AcceptedTickets > 0 {
 		// Total's own dollar figure already sums every source this
-		// rollup can see: both drafting stages (Spec/Plan/Oracle, each
+		// rollup can see: both drafting stages (Spec/Plan, each
 		// preferring the exact relay-measured Spend when one exists) and
 		// every ticket's build plus every corrective round (review-corrective
 		// or PR-review) that ran, accepted or not -- exactly "total request
@@ -3575,11 +3523,10 @@ type requestDetailView struct {
 	// ApproveNextState is the state an Approve call would move this
 	// request to right now -- request.NextApprovalState, the same
 	// function approve() itself branches on -- omitted outside a review
-	// state (spec_review/oracle_review/plan_review). The console's own
+	// state (spec_review/plan_review). The console's own
 	// approve-confirm sheet must not guess this from a hardcoded
-	// table ("spec_review -> planning"), which is simply wrong for a
-	// -draft-oracles request (it goes to oracle_drafting) -- the server
-	// names its own real next state instead.
+	// table ("spec_review -> planning") -- the server names its own real
+	// next state instead.
 	ApproveNextState request.State `json:"approve_next_state,omitempty"`
 	// NextAction is request.Request.NextAction()'s own one-sentence "what
 	// does the operator do next", empty when nothing currently waits on
@@ -3592,8 +3539,7 @@ type requestDetailView struct {
 	NextAction string `json:"next_action,omitempty"`
 	// CanSendBack is true exactly when POST /requests/{id}/reject with a
 	// "to" field would be legal for this request right now:
-	// quarantined or halted (not with HaltOracleMaterialize, which has its
-	// own narrower recovery), with no ticket yet accepted
+	// quarantined or halted, with no ticket yet accepted
 	// (request.Request.AnyTicketAccepted) -- the console computes its
 	// "Send back" button's enabled state from this rather than
 	// re-deriving request.SendBack's own precondition client-side, the
@@ -3601,8 +3547,7 @@ type requestDetailView struct {
 	// extra precondition is CanSendBackToPlan, below.
 	CanSendBack bool `json:"can_send_back,omitempty"`
 	// CanSendBackToPlan is CanSendBack narrowed to the "plan" target
-	// (request.Request.SendBackPlanAllowed: an approved spec.md, and no
-	// oracle stage skipped for a -draft-oracles request). The console
+	// (request.Request.SendBackPlanAllowed: an approved spec.md). The console
 	// defaults its send-back dialog to "spec" and disables "plan" when
 	// this is false, instead of letting the operator's first choice hit a
 	// 409 (adversarial review of SendBack, round 2, 2026-09-26).
@@ -3700,7 +3645,7 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 		ActiveJob:    request.LoadActiveJob(dataDir, id),
 		NextAction:   loaded.NextAction(),
 		CanSendBack: (loaded.State == request.StateQuarantined ||
-			(loaded.State == request.StateHalted && loaded.HaltKind != request.HaltOracleMaterialize)) &&
+			loaded.State == request.StateHalted) &&
 			!loaded.AnyTicketAccepted(),
 	}
 	view.CanSendBackToPlan = view.CanSendBack && loaded.SendBackPlanAllowed()
@@ -3979,15 +3924,15 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// ApproveShown, not Approve: the API must not pin oracle files the
-	// client never displayed (the CLI path stays unconditional).
+	// ApproveShown, not Approve: the API approves what the client displayed
+	// (the CLI path stays unconditional).
 	loaded, err := request.ApproveShown(s.dataDir, id, by, time.Now(), body.ExpectedSHA256, opts...)
 	s.noteGateExpired(id, err)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}
-	if errors.Is(err, request.ErrOracleNotShown) || errors.Is(err, request.ErrReadBackNotShown) {
+	if errors.Is(err, request.ErrReadBackNotShown) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -3995,9 +3940,9 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 	// request just isn't in a state this call can act on -- not a
 	// malformed request, so it maps to 409 like every other
 	// "the resource changed under you" refusal on this route
-	// (ErrOracleNotShown, ErrApprovalStale below). Every other
-	// request.Approve error (a hash mismatch, an unusable oracle
-	// directory, ...) is still a caller-input/precondition problem, never
+	// (ErrReadBackNotShown, ErrApprovalStale below). Every other
+	// request.Approve error (a hash mismatch, a bug request's ticket 1
+	// opting out of tests, ...) is still a caller-input/precondition problem, never
 	// an internal failure, so it keeps its prior 400 -- mirrors
 	// overrideRun's own treatment of ApplyOverride's errors.
 	if errors.Is(err, request.ErrIllegalTransition) {
@@ -4006,7 +3951,7 @@ func (s *Server) approveRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	// request.ErrApprovalStale (an adversarial review, 2026-09-24, found):
 	// the comment above already documented this as a 409 alongside
-	// ErrOracleNotShown/ErrIllegalTransition, but no branch actually
+	// ErrIllegalTransition, but no branch actually
 	// mapped it -- a stale-hash approve (the exact "the resource changed
 	// under you" case that comment names) fell through to the generic
 	// err != nil 400 below instead.
@@ -4351,12 +4296,11 @@ func pruneBuildSessions(dataDir string, r *request.Request) error {
 const maxRequestContentBytes = 1 << 20 // 1 MiB
 
 // updateRequestContentBody is PUT /requests/{id}/spec, PUT
-// /requests/{id}/tickets/{n}, and PUT /requests/{id}/oracle/{name}'s shared
-// JSON request body.
+// /requests/{id}/tickets/{n}'s shared JSON request body.
 type updateRequestContentBody struct {
 	Content string `json:"content"`
 	// By is the operator saving the edit, recorded on the request's edit
-	// history by the spec and ticket routes (the oracle route ignores it).
+	// history by the spec and ticket routes.
 	// Like approve's "by", it is the client's own claim: the token carries
 	// no identity.
 	By string `json:"by,omitempty"`
@@ -4375,8 +4319,8 @@ type updateRequestContentBody struct {
 
 // verifyBaseSHA256 checks body.BaseSHA256 (see updateRequestContentBody's
 // own doc comment) against currentContent's actual sha256, reading
-// currentPath itself when currentContent is nil (the oracle route's caller
-// doesn't have it in hand already -- see putRequestOracleFile). ok=true
+// currentPath itself when currentContent is nil (a caller
+// that doesn't have it in hand already). ok=true
 // with nothing written means either BaseSHA256 was empty (unconditional,
 // back-compat) or it matched; ok=false means a 409 response naming the
 // current hash was already written and the caller must not proceed. A
@@ -4592,8 +4536,8 @@ func (s *Server) updateRequestTicket(w http.ResponseWriter, r *http.Request) {
 // decodeRequestContentBody decodes updateRequestContentBody from r's
 // body, capped at maxRequestContentBytes, writing its own error response
 // and returning ok=false on any failure -- an oversized body (413), a
-// malformed or trailing-data body (400). Shared by updateRequestSpec,
-// updateRequestTicket and putRequestOracleFile so none can diverge on
+// malformed or trailing-data body (400). Shared by updateRequestSpec
+// and updateRequestTicket so neither can diverge on
 // what counts as a legal body, mirroring startRunWithID's own "reject a
 // second JSON value" check. Returns the whole decoded body, not just
 // Content, so a caller can also see BaseSHA256.
@@ -4769,7 +4713,7 @@ func validRequestID(id string) bool {
 // recover it byte by byte.
 //
 // Gates the request pipeline's own operator writes (approve/reject/retry/
-// cancel, the spec/ticket/oracle PUT editors) -- every one of them is
+// cancel, the spec/ticket PUT editors) -- every one of them is
 // scoped to a single request.Request the operator is already looking at
 // in the console. It is deliberately NOT used by overrideRun: see
 // authorizeOverride, below, and its own doc comment for why a release

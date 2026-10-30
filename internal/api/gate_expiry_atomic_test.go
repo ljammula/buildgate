@@ -22,7 +22,6 @@ func TestResumeAndEditsRefusedAtALapsedGate(t *testing.T) {
 		"resume":      {request.StateResumeReview, http.MethodPost, "/requests/req-1/resume", `{"from":"scratch"}`},
 		"spec edit":   {request.StateSpecReview, http.MethodPut, "/requests/req-1/spec", `{"content":"# Spec\n"}`},
 		"ticket edit": {request.StatePlanReview, http.MethodPut, "/requests/req-1/tickets/1", `{"content":"x"}`},
-		"oracle edit": {request.StateOracleReview, http.MethodPut, "/requests/req-1/oracle/RUN_COMMAND.txt", `{"content":"go test ./...\n"}`},
 		"answer":      {request.StateSpecReview, http.MethodPut, "/requests/req-1/read-back/answers/Q1", `{"answer":"yes","question_sha256":"x"}`},
 	}
 	for name, c := range cases {

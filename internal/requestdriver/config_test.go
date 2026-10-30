@@ -76,7 +76,7 @@ func TestFullSuiteNoneKeepsDenial(t *testing.T) {
 	policy := release.MergePolicy{
 		RollbackPlan:    "git revert the merge commit on main",
 		MaxFilesChanged: 25,
-		MaxInsertions:   1000,
+		MaxChangedLines: 1000,
 		RequiredGates:   []string{"canonical_verify", "full_suite_verify"},
 	}
 	allowed, reasons := release.MergePolicyCheck(r, policy)
@@ -124,17 +124,6 @@ func TestBuildTicketRunArgsIncludesFullSuiteCommandOnlyWhenSet(t *testing.T) {
 		if a == "-full-suite-command" {
 			t.Errorf("an entry with no full-suite command must not forward the flag")
 		}
-	}
-}
-
-func TestBuildTicketRunArgsForwardsNoCommitOraclesOnlyWhenSet(t *testing.T) {
-	with := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", NoCommitOracles: true}
-	if !containsFlag(requestdriver.BuildTicketRunArgs("data", with, requestdriver.WorkerConfig{}), "-no-commit-oracles") {
-		t.Error("an opted-out entry must forward -no-commit-oracles")
-	}
-	without := &requestdriver.QueueEntry{ID: "t2", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-	if containsFlag(requestdriver.BuildTicketRunArgs("data", without, requestdriver.WorkerConfig{}), "-no-commit-oracles") {
-		t.Error("an entry that did not opt out must not forward the flag")
 	}
 }
 

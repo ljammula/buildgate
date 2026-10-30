@@ -774,13 +774,6 @@ func registryProxyUpstreamFailures(ctx context.Context, dockerBinary, containerN
 // short word) and is skipped.
 const maxRegistryProxyLogLine = 4096
 
-// parseRegistryProxyUpstreamFailures is scanRegistryProxyUpstreamFailures
-// over a log already in hand.
-func parseRegistryProxyUpstreamFailures(log string) (count int, known bool) {
-	count, known, _ = scanRegistryProxyUpstreamFailures(strings.NewReader(log))
-	return count, known
-}
-
 // scanRegistryProxyUpstreamFailures returns the highest total among the
 // proxy's failure lines in log, 0 when it has none. A failure line is the
 // logger's date and time and then one word, the prefix and a number, with

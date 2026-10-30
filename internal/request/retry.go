@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"buildgate/internal/run"
 )
 
 // PROpenOutcome is what a PROpener (below) reports for one attempt to
@@ -108,15 +106,11 @@ func retryAcceptedNoPR(dataDir, id, by, reason string, r *Request, now time.Time
 //
 // Only a quarantined or halted request is retryable, and only in the
 // shapes the pre-refactor cmd/factoryd retryRequest already recognized:
-//   - a halt while materializing per-ticket oracles from an approved
-//     request-level oracle (HaltOracleMaterialize) returns to
-//     oracle_review with the pins dropped, so the operator can edit
-//     oracle/ and approve again;
 //   - a halt/quarantine before any ticket existed (TicketCount == 0),
 //     or a halt in planning (a re-plan after a plan_review rejection),
 //     resumes the drafting stage the artifacts on disk show it reached --
-//     planning if an approved spec.md exists, the oracle stage if it
-//     halted there, otherwise spec drafting;
+//     planning if an approved spec.md exists, otherwise spec
+//     drafting;
 //   - a ticket that already has an open PR (TicketIndex names one with a
 //     recorded PRURL) resumes pr_review, so a fresh run never tries to
 //     open a second PR on the same branch;
@@ -181,8 +175,6 @@ func (r *Request) reopensAReview() func(by, reason string, now time.Time) error 
 		return nil
 	}
 	switch r.HaltKind {
-	case HaltOracleMaterialize:
-		return r.ReturnToOracleReview
 	case HaltGateExpired:
 		return r.ReopenReview
 	}
@@ -225,10 +217,6 @@ func retry(dataDir, id, by, reason string, choice retryChoice, now time.Time, op
 		}
 		return r, nil
 	}
-	// A build refused because a reproduction's held copy is gone: the
-	// retrying operator drops those whose copy is still missing, recorded on
-	// the request.
-	r.dropUnheldReproductions(by, func(e run.RecheckEntry) bool { return !run.HeldCopyOnDisk(dataDir, e) }, now)
 	if r.TicketCount == 0 || r.HaltedFrom() == StatePlanning {
 		// Halted before any ticket existed (a spec-drafting or planning
 		// failure), or halted in a re-plan after a plan_review rejection,
@@ -237,7 +225,7 @@ func retry(dataDir, id, by, reason string, choice retryChoice, now time.Time, op
 		return resumeDraftingAfterHalt(dataDir, r, by, reason, now)
 	}
 	// TicketIndex 0 is valid here: a request halted at the very start of
-	// building (e.g. an approved-oracle hash mismatch, which is refused
+	// building (e.g. an approved-hash mismatch, which is refused
 	// before ticket 1 is ever marked started) has not advanced the index
 	// yet, and advanceBuilding defaults an index below 1 to ticket 1.
 	if r.TicketIndex < 0 || r.TicketIndex > r.TicketCount {
@@ -314,18 +302,11 @@ func (r *Request) StackBase(index int) string {
 
 // resumeDraftingAfterHalt resumes the drafting stage the artifacts on disk
 // show r reached: planning once an approved spec.md exists, otherwise spec
-// drafting, and the oracle stage when r halted there.
+// drafting.
 func resumeDraftingAfterHalt(dataDir string, r *Request, by, reason string, now time.Time) (*Request, error) {
 	target := StateSpecDrafting
 	if _, err := os.Stat(SpecPath(dataDir, r.ID)); err == nil && r.ApprovedSHA256[specFileName] != "" {
 		target = StatePlanning
-	}
-	// A request that halted inside the oracle stage has an approved
-	// spec too, so the artifact check above would send it straight
-	// to planning and silently skip the stage it was opted into:
-	// resume where it actually halted.
-	if from := r.HaltedFrom(); from == StateOracleDrafting || from == StateOracleReview {
-		target = StateOracleDrafting
 	}
 	if err := r.ResumeDrafting(target, by, reason, now); err != nil {
 		return nil, err

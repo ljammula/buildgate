@@ -162,7 +162,7 @@ func StageSkills(workDir, parent string, skills []SkillSource) (dir, sha256Hash 
 	if len(skills) == 0 {
 		return "", "", nil, nil
 	}
-	if ReferenceOracleSourceContained(workDir, parent) {
+	if PathContained(workDir, parent) {
 		return "", "", nil, errors.New("skills: staging directory must not be inside the workspace")
 	}
 	if err := os.MkdirAll(parent, 0o750); err != nil {
@@ -196,8 +196,7 @@ func SkillNames(skills []SkillSource) []string {
 // SnapshotSkills copies the operator skills into dst (one folder per skill
 // name) and returns the SHA-256 of the snapshot, the one fixed tree both
 // the recorded hash and the read-only worker mount act on. dst is removed
-// first (a retried Temporal Activity can find a stale one, as in
-// SnapshotReferenceOracle) and must be absolute and outside workDir; on
+// first (a retried Temporal Activity can find a stale one) and must be absolute and outside workDir; on
 // any error nothing is left behind. No skills means "", nil and nothing
 // is created.
 //
@@ -275,7 +274,7 @@ func checkSkill(workDir string, s SkillSource) (string, int64, error) {
 	if err != nil {
 		return "", 0, fmt.Errorf("skills: %s: resolve %s: %w", s.Name, s.Dir, err)
 	}
-	if ReferenceOracleSourceContained(workDir, root) {
+	if PathContained(workDir, root) {
 		return "", 0, fmt.Errorf("skills: %s: source %s must not be inside the workspace", s.Name, root)
 	}
 	info, err := os.Lstat(filepath.Join(root, "SKILL.md"))

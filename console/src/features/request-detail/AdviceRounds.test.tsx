@@ -79,3 +79,43 @@ test("an advice round under way and the ones that ended are on the ticket, apart
   // Advice rounds are not review rounds.
   expect(screen.queryByTestId("ticket-rounds-1")).not.toBeInTheDocument();
 });
+
+test("a challenge round is listed apart from advice and review rounds, and the ledger names its kind", async () => {
+  openRequest(
+    building({
+      rounds: [
+        {
+          index: 1,
+          kind: "challenge",
+          run_id: "req-1-001-challenge1",
+          outcome: "accepted",
+          pushed: false,
+          at: "2026-10-28T09:00:00Z",
+        },
+      ],
+      round_tags: [
+        {
+          n: 2,
+          run_id: "req-1-001-challenge1",
+          kind: "challenge",
+          sha: "0123456789abcdef",
+          ref: "refs/buildgate/x",
+          outcome: "accepted",
+          at: "2026-10-28T09:00:00Z",
+        },
+      ],
+    }),
+    { extra: [runRoute] },
+  );
+  await screen.findByRole("heading", { level: 1, name: "Advised ticket" });
+  const block = screen.getByTestId("ticket-challenge-rounds-1");
+  expect(within(block).getByRole("link", { name: "Challenge round run" })).toHaveAttribute(
+    "href",
+    "/runs/req-1-001-challenge1",
+  );
+  expect(screen.queryByTestId("ticket-advice-rounds-1")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("ticket-rounds-1")).not.toBeInTheDocument();
+  expect(
+    within(screen.getByTestId("round-ledger-1")).getByText("Challenge round"),
+  ).toBeInTheDocument();
+});

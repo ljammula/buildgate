@@ -59,11 +59,11 @@ type parityScenario struct {
 	// terminal state -- a halt (this suite's rewind_and_commit scenario)
 	// never reaches gate evaluation.
 	wantGates map[string]bool
-	// gateCommands optionally declares a policy.CommandGate command (keyed
-	// by gate ID) for this scenario -- RunWorkflowInput.
-	// GateCommands get it identically, so a scenario like lint_gate_fails
-	// below exercises the M4-K2 command-gate registry plumbing on both
-	// paths, not just canonical_verify/diff_scope/tests_red_on_base.
+	// gateCommands optionally declares a repository gate command (keyed by
+	// policy.RepoGateCheck(id)) for this scenario -- RunWorkflowInput.
+	// GateCommands, so a scenario like repo_gate_fails below exercises the
+	// repository-gate plumbing, not just canonical_verify/diff_scope/
+	// tests_red_on_base.
 	gateCommands map[string]string
 }
 
@@ -132,19 +132,18 @@ func parityScenarios() []parityScenario {
 			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": false, "full_suite_verify": true},
 		},
 		{
-			// lint_gate_fails exercises policy.CommandGates' registry
-			// plumbing end to end (M4-K2): a configured
-			// command-gate command that exits nonzero must quarantine the
-			// run and record "lint": false, through
+			// repo_gate_fails exercises the repository-gate plumbing end to
+			// end: a configured repository gate that exits nonzero must
+			// quarantine the run and record "repo-lint": false, through
 			// RunWorkflowInput.GateCommands.
-			name:          "lint_gate_fails",
+			name:          "repo_gate_fails",
 			mode:          "commit",
 			verifyCommand: "true",
 			specExtra:     "\nTests-Required: no -- parity fixture doesn't exercise tests_red_on_base\n",
 			wantState:     run.StateQuarantined,
 			wantCommitted: false,
-			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true, "lint": false},
-			gateCommands:  map[string]string{"lint": "false"},
+			wantGates:     map[string]bool{"canonical_verify": true, "tests_red_on_base": true, "full_suite_verify": true, "repo-lint": false},
+			gateCommands:  map[string]string{"repo-lint": "false"},
 		},
 		{
 			// rewind_and_commit resets the workspace to its root commit
@@ -371,14 +370,6 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 	if err != nil {
 		t.Fatalf("parse Allowed-Files: %v", err)
 	}
-	requiredChangedFiles, err := ticketspec.ParseRequiredChangedFiles(specPath)
-	if err != nil {
-		t.Fatalf("parse Required-Changed-Files: %v", err)
-	}
-	requiredContent, err := ticketspec.ParseRequiredContent(specPath)
-	if err != nil {
-		t.Fatalf("parse Required-Content: %v", err)
-	}
 	testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(specPath)
 	if err != nil {
 		t.Fatalf("parse Tests-Required: %v", err)
@@ -422,35 +413,33 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 		sliceOpts.TicketPath = specPath
 	}
 	input := runOptions{
-		ID:                   id,
-		Ticket:               ticket,
-		WorkspacePath:        workspace,
-		SpecSnapshotPath:     specPath,
-		BaseSHA:              baseSHA,
-		DataDir:              dataDir,
-		BuildAppInterpreter:  "/bin/sh",
-		BuildAppScript:       scriptPath,
-		Harness:              "pi",
-		ReviewHarness:        "pi",
-		CodeReviewPolicy:     "off",
-		VerifyCommand:        verifyCommand,
-		FullSuiteCommand:     fullSuiteCommand,
-		GateCommands:         gateCommands,
-		MaxRounds:            3,
-		TimeoutMinutes:       45,
-		BuildAppMaxAttempts:  2,
-		VerifyMaxAttempts:    2,
-		SandboxImage:         fakeSandboxImage,
-		SandboxDocker:        dockerPath,
-		ComposeServices:      compose,
-		AllowedFiles:         allowedFiles,
-		RequiredChangedFiles: requiredChangedFiles,
-		RequiredContent:      requiredContent,
-		TestsRequiredOptOut:  testsRequiredOptOut,
-		Slice:                sliceOpts,
-		Thinking:             thinking,
-		ReviewThinking:       reviewThinking,
-		ReviewRelayPolicy:    reviewRelayPolicy,
+		ID:                  id,
+		Ticket:              ticket,
+		WorkspacePath:       workspace,
+		SpecSnapshotPath:    specPath,
+		BaseSHA:             baseSHA,
+		DataDir:             dataDir,
+		BuildAppInterpreter: "/bin/sh",
+		BuildAppScript:      scriptPath,
+		Harness:             "pi",
+		ReviewHarness:       "pi",
+		CodeReviewPolicy:    "off",
+		VerifyCommand:       verifyCommand,
+		FullSuiteCommand:    fullSuiteCommand,
+		GateCommands:        gateCommands,
+		MaxRounds:           3,
+		TimeoutMinutes:      45,
+		BuildAppMaxAttempts: 2,
+		VerifyMaxAttempts:   2,
+		SandboxImage:        fakeSandboxImage,
+		SandboxDocker:       dockerPath,
+		ComposeServices:     compose,
+		AllowedFiles:        allowedFiles,
+		TestsRequiredOptOut: testsRequiredOptOut,
+		Slice:               sliceOpts,
+		Thinking:            thinking,
+		ReviewThinking:      reviewThinking,
+		ReviewRelayPolicy:   reviewRelayPolicy,
 	}.workflowInput()
 
 	var suite testsuite.WorkflowTestSuite
@@ -709,7 +698,7 @@ func TestOnBranchTemporalPathChecksOutPRBranchNotSharedHEAD(t *testing.T) {
 // B -- this run (-on-branch review-branch-temporal, -diff-base=A) then
 // edits content.txt again (FAKE_BUILD_APP_MODE=commit) as the round's own
 // commit C, which alone touches only content.txt. The ticket declares
-// Required-Changed-Files: content.txt,b_test.go -- satisfiable only by
+// Allowed-Files: content.txt, b_test.go -- satisfiable only by
 // the cumulative range A..HEAD, not by C..HEAD (this round's own
 // BaseSHA), which is exactly what DiffBaseSHA=A selects.
 func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
@@ -745,7 +734,7 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 		t.Fatalf("checkout main: %v: %s", err, out)
 	}
 
-	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nRequired-Changed-Files: content.txt, b_test.go\nTests-Required: no -- fixture doesn't exercise tests_red_on_base\n"
+	specContent := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, b_test.go\nTests-Required: no -- fixture doesn't exercise tests_red_on_base\n"
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -765,10 +754,6 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 	allowedFiles, err := ticketspec.ParseAllowedFiles(specPath)
 	if err != nil {
 		t.Fatalf("parse Allowed-Files: %v", err)
-	}
-	requiredChangedFiles, err := ticketspec.ParseRequiredChangedFiles(specPath)
-	if err != nil {
-		t.Fatalf("parse Required-Changed-Files: %v", err)
 	}
 	testsRequiredOptOut, err := ticketspec.ParseTestsRequiredOptOut(specPath)
 	if err != nil {
@@ -791,29 +776,28 @@ func TestDiffBaseTemporalPathComputesCumulativeChangedFiles(t *testing.T) {
 	// equivalent -- both mirror what a real corrective round submitted by
 	// pr_review_driver.go/request_driver.go would carry.
 	input := runOptions{
-		ID:                   id,
-		Ticket:               ticket,
-		WorkspacePath:        workspace,
-		SpecSnapshotPath:     specPath,
-		BaseSHA:              branchTip,
-		DataDir:              dataDir,
-		BuildAppInterpreter:  "/bin/sh",
-		BuildAppScript:       scriptPath,
-		Harness:              "pi",
-		ReviewHarness:        "pi",
-		CodeReviewPolicy:     "off",
-		VerifyCommand:        "true",
-		FullSuiteCommand:     "true",
-		MaxRounds:            3,
-		TimeoutMinutes:       45,
-		BuildAppMaxAttempts:  2,
-		VerifyMaxAttempts:    2,
-		SandboxImage:         fakeSandboxImage,
-		SandboxDocker:        dockerPath,
-		AllowedFiles:         allowedFiles,
-		RequiredChangedFiles: requiredChangedFiles,
-		TestsRequiredOptOut:  testsRequiredOptOut,
-		Slice:                sliceOpts,
+		ID:                  id,
+		Ticket:              ticket,
+		WorkspacePath:       workspace,
+		SpecSnapshotPath:    specPath,
+		BaseSHA:             branchTip,
+		DataDir:             dataDir,
+		BuildAppInterpreter: "/bin/sh",
+		BuildAppScript:      scriptPath,
+		Harness:             "pi",
+		ReviewHarness:       "pi",
+		CodeReviewPolicy:    "off",
+		VerifyCommand:       "true",
+		FullSuiteCommand:    "true",
+		MaxRounds:           3,
+		TimeoutMinutes:      45,
+		BuildAppMaxAttempts: 2,
+		VerifyMaxAttempts:   2,
+		SandboxImage:        fakeSandboxImage,
+		SandboxDocker:       dockerPath,
+		AllowedFiles:        allowedFiles,
+		TestsRequiredOptOut: testsRequiredOptOut,
+		Slice:               sliceOpts,
 	}.workflowInput()
 
 	if input.DiffBaseSHA != diffBase {

@@ -1,5 +1,5 @@
-// Making hidden characters visible. An oracle file is code the operator is
-// about to approve, so nothing in it (or in a name or message derived from
+// Making hidden characters visible. Text the operator reads before
+// approving it: nothing in it (or in a name or message derived from
 // it) may hide behind an invisible or direction-changing character, and two
 // different byte sequences must never render identically. Display only: the
 // approval hash is always over the raw bytes.

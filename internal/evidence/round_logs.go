@@ -16,7 +16,7 @@ import (
 
 // RoundLogsDirName is the directory, inside a run's own directory, that
 // holds the retained copy of each build round's output: the failing
-// command's (<run dir>/round-logs/round-<n>/<verify|fast-check|oracle>.log)
+// command's (<run dir>/round-logs/round-<n>/<verify|fast-check>.log)
 // and, for every round, passed or failed, what its setup: and autofix:
 // commands printed (setup.log, autofix.log).
 const RoundLogsDirName = "round-logs"
@@ -27,9 +27,9 @@ const RoundLogsDirName = "round-logs"
 const roundLogsSource = ".pi-build-session/feedback"
 
 // roundLogNames are the files build_app.py writes per round
-// (FAST_CHECK_LOG, VERIFY_LOG, ORACLE_LOG). Only these names are copied:
+// (FAST_CHECK_LOG, VERIFY_LOG). Only these names are copied:
 // the folder is in a workspace the build agent can write.
-var roundLogNames = []string{"fast-check.log", "verify.log", "oracle.log"}
+var roundLogNames = []string{"fast-check.log", "verify.log"}
 
 // retainedRoundLogNames are the files RetainRoundLogs copies per round: the
 // failing command's logs first, then what the round's setup: and autofix:

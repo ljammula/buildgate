@@ -410,8 +410,8 @@ func TestExampleMatchesReleaseDefaults(t *testing.T) {
 	if cfg.ReleaseMaxFilesChanged == nil || *cfg.ReleaseMaxFilesChanged != DefaultReleaseMaxFilesChanged {
 		t.Errorf("Example release_max_files_changed = %v, want %d", cfg.ReleaseMaxFilesChanged, DefaultReleaseMaxFilesChanged)
 	}
-	if cfg.ReleaseMaxInsertions == nil || *cfg.ReleaseMaxInsertions != DefaultReleaseMaxInsertions {
-		t.Errorf("Example release_max_insertions = %v, want %d", cfg.ReleaseMaxInsertions, DefaultReleaseMaxInsertions)
+	if cfg.ReleaseMaxChangedLines == nil || *cfg.ReleaseMaxChangedLines != DefaultReleaseMaxChangedLines {
+		t.Errorf("Example release_max_changed_lines = %v, want %d", cfg.ReleaseMaxChangedLines, DefaultReleaseMaxChangedLines)
 	}
 	if cfg.ReleaseRollbackPlan == nil || *cfg.ReleaseRollbackPlan != DefaultReleaseRollbackPlan {
 		t.Errorf("Example release_rollback_plan = %v, want %q", cfg.ReleaseRollbackPlan, DefaultReleaseRollbackPlan)

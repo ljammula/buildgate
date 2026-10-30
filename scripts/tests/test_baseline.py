@@ -197,7 +197,7 @@ class RebuiltBlockers(unittest.TestCase):
 	def test_the_round_end_line_and_the_report_add_what_the_fields_cannot_show(self):
 		passed_fields = rnd(1)
 		self.assertEqual(baseline.rebuilt_blockers(passed_fields, "advisory", (True, "no changes made"), {}), [baseline.NO_CHANGES])
-		self.assertEqual(baseline.rebuilt_blockers(passed_fields, "advisory", (True, "reference oracle failed"), {}), ["reference oracle failed"])
+		self.assertEqual(baseline.rebuilt_blockers(passed_fields, "advisory", (True, "verify command failed"), {}), ["verify command failed"])
 		self.assertEqual(baseline.rebuilt_blockers(passed_fields, "advisory", (True, ""), {}), ["round failed"])
 		# The loop said the round passed: its fields are not second-guessed.
 		self.assertEqual(baseline.rebuilt_blockers(rnd(1, False), "advisory", (False, ""), {}), [])

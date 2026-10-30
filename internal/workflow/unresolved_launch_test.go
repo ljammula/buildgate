@@ -81,7 +81,7 @@ func TestANamedGateRelaunchesOnlyASandboxThatNeverStarted(t *testing.T) {
 		var suite testsuite.WorkflowTestSuite
 		env := suite.NewTestActivityEnvironment()
 		env.RegisterActivity(f.acts.RunNamedGateActivity)
-		_, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "sh .factory/x.sh"})
+		_, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: in, Check: "lint", Command: "sh .factory/x.sh"})
 		if err == nil || UnresolvedCauseFromError(err) != tc.wantCause {
 			t.Errorf("%s: err = %v, cause %q, want cause %q", tc.name, err, UnresolvedCauseFromError(err), tc.wantCause)
 		}

@@ -29,8 +29,8 @@ func TestAdviceCarriesOnlyTheHighFindingsCleanedAndCapped(t *testing.T) {
 	if len(doc.AdviceFindings) != maxAdviceFindings {
 		t.Fatalf("AdviceFindings = %d, want the cap %d", len(doc.AdviceFindings), maxAdviceFindings)
 	}
-	if doc.Checks != nil || doc.ReproducedFindings != nil || doc.Next != "" {
-		t.Errorf("an advice record carries checks, reproduced findings or a bin: %+v", doc)
+	if doc.Checks != nil || doc.Next != "" {
+		t.Errorf("an advice record carries checks or a bin: %+v", doc)
 	}
 	md := doc.Markdown()
 	for _, want := range []string{

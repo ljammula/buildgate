@@ -29,7 +29,7 @@ def test_inventory_is_json_serializable_and_sources_exist():
 		}
 		assert source["id"].startswith("prompt-source:")
 		assert isinstance(source["fragment"], str) and source["fragment"]
-		assert source["role"] in {"planning", "execution", "review"}
+		assert source["role"] in {"planning", "execution", "review", "challenger"}
 		assert isinstance(source["stage"], str) and source["stage"]
 		assert source["kind"] == "inline-assembly"
 		assert isinstance(source["description"], str) and source["description"]
@@ -47,8 +47,6 @@ def test_inventory_has_stable_unique_ids_and_does_not_expose_prompt_text():
 		"prompt-source:draft-spec.context",
 		"prompt-source:draft-agents.context",
 		"prompt-source:plan-tickets.context",
-		"prompt-source:draft-oracles.criteria-context",
-		"prompt-source:draft-oracles.criterion-index",
 		"prompt-source:build-corrective.context",
 		"prompt-source:combined-review",
 		"prompt-source:review-instructions-diff",

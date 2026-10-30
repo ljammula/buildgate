@@ -184,116 +184,6 @@ func TestDiffScopeViolationsGlobDoesNotCrossDirectories(t *testing.T) {
 	}
 }
 
-func TestUnchangedRequiredFilesAllPresent(t *testing.T) {
-	if missing := UnchangedRequiredFiles([]string{"a.go", "a_test.go", "b.go"}, []string{"a.go", "a_test.go"}); len(missing) != 0 {
-		t.Errorf("got %v, want no missing files", missing)
-	}
-}
-
-func TestUnchangedRequiredFilesFindsMissingFile(t *testing.T) {
-	missing := UnchangedRequiredFiles([]string{"a_test.go"}, []string{"a.go", "a_test.go"})
-	if want := []string{"a.go"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v", missing, want)
-	}
-}
-
-func TestUnchangedRequiredFilesEmptyChangedMissesEveryRequiredFile(t *testing.T) {
-	missing := UnchangedRequiredFiles(nil, []string{"a.go"})
-	if want := []string{"a.go"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v", missing, want)
-	}
-}
-
-// An unmet Required-Changed-Files or Required-Content declaration is a note,
-// never a refused run: the run is accepted and the pull request lists each
-// unmet fact on its own line.
-func TestEvaluateRunNotesUnmetRequiredFilesAndContentAndRefusesNothing(t *testing.T) {
-	got := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:             []string{"make", "test"},
-		ChangedFiles:              []string{"README.md"},
-		RequiredChangedFiles:      []string{"README.md", "main.go"},
-		RequiredContent:           []string{"marker"},
-		RequiredContentBaseFiles:  map[string]string{"main.go": ""},
-		RequiredContentFinalFiles: map[string]string{"main.go": ""},
-		TestsRequiredOptOut:       "a documentation row",
-	})
-	if !got.Accepted || len(got.FailedChecks) != 0 {
-		t.Fatalf("EvaluateRun() = %+v, want accepted: required files and content refuse nothing", got)
-	}
-	want := []string{"required file not changed: main.go", `required content not newly present: "marker"`}
-	if !slices.Equal(got.Notes, want) {
-		t.Errorf("Notes = %q, want %q", got.Notes, want)
-	}
-	for _, g := range got.GateResults {
-		if g.Check == "required_files_changed" || g.Check == "required_content_present" {
-			t.Errorf("gate %q recorded: required files and content are notes, not gates", g.Check)
-		}
-	}
-}
-
-func TestAbsentRequiredContentAllNew(t *testing.T) {
-	base := map[string]string{"a.dart": "class Widget {}\n"}
-	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
-	if missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"}); len(missing) != 0 {
-		t.Errorf("got %v, want none missing", missing)
-	}
-}
-
-func TestAbsentRequiredContentMissingFromFinal(t *testing.T) {
-	base := map[string]string{"a.dart": "class Widget {}\n"}
-	final := map[string]string{"a.dart": "class Widget {\n  // cosmetic change only\n}\n"}
-	missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"})
-	if want := []string{"Key('quick-time-chips')"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v", missing, want)
-	}
-}
-
-func TestAbsentRequiredContentAlreadyInBaseDoesNotCount(t *testing.T) {
-	base := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n}\n"}
-	final := map[string]string{"a.dart": "class Widget {\n  Key('quick-time-chips')\n  // untouched otherwise\n}\n"}
-	missing := AbsentRequiredContent(base, final, []string{"Key('quick-time-chips')"})
-	if want := []string{"Key('quick-time-chips')"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v — content already present at base isn't new evidence of this run's change", missing, want)
-	}
-}
-
-func TestAbsentRequiredContentMatchesAcrossFiles(t *testing.T) {
-	base := map[string]string{"a.dart": "", "a_test.dart": ""}
-	final := map[string]string{"a.dart": "no marker here\n", "a_test.dart": "func TestQuickTimeChips() {}\n"}
-	if missing := AbsentRequiredContent(base, final, []string{"func TestQuickTimeChips("}); len(missing) != 0 {
-		t.Errorf("got %v, want none missing — the string only needs to appear in one of the required files", missing)
-	}
-}
-
-// TestAbsentRequiredContentDoesNotMaskAcrossFiles is the regression test
-// for a real finding from review: the marker is newly added to file B,
-// but that same marker already existed in file A at base — concatenating
-// every file into one blob before matching let A's pre-existing content
-// mask B's genuinely new addition. Checked per-file, A's pre-existing
-// marker must not affect B's independent pass.
-func TestAbsentRequiredContentDoesNotMaskAcrossFiles(t *testing.T) {
-	base := map[string]string{"a.dart": "Key('already-here')\n", "b.dart": ""}
-	final := map[string]string{"a.dart": "Key('already-here')\n", "b.dart": "Key('already-here')\n"}
-	if missing := AbsentRequiredContent(base, final, []string{"Key('already-here')"}); len(missing) != 0 {
-		t.Errorf("got %v, want none missing — b.dart newly added the marker, independent of a.dart already having it", missing)
-	}
-}
-
-// TestAbsentRequiredContentDoesNotFabricateSeamMatch is the regression
-// test for the other half of the same finding: concatenating file
-// content can fabricate a match at the seam between two files that
-// exists in neither file individually. "abc"+"def" naively concatenates
-// to "abcdef", which contains "cd" — a substring split across the seam —
-// even though no single file's content does.
-func TestAbsentRequiredContentDoesNotFabricateSeamMatch(t *testing.T) {
-	base := map[string]string{"a.dart": "", "b.dart": ""}
-	final := map[string]string{"a.dart": "xxxabc", "b.dart": "defxxx"}
-	missing := AbsentRequiredContent(base, final, []string{"abcdef"})
-	if want := []string{"abcdef"}; !slices.Equal(missing, want) {
-		t.Errorf("got %v, want %v — no single file actually contains the marker", missing, want)
-	}
-}
-
 func TestEvaluateRunAcceptsWhenOnlyCanonicalVerifyDeclared(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand:  []string{"sh", "-c", "make verify"},
@@ -358,16 +248,12 @@ func TestEvaluateRunRejectsOnFailingCanonicalVerify(t *testing.T) {
 
 func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:             []string{"sh", "-c", "true"},
-		BuildExitCode:             0,
-		VerifyExitCode:            0,
-		ChangedFiles:              []string{"a.go", "out-of-scope.txt"},
-		AllowedFiles:              []string{"a.go"},
-		RequiredChangedFiles:      []string{"a.go", "b.go"},
-		RequiredContent:           []string{"marker"},
-		RequiredContentBaseFiles:  map[string]string{"a.go": "", "b.go": ""},
-		RequiredContentFinalFiles: map[string]string{"a.go": "cosmetic change only", "b.go": ""},
-		TestsRequiredOptOut:       "not exercising tests_red_on_base in this fixture",
+		VerifyCommand:       []string{"sh", "-c", "true"},
+		BuildExitCode:       0,
+		VerifyExitCode:      0,
+		ChangedFiles:        []string{"a.go", "out-of-scope.txt"},
+		AllowedFiles:        []string{"a.go"},
+		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
 	})
 	if result.Accepted {
 		t.Error("Accepted = true, want false")
@@ -378,10 +264,6 @@ func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 	}
 	if !slices.Equal(result.DiffScopeViolations, []string{"out-of-scope.txt"}) {
 		t.Errorf("DiffScopeViolations = %v, want [out-of-scope.txt]", result.DiffScopeViolations)
-	}
-	wantNotes := []string{"required file not changed: b.go", `required content not newly present: "marker"`}
-	if !slices.Equal(result.Notes, wantNotes) {
-		t.Errorf("Notes = %q, want %q", result.Notes, wantNotes)
 	}
 	wantChecks := []string{"canonical_verify", "diff_scope", "tests_red_on_base"}
 	if len(result.GateResults) != len(wantChecks) {
@@ -396,17 +278,13 @@ func TestEvaluateRunRunsAllDeclaredGatesAndAggregatesFailures(t *testing.T) {
 
 func TestEvaluateRunAcceptsWhenAllDeclaredGatesPass(t *testing.T) {
 	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:             []string{"sh", "-c", "true"},
-		BuildExitCode:             0,
-		VerifyExitCode:            0,
-		ChangedFiles:              []string{"a.go", "a_test.go"},
-		AllowedFiles:              []string{"a.go", "a_test.go"},
-		RequiredChangedFiles:      []string{"a.go"},
-		RequiredContent:           []string{"marker"},
-		RequiredContentBaseFiles:  map[string]string{"a.go": ""},
-		RequiredContentFinalFiles: map[string]string{"a.go": "marker"},
-		FullSuiteCommand:          []string{"sh", "-c", "true"},
-		FullSuiteExitCode:         0,
+		VerifyCommand:     []string{"sh", "-c", "true"},
+		BuildExitCode:     0,
+		VerifyExitCode:    0,
+		ChangedFiles:      []string{"a.go", "a_test.go"},
+		AllowedFiles:      []string{"a.go", "a_test.go"},
+		FullSuiteCommand:  []string{"sh", "-c", "true"},
+		FullSuiteExitCode: 0,
 	})
 	if !result.Accepted {
 		t.Errorf("Accepted = false, want true; FailedChecks = %v", result.FailedChecks)
@@ -436,25 +314,25 @@ func TestEvaluateRunExemptsHarnessByproductsFromDiffScope(t *testing.T) {
 }
 
 func TestTestFilesFindsADefaultPatternMatch(t *testing.T) {
-	got := TestFiles([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil, nil)
+	got := TestFiles([]string{"internal/foo/bar.go", "internal/foo/bar_test.go"}, nil)
 	if !slices.Equal(got, []string{"internal/foo/bar_test.go"}) {
 		t.Errorf("TestFiles() = %v, want the *_test.go file only", got)
 	}
 }
 
 func TestTestFilesIsEmptyWithNoTestFileChanged(t *testing.T) {
-	if got := TestFiles([]string{"internal/foo/bar.go"}, nil, nil); len(got) != 0 {
+	if got := TestFiles([]string{"internal/foo/bar.go"}, nil); len(got) != 0 {
 		t.Errorf("TestFiles() = %v, want none when no changed file matches a test pattern", got)
 	}
 }
 
 func TestTestFilesHonorsCustomPatterns(t *testing.T) {
-	if got := TestFiles([]string{"e2e/checkout.feature"}, []string{"*.feature"}, nil); len(got) != 1 {
+	if got := TestFiles([]string{"e2e/checkout.feature"}, []string{"*.feature"}); len(got) != 1 {
 		t.Error("TestFiles() found no test against a custom test_patterns match")
 	}
 	// The same changed file does not satisfy any default pattern, proving
 	// the custom pattern -- not a default -- is what matched.
-	if got := TestFiles([]string{"e2e/checkout.feature"}, nil, nil); len(got) != 0 {
+	if got := TestFiles([]string{"e2e/checkout.feature"}, nil); len(got) != 0 {
 		t.Error("TestFiles() with default patterns unexpectedly matched a non-test-convention file")
 	}
 }
@@ -481,15 +359,15 @@ func TestTestFilesDefaultPatternsCoverMultipleLanguages(t *testing.T) {
 		"src/widget_test.rs",
 	} {
 		t.Run(changed, func(t *testing.T) {
-			if got := TestFiles([]string{changed}, nil, nil); len(got) != 1 {
-				t.Errorf("TestFiles([]string{%q}, nil, nil) = %v, want the file", changed, got)
+			if got := TestFiles([]string{changed}, nil); len(got) != 1 {
+				t.Errorf("TestFiles([]string{%q}, nil) = %v, want the file", changed, got)
 			}
 		})
 	}
 }
 
 func TestTestFilesCustomPatternMatchesFullPathNotJustBasename(t *testing.T) {
-	if got := TestFiles([]string{"test/integration/foo.go"}, []string{"test/*/*.go"}, nil); len(got) != 1 {
+	if got := TestFiles([]string{"test/integration/foo.go"}, []string{"test/*/*.go"}); len(got) != 1 {
 		t.Error("TestFiles() found no test when the full path matches a custom pattern")
 	}
 }
@@ -505,21 +383,27 @@ func TestTestsRedOnBaseVerdictTable(t *testing.T) {
 		name     string
 		tests    []string
 		optOut   string
+		refused  bool
 		proof    *TestsRedOnBaseInput
 		passed   bool
 		wantNote string
 	}{
-		{"red on base proved", tests, "", proof(run.TestsRedProved), true, ""},
-		{"every test passes on base", tests, "", proof(run.TestsRedNotExercised), false, ""},
-		{"no verdict passes with a note", tests, "", proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
-		{"no proof at all passes with a note", tests, "", nil, true, "tests_red_on_base: the changed tests were not run"},
-		{"no test file changed refuses", nil, "", nil, false, ""},
-		{"no test file changed refuses whatever the proof", nil, "", proof(run.TestsRedProved), false, ""},
-		{"opt-out passes without a test", nil, "docs-only change", nil, true, ""},
-		{"opt-out ignores a proof", tests, "docs-only change", proof(run.TestsRedNotExercised), true, ""},
+		{"red on base proved", tests, "", false, proof(run.TestsRedProved), true, ""},
+		{"every test passes on base", tests, "", false, proof(run.TestsRedNotExercised), false, ""},
+		{"no verdict passes with a note", tests, "", false, proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
+		{"no proof at all passes with a note", tests, "", false, nil, true, "tests_red_on_base: the changed tests were not run"},
+		{"no test file changed refuses", nil, "", false, nil, false, ""},
+		{"no test file changed refuses whatever the proof", nil, "", false, proof(run.TestsRedProved), false, ""},
+		{"opt-out passes without a test", nil, "docs-only change", false, nil, true, ""},
+		{"opt-out ignores a proof", tests, "docs-only change", false, proof(run.TestsRedNotExercised), true, ""},
+		{"a bug ticket 1 may not opt out", tests, "docs-only change", true, proof(run.TestsRedProved), false, ""},
+		{"a bug ticket 1 may not opt out of having no test", nil, "docs-only change", true, nil, false, ""},
+		{"a bug ticket 1 with a test that fails on the base passes", tests, "", true, proof(run.TestsRedProved), true, ""},
+		{"a bug ticket 1 whose tests all pass on the base is refused", tests, "", true, proof(run.TestsRedNotExercised), false, ""},
+		{"a bug ticket 1 with no verdict passes with a note", tests, "", true, proof(run.TestsRedNoVerdict), true, "tests_red_on_base: no verdict (why)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			gate, note := TestsRedOnBase(c.tests, c.optOut, c.proof)
+			gate, note := TestsRedOnBase(c.tests, c.optOut, c.refused, c.proof)
 			if gate.Check != "tests_red_on_base" || gate.Passed != c.passed || note != c.wantNote {
 				t.Errorf("TestsRedOnBase() = %+v, %q; want passed %v, note %q", gate, note, c.passed, c.wantNote)
 			}
@@ -528,8 +412,8 @@ func TestTestsRedOnBaseVerdictTable(t *testing.T) {
 }
 
 // TestTicketTestsFeasibleCatchesTheLiveCase pins the exact shape found
-// live (a Flutter + Go app repo run 3, 2026-09-28): a ticket's Allowed-Files/
-// Required-Changed-Files named only one concrete, non-test Go file, no
+// live (a Flutter + Go app repo run 3, 2026-09-28): a ticket's Allowed-Files
+// named only one concrete, non-test Go file, no
 // Tests-Required opt-out declared -- structurally unable to ever pass
 // tests_red_on_base, yet the plan reached plan_review and a build ran before
 // quarantining on it.
@@ -798,7 +682,7 @@ func TestEvaluateRunQuarantinesOnCodeReviewFailure(t *testing.T) {
 
 // TestEvaluateRunSkipsUnconfiguredNamedGates is the named gates' version
 // of TestEvaluateRunSkipsFullSuiteVerifyWhenNotDeclared: a gate absent from
-// NamedGates never appears in GateResults at all -- not present-and-
+// RepoGates never appears in GateResults at all -- not present-and-
 // passed, since "not configured" is a distinct state the PR body must be
 // able to render.
 func TestEvaluateRunSkipsUnconfiguredNamedGates(t *testing.T) {
@@ -809,7 +693,7 @@ func TestEvaluateRunSkipsUnconfiguredNamedGates(t *testing.T) {
 	})
 	for _, g := range result.GateResults {
 		if g.Check == "lint" || g.Check == "security_audit" || g.Check == "unit_tests" || g.Check == "integration_tests" {
-			t.Errorf("GateResults = %+v, want no named gates when NamedGates is empty", result.GateResults)
+			t.Errorf("GateResults = %+v, want no named gates when RepoGates is empty", result.GateResults)
 		}
 	}
 }
@@ -823,7 +707,7 @@ func TestEvaluateRunQuarantinesOnFailingSecurityAudit(t *testing.T) {
 		VerifyCommand:  []string{"sh", "-c", "true"},
 		BuildExitCode:  0,
 		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
+		RepoGates: []RepoGateInput{
 			{Check: "lint", Command: []string{"sh", "-c", "golangci-lint run ./..."}, ExitCode: 0, DurationMs: 10, LogSHA256: "abc"},
 			{Check: "security_audit", Command: []string{"sh", "-c", "govulncheck ./..."}, ExitCode: 1, DurationMs: 20, LogSHA256: "def"},
 		},
@@ -849,100 +733,6 @@ func TestEvaluateRunQuarantinesOnFailingSecurityAudit(t *testing.T) {
 	}
 	if result.GateResults[3].Passed {
 		t.Errorf("security_audit gate should have failed: %+v", result.GateResults[3])
-	}
-}
-
-// TestEvaluateRunQuarantinesOnFailingReferenceOracle is the
-// reference_oracle counterpart to
-// TestEvaluateRunQuarantinesOnFailingSecurityAudit, added alongside the
-// gate itself rather than relying on the generic NamedGate mechanism's
-// other coverage to stand in for it: a failing reference-oracle command
-// must quarantine the run the same way any other failing named gate does, and this pins that
-// specifically by name rather than only by analogy. Confirmed live
-// (2026-09-15): three real sandboxed builds against a real local model
-// all passed this gate legitimately; this test is the fast, deterministic
-// regression guard for the failure path those live runs didn't happen to
-// exercise.
-func TestEvaluateRunQuarantinesOnFailingReferenceOracle(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
-			{Check: "reference_oracle", Command: []string{"sh", "-c", "go test ./verify/..."}, ExitCode: 1, DurationMs: 15, LogSHA256: "ghi"},
-		},
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	})
-	if result.Accepted {
-		t.Error("Accepted = true, want false when reference_oracle fails")
-	}
-	if !slices.Equal(result.FailedChecks, []string{"reference_oracle"}) {
-		t.Errorf("FailedChecks = %v, want [reference_oracle]", result.FailedChecks)
-	}
-	wantChecks := []string{"canonical_verify", "tests_red_on_base", "reference_oracle"}
-	if len(result.GateResults) != len(wantChecks) {
-		t.Fatalf("GateResults = %+v, want %d gates", result.GateResults, len(wantChecks))
-	}
-	for i, want := range wantChecks {
-		if result.GateResults[i].Check != want {
-			t.Errorf("GateResults[%d].Check = %q, want %q", i, result.GateResults[i].Check, want)
-		}
-	}
-	if result.GateResults[2].Passed {
-		t.Errorf("reference_oracle gate should have failed: %+v", result.GateResults[2])
-	}
-}
-
-// TestEvaluateRunCarriesReferenceOracleSHA256Through is the regression
-// test for the SC-012 follow-up (PR #151 review, round 2): the oracle
-// content hash cmd/factoryd computes must survive EvaluateRun/NamedGate
-// unchanged into the persisted GateResult, the same way LogSHA256 already
-// does -- policy.NamedGate copies it through verbatim rather than
-// recomputing or dropping it.
-func TestEvaluateRunCarriesReferenceOracleSHA256Through(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
-			{Check: "reference_oracle", Command: []string{"sh", "-c", "go test ./verify/..."}, ExitCode: 0, DurationMs: 15, LogSHA256: "ghi", ReferenceOracleSHA256: "deadbeef"},
-		},
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	})
-	var found bool
-	for _, g := range result.GateResults {
-		if g.Check != "reference_oracle" {
-			continue
-		}
-		found = true
-		if g.ReferenceOracleSHA256 != "deadbeef" {
-			t.Errorf("ReferenceOracleSHA256 = %q, want %q to survive unchanged", g.ReferenceOracleSHA256, "deadbeef")
-		}
-	}
-	if !found {
-		t.Fatal("no reference_oracle GateResult found")
-	}
-}
-
-// TestEvaluateRunLeavesReferenceOracleSHA256EmptyForOtherGates confirms
-// the field stays empty for every gate that isn't reference_oracle, so a
-// reviewer reading GateResults never mistakes an unrelated gate's zero
-// value for "no oracle content was hashed" vs. "this gate isn't the
-// oracle gate at all".
-func TestEvaluateRunLeavesReferenceOracleSHA256EmptyForOtherGates(t *testing.T) {
-	result := EvaluateRun(EvaluateRunInput{
-		VerifyCommand:  []string{"sh", "-c", "true"},
-		BuildExitCode:  0,
-		VerifyExitCode: 0,
-		NamedGates: []NamedGateInput{
-			{Check: "lint", Command: []string{"sh", "-c", "golangci-lint run ./..."}, ExitCode: 0, DurationMs: 10, LogSHA256: "abc"},
-		},
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	})
-	for _, g := range result.GateResults {
-		if g.Check == "lint" && g.ReferenceOracleSHA256 != "" {
-			t.Errorf("lint gate's ReferenceOracleSHA256 = %q, want empty", g.ReferenceOracleSHA256)
-		}
 	}
 }
 
@@ -1372,7 +1162,6 @@ func containsReason(reasons []string, want string) bool {
 
 const wellFormedBrownfieldTicket = `Verify-Command: make verify
 Allowed-Files: internal/foo/foo.go, internal/foo/foo_test.go
-Required-Changed-Files: internal/foo/foo.go
 
 ## Goal
 
@@ -1419,6 +1208,21 @@ func TestTicketStructureBrownfieldRejectsMissingHeaderKey(t *testing.T) {
 	}
 }
 
+// Retired headers in existing plans are ignored, including malformed values.
+func TestTicketStructureBrownfieldIgnoresRetiredHeaders(t *testing.T) {
+	for _, header := range []string{"Required-Changed-Files: internal/foo/foo.go", "Required-Content: marker"} {
+		ticket := strings.Replace(wellFormedBrownfieldTicket, "\n\n## Goal", "\n"+header+"\n\n## Goal", 1)
+		passed, reasons := TicketStructureBrownfield(ticket)
+		if !passed || len(reasons) != 0 {
+			t.Errorf("TicketStructureBrownfield(%q) = %v, %v, want acceptance", header, passed, reasons)
+		}
+	}
+	fenced := strings.Replace(wellFormedBrownfieldTicket, "## Goal", "```\nRequired-Content: marker\n```\n\n## Goal", 1)
+	if passed, reasons := TicketStructureBrownfield(fenced); !passed {
+		t.Errorf("a retired header inside a fenced example refused the ticket: %v", reasons)
+	}
+}
+
 func TestTicketStructureBrownfieldRejectsMissingSection(t *testing.T) {
 	missingOutOfScope := strings.Replace(wellFormedBrownfieldTicket, "## Out of scope\n\nNothing else.\n", "", 1)
 	passed, reasons := TicketStructureBrownfield(missingOutOfScope)
@@ -1431,8 +1235,8 @@ func TestTicketStructureBrownfieldRejectsMissingSection(t *testing.T) {
 }
 
 func TestTicketStructureBrownfieldRejectsFencedHeaderKeyOnly(t *testing.T) {
-	fencedOnly := "```\nVerify-Command: make verify\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n```\n\n" +
-		strings.Replace(wellFormedBrownfieldTicket, "Verify-Command: make verify\nAllowed-Files: internal/foo/foo.go, internal/foo/foo_test.go\nRequired-Changed-Files: internal/foo/foo.go\n\n", "", 1)
+	fencedOnly := "```\nVerify-Command: make verify\nAllowed-Files: a.go\n```\n\n" +
+		strings.Replace(wellFormedBrownfieldTicket, "Verify-Command: make verify\nAllowed-Files: internal/foo/foo.go, internal/foo/foo_test.go\n\n", "", 1)
 	passed, reasons := TicketStructureBrownfield(fencedOnly)
 	if passed {
 		t.Fatal("TicketStructureBrownfield(header keys only inside a fenced block) Passed = true, want false")
@@ -1455,7 +1259,7 @@ func TestEvaluateRunCarriesANamedGatesBaseCheckWithoutJudgingByIt(t *testing.T) 
 	passesOnBase := &run.GateBaseCheck{Outcome: run.GateBasePasses, BaseSHA: "abc"}
 	result := EvaluateRun(EvaluateRunInput{
 		VerifyCommand: []string{"sh", "-c", "true"},
-		NamedGates: []NamedGateInput{
+		RepoGates: []RepoGateInput{
 			{Check: "lint", Command: []string{"sh", "-c", "lint"}, ExitCode: 1, BaseCheck: passesOnBase},
 			{Check: "unit_tests", Command: []string{"sh", "-c", "test"}, ExitCode: 0},
 		},
@@ -1504,10 +1308,10 @@ func TestIsTestFile(t *testing.T) {
 
 func TestTestFilesAcceptsATestDirectoryPattern(t *testing.T) {
 	immer := []string{"*.test.js", "*.spec.ts", "__tests__/"}
-	if got := TestFiles([]string{"src/patch.ts", "__tests__/patch.js"}, immer, nil); !slices.Equal(got, []string{"__tests__/patch.js"}) {
+	if got := TestFiles([]string{"src/patch.ts", "__tests__/patch.js"}, immer); !slices.Equal(got, []string{"__tests__/patch.js"}) {
 		t.Errorf("TestFiles() = %v, want __tests__/patch.js", got)
 	}
-	if got := TestFiles([]string{"__tests__/patch.js"}, []string{"*.test.js"}, nil); len(got) != 0 {
+	if got := TestFiles([]string{"__tests__/patch.js"}, []string{"*.test.js"}); len(got) != 0 {
 		t.Error("without the directory entry the file is not a test")
 	}
 }
@@ -1525,22 +1329,14 @@ func TestTicketTestsFeasibleWithATestDirectory(t *testing.T) {
 	}
 }
 
-// SC-022: the review_reproduction check fails iff a reproduction refuses the
-// run, and is not recorded for a run that took no reproduction phase.
-func TestEvaluateRunReviewReproductionFailsOnlyOnARefusingReproduction(t *testing.T) {
-	base := EvaluateRunInput{VerifyCommand: []string{"make", "verify"}, TestsRequiredOptOut: "not under test"}
-	if got := EvaluateRun(base); !got.Accepted || slices.ContainsFunc(got.GateResults, func(g run.GateResult) bool { return g.Check == ReviewReproductionCheck }) {
-		t.Errorf("no phase: %+v, want accepted with no review_reproduction check", got)
-	}
-	for _, tc := range []struct {
-		in   ReviewReproductionInput
-		want bool
-	}{{ReviewReproductionInput{}, true}, {ReviewReproductionInput{Decided: 3}, true}, {ReviewReproductionInput{Decided: 3, Refusing: 1}, false}} {
-		in := base
-		in.ReviewReproduction = &tc.in
-		got := EvaluateRun(in)
-		if got.Accepted != tc.want || slices.Contains(got.FailedChecks, ReviewReproductionCheck) == tc.want {
-			t.Errorf("%+v: accepted=%v failed=%v, want accepted=%v", tc.in, got.Accepted, got.FailedChecks, tc.want)
-		}
+func TestEvaluateRunTestsRedOnBaseNamesEachSkippedFile(t *testing.T) {
+	result := EvaluateRun(EvaluateRunInput{
+		VerifyCommand:  []string{"sh", "-c", "true"},
+		ChangedFiles:   []string{"a.go", "a_test.go", "b_test.go"},
+		TestsRedOnBase: &TestsRedOnBaseInput{Verdict: run.TestsRedProved, Skipped: []run.TestsRedSkipped{{Path: "b_test.go", Reason: "the runner reads no test ID in it"}}},
+	})
+	want := "tests_red_on_base: b_test.go was not run or judged: the runner reads no test ID in it"
+	if !slices.Contains(result.Notes, want) {
+		t.Errorf("Notes = %q, want %q", result.Notes, want)
 	}
 }

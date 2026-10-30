@@ -531,68 +531,6 @@ class CopilotPlaceholderEnvTests(unittest.TestCase):
 				self._invocation(tmp)
 
 
-class AgentDigestTests(unittest.TestCase):
-	"""The oracle drafter's bounded streaming digest reads each harness's own
-	events through its adapter's line_event hook."""
-
-	def digest(self, adapter, name):
-		draft = _load("draft_acceptance_oracles")
-		d = draft.AgentDigest(adapter)
-		for line in fixture(name).splitlines():
-			d.feed(line)
-		return d
-
-	def test_codex_round(self):
-		d = self.digest(CODEX, "codex_round1.jsonl")
-		self.assertTrue(d.last_full_text.startswith("Created `probe_hello.txt`"))
-		self.assertEqual((d.turns, d.errored, d.last_error), (1, 0, None))
-		self.assertEqual(d.usage()["output"], 174)
-		self.assertEqual(d.usage()["cacheRead"], 6912)
-
-	def test_codex_model_error(self):
-		d = self.digest(CODEX, "codex_model_error.jsonl")
-		self.assertIsNone(d.last_full_text)
-		self.assertIsNone(d.usage())
-		self.assertEqual((d.turns, d.errored), (1, 1))
-		self.assertIn("'no-such-model-xyz' model is not supported", d.last_error)
-		self.assertIn("codex events", d.summary())
-		self.assertIn("not supported", d.summary())
-
-	def test_copilot_round(self):
-		d = self.digest(COPILOT, "copilot_round1.jsonl")
-		self.assertTrue(d.last_full_text.startswith("Done. Created"))
-		self.assertIsNone(d.usage())
-		self.assertEqual((d.turns, d.errored, d.last_error), (3, 0, None))
-
-	def test_copilot_model_error(self):
-		d = self.digest(COPILOT, "copilot_model_error.jsonl")
-		self.assertIsNone(d.last_full_text)
-		self.assertIsNone(d.usage())
-		self.assertEqual((d.turns, d.errored), (1, 1))
-		self.assertEqual(d.last_error, "400 Bad Request")
-
-	def test_a_failed_final_turn_drops_the_earlier_text(self):
-		d = self.digest(CODEX, "codex_round1.jsonl")
-		for line in fixture("codex_model_error.jsonl").splitlines():
-			d.feed(line)
-		self.assertIsNone(d.last_full_text)
-
-	def test_pi_events_still_digest(self):
-		pi = harness_adapters.get("pi")
-		draft = _load("draft_acceptance_oracles")
-		d = draft.AgentDigest(pi)
-		for line in (
-			'{"type":"message_start"}',
-			'{"type":"message_update","assistantMessageEvent":{"delta":"abc"}}',
-			'{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}',
-			'{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"boom","content":[]}}',
-			'{"type":"agent_end","messages":[{"role":"assistant","usage":{"input":3,"output":4}}]}',
-		):
-			d.feed(line)
-		self.assertEqual((d.turns, d.errored, d.last_error, d.last_full_text), (2, 1, "boom", "done"))
-		self.assertEqual(d.usage(), {"input": 3, "output": 4})
-
-
 class LaunchTests(unittest.TestCase):
 	"""The launch helpers give every agent subprocess /dev/null for stdin:
 	Codex reads stdin whenever it is not a TTY and would otherwise wait on it."""

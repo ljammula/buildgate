@@ -283,6 +283,7 @@ func TestCheckLaunchBudgetMonthlyExceeded(t *testing.T) {
 // planning launch point.
 func TestAdvancePlanningQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	r := requestdrivertest.LoadRequest(t, dataDir, id)
 	r.SpecEvidence = &request.SpecEvidence{Spend: &request.JobSpend{CostMicroUSD: 10_000_000, At: time.Now()}}
 	if err := r.Save(dataDir); err != nil {
@@ -292,33 +293,6 @@ func TestAdvancePlanningQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestCostBudgetMicroUSD: 1_000_000}}
 	if err := requestdriver.AdvancePlanning(newFakeDeps(t), context.Background(), dataDir, r, cfg, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatalf("advancePlanning: %v", err)
-	}
-	if r.State != request.StateQuarantined {
-		t.Fatalf("State = %q, want %q", r.State, request.StateQuarantined)
-	}
-	if r.QuarantineCheck != request.QuarantineCheckBudgetRequest {
-		t.Errorf("QuarantineCheck = %q, want %q", r.QuarantineCheck, request.QuarantineCheckBudgetRequest)
-	}
-}
-
-// TestAdvanceOracleDraftingQuarantinesWhenRequestBudgetExhausted covers
-// the oracle-drafting launch point.
-func TestAdvanceOracleDraftingQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
-	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	r := requestdrivertest.LoadRequest(t, dataDir, id)
-	r.SpecEvidence = &request.SpecEvidence{Spend: &request.JobSpend{InputTokens: 1000, At: time.Now()}}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := requestdrivertest.NoOracleScriptCfg
-	cfg.Settings = sessionconfig.Settings{RequestTokenBudget: 1}
-	runner := func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		t.Fatal("oracleDraftRunner must not be called once the request budget is already exhausted")
-		return request.OracleDraft{}, nil
-	}
-	if err := requestdriver.AdvanceOracleDrafting(newFakeDeps(t), context.Background(), dataDir, r, cfg, runner, time.Now()); err != nil {
-		t.Fatalf("advanceOracleDrafting: %v", err)
 	}
 	if r.State != request.StateQuarantined {
 		t.Fatalf("State = %q, want %q", r.State, request.StateQuarantined)
@@ -341,7 +315,7 @@ func TestAdvanceBuildingQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	}
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 1000}}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -365,7 +339,7 @@ func TestAdvanceBuildingLaunchesWhenUnderBudget(t *testing.T) {
 	runner := requestdrivertest.AcceptingBuildRunner(t, dataDir)
 
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.Settings{RequestTokenBudget: 1_000_000, RequestCostBudgetMicroUSD: 1_000_000}}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 
@@ -393,7 +367,7 @@ func TestCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket := &r.Tickets[0]
-	runRecord := requestdrivertest.ReproductionRefusedOn(t, dataDir, "run-under-test", branch, baseSHA, fmt.Sprintf("%040d", 2))
+	runRecord := requestdrivertest.CorrectableQuarantine(t, dataDir, "run-under-test", branch, baseSHA, fmt.Sprintf("%040d", 2))
 
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}

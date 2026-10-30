@@ -18,11 +18,11 @@ test("lists every request that needs the operator, oldest wait first", () => {
     summary({ id: "working", state: "building" }),
     summary({ id: "new", state: "plan_review", enteredAt: "2026-09-12T08:00:00Z" }),
     summary({ id: "old", state: "spec_review", enteredAt: "2026-09-10T08:00:00Z" }),
-    summary({ id: "oracle", state: "oracle_review", enteredAt: "2026-09-11T08:00:00Z" }),
+    summary({ id: "resume", state: "resume_review", enteredAt: "2026-09-11T08:00:00Z" }),
     summary({ id: "halted", state: "halted", enteredAt: "2026-09-11T09:00:00Z" }),
     summary({ id: "done", state: "done" }),
   ]);
-  expect(list.map((r) => r.id)).toEqual(["old", "oracle", "halted", "new"]);
+  expect(list.map((r) => r.id)).toEqual(["old", "resume", "halted", "new"]);
 });
 
 test("a spec_review artifact is the spec", () => {
@@ -58,7 +58,6 @@ test("typing targets are inputs, textareas, selects and editable elements", () =
 test("only spec_review and plan_review are decided in place", () => {
   expect(decidesInPlace(summary({ id: "a", state: "spec_review" }))).toBe(true);
   expect(decidesInPlace(summary({ id: "a", state: "plan_review" }))).toBe(true);
-  expect(decidesInPlace(summary({ id: "a", state: "oracle_review" }))).toBe(false);
   expect(decidesInPlace(summary({ id: "a", state: "halted" }))).toBe(false);
 });
 
@@ -69,9 +68,7 @@ test("the reason is the server's next step, except in review states that name CL
       "t",
     );
   expect(triageReason(withNext("halted"))).toBe("Run factoryd x.");
-  expect(triageReason(withNext("oracle_review"))).toBe(
-    "The drafted acceptance tests wait for your review.",
-  );
+  expect(triageReason(withNext("resume_review"))).toBe("A resume plan waits for your approval.");
   expect(triageReason(summary({ id: "a", state: "resume_review" }))).toBe(
     "A resume plan waits for your approval.",
   );

@@ -27,11 +27,7 @@ export const requiredTicketHeadings: readonly string[] = [
   "## Out of scope",
 ];
 
-export const requiredTicketHeaderKeys: readonly string[] = [
-  "Verify-Command:",
-  "Allowed-Files:",
-  "Required-Changed-Files:",
-];
+export const requiredTicketHeaderKeys: readonly string[] = ["Verify-Command:", "Allowed-Files:"];
 
 const ACCEPTANCE_CRITERIA = "## Acceptance criteria";
 const CRITERIA_COVERED = "### Acceptance criteria covered";

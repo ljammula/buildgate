@@ -37,13 +37,14 @@ func acceptedRunFixture(t *testing.T, dataDir, runID string) *run.Run {
 		ChangedFiles:               []string{"lib/app.go"},
 		DependencyLockfilesTouched: []string{},
 		DiffStat:                   &run.DiffStat{FilesChanged: 1, Insertions: 2},
+		ChangeSize:                 &run.ChangeSize{SourceFiles: 1, SourceLines: 2},
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: true},
 			{Check: "full_suite_verify", Passed: true},
 		},
 		ReleasePolicy: runReleasePolicy(release.MergePolicy{
 			MaxFilesChanged:                10,
-			MaxInsertions:                  100,
+			MaxChangedLines:                100,
 			RollbackPlan:                   "revert the PR",
 			RequiredGates:                  []string{"canonical_verify", "full_suite_verify"},
 			AllowUnsandboxed:               true,

@@ -210,7 +210,7 @@ const card = (id) => page.getByTestId(`card-${id}`);
 // it stopped at, so a column holds at least its own states, and the four
 // stage columns together hold every request that is not finished.
 const columnStates = {
-  Spec: ["submitted", "spec_drafting", "spec_review", "oracle_drafting", "oracle_review"],
+  Spec: ["submitted", "spec_drafting", "spec_review"],
   Plan: ["planning", "plan_review"],
   Building: ["building"],
   "PR review": ["pr_review"],
@@ -299,7 +299,7 @@ step("mission-control", async () => {
       (await health.getByText("Queued").count()) === 0,
       "a queue length is shown with no live worker",
     );
-    const jobStates = ["submitted", "spec_drafting", "oracle_drafting", "planning", "building"];
+    const jobStates = ["submitted", "spec_drafting", "planning", "building"];
     if (listed.some((r) => jobStates.includes(r.state))) {
       await health.getByTestId("health-need-worker").waitFor();
     }
@@ -443,7 +443,7 @@ step("mission-control-review", async () => {
   );
   // A review card is compact: its controls open while it is hovered or
   // holds the focus.
-  for (const id of ["req-spec-review", "req-plan-review", "req-oracle-review"]) {
+  for (const id of ["req-spec-review", "req-plan-review"]) {
     await card(id).hover();
     await card(id).getByRole("link", { name: "Review", exact: true }).waitFor();
     await card(id).getByRole("button", { name: "Request changes", exact: true }).waitFor();
@@ -813,7 +813,6 @@ step("new-request", async () => {
   await page
     .getByLabel("Request", { exact: true })
     .fill("Add a healthz endpoint\n\nIt returns 200 and the build SHA.");
-  await page.getByLabel("Draft oracles").check();
   await button("Advanced").click();
   await page.getByLabel(/Verify command/).fill("go test ./...");
   // An empty repository has none of the project artifacts the default
@@ -829,7 +828,6 @@ step("new-request", async () => {
     created.body.verify_command === "go test ./...",
     `verify_command recorded as ${created.body.verify_command}`,
   );
-  check(created.body.draft_oracles === true, "draft_oracles was not recorded");
   check(
     (await api("/requests")).body.length === before + 1,
     "the request list did not grow by one",
@@ -1073,37 +1071,10 @@ step("request-changes", async () => {
   check(after.rejections.at(-1).by === "walk-operator", "the rejection has no operator");
 });
 
-step("request-oracle-approve", async () => {
-  await visit("/requests/req-oracle-review");
-  const listing = (await api("/requests/req-oracle-review/oracle")).body;
-  check(listing.files.length === 3, `the oracle has ${listing.files.length} files, want 3`);
-  // Every file has to be opened before the approval is offered.
-  const approve = main().getByRole("button", { name: "Approve", exact: true });
-  check(await approve.isDisabled(), "Approve is enabled before any oracle file was shown");
-  for (const file of listing.files) {
-    await main()
-      .getByRole("button", { name: new RegExp(`^${file.name.replace(".", "\\.")}`) })
-      .click();
-  }
-  await page.getByText("func TestOracleIdempotency").waitFor();
-  await approve.click();
-  await confirmDialog("Approve");
-  const after = await request("req-oracle-review");
-  check(after.state === "planning", `state is ${after.state}, want planning`);
-  for (const file of listing.files) {
-    check(
-      after.approved_sha256[`oracle/${file.name}`] === file.sha256,
-      `oracle/${file.name} is not pinned to the hash that was shown`,
-    );
-  }
-});
-
 step("request-plan-approve", async () => {
   await visit("/requests/req-plan-review");
   const shown = await request("req-plan-review");
-  const listing = (await api("/requests/req-plan-review/tickets/1/oracle")).body;
   const approve = main().getByRole("button", { name: "Approve", exact: true });
-  check(await approve.isDisabled(), "the plan can be approved before its oracle files were shown");
   // This plan was rejected once: the re-review opens on what changed, with
   // the note against the section it was written on and whether the drafter
   // was given it, read from the server's own revision record.
@@ -1125,12 +1096,6 @@ step("request-plan-approve", async () => {
     (await coverage.getByRole("rowheader").count()) > 0,
     "the coverage view lists no acceptance criterion",
   );
-  for (const file of listing.files) {
-    await main()
-      .getByRole("button", { name: new RegExp(`^${file.name.replace(".", "\\.")}`) })
-      .click();
-  }
-  await page.getByText(`${listing.files.length} of ${listing.files.length} shown`).waitFor();
   await approve.click();
   await dialog().getByText("Plan review → Building").waitFor();
   await confirmDialog("Approve");
@@ -1141,12 +1106,6 @@ step("request-plan-approve", async () => {
     check(
       after.approved_sha256[key] === sha256(ticket.content),
       `${key} is not bound to the plan that was shown`,
-    );
-  }
-  for (const file of listing.files) {
-    check(
-      after.approved_sha256[`tickets/001.oracle/${file.name}`] === file.sha256,
-      `tickets/001.oracle/${file.name} is not pinned`,
     );
   }
 });

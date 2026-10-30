@@ -87,7 +87,6 @@ describe("next action", () => {
     ["quarantined", false],
     ["resume_review", false],
     ["spec_review", false],
-    ["oracle_review", false],
     ["plan_review", false],
     ["building", true],
     ["done", true],
@@ -98,7 +97,7 @@ describe("next action", () => {
 
 test("tickets lead the content in every state but the three review states", () => {
   const tickets = [ticketWire({ index: 1 })];
-  for (const state of ["spec_review", "oracle_review", "plan_review"]) {
+  for (const state of ["spec_review", "plan_review"]) {
     expect(ticketsLeadContent(req(state, { tickets }))).toBe(false);
   }
   for (const state of [
@@ -366,22 +365,6 @@ describe("pipelineSteps", () => {
   test("the building step shows build progress while current", () => {
     expect(
       pipelineSteps(req("building")).find((s) => s.step === "building")?.showsBuildProgress,
-    ).toBe(true);
-  });
-
-  test("the oracle steps appear for -draft-oracles, for a visit in the history, or at the state itself", () => {
-    const has = (r: RequestSummary) => pipelineSteps(r).some((s) => s.step === "oracle_drafting");
-    expect(has(req("spec_review"))).toBe(false);
-    expect(has(req("spec_review", { draft_oracles: true }))).toBe(true);
-    expect(has(req("oracle_review"))).toBe(true);
-    expect(
-      has(
-        req("planning", {
-          history: [
-            historyWire({ from: "spec_review", to: "oracle_drafting", at: at(0), by: "f" }),
-          ],
-        }),
-      ),
     ).toBe(true);
   });
 });

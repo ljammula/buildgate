@@ -30,14 +30,13 @@ import (
 // each under their own state checks and save request.json themselves.
 type requestActivities struct {
 	// dp is the external boundaries this call reaches.
-	dp           *deps
-	dataDir      string
-	jobsQueue    string // the task queue whose steps occupy a job slot
-	cfg          requestdriver.WorkerConfig
-	specRunner   requestdriver.SpecDraftRunner
-	planRunner   requestdriver.PlanTicketsRunner
-	oracleRunner requestdriver.OracleDraftRunner
-	buildRunner  requestdriver.TicketRunner
+	dp          *deps
+	dataDir     string
+	jobsQueue   string // the task queue whose steps occupy a job slot
+	cfg         requestdriver.WorkerConfig
+	specRunner  requestdriver.SpecDraftRunner
+	planRunner  requestdriver.PlanTicketsRunner
+	buildRunner requestdriver.TicketRunner
 	// cancelPoll is how often a running step looks for its request being
 	// cancelled; 0 is requestHeartbeatInterval.
 	cancelPoll time.Duration
@@ -296,7 +295,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 		// inside its slot.
 		defer repositoryWaits.clear(id)
 		stopHeartbeat := heartbeatUntilDone(ctx, requestHeartbeatInterval)
-		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.oracleRunner, a.buildRunner)
+		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.buildRunner)
 		stopHeartbeat()
 		if err != nil && !errors.Is(err, request.ErrCancelledOnDisk) {
 			return "", err

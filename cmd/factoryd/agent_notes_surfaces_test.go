@@ -97,7 +97,7 @@ func TestAQuarantinedRunsAgentNotesReachOnlyTheHandoff(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runDir, "build_app.log"), []byte("a build log line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "repo-lint")
 	rr.Project = "notes-project"
 	if err := rr.Save(dataDir); err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestWorthKnowingNotesReachOnlyTheOperatorsMemoryList(t *testing.T) {
 func acceptAfterAFailedRound(t *testing.T, rr *run.Run, dataDir string) {
 	t.Helper()
 	passed := true
-	rr.State, rr.GateResults = run.StateAccepted, []run.GateResult{{Check: "lint", Passed: true}}
+	rr.State, rr.GateResults = run.StateAccepted, []run.GateResult{{Check: "repo-lint", Passed: true}}
 	rr.AgentEvidence.Rounds = append(rr.AgentEvidence.Rounds, run.AgentEvidenceRound{Index: 2, VerifyPassed: &passed, ChangedFiles: []string{"sum.go"}})
 	if err := handoff.Sync(rr, dataDir); err != nil {
 		t.Fatal(err)
@@ -295,7 +295,7 @@ func worthKnowingNotesReachOnlyTheMemoryList(t *testing.T, state run.State) {
 	if err := os.WriteFile(filepath.Join(runDir, "build_app.log"), []byte("a build log line\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "repo-lint")
 	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if state == run.StateAccepted {
 		acceptAfterAFailedRound(t, rr, dataDir)

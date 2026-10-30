@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"buildgate/internal/requestsubmit"
@@ -92,7 +93,7 @@ type WorkerConfig struct {
 	ReviewCorrectiveRounds int
 	// hitlReminderInterval is how often the worker's reminder ticker
 	// (RemindIfDue) re-reminds a request waiting in spec_review,
-	// oracle_review or plan_review. See -hitl-reminder-interval's own
+	// plan_review. See -hitl-reminder-interval's own
 	// help text.
 	HitlReminderInterval time.Duration
 	// advanceOn is the request driver's own ticket-sequencing policy: "accepted"
@@ -166,14 +167,6 @@ type WorkerConfig struct {
 	PlanTicketsInterpreter    string
 	PlanTicketsTimeoutMinutes int
 
-	// oracleDraftScript/oracleDraftInterpreter/oracleDraftTimeoutMinutes are
-	// the same trio for the request driver's oracle-drafting job
-	// (cmd/factoryd/oracle_draft_job.go); allowUnsandboxedSpecDraft above is
-	// reused, exactly as for the plan job.
-	OracleDraftScript         string
-	OracleDraftInterpreter    string
-	OracleDraftTimeoutMinutes int
-
 	// temporalAddress is worker's resolved -temporal-address (see
 	// resolveTemporalAddress). Every drained entry's child invocation is
 	// given the address explicitly, so the child never re-probes and picks
@@ -209,6 +202,15 @@ type WorkerConfig struct {
 // per-invocation rather than daemon-wide, so they were restored as
 // Tier-1 flags there and are forwarded through this argv like every
 // other Tier-1 field above instead of through cfg.settings.
+// joinInts is ns as a comma-separated list, the form of -challenge-answers.
+func joinInts(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ",")
+}
+
 func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []string {
 	args := []string{
 		"-ticket", entry.ID,
@@ -238,9 +240,6 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.FullSuiteSource != "" {
 		args = append(args, "-full-suite-source", entry.FullSuiteSource)
 	}
-	if entry.NoCommitOracles {
-		args = append(args, "-no-commit-oracles")
-	}
 	if entry.Bug {
 		args = append(args, "-bug")
 	}
@@ -249,10 +248,15 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	}
 	if entry.RequestTicket {
 		scope := "approved"
-		if entry.ScopeUnapproved {
+		if entry.NoTicketScope {
+			scope = "none"
+		} else if entry.ScopeUnapproved {
 			scope = "unapproved"
 		}
 		args = append(args, "-request-ticket", "-scope-approval", scope)
+	}
+	if entry.OrderGroup > 0 {
+		args = append(args, "-order-group", strconv.Itoa(entry.OrderGroup))
 	}
 	if entry.IssueRef != "" {
 		args = append(args, "-pr-closes-issue", entry.IssueRef)
@@ -269,34 +273,16 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}
-	// A request's ticket build holds and runs its review's reproductions
-	// (SC-022) only when review_reproductions is on (reproductionInputs); a
-	// bare run never gets these flags.
-	if entry.ReviewReproduction {
-		args = append(args, "-review-reproduction")
+	if entry.Challenge {
+		args = append(args, "-challenge", "-challenge-spec", entry.ChallengeSpecPath,
+			"-challenge-criteria", strconv.Itoa(entry.ChallengeCriteria), "-challenge-answers", joinInts(entry.ChallengeAnswers),
+			"-challenge-approved-sha256", entry.ChallengeApprovedSHA256, "-challenge-approved-bytes", strconv.Itoa(entry.ChallengeApprovedBytes))
 	}
-	if entry.ReviewSpecPath != "" {
-		args = append(args, "-review-spec", entry.ReviewSpecPath)
-	}
-	if entry.RecheckReproductions != "" {
-		args = append(args, "-recheck-reproductions", entry.RecheckReproductions)
-	}
-	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
-	// own output (Phase 2) -- both set together or neither (see that
-	// function's own doc comment), so checking one is sufficient. The
-	// mount path and in-loop-retry opt-in are always the same fixed
-	// values for an auto-wired oracle -- TicketOracleMountPath, and
-	// -reference-oracle-in-loop-retry unconditionally, since resolving
-	// an oracle at all already means it was plan_review-approved and
-	// hash-verified moments ago; there is no "resolved but don't use it
-	// in-loop" case for this path the way the standalone CLI flag has.
-	if entry.ReferenceOracleDir != "" {
-		args = append(args,
-			"-reference-oracle-dir", entry.ReferenceOracleDir,
-			"-reference-oracle-mount-path", TicketOracleMountPath,
-			"-reference-oracle-command", entry.ReferenceOracleCommand,
-			"-reference-oracle-in-loop-retry",
-		)
+	if entry.ChallengeHeld != "" {
+		args = append(args, "-challenge-held", entry.ChallengeHeld)
+		if entry.ChallengeRound {
+			args = append(args, "-challenge-round")
+		}
 	}
 	if cfg.OpenPullRequest {
 		args = append(args, "-open-pull-request")

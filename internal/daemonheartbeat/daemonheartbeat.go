@@ -196,26 +196,6 @@ func WorkerActiveRequests(dataDir string, now time.Time) (ids []string, slots in
 	return hb.ActiveRequests, max(hb.JobSlots, 1)
 }
 
-// WorkerSlotRequests returns the SlotRequests and JobSlots of dataDir's
-// worker heartbeat, or (nil, 1) when there is no heartbeat or it is stale.
-func WorkerSlotRequests(dataDir string, now time.Time) (ids []string, slots int) {
-	hb, err := Read(WorkerPath(dataDir))
-	if err != nil || Stale(hb, now, WorkerStaleAfter) {
-		return nil, 1
-	}
-	return hb.SlotRequests, max(hb.JobSlots, 1)
-}
-
-// WorkerRepositoryWaits returns the RepositoryWaits of dataDir's worker
-// heartbeat, or nil when there is no heartbeat or it is stale.
-func WorkerRepositoryWaits(dataDir string, now time.Time) map[string]string {
-	hb, err := Read(WorkerPath(dataDir))
-	if err != nil || Stale(hb, now, WorkerStaleAfter) {
-		return nil
-	}
-	return hb.RepositoryWaits
-}
-
 // Write persists hb to path atomically (write to a temp file, then
 // rename), so a supervisor polling concurrently never observes a
 // partially-written file — the same crash-safety convention run.Run.Save

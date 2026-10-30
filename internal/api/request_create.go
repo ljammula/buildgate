@@ -41,7 +41,6 @@ type createRequestBody struct {
 	VerifyCommand    string `json:"verify_command,omitempty"`
 	FullSuiteCommand string `json:"full_suite_command,omitempty"`
 	PreflightProfile string `json:"preflight_profile,omitempty"`
-	DraftOracles     bool   `json:"draft_oracles,omitempty"`
 	PlanReview       bool   `json:"plan_review,omitempty"`
 	By               string `json:"by,omitempty"`
 	// Models is `factoryd submit -model role=model`'s HTTP equivalent: a
@@ -139,7 +138,6 @@ func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) {
 		VerifyCommand:              body.VerifyCommand,
 		VerifyCommandExplicit:      body.VerifyCommand != "",
 		FullSuiteCommand:           body.FullSuiteCommand,
-		DraftOracles:               body.DraftOracles,
 		PlanReview:                 body.PlanReview,
 		PreflightProfile:           body.PreflightProfile,
 		PreflightProfileExplicit:   body.PreflightProfile != "",

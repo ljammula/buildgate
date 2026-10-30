@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,19 +82,19 @@ func validateFollowUpRunInputs(diffBase, instructionBase, earlierAttempt string)
 // (-diff-base, which must be the file's onto_sha), and takes none of the
 // inputs that start, chain or open a build (conflicts: the flags set that
 // it refuses).
-func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*run.Replay, error) {
+func validateReplayFlags(path, onBranch, diffBase string, conflicts func(carved bool) []string) (*run.Replay, error) {
 	if path == "" {
 		return nil, nil
-	}
-	if len(conflicts) > 0 {
-		return nil, fmt.Errorf("-replay cannot be combined with %s", strings.Join(conflicts, ", "))
-	}
-	if onBranch == "" || diffBase == "" {
-		return nil, errors.New("-replay needs -on-branch, the branch the commits were replayed to, and -diff-base, the commit they were replayed onto")
 	}
 	replay, err := run.ReadReplayFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if set := conflicts(replay.Carve != nil); len(set) > 0 {
+		return nil, fmt.Errorf("-replay cannot be combined with %s", strings.Join(set, ", "))
+	}
+	if onBranch == "" || diffBase == "" {
+		return nil, errors.New("-replay needs -on-branch, the branch the commits were replayed to, and -diff-base, the commit they were replayed onto")
 	}
 	if diffBase != replay.OntoSHA {
 		return nil, fmt.Errorf("-diff-base %s is not the commit the replay is onto (%s)", diffBase, replay.OntoSHA)
@@ -103,9 +104,8 @@ func validateReplayFlags(path, onBranch, diffBase string, conflicts []string) (*
 
 // replayConflicts names the flags set in f that a replay run refuses: a
 // resume, a chain, an earlier attempt, a baseline check, a pull request it
-// would open, the shared repository queue, a run serve starts, and the
-// review-reproduction inputs (a replay run's review is advice only).
-func replayConflicts(f runFlags) []string {
+// would open (a carved commit's own run opens one, stacked), the shared repository queue and a run serve starts.
+func replayConflicts(f runFlags, carved bool) []string {
 	var set []string
 	for _, c := range []struct {
 		name string
@@ -116,13 +116,12 @@ func replayConflicts(f runFlags) []string {
 		{"-resume-worktree-of", *f.resumeWorktreeOf != ""},
 		{"-prior-run", *f.priorRun != ""},
 		{"-baseline-check", *f.baselineCheck},
-		{"-open-pull-request", *f.openPullRequest},
-		{"-pr-base", *f.prBase != ""},
+		{"-open-pull-request", *f.openPullRequest && !carved},
+		{"-pr-base", *f.prBase != "" && !carved},
 		{"-repository", *f.repository != ""},
 		{"-run-id", *f.runID != ""},
-		{"-review-reproduction", *f.reviewReproduction},
-		{"-review-spec", *f.reviewSpec != ""},
-		{"-recheck-reproductions", *f.recheckReproductions != ""},
+		{"-challenge", *f.challenge},
+		{"-challenge-held", *f.challengeHeld != ""},
 	} {
 		if c.on {
 			set = append(set, c.name)
@@ -269,15 +268,10 @@ type runFlags struct {
 	fullSuiteCommand    *string
 	fullSuiteSource     *string
 	fullSuiteCadence    *int
-	// gateCommands holds one flag per policy.CommandGate, keyed by its
-	// ID ("lint", "security_audit", "unit_tests", "integration_tests",
-	// "reference_oracle") -- see newRunFlags' own registration loop.
+	// gateCommands holds the repository gates the committed .factory.yml
+	// defines (`gates:`), keyed by policy.RepoGateCheck(id); they have no flag.
 	gateCommands                 map[string]*string
-	referenceOracleDir           *string
-	noCommitOracles              *bool
 	bug                          *bool
-	referenceOracleMountPath     *string
-	referenceOracleInLoopRetry   *bool
 	sandboxImage                 *string
 	executionModel               *string
 	executionThinking            *string
@@ -308,11 +302,17 @@ type runFlags struct {
 	resumeSessionOf              *string
 	resumeWorktreeOf             *string
 	replay                       *string
+	orderGroup                   *int
 	configPath                   *string
-	reviewReproduction           *bool
-	reviewSpec                   *string
-	recheckReproductions         *string
 	scopeApproval                *string
+	challenge                    *bool
+	challengeSpec                *string
+	challengeCriteria            *int
+	challengeAnswers             *string
+	challengeApprovedSHA256      *string
+	challengeApprovedBytes       *int
+	challengeHeld                *string
+	challengeRound               *bool
 }
 
 // newRunFlags builds `factoryd <run>`'s FlagSet in isolation from parsing,
@@ -336,18 +336,8 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.fullSuiteCommand = flags.String("full-suite-command", "", "repo-wide test command run on the final state -verify-command passed on. Empty uses .factory.yml's full_suite_command, else -verify-command; none skips it")
 	f.fullSuiteSource = flags.String("full-suite-source", "", "internal: how the worker already resolved -full-suite-command: verify_command for a substitution, none for an opt-out")
 	f.fullSuiteCadence = flags.Int("full-suite-cadence", 0, "run -full-suite-command only on every Nth run of a -prior-run chain; 0 or 1 runs it every time")
-	// One flag per policy.CommandGate, registered from its own Flag/Help
-	// fields -- adding a 6th command gate needs no new line here, only a
-	// new CommandGates entry.
-	f.gateCommands = make(map[string]*string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		f.gateCommands[g.ID] = flags.String(g.Flag, "", g.Help)
-	}
-	f.referenceOracleDir = flags.String("reference-oracle-dir", "", "host directory mounted read-only at -reference-oracle-mount-path for the reference-oracle gate. Must be outside -workspace, which the agent can write. Set both flags or neither")
-	f.bug = flags.Bool("bug", false, "internal: the request fixes a bug, so the reference oracle must fail on the base commit before the build starts")
-	f.noCommitOracles = flags.Bool("no-commit-oracles", false, "do not commit accepted oracles to the target repository. The oracle still gates the build, and the run record and evidence say it was not committed")
-	f.referenceOracleMountPath = flags.String("reference-oracle-mount-path", "", "path inside the workspace where -reference-oracle-dir is mounted, such as verify; set both flags or neither")
-	f.referenceOracleInLoopRetry = flags.Bool("reference-oracle-in-loop-retry", false, "also run the reference oracle in every build round, so a failing round is retried. The build agent can then read the oracle. Needs the other three -reference-oracle flags")
+	f.gateCommands = map[string]*string{}
+	f.bug = flags.Bool("bug", false, "internal: ticket 1 of a bug request, whose Tests-Required: no opt-out is not honoured")
 	f.sandboxImage = flags.String("sandbox-image", "", "Docker image the build and checks run in, pinned by digest (name@sha256:...); a tag is refused. Empty uses the session config's sandbox_image, which make install records")
 	f.executionModel = flags.String("execution-model", "", "model for this run's build: one of roles.execution.allowed in the session config. Empty uses roles.execution.model")
 	f.executionThinking = flags.String("execution-thinking", "", "reasoning effort for this run's build: the level of roles.execution.escalation, passed with -execution-model naming the escalation's model. Empty uses roles.execution.thinking")
@@ -358,10 +348,18 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-inspecting proxy's, that the registry proxy and host-side model calls trust. Empty uses ~/.config/factoryd/build-ca.pem when it exists")
 	f.dataDir = flags.String("data-dir", "data", "directory for durable run records and logs")
 	f.baselineCheck = flags.Bool("baseline-check", false, "check that the repository's verify and full-suite commands pass in the sandbox, with no model call and nothing built. Takes -workspace, no ticket")
-	f.requireDeclaredScope = flags.Bool("require-declared-scope", false, "halt before the build if the ticket does not declare both Allowed-Files: and Required-Changed-Files:")
+	f.requireDeclaredScope = flags.Bool("require-declared-scope", false, "halt before the build if the ticket does not declare Allowed-Files:")
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts it with Docker if it is down; with FACTORYD_AUTOSTART=0 the address is required. An unreachable server halts the run")
 	f.repository = flags.String("repository", "", "repository name; runs that pass the same name run one at a time")
 	f.runID = flags.String("run-id", "", "internal: the run's id, set by serve for a run it starts")
+	f.challenge = flags.Bool("challenge", false, "internal: after every gate and the review, run the challenger job once on the result (SC-022); a request's ticket build sets it")
+	f.challengeSpec = flags.String("challenge-spec", "", "internal: the request's approved spec.md with the read-back answers appended, which the challenger is given")
+	f.challengeCriteria = flags.Int("challenge-criteria", 0, "internal: how many numbered acceptance criteria a challenge file's header may cite")
+	f.challengeAnswers = flags.String("challenge-answers", "", "internal: the numbers of the answered read-back questions a challenge file's header may cite, comma-separated")
+	f.challengeApprovedSHA256 = flags.String("challenge-approved-sha256", "", "internal: the SHA-256 spec_review approved for the request's spec.md, which the first -challenge-approved-bytes bytes of -challenge-spec must match")
+	f.challengeApprovedBytes = flags.Int("challenge-approved-bytes", 0, "internal: how many leading bytes of -challenge-spec are the approved spec.md; the rest is the read-back answers")
+	f.challengeHeld = flags.String("challenge-held", "", "internal: JSON list of the held challenge files of this ticket that the build runs again on its result")
+	f.challengeRound = flags.Bool("challenge-round", false, "internal: this build is the ticket's challenge round: the held files are mounted read-only, and a green result commits them")
 	f.priorRun = flags.String("prior-run", "", "id of an accepted run that this run follows in a multi-slice chain")
 	f.skipProjectCheck = flags.Bool("skip-project-check", false, "skip the project-bootstrap preflight")
 	f.architectureRequiredSections = flags.String("architecture-required-sections", "", "comma-separated section headings the project-bootstrap preflight requires in ARCHITECTURE.md, in order")
@@ -379,10 +377,8 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.diffBase = flags.String("diff-base", "", "commit the diff checks and pull request evidence measure from, instead of the run's starting commit: a full 40-character id and an ancestor of it. Build and verify still use the branch tip")
 	f.resumeWorktreeOf = flags.String("resume-worktree-of", "", "id of a halted run whose kept worktree this run adopts to continue its build. Refused with -repository, -on-branch or -prior-run, or when the worktree was not kept intact")
 	f.replay = flags.String("replay", "", "internal: file naming commits the host replayed onto a new base; the run judges them instead of building")
-	f.reviewReproduction = flags.Bool("review-reproduction", false, "internal: hold the review's reproductions and run them, so a finding can refuse the run (SC-022); a request's ticket build sets it")
-	f.reviewSpec = flags.String("review-spec", "", "internal: the request's approved spec.md, which the review cites by line and the reproduction check compares citations with")
-	f.recheckReproductions = flags.String("recheck-reproductions", "", "internal: manifest of a quarantined run's held reproductions that this corrective build's result must pass")
-	f.scopeApproval = flags.String("scope-approval", "", "internal: \"approved\" or \"unapproved\": whether a person approved the ticket's Allowed-Files; if not, a file outside it is a pull request note. A request's ticket build sets it; other runs may omit it")
+	f.orderGroup = flags.Int("order-group", 0, "internal: the 1-based pr_order group this carved ticket's pull request is limited to; a result that changes a file of another group is denied release")
+	f.scopeApproval = flags.String("scope-approval", "", "internal: whether a request ticket's scope is approved, unapproved, or absent")
 	f.configPath = flags.String("config", "", "session config path, or a profile name; empty uses the active profile or the default paths")
 	finishFlags(flags)
 	flags.Usage = func() {
@@ -423,12 +419,7 @@ type ticketRun struct {
 	fullSuiteCommand             *string
 	fullSuiteCadence             *int
 	fullSuiteSource              *string
-	referenceOracleCommand       *string
-	referenceOracleDir           *string
-	noCommitOracles              *bool
 	bug                          *bool
-	referenceOracleMountPath     *string
-	referenceOracleInLoopRetry   *bool
 	sandboxImage                 *string
 	executionModel               *string
 	executionHarness             *string
@@ -462,13 +453,7 @@ type ticketRun struct {
 	replay *run.Replay
 	// resumeSession is the kept build session of the run -resume-session-of
 	// names (resumeSessionPathOf), "" for none.
-	resumeSession string
-	// reviewSpecSnapshot/reviewSpecSHA256 are -review-spec's snapshot in the
-	// run's directory and its hash; rechecks is -recheck-reproductions,
-	// checked (snapshotReviewInputs).
-	reviewSpecSnapshot                    string
-	reviewSpecSHA256                      string
-	rechecks                              []run.RecheckEntry
+	resumeSession                         string
 	args                                  []string
 	settings                              sessionconfig.Settings
 	executionHarnessName                  string
@@ -482,6 +467,12 @@ type ticketRun struct {
 	reviewOK                              bool
 	execSelection                         *modelrole.Selection
 	reviewSelection                       *modelrole.Selection
+	challengerSelection                   *modelrole.Selection
+	challengerThinking                    string
+	challengerHarnessName                 string
+	challengeSpecSnapshot                 string
+	challengeSpecSHA256                   string
+	challengeHeld                         []run.ChallengeFile
 	sandboxDocker                         *string
 	sandboxUser                           *string
 	sandboxWorkerUID                      *int
@@ -505,7 +496,7 @@ type ticketRun struct {
 	registryProxyUpstreamTimeout          *time.Duration
 	releaseProtectedPaths                 *string
 	releaseMaxFilesChanged                *int
-	releaseMaxInsertions                  *int
+	releaseMaxChangedLines                *int
 	releaseRollbackPlan                   *string
 	releaseAllowOverrides                 *bool
 	releaseAllowDependencyLockfileChanges *bool
@@ -514,6 +505,7 @@ type ticketRun struct {
 	relayNeededForExecution               bool
 	testPatterns                          []string
 	allowedPaths                          []string
+	prOrder                               [][]string
 	scopeUnapproved                       bool
 	gateCommands                          map[string]string
 	sandboxImageExplicit                  bool
@@ -565,10 +557,8 @@ type ticketRun struct {
 	configuredFullSuiteCommand    string
 	effectiveFullSuiteCommand     string
 	allowedFiles                  []string
-	requiredChangedFiles          []string
 	testsRequiredOptOut           string
 	specTicketScopeMismatchFields []string
-	requiredContent               []string
 	resumeFrom                    *workflow.ResumeFrom
 	r                             *run.Run
 	onReady                       func(*run.Run)
@@ -599,7 +589,7 @@ func runMainWithReady(dp *deps, lifecycleCtx context.Context, args []string, onR
 	if err := tr.snapshotSpec(); err != nil {
 		return err
 	}
-	if err := tr.snapshotReviewInputs(); err != nil {
+	if err := tr.snapshotChallengeInputs(); err != nil {
 		return err
 	}
 	if err := tr.checkScope(); err != nil {
@@ -625,18 +615,8 @@ func (tr *ticketRun) parseFlags() error {
 	tr.maxRounds, tr.timeoutMinutes, tr.timeout, tr.verifyCommand = tr.rf.maxRounds, tr.rf.timeoutMinutes, tr.rf.timeout, tr.rf.verifyCommand
 	tr.fastCheckCommand, tr.verifyMaxAttempts, tr.fullSuiteCommand, tr.fullSuiteCadence = tr.rf.fastCheckCommand, tr.rf.verifyMaxAttempts, tr.rf.fullSuiteCommand, tr.rf.fullSuiteCadence
 	tr.fullSuiteSource = tr.rf.fullSuiteSource
-	// referenceOracleCommand alone, of policy.CommandGates' per-gate flags
-	// (rf.gateCommands, keyed by gate ID), needs an individual local name
-	// below: reference_oracle has several special uses beyond the generic
-	// command-gate plumbing (the in-loop retry checks, the build-phase
-	// oracle mount). Every gate's resolved command, including this one,
-	// also flows through the registry-order gateCommands map built below
-	// (post applyProjectConfigDefaults).
-	tr.referenceOracleCommand = tr.rf.gateCommands[policy.ReferenceOracleGateID]
-	tr.referenceOracleDir = tr.rf.referenceOracleDir
-	tr.noCommitOracles = tr.rf.noCommitOracles
 	tr.bug = tr.rf.bug
-	tr.referenceOracleMountPath, tr.referenceOracleInLoopRetry, tr.sandboxImage = tr.rf.referenceOracleMountPath, tr.rf.referenceOracleInLoopRetry, tr.rf.sandboxImage
+	tr.sandboxImage = tr.rf.sandboxImage
 	tr.executionModel, tr.executionHarness, tr.executionThinkingChoice = tr.rf.executionModel, tr.rf.executionHarness, tr.rf.executionThinking
 	tr.registryProxy, tr.registryProxyImage, tr.composeServices, tr.egressCABundle, tr.dataDir = tr.rf.registryProxy, tr.rf.registryProxyImage, tr.rf.composeServices, tr.rf.egressCABundle, tr.rf.dataDir
 	tr.requireDeclaredScope, tr.temporalAddress, tr.repository, tr.runID, tr.priorRun = tr.rf.requireDeclaredScope, tr.rf.temporalAddress, tr.rf.repository, tr.rf.runID, tr.rf.priorRun
@@ -788,7 +768,7 @@ func (tr *ticketRun) parseFlags() error {
 	tr.registryProxyUpstreamTimeout = &tr.settings.RegistryProxyUpstreamTimeout
 	tr.releaseProtectedPaths = &tr.settings.ReleaseProtectedPaths
 	tr.releaseMaxFilesChanged = &tr.settings.ReleaseMaxFilesChanged
-	tr.releaseMaxInsertions = &tr.settings.ReleaseMaxInsertions
+	tr.releaseMaxChangedLines = &tr.settings.ReleaseMaxChangedLines
 	tr.releaseRollbackPlan = &tr.settings.ReleaseRollbackPlan
 	tr.releaseAllowOverrides = &tr.settings.ReleaseAllowOverrides
 	tr.releaseAllowDependencyLockfileChanges = &tr.settings.ReleaseAllowDependencyLockfileChanges
@@ -805,7 +785,7 @@ func (tr *ticketRun) parseFlags() error {
 	warnIfReleasePolicyCanNeverAllow(*tr.openPullRequest, release.MergePolicy{
 		RollbackPlan:    *tr.releaseRollbackPlan,
 		MaxFilesChanged: *tr.releaseMaxFilesChanged,
-		MaxInsertions:   *tr.releaseMaxInsertions,
+		MaxChangedLines: *tr.releaseMaxChangedLines,
 	})
 	return nil
 }
@@ -909,7 +889,7 @@ func (tr *ticketRun) selectRoleRoutes() error {
 		tr.reviewOK = true
 		tr.reviewThinking = revSel.Thinking
 	}
-	return nil
+	return tr.resolveChallenger()
 }
 
 // applyProjectDefaults requires the ticket, workspace and spec, then applies
@@ -935,11 +915,8 @@ func (tr *ticketRun) applyProjectDefaults() error {
 	}
 	// gateCommands is rf.gateCommands' resolved values (post-
 	// applyProjectConfigDefaults, its one mutator), keyed by
-	// policy.CommandGate.ID -- the form every command-gate call site
-	// below (namedGateInputs, the post-oracle-commit re-run, the
-	// Temporal/-repository positional args, the evidence render) now
-	// takes, in registry order, instead of five individually-named
-	// commands.
+	// policy.RepoGateCheck(id) -- the form every gate call site below (the
+	// Temporal/-repository positional args, the evidence render) takes.
 	tr.gateCommands = resolvedGateCommands(tr.rf.gateCommands)
 	// routes:/models: mode: execSelection/reviewSelection's own
 	// RoutePolicy.TokenCeiling/CostCeilingMicroUSD were computed by
@@ -1095,7 +1072,7 @@ func (tr *ticketRun) validateHarnessAndSandboxIdentity() error {
 		return err
 	}
 	tr.resumeSession = resumeSession
-	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, replayConflicts(tr.rf))
+	replay, err := validateReplayFlags(*tr.rf.replay, *tr.onBranch, *tr.diffBase, func(carved bool) []string { return replayConflicts(tr.rf, carved) })
 	tr.replay = replay
 	return err
 }
@@ -1216,16 +1193,6 @@ func (tr *ticketRun) prepareSandbox() error {
 	// checkout's HEAD. Direct and Temporal paths validate the predecessor
 	// metadata before preparation, then validate chain cleanliness against
 	// the newly-created worktree.
-	// Fail fast rather than silently no-op (found via review): the
-	// build-phase gating below is
-	// `*referenceOracleInLoopRetry && *referenceOracleDir != "" &&
-	// *referenceOracleCommand != ""` -- an operator who sets this flag
-	// but forgets one of the other three would otherwise get no error
-	// and no in-loop retry, exactly the same silent-no-op shape as the
-	// Temporal case, just from a different missing precondition.
-	if *tr.referenceOracleInLoopRetry && (*tr.referenceOracleDir == "" || *tr.referenceOracleCommand == "" || *tr.referenceOracleMountPath == "") {
-		return fmt.Errorf("-reference-oracle-in-loop-retry requires -reference-oracle-dir, -reference-oracle-mount-path, and -reference-oracle-command to all be set")
-	}
 	// Resolved to an absolute path here, once, before it's ever carried
 	// into a RunWorkflowInput — found via review: -repository's own shared
 	// task queue already let a run's Activities be dispatched to any
@@ -1357,7 +1324,7 @@ func (tr *ticketRun) checkProject() error {
 	// (spec/tickets/<ticket>.md next to -workspace's parent), which is a
 	// real, intentional ticket file an operator relies on just as much as
 	// an explicit path (also found via review — a discovered ticket that
-	// actually declares Allowed-Files:/Required-Changed-Files:/
+	// actually declares Allowed-Files:/
 	// Verify-Command: must not be exempted just because -ticket-file itself
 	// was omitted). Falling back to *ticketFile only when piTicketPath is
 	// empty covers both.
@@ -1920,13 +1887,8 @@ func (tr *ticketRun) snapshotSpec() error {
 	// mistake, since it isn't a parse error and would otherwise silently
 	// fall back to a default or skip the check it should have gated. An
 	// absent optional header is never a problem here.
-	if problems, err := ticketspec.HeaderStrictnessProblems(tr.specSnapshotPath); err != nil {
-		return fmt.Errorf("check ticket header strictness: %w", err)
-	} else if len(problems) > 0 {
-		return fmt.Errorf(
-			"ticket header preflight failed for %s:\n%s\n\nrun `factoryd check-ticket %s`",
-			tr.specSnapshotPath, strings.Join(problems, "\n"), tr.specSnapshotPath,
-		)
+	if err := tr.checkSnapshotHeaders(); err != nil {
+		return err
 	}
 
 	// The ticket's own declared verify command wins over -verify-command's
@@ -1978,18 +1940,6 @@ func (tr *ticketRun) snapshotSpec() error {
 		return err
 	}
 
-	// A passing Verify-Command only proves the declared command exited 0,
-	// not that the ticket's required change was actually made — a command
-	// that never depended on the missing code can pass against an
-	// unmodified file (found live: an agent round stalled after writing
-	// only unrelated scaffolding, and the run was accepted with no code
-	// review catching it). Required-Changed-Files: is optional; when a
-	// ticket doesn't declare it, this check is skipped entirely.
-	tr.requiredChangedFiles, err = ticketspec.ParseRequiredChangedFiles(tr.specSnapshotPath)
-	if err != nil {
-		return fmt.Errorf("parse ticket required changed files: %w", err)
-	}
-
 	// A declared path missing a real prefix (e.g. "internal/service/note.go"
 	// for a repo whose real Go module root is backend/) is syntactically
 	// valid -- invalidWorkspaceRelativePaths above has nothing to say about
@@ -2004,7 +1954,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	if len(scopePathsToCheck) > 0 {
 		corrections, err := ticketspec.MisprefixedWorkspacePaths(*tr.workspace, scopePathsToCheck)
 		if err != nil {
-			return fmt.Errorf("check ticket Allowed-Files/Required-Changed-Files against -workspace: %w", err)
+			return fmt.Errorf("check ticket Allowed-Files against -workspace: %w", err)
 		}
 		if len(corrections) > 0 {
 			var lines []string
@@ -2021,19 +1971,53 @@ func (tr *ticketRun) snapshotSpec() error {
 	return nil
 }
 
-// checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
-func (tr *ticketRun) checkScope() error {
+func (tr *ticketRun) checkSnapshotHeaders() error {
+	check := ticketspec.HeaderStrictnessProblems
+	if *tr.requestTicket && *tr.rf.scopeApproval == "none" {
+		check = ticketspec.SpecTicketHeaderStrictnessProblems
+	}
+	problems, err := check(tr.specSnapshotPath)
+	if err != nil {
+		return fmt.Errorf("check ticket header strictness: %w", err)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("ticket header preflight failed for %s:\n%s\n\nrun `factoryd check-ticket %s`", tr.specSnapshotPath, strings.Join(problems, "\n"), tr.specSnapshotPath)
+	}
+	return nil
+}
+
+// carved reports whether this build is of a ticket the host carved by
+// pr_order: its replay run, or any later build of it (-order-group).
+func (tr *ticketRun) carved() bool {
+	return (tr.replay != nil && tr.replay.Carve != nil) || *tr.rf.orderGroup > 0
+}
+
+// parseTestsRequiredOpt reads the ticket's own tests_red_on_base opt-out, the
+// gate boundary's exception (ticketspec.ParseTestsRequiredOptOut); every
+// build of a carved ticket records carvedTestsRequiredReason instead.
+func (tr *ticketRun) parseTestsRequiredOpt() error {
 	var err error
-	// The tests_red_on_base gate boundary: the ticket's own declared
-	// exception, if any -- see ticketspec.ParseTestsRequiredOptOut's own
-	// doc comment.
 	tr.testsRequiredOptOut, err = ticketspec.ParseTestsRequiredOptOut(tr.specSnapshotPath)
 	if err != nil {
 		return fmt.Errorf("parse ticket tests-required opt-out: %w", err)
 	}
+	if tr.carved() {
+		// A carved ticket (its replay run, and every later build of it) holds
+		// a part of a change whose tests_red_on_base was judged on the run
+		// that was carved, and a part may hold no test.
+		tr.testsRequiredOptOut = carvedTestsRequiredReason
+	}
+	return nil
+}
+
+// checkScope reads the ticket's remaining declarations and refuses a spec whose scope disagrees with the ticket file or is missing when required.
+func (tr *ticketRun) checkScope() error {
+	if err := tr.parseTestsRequiredOpt(); err != nil {
+		return err
+	}
 
 	// build_app.py, and everything ticketspec parses above (Verify-Command:/
-	// Allowed-Files:/Required-Changed-Files:), come from -spec's own
+	// Allowed-Files:), come from -spec's own
 	// snapshot — never from -ticket-file, which PreflightActivity reads
 	// only for the pi-harness native structure check (## Goal/## Required
 	// changes/...). Found live: the documented invocation pattern
@@ -2043,13 +2027,13 @@ func (tr *ticketRun) checkScope() error {
 	// the diff_scope gate and the required-file notes — a real ticket 2+ run
 	// against an existing repo was accepted with zero of its required
 	// changes made, because both scope gates were skipped as
-	// undeclared (input.AllowedFiles/RequiredChangedFiles == nil) rather
+	// undeclared (input.AllowedFiles == nil) rather
 	// than failing. This check catches that class of misconfiguration
 	// before build_app.py ever runs: if -ticket-file declares a field that
 	// -spec's own snapshot doesn't *actually match* for that same field --
 	// not merely "-spec declares nothing at all" (found via review:
 	// comparing only presence let a spec that declares its own, different
-	// Allowed-Files/Required-Changed-Files/Verify-Command sail through
+	// Allowed-Files/Verify-Command sail through
 	// unflagged even though the run would still enforce the wrong scope)
 	// -- something is wrong with which file -spec points at.
 	//
@@ -2097,35 +2081,12 @@ func (tr *ticketRun) checkScope() error {
 				if ticketAllowed != nil && !stringSetsEqual(tr.allowedFiles, ticketAllowed) {
 					mismatches = append(mismatches, "Allowed-Files:")
 				}
-				ticketRequired, err := ticketspec.ParseRequiredChangedFiles(tr.scopeGuardTicketPath)
-				if err != nil {
-					return fmt.Errorf("parse -ticket-file %q required changed files for the -spec/-ticket-file scope-mismatch check: %w", tr.scopeGuardTicketPath, err)
-				}
-				if ticketRequired != nil && !stringSetsEqual(tr.requiredChangedFiles, ticketRequired) {
-					mismatches = append(mismatches, "Required-Changed-Files:")
-				}
 				ticketVerify, err := ticketspec.ParseVerifyCommand(tr.scopeGuardTicketPath)
 				if err != nil {
 					return fmt.Errorf("parse -ticket-file %q verify command for the -spec/-ticket-file scope-mismatch check: %w", tr.scopeGuardTicketPath, err)
 				}
 				if ticketVerify != "" && ticketVerify != tr.ticketVerifyCmd {
 					mismatches = append(mismatches, "Verify-Command:")
-				}
-				// Required-Content: is parsed independently of the
-				// requiredContent local below (found via review: that
-				// variable isn't computed until after this block, and
-				// duplicating one small parse call here is cheaper than
-				// reordering every declaration between here and there).
-				specRequiredContent, err := ticketspec.ParseRequiredContent(tr.specSnapshotPath)
-				if err != nil {
-					return fmt.Errorf("parse ticket required content: %w", err)
-				}
-				ticketRequiredContent, err := ticketspec.ParseRequiredContent(tr.scopeGuardTicketPath)
-				if err != nil {
-					return fmt.Errorf("parse -ticket-file %q required content for the -spec/-ticket-file scope-mismatch check: %w", tr.scopeGuardTicketPath, err)
-				}
-				if ticketRequiredContent != nil && !stringSetsEqual(specRequiredContent, ticketRequiredContent) {
-					mismatches = append(mismatches, "Required-Content:")
 				}
 				if len(mismatches) > 0 {
 					if !*tr.allowSpecTicketScopeMismatch {
@@ -2158,13 +2119,11 @@ func (tr *ticketRun) checkScope() error {
 	}
 
 	// When -require-declared-scope is set, enforce that the ticket declares
-	// both Allowed-Files: and Required-Changed-Files:. Without this flag
-	// (the default), tickets are free to omit either key — they remain
-	// entirely optional per-ticket, and unenforced scopes keep their prior
-	// behavior. When the flag is set, the run must halt before build_app.py
-	// is invoked if either key is absent, fail-closed against incomplete
-	// ticket scope declarations.
-	if *tr.requireDeclaredScope && (tr.allowedFiles == nil || tr.requiredChangedFiles == nil) {
+	// Allowed-Files:. Without this flag (the default), the key is optional
+	// per ticket, and an unenforced scope keeps its prior behavior. When the
+	// flag is set, the run must halt before build_app.py is invoked if the
+	// key is absent, fail-closed against an incomplete scope declaration.
+	if *tr.requireDeclaredScope && tr.allowedFiles == nil {
 		// Reuses the already-computed id, not a freshly recomputed one:
 		// two separate time.Now() calls for what must be the same run's
 		// identifier is exactly the class of drift this file's own
@@ -2195,22 +2154,9 @@ func (tr *ticketRun) checkScope() error {
 		if saveErr := save(r, *tr.dataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
 		}
-		return fmt.Errorf("ticket does not declare both Allowed-Files: and Required-Changed-Files: (required by -require-declared-scope)")
+		return fmt.Errorf("ticket does not declare Allowed-Files: (required by -require-declared-scope)")
 	}
 
-	// A required file that changed only proves it has *some* diff — a file
-	// touched only cosmetically (whitespace, an unrelated line) still
-	// counts. Required-Content: pins a concrete marker
-	// of the real change (a new widget's Key literal, a new test's
-	// function name) that must actually be newly present. Optional, like
-	// the other Required-* keys; skipped entirely when absent.
-	tr.requiredContent, err = ticketspec.ParseRequiredContent(tr.specSnapshotPath)
-	if err != nil {
-		return fmt.Errorf("parse ticket required content: %w", err)
-	}
-	if tr.requiredContent != nil && tr.requiredChangedFiles == nil {
-		return fmt.Errorf("ticket declares Required-Content: without Required-Changed-Files: — there is no required file set to search")
-	}
 	return nil
 }
 
@@ -2219,7 +2165,7 @@ func (tr *ticketRun) createRunRecord() error {
 	var err error
 	// Hashed from the snapshot, not the original path: ticket specs are
 	// mutable prose files, and this pins exactly which version of the
-	// ticket this run was judged against (the "acceptance-oracle hash"
+	// ticket this run was judged against (the spec hash
 	// from the plan's Phase 4 evidence list) to the same bytes every other
 	// step below actually reads.
 	var specSHA256 string
@@ -2273,10 +2219,6 @@ func (tr *ticketRun) createRunRecord() error {
 		SpecTicketScopeMismatchFields: tr.specTicketScopeMismatchFields,
 		State:                         run.StateReady,
 		Repository:                    *tr.repository,
-		ReferenceOracleDir:            *tr.referenceOracleDir,
-		OraclesNotCommittedByRequest:  *tr.noCommitOracles,
-		// The reproductions this run was given to pass again: evidence.
-		ReviewReproductionRechecksGiven: tr.rechecks,
 		// Persisted here so applyRunWorkflowResult's own accepted branch
 		// -- the one completion point every execution path (runViaTemporal,
 		// runViaRepositoryOwner, and reconcileReclaimedRun)
@@ -2284,18 +2226,20 @@ func (tr *ticketRun) createRunRecord() error {
 		// *openPullRequest flag variable threaded into a function that
 		// doesn't otherwise see it (found via Codex review, PR #64).
 		OpenPullRequest:     *tr.openPullRequest,
+		PRBudgetLines:       tr.settings.PRBudgetLines,
 		PRCloses:            *tr.prClosesIssue,
 		PRBase:              *tr.prBase,
 		TestsRequiredOptOut: tr.testsRequiredOptOut,
 		ScopeUnapproved:     tr.scopeUnapproved,
 		AllowedPaths:        tr.allowedPaths,
+		PROrder:             tr.runPROrder(),
 		// ReleasePolicy: persisted here, at run start, so a LATER
 		// reconciliation of this same run (Temporal reconcileReclaimedRun,
 		// or a daemon-restart reclaim) can evaluate its release decision
 		// against the policy this run actually started with, instead of
 		// an always-deny release.MergePolicy{} -- see run.Run.ReleasePolicy's
 		// own doc comment.
-		ReleasePolicy: runReleasePolicy(releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxInsertions, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)),
+		ReleasePolicy: runReleasePolicy(releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)),
 		// RFC3339Nano — see the other CreatedAt assignment above's doc
 		// comment for why.
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
@@ -2642,27 +2586,25 @@ func (tr *ticketRun) dispatch() error {
 	if dialErr == nil {
 		defer temporalClient.Close()
 		sliceOpts := temporalSliceOptions{
-			PriorRun:                   tr.priorRunSnapshot,
-			IsolatedRepoDir:            tr.isolatedRepoDir,
-			IsolatedParentDir:          tr.isolatedParentDir,
-			OnBranch:                   *tr.onBranch,
-			DiffBase:                   tr.r.DiffBaseSHA,
-			InstructionBase:            tr.r.InstructionBaseSHA,
-			EarlierAttempt:             absolutePathOrEmpty(*tr.earlierAttempt),
-			ResumeSession:              tr.resumeSession,
-			KeepBuildSession:           tr.settings.RoundSessionContinuity && *tr.requestTicket && tr.replay == nil,
-			Replay:                     replayInputOf(tr.replay),
-			TicketPath:                 temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
-			TicketNumber:               tr.piTicketNumber,
-			RequestTicket:              *tr.requestTicket,
-			ReferenceOracleInLoopRetry: *tr.referenceOracleInLoopRetry,
-			NoCommitOracles:            *tr.noCommitOracles,
-			Bug:                        *tr.bug,
-			ResumeFrom:                 tr.resumeFrom,
-			ExecutionRouteSkips:        routeSkipsOf(tr.execSelection),
-			ReviewRouteSkips:           routeSkipsOf(tr.reviewSelection),
+			PriorRun:            tr.priorRunSnapshot,
+			IsolatedRepoDir:     tr.isolatedRepoDir,
+			IsolatedParentDir:   tr.isolatedParentDir,
+			OnBranch:            *tr.onBranch,
+			DiffBase:            tr.r.DiffBaseSHA,
+			InstructionBase:     tr.r.InstructionBaseSHA,
+			EarlierAttempt:      absolutePathOrEmpty(*tr.earlierAttempt),
+			ResumeSession:       tr.resumeSession,
+			KeepBuildSession:    tr.settings.RoundSessionContinuity && *tr.requestTicket && tr.replay == nil,
+			Replay:              replayInputOf(tr.replay),
+			TicketPath:          temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
+			TicketNumber:        tr.piTicketNumber,
+			RequestTicket:       *tr.requestTicket,
+			Bug:                 *tr.bug,
+			ResumeFrom:          tr.resumeFrom,
+			ExecutionRouteSkips: routeSkipsOf(tr.execSelection),
+			ReviewRouteSkips:    routeSkipsOf(tr.reviewSelection),
 		}
-		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxInsertions, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)
+		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)
 		relayOpts := modelRouteOptions{Policy: tr.relayPolicy, CABundlePath: *tr.egressCABundle}
 		relayOpts.CheckRoute = checkRouteFunc(tr.settings)
 		relayOpts.ResolveRouteCredentials = resolveRouteCredentialsFunc(tr.settings)
@@ -2697,68 +2639,75 @@ func (tr *ticketRun) dispatch() error {
 			WorkerEnvironment: tr.settings.ComposeServicesWorkerEnv,
 		}
 		opts := runOptions{
-			DataDir:                  *tr.dataDir,
-			ID:                       tr.id,
-			Ticket:                   *tr.ticket,
-			WorkspacePath:            *tr.workspace,
-			SpecSnapshotPath:         tr.specSnapshotPath,
-			BaseSHA:                  tr.baseSHA,
-			Repository:               *tr.repository,
-			TemporalAddress:          *tr.temporalAddress,
-			BuildAppInterpreter:      *tr.buildAppInterpreter,
-			BuildAppScript:           *tr.buildAppScript,
-			Harness:                  tr.executionHarnessName,
-			ReviewHarness:            tr.reviewHarnessName,
-			CodeReviewPolicy:         *tr.codeReviewPolicy,
-			VerifyCommand:            tr.verifyCmd,
-			FastCheckCommand:         *tr.fastCheckCommand,
-			FullSuiteCommand:         tr.effectiveFullSuiteCommand,
-			BaselineCheck:            *tr.rf.baselineCheck,
-			GateCommands:             tr.gateCommands,
-			SetupCommands:            tr.setup,
-			AutofixCommands:          tr.autofix,
-			ProjectConfigCommitSHA:   tr.projectConfigCommitSHA,
-			Sandbox:                  tr.sandbox,
-			SandboxRepoKey:           memory.StoreKey(tr.project, tr.repositoryRoot),
-			ConfiguredSandboxImage:   tr.configuredSandboxImage,
-			ApprovalDataDir:          firstNonEmptyString(tr.approvalDataDir, tr.sandboxDataDir),
-			InstallCacheImages:       tr.settings.SandboxInstallCacheImages,
-			Skills:                   roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
-			ReferenceOracleDir:       *tr.referenceOracleDir,
-			ReferenceOracleMountPath: *tr.referenceOracleMountPath,
-			MaxRounds:                *tr.maxRounds,
-			TimeoutMinutes:           *tr.timeoutMinutes,
-			BuildAppMaxAttempts:      *tr.buildAppMaxAttempts,
-			VerifyMaxAttempts:        *tr.verifyMaxAttempts,
-			OverallTimeout:           *tr.timeout,
-			SandboxImage:             *tr.sandboxImage,
-			SandboxDocker:            *tr.sandboxDocker,
-			SandboxUser:              *tr.sandboxUser,
-			SandboxWorkerUID:         *tr.sandboxWorkerUID,
-			SandboxMemory:            *tr.sandboxMemory,
-			SandboxCPUs:              *tr.sandboxCPUs,
-			SandboxTmpfsSize:         *tr.sandboxTmpfsSize,
-			ModelHostConcurrency:     tr.settings.ModelHostConcurrency,
-			Relay:                    relayOpts,
-			RegistryProxyPolicy:      tr.registryProxyPolicy,
-			GoModuleDir:              repositoryGoModuleDir(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, tr.baseSHA, tr.registryProxyPolicy),
-			ComposeServices:          composeServicesOpts,
-			AllowedFiles:             tr.allowedFiles,
-			RequiredChangedFiles:     tr.requiredChangedFiles,
-			RequiredContent:          tr.requiredContent,
-			TestPatterns:             tr.testPatterns,
-			AllowedPaths:             tr.allowedPaths,
-			ScopeUnapproved:          tr.scopeUnapproved,
-			TestsRequiredOptOut:      tr.r.TestsRequiredOptOut,
-			Slice:                    sliceOpts,
-			ReleasePolicy:            releasePolicy,
-			Thinking:                 tr.executionThinking,
-			ReviewThinking:           tr.reviewThinking,
-			ReviewRelayPolicy:        reviewRelayPolicy,
-			ReviewReproduction:       *tr.rf.reviewReproduction,
-			ReviewSpecPath:           tr.reviewSpecSnapshot,
-			ReviewSpecSHA256:         tr.reviewSpecSHA256,
-			RecheckReproductions:     tr.rechecks,
+			DataDir:                 *tr.dataDir,
+			ID:                      tr.id,
+			Ticket:                  *tr.ticket,
+			WorkspacePath:           *tr.workspace,
+			SpecSnapshotPath:        tr.specSnapshotPath,
+			BaseSHA:                 tr.baseSHA,
+			Repository:              *tr.repository,
+			TemporalAddress:         *tr.temporalAddress,
+			BuildAppInterpreter:     *tr.buildAppInterpreter,
+			BuildAppScript:          *tr.buildAppScript,
+			Harness:                 tr.executionHarnessName,
+			ReviewHarness:           tr.reviewHarnessName,
+			CodeReviewPolicy:        *tr.codeReviewPolicy,
+			VerifyCommand:           tr.verifyCmd,
+			FastCheckCommand:        *tr.fastCheckCommand,
+			FullSuiteCommand:        tr.effectiveFullSuiteCommand,
+			BaselineCheck:           *tr.rf.baselineCheck,
+			GateCommands:            tr.gateCommands,
+			SetupCommands:           tr.setup,
+			AutofixCommands:         tr.autofix,
+			ProjectConfigCommitSHA:  tr.projectConfigCommitSHA,
+			Sandbox:                 tr.sandbox,
+			SandboxRepoKey:          memory.StoreKey(tr.project, tr.repositoryRoot),
+			ConfiguredSandboxImage:  tr.configuredSandboxImage,
+			ApprovalDataDir:         firstNonEmptyString(tr.approvalDataDir, tr.sandboxDataDir),
+			InstallCacheImages:      tr.settings.SandboxInstallCacheImages,
+			Skills:                  roleSkillSet{Execution: tr.executionSkills, Review: tr.reviewSkills},
+			MaxRounds:               *tr.maxRounds,
+			TimeoutMinutes:          *tr.timeoutMinutes,
+			BuildAppMaxAttempts:     *tr.buildAppMaxAttempts,
+			VerifyMaxAttempts:       *tr.verifyMaxAttempts,
+			OverallTimeout:          *tr.timeout,
+			SandboxImage:            *tr.sandboxImage,
+			SandboxDocker:           *tr.sandboxDocker,
+			SandboxUser:             *tr.sandboxUser,
+			SandboxWorkerUID:        *tr.sandboxWorkerUID,
+			SandboxMemory:           *tr.sandboxMemory,
+			SandboxCPUs:             *tr.sandboxCPUs,
+			SandboxTmpfsSize:        *tr.sandboxTmpfsSize,
+			ModelHostConcurrency:    tr.settings.ModelHostConcurrency,
+			Relay:                   relayOpts,
+			RegistryProxyPolicy:     tr.registryProxyPolicy,
+			GoModuleDir:             repositoryGoModuleDir(tr.dp, tr.lifecycleCtx, os.Stderr, tr.resolvedWorkspace, tr.baseSHA, tr.registryProxyPolicy),
+			ComposeServices:         composeServicesOpts,
+			AllowedFiles:            tr.allowedFiles,
+			TestPatterns:            tr.testPatterns,
+			AllowedPaths:            tr.allowedPaths,
+			ScopeUnapproved:         tr.scopeUnapproved,
+			NoTicketScope:           *tr.rf.scopeApproval == "none",
+			TestsRequiredOptOut:     tr.r.TestsRequiredOptOut,
+			Slice:                   sliceOpts,
+			ReleasePolicy:           releasePolicy,
+			Thinking:                tr.executionThinking,
+			ReviewThinking:          tr.reviewThinking,
+			ReviewRelayPolicy:       reviewRelayPolicy,
+			Challenge:               *tr.rf.challenge,
+			ChallengeSpecPath:       tr.challengeSpecSnapshot,
+			ChallengeSpecSHA256:     tr.challengeSpecSHA256,
+			ChallengeCriteria:       *tr.rf.challengeCriteria,
+			ChallengeAnswers:        challengeAnswerNumbers(*tr.rf.challengeAnswers),
+			ChallengeApprovedSHA256: *tr.rf.challengeApprovedSHA256,
+			ChallengeApprovedBytes:  *tr.rf.challengeApprovedBytes,
+			ChallengerThinking:      tr.challengerThinking,
+			ChallengerHarness:       tr.challengerHarnessName,
+			ChallengeHeld:           tr.challengeHeld,
+			ChallengeRound:          *tr.rf.challengeRound,
+		}
+		if tr.challengerSelection != nil {
+			opts.ChallengerRelayPolicy = &tr.challengerSelection.Policy
 		}
 		if opts.Repository != "" {
 			return runViaRepositoryOwner(tr.dp, tr.lifecycleCtx, temporalClient, tr.r, opts)
@@ -2778,15 +2727,11 @@ func (tr *ticketRun) dispatch() error {
 	return fmt.Errorf("Temporal at %s is unreachable: %w; builds run only on Temporal (factoryd doctor -fix starts it)", *tr.temporalAddress, dialErr)
 }
 
-// resolvedGateCommands is the run's gate commands by check: every
-// policy.CommandGates entry (empty when unset), plus the gates the target
-// repository's .factory.yml defines for itself, which
+// resolvedGateCommands is the run's gate commands by check: the gates the
+// target repository's .factory.yml defines for itself, which
 // applyProjectConfigDefaults added under their "repo-<id>" names.
 func resolvedGateCommands(flags map[string]*string) map[string]string {
 	out := make(map[string]string, len(flags))
-	for _, g := range policy.CommandGates {
-		out[g.ID] = *flags[g.ID]
-	}
 	for check, command := range flags {
 		if policy.IsRepoGate(check) && command != nil {
 			out[check] = *command
@@ -2813,6 +2758,7 @@ func (tr *ticketRun) applyCommittedProjectConfig(fullSuiteExplicit bool) error {
 		tr.setup, tr.autofix, tr.requiredBinaries, tr.projectConfigSHA256 = cfg.Setup, cfg.Autofix, cfg.RequiredBinaries, cfg.SHA256
 		tr.sandbox = cfg.Sandbox
 		tr.allowedPaths = cfg.AllowedPaths
+		tr.prOrder = cfg.PROrder
 	}
 	// HEAD is the commit it was before the first read of the file
 	// (headBeforeProjectConfig) and that commit's file is the one just read,
@@ -2862,34 +2808,45 @@ func resolveScopeApproval(value string, requestTicket bool) (unapproved bool, er
 		return false, nil
 	case "unapproved":
 		return true, nil
+	case "none":
+		if !requestTicket {
+			return false, errors.New("-scope-approval none requires -request-ticket")
+		}
+		return false, nil
 	case "":
 		if requestTicket {
-			return false, errors.New("-scope-approval is required with -request-ticket: approved or unapproved")
+			return false, errors.New("-scope-approval is required with -request-ticket: approved, unapproved, or none")
 		}
 		return false, nil
 	}
-	return false, fmt.Errorf("-scope-approval must be approved or unapproved, got %q", value)
+	return false, fmt.Errorf("-scope-approval must be approved, unapproved, or none, got %q", value)
 }
 
 // parseAllowedScope reads the ticket's Allowed-Files (nil when it declares
 // none) and whether a person approved that list (-scope-approval).
 func (tr *ticketRun) parseAllowedScope() (err error) {
+	tr.scopeUnapproved, err = resolveScopeApproval(*tr.rf.scopeApproval, *tr.requestTicket)
+	if err != nil {
+		return err
+	}
+	if *tr.rf.scopeApproval == "none" {
+		tr.allowedFiles = nil
+		return nil
+	}
 	tr.allowedFiles, err = ticketspec.ParseAllowedFiles(tr.specSnapshotPath)
 	if err != nil {
 		return fmt.Errorf("parse ticket allowed files: %w", err)
 	}
-	tr.scopeUnapproved, err = resolveScopeApproval(*tr.rf.scopeApproval, *tr.requestTicket)
-	return err
+	return nil
 }
 
 // misprefixCheckPaths are the declared paths checked for a missing directory
-// prefix, without repeats: Required-Changed-Files, and Allowed-Files unless no
-// person approved that list (it refuses nothing then, so a wrong prefix in it
-// halts nothing).
+// prefix: Allowed-Files, unless no person approved that list (it refuses
+// nothing then, so a wrong prefix in it halts nothing).
 func (tr *ticketRun) misprefixCheckPaths() []string {
-	declared := tr.requiredChangedFiles
+	var declared []string
 	if !tr.scopeUnapproved {
-		declared = append(slices.Clone(tr.allowedFiles), tr.requiredChangedFiles...)
+		declared = tr.allowedFiles
 	}
 	var paths []string
 	for _, p := range declared {
@@ -2898,4 +2855,34 @@ func (tr *ticketRun) misprefixCheckPaths() []string {
 		}
 	}
 	return paths
+}
+
+// carvedTestsRequiredReason is the opt-out reason a carved commit's run
+// records for tests_red_on_base: that gate judged the whole change on the run
+// that was carved.
+const carvedTestsRequiredReason = "carved by pr_order from a run whose tests_red_on_base judged the whole change"
+
+// runPROrder is the pr_order a request ticket's run records, so the release
+// decision reads its changed files against it: the committed .factory.yml's
+// groups, and for a carved ticket (-order-group) the group it is limited to.
+// A run that is not a request's ticket (a single-ticket `factoryd run`) has
+// none, and so does a repository whose .factory.yml lists no groups.
+func (tr *ticketRun) runPROrder() *run.PROrder {
+	if !*tr.requestTicket || len(tr.prOrder) == 0 {
+		return nil
+	}
+	return &run.PROrder{Groups: tr.prOrder, TicketGroup: *tr.rf.orderGroup}
+}
+
+// challengeAnswerNumbers parses -challenge-answers: the comma-separated
+// numbers of the answered read-back questions. A token that is not a number
+// is dropped, so no header can cite it.
+func challengeAnswerNumbers(list string) []int {
+	var ns []int
+	for _, tok := range strings.Split(list, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(tok)); err == nil {
+			ns = append(ns, n)
+		}
+	}
+	return ns
 }

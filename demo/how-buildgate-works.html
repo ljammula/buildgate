@@ -98,12 +98,9 @@
   .chip { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
   .chip.you { background: var(--human-soft); color: var(--human); }
   .chip.factory { background: var(--accent-soft); color: var(--accent); }
-  .chip.optional { border: 1px dashed var(--muted); color: var(--muted); }
 
   /* Walkthrough */
   .walk-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 12px 0; }
-  .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; user-select: none; }
-  .toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
   .walk { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
   .walk > * { min-width: 0; }
   .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -243,7 +240,7 @@
   <tbody>
     <tr><th>In</th><td>A ticket (text or a GitHub issue) and a git repo with a verify command (<code>go test ./...</code>, <code>make verify</code>…)</td></tr>
     <tr><th>Out</th><td>A PR with an evidence trail, or a quarantine that names the gate that failed</td></tr>
-    <tr><th>Human gates</th><td>Spec review, plan review, (opt-in) acceptance-test review, PR review and merge</td></tr>
+    <tr><th>Human gates</th><td>Spec review, plan review, PR review and merge</td></tr>
     <tr><th>Runs on</th><td>A background <code>worker</code> on Temporal (started for you when it is down), so an interrupted build waits for your decision with its work kept. See <a href="#runtime">What runs on your machine</a></td></tr>
   </tbody>
 </table></div>
@@ -271,7 +268,6 @@
 <div class="walk-controls">
   <span><span class="chip you">You</span> a human acts</span>
   <span><span class="chip factory">Factory</span> runs unattended</span>
-  <label class="toggle"><input type="checkbox" id="oracles-toggle" checked> Include opt-in acceptance tests (<code>-draft-oracles</code>)</label>
 </div>
 <div class="walk">
   <ol class="steps" id="steps"></ol>
@@ -305,7 +301,7 @@ serve       the console and its API, over the same data dir</code></pre>
   <thead><tr><th>Screen</th><th>Shows</th></tr></thead>
   <tbody>
     <tr><td>Request board</td><td>Every request with its cost, waiting-on-you first; a banner when no <code>worker</code> is alive or the release policy can never open a PR</td></tr>
-    <tr><td>Request detail</td><td>Pipeline stepper (each step timestamped and attributed); spec, acceptance tests and plan with Edit, Approve, Request changes</td></tr>
+    <tr><td>Request detail</td><td>Pipeline stepper (each step timestamped and attributed); spec and plan with Edit, Approve, Request changes</td></tr>
     <tr><td>Triage</td><td>Keyboard queue of pending spec and plan reviews (<code>j</code>/<code>k</code>, <code>a</code>/<code>r</code>); no approve-all</td></tr>
     <tr><td>New request</td><td>The same form as <code>submit</code>, limited to allow-listed workspaces</td></tr>
     <tr><td>Run detail</td><td>Live timeline (prep, build, verify, gates, review), readable build log, each attempt's exit code, a <em>stalled</em> chip after 5 silent minutes, evidence</td></tr>
@@ -316,7 +312,7 @@ serve       the console and its API, over the same data dir</code></pre>
 <h3 id="build">Inside the build</h3>
 <p>Everything the agent can touch is inside the sandbox. Everything that decides whether it passed runs outside it.</p>
 <div class="diagram">
-<svg viewBox="0 0 980 430" role="img" aria-label="Build architecture: the coding agent (Pi, Codex, Copilot or pifork) works in a sandbox with no network interface, created by the OpenShell gateway, with read-only acceptance tests and skills and optional compose sidecars, and reaches the model only through its supervisor and the meter; its commits go through factory-run verify and gates before a PR opens for human merge.">
+<svg viewBox="0 0 980 430" role="img" aria-label="Build architecture: the coding agent (Pi, Codex, Copilot or pifork) works in a sandbox with no network interface, created by the OpenShell gateway, with read-only skills and optional compose sidecars, and reaches the model only through its supervisor and the meter; its commits go through factory-run verify and gates before a PR opens for human merge.">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
     <marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
@@ -338,8 +334,7 @@ serve       the console and its API, over the same data dir</code></pre>
 
   <rect class="box" x="50" y="196" width="290" height="84" rx="8"/>
   <text class="label" x="66" y="222">Mounted read-only, hash-pinned</text>
-  <text class="small" x="66" y="242">approved acceptance tests at .oracle</text>
-  <text class="small" x="66" y="258">chosen skills at /inputs/skills</text>
+  <text class="small" x="66" y="242">chosen skills at /inputs/skills</text>
 
   <!-- Supervisor, meter and model -->
   <rect class="box" x="420" y="104" width="200" height="70" rx="8"/>
@@ -372,7 +367,6 @@ serve       the console and its API, over the same data dir</code></pre>
   <text class="label" x="436" y="246">Factory-run checks</text>
   <text class="small" x="436" y="268">canonical verify → diff scope → required files</text>
   <text class="small" x="436" y="286">→ tests added → full suite → code review</text>
-  <text class="small" x="436" y="304">→ code review → acceptance tests + canary</text>
   <text class="small" x="436" y="330">Fail with rounds left: back to the agent</text>
 
   <path class="arrow" d="M340,164 C380,164 380,262 416,262" marker-end="url(#arrow)"/>
@@ -385,7 +379,7 @@ serve       the console and its API, over the same data dir</code></pre>
 
   <rect class="box fail" x="770" y="282" width="180" height="56" rx="8"/>
   <text class="label" x="786" y="306">Quarantined</text>
-  <text class="small" x="786" y="324">named gate + triage note</text>
+  <text class="small" x="786" y="324">failed gate + triage note</text>
 
   <rect class="box human" x="770" y="356" width="180" height="50" rx="8"/>
   <text class="label" x="786" y="378">Human merges</text>
@@ -409,11 +403,10 @@ serve       the console and its API, over the same data dir</code></pre>
     <tr><td><code>diff_scope</code></td><td>Every changed file is in the plan's allowed files, checked on the final commit</td><td>The agent also bumps a dependency in <code>go.mod</code>. Not an allowed file, so the run is quarantined (the proving-ground's scope-violation fixture)</td></tr>
     <tr><td><code>tests_red_on_base</code></td><td>A test the change added or changed fails on the base commit and passes on the result, shown by running it in the sandbox; or the ticket opted out with a stated reason (recorded on the release decision)</td><td><code>Multiply</code> is correct and verify passes, but the new test also passes on the old code, so it does not exercise the change</td></tr>
     <tr><td><code>full_suite_verify</code></td><td>The repo-wide suite still passes, not just the ticket's tests</td><td>While there, the agent changes the signature of <code>mathops.Divide</code> and updates its tests; <code>./mathops</code> passes, but package <code>report</code>, which calls <code>Divide</code>, no longer compiles under <code>go test ./...</code></td></tr>
-    <tr><td><code>code_review</code></td><td>Correctness review with structured findings posted to the PR, in the same review-role call. A finding is advice, listed in the PR; it refuses a request's build only through a reproduction test the factory runs itself (<code>review_reproduction</code>). Under <code>required</code> (what <code>quickstart</code> writes) a review with no verdict waits for a person</td><td>The test computes its expected value by calling <code>Multiply</code> itself, so it can never fail: flagged as a test that proves nothing</td></tr>
-    <tr><td><code>reference_oracle</code> + canary</td><td>The human-approved acceptance tests pass. They were drafted from the spec before any code existed, are hash-pinned and mounted read-only. The canary reruns the gate with a copy that must fail; if that copy "passes", the tests aren't really running and the gate fails closed</td><td>The approved oracle expects <code>Multiply(-2, 5) == -10</code>; an implementation that returns <code>abs(a*b)</code> fails it. Or the agent adds a <code>TestMain</code> that exits before any test runs: the canary passes too, so the gate fails</td></tr>
+    <tr><td><code>code_review</code></td><td>Correctness review with structured findings posted to the PR, in the same review-role call. A finding is advice, listed in the PR; it refuses nothing. Under <code>required</code> (what <code>quickstart</code> writes) a review with no verdict waits for a person</td><td>The test computes its expected value by calling <code>Multiply</code> itself, so it can never fail: flagged as a test that proves nothing</td></tr>
   </tbody>
 </table></div>
-<p class="note"><code>.factory.yml</code> can add <code>lint</code>, <code>security_audit</code>, <code>unit_tests</code> and <code>integration_tests</code> gates, each with its own exit code and log.</p>
+<p class="note">A repository's <code>.factory.yml</code> <code>gates:</code> list adds its own checks (a lint check, say), each recorded as <code>repo-&lt;id&gt;</code> with its own exit code and log.</p>
 
 <h3 id="outcomes">Outcomes</h3>
 <div class="cards">
@@ -428,7 +421,7 @@ serve       the console and its API, over the same data dir</code></pre>
   <li>Reach the internet: it has no network interface. Its only route out is its sandbox's supervisor, which admits one model upstream; packages come through a registry proxy</li>
   <li>See model credentials: it holds a placeholder, and the supervisor substitutes the real one on the way out</li>
   <li>Spend past the budget: every model call passes the meter, which refuses one past the token or cost ceiling</li>
-  <li>Edit the approved spec or acceptance tests: hash-pinned, tests mounted read-only</li>
+  <li>Edit the approved spec: hash-pinned</li>
   <li>Choose its reviewer or declare itself done: only factory-run gates accept</li>
   <li>Merge or deploy: a human does that, outside Buildgate</li>
 </ul>
@@ -442,9 +435,8 @@ serve       the console and its API, over the same data dir</code></pre>
     <tr><td>Teach the agent a team practice</td><td>Write a skill: a folder with a <code>SKILL.md</code> whose front-matter <code>name</code> matches the folder. Commit it to the repo's <code>.agents/skills</code> (every harness loads it for the build), or keep it in a host folder listed in <code>skill_dirs:</code> and enable it per role with <code>roles.&lt;role&gt;.skills</code>. Refused at launch: scripts or exec bits, symlinks, over 2 MiB per role, or a repo skill with the same name</td><td>No</td></tr>
     <tr><td>Give every repository a team skill</td><td>Add <code>&lt;skill_dirs entry&gt;/&lt;name&gt;/SKILL.md</code> and name it in <code>roles.&lt;role&gt;.skills</code>; the launch refuses symlinks, executable files and a name mismatch</td><td>No, config only</td></tr>
     <tr><td>Use another model or endpoint</td><td>Add <code>routes:</code> and <code>models:</code> entries in the session config: any OpenAI-compatible <code>/v1</code> (vLLM, Ollama, a gateway), ChatGPT via Codex login, Copilot, Anthropic. Add its price to <code>internal/prices/prices.yml</code> so budgets and <code>factoryd cost</code> are right</td><td>No (price table: rebuild)</td></tr>
-    <tr><td>Add a check for one repo</td><td>Set <code>lint_command</code>, <code>security_command</code>, <code>unit_test_command</code> or <code>integration_test_command</code> in the repo's <code>.factory.yml</code>; each becomes a named gate with its own evidence</td><td>No</td></tr>
+    <tr><td>Add a check for one repo</td><td>List it under <code>gates:</code> in the repo's <code>.factory.yml</code> (an <code>id</code> and a <code>command</code>); it becomes a <code>repo-&lt;id&gt;</code> gate with its own evidence</td><td>No</td></tr>
     <tr><td>Give the build real services</td><td>Declare Postgres, Kafka or Redis in the repo's <code>docker-compose.yml</code> (allow-listed images); they run as sidecars for every phase. Check with <code>factoryd doctor -target-repo &lt;repo&gt;</code></td><td>No</td></tr>
-    <tr><td>Add a new kind of gate for all repos</td><td>One <code>CommandGate</code> entry in <code>internal/policy/gates.go</code> plus one <code>.factory.yml</code> field</td><td>Yes, small</td></tr>
     <tr><td>Add a coding-agent harness</td><td>One adapter class in <code>agent/pi/scripts/harness_adapters.py</code>, one entry in <code>internal/harness/registry.go</code>, one image stage in the sandbox Dockerfile, recorded fixtures, one <code>containment-matrix.md</code> row. No change to job launch, the sandbox runtime or the config schema; Codex and Copilot CLI were added this way</td><td>Yes, five files</td></tr>
   </tbody>
 </table></div>
@@ -479,7 +471,6 @@ serve       the console and its API, over the same data dir</code></pre>
 <ul>
   <li><strong>Our repos:</strong> fixtures are personal repos. Multi-module <code>go.work</code>, cgo, private modules and generated code are untested.</li>
   <li><strong>Routes:</strong> live runs mostly use the ChatGPT Codex route; the Copilot route and CLI harness have each taken one small ticket to accepted, on an individual free plan.</li>
-  <li><strong>Acceptance-test drafting:</strong> opt-in; drafted tests still need a careful human read.</li>
   <li><strong>A lost build step</strong> is never retried automatically: the request waits in <code>resume_review</code> for your decision, and the build keeps its worktree.</li>
 </ul>
 
@@ -524,18 +515,6 @@ factoryd stop                      # stop what quickstart started</code></pre>
       why: "Approval records who approved it and the SHA-256 of the file. A later edit to the approved spec is refused."
     },
     {
-      id: "oracle_drafting", title: "Acceptance-test drafting", who: "factory", optional: true,
-      what: "A sandboxed drafter on the review role writes one acceptance test per criterion, from the spec and the repo at the base commit. It never sees the implementation, because none exists yet.",
-      see: '<pre><code>oracle/\n  MANIFEST.json      criterion → test file → target path\n  RUN_COMMAND.txt    how the gate runs them\n  multiply_oracle_test.go</code></pre>',
-      why: "Tests written before the code, from the spec alone, can't be shaped to fit whatever the agent later builds. Go and Python only."
-    },
-    {
-      id: "oracle_review", title: "Acceptance-test review", who: "you", optional: true,
-      what: "You read every drafted test like a code review: right package, real assertions, correct expected values. Reject to redraft with a reason.",
-      see: '<pre><code>{"3x4", 3, 4, 12},\n{"zero", 0, 9, 0},\n{"negative", -2, 5, -10},</code></pre>',
-      why: "Approval hash-pins each test file. A wrong test you approve here would block correct code later, so read it carefully."
-    },
-    {
       id: "planning", title: "Planning", who: "factory",
       what: "The planning role breaks the spec into tickets: files to touch, steps, and tests to add. It checks that every acceptance criterion is claimed by a ticket.",
       see: "<pre><code>Ticket 1: Add Multiply\n  Allowed-Files: mathops.go, mathops_test.go\n  Steps: implement Multiply; add table-driven test\n  Verify-Command: go test ./...</code></pre>",
@@ -550,7 +529,7 @@ factoryd stop                      # stop what quickstart started</code></pre>
     {
       id: "building", title: "Building", who: "factory",
       what: "The execution role's coding agent works in a sandbox with no network interface, reaching the model only through its supervisor and the meter. If the repo's docker-compose.yml declares Postgres, Kafka or Redis, they run as sidecars the agent and the gates can reach. The agent self-checks with focused tests; the factory then reruns the full verify command and the gates itself. A failure with rounds left goes back to the agent, with the failure attached.",
-      see: '<pre><code>$ factoryd watch &lt;request-id&gt;\nbuilding   round 1  agent committed 2 files\nverify     go test ./...            pass\ngates      diff_scope               pass\n           tests_red_on_base       pass\n           full_suite_verify        pass\n           code_review              pass\n           reference_oracle         pass\nresult     accepted</code></pre>',
+      see: '<pre><code>$ factoryd watch &lt;request-id&gt;\nbuilding   round 1  agent committed 2 files\nverify     go test ./...            pass\ngates      diff_scope               pass\n           tests_red_on_base       pass\n           full_suite_verify        pass\n           code_review              pass\nresult     accepted</code></pre>',
       why: 'If the Mac sleeps, factoryd crashes or you force a stop mid-build, the request waits in <code>resume_review</code> and the build keeps its code: <code>factoryd resume &lt;request-id&gt;</code> continues it. See <a href="#build">Inside the build</a> for the full picture. <code>factoryd logs -f &lt;request-id&gt;</code> follows the raw log. A shared local model host is serialized automatically; a waiting job shows "queued behind &lt;run&gt;".'
     },
     {
@@ -569,11 +548,10 @@ factoryd stop                      # stop what quickstart started</code></pre>
 
   var stepsEl = document.getElementById("steps");
   var panelEl = document.getElementById("panel");
-  var toggle = document.getElementById("oracles-toggle");
   var current = 0;
 
   function visible() {
-    return STAGES.filter(function (s) { return toggle.checked || !s.optional; });
+    return STAGES;
   }
 
   function chip(who) {
@@ -590,7 +568,7 @@ factoryd stop                      # stop what quickstart started</code></pre>
       b.type = "button";
       b.className = s.who;
       if (i === current) b.setAttribute("aria-current", "step");
-      b.innerHTML = '<span class="num">' + (i + 1) + "</span><span>" + s.title + (s.optional ? ' <span class="chip optional">opt-in</span>' : "") + "</span>";
+      b.innerHTML = '<span class="num">' + (i + 1) + "</span><span>" + s.title + "</span>";
       b.addEventListener("click", function () { current = i; render(); });
       li.appendChild(b);
       stepsEl.appendChild(li);
@@ -598,7 +576,7 @@ factoryd stop                      # stop what quickstart started</code></pre>
     var s = list[current];
     panelEl.innerHTML =
       '<h3>' + (current + 1) + ". " + s.title + "</h3>" +
-      '<p class="who">' + chip(s.who) + (s.optional ? '<span class="chip optional">opt-in</span>' : "") + ' <code>' + s.id + "</code></p>" +
+      '<p class="who">' + chip(s.who) + "" + ' <code>' + s.id + "</code></p>" +
       "<h4>What happens</h4><p>" + s.what + "</p>" +
       "<h4>What you see</h4>" + s.see +
       "<h4>Why it matters</h4><p>" + s.why + "</p>" +
@@ -620,7 +598,6 @@ factoryd stop                      # stop what quickstart started</code></pre>
     render();
   }
 
-  toggle.addEventListener("change", function () {
     var id = visible()[current] ? visible()[current].id : null;
     render();
     if (id) {

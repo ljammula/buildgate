@@ -14,8 +14,7 @@ import (
 // .factory.yml alone and reach the run's gate commands as "repo-<id>".
 func TestRepoDefinedGatesReachTheRunsGateCommands(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFactoryYML(t, dir, `lint_command: "golangci-lint run ./..."
-gates:
+	writeTestFactoryYML(t, dir, `gates:
   - id: no_todo
     command: "! grep -rn TODO src"
   - id: licenses
@@ -30,7 +29,6 @@ gates:
 	}
 	got := resolvedGateCommands(gateCommands)
 	want := map[string]string{
-		"lint":          "golangci-lint run ./...",
 		"repo-no_todo":  "! grep -rn TODO src",
 		"repo-licenses": "scripts/check-licenses.sh",
 	}
@@ -50,10 +48,8 @@ gates:
 	if derived := cfg.RepoGateCommands(); len(derived) != 2 || derived["repo-no_todo"] != got["repo-no_todo"] || derived["repo-licenses"] != got["repo-licenses"] {
 		t.Errorf("Config.RepoGateCommands = %v, want the run's two repo gates", derived)
 	}
-	for _, g := range policy.CommandGates {
-		if _, ok := got[g.ID]; !ok {
-			t.Errorf("registry gate %s is missing from the resolved commands", g.ID)
-		}
+	if len(got) != 2 {
+		t.Errorf("resolved gate commands = %v, want only the repository's two gates", got)
 	}
 }
 
@@ -62,7 +58,7 @@ func TestEvidenceListsRepoDefinedGates(t *testing.T) {
 	var b strings.Builder
 	writeRepoGateLines(&b, []run.GateResult{
 		{Check: "canonical_verify", Passed: true},
-		{Check: "lint", Passed: true},
+		{Check: "canonical_verify", Passed: true},
 		{Check: "repo-licenses", Passed: true},
 		{Check: "repo-no_todo", Passed: false},
 	})
@@ -74,15 +70,15 @@ func TestEvidenceListsRepoDefinedGates(t *testing.T) {
 // An accepted result with no result for a repo-defined gate was judged by
 // workflow code that predates them: it is quarantined, naming the gate.
 func TestAcceptedResultMissingARepoGateIsQuarantined(t *testing.T) {
-	commands := map[string]string{"lint": "golangci-lint run", "repo-licenses": "scripts/check-licenses.sh", "repo-no_todo": "! grep -rn TODO src"}
+	commands := map[string]string{"repo-licenses": "scripts/check-licenses.sh", "repo-no_todo": "! grep -rn TODO src"}
 	complete := workflow.RunWorkflowResult{State: run.StateAccepted, GateResults: []run.GateResult{
-		{Check: "lint", Passed: true}, {Check: "repo-licenses", Passed: true}, {Check: "repo-no_todo", Passed: true},
+		{Check: "canonical_verify", Passed: true}, {Check: "repo-licenses", Passed: true}, {Check: "repo-no_todo", Passed: true},
 	}}
 	if got := requireRepoGateResults(commands, complete); got.State != run.StateAccepted || len(got.GateResults) != 3 {
 		t.Errorf("a result with every repo gate changed: state %s, %d gate results", got.State, len(got.GateResults))
 	}
 	missing := workflow.RunWorkflowResult{State: run.StateAccepted, GateResults: []run.GateResult{
-		{Check: "lint", Passed: true}, {Check: "repo-licenses", Passed: true},
+		{Check: "canonical_verify", Passed: true}, {Check: "repo-licenses", Passed: true},
 	}}
 	got := requireRepoGateResults(commands, missing)
 	if got.State != run.StateQuarantined {

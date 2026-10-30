@@ -26,7 +26,7 @@ func truncateRunes(s string, n int) string {
 // criterion, not a sentence it has to locate.
 type RejectionAnchor struct {
 	// Path is the request-relative file the note is about ("spec.md",
-	// "tickets/001.spec.md", "oracle/RUN_COMMAND.txt").
+	// "tickets/001.spec.md").
 	Path string `json:"path"`
 	// Section is the heading the note is under, as written in the file
 	// ("## Acceptance criteria"); empty for a note on the whole file.

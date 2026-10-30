@@ -13,7 +13,7 @@ import (
 // checkTicketMain implements `factoryd check-ticket <path>`: a fast,
 // side-effect-free preflight over a hand-authored brownfield ticket
 // (internal/ticketspec's Verify-Command:/Allowed-Files:/
-// Required-Changed-Files:/Required-Content:/Tests-Required: header-line
+// Tests-Required: header-line
 // format, e.g. data/tickets/*.spec.md) that an operator or agent runs
 // before ever starting a real sandboxed `factoryd <run>` against it.
 //
@@ -108,34 +108,7 @@ var ticketHeaderChecks = map[string]ticketHeaderCheck{
 			files, err := ticketspec.ParseAllowedFiles(specPath)
 			return strings.Join(files, ", "), err
 		},
-		Absent: "not present -- a real run will skip the diff-scope check entirely (any file may be touched)",
-	},
-	ticketspec.RequiredChangedFilesPrefix: {
-		Read: func(specPath string, _ map[string]bool) (string, error) {
-			files, err := ticketspec.ParseRequiredChangedFiles(specPath)
-			return strings.Join(files, ", "), err
-		},
-		Absent: "not present -- a real run will skip the check that the ticket's required file(s) were actually changed",
-	},
-	ticketspec.RequiredContentPrefix: {
-		Read: func(specPath string, _ map[string]bool) (string, error) {
-			content, err := ticketspec.ParseRequiredContent(specPath)
-			if err != nil || len(content) == 0 {
-				return strings.Join(content, ", "), err
-			}
-			// Mirrors run_ticket.go's own preflight check (its comment:
-			// "ticket declares Required-Content: without
-			// Required-Changed-Files: -- there is no required file set to
-			// search"): the one cross-key validation a real run enforces
-			// before starting a build, reported here as malformed too since
-			// it halts a real run exactly like a bad header line does.
-			files, err := ticketspec.ParseRequiredChangedFiles(specPath)
-			if err == nil && len(files) == 0 {
-				err = fmt.Errorf("declares %s without %s -- there is no required file set to search", ticketspec.RequiredContentPrefix, ticketspec.RequiredChangedFilesPrefix)
-			}
-			return strings.Join(content, ", "), err
-		},
-		Absent: "not present -- a real run will skip the check that required content markers actually appear in the changed file(s)",
+		Absent: "not present -- the ticket adds no file limit; the repository's allowed_paths still apply",
 	},
 	ticketspec.TestsRequiredPrefix: {
 		Read: func(specPath string, present map[string]bool) (string, error) {
@@ -218,8 +191,7 @@ func printTicketHeaderReport(w io.Writer, specPath string, reports []ticketHeade
 
 // ticketTemplateMain implements `factoryd ticket-template [-o <path>]`: a
 // skeleton ticket in the exact internal/ticketspec-parsed shape (## Context
-// / ## Required change / ## Out of scope with Allowed-Files:/
-// Required-Changed-Files:/Required-Content: lines / ## Acceptance /
+// / ## Required change / ## Out of scope with an Allowed-Files: line / ## Acceptance /
 // verification with Verify-Command:), matching the real shape shown by
 // e.g. data/tickets/math-ops-multiply.spec.md -- NOT the
 // plan_tickets.py/policy.TicketStructureBrownfield shape (## Goal/## Plan/
@@ -278,12 +250,10 @@ func ticketTemplateMain(args []string) error {
 const ticketTemplateContent = `# Ticket: <one-line summary of the change>
 
 This skeleton matches the header-line format internal/ticketspec parses:
-six optional "Key: value" lines (Verify-Command, Allowed-Files,
-Required-Changed-Files, Required-Content, Tests-Required,
-Estimated-Changed-Lines) mixed into
-ordinary prose sections below. Each one closes a real gap a run would
-otherwise leave unenforced -- see the note directly under each header
-line further down. Replace the placeholder text, delete any header line
+four optional "Key: value" lines (Verify-Command, Allowed-Files,
+Tests-Required, Estimated-Changed-Lines) mixed into
+ordinary prose sections below. Each note explains what its header changes.
+Replace the placeholder text, delete any header line
 you don't want to declare, then run ` + "`factoryd check-ticket <this file>`" + `
 before starting a real run -- it reports exactly which headers were
 recognized and whether each one parses cleanly.
@@ -307,16 +277,6 @@ Allowed-Files: path/to/file_one.ext, path/to/file_two.ext
   -- optional: the set of files a run may change. Without this line, a
   real run skips the diff-scope check entirely and does not bound what a
   build may touch.
-
-Required-Changed-Files: path/to/file_one.ext, path/to/file_two.ext
-  -- optional: the set of files a run must actually change. Without this
-  line, nothing proves the ticket's required change was actually made --
-  a passing Verify-Command alone only proves the command exited 0.
-
-Required-Content: a literal substring that must be newly present in a Required-Changed-Files file
-  -- optional, repeat this line once per required string. Without at
-  least one of these, nothing proves a required file's diff is more than
-  cosmetic.
 
 ## Acceptance / verification
 

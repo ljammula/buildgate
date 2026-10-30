@@ -100,8 +100,7 @@ const stageOrder: readonly string[] = [
   "code_review",
   "review",
   "review_reproduction",
-  "commit_oracles",
-  "post_oracle_commit_verify",
+  "challenge",
   "evaluate",
   "finished",
 ];
@@ -122,8 +121,7 @@ export const stageLabels: Readonly<Record<string, string>> = {
   review: "Review",
   tests_red_on_base: "Changed tests on base and result",
   review_reproduction: "Reviewer reproduction",
-  commit_oracles: "Commit oracles",
-  post_oracle_commit_verify: "Re-verify after oracle commit",
+  challenge: "Challenge",
   evaluate: "Evaluate",
   finished: "Finished",
 };
@@ -247,12 +245,6 @@ export function overallGlyph(glyphs: readonly StageGlyph[], finished: boolean): 
   return "pending";
 }
 
-/** The two oracle-commit stages that only ever run for a request launched with `-draft-oracles`. */
-const optionalOracleStages: ReadonlySet<string> = new Set([
-  "commit_oracles",
-  "post_oracle_commit_verify",
-]);
-
 /** The run the Timeline is computed for. */
 export type TimelineRun = Run;
 
@@ -298,7 +290,7 @@ function simpleStageRow(
 
 /**
  * Builds the Gates row directly from `run.gate_results` (the built-in policy
- * gates' own recorded evidence) when the progress feed has no named-gate
+ * gates' own recorded evidence) when the progress feed has no repository-gate
  * events to show -- see `gateRow`'s doc comment.
  */
 function gateRowFromResults(results: readonly GateResult[]): TimelineRow {
@@ -338,7 +330,7 @@ function gateRow(
     if (list === undefined) byGate.set(name, [event]);
     else list.push(event);
   }
-  // No named-gate progress events (no lint/security_audit/etc. configured)
+  // No repository-gate progress events (no `gates:` entries configured)
   // does NOT mean no gates ran: the built-in policy gates (canonical_verify,
   // diff_scope, ...) are always evaluated but never emit their own `gate`
   // progress events (found live, 2026-09-26 operator walk) -- falling
@@ -558,19 +550,6 @@ export function computeTimeline(
   const finished = (byStage.get("finished") ?? []).some((e) => e.event === "end");
   const rows: TimelineRow[] = [];
   for (const stage of stageOrder) {
-    // A run launched with no -reference-oracle-dir never visits the two
-    // oracle-commit stages -- omit them rather than showing a
-    // pending/skipped row for a stage this run will never reach (operator
-    // demo, 2026-09-26). A run that DID emit events for one (an older
-    // record, or a race with the field landing) still shows it, so real
-    // evidence is never hidden.
-    if (
-      run.referenceOracleDir === "" &&
-      optionalOracleStages.has(stage) &&
-      (byStage.get(stage)?.length ?? 0) === 0
-    ) {
-      continue;
-    }
     if (stage === "build") rows.push(buildStageRow(events, finished, now, run));
     else if (stage === "gate") rows.push(gateRow(byStage.get("gate") ?? [], finished, now, run));
     else rows.push(simpleStageRow(stage, byStage.get(stage) ?? [], finished, now));

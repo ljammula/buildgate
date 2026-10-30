@@ -1273,7 +1273,7 @@ func TestDirectRunSandboxWithRetriesReportsExhaustedTeardownMarginAsAnError(t *t
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(sandboxAttemptTeardownMargin/2))
 	defer cancel()
 
-	res, err := runSandboxWithRetries(ctx, t.TempDir(), "", "", "", logPath, 1, "factory-worker:test@sha256:deadbeef", "docker", "", sandbox.DefaultWorkerUID, "run-id", t.TempDir(), "4g", "2", "256m", nil, nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{}, "", "", nil, nil, "sh", "-c", "true")
+	res, err := runSandboxWithRetries(ctx, t.TempDir(), "", "", "", logPath, 1, "factory-worker:test@sha256:deadbeef", "docker", "", sandbox.DefaultWorkerUID, "run-id", t.TempDir(), "4g", "2", "256m", nil, nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{}, nil, nil, "sh", "-c", "true")
 	if err == nil {
 		t.Fatalf("runSandboxWithRetries with less than the teardown margin left: want an error, got nil (result %+v)", res)
 	}
@@ -1314,7 +1314,7 @@ func TestDirectRunSandboxWithRetriesDoesNotPadMarginForADisabledComposeSpec(t *t
 		t.Fatalf("write fake docker: %v", err)
 	}
 	composeSpec := &sandbox.ComposeServicesSpec{} // empty ComposeYAML: disabled, matching a target repo with no compose file at all.
-	res, err := runSandboxWithRetries(ctx, t.TempDir(), "", "", "", logPath, 1, "factory-worker:test@sha256:deadbeef", docker, sandboxTestUser(), sandbox.DefaultWorkerUID, "run-id", t.TempDir(), "4g", "2", "256m", nil, nil, nil, sandbox.RegistryProxyHooks{}, composeSpec, sandbox.ComposeServicesHooks{}, "", "", nil, nil, "sh", "-c", "true")
+	res, err := runSandboxWithRetries(ctx, t.TempDir(), "", "", "", logPath, 1, "factory-worker:test@sha256:deadbeef", docker, sandboxTestUser(), sandbox.DefaultWorkerUID, "run-id", t.TempDir(), "4g", "2", "256m", nil, nil, nil, sandbox.RegistryProxyHooks{}, composeSpec, sandbox.ComposeServicesHooks{}, nil, nil, "sh", "-c", "true")
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries with a disabled composeSpec = %v, want nil (result %+v)", err, res)
 	}

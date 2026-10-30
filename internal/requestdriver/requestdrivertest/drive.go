@@ -17,7 +17,7 @@ import (
 // request is polled, and only the oldest request in a state that runs a job
 // is advanced. Production advances each request through its own workflow;
 // the runners are stubs.
-func DriveRequests(dp requestdriver.Deps, ctx context.Context, dataDir string, cfg requestdriver.WorkerConfig, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner, oracleRunner requestdriver.OracleDraftRunner, buildRunner requestdriver.TicketRunner) error {
+func DriveRequests(dp requestdriver.Deps, ctx context.Context, dataDir string, cfg requestdriver.WorkerConfig, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner, buildRunner requestdriver.TicketRunner) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
@@ -34,7 +34,7 @@ func DriveRequests(dp requestdriver.Deps, ctx context.Context, dataDir string, c
 			}
 			advancedJob = true
 		}
-		err := requestdriver.AdvanceRequest(dp, ctx, dataDir, r, cfg, specRunner, planRunner, oracleRunner, buildRunner)
+		err := requestdriver.AdvanceRequest(dp, ctx, dataDir, r, cfg, specRunner, planRunner, buildRunner)
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}

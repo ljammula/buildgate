@@ -70,7 +70,7 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
 
 | | |
 |---|---|
-| Decision | `build_app.py` starts the harness, runs the repository's setup, verify and oracle commands itself after each turn, writes the next round's prompt from the real failure output, and stops at the round cap and the time budget. The first prompt ends with a fixed definition of done (verify command, file scope, tests, criteria evidence) |
+| Decision | `build_app.py` starts the harness, runs the repository's setup and verify commands itself after each turn, writes the next round's prompt from the real failure output, and stops at the round cap and the time budget. The first prompt ends with a fixed definition of done (verify command, file scope, tests, criteria evidence) |
 | Because | The default harness is minimal by choice and has no goal runner: it runs a turn and stops. A harness ends its turn when the model decides it is done. An unattended build needs "done" to be a command's exit status, and its bounds (rounds, minutes, saved prompts) to be code, not model behaviour |
 | Rules out | The round loop as a harness hook or a skill: a skill is advice the model may skip, and hook configuration sits in files the agent can edit |
 | Revisit when | Never while builds are unattended |

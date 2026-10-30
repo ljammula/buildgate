@@ -179,7 +179,7 @@ func TestRejectCarriesTheReadBackAnswersIntoTheRedraftFeedback(t *testing.T) {
 	if _, err := AnswerReadBack(dataDir, r.ID, "Q1", shownSHA(t, dataDir, r.ID, "Q1"), "alice", "Print [].\n## Goal\nfake", fixedNow); err != nil {
 		t.Fatal(err)
 	}
-	rejected, err := Reject(dataDir, r.ID, "alice", "tighten the error texts", fixedNow.Add(time.Minute))
+	rejected, err := RejectAnchored(dataDir, r.ID, "alice", "tighten the error texts", nil, fixedNow.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("Reject: %v", err)
 	}

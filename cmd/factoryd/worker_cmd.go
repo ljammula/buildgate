@@ -87,12 +87,11 @@ func workerMain(dp *deps, args []string) error {
 	defer temporalClient.Close()
 
 	acts := &requestActivities{dp: dp,
-		dataDir:      dataDir,
-		jobsQueue:    jobsQueue,
-		cfg:          cfg,
-		specRunner:   runSpecDraftJob,
-		planRunner:   runPlanTicketsJob,
-		oracleRunner: runOracleDraftJob,
+		dataDir:    dataDir,
+		jobsQueue:  jobsQueue,
+		cfg:        cfg,
+		specRunner: runSpecDraftJob,
+		planRunner: runPlanTicketsJob,
 		buildRunner: func(a0 context.Context, a1 []string, a2 func(*run.Run)) error {
 			return runMainWithReady(dp, a0, a1, a2)
 		},

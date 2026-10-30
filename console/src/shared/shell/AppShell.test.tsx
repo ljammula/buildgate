@@ -66,7 +66,7 @@ test("no pill when nothing waits, and none when the list cannot be read", async 
 test("the Triage count is the number of rows Triage lists: every state that needs the operator", async () => {
   const list = [
     { id: "a", state: "spec_review" },
-    { id: "b", state: "oracle_review" },
+    { id: "b", state: "spec_review" },
     { id: "c", state: "halted" },
     { id: "d", state: "quarantined" },
     { id: "e", state: "resume_review" },

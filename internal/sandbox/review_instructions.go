@@ -147,7 +147,7 @@ func SnapshotReviewInstructions(parent context.Context, workDir, baseSHA, result
 	if err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
-	if err := validateWorkspaceMasks(masks, ""); err != nil {
+	if err := validateWorkspaceMasks(masks); err != nil {
 		return ReviewInstructionSnapshot{}, err
 	}
 	if len(masks) == 0 && len(removed) == 0 {

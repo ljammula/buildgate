@@ -162,8 +162,8 @@ func resolvedLaunchDir(what, dir string) (string, error) {
 
 // sandboxMounts lists the mounts of s, whose sources withResolvedMounts has
 // resolved, in the order docker run takes them, and the container paths the
-// filesystem policy opens. A read-only bind below /workspace (.git, the
-// reference oracle) needs no policy entry of its own: the policy opens
+// filesystem policy opens. A read-only bind below /workspace (.git)
+// needs no policy entry of its own: the policy opens
 // /workspace and the mount itself refuses writes.
 func (s LaunchSpec) sandboxMounts(launch SandboxLaunch, tmpfsBytes int64) (mounts []SandboxMount, readOnly, readWrite []string) {
 	bind := func(source, target string, ro bool) {
@@ -188,9 +188,6 @@ func (s LaunchSpec) sandboxMounts(launch SandboxLaunch, tmpfsBytes int64) (mount
 		readOnly = append(readOnly, s.gitCommonDirTarget)
 	} else if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
 		bind(gitPath, workerContainerWorkDir+"/.git", true)
-	}
-	if s.ReferenceOracleDir != "" {
-		bind(s.ReferenceOracleDir, workerContainerWorkDir+"/"+s.ReferenceOracleMountPath, true)
 	}
 	for _, mask := range s.WorkspaceMasks {
 		bind(mask.Source, workerContainerWorkDir+"/"+mask.Target, true)

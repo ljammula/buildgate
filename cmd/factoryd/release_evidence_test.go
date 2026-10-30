@@ -84,75 +84,32 @@ func TestRenderEvidenceMarkdownIncludesRealEvidence(t *testing.T) {
 }
 
 // TestRenderEvidenceMarkdownNamedGatesRenderPassFailNotConfigured is the
-// named-gate mechanism's PR-body case: each of the four named gates gets
-// its own line, showing pass, FAIL, or "not configured" -- never silently
-// absent the way an undeclared ticket-scoped gate (diff_scope, etc.) is.
+// repository gates' PR-body case: each gate the run recorded gets its own
+// line, showing pass or FAIL, under "Repository gates"; a run that recorded
+// none has no such section.
 func TestRenderEvidenceMarkdownNamedGatesRenderPassFailNotConfigured(t *testing.T) {
 	t.Parallel()
 	r := &run.Run{
 		ID: "run-1",
 		GateResults: []run.GateResult{
 			{Check: "canonical_verify", Passed: true},
-			{Check: "lint", Passed: true, ExitCode: 0},
-			{Check: "security_audit", Passed: false, ExitCode: 1},
-			// unit_tests and integration_tests deliberately absent: not
-			// configured for this run.
+			{Check: "repo-lint", Passed: true, ExitCode: 0},
+			{Check: "repo-security", Passed: false, ExitCode: 1},
 		},
 	}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
 	for _, want := range []string{
-		"- `lint`: pass",
-		"- `security_audit`: FAIL",
-		"- `unit_tests`: not configured",
-		"- `integration_tests`: not configured",
+		"## Repository gates",
+		"- `repo-lint`: pass",
+		"- `repo-security`: FAIL",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("evidence body does not contain %q:\n%s", want, body)
 		}
 	}
-}
-
-// TestRenderEvidenceMarkdownShowsReferenceOracleContentHash is the
-// SC-012 follow-up's PR-body regression test (PR #151 review, round 2):
-// when a reference_oracle run recorded a content hash, it must be
-// visible in the rendered evidence, not just persisted in run.json.
-// Confirmed live (2026-09-15) against a real run: the rendered hash
-// matched an independent evidence.SHA256Tree recomputation of the same
-// -reference-oracle-dir.
-func TestRenderEvidenceMarkdownShowsReferenceOracleContentHash(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		GateResults: []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "reference_oracle", Passed: true, ExitCode: 0, ReferenceOracleSHA256: "deadbeef"},
-		},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if !strings.Contains(body, "- `reference_oracle`: pass") {
-		t.Errorf("evidence body missing reference_oracle pass line:\n%s", body)
-	}
-	if !strings.Contains(body, "reference-oracle content: `sha256:deadbeef`") {
-		t.Errorf("evidence body missing reference-oracle content hash:\n%s", body)
-	}
-}
-
-// TestRenderEvidenceMarkdownOmitsReferenceOracleHashWhenNotComputed
-// confirms the converse: a reference_oracle gate that ran WITHOUT
-// -reference-oracle-dir configured (the pre-existing, weaker behavior)
-// shows no hash line at all, rather than an empty or misleading one.
-func TestRenderEvidenceMarkdownOmitsReferenceOracleHashWhenNotComputed(t *testing.T) {
-	t.Parallel()
-	r := &run.Run{
-		ID: "run-1",
-		GateResults: []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "reference_oracle", Passed: true, ExitCode: 0},
-		},
-	}
-	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
-	if strings.Contains(body, "reference-oracle content:") {
-		t.Errorf("evidence body shows a reference-oracle content hash line despite none being computed:\n%s", body)
+	none := renderEvidenceMarkdown(&run.Run{ID: "run-2", GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}}}, &release.MergePolicy{})
+	if strings.Contains(none, "Repository gates") || strings.Contains(none, "Named gates") {
+		t.Errorf("a run with no repository gate has a gates section:\n%s", none)
 	}
 }
 
@@ -911,7 +868,7 @@ func TestRecordAcceptedRunSideEffectsLockedMutatesRDirectly(t *testing.T) {
 // block or retroactively change an already-earned acceptance.
 //
 // tier2SettingsOverride is given a real, allowing release policy
-// (RollbackPlan/MaxFilesChanged/MaxInsertions) on top of
+// (RollbackPlan/MaxFilesChanged/MaxChangedLines) on top of
 // withFakeSandboxSettings' own fixture, not left at its zero-value
 // default: with the release-decision gate added ahead of
 // -open-pull-request, a denying policy (this repo's actual default) would
@@ -924,7 +881,7 @@ func TestAPIStartStarterPlumbsOpenPullRequestFlagBestEffort(t *testing.T) {
 	withFakeSandboxSettings(t)
 	tier2SettingsOverride.ReleaseRollbackPlan = "reviewed and reversible"
 	tier2SettingsOverride.ReleaseMaxFilesChanged = 100
-	tier2SettingsOverride.ReleaseMaxInsertions = 100000
+	tier2SettingsOverride.ReleaseMaxChangedLines = 100000
 	tier2SettingsOverride.ReleaseAllowUnsandboxed = true
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -984,10 +941,10 @@ func TestReleasePolicyCanNeverAllow(t *testing.T) {
 		want   bool
 	}{
 		{"this repo's actual -release-* defaults", release.MergePolicy{}, true},
-		{"no rollback plan alone", release.MergePolicy{MaxFilesChanged: 10, MaxInsertions: 100}, true},
-		{"zero max files changed alone", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxInsertions: 100}, true},
+		{"no rollback plan alone", release.MergePolicy{MaxFilesChanged: 10, MaxChangedLines: 100}, true},
+		{"zero max files changed alone", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxChangedLines: 100}, true},
 		{"zero max insertions alone", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10}, true},
-		{"every value real", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxInsertions: 100}, false},
+		{"every value real", release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 100}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1007,7 +964,7 @@ func TestReleasePolicyCanNeverAllow(t *testing.T) {
 // not parallel-safe: redirects the global log package's output (log.SetOutput)
 func TestWarnIfReleasePolicyCanNeverAllowLogsOnlyWhenBothConditionsHold(t *testing.T) {
 	denyingPolicy := release.MergePolicy{}
-	allowingPolicy := release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxInsertions: 100}
+	allowingPolicy := release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 100}
 
 	cases := []struct {
 		name            string
@@ -1096,6 +1053,7 @@ func TestRecordReleaseDecisionAndOpenerGate(t *testing.T) {
 		State: run.StateAccepted, BaseSHA: "base", ResultSHA: "result",
 		ChangedFiles: []string{"lib/app.go"},
 		DiffStat:     &run.DiffStat{FilesChanged: 1, Insertions: 2},
+		ChangeSize:   &run.ChangeSize{SourceFiles: 1, SourceLines: 2},
 		GateResults:  []run.GateResult{{Check: "verify", Passed: true}},
 		Branch:       "factoryd/run-1", OpenPullRequest: true,
 	}
@@ -1145,24 +1103,6 @@ func TestOpenEvidencePullRequestRecordsTheFailureOnTheRun(t *testing.T) {
 	}
 }
 
-func TestRenderEvidenceMarkdownOracleOptOutOnlyClaimsGatingWhenTheGatePassed(t *testing.T) {
-	r := &run.Run{ID: "r1", OraclesNotCommittedByRequest: true}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); !strings.Contains(body, "no reference oracle ran") || strings.Contains(body, "gated this run") {
-		t.Errorf("no oracle gate ran but the evidence claims otherwise:\n%s", body)
-	}
-	r.GateResults = []run.GateResult{{Check: "reference_oracle", Passed: true}}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); !strings.Contains(body, "the oracle gated this run and no factory oracle commit is recorded") {
-		t.Errorf("passed oracle gate not reflected:\n%s", body)
-	}
-}
-
-func TestRenderEvidenceMarkdownOracleOptOutSaysPlainlyWhenOraclesWereCommitted(t *testing.T) {
-	r := &run.Run{ID: "r1", OraclesNotCommittedByRequest: true, Oracles: &run.OracleEvidence{Authored: []run.OracleFile{{Path: "a_test.go", SHA256: "h"}}}}
-	if body := renderEvidenceMarkdown(r, &release.MergePolicy{}); !strings.Contains(body, "oracles WERE committed") {
-		t.Errorf("committed oracles under a requested opt-out not called out:\n%s", body)
-	}
-}
-
 // TestRenderEvidenceMarkdownOmitsCodeReviewWhenNil pins the "## Reviewer
 // advice" section's own convention: a run whose review never ran
 // (r.CodeReview == nil, e.g. -code-review-policy was "off") gets no section
@@ -1192,22 +1132,17 @@ func TestRenderEvidenceMarkdownCodeReviewUnavailable(t *testing.T) {
 	}
 }
 
-// P2.5: the PR body lists every finding that is advice (Disposition
-// "advice", or none on an older record) as one line, "- **<severity>**
-// <summary>", high severity first, stable within a severity; never the
-// file, the failure scenario, the cited spec line or the reproduction, and
-// never a finding that blocked.
+// The PR body lists every finding as one line, "- **<severity>** <summary>",
+// high severity first, stable within a severity; never the file or the
+// failure scenario.
 func TestPRBodyListsReviewerAdviceOneLineEach(t *testing.T) {
 	r := &run.Run{ID: "r1", CodeReview: &run.CodeReviewResult{
 		Policy: "required", Available: true,
 		Findings: []run.CodeReviewFinding{
-			{Severity: "low", Summary: "low one", Disposition: run.DispositionAdvice},
-			{Severity: "high", Summary: "high one", File: "a.go", Line: 12, FailureScenario: "SCENARIO crashes on nil", Disposition: run.DispositionAdvice,
-				SpecLine:     &run.SpecCitation{Number: 3, Text: "SPECTEXT"},
-				Reproduction: &run.ReviewReproduction{Path: "REPROPATH_test.go", Verdict: "advice", Reason: "REASON passes on the result"}},
+			{Severity: "low", Summary: "low one"},
+			{Severity: "high", Summary: "high one", File: "a.go", Line: 12, FailureScenario: "SCENARIO crashes on nil"},
 			{Severity: "medium", Summary: "medium one"},
-			{Severity: "high", Summary: "BLOCKING one", Disposition: run.DispositionBlocks},
-			{Severity: "high", Summary: "high two", Disposition: run.DispositionAdvice},
+			{Severity: "high", Summary: "high two"},
 		},
 	}}
 	body := renderEvidenceMarkdown(r, &release.MergePolicy{})
@@ -1215,7 +1150,7 @@ func TestPRBodyListsReviewerAdviceOneLineEach(t *testing.T) {
 	if !strings.Contains(body, want) {
 		t.Errorf("evidence body lacks\n%s\n---\n%s", want, body)
 	}
-	for _, leaked := range []string{"a.go", "SCENARIO", "SPECTEXT", "REPROPATH", "REASON", "BLOCKING"} {
+	for _, leaked := range []string{"a.go", "SCENARIO"} {
 		if strings.Contains(body, leaked) {
 			t.Errorf("evidence body carries %q:\n%s", leaked, body)
 		}

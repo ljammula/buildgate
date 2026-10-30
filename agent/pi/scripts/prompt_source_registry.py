@@ -17,7 +17,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FIELDS = {
 	"id", "source_path", "fragment", "role", "stage", "kind", "template_refs", "description",
 }
-_ROLES = {"planning", "execution", "review"}
+_ROLES = {"planning", "execution", "review", "challenger"}
 
 
 def _load_registry() -> tuple[str, tuple[dict[str, Any], ...]]:

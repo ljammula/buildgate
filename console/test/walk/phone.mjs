@@ -41,7 +41,6 @@ const routes =
         "/app/runs/new",
         "/requests/new",
         "/requests/req-spec-review",
-        "/requests/req-oracle-review",
         "/requests/req-plan-review",
         "/requests/req-building",
         "/requests/req-quarantined",

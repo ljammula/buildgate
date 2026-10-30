@@ -97,17 +97,12 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /requests", Path: "/requests", File: "requests.json"},
 		{Pattern: "GET /requests/events", Path: "/requests/events", File: "request-events.sse", Events: len(contractRequestIDs)},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-spec-review", File: "request-spec-review.json"},
-		{Pattern: "GET /requests/{id}", Path: "/requests/req-oracle-review", File: "request-oracle-review.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-plan-review", File: "request-plan-review.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-building", File: "request-building.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-done", File: "request-done.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-quarantined", File: "request-quarantined.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-halted", File: "request-halted.json"},
 		{Pattern: "GET /requests/{id}", Path: "/requests/req-every-field", File: "request-every-field.json"},
-		{Pattern: "GET /requests/{id}/oracle", Path: "/requests/req-oracle-review/oracle", File: "request-oracle.json"},
-		{Pattern: "GET /requests/{id}/oracle/{name}", Path: "/requests/req-oracle-review/oracle/RUN_COMMAND.txt", File: "request-oracle-file.txt"},
-		{Pattern: "GET /requests/{id}/tickets/{n}/oracle", Path: "/requests/req-plan-review/tickets/1/oracle", File: "ticket-oracle.json"},
-		{Pattern: "GET /requests/{id}/tickets/{n}/oracle/{name}", Path: "/requests/req-plan-review/tickets/1/oracle/RUN_COMMAND.txt", File: "ticket-oracle-file.txt"},
 		{Pattern: "GET /requests/{id}/revisions", Path: "/requests/req-plan-review/revisions", File: "request-revisions.json"},
 		{Pattern: "GET /requests/{id}/revisions/{n}", Path: "/requests/req-plan-review/revisions/1", File: "request-revision.json"},
 	}
@@ -115,7 +110,7 @@ func contractRoutes() []contractRoute {
 
 // contractRequestIDs is every seeded request, so the request event stream's
 // fixture knows how many events its first snapshot holds.
-var contractRequestIDs = []string{"req-building", "req-done", "req-every-field", "req-halted", "req-oracle-review", "req-plan-review", "req-quarantined", "req-spec-review"}
+var contractRequestIDs = []string{"req-building", "req-done", "req-every-field", "req-halted", "req-plan-review", "req-quarantined", "req-spec-review"}
 
 // TestConsoleContractFixtures serves every read route from a fixed data
 // directory and compares the response with its committed fixture.
@@ -357,12 +352,6 @@ A retried checkout charges the card twice.
 2. A key is scoped to one account.
 `
 
-const contractOracleRunCommand = "go test ./.oracle/...\n"
-
-// contractOracleTest is a test file the oracle checks accept: a Go test
-// declaring a TestOracle function.
-const contractOracleTest = "package oracle\n\nimport \"testing\"\n\nfunc TestOracleIdempotency(t *testing.T) {}\n"
-
 // seedContractFixtureData writes the data directory the fixtures are
 // served from: one request in each state the console draws differently,
 // the runs behind them, and one request and one run with every field set.
@@ -426,22 +415,6 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	specReview.WaitingSince = stamp(5)
 	saveRequest(specReview)
 
-	oracleReview := newRequest("req-oracle-review", request.StateOracleReview)
-	oracleReview.Source = request.Source{Kind: request.SourceIssue, IssueRef: "acme/app#42"}
-	oracleReview.DraftOracles = true
-	oracleReview.WaitingSince = stamp(9)
-	oracleReview.OracleDraft = &request.OracleDraft{
-		Status: "drafted", Detail: "one criterion is covered", ProposedCommand: "go test ./.oracle/...",
-		Files:    []string{"idempotency_test.go"},
-		Criteria: []request.OracleCriterionVerdict{{Number: 1, Eligible: true}, {Number: 2, Eligible: false, Reason: "needs a second account"}},
-		Model:    "gpt-5.6-luna", Thinking: "high",
-	}
-	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "RUN_COMMAND.txt"), contractOracleRunCommand)
-	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "idempotency_test.go"), contractOracleTest)
-	write(filepath.Join(request.Dir(dataDir, oracleReview.ID), "oracle", "MANIFEST.json"),
-		`[{"criterion": "A repeated request with the same key returns the first response.", "oracle_file": "idempotency_test.go", "criterion_index": 1}]`+"\n")
-	saveRequest(oracleReview)
-
 	planReview := newRequest("req-plan-review", request.StatePlanReview)
 	planReview.TicketCount = 2
 	planReview.Tickets = []request.Ticket{{Index: 1, SpecPath: ticketPath(planReview.ID, 1)}, {Index: 2, SpecPath: ticketPath(planReview.ID, 2)}}
@@ -456,12 +429,10 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	// The plan was drafted under a 400-line budget; ticket 2's estimate is over it.
 	planReview.PlanBudgetLines = 400
 	withEstimate := func(ticket string, lines int) string {
-		return strings.Replace(ticket, "Required-Changed-Files: a.go\n", fmt.Sprintf("Required-Changed-Files: a.go\nEstimated-Changed-Lines: %d\n", lines), 1)
+		return strings.Replace(ticket, "Allowed-Files: a.go\n", fmt.Sprintf("Allowed-Files: a.go\nEstimated-Changed-Lines: %d\n", lines), 1)
 	}
 	write(ticketPath(planReview.ID, 2), withEstimate(seedApprovableRequestTicket, 620))
 	write(ticketPath(planReview.ID, 1), strings.Replace(withEstimate(seedApprovableRequestTicket, 220), "1. s\n", "1. migrate and switch over in one step\n", 1))
-	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "RUN_COMMAND.txt"), contractOracleRunCommand)
-	write(filepath.Join(request.Dir(dataDir, planReview.ID), "tickets", "001.oracle", "idempotency_test.go"), contractOracleTest)
 	saveRequest(planReview)
 	if _, err := request.SnapshotRevision(dataDir, planReview.ID, "alice", planReason, request.StatePlanReview,
 		[]string{"spec.md", "tickets/001.spec.md", "tickets/002.spec.md"}, at.Add(8*time.Minute)); err != nil {
@@ -519,7 +490,6 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	everyRequest.History = []request.Transition{{From: request.StateBuilding, To: request.StateResumeReview, At: stamp(50), By: "factoryd", Reason: "the build was lost"}}
 	everyRequest.Resume.FromState = request.StateBuilding
 	everyRequest.Rejections[0].FromState, everyRequest.Rejections[0].ForStage = request.StateSpecReview, request.StateSpecDrafting
-	everyRequest.OracleDraft.Status = "drafted"
 	everyRequest.ApprovedSHA256 = nil
 	everyRequest.TicketCount, everyRequest.TicketIndex = 1, 1
 	everyRequest.Tickets[0].Index, everyRequest.Tickets[0].SpecPath = 1, ticketPath(everyRequest.ID, 1)
@@ -554,7 +524,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	}}
 	accepted.GateResults = []run.GateResult{
 		{Check: "verify", Command: []string{"go", "test", "./..."}, Passed: true, DurationMs: 4200, LogSHA256: strings.Repeat("cd", 32)},
-		{Check: "lint", Command: []string{"go", "vet", "./..."}, Passed: true, DurationMs: 900, LogSHA256: strings.Repeat("ef", 32)},
+		{Check: "repo-lint", Command: []string{"go", "vet", "./..."}, Passed: true, DurationMs: 900, LogSHA256: strings.Repeat("ef", 32)},
 	}
 	model, provider := "gpt-5.6-luna", "chatgpt-codex"
 	accepted.AgentEvidence = &run.AgentEvidence{
@@ -577,7 +547,7 @@ func seedContractFixtureData(t *testing.T, dataDir, workspace string) {
 	} {
 		appendProgress(t, dataDir, accepted.ID, e)
 	}
-	must(release.Engage(dataDir, "app", "operator@example.com", "incident 42", func() string { return stamp(26) }))
+	must(engageKillSwitch(dataDir, "app", "operator@example.com", "incident 42", func() string { return stamp(26) }))
 	must(release.SaveDecision(dataDir, release.Decision{
 		RunID: accepted.ID, Project: "app", Allowed: false, Evaluated: stamp(27),
 		Reasons: []string{`kill switch is engaged for project "app"`},

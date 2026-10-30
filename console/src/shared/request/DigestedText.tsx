@@ -1,5 +1,5 @@
 import { digestText } from "@/domain/digest";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { Disclosure } from "@/ui/Disclosure";
 
 export interface DigestedTextProps {

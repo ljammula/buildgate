@@ -27,41 +27,90 @@ func (minitestJSON) Applies(p string, root RootFacts) bool {
 }
 
 var (
-	rbClass    = regexp.MustCompile(`^\s*class\s+((?:\w+::)*)(\w+)\b`)
-	rbDefTest  = regexp.MustCompile(`^\s*def\s+(test_\w+[?!]?)`)
-	rbTestDecl = regexp.MustCompile(`^\s*test\s+(?:"([^"\\#]*)"|'([^'\\]*)')\s*(?:do\b|\{)`)
-	rbSpaces   = regexp.MustCompile(`\s+`)
+	rbClass      = regexp.MustCompile(`^\s*class\s+((?:\w+::)*)(\w+)\b`)
+	rbDefTest    = regexp.MustCompile(`^\s*def\s+(test_\w+[?!]?)`)
+	rbTestDecl   = regexp.MustCompile(`^\s*test\s+(?:"([^"\\#]*)"|'([^'\\]*)')\s*(do\b|\{)`)
+	rbEndlessDef = regexp.MustCompile(`^def\s+[^(\s]+(?:\([^)]*\))?\s*=`)
+	rbSpaces     = regexp.MustCompile(`\s+`)
 )
 
-// TestIDs are "Class#test_name": def test_* methods, and ActiveSupport's
+// Tests are "Class#test_name": def test_* methods, and ActiveSupport's
 // test "name" do blocks (named test_ plus the name with spaces as
 // underscores), under the last class opened above them (its last name
-// component).
-func (minitestJSON) TestIDs(_ string, content []byte) ([]string, error) {
-	var ids []string
+// component). A test spans from its line to the closing end (or brace) at its
+// own indentation; one that closes on its own line spans that line.
+func (minitestJSON) Tests(_ string, content []byte) ([]TestSpan, error) {
+	var spans []TestSpan
 	class := ""
-	for _, line := range strings.Split(string(content), "\n") {
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
 		if m := rbClass.FindStringSubmatch(line); m != nil {
 			class = m[2]
 			continue
 		}
-		name := ""
+		name, brace := "", false
 		if m := rbDefTest.FindStringSubmatch(line); m != nil {
 			name = m[1]
 		} else if m := rbTestDecl.FindStringSubmatch(line); m != nil {
 			name = "test_" + rbSpaces.ReplaceAllString(m[1]+m[2], "_")
+			brace = m[3] == "{"
 		}
 		if name != "" && class != "" {
-			ids = append(ids, class+"#"+name)
+			spans = append(spans, TestSpan{ID: class + "#" + name, Start: i + 1, End: rbBlockEnd(lines, i, brace)})
 		}
 	}
-	return uniqueIDs(ids), nil
+	return uniqueSpans(spans), nil
+}
+
+// rbBlockEnd is the 1-based line that closes the block opened on lines[i]: the
+// first later line at the opening line's indentation that starts with end (or
+// } for a brace block), the opening line itself when it closes there (a
+// trailing end or }, or an endless def), and the last line when none does.
+func rbBlockEnd(lines []string, i int, brace bool) int {
+	closer := "end"
+	if brace {
+		closer = "}"
+	}
+	open := lines[i]
+	trimmed := strings.TrimSpace(open)
+	if strings.HasSuffix(trimmed, " end") || strings.HasSuffix(trimmed, ";end") || strings.HasSuffix(trimmed, "}") ||
+		rbEndlessDef.MatchString(trimmed) {
+		return i + 1
+	}
+	indent := len(open) - len(strings.TrimLeft(open, " \t"))
+	for j := i + 1; j < len(lines); j++ {
+		l := lines[j]
+		t := strings.TrimSpace(l)
+		if t == "" {
+			continue
+		}
+		if len(l)-len(strings.TrimLeft(l, " \t")) == indent && (t == closer || strings.HasPrefix(t, closer+" ") || strings.HasPrefix(t, closer+".")) {
+			return j + 1
+		}
+	}
+	return len(lines)
 }
 
 func (minitestJSON) Command(inv Invocation) Command {
-	script := fmt.Sprintf("BG_REPRO_REPORT=%s BG_REPRO_TEST_TIMEOUT=%d ruby -Itest -Ilib -I%s -rbg_repro_reporter -e 'BgRepro.load_test(ARGV[0])' %s",
-		shellQuote(inv.ReportPath), int(PerTestTimeout.Seconds()), shellQuote(inv.HelperDir), shellQuote(inv.Path))
+	script := fmt.Sprintf("BG_REPRO_REPORT=%s BG_REPRO_TEST_TIMEOUT=%d ruby -Itest -Ilib -I%s -rbg_repro_reporter -e 'BgRepro.load_test(ARGV[0])' %s%s",
+		shellQuote(inv.ReportPath), int(PerTestTimeout.Seconds()), shellQuote(inv.HelperDir), shellQuote(inv.Path), minitestNameFilter(inv.TestIDs))
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(minitestReporter), Timeout: launchTimeout(inv.TestIDs)}
+}
+
+// minitestNameFilter is minitest's -n option over the invocation's method
+// names (the part of each ID after the class), each quoted and anchored. A
+// same-named test of another class runs too and is not judged. No IDs, no
+// option.
+func minitestNameFilter(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		_, name, _ := strings.Cut(id, "#")
+		names[i] = regexp.QuoteMeta(name)
+	}
+	return " -n " + shellQuote("/^("+strings.Join(names, "|")+")$/")
 }
 
 type minitestReport struct {

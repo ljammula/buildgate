@@ -230,35 +230,9 @@ preflight_profile: brownfield
 	}
 }
 
-// TestSubmitMainRecordsNoCommitOraclesFlag: the opt-out is explicit and
-// recorded on the request; absent, it stays false.
-func TestSubmitMainRecordsNoCommitOraclesFlag(t *testing.T) {
-	dp := newTestDeps(t)
-	for _, tc := range []struct {
-		args []string
-		want bool
-	}{{[]string{"-no-commit-oracles"}, true}, {nil, false}} {
-		workspace := t.TempDir()
-		writeTestSubmitRepo(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
-		dataDir := t.TempDir()
-		args := append(append([]string{}, tc.args...), "-data-dir", dataDir, workspace, "Add a new func")
-		if err := submitMain(dp, args); err != nil {
-			t.Fatalf("submitMain: %v", err)
-		}
-		requests, err := request.List(dataDir)
-		if err != nil || len(requests) != 1 {
-			t.Fatalf("List = %v, %v; want one request", requests, err)
-		}
-		if got := requests[0].NoCommitOracles; got != tc.want {
-			t.Errorf("args %v: NoCommitOracles = %v, want %v", tc.args, got, tc.want)
-		}
-	}
-}
-
-// TestSubmitMainRecordsDraftOraclesFlag: -draft-oracles opts one request into
-// the staged oracle stage; without it the field stays false (and, being
-// omitempty, absent from request.json).
-func TestSubmitMainRecordsDraftOraclesFlag(t *testing.T) {
+// TestSubmitMainRecordsTheBugFlag: -bug records the request as a bug fix and
+// nothing else; without it the field stays false.
+func TestSubmitMainRecordsTheBugFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
@@ -266,41 +240,10 @@ preflight_profile: brownfield
 `)
 	for _, tc := range []struct {
 		args []string
-		want bool
+		bug  bool
 	}{
-		{[]string{"-draft-oracles"}, true},
+		{[]string{"-bug"}, true},
 		{nil, false},
-	} {
-		dataDir := t.TempDir()
-		args := append(append([]string{}, tc.args...), "-data-dir", dataDir, workspace, "Add a new func")
-		if err := submitMain(dp, args); err != nil {
-			t.Fatalf("submitMain(%v): %v", tc.args, err)
-		}
-		requests, err := request.List(dataDir)
-		if err != nil || len(requests) != 1 {
-			t.Fatalf("List = %v, %v; want one request", requests, err)
-		}
-		if requests[0].DraftOracles != tc.want {
-			t.Errorf("args %v: DraftOracles = %v, want %v", tc.args, requests[0].DraftOracles, tc.want)
-		}
-	}
-}
-
-// TestSubmitMainBugForcesDraftOracles: -bug records the request as a bug
-// fix and adds the oracle stage whether or not -draft-oracles is given.
-func TestSubmitMainBugForcesDraftOracles(t *testing.T) {
-	dp := newTestDeps(t)
-	workspace := t.TempDir()
-	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
-`)
-	for _, tc := range []struct {
-		args      []string
-		bug, oras bool
-	}{
-		{[]string{"-bug"}, true, true},
-		{[]string{"-draft-oracles"}, false, true},
-		{nil, false, false},
 	} {
 		dataDir := t.TempDir()
 		args := append(append([]string{}, tc.args...), "-data-dir", dataDir, workspace, "Fix the crash")
@@ -311,8 +254,8 @@ preflight_profile: brownfield
 		if err != nil || len(requests) != 1 {
 			t.Fatalf("List = %v, %v; want one request", requests, err)
 		}
-		if requests[0].Bug != tc.bug || requests[0].DraftOracles != tc.oras {
-			t.Errorf("args %v: Bug = %v DraftOracles = %v, want %v and %v", tc.args, requests[0].Bug, requests[0].DraftOracles, tc.bug, tc.oras)
+		if requests[0].Bug != tc.bug {
+			t.Errorf("args %v: Bug = %v, want %v", tc.args, requests[0].Bug, tc.bug)
 		}
 	}
 }

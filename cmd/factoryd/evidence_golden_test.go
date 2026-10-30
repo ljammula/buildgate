@@ -212,33 +212,3 @@ func TestPlanEvidenceRejectsUnknownSchemaVersion(t *testing.T) {
 		t.Fatal("readPlanTicketsOutputs(schema_version 2): want an error, got nil")
 	}
 }
-
-func TestOracleDraftEvidenceGoldenParsesWithReadDraftEvidence(t *testing.T) {
-	scratchDir := t.TempDir()
-	evidencePath := filepath.Join(scratchDir, "evidence.json")
-	if err := os.WriteFile(evidencePath, readGolden(t, "oracle_draft_evidence.json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ev, err := readDraftEvidence(evidencePath)
-	if err != nil {
-		t.Fatalf("readDraftEvidence: %v", err)
-	}
-	if ev.Status != "drafted" || ev.DroppedCount != 0 {
-		t.Errorf("evidence = %+v, unexpected", ev)
-	}
-	if len(ev.Failures) != 1 || ev.Failures[0].CriterionIndex != 3 {
-		t.Errorf("Failures = %+v, want one entry for criterion 3", ev.Failures)
-	}
-}
-
-func TestOracleDraftEvidenceRejectsUnknownSchemaVersion(t *testing.T) {
-	scratchDir := t.TempDir()
-	evidencePath := filepath.Join(scratchDir, "evidence.json")
-	bad := []byte(`{"schema_version":2,"status":"drafted","dropped_count":0,"failures":[]}`)
-	if err := os.WriteFile(evidencePath, bad, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readDraftEvidence(evidencePath); err == nil {
-		t.Fatal("readDraftEvidence(schema_version 2): want an error, got nil")
-	}
-}

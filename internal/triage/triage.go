@@ -15,8 +15,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"buildgate/internal/evidence"
-	"buildgate/internal/oraclemanifest"
 	"buildgate/internal/policy"
 	"buildgate/internal/progress"
 	"buildgate/internal/run"
@@ -78,8 +76,7 @@ type GateFinding struct {
 	// gate that is a command run on the result (canonical verification,
 	// the full suite, a named or repository gate). It is what that command
 	// printed, so it is data from the repository under build. Empty for
-	// every other gate, and always for the reference oracle, whose output
-	// is the oracle's own assertions.
+	// every other gate.
 	LogTail string
 	// BuildStoppedBySetup is set on canonical_verify when the factory's own
 	// records show the build ended at a failing setup command before its
@@ -90,9 +87,7 @@ type GateFinding struct {
 // FailedGates returns one finding per failed gate of r, each check once, in
 // the order the gates were recorded: Run's sentence for every failing gate
 // rather than the first, for a reader that is told about all of them (the
-// handoff to a later build attempt). The sentences never name or hint at a
-// reference oracle, and the reference_oracle gate itself gets none: its
-// log's failing line is the oracle's own assertion.
+// handoff to a later build attempt).
 func FailedGates(r *run.Run, dataDir string) []GateFinding {
 	var out []GateFinding
 	seen := map[string]bool{}
@@ -102,10 +97,8 @@ func FailedGates(r *run.Run, dataDir string) []GateFinding {
 		}
 		seen[g.Check] = true
 		finding := GateFinding{Check: g.Check, ExitCode: g.ExitCode, BuildStoppedBySetup: g.Check == "canonical_verify" && BuildStoppedBySetup(r)}
-		if g.Check != policy.ReferenceOracleGateID {
-			finding.Sentence = truncateTriage(gateSentence(r, dataDir, g, false))
-			finding.LogTail = commandGateLogTail(r, g.Check)
-		}
+		finding.Sentence = truncateTriage(gateSentence(r, dataDir, g, false))
+		finding.LogTail = commandGateLogTail(r, g.Check)
 		out = append(out, finding)
 	}
 	return out
@@ -123,13 +116,7 @@ func commandGateLogTail(r *run.Run, check string) string {
 		kind = "verify"
 	case check == "full_suite_verify" || policy.IsRepoGate(check):
 	default:
-		named := false
-		for _, id := range policy.CommandGateIDs() {
-			named = named || id == check
-		}
-		if !named {
-			return ""
-		}
+		return ""
 	}
 	attempt, found := lastAttempt(r, kind)
 	if !found {
@@ -140,30 +127,14 @@ func commandGateLogTail(r *run.Run, check string) string {
 
 // gateSentence is the sentence for one failing gate. forOperator is Run's
 // form: a canonical_verify sentence also says how many other gates failed
-// (it stands alone), and a diff_scope sentence may add the hint that an
-// approved oracle could be the thing that is wrong, naming it. FailedGates lists every gate for a later build attempt, which is not
-// told about the oracle, so it gets neither.
+// (it stands alone). FailedGates lists every gate for a later build attempt,
+// which gets the plain form.
 func gateSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool) string {
-	s := gateCauseSentence(r, dataDir, g, forOperator)
-	if !forOperator || !r.FailedOnlyAfterOracleCommit(g.Check) {
-		return s
-	}
-	if s == "" {
-		s = g.Check + " failed"
-	}
-	return fitTriageSuffix(s, afterOracleCommitSuffix)
-}
-
-// gateCauseSentence is gateSentence before the operator's note that the check
-// failed only on the tree with the committed oracle files.
-func gateCauseSentence(r *run.Run, dataDir string, g run.GateResult, forOperator bool) string {
 	switch g.Check {
 	case "diff_scope":
-		return triageDiffScope(r, dataDir, forOperator)
+		return triageDiffScope(r, dataDir)
 	case policy.TestsRedOnBaseCheck:
 		return triageTestsRedOnBase(r)
-	case policy.ReviewReproductionCheck:
-		return triageReviewReproduction(r)
 	case "canonical_verify":
 		if g.SetupNotRun() {
 			return "canonical_verify: " + run.SetupNotRunMessage
@@ -228,12 +199,6 @@ func gateCauseSentence(r *run.Run, dataDir string, g run.GateResult, forOperator
 	}
 }
 
-// afterOracleCommitSuffix is the operator's note on a check that passed on the
-// build's tree and failed only on the tree with the committed oracle files
-// (run.Run.FailedAfterOracleCommit). A build cannot change those files. Fixed
-// text, so fitTriageSuffix never cuts it.
-const afterOracleCommitSuffix = " (passed before the oracle files were committed; a build cannot change them)"
-
 // shortBaseSHA is the base commit of g's rerun as a sentence names it.
 func shortBaseSHA(g run.GateResult) string {
 	base := sanitize.Line(g.BaseCheck.BaseSHA)
@@ -285,13 +250,13 @@ func specSnapshotPathFor(dataDir, id string) string {
 // GateResult itself records no detail), and the scope the run recorded
 // (r.ScopeUnapproved, r.AllowedPaths) -- rather than guessing which changed
 // file was out of scope.
-func triageDiffScope(r *run.Run, dataDir string, oracleHint bool) string {
+func triageDiffScope(r *run.Run, dataDir string) string {
 	allowed, err := ticketspec.ParseAllowedFiles(specSnapshotPathFor(dataDir, r.ID))
 	if err != nil {
 		return ""
 	}
 	scope := policy.Scope{AllowedFiles: allowed, Unapproved: r.ScopeUnapproved, AllowedPaths: r.AllowedPaths}
-	verdict := scope.Judge(policy.ExcludeFactoryOracles(policy.ExcludeHarnessByproducts(r.ChangedFiles), r.Oracles))
+	verdict := scope.Judge(policy.ExcludeHarnessByproducts(r.ChangedFiles))
 	var parts []string
 	if len(verdict.OutsideTicket) > 0 {
 		parts = append(parts, fmt.Sprintf("changed %s outside Allowed-Files", strings.Join(verdict.OutsideTicket, ", ")))
@@ -302,78 +267,7 @@ func triageDiffScope(r *run.Run, dataDir string, oracleHint bool) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	base := "diff_scope: " + strings.Join(parts, "; ")
-	if !oracleHint || len(verdict.OutsideTicket) == 0 {
-		return base
-	}
-	if hint := oracleScopeHint(r); hint != "" {
-		return base + " -- " + hint
-	}
-	return base
-}
-
-// maxTriageOracleManifestBytes bounds the MANIFEST.json read below --
-// operator-populated (or drafter-populated) content, same untrusted-input
-// caution evidence.ReadHostileFile's own doc comment describes.
-const maxTriageOracleManifestBytes = 64 * 1024
-
-// oracleScopeHint returns a hedged, one-clause addition to a diff_scope
-// triage sentence when this run's OWN gate evidence is consistent with the
-// out-of-scope edit having been made to satisfy a reference oracle, not a
-// defect in the build. Found in a 2026-09-22 live run (a calculator app repo run
-// 2): an already-accepted oracle's own errors.Is assertion (comparing two
-// independently-constructed wrapped errors, which
-// is never == without a custom Is method) forced an otherwise-correct,
-// in-scope ticket to add an Is(error) bool method to a file outside its own
-// declared Allowed-Files just to keep the oracle's own re-run passing --
-// the build agent diagnosed this correctly in its own report, but that
-// self-report is exactly the kind of agent-authored prose this package's
-// own doc comment forbids trusting (see Run's own doc comment), so this
-// derives the same signal from durable gate evidence instead: a reference
-// oracle was active for this run (r.ReferenceOracleDir != "") AND its own
-// gate PASSED this run (oraclemanifest.GateOutcome), i.e. the build
-// succeeded specifically at satisfying the oracle -- exactly the situation
-// under which an over-reaching oracle assertion can force a scope-widening
-// edit. This never claims the oracle caused THIS SPECIFIC violation (that
-// would be the guess Run's own doc comment forbids); it only surfaces the
-// possibility, hedged, so a human reviewer checks the oracle before
-// blaming the build.
-func oracleScopeHint(r *run.Run) string {
-	if r.ReferenceOracleDir == "" {
-		return ""
-	}
-	passed := oraclemanifest.GateOutcome(r.GateResults)
-	if passed == nil || !*passed {
-		return ""
-	}
-	name := "(the reference oracle)"
-	if data, err := evidence.ReadHostileFile(filepath.Join(r.ReferenceOracleDir, "MANIFEST.json"), maxTriageOracleManifestBytes); err == nil {
-		if covered, parseErr := oraclemanifest.CoveredCriteria(data); parseErr == nil && len(covered) > 0 {
-			name = strings.TrimSpace(covered[0])
-			if len(covered) > 1 {
-				name += fmt.Sprintf(" (+%d more criteria)", len(covered)-1)
-			}
-		}
-	}
-	return fmt.Sprintf(
-		"the file was touched to satisfy oracle %s: the oracle may be wrong, not the build (check its errors.Is/sentinel assertions and whether it reaches beyond its own target file)",
-		name,
-	)
-}
-
-// leadingCriterionNumber extracts a criterion's own leading "N." / "N)"
-// ordinal, the same convention oraclemanifest.NormalizeCriterion strips.
-var leadingCriterionNumber = regexp.MustCompile(`^\s*(\d+)[.)]`)
-
-// criterionNumber returns criterion's leading ordinal ("2" from
-// "2. Handles empty input."), or the trimmed criterion text itself when it
-// carries no leading number -- never empty for a non-empty criterion, so
-// callers always have something to name.
-func criterionNumber(criterion string) string {
-	if m := leadingCriterionNumber.FindStringSubmatch(criterion); m != nil {
-		return m[1]
-	}
-	return strings.TrimSpace(criterion)
+	return "diff_scope: " + strings.Join(parts, "; ")
 }
 
 // triageTestsRedOnBase words a failed tests_red_on_base gate from the run's
@@ -434,45 +328,13 @@ func triageCodeReview(r *run.Run, check string) string {
 // maxReproductionNameLen caps a reproduction's path or test ID in a sentence.
 const maxReproductionNameLen = 160
 
-// triageReviewReproduction words a failed review_reproduction check
-// (SC-022): the path of the first reproduction a corrective build's recheck
-// found still failing, else of the first blocking finding's, with one test
-// ID and its failure kind. The path and the ID are the reviewer's, quoted;
-// the reviewer's summary and scenario are never in the sentence.
-func triageReviewReproduction(r *run.Run) string {
-	const where = "; the finding is in the run's review evidence"
-	for _, rc := range r.ReviewReproductionRechecks {
-		if rc.Verdict == "still_failing" {
-			id, kind := rc.FailedTest()
-			return fmt.Sprintf("review_reproduction: %q still fails on the result commit after the corrective build%s%s", reproductionName(rc.Path), testFailure(id, kind), where)
-		}
-	}
-	if r.CodeReview != nil {
-		for _, f := range r.CodeReview.Findings {
-			if f.Disposition == run.DispositionBlocks && f.Reproduction != nil {
-				id, kind := f.Reproduction.FailedTest()
-				return fmt.Sprintf("review_reproduction: the factory's run of the reviewer's reproduction %q fails on the result commit%s%s", reproductionName(f.Reproduction.Path), testFailure(id, kind), where)
-			}
-		}
-	}
-	return "review_reproduction: a reviewer's reproduction refused the run" + where
-}
-
-// reproductionName is a reviewer-chosen path or test ID made one bounded line.
+// reproductionName is a path or test ID a model or a test chose, made one bounded line.
 func reproductionName(s string) string {
 	s = sanitize.Line(s)
 	if runes := []rune(s); len(runes) > maxReproductionNameLen {
 		s = string(runes[:maxReproductionNameLen]) + "…"
 	}
 	return s
-}
-
-// testFailure is " (<id> <kind>)", or "" without an ID.
-func testFailure(id, kind string) string {
-	if id == "" {
-		return ""
-	}
-	return fmt.Sprintf(" (%q %s)", reproductionName(id), kind)
 }
 
 // triageLogGate reports the first failure marker found in the failing
@@ -551,7 +413,7 @@ func setupFailureSentence(check string, a run.Attempt, suffixReserve int) string
 // Every build of the ticket from that commit runs the same commands first
 // and ends the same way, so no corrective build answers it
 // (internal/handoff). A setup failure in any other step (the verify, a gate,
-// a rerun after the oracle commit) runs on the build's result and is that
+// a rerun) runs on the build's result and is that
 // step's own failed check.
 func BuildStoppedBySetup(r *run.Run) bool {
 	if r.ResumeSpendCarried != nil || r.BaseSHA == "" || r.ResultSHA != r.BaseSHA {
@@ -888,11 +750,7 @@ func triageHalt(r *run.Run) string {
 	case string(unresolved.RouteCredential):
 		return "halted: the model route's credential was missing or expired too soon, so no model request was made with it; refresh it (a chatgpt-codex route: `codex login` on the host) and resume"
 	case string(unresolved.ReproductionUnheld):
-		return "halted after the review: a reviewer's reproduction could not be held or mounted, so its finding was not judged and nothing was refused"
-	case run.HaltReasonOracleNotRunOnBase:
-		return "halted before the build: the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected), so it says nothing about the bug; no model call was made"
-	case run.HaltReasonOraclePassesOnBase:
-		return "halted before the build: the acceptance oracle passes on the base commit, so it does not reproduce the bug; no model call was made"
+		return "halted after the review: a held test file could not be held or mounted, so it was not judged and nothing was refused"
 	case run.HaltReasonBaselineVerifyFailed:
 		// No model call was made: the verify command failed on the base
 		// commit with a failure the ticket does not name.

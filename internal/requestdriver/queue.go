@@ -18,20 +18,6 @@ type QueueEntry struct {
 	Project string `json:"project,omitempty"`
 	// SpecPath is the absolute path to the ticket spec.md.
 	SpecPath string `json:"spec_path"`
-	// ReviewSpecPath is the request's approved spec.md (its hash checked
-	// against the approval), forwarded as -review-spec: the review cites it
-	// by line. Set only with ReviewReproduction; empty otherwise.
-	ReviewSpecPath string `json:"review_spec_path,omitempty"`
-	// ReviewReproduction is forwarded as -review-reproduction: the build
-	// holds and runs its review's reproductions, so a finding can refuse the
-	// run only through the factory's run of one (SC-022). Set only with
-	// ReviewSpecPath, when the session config's review_reproductions is on
-	// or the ticket has reproductions to recheck (reproductionInputs);
-	// otherwise every finding is advice.
-	ReviewReproduction bool `json:"review_reproduction,omitempty"`
-	// RecheckReproductions is the build's -recheck-reproductions manifest,
-	// written from the ticket's list (ticketRecheck); "" when it has none.
-	RecheckReproductions string `json:"recheck_reproductions,omitempty"`
 	// VerifyCommand is this ticket's canonical verification command,
 	// resolved at submit time from -verify-command or the workspace's
 	// .factory.yml.
@@ -55,11 +41,8 @@ type QueueEntry struct {
 	// decision text needs to know it was a substitution, not just what
 	// the substituted value is.
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
-	// NoCommitOracles is forwarded as -no-commit-oracles when set (a
-	// request's own `factoryd submit -no-commit-oracles`).
-	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
-	// Bug is forwarded as -bug when set (a request's own `factoryd submit
-	// -bug`).
+	// Bug is forwarded as -bug when set: ticket 1 of a request submitted with
+	// `factoryd submit -bug`.
 	Bug bool `json:"bug,omitempty"`
 	// PreflightProfile is passed through to runMainWithReady's own
 	// -preflight-profile verbatim; empty means "let it resolve its own
@@ -89,6 +72,13 @@ type QueueEntry struct {
 	// note on the pull request and refuses nothing. BuildTicketRunArgs always
 	// forwards one of the two for a request's ticket build.
 	ScopeUnapproved bool `json:"scope_unapproved,omitempty"`
+	// NoTicketScope means this ticket is the approved spec itself, so a
+	// header-shaped line in its prose is not a ticket file list.
+	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
+	// OrderGroup is the 1-based pr_order group of a carved ticket: every build
+	// of it is told (-order-group), so a result that changes a file of
+	// another group is denied release.
+	OrderGroup int `json:"order_group,omitempty"`
 	// IssueRef is the fully-qualified "<owner>/<repo>#<N>" GitHub issue
 	// reference this entry was submitted from (`factoryd submit -issue
 	// <url>`), empty when it wasn't. Qualified with the ISSUE's own
@@ -121,6 +111,18 @@ type QueueEntry struct {
 	// earlier build's unmerged instruction text as genuine. Empty on a
 	// ticket's first build: the run then records its own base.
 	InstructionBase string `json:"instruction_base,omitempty"`
+	// Challenge..ChallengeRound are forwarded as the -challenge flags
+	// (SC-022): Challenge and its spec and counts for a ticket's first
+	// reviewed build; ChallengeHeld, the manifest of held files, for every
+	// later build; ChallengeRound for the ticket's challenge round.
+	Challenge               bool   `json:"challenge,omitempty"`
+	ChallengeSpecPath       string `json:"challenge_spec_path,omitempty"`
+	ChallengeCriteria       int    `json:"challenge_criteria,omitempty"`
+	ChallengeAnswers        []int  `json:"challenge_answers,omitempty"`
+	ChallengeApprovedSHA256 string `json:"challenge_approved_sha256,omitempty"`
+	ChallengeApprovedBytes  int    `json:"challenge_approved_bytes,omitempty"`
+	ChallengeHeld           string `json:"challenge_held,omitempty"`
+	ChallengeRound          bool   `json:"challenge_round,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request
 	// execution-role harness pick (request.Request.Harnesses["execution"],
@@ -144,14 +146,4 @@ type QueueEntry struct {
 	// (-execution-thinking): the level of roles.execution.escalation, set
 	// with ExecutionModel by escalate. Empty leaves the role's own.
 	ExecutionThinking string `json:"execution_thinking,omitempty"`
-	// ReferenceOracleDir/ReferenceOracleCommand are resolveTicketOracle's
-	// own output: an operator-reviewed, plan_review-approved,
-	// hash-pinned reference oracle for this ticket, threaded through to
-	// runMainWithReady's own -reference-oracle-dir/-reference-oracle-command
-	// (and, whenever ReferenceOracleDir is set, -reference-oracle-mount-path
-	// TicketOracleMountPath and -reference-oracle-in-loop-retry) verbatim.
-	// Both empty (the common case) means this ticket has no oracle and
-	// every one of those flags stays unset, identical to today.
-	ReferenceOracleDir     string `json:"reference_oracle_dir,omitempty"`
-	ReferenceOracleCommand string `json:"reference_oracle_command,omitempty"`
 }

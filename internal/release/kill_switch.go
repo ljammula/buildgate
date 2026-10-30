@@ -35,18 +35,6 @@ type KillSwitchRecord struct {
 	History []KillSwitchTransition `json:"history"`
 }
 
-// Engage durably engages a project's kill switch.
-func Engage(dir, project, by, reason string, now func() string) error {
-	_, err := SetKillSwitch(dir, project, by, reason, true, now)
-	return err
-}
-
-// Disengage durably disengages a project's kill switch.
-func Disengage(dir, project, by, reason string, now func() string) error {
-	_, err := SetKillSwitch(dir, project, by, reason, false, now)
-	return err
-}
-
 // SetKillSwitch applies one transition and returns the resulting durable
 // record, read back under the same lock that performed the transition.
 //

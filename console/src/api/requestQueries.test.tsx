@@ -8,13 +8,11 @@ import {
   upsertRequest,
   useApproveRequest,
   useRejectRequest,
-  useOracleFiles,
   useRequest,
   useRequestBoard,
   useRequestDetailEvents,
   useRequestRevisions,
   useRequests,
-  useTicketOracleListings,
 } from "@/api/requestQueries";
 import { asObject } from "@/domain/decode";
 import { type RequestSummary, decodeRequestList } from "@/domain/request";
@@ -111,7 +109,7 @@ describe("useRequestBoard", () => {
     await waitFor(() => {
       expect(result.current.query.data?.find((r) => r.id === first.id)?.state).toBe("cancelled");
     });
-    expect(result.current.query.data).toHaveLength(8);
+    expect(result.current.query.data).toHaveLength(7);
     expect(result.current.live).toBe(true);
     unmount();
   });
@@ -138,7 +136,7 @@ describe("useRequestBoard", () => {
       { wrapper },
     );
     await waitFor(() => {
-      expect(result.current.data).toHaveLength(8);
+      expect(result.current.data).toHaveLength(7);
     });
     fail = true;
     await act(async () => {
@@ -147,7 +145,7 @@ describe("useRequestBoard", () => {
     await waitFor(() => {
       expect(result.current.isError).toBe(true);
     });
-    expect(result.current.data).toHaveLength(8);
+    expect(result.current.data).toHaveLength(7);
     unmount();
   });
 
@@ -168,7 +166,7 @@ describe("useRequestBoard", () => {
       expect(result.current.streamError?.serverMessage).toBe("requests endpoint is not authorized");
     });
     await waitFor(() => {
-      expect(result.current.query.data).toHaveLength(8);
+      expect(result.current.query.data).toHaveLength(7);
     });
     expect(result.current.live).toBe(false);
     unmount();
@@ -218,7 +216,7 @@ describe("useApproveRequest", () => {
 });
 
 describe("useApproveRequest invalidation", () => {
-  test("refetches revisions, only marks oracle queries, and leaves the list alone", async () => {
+  test("refetches revisions and leaves the list alone", async () => {
     const detail = readFixtureJson("api/request-spec-review.json") as Record<string, unknown>;
     const { wrapper, client, calls } = harness([
       {
@@ -232,8 +230,6 @@ describe("useApproveRequest invalidation", () => {
     ]);
     const k = queryKeys.requests;
     client.setQueryData(k.list(), []);
-    client.setQueryData(k.oracleFileAt("req-spec-review", "a", "h"), "file");
-    client.setQueryData(k.ticketOracle("req-spec-review", 1), "listing");
     const revisions = renderHook(
       () => ({
         rev: useRequestRevisions("req-spec-review"),
@@ -248,90 +244,10 @@ describe("useApproveRequest invalidation", () => {
       await revisions.result.current.a.mutateAsync({ by: "a", expectedSha256: {} });
     });
     const stale = (key: readonly unknown[]) => client.getQueryState(key)?.isInvalidated;
-    expect(stale(k.oracleFileAt("req-spec-review", "a", "h"))).toBe(true);
-    expect(stale(k.ticketOracle("req-spec-review", 1))).toBe(true);
     expect(stale(k.list())).toBe(false);
     await waitFor(() => {
       expect(calls.filter((c) => c.url.endsWith("/revisions"))).toHaveLength(2);
     });
-    expect(calls.some((c) => c.url.endsWith("/oracle"))).toBe(false);
-  });
-});
-
-describe("useOracleFiles", () => {
-  test("fetches each file at its hash, a request's and a ticket's, in order", async () => {
-    const { wrapper, client, calls } = harness([
-      {
-        match: (url) => url === "/requests/r1/oracle/a.txt",
-        respond: () => new Response(readFixtureText("api/request-oracle-file.txt")),
-      },
-      {
-        match: (url) => url === "/requests/r1/tickets/2/oracle/b.txt",
-        respond: () => new Response(readFixtureText("api/ticket-oracle-file.txt")),
-      },
-    ]);
-    const { result, unmount } = renderHook(
-      () =>
-        useOracleFiles("r1", [
-          { name: "a.txt", sha256: "h1" },
-          { name: "b.txt", sha256: "h2", ticket: 2 },
-        ]),
-      { wrapper },
-    );
-    await waitFor(() => {
-      expect(result.current.every((q) => q.isSuccess)).toBe(true);
-    });
-    expect(calls.map((c) => c.url)).toEqual([
-      "/requests/r1/oracle/a.txt",
-      "/requests/r1/tickets/2/oracle/b.txt",
-    ]);
-    expect(client.getQueryData(queryKeys.requests.oracleFileAt("r1", "a.txt", "h1"))).toBeDefined();
-    expect(
-      client.getQueryData(queryKeys.requests.ticketOracleFileAt("r1", 2, "b.txt", "h2")),
-    ).toBeDefined();
-    unmount();
-  });
-
-  test("a failed file is not retried and reports its error", async () => {
-    const { wrapper, calls } = harness([]);
-    const { result, unmount } = renderHook(
-      () => useOracleFiles("r1", [{ name: "a.txt", sha256: "h" }]),
-      { wrapper },
-    );
-    await waitFor(() => {
-      expect(result.current[0]?.isError).toBe(true);
-    });
-    expect(calls).toHaveLength(1);
-    unmount();
-  });
-});
-
-describe("useTicketOracleListings", () => {
-  test("reads a 404 as an empty listing and other failures as errors", async () => {
-    const { wrapper } = harness([
-      {
-        match: (url) => url === "/requests/r1/tickets/1/oracle",
-        respond: () => new Response(readFixtureText("api/ticket-oracle.json")),
-      },
-      {
-        match: (url) => url === "/requests/r1/tickets/2/oracle",
-        respond: () => new Response('{"error": "no such ticket"}', { status: 404 }),
-      },
-      {
-        match: (url) => url === "/requests/r1/tickets/3/oracle",
-        respond: () => new Response('{"error": "boom"}', { status: 500 }),
-      },
-    ]);
-    const { result, unmount } = renderHook(() => useTicketOracleListings("r1", [1, 2, 3]), {
-      wrapper,
-    });
-    await waitFor(() => {
-      expect(result.current.every((q) => !q.isPending)).toBe(true);
-    });
-    expect(result.current[0]?.data?.files.length).toBeGreaterThan(0);
-    expect(result.current[1]?.data).toMatchObject({ files: [], problems: [] });
-    expect(result.current[2]?.isError).toBe(true);
-    unmount();
   });
 });
 

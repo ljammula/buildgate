@@ -17,17 +17,14 @@ export function triageRequests(requests: readonly RequestSummary[]): RequestSumm
 
 /**
  * Whether Approve and Reject act on the request here: only spec_review and
- * plan_review, whose spec or plan is shown in full. oracle_review is decided
- * on the request page, where the oracle panel shows every file and sends the
- * hashes it displayed, so a triage keystroke would approve blind; the other
- * states have their own recovery actions there.
+ * plan_review, whose spec or plan is shown in full; the other states have
+ * their own recovery actions on the request page.
  */
 export function decidesInPlace(request: RequestSummary): boolean {
   return request.state === "spec_review" || request.state === "plan_review";
 }
 
 const reasonFallback: Readonly<Record<string, string>> = {
-  oracle_review: "The drafted acceptance tests wait for your review.",
   resume_review: "A resume plan waits for your approval.",
   halted: "The build halted and needs your decision.",
   quarantined: "A ticket was quarantined and needs your triage.",
@@ -40,7 +37,7 @@ const reasonFallback: Readonly<Record<string, string>> = {
  * commands for buttons the request page has, so those take the fixed line.
  */
 export function triageReason(request: RequestSummary): string {
-  const reviewState = request.state === "oracle_review" || request.state === "resume_review";
+  const reviewState = request.state === "resume_review";
   if (request.nextAction !== "" && !reviewState) return request.nextAction;
   return reasonFallback[request.state] ?? "This request waits on you.";
 }

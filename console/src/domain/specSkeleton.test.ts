@@ -101,7 +101,6 @@ const SPEC = [
 const TICKET = [
   "Verify-Command: true",
   "Allowed-Files: a.go",
-  "Required-Changed-Files: a.go",
   "## Goal",
   "g",
   "## Plan",
@@ -220,7 +219,7 @@ describe("ticketStructure", () => {
   test("a well-formed ticket ticks every row and lists what it covers", () => {
     const check = ticketStructure(TICKET);
     expect(check.passes).toBe(true);
-    expect(check.rows).toHaveLength(11);
+    expect(check.rows).toHaveLength(10);
     expect(check.rows.at(-1)).toEqual({ label: "Criteria covered", ok: true, note: "1, 3" });
   });
 

@@ -62,7 +62,7 @@ var (
 )
 
 // PromptAttemptDir is the folder, under PromptsDirName, a launch of kind
-// (build, spec_conformity, code_review, review, spec, read_back, plan, oracle) with the
+// (build, spec_conformity, code_review, review, spec, read_back, plan) with the
 // given number keeps its prompts in.
 func PromptAttemptDir(kind string, n int) string {
 	return fmt.Sprintf("%s-%d", kind, n)

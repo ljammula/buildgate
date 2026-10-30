@@ -141,7 +141,7 @@ func (f *factoryDirFixture) gate(check string) []run.Attempt {
 	env.RegisterActivity(f.acts.RunNamedGateActivity)
 	in := f.input
 	in.CheckpointDir = f.t.TempDir()
-	val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: in, Check: check, Command: "sh .factory/x.sh"})
+	val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, RepoGateActivityInput{RunWorkflowInput: in, Check: check, Command: "sh .factory/x.sh"})
 	if err != nil {
 		f.t.Fatalf("%s gate: %v", check, err)
 	}
@@ -213,38 +213,6 @@ var factoryDirLaunches = []struct {
 	}},
 	{"repository gate", 1, func(_ *testing.T, f *factoryDirFixture, _ *testsuite.TestActivityEnvironment) []run.Attempt {
 		return f.gate(policy.RepoGateCheck("docs"))
-	}},
-	{"reference oracle and its canary", 2, func(t *testing.T, f *factoryDirFixture, env *testsuite.TestActivityEnvironment) []run.Attempt {
-		oracle := t.TempDir()
-		writeFile(t, filepath.Join(oracle, "p_oracle_test.go"), canaryTestOracleSrc)
-		writeFile(t, filepath.Join(oracle, "MANIFEST.json"), "{}")
-		in := f.input
-		in.ReferenceOracleDir, in.ReferenceOracleMountPath = oracle, ".oracle"
-		env.RegisterActivity(f.acts.RunNamedGateActivity)
-		val, err := env.ExecuteActivity(f.acts.RunNamedGateActivity, NamedGateActivityInput{RunWorkflowInput: in, Check: "reference_oracle", OracleCanary: true, Command: "go test -run TestOracleLevel"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var res VerifyActivityResult
-		if err := val.Get(&res); err != nil {
-			t.Fatal(err)
-		}
-		return res.Attempts
-	}},
-	{"reruns after an oracle commit", 3, func(t *testing.T, f *factoryDirFixture, env *testsuite.TestActivityEnvironment) []run.Attempt {
-		in := f.input
-		in.VerifyCommand, in.FullSuiteCommand = "true", "true"
-		setGateCommand(&in, "lint", "sh .factory/x.sh")
-		env.RegisterActivity(f.acts.RunPostOracleCommitVerifyActivity)
-		val, err := env.ExecuteActivity(f.acts.RunPostOracleCommitVerifyActivity, in)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var res PostOracleCommitVerifyResult
-		if err := val.Get(&res); err != nil {
-			t.Fatal(err)
-		}
-		return res.Attempts
 	}},
 }
 

@@ -2107,7 +2107,7 @@ func TestGetRunReleaseReturnsDecisionAndKillSwitchHistory(t *testing.T) {
 		ID: "run-1", Ticket: "ticket-1", State: run.StateAccepted,
 		ProjectPath: "/checkouts/app", Project: "checkouts", CreatedAt: "2026-09-03T10:00:00Z",
 	})
-	if err := release.Engage(dataDir, "checkouts", "operator@example.com", "incident 42", func() string { return "2026-09-03T09:00:00Z" }); err != nil {
+	if err := engageKillSwitch(dataDir, "checkouts", "operator@example.com", "incident 42", func() string { return "2026-09-03T09:00:00Z" }); err != nil {
 		t.Fatalf("engage kill switch: %v", err)
 	}
 	if err := release.SaveDecision(dataDir, release.Decision{
@@ -2223,7 +2223,7 @@ func TestGetRunReleaseRejectsUnknownRunAndUnprojectedRun(t *testing.T) {
 // needs to exist for the project at all.
 func TestGetProjectReleaseReturnsKillSwitchWithNoRunsRequired(t *testing.T) {
 	dataDir := t.TempDir()
-	if err := release.Engage(dataDir, "checkouts", "operator@example.com", "incident 42", func() string { return "2026-09-03T09:00:00Z" }); err != nil {
+	if err := engageKillSwitch(dataDir, "checkouts", "operator@example.com", "incident 42", func() string { return "2026-09-03T09:00:00Z" }); err != nil {
 		t.Fatalf("engage kill switch: %v", err)
 	}
 
@@ -2781,4 +2781,11 @@ func TestCORSPreflightReplies204WithoutReachingRoute(t *testing.T) {
 	if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "Authorization, Content-Type" {
 		t.Errorf("Access-Control-Allow-Headers = %q", got)
 	}
+}
+
+// engageKillSwitch and disengageKillSwitch apply one kill-switch transition
+// and drop the resulting record.
+func engageKillSwitch(dir, project, by, reason string, now func() string) error {
+	_, err := release.SetKillSwitch(dir, project, by, reason, true, now)
+	return err
 }

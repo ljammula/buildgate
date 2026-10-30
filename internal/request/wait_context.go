@@ -85,7 +85,7 @@ func (c *WaitContext) For(r *Request) *Wait {
 // for a build; "" when there is none yet.
 func (r *Request) FeedRunID() string {
 	switch r.State {
-	case StateSpecDrafting, StateOracleDrafting, StatePlanning:
+	case StateSpecDrafting, StatePlanning:
 		return r.ID
 	case StateBuilding:
 		if r.TicketIndex >= 1 && r.TicketIndex <= len(r.Tickets) {

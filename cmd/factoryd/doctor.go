@@ -94,7 +94,7 @@ type doctorCheck struct {
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy *bool, registryProxyImage *string, composeServices, fix *bool, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand, referenceOracleCommand, referenceOracleDir *string, hitlReminderInterval *time.Duration, configPath *string) {
+func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy *bool, registryProxyImage *string, composeServices, fix *bool, repoRoot, workspace, dataDir, temporalAddress, egressCABundle *string, hitlReminderInterval *time.Duration, configPath *string) {
 	flags = flag.NewFlagSet("doctor", flag.ContinueOnError)
 	// configPath resolves every session-config-derived value below
 	// (settings, -hitl-reminder-interval, -data-dir): `doctor` had no
@@ -113,12 +113,6 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	dataDir = flags.String("data-dir", "data", "Directory of durable run records and logs, checked, with -workspace, for Docker visibility and for lying outside it. Unset uses the session config's data_dir.")
 	temporalAddress = flags.String("temporal-address", "", "Temporal server address to confirm is reachable; empty skips this check")
 	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of extra CA certificates to check parses and to trust in the model-route reachability probe. Empty uses the bundle built for a network that re-signs TLS, when one exists.")
-	lintCommand = flags.String("lint-command", "", "Lint gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	securityCommand = flags.String("security-command", "", "Security-audit gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	unitTestCommand = flags.String("unit-test-command", "", "Unit-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	integrationTestCommand = flags.String("integration-test-command", "", "Integration-test gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	referenceOracleCommand = flags.String("reference-oracle-command", "", "Reference-oracle gate command whose first executable must exist in the sandbox image. Empty skips this check.")
-	referenceOracleDir = flags.String("reference-oracle-dir", "", "Host directory of reference-oracle content to check Docker can see inside a container: an unshared path mounts empty with no error. Empty skips this check.")
 	hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "How often the worker re-reminds a request waiting at a review gate. Doctor prints it and checks nothing against it. Unset uses the session config's hitl_reminder_interval.")
 	finishFlags(flags)
 	return
@@ -133,7 +127,7 @@ func doctorMain(dp *deps, args []string) error {
 		fmt.Printf("factoryd doctor: running %s (%s)\n\n", selfPath, factoryVersionOf(selfPath))
 	}
 
-	flags, sandboxImage, registryProxy, registryProxyImage, composeServices, fix, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, lintCommand, securityCommand, unitTestCommand, integrationTestCommand, referenceOracleCommand, referenceOracleDir, hitlReminderInterval, configPath := newDoctorFlags()
+	flags, sandboxImage, registryProxy, registryProxyImage, composeServices, fix, repoRoot, workspace, dataDir, temporalAddress, egressCABundle, hitlReminderInterval, configPath := newDoctorFlags()
 	// Registered directly on flags rather than threaded through
 	// newDoctorFlags' own already-long return tuple -- see
 	// doctorRegisterNotifyTestFlag's own doc comment (cmd/factoryd/
@@ -262,17 +256,11 @@ func doctorMain(dp *deps, args []string) error {
 		profileImages:          doctorProfileImages(),
 		baselineCheck:          doctorBaselineCheckRunner(dp, resolvedConfigPath, doctorExplicitDataDir(flags, *dataDir), *temporalAddress),
 		egressCABundle:         *egressCABundle,
-		lintCommand:            *lintCommand,
-		securityCommand:        *securityCommand,
-		unitTestCommand:        *unitTestCommand,
-		integrationTestCommand: *integrationTestCommand,
-		referenceOracleCommand: *referenceOracleCommand,
-		referenceOracleDir:     *referenceOracleDir,
 		composeServices:        *composeServices,
 		targetRepo:             *targetRepo,
 		removeSandbox:          *removeSandbox,
 		releaseMaxFilesChanged: settings.ReleaseMaxFilesChanged,
-		releaseMaxInsertions:   settings.ReleaseMaxInsertions,
+		releaseMaxChangedLines: settings.ReleaseMaxChangedLines,
 		releaseRollbackPlan:    settings.ReleaseRollbackPlan,
 		settings:               settings,
 		// The repo a request will clone and run version control against is
@@ -364,7 +352,7 @@ func doctorMain(dp *deps, args []string) error {
 		if err != nil {
 			return err
 		}
-		checks = doctorReplaceCheck(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan))
+		checks = doctorReplaceCheck(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan))
 		if in.workspace != "" {
 			// .factory.yml (fix (a), written by doctorApplyFixes above) --
 			// a round-2 review of Phase A found this was left
@@ -492,7 +480,7 @@ func doctorRefreshInputsAfterFix(in doctorInputs, dataDirExplicit bool, dataDir,
 		return in, dataDir, err
 	}
 	in.releaseMaxFilesChanged = settings.ReleaseMaxFilesChanged
-	in.releaseMaxInsertions = settings.ReleaseMaxInsertions
+	in.releaseMaxChangedLines = settings.ReleaseMaxChangedLines
 	in.releaseRollbackPlan = settings.ReleaseRollbackPlan
 	dataDir = resolveConfiguredDataDir(dataDirExplicit, dataDir, configPath)
 	in.dataDir = dataDir
@@ -820,12 +808,6 @@ type doctorInputs struct {
 	dataDir                     string
 	temporalAddress             string
 	egressCABundle              string
-	lintCommand                 string
-	securityCommand             string
-	unitTestCommand             string
-	integrationTestCommand      string
-	referenceOracleCommand      string
-	referenceOracleDir          string
 	composeServices             bool
 	// targetRepo is -target-repo: see doctorTargetRepoChecks.
 	targetRepo string
@@ -837,15 +819,15 @@ type doctorInputs struct {
 	// profileImages is each profile's sandbox_image, keyed by image, the
 	// profiles in order (doctorProfileImages); empty checks none.
 	profileImages []doctorProfileImage
-	// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan feed
+	// releaseMaxFilesChanged/releaseMaxChangedLines/releaseRollbackPlan feed
 	// doctorCheckReleasePolicy: the same three
-	// release_max_files_changed/release_max_insertions/release_rollback_plan
+	// release_max_files_changed/release_max_changed_lines/release_rollback_plan
 	// session-config keys releasePolicyCanNeverAllow already checks at
 	// runtime, surfaced here so an operator learns about a deny-all
 	// release policy from `factoryd doctor` before ever running a ticket,
 	// not only after a first accepted run silently produces no PR.
 	releaseMaxFilesChanged int
-	releaseMaxInsertions   int
+	releaseMaxChangedLines int
 	releaseRollbackPlan    string
 	// checkRequestSourceRepos makes doctorChecksFor also probe the source
 	// repo of every in-flight request under dataDir (set by `factoryd doctor`
@@ -991,7 +973,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	if in.sandboxTmpfsSize != "" {
 		checks = append(checks, doctorCheckTmpfsSize(in.sandboxTmpfsSize))
 	}
-	checks = append(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan))
+	checks = append(checks, doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan))
 	checks = append(checks, doctorCheckRolesResolve(in))
 	checks = append(checks, doctorCheckSkills(in))
 	checks = append(checks, doctorCheckDesignGuide(in))
@@ -1024,15 +1006,6 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	if in.checkRequestSourceRepos && in.dataDir != "" {
 		checks = append(checks, doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace)...)
 	}
-	if in.referenceOracleDir != "" {
-		// Reuses -workspace's own mount-visibility probe unchanged (same
-		// underlying failure mode: a host path the Docker backend doesn't
-		// actually share into its VM produces a silently empty mount, not
-		// an error) -- its "-workspace" wording in the reported name/Fix
-		// text is accurate about the mechanism, just not about which flag
-		// this particular call is checking.
-		checks = append(checks, doctorCheckMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.referenceOracleDir))
-	}
 	if in.temporalAddress != "" {
 		checks = append(checks, doctorCheckTemporalReachable(ctx, in.temporalAddress))
 		checks = append(checks, doctorCheckStaleTemporalWorkflows(ctx, in.temporalAddress))
@@ -1051,17 +1024,6 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		checks = append(checks, doctorCheckRequiredBinaries(ctx, in)...)
 		checks = append(checks, doctorCheckSandboxBlock(in)...)
 		checks = append(checks, doctorCheckBaseline(in, doctorChecksFailed(checks)))
-	}
-	for _, gate := range []struct{ label, command string }{
-		{"-lint-command", in.lintCommand},
-		{"-security-command", in.securityCommand},
-		{"-unit-test-command", in.unitTestCommand},
-		{"-integration-test-command", in.integrationTestCommand},
-		{"-reference-oracle-command", in.referenceOracleCommand},
-	} {
-		if gate.command != "" {
-			checks = append(checks, doctorCheckExecutableInImage(ctx, in.sandboxDocker, image, gate.label, gate.command))
-		}
 	}
 	return checks
 }
@@ -1305,6 +1267,7 @@ var doctorRoleSpecs = []struct {
 	{"planning", modelrole.RolePlanning},
 	{"execution", modelrole.RoleExecution},
 	{"review", modelrole.RoleReview},
+	{"challenger", modelrole.RoleChallenger},
 }
 
 // doctorRoleSelection is one selection doctorRoutesModeChecks resolves the
@@ -1325,6 +1288,9 @@ type doctorRoleSelection struct {
 func doctorRoleSelections(settings sessionconfig.Settings) []doctorRoleSelection {
 	var selections []doctorRoleSelection
 	for _, spec := range doctorRoleSpecs {
+		if spec.role == modelrole.RoleChallenger && !doctorRoleConfigured(settings, spec.name) {
+			continue
+		}
 		selections = append(selections, doctorRoleSelection{name: spec.name, role: spec.role, label: spec.name})
 		if spec.role != modelrole.RoleExecution || settings.Roles == nil {
 			continue
@@ -1352,6 +1318,8 @@ func doctorRoleConfigured(s sessionconfig.Settings, roleName string) bool {
 		rc = s.Roles.Execution
 	case "review":
 		rc = s.Roles.Review
+	case "challenger":
+		rc = s.Roles.Challenger
 	}
 	return rc != nil && rc.Model != ""
 }
@@ -1825,13 +1793,10 @@ func doctorCheckImagePresent(ctx context.Context, dockerBinary, label, image, fi
 }
 
 // doctorCheckExecutableInImage confirms command's leading executable is on
-// PATH inside image -- the named-gate commands (lint_command,
-// security_command, unit_test_command, integration_test_command,
-// reference_oracle_command) are only useful if their tool is actually
-// installed in the sandbox image a real
-// run will execute them in; a missing one otherwise surfaces as a
-// confusing gate failure deep inside a run instead of naming it here,
-// before the run ever starts.
+// PATH inside image -- a command is only useful if its tool is
+// installed in the sandbox image a real run will execute it in; a missing
+// one otherwise surfaces as a confusing failure deep inside a run instead of
+// naming it here, before the run ever starts.
 func doctorCheckExecutableInImage(ctx context.Context, dockerBinary, image, label, command string) doctorCheck {
 	name := fmt.Sprintf("%s executable present in sandbox image (%s)", label, image)
 	fields := strings.Fields(command)
@@ -2535,9 +2500,7 @@ func doctorCheckMountVisibility(ctx context.Context, backend dockerbackend.Backe
 // -sandbox-image forces it
 // out of -workspace, per USAGE.md's own gotcha table) only found out
 // minutes into a real run, deep inside build_app.py/draft_spec.py.
-// Unlike the referenceOracleDir call site just below, which deliberately
-// keeps doctorCheckMountVisibility's "-workspace" wording for a rarer
-// flag, -data-dir is checked on every worker/`factoryd <run>`
+// -data-dir is checked on every worker/`factoryd <run>`
 // invocation, common enough that the reported name/Fix text should name
 // the right flag.
 func doctorCheckDataDirMountVisibility(ctx context.Context, backend dockerbackend.Backend, dockerBinary, image, dataDir string) doctorCheck {
@@ -2941,7 +2904,7 @@ func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
 // releasePolicyCanNeverAllow (release_and_evidence.go) already knows a
 // release policy denies every
 // PR unconditionally whenever release_rollback_plan is empty or
-// release_max_files_changed/release_max_insertions is 0, but until this
+// release_max_files_changed/release_max_changed_lines is 0, but until this
 // check existed that only ever surfaced as a runtime warning logged once
 // -open-pull-request was already set, or as silence and no PR after a
 // run had already been accepted. Reports the same condition here, with
@@ -2961,17 +2924,17 @@ func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
 // backfill and never touches -open-pull-request at all, purely on an
 // unrelated session-config gap. Warn-and-name-the-fix still satisfies
 // that same visibility goal without that regression.
-func doctorCheckReleasePolicy(maxFilesChanged, maxInsertions int, rollbackPlan string) doctorCheck {
+func doctorCheckReleasePolicy(maxFilesChanged, maxChangedLines int, rollbackPlan string) doctorCheck {
 	name := "release policy allows a PR"
-	if !releasePolicyCanNeverAllow(release.MergePolicy{MaxFilesChanged: maxFilesChanged, MaxInsertions: maxInsertions, RollbackPlan: rollbackPlan}) {
+	if !releasePolicyCanNeverAllow(release.MergePolicy{MaxFilesChanged: maxFilesChanged, MaxChangedLines: maxChangedLines, RollbackPlan: rollbackPlan}) {
 		return doctorCheck{Name: name}
 	}
 	return doctorCheck{
 		Name:     name,
 		Advisory: true,
-		Err:      fmt.Errorf("the effective release policy denies every PR unconditionally (release_max_files_changed=%d, release_max_insertions=%d, release_rollback_plan=%q -- MergePolicyCheck denies whenever any of these is 0/empty); harmless if you never set -open-pull-request", maxFilesChanged, maxInsertions, rollbackPlan),
-		Fix: fmt.Sprintf("add these three keys to your session config (factoryd init-config's own scaffold now includes them):\nrelease_max_files_changed: %d\nrelease_max_insertions: %d\nrelease_rollback_plan: %q",
-			sessionconfig.DefaultReleaseMaxFilesChanged, sessionconfig.DefaultReleaseMaxInsertions, sessionconfig.DefaultReleaseRollbackPlan),
+		Err:      fmt.Errorf("the effective release policy denies every PR unconditionally (release_max_files_changed=%d, release_max_changed_lines=%d, release_rollback_plan=%q -- MergePolicyCheck denies whenever any of these is 0/empty); harmless if you never set -open-pull-request", maxFilesChanged, maxChangedLines, rollbackPlan),
+		Fix: fmt.Sprintf("add these three keys to your session config (factoryd init-config's own scaffold now includes them):\nrelease_max_files_changed: %d\nrelease_max_changed_lines: %d\nrelease_rollback_plan: %q",
+			sessionconfig.DefaultReleaseMaxFilesChanged, sessionconfig.DefaultReleaseMaxChangedLines, sessionconfig.DefaultReleaseRollbackPlan),
 	}
 }
 

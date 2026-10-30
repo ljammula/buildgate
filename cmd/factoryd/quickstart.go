@@ -46,7 +46,7 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
-// quickstartDefaultReleaseMaxFilesChanged/quickstartDefaultReleaseMaxInsertions/
+// quickstartDefaultReleaseMaxFilesChanged/quickstartDefaultReleaseMaxChangedLines/
 // quickstartDefaultReleaseRollbackPlan alias the single source of truth
 // in internal/sessionconfig (sessionconfig.DefaultReleaseMaxFilesChanged
 // and friends) so quickstart's fresh-config path and its reuse-path
@@ -56,17 +56,17 @@ import (
 // default-on, a first "successful" quickstart run would otherwise end
 // with no PR and no explanation at
 // all: the shipped zero-value defaults (sessionconfig.DefaultSettings'
-// own ReleaseMaxFilesChanged/ReleaseMaxInsertions/ReleaseRollbackPlan)
+// own ReleaseMaxFilesChanged/ReleaseMaxChangedLines/ReleaseRollbackPlan)
 // deny every PR unconditionally (see internal/release.MergePolicyCheck: 0
 // files allowed, empty rollback plan always denies).
 const (
 	quickstartDefaultReleaseMaxFilesChanged = sessionconfig.DefaultReleaseMaxFilesChanged
-	quickstartDefaultReleaseMaxInsertions   = sessionconfig.DefaultReleaseMaxInsertions
+	quickstartDefaultReleaseMaxChangedLines = sessionconfig.DefaultReleaseMaxChangedLines
 	quickstartDefaultReleaseRollbackPlan    = sessionconfig.DefaultReleaseRollbackPlan
 )
 
 // quickstartBackfillReleaseDefaults fills in whichever of
-// release_max_files_changed/release_max_insertions/release_rollback_plan
+// release_max_files_changed/release_max_changed_lines/release_rollback_plan
 // are missing from a REUSED session config with the same usable defaults
 // a freshly generated config gets (quickstartDefaultRelease* above), and
 // returns the flag names it added so the caller can tell the operator
@@ -83,10 +83,10 @@ func quickstartBackfillReleaseDefaults(existing *sessionconfig.Config) []string 
 		existing.ReleaseMaxFilesChanged = &v
 		added = append(added, "release_max_files_changed")
 	}
-	if existing.ReleaseMaxInsertions == nil {
-		v := quickstartDefaultReleaseMaxInsertions
-		existing.ReleaseMaxInsertions = &v
-		added = append(added, "release_max_insertions")
+	if existing.ReleaseMaxChangedLines == nil {
+		v := quickstartDefaultReleaseMaxChangedLines
+		existing.ReleaseMaxChangedLines = &v
+		added = append(added, "release_max_changed_lines")
 	}
 	if existing.ReleaseRollbackPlan == nil {
 		v := quickstartDefaultReleaseRollbackPlan
@@ -108,7 +108,7 @@ func quickstartBackfillReleaseDefaults(existing *sessionconfig.Config) []string 
 // only the missing lines means a backfill-only run changes nothing an
 // operator wrote by hand.
 //
-// cfg's ReleaseMaxFilesChanged/ReleaseMaxInsertions/ReleaseRollbackPlan
+// cfg's ReleaseMaxFilesChanged/ReleaseMaxChangedLines/ReleaseRollbackPlan
 // pointers must already be non-nil for every key named in added (true
 // immediately after quickstartBackfillReleaseDefaults, which is this
 // function's only caller).
@@ -135,8 +135,8 @@ func quickstartAppendReleaseDefaultsText(path string, cfg *sessionconfig.Config,
 		switch key {
 		case "release_max_files_changed":
 			fmt.Fprintf(&b, "release_max_files_changed: %d\n", *cfg.ReleaseMaxFilesChanged)
-		case "release_max_insertions":
-			fmt.Fprintf(&b, "release_max_insertions: %d\n", *cfg.ReleaseMaxInsertions)
+		case "release_max_changed_lines":
+			fmt.Fprintf(&b, "release_max_changed_lines: %d\n", *cfg.ReleaseMaxChangedLines)
 		case "release_rollback_plan":
 			fmt.Fprintf(&b, "release_rollback_plan: %s\n", quickstartYAMLScalar(*cfg.ReleaseRollbackPlan))
 		}
@@ -701,7 +701,7 @@ func quickstartCheckGHAuth(w io.Writer, repoRoot string) error {
 // (an already valid session config quickstart is about to reuse),
 // supplies each image from that config's own value.
 //
-// releaseMaxFilesChanged/releaseMaxInsertions/releaseRollbackPlan default
+// releaseMaxFilesChanged/releaseMaxChangedLines/releaseRollbackPlan default
 // to the same quickstartDefaultRelease* values a fresh config gets and are
 // overridden by existing's own values below when it has them:
 // doctorChecksFor always appends doctorCheckReleasePolicy, and an earlier
@@ -716,7 +716,7 @@ func quickstartPullDoctorInputs(sandboxDocker string, existing *sessionconfig.Co
 		sandboxDocker:          sandboxDocker,
 		composeServices:        true,
 		releaseMaxFilesChanged: quickstartDefaultReleaseMaxFilesChanged,
-		releaseMaxInsertions:   quickstartDefaultReleaseMaxInsertions,
+		releaseMaxChangedLines: quickstartDefaultReleaseMaxChangedLines,
 		releaseRollbackPlan:    quickstartDefaultReleaseRollbackPlan,
 		// This is an image-presence-only pass, run before this
 		// quickstart invocation's own config is finalized -- see
@@ -728,8 +728,8 @@ func quickstartPullDoctorInputs(sandboxDocker string, existing *sessionconfig.Co
 		if existing.ReleaseMaxFilesChanged != nil {
 			in.releaseMaxFilesChanged = *existing.ReleaseMaxFilesChanged
 		}
-		if existing.ReleaseMaxInsertions != nil {
-			in.releaseMaxInsertions = *existing.ReleaseMaxInsertions
+		if existing.ReleaseMaxChangedLines != nil {
+			in.releaseMaxChangedLines = *existing.ReleaseMaxChangedLines
 		}
 		if existing.ReleaseRollbackPlan != nil {
 			in.releaseRollbackPlan = *existing.ReleaseRollbackPlan
@@ -1808,13 +1808,23 @@ func (b *quickstartConfigBuild) askHarness(route string) error {
 // operator who accidentally reuses a builder's own model as its
 // reviewer, which cannot happen here since there is only ever one model
 // to begin with.
-func quickstartSingleModelRoles(model string) *sessionconfig.Roles {
-	return &sessionconfig.Roles{
+func quickstartSingleModelRoles(model, modelID string) *sessionconfig.Roles {
+	roles := &sessionconfig.Roles{
 		Planning:  &sessionconfig.RoleConfig{Model: model},
 		Execution: &sessionconfig.RoleConfig{Model: model},
 		Review:    &sessionconfig.RoleConfig{Model: model, AllowSharedModel: true},
 	}
+	// The challenger role (SC-022) is written only when its model is the one
+	// the route configures; otherwise it stays unset and no challenger runs.
+	if modelID == challengerModelID {
+		roles.Challenger = &sessionconfig.RoleConfig{Model: model, AllowSharedModel: true}
+	}
+	return roles
 }
+
+// challengerModelID is the model roles.challenger takes when the route
+// configures it.
+const challengerModelID = "gpt-6.1-terra"
 
 // quickstartConfigBuild is what the route cases of one quickstartBuildConfig
 // call share: its parameters, the config being filled and the credential
@@ -1924,10 +1934,10 @@ func quickstartBuildConfig(dp *deps, opts *quickstartOptions, p *quickstartPromp
 	}
 
 	maxFiles := quickstartDefaultReleaseMaxFilesChanged
-	maxInsertions := quickstartDefaultReleaseMaxInsertions
+	maxChangedLines := quickstartDefaultReleaseMaxChangedLines
 	rollbackPlan := quickstartDefaultReleaseRollbackPlan
 	b.cfg.ReleaseMaxFilesChanged = &maxFiles
-	b.cfg.ReleaseMaxInsertions = &maxInsertions
+	b.cfg.ReleaseMaxChangedLines = &maxChangedLines
 	b.cfg.ReleaseRollbackPlan = &rollbackPlan
 
 	// A freshly written config states the default review policy
@@ -2100,7 +2110,7 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 			ContextWindow: contextWindow,
 		},
 	}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	return nil, nil, nil
 }
 
@@ -2173,7 +2183,7 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 			ContextWindow: contextWindow,
 		},
 	}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	return nil, nil, nil
 }
 
@@ -2412,7 +2422,7 @@ func (b *quickstartConfigBuild) copilotRoute() (*sessionconfig.Config, []string,
 		copilotModel.API = workerAPI
 	}
 	b.cfg.Models = map[string]sessionconfig.Model{modelKey: copilotModel}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	return nil, nil, nil
 }
 
@@ -2508,7 +2518,7 @@ func (b *quickstartConfigBuild) chatGPTCodexRoute() (*sessionconfig.Config, []st
 		Routes:        []string{routeName},
 		ContextWindow: contextWindow,
 	}
-	b.cfg.Roles = quickstartSingleModelRoles(modelKey)
+	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)
 	if modelID == chatGPTCodexDefaultModelID {
 		// The Luna profile: the default model declares its reasoning
 		// levels (Pi clamps an undeclared xhigh/max silently) and plans,
@@ -2910,16 +2920,11 @@ var quickstartInFlightStates = map[request.State]bool{
 	request.StateSubmitted:    true,
 	request.StateSpecDrafting: true,
 	request.StateSpecReview:   true,
-	// The oracle stage is opt-in (submit -draft-oracles) and quickstart never
-	// opts in, but a request submitted that way against the same repo is
-	// still in flight and must not be duplicated.
-	request.StateOracleDrafting: true,
-	request.StateOracleReview:   true,
-	request.StatePlanning:       true,
-	request.StatePlanReview:     true,
-	request.StateBuilding:       true,
-	request.StatePRReview:       true,
-	request.StateResumeReview:   true,
+	request.StatePlanning:     true,
+	request.StatePlanReview:   true,
+	request.StateBuilding:     true,
+	request.StatePRReview:     true,
+	request.StateResumeReview: true,
 }
 
 // quickstartFindInFlightRequest returns the most recently submitted
@@ -3170,12 +3175,6 @@ func quickstartReportRequestState(dataDir string, r *request.Request, w io.Write
 		fmt.Fprintf(w, "Spec drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, request.SpecPath(dataDir, r.ID), arg, r.ID)
 		printReviewNotes(w, dataDir, r)
 		printReadBack(w, r)
-		return nil
-	case request.StateOracleReview:
-		fmt.Fprintf(w, "Oracle stage for request %s is waiting on you: %s/%s\nReview or hand-write it (absent or empty skips), then run: factoryd approve%s %s\n", r.ID, request.Dir(dataDir, r.ID), request.RequestOracleDirName, arg, r.ID)
-		if notice := request.OracleReviewNotice(dataDir, r); notice != "" {
-			fmt.Fprintf(w, "ACTION NEEDED before approve: %s\n", notice)
-		}
 		return nil
 	case request.StatePlanReview:
 		fmt.Fprintf(w, "Plan drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, filepath.Join(request.Dir(dataDir, r.ID), "tickets"), arg, r.ID)

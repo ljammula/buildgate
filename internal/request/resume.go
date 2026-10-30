@@ -22,7 +22,7 @@ const (
 
 // resumableStates are the states a lost step can leave a request in.
 var resumableStates = []State{
-	StateSpecDrafting, StateOracleDrafting, StatePlanning, StateBuilding, StatePRReview,
+	StateSpecDrafting, StatePlanning, StateBuilding, StatePRReview,
 }
 
 // ResumeInfo records the step a lost worker left behind. Written by
