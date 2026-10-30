@@ -215,6 +215,25 @@ func TestPreflightTreatsSpecTicketScopeHeaderAsProse(t *testing.T) {
 	}
 }
 
+// A request's verbatim spec ticket (no ticket scope) passes the start-of-build
+// structure check in the shape a handed-over spec was approved in; the same
+// content as a planned ticket does not.
+func TestPreflightAcceptsAHandedOverSpecTicket(t *testing.T) {
+	workspacePath := testfixture.NewGitRepo(t)
+	ticketPath := filepath.Join(t.TempDir(), "001.spec.md")
+	if err := os.WriteFile(ticketPath, []byte("# Spec\n\n## Problem\n\np\n\n## Wanted behaviour\n\n- one\n- two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input := PreflightInput{WorkspacePath: workspacePath, TicketPath: ticketPath, RequestTicket: true, NoTicketScope: true}
+	if err := (&Activities{}).PreflightActivity(context.Background(), input); err != nil {
+		t.Fatalf("spec ticket preflight: %v", err)
+	}
+	input.NoTicketScope = false
+	if err := (&Activities{}).PreflightActivity(context.Background(), input); err == nil {
+		t.Fatal("a planned ticket in spec shape must fail preflight")
+	}
+}
+
 // TestCaptureBaseSHAActivityRejectsMalformedPriorSnapshot proves a caller
 // cannot submit a forged or incomplete predecessor snapshot directly to a
 // Temporal Workflow and bypass the CLI's eager validation.

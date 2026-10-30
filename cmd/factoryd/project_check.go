@@ -450,11 +450,11 @@ var errProjectBootstrapCheckFailed = errors.New("project-bootstrap preflight fai
 // rejects it first -- so this advisory case is only ever the discovery
 // convention's own hypothetical path.
 //
-// requestTicket (runMainWithReady's own -request-ticket, forwarded from
-// QueueEntry.RequestTicket) means ticketPath is a request-pipeline
-// ticketspec-format ticket (-spec itself), not a repo-native pi-harness
-// one: when true, ticket_structure is checked with
-// policy.TicketStructureBrownfield instead of policy.TicketStructure,
+// requestTicketCheck, set for runMainWithReady's own -request-ticket
+// (forwarded from QueueEntry.RequestTicket; requestTicketCheck on ticketRun
+// picks it), means ticketPath is a request-pipeline ticketspec-format ticket
+// (-spec itself), not a repo-native pi-harness one: when set,
+// ticket_structure is checked with it instead of policy.TicketStructure,
 // under BOTH profiles, and is never advisory -- ticketPath is the run's
 // own -spec snapshot, which always exists by this point, so there is no
 // "convention not adopted yet" case to exempt the way the auto-discovered
@@ -466,7 +466,7 @@ var errProjectBootstrapCheckFailed = errors.New("project-bootstrap preflight fai
 // <repo>/spec/tickets/<request-id>-NNN.md and hard-failed ticket_structure
 // non-advisory, since strict never marks the ticket check advisory at
 // all -- strict and the request pipeline could never both pass.
-func evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath string, ticketNumber int, architectureRequiredSections []string, profile string, requestTicket bool) ([]ProjectCheckResult, bool) {
+func evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath string, ticketNumber int, architectureRequiredSections []string, profile string, requestTicketCheck func(string) (bool, []string)) ([]ProjectCheckResult, bool) {
 	type namedCheck struct {
 		name     string
 		path     string
@@ -490,16 +490,14 @@ func evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ti
 		return policy.ArchitectureStructure(content, architectureRequiredSections)
 	}, profile == preflightProfileBrownfield})
 	if ticketPath != "" {
-		if requestTicket {
+		if requestTicketCheck != nil {
 			// See this function's own doc comment: ticketPath is -spec
 			// itself here, in the request pipeline's ticketspec format, so
 			// it is checked with the brownfield ticket checker under BOTH
 			// profiles, never advisory -- unlike the native-ticket path
 			// below, there is no "convention not adopted yet" case for a
 			// request's own spec snapshot, which always exists.
-			checks = append(checks, namedCheck{"ticket_structure", ticketPath, func(content string) (bool, []string) {
-				return request.RequestTicketStructure(content)
-			}, false})
+			checks = append(checks, namedCheck{"ticket_structure", ticketPath, requestTicketCheck, false})
 		} else {
 			ticketAdvisory := false
 			if profile == preflightProfileBrownfield {
@@ -562,8 +560,8 @@ func onboardingNotDone(specPath, contractPath, architecturePath string) bool {
 // silently point the printed command at workspace's *parent* instead of
 // workspace itself whenever -workspace already IS the repo root and just
 // hasn't been onboarded yet.
-func runProjectBootstrapCheck(dataDir string, dataDirInsideWorkspace bool, resolvedWorkspace string, repoRootHint string, project, specPath, contractPath, architecturePath, ticketPath string, ticketNumber int, architectureRequiredSections []string, preflightProfile string, requestTicket bool) (string, string, error) {
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath, ticketNumber, architectureRequiredSections, preflightProfile, requestTicket)
+func runProjectBootstrapCheck(dataDir string, dataDirInsideWorkspace bool, resolvedWorkspace string, repoRootHint string, project, specPath, contractPath, architecturePath, ticketPath string, ticketNumber int, architectureRequiredSections []string, preflightProfile string, requestTicketCheck func(string) (bool, []string)) (string, string, error) {
+	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath, ticketNumber, architectureRequiredSections, preflightProfile, requestTicketCheck)
 
 	record := ProjectCheckRecord{Project: project, CheckedAt: time.Now().Format(time.RFC3339Nano), Results: results, Passed: allPassed}
 	recordDataDir := dataDir
@@ -881,4 +879,19 @@ func saveProjectCheckRecord(dataDir string, record ProjectCheckRecord) (string, 
 		return "", fmt.Errorf("rename project-check record: %w", err)
 	}
 	return path, nil
+}
+
+// requestTicketCheck is the start-of-build structure check of a request's
+// ticket: a ticket with no ticket scope (the verbatim spec ticket, or a
+// carved replay's input) in any shape a spec is approved in, any other
+// ticket in the ticket shape; nil for a run that is not a request's.
+func (tr *ticketRun) requestTicketCheck() func(string) (bool, []string) {
+	switch {
+	case !*tr.requestTicket:
+		return nil
+	case *tr.rf.scopeApproval == "none":
+		return request.SpecTicketStructure
+	default:
+		return request.RequestTicketStructure
+	}
 }

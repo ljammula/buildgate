@@ -67,12 +67,12 @@ func apiProjectChecker() api.ProjectChecker {
 			}
 		}
 
-		// requestTicket is always false here: POST /projects/check previews
+		// requestTicketCheck is always nil here: POST /projects/check previews
 		// a plain factoryd <run>/API-started run's own preflight, which can
 		// never set -request-ticket (see that flag's own doc comment) --
 		// the request pipeline's own tickets are never previewed through
 		// this endpoint.
-		results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath, ticketNumber, nil, profile, false)
+		results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath, ticketNumber, nil, profile, nil)
 		checks := make([]api.ProjectCheckResult, len(results))
 		for i, r := range results {
 			checks[i] = api.ProjectCheckResult{Check: r.Check, Path: r.Path, Passed: r.Passed, Reasons: r.Reasons, Advisory: r.Advisory}

@@ -120,6 +120,39 @@ func TestARequestWithoutAPlanRunsNoPlanningJobAndBuildsTheSpecVerbatim(t *testin
 	}
 }
 
+// A spec handed over with -spec-file in its own shape, not the drafted
+// skeleton, is a valid approved spec: the factory's ticket built from it
+// passes the plan approval and the start-of-build structure check, so the
+// request reaches building instead of stopping at a plan_review nobody can
+// approve.
+func TestAHandedOverSpecOutsideTheSkeletonIsBuiltAsTheTicket(t *testing.T) {
+	spec := "# rack: media types\n\n## Problem\n\nThe request does not parse Accept.\n\n## Wanted behaviour\n\n- The request lists its media ranges, most preferred first.\n- A range with q=0 is left out.\n\n## Interface\n\n`Rack::Request#accept_media_types`\n"
+	if err := request.ValidateHandedOverSpec(spec); err != nil {
+		t.Fatalf("fixture is not a valid handed-over spec: %v", err)
+	}
+	if request.ValidateSpecSkeleton(spec) == nil {
+		t.Fatal("fixture must be outside the drafted skeleton")
+	}
+	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, spec, "make verify")
+	requestdrivertest.PlanReviewOff(t, dataDir, id)
+	driveWithSpecPlanner(t, dataDir, requestdrivertest.FailingPlanTicketsRunner(t))
+
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	if r.State != request.StateBuilding || r.TicketCount != 1 {
+		t.Fatalf("state %s (%s), tickets %d; want building with 1 ticket", r.State, r.Error, r.TicketCount)
+	}
+	input, err := requestdriver.TicketBuildSpecContent(dataDir, id, r.Tickets[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input != spec {
+		t.Errorf("build input = %q, want the spec verbatim", input)
+	}
+	if ok, reasons := request.SpecTicketStructure(input); !ok {
+		t.Errorf("the build input fails the start-of-build structure check: %v", reasons)
+	}
+}
+
 // The same ticket waits at plan_review when the request opted in.
 func TestTheSpecTicketWaitsAtPlanReviewWhenTheRequestOptedIn(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")

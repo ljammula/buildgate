@@ -575,6 +575,22 @@ func TestSpecAcceptanceCriteriaLargePreambleAndHeadingDocumentIsLinearEnough(t *
 	}
 }
 
+// The factory's spec ticket may be a spec handed over in its own shape, not
+// the drafted skeleton: SpecTicketStructure accepts it, while
+// RequestTicketStructure, which judges content of unknown origin, does not.
+func TestSpecTicketStructureAcceptsAHandedOverSpec(t *testing.T) {
+	handedOver := "# Spec\n\n## Goal\n\ng\n\n## Wanted behaviour\n\n- one\n- two\n"
+	if ok, reasons := SpecTicketStructure(handedOver); !ok {
+		t.Errorf("a handed-over spec was refused as the spec ticket: %v", reasons)
+	}
+	if ok, _ := RequestTicketStructure(handedOver); ok {
+		t.Error("RequestTicketStructure accepted a handed-over spec of unknown origin")
+	}
+	if ok, reasons := SpecTicketStructure(validTicket); !ok {
+		t.Errorf("a ticket was refused: %v", reasons)
+	}
+}
+
 // A request ticket is the shape the planning job drafts or the approved spec's
 // own skeleton (the one ticket the factory writes for a request submitted
 // without a plan); anything else is refused with the ticket shape's reasons.
