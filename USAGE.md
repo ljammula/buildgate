@@ -275,11 +275,11 @@ trailing request text `factoryd submit` takes; each must precede
 
 **Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
 that are missing, starts colima and runs `gh auth login`. On Linux it installs
-nothing and runs no `sudo`: it names each missing tool and stops, with Docker,
-buildx and Compose v2 from Docker's own apt repository
-(`docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
-distribution's `docker.io` or the snap; a Docker that does not answer gets the
-`sudo systemctl start docker` and docker-group hint. Go, Docker (colima: `colima
+nothing and runs no `sudo`: it names each missing tool and stops, with the
+docker CLI, buildx and Compose v2 from Docker's own apt repository
+(`docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
+distribution's `docker.io` or the snap, and colima, whose VM runs Docker as on
+a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
@@ -558,8 +558,8 @@ point without re-running `quickstart`.
 
 | Backend | What it means |
 |---|---|
-| `colima` | colima's VM, as on a Mac (QEMU, which needs `/dev/kvm`); narrow its mounts as above |
-| `native-linux` | Docker Engine from Docker's apt repository, on this host. A warning: there is no VM between a sandbox and the machine, and this setup is not live-proven |
+| `colima` | colima's VM, as on a Mac (QEMU, which needs `/dev/kvm` and so a machine with KVM: most cloud VMs have none); narrow its mounts as above. The one backend sandboxes run on, and not yet live-proven on Linux |
+| `native-linux` | Docker Engine on this host. Refused: the worker runs as the image's user 65532, which cannot use factoryd's launch directories with no VM between them, so no worker command would start |
 | `docker-desktop`, `desktop-linux`, `rootless`, `userns`, `snap`, `podman`, `wsl2`, `other` | Refused before any sandbox, the OpenShell stack or a worker starts, with the reason |
 
 A machine with no desktop session (a server reached over ssh) opens no
@@ -1715,7 +1715,7 @@ What changes for a build:
 | Runs stall with no error | A local/private model host is single-instance; `internal/modelhost` serializes callers automatically. Likewise only `compose_services_concurrency` runs at a time have compose sidecars | `factoryd watch`/console show a `model_host_lock` or `compose_services_lock` `waiting` line naming the holder |
 | Containers left behind after killing a run | The process died before cleanup | `docker ps`, then `docker rm -f` only the `factoryd-*` containers |
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
-| `factoryd worker`, `doctor -fix` or a launch says `refusing to run sandboxes on this Docker (<backend>; ...)` | The Docker CLI reaches a backend sandboxes do not run on (Docker Desktop, Docker Desktop for Linux, rootless, `userns-remap`, the snap, podman, WSL2, or one `factoryd` cannot name) | Follow the reason the line ends with: on Linux, Docker Engine from Docker's apt repository and `docker context use default`, or colima; on a Mac, colima |
+| `factoryd worker`, `doctor -fix` or a launch says `refusing to run sandboxes on this Docker (<backend>; ...)` | The Docker CLI reaches a backend sandboxes do not run on (Docker Engine on a Linux host, Docker Desktop, Docker Desktop for Linux, rootless, `userns-remap`, the snap, podman, WSL2, or one `factoryd` cannot name) | Run Docker in colima (`colima start`, then `docker context use colima`), on Linux as on a Mac |
 | `install-service` on Linux warns `this user does not linger` | Without linger, systemd starts the user's units at the first login and stops them at the last logout, so nothing builds at boot or with nobody logged in | Run `sudo loginctl enable-linger $USER` once (it needs an administrator); the installed units then start at boot |
 | `install-service` on Linux says `no systemd user manager answers` | The shell came from `su` or `sudo -u`, which start no user manager | Log in as that user directly (ssh or a desktop session) and rerun |
 | `quickstart` or `console -open` on Linux says `no graphical session here` | An ssh login or a server has no browser to open | Open the printed link; from another machine, forward the port first: `ssh -L 8090:127.0.0.1:8090 <host>` |

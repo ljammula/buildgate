@@ -87,11 +87,11 @@ func TestDoctorCheckDockerBackend(t *testing.T) {
 		t.Errorf("colima = %+v", c)
 	}
 	c, _ = doctorCheckDockerBackend(dockerbackend.Detection{Backend: dockerbackend.NativeLinux})
-	if c.Err == nil || !c.Advisory {
-		t.Errorf("native-linux = %+v, want an advisory warning", c)
+	if c.Err == nil || c.Advisory || !strings.Contains(c.Fix, "65532") {
+		t.Errorf("native-linux = %+v, want a failure with the uid reason", c)
 	}
 	c, _ = doctorCheckDockerBackend(dockerbackend.Detection{Backend: dockerbackend.Snap})
-	if c.Err == nil || c.Advisory || !strings.Contains(c.Fix, "apt repository") {
+	if c.Err == nil || c.Advisory || !strings.Contains(c.Fix, "snap") {
 		t.Errorf("snap = %+v, want a failure with its reason", c)
 	}
 }
@@ -103,7 +103,7 @@ func TestGatewayRuntimeRefusesARefusedBackend(t *testing.T) {
 	dp := newTestDeps(t)
 	asked := false
 	fakeSandboxOf(dp).meterHealthyFn = func(context.Context) error { asked = true; return errors.New("down") }
-	for _, b := range []dockerbackend.Backend{dockerbackend.Rootless, dockerbackend.DockerDesktop, dockerbackend.Other} {
+	for _, b := range []dockerbackend.Backend{dockerbackend.NativeLinux, dockerbackend.Rootless, dockerbackend.DockerDesktop, dockerbackend.Other} {
 		stubBackend(dp, b)
 		err := newGatewayRuntime(dp).Ready(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "refusing to run sandboxes") || !strings.Contains(err.Error(), string(b)) {
@@ -119,9 +119,9 @@ func TestGatewayRuntimeRefusesARefusedBackend(t *testing.T) {
 	if err := newGatewayRuntime(dp).Ready(context.Background()); err == nil || !strings.Contains(err.Error(), "timed out") || asked {
 		t.Errorf("an unread backend: Ready = %v, meter asked %v; want a refusal before the meter", err, asked)
 	}
-	stubBackend(dp, dockerbackend.NativeLinux)
+	stubBackend(dp, dockerbackend.Colima)
 	if err := newGatewayRuntime(dp).Ready(context.Background()); err == nil || !asked {
-		t.Errorf("native-linux: Ready = %v, meter asked %v; want it to go on to the meter", err, asked)
+		t.Errorf("colima: Ready = %v, meter asked %v; want it to go on to the meter", err, asked)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestStartStackRefusesARefusedBackend(t *testing.T) {
 }
 
 func TestMountVisibilityFixNamesTheBackendsCause(t *testing.T) {
-	if fix := doctorMountVisibilityFix(dockerbackend.NativeLinux, "-data-dir", "/home/op/buildgate/data"); !strings.Contains(fix, "65532") || strings.Contains(fix, "colima's mounts") {
+	if fix := doctorMountVisibilityFix(dockerbackend.NativeLinux, "-data-dir", "/home/op/buildgate/data"); !strings.Contains(fix, "docker backend row") || strings.Contains(fix, "colima's mounts") {
 		t.Errorf("native-linux fix = %q", fix)
 	}
 	for _, b := range []dockerbackend.Backend{dockerbackend.Colima, ""} {

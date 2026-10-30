@@ -110,7 +110,7 @@ it explains what the flag changes. Flags come before positional arguments.
 systemd on Linux) as info. It fails only when an installed plist or unit
 points at a `factoryd` binary that no longer exists (fix: `factoryd
 install-service -force`). It also names the Docker backend (`docker backend:
-<name>`): a refused one fails, Docker Engine on a Linux host is a warning.
+<name>`): every backend but colima fails, Docker Engine on a Linux host included.
 
 **`-data-dir` resolution.** The same on every command that takes the flag,
 so a command means the same records from any directory:

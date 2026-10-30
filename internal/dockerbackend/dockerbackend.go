@@ -5,10 +5,12 @@
 // passes them in.
 //
 // The OS chooses the host lifecycle (the service manager, how Docker is
-// started); the backend chooses the containment. colima and Docker Engine on
-// a Linux host are the two backends sandboxes run on. Every other backend is
-// refused before any launch, each with its own one-line reason: a backend
-// buildgate cannot name is not one whose containment has been reviewed.
+// started); the backend chooses the containment. colima, on macOS or Linux,
+// is the one backend sandboxes run on. Every other backend is refused before
+// any launch, each with its own one-line reason: Docker Engine on a Linux
+// host is named (NativeLinux) but refused until a uid scheme lets its worker
+// use factoryd's directories, and a backend buildgate cannot name is not one
+// whose containment has been reviewed.
 package dockerbackend
 
 import (
@@ -133,30 +135,37 @@ func isLocalSocket(endpoint string) bool {
 	return false
 }
 
-// Supported reports whether sandboxes may run on b.
-func (b Backend) Supported() bool { return b == Colima || b == NativeLinux }
+// Supported reports whether sandboxes may run on b: on colima alone.
+func (b Backend) Supported() bool { return b == Colima }
 
 // Refusal is the one-line reason sandboxes do not run on b, "" when they do.
 func (b Backend) Refusal() string {
 	switch b {
-	case Colima, NativeLinux:
+	case Colima:
 		return ""
+	case NativeLinux:
+		// The worker runs as the image's 65532 and factoryd's launch
+		// directories are the operator's, mode 0750: with no VM file
+		// sharing between them, Landlock skips the worker's mounts and its
+		// command never starts. A uid scheme for this host is a
+		// containment change, not yet made.
+		return "sandboxes do not run on Docker Engine on this host yet: the worker's user (65532) cannot use factoryd's launch directories without a VM between them; use colima on this machine"
 	case DockerDesktop:
-		return "Docker Desktop's VM has neither AppArmor nor Landlock, which the sandbox needs; use colima on macOS, or Docker Engine on Linux"
+		return "Docker Desktop's VM has neither AppArmor nor Landlock, which the sandbox needs; use colima"
 	case DesktopLinux:
-		return "Docker Desktop for Linux (context desktop-linux) is not supported; use Docker Engine from Docker's apt repository and `docker context use default`"
+		return "Docker Desktop for Linux (context desktop-linux) is not supported; use colima"
 	case Rootless:
-		return "rootless Docker is not supported: the worker's user maps to a subordinate UID, so no file ownership between it and factoryd is right; use rootful Docker Engine"
+		return "rootless Docker is not supported: the worker's user maps to a subordinate UID, so no file ownership between it and factoryd is right; use colima"
 	case Userns:
-		return "Docker with userns-remap is not supported: the worker's user maps to a subordinate UID, so no file ownership between it and factoryd is right; turn userns-remap off"
+		return "Docker with userns-remap is not supported: the worker's user maps to a subordinate UID, so no file ownership between it and factoryd is right; use colima"
 	case Snap:
-		return "Docker from the snap package is not supported; use Docker Engine from Docker's apt repository"
+		return "Docker from the snap package is not supported; use colima"
 	case Podman:
-		return "podman behind the docker CLI is not supported; use Docker Engine, or colima"
+		return "podman behind the docker CLI is not supported; use colima"
 	case WSL2:
-		return "Docker under WSL2 is not supported; use a Linux host or a Mac"
+		return "Docker under WSL2 is not supported; use a Linux host or a Mac, with colima"
 	}
-	return "this Docker is neither colima nor Docker Engine on this Linux host, the only backends sandboxes run on"
+	return "this Docker is not colima, the only backend sandboxes run on"
 }
 
 // Detection is a backend with the facts it was named from.

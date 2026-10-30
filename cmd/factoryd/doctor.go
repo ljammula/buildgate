@@ -1669,7 +1669,7 @@ func dockerReachableFix() string {
 	case "darwin":
 		return "run `brew install colima docker && colima start` (the Mac backend), and confirm -sandbox-docker names a real executable"
 	case "linux":
-		return "run `sudo systemctl start docker` (Docker Engine from Docker's apt repository; add yourself to the docker group), or `colima start` if colima is your backend, and confirm -sandbox-docker names a real executable"
+		return "run `colima start` (sandboxes run in colima's VM on Linux as on a Mac: README's Linux section), and confirm -sandbox-docker names a real executable"
 	default:
 		return "start Docker and confirm -sandbox-docker names a real executable"
 	}
@@ -2583,12 +2583,12 @@ func doctorCheckMountVisibilityFor(ctx context.Context, backend dockerbackend.Ba
 }
 
 // doctorMountVisibilityFix says why a container cannot see dirAbs on
-// backend. Docker Engine on this Linux host bind-mounts every host path, so
-// there the cause is the probe's user (the sandbox image's, 65532) being
-// unable to read it; a VM backend shares only the paths it is told to.
+// backend. A VM backend shares only the paths it is told to. Docker Engine
+// on this Linux host mounts every path as it is, and no sandbox runs there
+// yet (the docker backend row), so no permission change is the fix.
 func doctorMountVisibilityFix(backend dockerbackend.Backend, flagLabel, dirAbs string) string {
 	if backend == dockerbackend.NativeLinux {
-		return fmt.Sprintf("Docker Engine on this host mounts %s's path as it is, so the sandbox image's user (65532) cannot read it: make it and its parent directories group- or other-readable and searchable (chmod g+rX or o+rX), or use colima", flagLabel)
+		return fmt.Sprintf("Docker Engine on this host mounts %s's path as it is, and sandboxes do not run on it yet (the docker backend row says why): use colima on this machine", flagLabel)
 	}
 	return fmt.Sprintf("the configured Docker backend does not share %s's own path into its containers -- add it to colima's mounts (USAGE.md, \"Data directory and colima\": data dirs under %s read-write, repositories read-only)", flagLabel, sessionconfig.DataRoot()) + doctorMountVisibilityHint(dirAbs)
 }
@@ -3376,21 +3376,15 @@ func doctorSizingChecksAfterFix(fix bool, in doctorInputs, checks []doctorCheck)
 }
 
 // doctorCheckDockerBackend names the Docker backend sandboxes run on. A
-// backend buildgate refuses fails, with its reason; Docker Engine on this
-// Linux host is a warning, since its containment has no VM between a
-// sandbox and the host. No row when Docker did not answer: the reachability
-// check already fails.
+// backend buildgate refuses, Docker Engine on this Linux host among them,
+// fails with its reason. No row when Docker did not answer: the
+// reachability check already fails.
 func doctorCheckDockerBackend(d dockerbackend.Detection) (doctorCheck, bool) {
 	if d.Err != nil {
 		return doctorCheck{}, false
 	}
 	name := "docker backend: " + string(d.Backend)
-	switch {
-	case d.Backend == dockerbackend.NativeLinux:
-		return doctorCheck{Name: name, Advisory: true,
-			Err: errors.New("Docker Engine on this host: sandboxes run with no VM between them and this machine, a setup whose containment review is not finished"),
-			Fix: "for a VM layer, run colima on this machine (README's Linux section)"}, true
-	case !d.Backend.Supported():
+	if !d.Backend.Supported() {
 		return doctorCheck{Name: name, Err: d.Refused(), Fix: d.Backend.Refusal()}, true
 	}
 	return doctorCheck{Name: name}, true

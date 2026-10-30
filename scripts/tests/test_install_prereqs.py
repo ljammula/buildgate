@@ -408,7 +408,7 @@ fi
         self.system("Linux")
         result = self.run_script()
         self.assertEqual(result.returncode, 1)
-        for named in ("go: https://go.dev", "gh: https://github.com/cli/cli", "git: sudo apt-get install git", "npm (Node 20+"):
+        for named in ("go: https://go.dev", "gh: https://github.com/cli/cli", "git: sudo apt-get install git", "npm (Node 20+", "colima (sandboxes run in its VM"):
             self.assertIn(named, result.stderr)
         self.assertNotIn("python3:", result.stderr)
         self.assertNotIn("Docker's apt repository", result.stderr)
@@ -417,12 +417,12 @@ fi
         self.assertEqual(self.privileged_calls(), [])
 
     def test_linux_without_docker_names_dockers_apt_repository(self):
-        self.have("go", "python3", "gh", "git", "npm")
+        self.have("go", "python3", "gh", "git", "npm", "colima")
         self.system("Linux")
         result = self.run_script()
         self.assertEqual(result.returncode, 1)
         self.assertIn("https://docs.docker.com/engine/install/ubuntu/", result.stderr)
-        self.assertIn("sudo apt-get install docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin", result.stderr)
+        self.assertIn("sudo apt-get install docker-ce-cli docker-buildx-plugin docker-compose-plugin", result.stderr)
         self.assertNotIn("install docker.io", result.stderr)
         self.assertNotIn("snap install", result.stderr)
         self.assertEqual(self.brew_calls(), [])
@@ -453,20 +453,20 @@ fi
         self.assertFalse((self.home / ".docker" / "cli-plugins" / "docker-buildx").exists())
 
     def test_linux_missing_npm_alone_is_not_a_failure(self):
-        self.have("go", "python3", "gh", "git", "docker")
+        self.have("go", "python3", "gh", "git", "docker", "colima")
         self.system("Linux")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("placeholder", result.stderr)
         self.assertEqual(self.brew_calls(), [])
 
-    def test_linux_docker_down_without_colima_names_systemd_and_goes_on(self):
-        self.have("go", "python3", "gh", "git", "npm", "docker", docker_up=False)
+    def test_linux_without_colima_names_it_and_fails(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker")
         self.system("Linux")
         result = self.run_script()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("sudo systemctl start docker", result.stderr)
-        self.assertIn("sudo usermod -aG docker", result.stderr)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("colima (sandboxes run in its VM; it needs QEMU and /dev/kvm)", result.stderr)
+        self.assertNotIn("systemctl", result.stderr)
         self.assertEqual(self.privileged_calls(), [])
         self.assertEqual(self.colima_calls(), [])
 

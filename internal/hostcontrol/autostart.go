@@ -178,7 +178,7 @@ func ensureDocker(dp Deps, ctx context.Context, w io.Writer, subject string) err
 	}
 	profile, isColima := colimaToStart(dp, ctx)
 	if !isColima {
-		return fmt.Errorf("%s and docker is not usable (start it: `colima start`, or on Linux with Docker Engine `sudo systemctl start docker`): %v", subject, err)
+		return fmt.Errorf("%s and docker is not usable (start it: `colima start`): %v", subject, err)
 	}
 	if cerr := startColima(dp, ctx, w, profile); cerr != nil {
 		return fmt.Errorf("%s and docker is not usable (%v): %v", subject, err, cerr)

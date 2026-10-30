@@ -11,17 +11,21 @@
 #   python3, git          python git         apt-get                    the command is not on PATH
 #   gh                    gh                 GitHub CLI's Linux page    the command is not on PATH
 #   npm (the console)     node               nodejs.org                 the command is not on PATH
-#   docker                docker             Docker's apt repository    the command is not on PATH
+#   docker (the CLI)      docker             Docker's apt repository    the command is not on PATH
 #   docker buildx         docker-buildx      Docker's apt repository    `docker buildx version` fails
 #   docker compose        -                  Docker's apt repository    Linux, and `docker compose version` fails
-#   a Docker daemon       colima             systemd's docker service   macOS: neither docker nor colima is on PATH
+#   a Docker daemon       colima             colima (QEMU, /dev/kvm)    macOS: neither docker nor colima is on PATH;
+#                                                                       Linux: colima is not on PATH
 #   terminal-notifier     terminal-notifier  -                          macOS, and the command is not on PATH
 #
-# On Linux, Docker comes from Docker's own apt repository
-# (https://docs.docker.com/engine/install/ubuntu/): docker-ce, docker-ce-cli,
-# docker-buildx-plugin and docker-compose-plugin. The distribution's docker.io
-# package and the snap are not named: they can lack the buildx plugin or
-# Compose v2, which the image builds and compose services need.
+# On Linux the Docker daemon runs in colima's VM, as on a Mac: sandboxes do
+# not run on Docker Engine on the host (factoryd refuses that backend), so
+# colima is required there too. The docker CLI and its plugins come from
+# Docker's own apt repository (https://docs.docker.com/engine/install/ubuntu/):
+# docker-ce-cli, docker-buildx-plugin and docker-compose-plugin. The
+# distribution's docker.io package and the snap are not named: they can lack
+# the buildx plugin or Compose v2, which the image builds and compose
+# services need.
 #
 # terminal-notifier is what makes a desktop notification's click open the
 # request it is about. It is optional: without Homebrew, or when its install
@@ -38,9 +42,8 @@
 # PATH, on either OS: `colima start` for a VM that already exists (its own
 # settings), else `colima start --memory 4`. FACTORYD_AUTOSTART=0 turns the
 # start off, as it does for factoryd's own. Any other Docker is the
-# operator's to start: on Linux without colima this never starts dockerd and
-# prints the systemd command and the docker group membership instead.
-# `make install` stops at the image build and says so.
+# operator's to start; this never starts dockerd. `make install` stops at the
+# image build and says so.
 #
 # Without Homebrew on macOS, and always on Linux, it installs nothing: it
 # names what is missing and fails, unless only npm is, which costs the console
@@ -75,7 +78,7 @@ linux_prereqs() {
 	have git || need "git: sudo apt-get install git"
 	docker_packages=""
 	if ! have docker; then
-		docker_packages="docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin"
+		docker_packages="docker-ce-cli docker-buildx-plugin docker-compose-plugin"
 		need "docker, docker buildx and docker compose: Docker's apt repository"
 	else
 		if ! docker buildx version >/dev/null 2>&1; then
@@ -87,6 +90,7 @@ linux_prereqs() {
 			need "docker compose (the Compose v2 plugin): Docker's apt repository"
 		fi
 	fi
+	have colima || need "colima (sandboxes run in its VM; it needs QEMU and /dev/kvm): https://github.com/abiosoft/colima#installation"
 	if [ -z "$linux_lines" ]; then
 		have npm || echo "npm not installed -- factoryd will serve the console placeholder page (Node 20+ from https://nodejs.org builds the console)" >&2
 		return 0
@@ -164,11 +168,4 @@ if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker 
 		echo "Starting Docker: colima start --memory 4"
 		colima start --memory 4
 	fi
-fi
-
-# Linux without colima: the system's Docker service is the operator's to
-# start. The install goes on; the image step says Docker is down.
-if [ "$os" = Linux ] && have docker && ! have colima && ! docker info >/dev/null 2>&1; then
-	echo "Docker is not answering. Start it: sudo systemctl start docker ('sudo systemctl enable docker' starts it at boot)." >&2
-	echo "If it is running, add yourself to the docker group so you can reach its socket: sudo usermod -aG docker \"\$USER\", then log in again." >&2
 fi

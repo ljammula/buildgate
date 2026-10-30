@@ -53,7 +53,7 @@ func TestClassify(t *testing.T) {
 }
 
 // TestEveryRefusedBackendSaysWhy: each refused backend has its own reason,
-// and only colima and native-linux have none.
+// and only colima has none.
 func TestEveryRefusedBackendSaysWhy(t *testing.T) {
 	seen := map[string]Backend{}
 	for _, b := range []Backend{Colima, NativeLinux, DockerDesktop, DesktopLinux, Rootless, Userns, Snap, Podman, WSL2, Other} {
@@ -78,8 +78,8 @@ func TestDetectionRefused(t *testing.T) {
 	if err := (Detection{Backend: Colima}).Refused(); err != nil {
 		t.Errorf("colima refused: %v", err)
 	}
-	if err := (Detection{Backend: NativeLinux}).Refused(); err != nil {
-		t.Errorf("native-linux refused: %v", err)
+	if err := (Detection{Backend: NativeLinux}).Refused(); err == nil || !strings.Contains(err.Error(), "65532") {
+		t.Errorf("native-linux = %v, want refused with the uid reason", err)
 	}
 	err := (Detection{Backend: Rootless, Facts: Facts{Context: "rootless", Endpoint: "unix:///run/user/1000/docker.sock"}}).Refused()
 	if err == nil || !strings.Contains(err.Error(), "rootless") || !strings.Contains(err.Error(), "/run/user/1000/docker.sock") {
