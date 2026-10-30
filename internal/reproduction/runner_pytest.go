@@ -111,8 +111,14 @@ func methodIndent(line string) bool {
 		(strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "\t\t"))
 }
 
+// pytestInterpreter picks the repository's own Python, which is where its
+// setup commands installed pytest: an active $VIRTUAL_ENV, then a `.venv` or
+// `venv` directory at the worktree root, else python3 on PATH. It tests
+// paths only; it reads no file.
+const pytestInterpreter = `BG_PY=python3; if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then BG_PY="$VIRTUAL_ENV/bin/python"; elif [ -x .venv/bin/python ]; then BG_PY=.venv/bin/python; elif [ -x venv/bin/python ]; then BG_PY=venv/bin/python; fi; `
+
 func (pytestJUnit) Command(inv Invocation) Command {
-	script := fmt.Sprintf(`PYTHONPATH=%s"${PYTHONPATH:+:$PYTHONPATH}" BG_REPRO_TEST_TIMEOUT=%d python3 -m pytest -p no:cacheprovider -o addopts= -p bg_repro_timeout --junitxml=%s -q %s`,
+	script := pytestInterpreter + fmt.Sprintf(`PYTHONPATH=%s"${PYTHONPATH:+:$PYTHONPATH}" BG_REPRO_TEST_TIMEOUT=%d "$BG_PY" -m pytest -p no:cacheprovider -o addopts= -p bg_repro_timeout --junitxml=%s -q %s`,
 		shellQuote(inv.HelperDir), int(PerTestTimeout.Seconds()), shellQuote(inv.ReportPath), pytestNodeIDs(inv))
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(pytestTimeoutPlugin), Timeout: launchTimeout(inv.TestIDs)}
 }

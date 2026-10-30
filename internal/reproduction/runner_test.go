@@ -497,3 +497,51 @@ func TestCommandsSelectExactlyTheJudgedIDs(t *testing.T) {
 		}
 	}
 }
+
+// The pytest command runs under the repository's own Python, where its setup
+// installed pytest: $VIRTUAL_ENV, then .venv, then venv, else python3. A
+// repository that installs into a venv otherwise collects nothing.
+func TestPytestCommandRunsTheRepositorysOwnPython(t *testing.T) {
+	stub := func(t *testing.T, dir, name string) {
+		t.Helper()
+		bin := filepath.Join(dir, "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		script := "#!/bin/sh\necho " + name + "\n"
+		if err := os.WriteFile(filepath.Join(bin, "python"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := pytestJUnit{}.Command(Invocation{Path: "tests/test_x.py", TestIDs: []string{"test_a"}, ReportPath: "/r", HelperDir: "/h"}).Script
+	for _, tc := range []struct {
+		name, want string
+		dirs       []string
+		active     bool
+	}{
+		{"active virtualenv first", "active", []string{".venv", "venv"}, true},
+		{".venv before venv", ".venv", []string{".venv", "venv"}, false},
+		{"venv", "venv", []string{"venv"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, d := range tc.dirs {
+				stub(t, filepath.Join(root, d), d)
+			}
+			cmd := exec.Command("sh", "-c", script)
+			cmd.Dir, cmd.Env = root, []string{"PATH=/usr/bin:/bin"}
+			if tc.active {
+				active := t.TempDir()
+				stub(t, active, "active")
+				cmd.Env = append(cmd.Env, "VIRTUAL_ENV="+active)
+			}
+			out, err := cmd.Output()
+			if err != nil || strings.TrimSpace(string(out)) != tc.want {
+				t.Fatalf("ran %q (err %v), want the %s interpreter", out, err, tc.want)
+			}
+		})
+	}
+	if !strings.Contains(script, `"$BG_PY" -m pytest`) || !strings.Contains(script, "BG_PY=python3;") {
+		t.Errorf("script %q, want python3 as the fallback interpreter", script)
+	}
+}

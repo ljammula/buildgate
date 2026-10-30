@@ -1,0 +1,6 @@
+{
+  "repo": "math_ops_venv",
+  "source": "testdata/fixtures/math_ops_venv",
+  "verify_command": "venv/bin/python -m pytest -q tests",
+  "preflight_profile": "brownfield"
+}
