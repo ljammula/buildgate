@@ -362,3 +362,27 @@ func TestChallengerJobComparesTheSpecWithTheApprovedHash(t *testing.T) {
 		}
 	}
 }
+
+// A job that exited non-zero (a provider that refused its last turn, a turn
+// that ran out of time) still has the files it left held, with a note; only a
+// job that left none gives no verdict.
+func TestChallengeFilesAreHeldWhateverTheJobsExitStatus(t *testing.T) {
+	for name, tc := range map[string]struct {
+		exit, held  int
+		cause, note string
+	}{
+		"clean exit, files":   {0, 2, "", ""},
+		"clean exit, none":    {0, 0, "handed over no test file", ""},
+		"refused turn, files": {42, 3, "", "exit status 42; the test files it left were held"},
+		"refused turn, none":  {42, 0, "exit status 42 and handed over no test", ""},
+		"failed setup, none":  {95, 0, "exit status 95", ""},
+	} {
+		cause, note := challengeHoldOutcome(tc.exit, tc.held)
+		if (tc.cause == "") != (cause == "") || !strings.Contains(cause, tc.cause) {
+			t.Errorf("%s: cause %q, want %q", name, cause, tc.cause)
+		}
+		if (tc.note == "") != (note == "") || !strings.Contains(note, tc.note) {
+			t.Errorf("%s: note %q, want %q", name, note, tc.note)
+		}
+	}
+}
