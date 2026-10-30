@@ -33,7 +33,7 @@ func TestBuildTicketHeaderReports(t *testing.T) {
 		{
 			name:        "well-formed real ticket",
 			specPath:    realTicket,
-			wantPresent: []string{"Verify-Command:", "Allowed-Files:", "Required-Changed-Files:", "Required-Content:"},
+			wantPresent: []string{"Verify-Command:", "Allowed-Files:"},
 			wantNotPresent: []string{
 				"Tests-Required:", // this ticket never declares it
 			},
@@ -46,12 +46,12 @@ func TestBuildTicketHeaderReports(t *testing.T) {
 		{
 			name:           "typo'd header name is absent, not malformed",
 			specContent:    "Verify-command: make verify\n", // lowercase c
-			wantNotPresent: []string{"Verify-Command:", "Allowed-Files:", "Required-Changed-Files:", "Required-Content:", "Tests-Required:"},
+			wantNotPresent: []string{"Verify-Command:", "Allowed-Files:", "Tests-Required:"},
 		},
 		{
 			name:           "no headers at all",
 			specContent:    "# Ticket: nothing declared\n\nJust prose.\n",
-			wantNotPresent: []string{"Verify-Command:", "Allowed-Files:", "Required-Changed-Files:", "Required-Content:", "Tests-Required:"},
+			wantNotPresent: []string{"Verify-Command:", "Allowed-Files:", "Tests-Required:"},
 		},
 	}
 
@@ -128,6 +128,18 @@ func TestCheckTicketMainExitsNonZeroOnlyForMalformedHeaders(t *testing.T) {
 	}
 	if err := checkTicketMain([]string{malformed}); err == nil {
 		t.Error("checkTicketMain(malformed header) = nil, want an error")
+	}
+}
+
+func TestCheckTicketWithoutFileListNamesRepositoryScope(t *testing.T) {
+	reports, err := buildTicketHeaderReportsFromContent(t, "# Ticket\n\nprose only\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	printTicketHeaderReport(&output, "ticket.spec.md", reports)
+	if !strings.Contains(output.String(), "repository's allowed_paths still apply") {
+		t.Fatalf("report = %q, want the repository scope named", output.String())
 	}
 }
 

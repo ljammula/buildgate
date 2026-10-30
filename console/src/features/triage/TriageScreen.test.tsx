@@ -68,27 +68,27 @@ test("shows only needsHuman requests, oldest wait first", async () => {
   expect(await screen.findByText(/# Old spec/)).toBeInTheDocument();
 });
 
-test("lists an oracle_review request with its state, a reason and a link, and no Approve", async () => {
+test("lists a resume_review request with its state, a reason and a link, and no Approve", async () => {
   renderApp(<TriageScreen />, {
     server: triage([
       {
-        id: "req-oracle",
-        state: "oracle_review",
-        title: "Oracle",
+        id: "req-resume",
+        state: "resume_review",
+        title: "Resume",
         enteredAt: "2026-09-10T08:00:00Z",
       },
       { id: "req-spec", state: "spec_review", title: "Spec", enteredAt: "2026-09-11T08:00:00Z" },
     ]),
   });
-  expect(await screen.findByTestId("triage-row-req-oracle")).toBeInTheDocument();
+  expect(await screen.findByTestId("triage-row-req-resume")).toBeInTheDocument();
   expect(row("req-spec")).toBeInTheDocument();
-  // The oldest wait is focused: an oracle review is opened, never approved here.
+  // The oldest wait is focused: a resume review is opened, never approved here.
   expect(screen.getByTestId("triage-reason")).toHaveTextContent(
-    "The drafted acceptance tests wait for your review.",
+    "A resume plan waits for your approval.",
   );
   expect(screen.getByRole("link", { name: "Open request" })).toHaveAttribute(
     "href",
-    "/requests/req-oracle",
+    "/requests/req-resume",
   );
   expect(screen.queryByRole("button", { name: "Approve (a)" })).not.toBeInTheDocument();
   await userEvent.keyboard("a");

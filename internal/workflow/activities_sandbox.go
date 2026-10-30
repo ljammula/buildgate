@@ -38,7 +38,7 @@ type relaunchUnstartedOnlyKey struct{}
 
 // relaunchUnstartedOnly marks ctx as a step whose launch is made again only
 // when its sandbox never started the command (sandbox.ErrSandboxNotStarted):
-// the review, full-suite and named-gate steps. Nothing ran, so the second
+// the review, full-suite and repository-gate steps. Nothing ran, so the second
 // launch spends nothing twice and finds the worktree as the first did. A
 // command that started and then failed is not launched again on these
 // steps: a review would get a second full spend ceiling and a worktree its
@@ -188,7 +188,7 @@ const sandboxAttemptTeardownMargin = 10 * time.Second
 // the Activity's own hooks (beforeAttempt/afterAttempt returning errors
 // that abort the loop), per-attempt daemon-heartbeat divergence checks,
 // and checkpoint-relative staging specific to this loop; its lifecycle ordering is kept in step with cmd/factoryd by sandbox.RegistryProxyLifecycle.
-func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflowInput, logPath func(int) string, maxAttempts int, beforeAttempt func(int) error, afterAttempt func(int, runner.Result, error) error, relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, referenceOracleDir, referenceOracleMountPath string, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
+func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflowInput, logPath func(int) string, maxAttempts int, beforeAttempt func(int) error, afterAttempt func(int, runner.Result, error) error, relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, composeSpec *sandbox.ComposeServicesSpec, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -414,7 +414,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	// always invoked from inside heartbeatWhileRunning (see every one of
 	// its callers -- RunBuildActivity, RunVerifyActivity,
 	// RunReviewStepActivity, RunFullSuiteVerifyActivity, the
-	// named-gate check), which already runs a ticker calling
+	// repository-gate check), which already runs a ticker calling
 	// activity.RecordHeartbeat concurrently with this call for as long as
 	// it runs, regardless of what it's doing internally -- so a long wait
 	// for the lock keeps heartbeating exactly like a long-running build
@@ -581,7 +581,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 		if factoryDirErr != nil {
 			return refusedFactoryDirAttempt(afterAttempt, attempt, command, factoryDirErr)
 		}
-		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ReferenceOracleDir: referenceOracleDir, ReferenceOracleMountPath: referenceOracleMountPath, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...),
+		s := sandbox.LaunchSpec{Image: image, WorkDir: workspace, LogPath: logPath(attempt), Name: fmt.Sprintf("factoryd-temporal-worker-%d", time.Now().UnixNano()), User: user, Command: command, Environment: withBuildTimeBudget(ctx, workerEnv, timeout), Memory: a.sandboxMemory(), CPUs: a.sandboxCPUs(), TmpfsSize: a.sandboxTmpfsSize(), Timeout: timeout, Network: "none", Inputs: mounts, RunID: a.runIDFor(input), DataDir: a.dataDirFor(input), WorkerUmask: workerUmask, ProgressPath: progress.PathInDir(a.logDirFor(input)), WorkspaceMasks: append(workspaceMasksFrom(ctx), factoryDir.Masks()...),
 			RestoreInstall: restoresInstall(ctx, input, image)}
 		if registryProxy != nil {
 			// Adds the package-manager environment and the proxy's address.
@@ -772,7 +772,7 @@ func unlaunchedAttempt(afterAttempt func(int, runner.Result, error) error, attem
 
 // hasFakeRunner reports whether a test has injected a fake unsandboxed
 // runner (runWithRetries/runWithRetriesChecked). Every production caller
-// leaves both nil, so every build/verify/full-suite/named-gate launch goes
+// leaves both nil, so every build/verify/full-suite/repository-gate launch goes
 // through the real sandboxed worker container (runSandboxWithRetries) --
 // sandboxing is unconditional and has no host-execution opt-out. Checked
 // ahead of the sandboxed dispatch at every call site in this file so a

@@ -1,6 +1,5 @@
 Verify-Command: python -m pip install -q -e . pytest freezegun && python -m pytest -q tests
 Allowed-Files: src/humanize/time.py, tests/test_time.py, tests/test_i18n.py, README.md
-Required-Changed-Files: src/humanize/time.py, tests/test_time.py, tests/test_i18n.py, README.md
 
 ## Goal
 

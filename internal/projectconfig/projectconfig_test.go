@@ -53,10 +53,6 @@ func TestLoadValidConfig(t *testing.T) {
 	yml := `verify_command: "make verify"
 fast_check_command: "make fast-check"
 full_suite_command: "go test ./..."
-lint_command: "golangci-lint run ./..."
-security_command: "govulncheck ./..."
-unit_test_command: "go test ./..."
-integration_test_command: "go test -tags=integration ./..."
 test_patterns:
   - "*_test.go"
   - "*.spec.ts"
@@ -90,20 +86,8 @@ cost_ceiling_micro_usd: 5000000
 	if cfg.FastCheckCommand != "make fast-check" {
 		t.Errorf("FastCheckCommand = %q", cfg.FastCheckCommand)
 	}
-	if cfg.LintCommand != "golangci-lint run ./..." {
-		t.Errorf("LintCommand = %q", cfg.LintCommand)
-	}
-	if cfg.SecurityCommand != "govulncheck ./..." {
-		t.Errorf("SecurityCommand = %q", cfg.SecurityCommand)
-	}
 	if cfg.FullSuiteCommand != "go test ./..." {
 		t.Errorf("FullSuiteCommand = %q", cfg.FullSuiteCommand)
-	}
-	if cfg.UnitTestCommand != "go test ./..." {
-		t.Errorf("UnitTestCommand = %q", cfg.UnitTestCommand)
-	}
-	if cfg.IntegrationTestCommand != "go test -tags=integration ./..." {
-		t.Errorf("IntegrationTestCommand = %q", cfg.IntegrationTestCommand)
 	}
 	if want := []string{"*_test.go", "*.spec.ts"}; len(cfg.TestPatterns) != len(want) || cfg.TestPatterns[0] != want[0] || cfg.TestPatterns[1] != want[1] {
 		t.Errorf("TestPatterns = %v, want %v", cfg.TestPatterns, want)
@@ -286,6 +270,22 @@ func TestLoadRejectsRemovedReviewPolicyKey(t *testing.T) {
 	}
 	if _, _, err := Load(root); err == nil {
 		t.Fatal("expected error for a removed review_policy key")
+	}
+}
+
+// TestLoadRefusesTheRetiredFixedGateKeys: the four fixed command gates are
+// gone, so a .factory.yml declaring one of their keys fails to load like any
+// unknown key; a repository's own `gates:` list is the way to add a check.
+func TestLoadRefusesTheRetiredFixedGateKeys(t *testing.T) {
+	for _, key := range []string{"lint_command", "security_command", "unit_test_command", "integration_test_command"} {
+		root := t.TempDir()
+		initGitRepo(t, root)
+		if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte(key+": \"true\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(root); err == nil {
+			t.Errorf("a .factory.yml declaring %s loaded; the fixed gates are retired", key)
+		}
 	}
 }
 
@@ -516,17 +516,16 @@ func TestLoadRejectsBadRepoDefinedGates(t *testing.T) {
 		many += fmt.Sprintf("  - id: g%d\n    command: \"true\"\n", i)
 	}
 	cases := map[string]string{
-		"an id with a slash":               "gates:\n  - id: a/b\n    command: \"true\"\n",
-		"an id with a capital":             "gates:\n  - id: NoTodo\n    command: \"true\"\n",
-		"an id with a dash":                "gates:\n  - id: no-todo\n    command: \"true\"\n",
-		"an empty id":                      "gates:\n  - command: \"true\"\n",
-		"an id over 32 characters":         "gates:\n  - id: " + strings.Repeat("a", 33) + "\n    command: \"true\"\n",
-		"an id ending in the rerun suffix": "gates:\n  - id: lint_after_oracle_commit\n    command: \"true\"\n",
-		"a duplicate id":                   "gates:\n  - id: a\n    command: \"true\"\n  - id: a\n    command: \"false\"\n",
-		"a gate with no command":           "gates:\n  - id: a\n",
-		"a blank command":                  "gates:\n  - id: a\n    command: \"  \"\n",
-		"an unknown key in a gate":         "gates:\n  - id: a\n    command: \"true\"\n    image: alpine\n",
-		"more gates than the bound":        many,
+		"an id with a slash":        "gates:\n  - id: a/b\n    command: \"true\"\n",
+		"an id with a capital":      "gates:\n  - id: NoTodo\n    command: \"true\"\n",
+		"an id with a dash":         "gates:\n  - id: no-todo\n    command: \"true\"\n",
+		"an empty id":               "gates:\n  - command: \"true\"\n",
+		"an id over 32 characters":  "gates:\n  - id: " + strings.Repeat("a", 33) + "\n    command: \"true\"\n",
+		"a duplicate id":            "gates:\n  - id: a\n    command: \"true\"\n  - id: a\n    command: \"false\"\n",
+		"a gate with no command":    "gates:\n  - id: a\n",
+		"a blank command":           "gates:\n  - id: a\n    command: \"  \"\n",
+		"an unknown key in a gate":  "gates:\n  - id: a\n    command: \"true\"\n    image: alpine\n",
+		"more gates than the bound": many,
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -680,6 +679,30 @@ func TestAllowedPathsLoadsAndIsValidatedLikeTestPatterns(t *testing.T) {
 	for _, entry := range []string{"", "/", "/x/", "*/src/", "src[s]/", "../x", "a/../b", "**/a.go", "src/**", "[a"} {
 		if _, err := load("allowed_paths:\n  - \"" + entry + "\"\n"); err == nil || !strings.Contains(err.Error(), "allowed_paths") {
 			t.Errorf("allowed_paths entry %q: err = %v, want a refusal naming allowed_paths", entry, err)
+		}
+	}
+}
+
+func TestPROrderLoadsAndIsValidatedLikeAllowedPaths(t *testing.T) {
+	load := func(yml string) (*Config, error) {
+		root := t.TempDir()
+		initGitRepo(t, root)
+		if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _, err := Load(root)
+		return cfg, err
+	}
+	cfg, err := load("pr_order:\n  - [\"db/migrations/\"]\n  - [\"api/\", \"*.md\"]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"db/migrations/"}, {"api/", "*.md"}}; !reflect.DeepEqual(cfg.PROrder, want) {
+		t.Errorf("PROrder = %v, want %v", cfg.PROrder, want)
+	}
+	for _, yml := range []string{"pr_order:\n  - []\n", "pr_order:\n  - [\"\"]\n", "pr_order:\n  - [\"a/\", \"/b\"]\n", "pr_order:\n  - [\"db/**\"]\n", "pr_order:\n  - [\"[a\"]\n"} {
+		if _, err := load(yml); err == nil || !strings.Contains(err.Error(), "pr_order group") {
+			t.Errorf("%q: err = %v, want a refusal naming the pr_order group", yml, err)
 		}
 	}
 }

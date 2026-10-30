@@ -172,6 +172,7 @@ func scopedTicket(criterion int, steps string) string {
 func plannedAndRejected(t *testing.T, anchors ...request.RejectionAnchor) (dataDir string, r *request.Request, tickets []requestdriver.DraftedTicket) {
 	t.Helper()
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	tickets = []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)},
 		{Filename: "002.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 2)},

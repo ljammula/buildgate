@@ -559,6 +559,9 @@ func ValidateRouting(s Settings) error {
 	if err := checkRoutingRole(s, "review", s.Roles.Review); err != nil {
 		return err
 	}
+	if err := checkRoutingRole(s, "challenger", s.Roles.Challenger); err != nil {
+		return err
+	}
 
 	return checkReviewBackendDiffers(s)
 }

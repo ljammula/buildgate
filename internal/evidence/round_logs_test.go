@@ -24,7 +24,7 @@ func TestRetainRoundLogsCopiesEachRoundsLogs(t *testing.T) {
 	workspace, dst := t.TempDir(), filepath.Join(t.TempDir(), RoundLogsDirName)
 	writeRoundLog(t, workspace, "round-1", "verify.log", "round one verify\n")
 	writeRoundLog(t, workspace, "round-2", "fast-check.log", "round two fast check\n")
-	writeRoundLog(t, workspace, "round-2", "oracle.log", "round two oracle\n")
+	writeRoundLog(t, workspace, "round-2", "setup.log", "round two setup\n")
 	// Not a round log: another name, and a folder that is not a round.
 	writeRoundLog(t, workspace, "round-2", "notes.txt", "agent scratch\n")
 	writeRoundLog(t, workspace, "scratch", "verify.log", "not a round\n")
@@ -37,7 +37,7 @@ func TestRetainRoundLogsCopiesEachRoundsLogs(t *testing.T) {
 	for path, want := range map[string]string{
 		"round-1/verify.log":     "round one verify\n",
 		"round-2/fast-check.log": "round two fast check\n",
-		"round-2/oracle.log":     "round two oracle\n",
+		"round-2/setup.log":      "round two setup\n",
 	} {
 		got, err := os.ReadFile(filepath.Join(dst, path))
 		if err != nil || string(got) != want {
@@ -93,7 +93,7 @@ func TestRetainRoundLogsRefusesLinksAndSpecialFiles(t *testing.T) {
 
 	t.Run("the log is a symlink", func(t *testing.T) {
 		workspace, dst := t.TempDir(), filepath.Join(t.TempDir(), RoundLogsDirName)
-		writeRoundLog(t, workspace, "round-1", "oracle.log", "real\n")
+		writeRoundLog(t, workspace, "round-1", "fast-check.log", "real\n")
 		if err := os.Symlink(secret, filepath.Join(workspace, ".pi-build-session", "feedback", "round-1", "verify.log")); err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestRetainRoundLogsRefusesLinksAndSpecialFiles(t *testing.T) {
 	}
 	t.Run("the log is a named pipe", func(t *testing.T) {
 		workspace, dst := t.TempDir(), filepath.Join(t.TempDir(), RoundLogsDirName)
-		writeRoundLog(t, workspace, "round-1", "oracle.log", "real\n")
+		writeRoundLog(t, workspace, "round-1", "fast-check.log", "real\n")
 		if err := syscall.Mkfifo(filepath.Join(workspace, ".pi-build-session", "feedback", "round-1", "verify.log"), 0o644); err != nil {
 			t.Skipf("mkfifo: %v", err)
 		}
@@ -227,7 +227,7 @@ func TestReadRetainedRoundLogReadsTheStartOfTheFirstLogThatExists(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	write("round-logs/round-2/oracle.log", "oracle output")
+	write("round-logs/round-2/setup.log", "setup output")
 	write("round-logs/round-2/verify.log", "verify output, a long one")
 	name, data := ReadRetainedRoundLog(runDir, 2, 13)
 	if name != "round-logs/round-2/verify.log" || string(data) != "verify output" {

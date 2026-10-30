@@ -17,13 +17,14 @@ func overrideToAccepted(t *testing.T, m *memRepo, base, result string) (*run.Run
 	dataDir := t.TempDir()
 	seeded := &run.Run{ID: "run-1", Ticket: "ticket-1", Project: "widget", ProjectPath: m.dir, State: run.StateQuarantined,
 		CreatedAt: "2026-08-26T10:00:00Z", BaseSHA: base, ResultSHA: result, ChangedFiles: m.changed(base, result),
-		DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 1}, GateResults: []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "full_suite_verify", Passed: true}},
+		DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 1}, ChangeSize: &run.ChangeSize{SourceFiles: 1, SourceLines: 1},
+		GateResults:                []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "full_suite_verify", Passed: true}},
 		DependencyLockfilesTouched: []string{}}
 	if err := seeded.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
 	err := overrideMain(newTestDeps(t), []string{"-run", seeded.ID, "-data-dir", dataDir, "-by", "operator", "-reason", "reviewed by hand", "-state", "accepted",
-		"-release-allow-overrides", "-release-allow-unsandboxed", "-release-rollback-plan", "revert the commit", "-release-max-files-changed", "10", "-release-max-insertions", "1000"})
+		"-release-allow-overrides", "-release-allow-unsandboxed", "-release-rollback-plan", "revert the commit", "-release-max-files-changed", "10", "-release-max-changed-lines", "1000"})
 	if err != nil {
 		t.Fatalf("override: %v", err)
 	}

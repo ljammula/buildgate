@@ -10,7 +10,7 @@ import (
 )
 
 // A repository command (canonical verify, the baseline verify, the full
-// suite, a named gate) that fails while the run's registry proxy cannot
+// suite, a repository gate) that fails while the run's registry proxy cannot
 // reach a package registry has not judged the work. The proxy counts the
 // requests its upstream failed (sandbox.RegistryProxyLifecycle.UpstreamFailures)
 // and runSandboxWithRetries reads that count before and after each launch.

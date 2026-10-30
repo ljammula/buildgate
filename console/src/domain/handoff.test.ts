@@ -81,7 +81,7 @@ test("a handoff with no checks decodes, and one missing a required field names i
 });
 
 test("every bin the server writes has its own wording, and an unknown one keeps its name", () => {
-  for (const bin of ["corrective", "corrective_if_oracle_in_loop", "never", "operator"]) {
+  for (const bin of ["corrective", "never", "operator"]) {
     expect(handoffBinLabel(bin)).not.toBe(bin);
     expect(handoffNextSentence(bin)).not.toContain("Sorted as");
   }

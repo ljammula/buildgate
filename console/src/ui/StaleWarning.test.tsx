@@ -51,11 +51,11 @@ describe("StaleWarning", () => {
 
   test("detail=callout stacks the full error callout over the message", () => {
     render(
-      <StaleWarning error={boom} detail="callout" testId="oracle-stale-listing">
+      <StaleWarning error={boom} detail="callout" testId="stale-listing">
         The files below may be out of date.
       </StaleWarning>,
     );
-    const box = screen.getByTestId("oracle-stale-listing");
+    const box = screen.getByTestId("stale-listing");
     expect(box).toHaveTextContent("Request failed (500)");
     expect(box).toHaveTextContent("The files below may be out of date.");
     expect(screen.getByRole("alert")).toBeInTheDocument();

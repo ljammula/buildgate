@@ -30,6 +30,7 @@ func malformedCoverageTicket(t *testing.T) string {
 func TestAdvancePlanningRedraftsAMalformedPlanOnceWithTheParsersMessage(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	malformed := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: malformedCoverageTicket(t)}}
 	valid := []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)}}
 	runner, callCount, feedbackByCall := sequencedPlanTicketsRunner(t, dataDir,
@@ -40,7 +41,7 @@ func TestAdvancePlanningRedraftsAMalformedPlanOnceWithTheParsersMessage(t *testi
 			return valid, &request.PlanEvidence{}, nil
 		},
 	)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *callCount != 2 {
@@ -71,11 +72,12 @@ func TestAdvancePlanningRedraftsAMalformedPlanOnceWithTheParsersMessage(t *testi
 func TestAdvancePlanningMalformedPlanTwiceHaltsAfterTwoLaunches(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	malformed := func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: malformedCoverageTicket(t)}}, &request.PlanEvidence{}, nil
 	}
 	runner, callCount, _ := sequencedPlanTicketsRunner(t, dataDir, malformed, malformed)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *callCount != 2 {
@@ -99,6 +101,7 @@ func TestAdvancePlanningMalformedPlanTwiceHaltsAfterTwoLaunches(t *testing.T) {
 func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	content := malformedCoverageTicket(t)
 	malformed := func() ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: content}}, &request.PlanEvidence{}, nil
@@ -110,7 +113,7 @@ func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _, _ := sequencedPlanTicketsRunner(t, dataDir, malformed, malformed)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if entries, err := os.ReadDir(existing); err != nil || len(entries) != 0 {
@@ -139,6 +142,7 @@ func TestAdvancePlanningKeepsEachRefusedPlanForTheRecord(t *testing.T) {
 func TestAdvancePlanningAcceptsAnEmptyOutOfScopeSection(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	valid := requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)
 	idx := strings.Index(valid, "## Out of scope")
 	if idx < 0 {
@@ -150,7 +154,7 @@ func TestAdvancePlanningAcceptsAnEmptyOutOfScopeSection(t *testing.T) {
 			return []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: empty}}, &request.PlanEvidence{}, nil
 		},
 	)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *callCount != 1 {

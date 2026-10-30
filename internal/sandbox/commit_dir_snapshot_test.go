@@ -167,10 +167,10 @@ func TestCommitDirSnapshotWritesFilesWithModes(t *testing.T) {
 	if snap.Mask == nil || snap.Mask.Source != root || snap.Mask.Target != ".factory" || !snap.Mask.Dir || snap.Mask.AbsentInWorktree {
 		t.Fatalf("mask = %+v", snap.Mask)
 	}
-	if err := validateWorkspaceMask(*snap.Mask, ""); err != nil {
+	if err := validateWorkspaceMask(*snap.Mask); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateWorkspaceMasks([]WorkspaceMask{*snap.Mask}, ""); err != nil {
+	if err := validateWorkspaceMasks([]WorkspaceMask{*snap.Mask}); err != nil {
 		t.Fatal(err)
 	}
 	wantFiles := map[string]struct {

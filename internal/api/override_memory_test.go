@@ -13,14 +13,15 @@ import (
 )
 
 func memoryOverridePolicy() release.MergePolicy {
-	return release.MergePolicy{RollbackPlan: "revert the commit", MaxFilesChanged: 10, MaxInsertions: 1000, AllowUnsandboxed: true, AllowOverrides: true}
+	return release.MergePolicy{RollbackPlan: "revert the commit", MaxFilesChanged: 10, MaxChangedLines: 1000, AllowUnsandboxed: true, AllowOverrides: true}
 }
 
 // quarantinedForOverride is a run the policy above releases once overridden.
 func quarantinedForOverride(changed ...string) run.Run {
 	return run.Run{ID: "run-1", Ticket: "ticket-1", Project: "widget", State: run.StateQuarantined, CreatedAt: "2026-08-26T10:00:00Z",
 		BaseSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), ChangedFiles: changed,
-		DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 1}, GateResults: []run.GateResult{{Check: "verify", Passed: true}},
+		DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 1}, ChangeSize: &run.ChangeSize{SourceFiles: 1, SourceLines: 1},
+		GateResults:                []run.GateResult{{Check: "verify", Passed: true}},
 		DependencyLockfilesTouched: []string{}}
 }
 

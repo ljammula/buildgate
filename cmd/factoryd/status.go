@@ -485,7 +485,7 @@ func rolesStatusLines(configPath string) []string {
 		return nil
 	}
 	var lines []string
-	for _, role := range []modelrole.Role{modelrole.RolePlanning, modelrole.RoleExecution, modelrole.RoleReview} {
+	for _, role := range []modelrole.Role{modelrole.RolePlanning, modelrole.RoleExecution, modelrole.RoleReview, modelrole.RoleChallenger} {
 		modelName, modelID, thinking, ok := modelrole.ConfiguredModel(settings, role)
 		if !ok {
 			continue

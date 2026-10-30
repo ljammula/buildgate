@@ -454,7 +454,7 @@ func TestRetriedNamedGateInheritsEarlierAttemptAndJournalsOnlyItsOwn(t *testing.
 	}
 	logDir := t.TempDir()
 	activities := &Activities{LogDir: logDir, SandboxDocker: docker, DataDir: t.TempDir()}
-	input := NamedGateActivityInput{
+	input := RepoGateActivityInput{
 		RunWorkflowInput: RunWorkflowInput{
 			Ticket: "fixture-ticket", WorkspacePath: t.TempDir(), SandboxImage: "factory-worker:test@sha256:deadbeef",
 			SandboxDocker: docker, RunID: "run-id", DataDir: activities.DataDir,

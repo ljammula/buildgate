@@ -18,8 +18,7 @@ import (
 
 // approveMain implements `factoryd approve [-data-dir <path>]
 // <request-id>` (USAGE.md §11): advances a request out of spec_review
-// (to planning, or to oracle_drafting for a -draft-oracles request),
-// oracle_review (to planning) or plan_review (to building). Shares its actual approval
+// (to planning) or plan_review (to building). Shares its actual approval
 // logic -- internal/request.Approve -- with POST /requests/{id}/approve
 // (internal/api's own handler), so neither path can diverge on what
 // counts as a legal approval.
@@ -69,20 +68,14 @@ func approveMain(dp *deps, args []string) error {
 	if _, err := fmt.Fprintf(os.Stdout, "request %s: state=%s\n", r.ID, r.State); err != nil {
 		return fmt.Errorf("print approve result: %w", err)
 	}
-	if r.OracleSkipWarning != "" && r.State == request.StatePlanning {
-		if _, err := fmt.Fprintf(os.Stdout, "warning: %s\n", r.OracleSkipWarning); err != nil {
-			return fmt.Errorf("print approve warning: %w", err)
-		}
-	}
 	return nil
 }
 
 // rejectMain implements `factoryd reject -reason "<text>" [-to plan|spec]
 // [-data-dir <path>] <request-id>` (USAGE.md §11): sends a request in
-// spec_review, oracle_review or plan_review back to the prior drafting
-// state, appending -reason to request.md so the redraft sees it (an
-// oracle_review rejection is recorded on the request's Rejections instead,
-// never in request.md). Shares internal/request.Reject with POST
+// spec_review or plan_review back to the prior drafting
+// state, recording -reason on the request's Rejections so the redraft sees it
+// (never in request.md). Shares internal/request.Reject with POST
 // /requests/{id}/reject, the same way approveMain shares
 // internal/request.Approve.
 //

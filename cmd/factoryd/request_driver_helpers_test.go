@@ -21,7 +21,7 @@ import (
 // Test-only: one pass of the retired poll loop. Production advances each
 // request through its own Temporal workflow (worker_cmd.go). The runners are
 // injectable stubs.
-func driveRequests(dp *deps, ctx context.Context, dataDir string, cfg requestdriver.WorkerConfig, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner, oracleRunner requestdriver.OracleDraftRunner, buildRunner requestdriver.TicketRunner) error {
+func driveRequests(dp *deps, ctx context.Context, dataDir string, cfg requestdriver.WorkerConfig, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner, buildRunner requestdriver.TicketRunner) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
@@ -51,7 +51,7 @@ func driveRequests(dp *deps, ctx context.Context, dataDir string, cfg requestdri
 			// console can say what other requests are queued behind.
 			addActiveRequest(r.ID)
 		}
-		err := requestdriver.AdvanceRequest(dp, ctx, dataDir, r, cfg, specRunner, planRunner, oracleRunner, buildRunner)
+		err := requestdriver.AdvanceRequest(dp, ctx, dataDir, r, cfg, specRunner, planRunner, buildRunner)
 		if isJob {
 			removeActiveRequest(r.ID)
 		}

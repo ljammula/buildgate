@@ -1320,7 +1320,7 @@ func TestQuickstartEnsureConfigReusesExistingValidConfig(t *testing.T) {
 // TestQuickstartEnsureConfigReuseBackfillsMissingReleaseDefaults is the
 // regression test for the deny-all release policy gap (see CLAIMS.md): a
 // reused session config missing release_max_files_changed/
-// release_max_insertions/release_rollback_plan used to stay that way
+// release_max_changed_lines/release_rollback_plan used to stay that way
 // forever, silently denying every PR (internal/release.MergePolicyCheck: 0
 // files allowed, empty rollback plan). quickstartEnsureConfig must now
 // backfill exactly the missing keys, leave any key the operator already
@@ -1355,13 +1355,13 @@ func TestQuickstartEnsureConfigReuseBackfillsMissingReleaseDefaults(t *testing.T
 	if reloaded.ReleaseMaxFilesChanged == nil || *reloaded.ReleaseMaxFilesChanged != 3 {
 		t.Errorf("ReleaseMaxFilesChanged = %v, want the operator's own value (3) preserved", reloaded.ReleaseMaxFilesChanged)
 	}
-	if reloaded.ReleaseMaxInsertions == nil || *reloaded.ReleaseMaxInsertions != quickstartDefaultReleaseMaxInsertions {
-		t.Errorf("ReleaseMaxInsertions = %v, want the backfilled default %d", reloaded.ReleaseMaxInsertions, quickstartDefaultReleaseMaxInsertions)
+	if reloaded.ReleaseMaxChangedLines == nil || *reloaded.ReleaseMaxChangedLines != quickstartDefaultReleaseMaxChangedLines {
+		t.Errorf("ReleaseMaxChangedLines = %v, want the backfilled default %d", reloaded.ReleaseMaxChangedLines, quickstartDefaultReleaseMaxChangedLines)
 	}
 	if reloaded.ReleaseRollbackPlan == nil || *reloaded.ReleaseRollbackPlan != quickstartDefaultReleaseRollbackPlan {
 		t.Errorf("ReleaseRollbackPlan = %v, want the backfilled default %q", reloaded.ReleaseRollbackPlan, quickstartDefaultReleaseRollbackPlan)
 	}
-	if !strings.Contains(out.String(), "release_max_insertions") || !strings.Contains(out.String(), "release_rollback_plan") {
+	if !strings.Contains(out.String(), "release_max_changed_lines") || !strings.Contains(out.String(), "release_rollback_plan") {
 		t.Errorf("output = %q, want it to name the backfilled keys", out.String())
 	}
 	if strings.Contains(out.String(), "release_max_files_changed") {
@@ -1409,7 +1409,7 @@ func TestQuickstartEnsureConfigReuseResolvesAndPersistsDefaultDataDir(t *testing
 	// No data_dir key at all -- release_* keys present so this test
 	// isolates the data_dir behavior from the release-defaults backfill's
 	// own rewrite.
-	if err := os.WriteFile(configPath, []byte("release_max_files_changed: 25\nrelease_max_insertions: 1000\nrelease_rollback_plan: \"git revert\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("release_max_files_changed: 25\nrelease_max_changed_lines: 1000\nrelease_rollback_plan: \"git revert\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	opts := &quickstartOptions{ConfigPath: configPath, DataDir: "data"}
@@ -1459,8 +1459,8 @@ func TestQuickstartEnsureConfigReuseNullOrEmptyDataDirDoesNotCorruptYAML(t *test
 		name    string
 		content string
 	}{
-		{"null data_dir", "data_dir:\nrelease_max_files_changed: 25\nrelease_max_insertions: 1000\nrelease_rollback_plan: \"git revert\"\n"},
-		{"empty-string data_dir", "data_dir: \"\"\nrelease_max_files_changed: 25\nrelease_max_insertions: 1000\nrelease_rollback_plan: \"git revert\"\n"},
+		{"null data_dir", "data_dir:\nrelease_max_files_changed: 25\nrelease_max_changed_lines: 1000\nrelease_rollback_plan: \"git revert\"\n"},
+		{"empty-string data_dir", "data_dir: \"\"\nrelease_max_files_changed: 25\nrelease_max_changed_lines: 1000\nrelease_rollback_plan: \"git revert\"\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			configDir := t.TempDir()
@@ -1548,7 +1548,7 @@ func TestQuickstartEnsureConfigReuseNoticesButNeverAdoptsCwdDataRecords(t *testi
 
 	configDir := t.TempDir()
 	configPath := filepath.Join(configDir, "config.yml")
-	if err := os.WriteFile(configPath, []byte("release_max_files_changed: 25\nrelease_max_insertions: 1000\nrelease_rollback_plan: \"git revert\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("release_max_files_changed: 25\nrelease_max_changed_lines: 1000\nrelease_rollback_plan: \"git revert\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// No DataDir override: opts.DataDir stays at its own real flag default
@@ -1602,7 +1602,7 @@ func TestQuickstartEnsureConfigReuseIgnoresTopLevelCwdRecordDirs(t *testing.T) {
 
 	configDir := t.TempDir()
 	configPath := filepath.Join(configDir, "config.yml")
-	if err := os.WriteFile(configPath, []byte("release_max_files_changed: 25\nrelease_max_insertions: 1000\nrelease_rollback_plan: \"git revert\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("release_max_files_changed: 25\nrelease_max_changed_lines: 1000\nrelease_rollback_plan: \"git revert\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	opts := &quickstartOptions{ConfigPath: configPath}
@@ -1684,8 +1684,8 @@ func TestQuickstartEnsureConfigReuseBackfillPreservesExistingFileBytes(t *testin
 	if reloaded.ReleaseMaxFilesChanged == nil || *reloaded.ReleaseMaxFilesChanged != quickstartDefaultReleaseMaxFilesChanged {
 		t.Errorf("ReleaseMaxFilesChanged = %v, want the backfilled default %d", reloaded.ReleaseMaxFilesChanged, quickstartDefaultReleaseMaxFilesChanged)
 	}
-	if reloaded.ReleaseMaxInsertions == nil || *reloaded.ReleaseMaxInsertions != quickstartDefaultReleaseMaxInsertions {
-		t.Errorf("ReleaseMaxInsertions = %v, want the backfilled default %d", reloaded.ReleaseMaxInsertions, quickstartDefaultReleaseMaxInsertions)
+	if reloaded.ReleaseMaxChangedLines == nil || *reloaded.ReleaseMaxChangedLines != quickstartDefaultReleaseMaxChangedLines {
+		t.Errorf("ReleaseMaxChangedLines = %v, want the backfilled default %d", reloaded.ReleaseMaxChangedLines, quickstartDefaultReleaseMaxChangedLines)
 	}
 	if reloaded.ReleaseRollbackPlan == nil || *reloaded.ReleaseRollbackPlan != quickstartDefaultReleaseRollbackPlan {
 		t.Errorf("ReleaseRollbackPlan = %v, want the backfilled default %q", reloaded.ReleaseRollbackPlan, quickstartDefaultReleaseRollbackPlan)
@@ -1699,14 +1699,14 @@ func TestQuickstartBackfillReleaseDefaultsNoopWhenAllSet(t *testing.T) {
 	files, insertions, plan := 7, 200, "roll back by hand"
 	cfg := &sessionconfig.Config{
 		ReleaseMaxFilesChanged: &files,
-		ReleaseMaxInsertions:   &insertions,
+		ReleaseMaxChangedLines: &insertions,
 		ReleaseRollbackPlan:    &plan,
 	}
 	added := quickstartBackfillReleaseDefaults(cfg)
 	if len(added) != 0 {
 		t.Errorf("added = %v, want none", added)
 	}
-	if *cfg.ReleaseMaxFilesChanged != 7 || *cfg.ReleaseMaxInsertions != 200 || *cfg.ReleaseRollbackPlan != "roll back by hand" {
+	if *cfg.ReleaseMaxFilesChanged != 7 || *cfg.ReleaseMaxChangedLines != 200 || *cfg.ReleaseRollbackPlan != "roll back by hand" {
 		t.Error("backfill must not touch already-set values")
 	}
 }
@@ -2045,8 +2045,8 @@ func TestQuickstartPullDoctorInputsDefaultsWithNoExistingConfig(t *testing.T) {
 	if in.registryProxyImage != "" {
 		t.Errorf("registryProxyImage = %q, want empty (no built-in default)", in.registryProxyImage)
 	}
-	if in.releaseMaxFilesChanged != quickstartDefaultReleaseMaxFilesChanged || in.releaseMaxInsertions != quickstartDefaultReleaseMaxInsertions || in.releaseRollbackPlan != quickstartDefaultReleaseRollbackPlan {
-		t.Errorf("release policy = (%d, %d, %q), want the usable quickstart defaults (a fresh config gets these) -- a zero-value release policy makes doctorCheckReleasePolicy always warn", in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan)
+	if in.releaseMaxFilesChanged != quickstartDefaultReleaseMaxFilesChanged || in.releaseMaxChangedLines != quickstartDefaultReleaseMaxChangedLines || in.releaseRollbackPlan != quickstartDefaultReleaseRollbackPlan {
+		t.Errorf("release policy = (%d, %d, %q), want the usable quickstart defaults (a fresh config gets these) -- a zero-value release policy makes doctorCheckReleasePolicy always warn", in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan)
 	}
 }
 
@@ -2056,33 +2056,33 @@ func TestQuickstartPullDoctorInputsDefaultsWithNoExistingConfig(t *testing.T) {
 // the config it was about to use already had usable release_* keys --
 // doctorChecksFor
 // always appends doctorCheckReleasePolicy, and quickstartPullDoctorInputs
-// used to leave releaseMaxFilesChanged/releaseMaxInsertions/
+// used to leave releaseMaxFilesChanged/releaseMaxChangedLines/
 // releaseRollbackPlan at doctorInputs' own zero value regardless of what
 // existing (already loaded) actually set, so the check evaluated a
 // hardcoded 0/0/"" instead of the config quickstart was really about to
 // use.
 func TestQuickstartPullDoctorInputsUsesExistingConfigReleasePolicy(t *testing.T) {
 	maxFiles := 10
-	maxInsertions := 500
+	maxChangedLines := 500
 	rollbackPlan := "git revert"
 	existing := &sessionconfig.Config{
 		ReleaseMaxFilesChanged: &maxFiles,
-		ReleaseMaxInsertions:   &maxInsertions,
+		ReleaseMaxChangedLines: &maxChangedLines,
 		ReleaseRollbackPlan:    &rollbackPlan,
 	}
 	in := quickstartPullDoctorInputs("docker", existing)
 	if in.releaseMaxFilesChanged != maxFiles {
 		t.Errorf("releaseMaxFilesChanged = %d, want the existing config's %d", in.releaseMaxFilesChanged, maxFiles)
 	}
-	if in.releaseMaxInsertions != maxInsertions {
-		t.Errorf("releaseMaxInsertions = %d, want the existing config's %d", in.releaseMaxInsertions, maxInsertions)
+	if in.releaseMaxChangedLines != maxChangedLines {
+		t.Errorf("releaseMaxChangedLines = %d, want the existing config's %d", in.releaseMaxChangedLines, maxChangedLines)
 	}
 	if in.releaseRollbackPlan != rollbackPlan {
 		t.Errorf("releaseRollbackPlan = %q, want the existing config's %q", in.releaseRollbackPlan, rollbackPlan)
 	}
 	// The false-alarm check itself: with these values populated,
 	// doctorCheckReleasePolicy must not warn.
-	check := doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxInsertions, in.releaseRollbackPlan)
+	check := doctorCheckReleasePolicy(in.releaseMaxFilesChanged, in.releaseMaxChangedLines, in.releaseRollbackPlan)
 	if check.Err != nil {
 		t.Errorf("doctorCheckReleasePolicy = %v, want no error -- the existing config already has usable release defaults", check.Err)
 	}
@@ -2560,7 +2560,7 @@ func TestQuickstartEnsureConfigReuseSignalsRestartNeeded(t *testing.T) {
 	// what this test is actually about -- see
 	// TestQuickstartEnsureConfigReuseBackfillsMissingReleaseDefaults for
 	// that behavior's own dedicated coverage.
-	if err := os.WriteFile(configPath, []byte("data_dir: "+filepath.Join(dir, "data")+"\nrelease_max_files_changed: 25\nrelease_max_insertions: 1000\nrelease_rollback_plan: \"git revert the merge commit on main\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte("data_dir: "+filepath.Join(dir, "data")+"\nrelease_max_files_changed: 25\nrelease_max_changed_lines: 1000\nrelease_rollback_plan: \"git revert the merge commit on main\"\n"+quickstartTestRolesYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2857,5 +2857,20 @@ func TestQuickstartRefusesARepositoryWithoutAgentsFileBeforeAnySetup(t *testing.
 	}
 	if lines := strings.Split(strings.TrimSpace(out.String()), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "Repository: ") {
 		t.Fatalf("quickstart printed more than the repository line before refusing:\n%s", out.String())
+	}
+}
+
+// roles.challenger is written only when the route's model is the challenger's:
+// any other model leaves the role unset, so no challenger runs.
+func TestQuickstartSingleModelRolesWritesTheChallengerOnlyForItsModel(t *testing.T) {
+	roles := quickstartSingleModelRoles("local", challengerModelID)
+	if roles.Challenger == nil || roles.Challenger.Model != "local" || !roles.Challenger.AllowSharedModel {
+		t.Errorf("Challenger = %+v, want the route's model, shared allowed", roles.Challenger)
+	}
+	if roles.Execution == nil || roles.Review == nil || roles.Planning == nil {
+		t.Errorf("roles = %+v, want planning, execution and review", roles)
+	}
+	if other := quickstartSingleModelRoles("local", "some-other-model"); other.Challenger != nil {
+		t.Errorf("Challenger = %+v for another model, want unset", other.Challenger)
 	}
 }

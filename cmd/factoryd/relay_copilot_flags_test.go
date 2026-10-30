@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -58,40 +57,6 @@ func TestRunMainWithReadyRefusesInvalidRolesBlock(t *testing.T) {
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "roles.execution") {
 		t.Fatalf("runMainWithReady with an invalid roles: block: error = %v, want it to name roles.execution", err)
-	}
-}
-
-// TestRunMainWithReadyRejectsReferenceOracleInLoopRetryWithoutCommand is
-// the regression test for a second real finding (found via review, same
-// class as the Temporal check above): -reference-oracle-in-loop-retry set
-// without one of its three required siblings (-reference-oracle-dir/
-// -mount-path/-command) previously no-opped silently -- the build-phase
-// gating condition just stayed false with no error, identical in shape to
-// the Temporal-path silent-no-op this same review round already fixed.
-func TestRunMainWithReadyRejectsReferenceOracleInLoopRetryWithoutCommand(t *testing.T) {
-	dp := newTestDeps(t)
-	t.Setenv("HOME", t.TempDir())
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "sandbox_worker_uid: "+strconv.Itoa(testSandboxWorkerUID())+"\n"+
-		"sandbox_image: example.test/worker@sha256:"+strings.Repeat("a", 64)+"\n"+
-		"routes:\n  local:\n    allow_no_credential: true\n    upstream: https://model-a.example.invalid\n"+
-		"models:\n  m:\n    id: some-model\n    routes: [local]\n"+
-		"roles:\n  execution:\n    model: m\n")
-	err := runMainWithReady(dp, context.Background(), []string{
-		"-ticket", "t", "-workspace", "/does/not/exist", "-spec", "/does/not/exist",
-		// -registry-proxy defaults on for this default, model-backed
-		// build_app.py, and -registry-proxy-image has no built-in default
-		// (see that flag's own help) -- disabled explicitly so this test
-		// reaches its own -reference-oracle-in-loop-retry check instead of
-		// failing earlier on an unrelated, unconfigured registry proxy.
-		"-registry-proxy=false",
-		"-reference-oracle-in-loop-retry",
-		"-reference-oracle-dir", "/does/not/exist",
-		"-reference-oracle-mount-path", "verify",
-		// -reference-oracle-command deliberately omitted.
-	}, nil)
-	if err == nil || !strings.Contains(err.Error(), "-reference-oracle-in-loop-retry requires") {
-		t.Fatalf("runMainWithReady with -reference-oracle-in-loop-retry and no -reference-oracle-command: error = %v, want it to name the missing precondition", err)
 	}
 }
 

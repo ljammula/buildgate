@@ -37,8 +37,8 @@ export class ApiError extends Error {
   }
 
   /**
-   * A 409 edit conflict's `current_sha256` (the spec, ticket and oracle
-   * command PUT routes, when `base_sha256` did not match); null for any
+   * A 409 edit conflict's `current_sha256` (the spec and ticket
+   * PUT routes, when `base_sha256` did not match); null for any
    * other status or body, so `currentSha256 !== null` tells a real edit
    * conflict from an unrelated 409.
    */

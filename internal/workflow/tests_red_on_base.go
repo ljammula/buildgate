@@ -33,7 +33,7 @@ func (o testsRedOutcome) policyInput() *policy.TestsRedOnBaseInput {
 	if o.proof == nil {
 		return nil
 	}
-	return &policy.TestsRedOnBaseInput{Verdict: o.proof.Verdict, Reason: o.proof.Reason}
+	return &policy.TestsRedOnBaseInput{Verdict: o.proof.Verdict, Reason: o.proof.Reason, Skipped: o.proof.SkippedFiles}
 }
 
 // noTestsRedVerdict is a proof that reached no verdict, for reason.
@@ -46,7 +46,7 @@ func noTestsRedVerdict(reason string) testsRedOutcome {
 // once on the result commit and, unless it already failed there, once on the
 // base commit (gateBaseCommit), through RunReviewReproductionActivity; then
 // reproduction.DecideRedOnBase. It runs only once build, verification, the full
-// suite and the named gates passed, and only for a run that did not opt out of
+// suite and the repository gates passed, and only for a run that did not opt out of
 // tests and changed a test file; the gate itself refuses a run with none. An
 // Activity that fails is the run's failure, as for a reviewer's reproduction.
 func runTestsRedOnBase(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, gates gateOutcome, worktreePath, branch string) (testsRedOutcome, error) {
@@ -61,7 +61,7 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 	if !earlierGatesPassed(result, gates) || input.TestsRequiredOptOut != "" {
 		return testsRedOutcome{}, nil
 	}
-	tests := policy.TestFiles(result.ChangedFiles, input.TestPatterns, result.Oracles)
+	tests := policy.TestFiles(result.ChangedFiles, input.TestPatterns)
 	if len(tests) == 0 || temporalworkflow.GetVersion(ctx, testsRedOnBaseChange, temporalworkflow.DefaultVersion, 1) != 1 {
 		return testsRedOutcome{}, nil
 	}
@@ -76,10 +76,12 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 		return testsRedOutcome{}, wrapActivityFailure("hold changed tests activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	if len(held.Held) == 0 {
-		return noTestsRedVerdict(held.Reason), nil
+		out := noTestsRedVerdict(held.Reason)
+		out.proof.SkippedFiles = held.Skipped
+		return out, nil
 	}
 	rctx := reproductionContext(ctx, buildVerifyCtx)
-	proof := &run.TestsRedOnBase{}
+	proof := &run.TestsRedOnBase{SkippedFiles: held.Skipped}
 	var runs []reproduction.FileRuns
 	for _, h := range held.Held {
 		file := run.TestsRedFile{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs}

@@ -41,7 +41,6 @@ type costReport struct {
 	ByModel                       []api.ModelUsage `json:"by_model,omitempty"`
 	Spec                          float64          `json:"spec"`
 	Plan                          float64          `json:"plan"`
-	Oracle                        float64          `json:"oracle,omitempty"`
 	Runs                          float64          `json:"runs"`
 	Total                         float64          `json:"total"`
 	Complete                      bool             `json:"complete"`
@@ -85,7 +84,6 @@ type costModelKey struct {
 func (rep *costReport) addRequestCostSummary(dataDir string, req *request.Request, cs api.CostSummary, byModel map[costModelKey]*api.ModelUsage, order *[]costModelKey) {
 	rep.Spec += cs.Spec
 	rep.Plan += cs.Plan
-	rep.Oracle += cs.Oracle
 	rep.Runs += cs.Runs
 	rep.Total += cs.Total
 	rep.AcceptedTickets += cs.AcceptedTickets
@@ -334,9 +332,6 @@ func printCostReport(w io.Writer, rep *costReport) {
 	fmt.Fprintf(w, "requests:            %d\n", rep.RequestCount)
 	fmt.Fprintf(w, "spec drafting:       $%.2f\n", rep.Spec)
 	fmt.Fprintf(w, "plan drafting:       $%.2f\n", rep.Plan)
-	if rep.Oracle != 0 {
-		fmt.Fprintf(w, "oracle drafting:     $%.2f\n", rep.Oracle)
-	}
 	fmt.Fprintf(w, "ticket runs:         $%.2f\n", rep.Runs)
 	fmt.Fprintf(w, "total:               $%.2f%s\n", rep.Total, completeness)
 	fmt.Fprintf(w, "accepted tickets:    %d\n", rep.AcceptedTickets)

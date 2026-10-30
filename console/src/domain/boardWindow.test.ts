@@ -29,10 +29,8 @@ describe("requestInBoardWindow", () => {
     const inFlight = [
       "submitted",
       "spec_drafting",
-      "oracle_drafting",
       "planning",
       "spec_review",
-      "oracle_review",
       "plan_review",
       "resume_review",
       "halted",

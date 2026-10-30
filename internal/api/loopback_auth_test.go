@@ -309,10 +309,13 @@ func TestConsoleConfigReleasePolicyWarning(t *testing.T) {
 		if !strings.Contains(got.ReleasePolicyWarning, "release_max_files_changed") {
 			t.Errorf("ReleasePolicyWarning = %q, want it to name the session-config fix", got.ReleasePolicyWarning)
 		}
+		if !strings.Contains(got.ReleasePolicyWarning, "release_max_changed_lines") {
+			t.Errorf("ReleasePolicyWarning = %q, want it to name the changed-lines key", got.ReleasePolicyWarning)
+		}
 	})
 
 	t.Run("usable policy is silent", func(t *testing.T) {
-		server := NewServer(dataDir, WithReleasePolicy(release.MergePolicy{MaxFilesChanged: 25, MaxInsertions: 1000, RollbackPlan: "git revert the merge commit on main"}))
+		server := NewServer(dataDir, WithReleasePolicy(release.MergePolicy{MaxFilesChanged: 25, MaxChangedLines: 1000, RollbackPlan: "git revert the merge commit on main"}))
 		recorder := httptest.NewRecorder()
 		server.ServeHTTP(recorder, requestActionFor(t, http.MethodGet, "/console-config.json", "", ""))
 		if strings.Contains(recorder.Body.String(), "release_policy_warning") {

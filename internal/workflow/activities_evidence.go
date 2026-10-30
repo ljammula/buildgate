@@ -2,11 +2,11 @@ package workflow
 
 import (
 	"buildgate/internal/evidence"
-	"buildgate/internal/oraclecommit"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"context"
-	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 
 	"go.temporal.io/sdk/activity"
@@ -128,7 +128,7 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 	// though that run's own changed-file gates excluded it. Extended to
 	// FullSuiteExitCode when FullSuiteRan (found via a later review
 	// round, same class of bug): see FullSuiteRan's own doc comment.
-	if input.BuildExitCode == 0 && input.VerifyExitCode == 0 && (!input.FullSuiteRan || input.FullSuiteExitCode == 0) && !input.NamedGatesFailed {
+	if input.BuildExitCode == 0 && input.VerifyExitCode == 0 && (!input.FullSuiteRan || input.FullSuiteExitCode == 0) && !input.RepoGatesFailed {
 		verifyClean, err := runner.GitIsClean(input.WorkspacePath)
 		if err != nil {
 			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause("check workspace cleanliness after verification", InfrastructureFailureType, err)
@@ -170,14 +170,8 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 
 	result = CollectedEvidence{
 		ResultSHA:    resultSHA,
-		ChangedFiles: evidence.UnionSorted(committedChanged, uncommittedChanged),
+		ChangedFiles: setAsideChallengeFiles(input.WorkspacePath, resultSHA, evidence.UnionSorted(committedChanged, uncommittedChanged), input.SetAside),
 		Committed:    committed,
-	}
-	// The base commit's oracle index (nil when it has none) protects earlier
-	// committed oracles from agent edits; see oraclecommit.CollectEvidence.
-	result.Oracles, err = oraclecommit.CollectEvidence(input.WorkspacePath, input.BaseSHA, resultSHA, result.ChangedFiles, nil, nil)
-	if err != nil {
-		return CollectedEvidence{}, temporal.NewApplicationErrorWithCause("collect committed-oracle evidence", InfrastructureFailureType, err)
 	}
 	packageLockChanges, err := runner.PackageLockDependencyChanges(input.WorkspacePath, input.BaseSHA, result.ChangedFiles)
 	if err != nil {
@@ -247,30 +241,32 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 		result.DiffTruncated = truncated
 	}
 
-	if input.RequiredContent == nil {
-		return result, nil
-	}
-
-	// Base content via GitShowFile (as of BaseSHA); final content read
-	// directly from the workspace via ReadRegularFile — the file's true
-	// final state, including anything left uncommitted by verification,
-	// same convention cmd/factoryd's uses, but refusing to
-	// follow a symlink a required path may have been replaced with (see
-	// ReadRegularFile's doc comment).
-	result.RequiredContentBaseFiles = make(map[string]string, len(input.RequiredChangedFiles))
-	result.RequiredContentFinalFiles = make(map[string]string, len(input.RequiredChangedFiles))
-	for _, f := range input.RequiredChangedFiles {
-		content, _, err := runner.GitShowFile(input.WorkspacePath, input.BaseSHA, f)
-		if err != nil {
-			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause(fmt.Sprintf("read base content of required file %q", f), InfrastructureFailureType, err)
-		}
-		result.RequiredContentBaseFiles[f] = content
-
-		finalContent, _, err := runner.ReadRegularFile(filepath.Join(input.WorkspacePath, f))
-		if err != nil {
-			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause(fmt.Sprintf("read final content of required file %q", f), InfrastructureFailureType, err)
-		}
-		result.RequiredContentFinalFiles[f] = finalContent
-	}
 	return result, nil
+}
+
+// setAsideChallengeFiles drops from changed each file of set that the result
+// commit holds with exactly the pinned SHA-256: the factory's own committed
+// challenge files (SC-022), set aside by hash and never by path, so a file
+// of the same path with any other content is judged like any changed file.
+func setAsideChallengeFiles(dir, resultSHA string, changed []string, set []run.ChallengeFile) []string {
+	if len(set) == 0 {
+		return changed
+	}
+	pinned := make(map[string]string, len(set))
+	for _, f := range set {
+		pinned[f.Path] = f.SHA256
+	}
+	kept := make([]string, 0, len(changed))
+	for _, p := range changed {
+		if want, ok := pinned[p]; ok && want != "" {
+			if content, existed, err := runner.GitShowFile(dir, resultSHA, p); err == nil && existed {
+				sum := sha256.Sum256([]byte(content))
+				if hex.EncodeToString(sum[:]) == want {
+					continue
+				}
+			}
+		}
+		kept = append(kept, p)
+	}
+	return kept
 }

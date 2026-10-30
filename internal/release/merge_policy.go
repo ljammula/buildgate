@@ -3,6 +3,8 @@ package release
 import (
 	"fmt"
 
+	"buildgate/internal/policy"
+	"buildgate/internal/prorder"
 	"buildgate/internal/run"
 )
 
@@ -11,7 +13,7 @@ import (
 type MergePolicy struct {
 	ProtectedPaths  []string
 	MaxFilesChanged int
-	MaxInsertions   int
+	MaxChangedLines int
 	// RollbackPlan identifies the rollback plan included in the evidence
 	// package. Checking that reference is present does not implement rollback.
 	RollbackPlan string
@@ -85,7 +87,7 @@ type MergePolicy struct {
 // CanNeverAllow reports whether p denies every release decision
 // unconditionally, regardless of any run's own evidence: MergePolicyCheck
 // denies whenever RollbackPlan == "", MaxFilesChanged == 0, or
-// MaxInsertions == 0 -- and those are this repo's own documented
+// MaxChangedLines == 0 -- and those are this repo's own documented
 // zero-value/-release-* flag defaults, so an unconfigured policy silently
 // denies every PR forever with no indication why. A pure, static check
 // against the policy alone -- no run or decision needed -- which is what
@@ -94,7 +96,7 @@ type MergePolicy struct {
 // surface (internal/api's consoleConfig) that has no run to evaluate
 // against.
 func (p MergePolicy) CanNeverAllow() bool {
-	return p.RollbackPlan == "" || p.MaxFilesChanged == 0 || p.MaxInsertions == 0
+	return p.RollbackPlan == "" || p.MaxFilesChanged == 0 || p.MaxChangedLines == 0
 }
 
 // MergePolicyCheck evaluates the release evidence currently recorded on a run.
@@ -154,6 +156,7 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 	}
 
 	reasons = append(reasons, memoryEditReasons(r.MemoryEdit)...)
+	reasons = append(reasons, PROrderReasons(r)...)
 
 	return len(reasons) == 0, reasons
 }
@@ -195,7 +198,8 @@ func runEvidenceReasons(r run.Run, cfg MergePolicy) []string {
 	return reasons
 }
 
-// diffStatReasons is why the run's diff stat denies a merge.
+// diffStatReasons requires both the recorded diff stat and the source-only
+// measurement used by the release caps.
 func diffStatReasons(r run.Run, cfg MergePolicy) []string {
 	var reasons []string
 	if r.DiffStat == nil {
@@ -203,17 +207,27 @@ func diffStatReasons(r run.Run, cfg MergePolicy) []string {
 	} else {
 		if r.DiffStat.FilesChanged < 0 {
 			reasons = append(reasons, "diff files changed must not be negative")
+		}
+		if r.DiffStat.Insertions < 0 || r.DiffStat.Deletions < 0 {
+			reasons = append(reasons, "diff line counts must not be negative")
+		}
+	}
+	if r.ChangeSize == nil {
+		reasons = append(reasons, "run has no source change size")
+	} else {
+		if r.ChangeSize.SourceFiles < 0 {
+			reasons = append(reasons, "source files changed must not be negative")
 		} else if cfg.MaxFilesChanged < 0 {
 			reasons = append(reasons, "max files changed must not be negative")
-		} else if r.DiffStat.FilesChanged > cfg.MaxFilesChanged {
-			reasons = append(reasons, fmt.Sprintf("diff changes %d files, limit is %d", r.DiffStat.FilesChanged, cfg.MaxFilesChanged))
+		} else if r.ChangeSize.SourceFiles > cfg.MaxFilesChanged {
+			reasons = append(reasons, fmt.Sprintf("diff changes %d source files, limit is %d", r.ChangeSize.SourceFiles, cfg.MaxFilesChanged))
 		}
-		if r.DiffStat.Insertions < 0 {
-			reasons = append(reasons, "diff insertions must not be negative")
-		} else if cfg.MaxInsertions < 0 {
-			reasons = append(reasons, "max insertions must not be negative")
-		} else if r.DiffStat.Insertions > cfg.MaxInsertions {
-			reasons = append(reasons, fmt.Sprintf("diff has %d insertions, limit is %d", r.DiffStat.Insertions, cfg.MaxInsertions))
+		if r.ChangeSize.SourceLines < 0 {
+			reasons = append(reasons, "source lines changed must not be negative")
+		} else if cfg.MaxChangedLines < 0 {
+			reasons = append(reasons, "max changed lines must not be negative")
+		} else if r.ChangeSize.SourceLines > cfg.MaxChangedLines {
+			reasons = append(reasons, fmt.Sprintf("diff changes %d source lines, limit is %d", r.ChangeSize.SourceLines, cfg.MaxChangedLines))
 		}
 	}
 	return reasons
@@ -253,7 +267,7 @@ func requiredGateReasons(r run.Run, cfg MergePolicy) []string {
 		// PR): FullSuiteScheduled is also false whenever
 		// -full-suite-command was never configured at all, not
 		// just when cadence skipped a configured one -- exempting
-		// on that alone let a run that never enabled the oracle in
+		// on that alone let a run that never enabled the suite in
 		// the first place satisfy this requirement with no
 		// result, silently reopening the exact canonical-only
 		// release path this fix exists to close. Only a
@@ -349,4 +363,28 @@ func namingPaths(reason string, paths []string) string {
 		reason += fmt.Sprintf(" and %d more", more)
 	}
 	return reason
+}
+
+// PROrderReasons is why the repository's pr_order (r.PROrder, read from the
+// commit its .factory.yml was read from) denies the run a pull request: its
+// changed files touch more than one group, or, for a ticket carved to one
+// group, include a file of another, named with its group. The check reads
+// the run's changed paths only. A run with no pr_order, or with no
+// changed-file inventory (denied for that elsewhere), has none.
+func PROrderReasons(r run.Run) []string {
+	if r.PROrder == nil || len(r.PROrder.Groups) == 0 || r.ChangedFiles == nil {
+		return nil
+	}
+	order := prorder.Order(r.PROrder.Groups)
+	changed := policy.ExcludeHarnessByproducts(r.ChangedFiles)
+	if r.PROrder.TicketGroup > 0 {
+		if why := order.OutsideReason(r.PROrder.TicketGroup-1, changed); why != "" {
+			return []string{why}
+		}
+		return nil
+	}
+	if why := order.MixedReason(changed); why != "" {
+		return []string{why}
+	}
+	return nil
 }

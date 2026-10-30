@@ -41,7 +41,7 @@ func TestRunSandboxWithRetriesReportsExhaustedTeardownMarginAsAnError(t *testing
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(sandboxAttemptTeardownMargin/2))
 	defer cancel()
 
-	res, err := activities.runSandboxWithRetries(ctx, input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	res, err := activities.runSandboxWithRetries(ctx, input, logPath, 1, nil, nil, nil, nil, nil, nil, nil, "sh", "-c", "true")
 	if err == nil {
 		t.Fatalf("runSandboxWithRetries with less than the teardown margin left: want an error, got nil (result %+v)", res)
 	}
@@ -84,7 +84,7 @@ func TestRunSandboxWithRetriesDoesNotPadMarginForADisabledComposeSpec(t *testing
 	defer cancel()
 
 	composeSpec := &sandbox.ComposeServicesSpec{}
-	res, err := activities.runSandboxWithRetries(ctx, input, logPath, 1, nil, nil, nil, nil, composeSpec, "", "", nil, nil, "sh", "-c", "true")
+	res, err := activities.runSandboxWithRetries(ctx, input, logPath, 1, nil, nil, nil, nil, composeSpec, nil, nil, "sh", "-c", "true")
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries with a disabled composeSpec = %v, want nil (result %+v)", err, res)
 	}
@@ -108,7 +108,7 @@ func TestRunSandboxWithRetriesRejectsAnExtraRunInputWithoutSpecPath(t *testing.T
 	input.SandboxDocker = "docker-should-never-run"
 	logPath := func(int) string { return filepath.Join(activities.LogDir, "build.log") }
 
-	_, err := activities.runSandboxWithRetries(withExtraRunInputs(context.Background(), criteriaPath), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "python3", "--handoff", criteriaPath)
+	_, err := activities.runSandboxWithRetries(withExtraRunInputs(context.Background(), criteriaPath), input, logPath, 1, nil, nil, nil, nil, nil, nil, nil, "python3", "--handoff", criteriaPath)
 	if err == nil {
 		t.Fatal("runSandboxWithRetries(an extra run input, SpecPath empty) = nil error, want a refusal")
 	}
@@ -163,7 +163,7 @@ func TestRunSandboxWithRetriesStagesAndTranslatesAnExtraRunInput(t *testing.T) {
 	// (staged into /inputs/script), not a bare "-c" shell command -- the
 	// script-staging branch below is skipped entirely for "-c", which
 	// would defeat this test's own point.
-	if _, err := activities.runSandboxWithRetries(withExtraRunInputs(context.Background(), criteriaPath), input, logPath, 1, nil, nil, nil, nil, nil, "", "", nil, nil, "/bin/sh", buildScript, "--handoff", criteriaPath); err != nil {
+	if _, err := activities.runSandboxWithRetries(withExtraRunInputs(context.Background(), criteriaPath), input, logPath, 1, nil, nil, nil, nil, nil, nil, nil, "/bin/sh", buildScript, "--handoff", criteriaPath); err != nil {
 		t.Fatalf("runSandboxWithRetries: %v", err)
 	}
 
@@ -229,7 +229,7 @@ func runtimeActivities(t *testing.T, rt *sandboxtest.WorkerRuntime) (*Activities
 func TestRunSandboxWithRetriesLaunchesThroughTheSandboxRuntime(t *testing.T) {
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"verify ok"}, ExitCode: 3}
 	activities, input, logPath := runtimeActivities(t, rt)
-	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, nil, nil, nil, "", "", []string{"K=V"}, nil, "sh", "-c", "true")
+	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, nil, nil, nil, []string{"K=V"}, nil, "sh", "-c", "true")
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRunSandboxWithRetriesThroughTheRuntimeGivesAModelStepItsRouteAndSpend(t
 		TokenBudget: 1000, TokenBudgetWindow: time.Minute, CostBudgetMicroUSD: 1000, CostBudgetWindow: time.Minute,
 		TokenCeiling: 5000, CostCeilingMicroUSD: 5000,
 	}}
-	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, &relaySpec, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, &relaySpec, nil, nil, nil, nil, "sh", "-c", "true")
 	if err != nil {
 		t.Fatalf("runSandboxWithRetries: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestRunSandboxWithRetriesThroughTheRuntimeGivesAModelStepItsRouteAndSpend(t
 func TestRunSandboxWithRetriesDoesNotRetryACommandTheRuntimeStartedTwice(t *testing.T) {
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"x"}, ExitCode: sandbox.WorkerExitRerun}
 	activities, input, logPath := runtimeActivities(t, rt)
-	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 3, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 3, nil, nil, nil, nil, nil, nil, nil, "sh", "-c", "true")
 	if !errors.Is(err, sandbox.ErrSandboxRerun) {
 		t.Fatalf("err = %v, want ErrSandboxRerun", err)
 	}
@@ -313,7 +313,7 @@ func TestRunSandboxWithRetriesTypesAFailedCreateAsALaunchFailure(t *testing.T) {
 		exitCodes = append(exitCodes, res.ExitCode)
 		return nil
 	}
-	_, err := activities.runSandboxWithRetries(relaunchUnstartedOnly(context.Background()), input, logPath, 2, nil, after, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	_, err := activities.runSandboxWithRetries(relaunchUnstartedOnly(context.Background()), input, logPath, 2, nil, after, nil, nil, nil, nil, nil, "sh", "-c", "true")
 	if !errors.Is(err, sandbox.ErrSandboxNotStarted) {
 		t.Fatalf("err = %v, want it to wrap ErrSandboxNotStarted", err)
 	}
@@ -328,7 +328,7 @@ func TestRunSandboxWithRetriesTypesAFailedCreateAsALaunchFailure(t *testing.T) {
 func TestRunSandboxWithRetriesAFailedCreateWhoseDeleteIsUnconfirmedIsNotALaunchFailure(t *testing.T) {
 	rt := &sandboxtest.WorkerRuntime{CreateErr: errors.New("gateway unreachable"), DeleteErr: fmt.Errorf("gateway unreachable: %w", sandbox.ErrCleanupUnconfirmed)}
 	activities, input, logPath := runtimeActivities(t, rt)
-	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, nil, nil, nil, nil, nil, nil, "sh", "-c", "true")
 	if got := launchErrorType(err); got != CleanupUnconfirmedFailureType {
 		t.Errorf("launchErrorType = %q, want %q: the sandbox may still exist, so nothing is kept for a resume", got, CleanupUnconfirmedFailureType)
 	}
@@ -352,7 +352,7 @@ func TestRunSandboxWithRetriesACommandThatStartedIsNeverALaunchFailure(t *testin
 	} {
 		rt := &sandboxtest.WorkerRuntime{Lines: []string{"x"}, WaitErr: errors.New("wait: connection reset")}
 		activities, input, logPath := runtimeActivities(t, rt)
-		_, err := activities.runSandboxWithRetries(tc.mark(context.Background()), input, logPath, 2, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+		_, err := activities.runSandboxWithRetries(tc.mark(context.Background()), input, logPath, 2, nil, nil, nil, nil, nil, nil, nil, "sh", "-c", "true")
 		if err == nil || errors.Is(err, sandbox.ErrSandboxNotStarted) || launchErrorType(err) != InfrastructureFailureType {
 			t.Errorf("%s: err = %v (type %q), want an infrastructure failure that is not a launch failure", tc.name, err, launchErrorType(err))
 		}
@@ -367,7 +367,7 @@ func TestRunSandboxWithRetriesACommandThatStartedIsNeverALaunchFailure(t *testin
 func TestRunSandboxWithRetriesANonZeroExitIsAResultNotALaunchFailure(t *testing.T) {
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"FAIL"}, ExitCode: 1}
 	activities, input, logPath := runtimeActivities(t, rt)
-	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, nil, nil, nil, nil, "", "", nil, nil, "sh", "-c", "false")
+	res, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, nil, nil, nil, nil, nil, nil, "sh", "-c", "false")
 	if err != nil || res.ExitCode != 1 {
 		t.Fatalf("exit code %d, err %v; want exit 1 and no error", res.ExitCode, err)
 	}
@@ -388,7 +388,7 @@ func TestRunSandboxWithRetriesAFailedStartAfterACommandRanIsNotALaunchFailure(t 
 		}
 		return nil
 	}
-	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, after, nil, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+	_, err := activities.runSandboxWithRetries(context.Background(), input, logPath, 2, nil, after, nil, nil, nil, nil, nil, "sh", "-c", "true")
 	if err == nil || errors.Is(err, sandbox.ErrSandboxNotStarted) || launchErrorType(err) != InfrastructureFailureType {
 		t.Errorf("err = %v (type %q), want an infrastructure failure: the first attempt's command ran", err, launchErrorType(err))
 	}

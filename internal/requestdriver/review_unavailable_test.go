@@ -101,7 +101,6 @@ func TestAReviewThatJudgedSomethingHasNoCause(t *testing.T) {
 		run       *run.Run
 		wantCheck string
 	}{
-		"a reviewer's reproduction refused it": {reviewRun(nil, available, "review_reproduction"), request.QuarantineCheckReviewReproduction},
 		// A record from a worker whose code_review still failed on a
 		// finding: the reviewer answered.
 		"code_review failed with a verdict": {reviewRun(nil, available, "code_review"), ""},

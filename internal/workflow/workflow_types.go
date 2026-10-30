@@ -10,24 +10,22 @@ import (
 )
 
 // RunWorkflowInput identifies the same bounded slice factoryd currently
-// runs. AllowedFiles, RequiredChangedFiles, and RequiredContent are the
-// ticket's declared scope/required-file/required-content keys, parsed by
+// runs. AllowedFiles is the
+// ticket's declared scope key, parsed by
 // the caller *before* this Workflow (and specifically before
 // RunBuildActivity) ever runs — not re-read from SpecPath by an Activity
 // partway through. Found live (review): the untrusted build subprocess
 // runs as the same user as the rest of the run and can edit
 // spec.snapshot.md; parsing these declarations only after the build
 // would let it silently strip any of them and defeat the gate that
-// depends on it, even though factoryd's own hashed acceptance-oracle
+// depends on it, even though factoryd's own hashed spec
 // record still points at the original (now-tampered) spec bytes. nil
 // means the ticket declared no such key — same optional-key convention
 // cmd/factoryd's uses, each check skipped entirely rather
 // than evaluated against an empty list.
 type RunWorkflowInput struct {
 	// ReleaseProtectedPaths is the run's configured release protected-path list
-	// (-release-protected-paths). The host commit of accepted oracles validates
-	// each manifest target_path against it BEFORE modifying the checkout, without it a manifest could commit a file under a
-	// protected path and only be caught later at release (Codex review of #203).
+	// (-release-protected-paths).
 	ReleaseProtectedPaths []string `json:"release_protected_paths,omitempty"`
 	Ticket                string   `json:"ticket"`
 	WorkspacePath         string   `json:"workspace_path"`
@@ -53,16 +51,17 @@ type RunWorkflowInput struct {
 	// policy.TicketStructureBrownfield instead of policy.TicketStructure.
 	// Mirrors cmd/factoryd's own -request-ticket flag; see its doc comment.
 	RequestTicket bool `json:"request_ticket,omitempty"`
+	// NoTicketScope marks the request's verbatim spec ticket, which has no
+	// Allowed-Files list even when its prose contains a header-shaped line.
+	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
 	// BaseSHA is the caller's own observation of the workspace's HEAD at
 	// submission time — kept for callers that have no queueing ahead of
 	// them (a caller with nothing else running against the same
 	// workspace), but RunWorkflow does NOT trust it for gate computation;
 	// see CaptureBaseSHAActivity's doc comment for why. Superseded by
 	// RunWorkflowResult.BaseSHA, the value actually used.
-	BaseSHA              string   `json:"base_sha"`
-	AllowedFiles         []string `json:"allowed_files,omitempty"`
-	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
-	RequiredContent      []string `json:"required_content,omitempty"`
+	BaseSHA      string   `json:"base_sha"`
+	AllowedFiles []string `json:"allowed_files,omitempty"`
 	// LogDir/CheckpointDir override Activities.LogDir/CheckpointDir for
 	// this execution when set, falling back to the Worker-static values
 	// otherwise (preserves every existing caller/test that only sets
@@ -135,13 +134,16 @@ type RunWorkflowInput struct {
 	SpecAcceptanceCriteria string `json:"spec_acceptance_criteria,omitempty"`
 	// TestPatterns/TestsRequiredOptOut feed the tests_red_on_base gate --
 	// see policy.EvaluateRunInput's own doc comment on the same two
-	// fields. No Worker-static fallback (like AllowedFiles/
-	// RequiredChangedFiles above, and unlike VerifyCommand): both come
+	// fields. No Worker-static fallback (like AllowedFiles
+	// above, and unlike VerifyCommand): both come
 	// from cmd/factoryd's own per-run resolution (.factory.yml's
 	// test_patterns, the ticket's own Tests-Required: opt-out), never a
 	// Worker-level default.
-	TestPatterns        []string `json:"test_patterns,omitempty"`
-	TestsRequiredOptOut string   `json:"tests_required_opt_out,omitempty"`
+	TestPatterns []string `json:"test_patterns,omitempty"`
+	// Release caps are the policy snapshot recorded when this run started.
+	ReleaseMaxFilesChanged int    `json:"release_max_files_changed"`
+	ReleaseMaxChangedLines int    `json:"release_max_changed_lines"`
+	TestsRequiredOptOut    string `json:"tests_required_opt_out,omitempty"`
 	// ScopeUnapproved and AllowedPaths are policy.Scope's other two fields,
 	// beside AllowedFiles above: no person approved the list AllowedFiles
 	// holds (a note on the pull request, never a refusal), and the
@@ -166,21 +168,15 @@ type RunWorkflowInput struct {
 	// passing check ends with RunWorkflowResult.BaselineChecked and no
 	// State, so nothing reaches release or a pull request.
 	BaselineCheck bool `json:"baseline_check,omitempty"`
-	// GateCommands is every operator-configured command gate (see
-	// policy.CommandGates -- "lint", "security_audit", "unit_tests",
-	// "integration_tests", "reference_oracle" today, keyed by
-	// policy.CommandGate.ID), ported to the Temporal path the same way
-	// FullSuiteCommand was: carried per-execution, no Worker-static
-	// fallback, doubling as RunWorkflow's own deterministic decision of
-	// whether to call RunNamedGateActivityName for each one -- RunWorkflow
-	// iterates policy.CommandGates itself (never this map directly) so
+	// GateCommands is the repository gates (.factory.yml `gates:`) by
+	// policy.RepoGateCheck(id), carried to the Temporal path the same way
+	// FullSuiteCommand was: per-execution, no Worker-static fallback,
+	// doubling as RunWorkflow's own deterministic decision of whether to
+	// call RunNamedGateActivityName for each one -- RunWorkflow runs them
+	// by name (gateChecksToRun, which never iterates this map directly) so
 	// every Worker in a replay-safe deployment visits gates in the same
-	// order. A gate ID absent from the map, or present with an empty
-	// value, skips that gate entirely, matching cmd/factoryd.
-	//
-	// It also carries the gates the target repository defines for itself
-	// (.factory.yml `gates:`), under policy.RepoGateCheck(id): RunWorkflow
-	// runs those after the registry's, by name (gateChecksToRun).
+	// order. A gate absent from the map, or present with an empty value,
+	// is skipped, matching cmd/factoryd.
 	GateCommands map[string]string `json:"gate_commands,omitempty"`
 	// SetupCommands is the committed .factory.yml `setup:` list, resolved
 	// before the workflow starts and never re-read from the worktree. Every
@@ -216,48 +212,8 @@ type RunWorkflowInput struct {
 	// AutofixCommands is the committed .factory.yml `autofix:` list, with
 	// the same source as SetupCommands; no Activity reads it.
 	AutofixCommands []string `json:"autofix_commands,omitempty"`
-	// ReferenceOracleDir/ReferenceOracleMountPath provide the read-only oracle mount (and the content hash it makes
-	// possible) to the Temporal/-repository path -- the parity follow-up
-	// from PR #151/#152's reviews. Same empty-means-not-configured
-	// convention as GateCommands[policy.ReferenceOracleGateID]: whichever
-	// Worker actually executes RunNamedGateActivity for the
-	// "reference_oracle" check needs ReferenceOracleDir reachable on ITS
-	// OWN filesystem (the same inherent constraint -WorkspacePath already
-	// has on a shared task queue -- see this struct's own doc comment on
-	// Worker-static vs. per-execution fields), which is why these travel
-	// with the rest of RunWorkflowInput rather than as a Worker-static
-	// a.Activities field.
-	ReferenceOracleDir       string `json:"reference_oracle_dir,omitempty"`
-	ReferenceOracleMountPath string `json:"reference_oracle_mount_path,omitempty"`
-	// ReferenceOracleInLoopRetry ports cmd/factoryd's
-	// -reference-oracle-in-loop-retry (Phase 0.5) to this path: when
-	// set together with ReferenceOracleDir/ReferenceOracleMountPath/
-	// ReferenceOracleCommand, RunBuildActivity also mounts the (snapshotted,
-	// hashed) oracle read-only into the BUILD container and passes the
-	// command to build_app.py's own --reference-oracle-command, so a failing
-	// round gets the same targeted-retry treatment a canonical-verify
-	// failure gets, instead of only the one-shot post-build gate. Purely an
-	// Activity-side decision -- RunWorkflow's own control flow never reads
-	// it. Off by default: exposing oracle content to the writable, agent-controlled
-	// build container is new exposure an operator must opt into. A Worker
-	// running a build older than this field ignores it (unknown JSON
-	// fields are dropped), i.e. silently gets no in-loop retry -- the one
-	// gap mixed-version deployments have here, same as any other new
-	// per-run field.
-	// ReferenceOracleDir must be reachable on whichever Worker executes the
-	// build (the same constraint WorkspacePath already has on a shared task
-	// queue); when it is not, RunBuildActivity fails before launching
-	// anything -- fail-closed by design, never a silent skip of an oracle
-	// the operator explicitly opted into.
-	ReferenceOracleInLoopRetry bool `json:"reference_oracle_in_loop_retry,omitempty"`
-	// NoCommitOracles is the request's explicit opt-out from the host oracle
-	// commit: CommitOraclesActivity runs validate-only (nothing written or
-	// committed, so no post-commit verify follows).
-	NoCommitOracles bool `json:"no_commit_oracles,omitempty"`
-	// Bug is a bug request's run: with a ReferenceOracleDir, preBuildChecks
-	// runs the reference-oracle command on the base commit and halts the run
-	// when it passes, since a test that already passes does not reproduce the
-	// bug (workflow change bug-oracle-red-on-base).
+	// Bug is the first ticket of a bug request: its tests_red_on_base gate
+	// takes no Tests-Required opt-out.
 	Bug           bool   `json:"bug,omitempty"`
 	SandboxImage  string `json:"sandbox_image,omitempty"`
 	SandboxDocker string `json:"sandbox_docker,omitempty"`
@@ -563,27 +519,41 @@ type RunWorkflowInput struct {
 	// roles.review is unset: the review keeps RoutePolicy's
 	// own build fields unchanged, exactly as before roles: existed.
 	ReviewRelayPolicy *sandbox.RoutePolicy `json:"review_relay_policy,omitempty"`
-	// ReviewReproduction is -review-reproduction: the review step holds the
-	// reproductions its findings carry and the factory runs each one
-	// (SC-022), so a finding can refuse the run through the
-	// review_reproduction check. Only a request's ticket build sets it; a
-	// bare run's review is advice only. Read only under
-	// reviewReproductionChange version 1, which no history recorded before
-	// the field existed holds.
-	ReviewReproduction bool `json:"review_reproduction,omitempty"`
-	// ReviewSpecPath is the run's snapshot of -review-spec (the request's
-	// approved spec.md, in the run's directory), which the review numbers
-	// for its citations and the hold checks each citation against;
-	// ReviewSpecSHA256 is its hash when the snapshot was taken, checked
-	// again before the hold reads it. Empty: no line can be cited, so every
-	// finding is advice.
-	ReviewSpecPath   string `json:"review_spec_path,omitempty"`
-	ReviewSpecSHA256 string `json:"review_spec_sha256,omitempty"`
-	// RecheckReproductions is -recheck-reproductions: the reproductions
-	// earlier runs' reviews held, which this build's result must pass, each
-	// run once after the gates. Every host path was checked to be under its
-	// entry's run's review-repro directory before the run started.
+	// ReviewReproduction and RecheckReproductions are the inputs of the
+	// retired reviewer-reproduction phase, read only under a history recorded
+	// before retireReviewReproductionChange (DefaultVersion), whose recorded
+	// input holds them; no Worker sets either now. The rechecks are the
+	// reproductions earlier runs' reviews held, each run once after the gates.
+	ReviewReproduction   bool               `json:"review_reproduction,omitempty"`
 	RecheckReproductions []run.RecheckEntry `json:"recheck_reproductions,omitempty"`
+	// Challenge is set by the request driver for a ticket's first build only
+	// (SC-022): after every gate and the review the challenger job runs once.
+	// ChallengeSpecPath is the run's snapshot of the approved spec with the
+	// read-back answers appended, ChallengeSpecSHA256 its hash when the
+	// snapshot was taken, ChallengeCriteria how many numbered criteria a file's
+	// header may cite and ChallengeAnswers the numbers of the answered
+	// read-back questions it may cite.
+	Challenge           bool   `json:"challenge,omitempty"`
+	ChallengeSpecPath   string `json:"challenge_spec_path,omitempty"`
+	ChallengeSpecSHA256 string `json:"challenge_spec_sha256,omitempty"`
+	ChallengeCriteria   int    `json:"challenge_criteria,omitempty"`
+	ChallengeAnswers    []int  `json:"challenge_answers,omitempty"`
+	// ChallengeApprovedSHA256 is the hash spec_review approved for spec.md,
+	// which the first ChallengeApprovedBytes bytes of the snapshot must match.
+	ChallengeApprovedSHA256 string `json:"challenge_approved_sha256,omitempty"`
+	ChallengeApprovedBytes  int    `json:"challenge_approved_bytes,omitempty"`
+	// ChallengerThinking, ChallengerHarness and ChallengerRelayPolicy are
+	// roles.challenger's resolved values, as the review's are; a nil policy
+	// with Challenge set means no challenger role is configured.
+	ChallengerThinking    string               `json:"challenger_thinking,omitempty"`
+	ChallengerHarness     string               `json:"challenger_harness,omitempty"`
+	ChallengerRelayPolicy *sandbox.RoutePolicy `json:"challenger_relay_policy,omitempty"`
+	// ChallengeHeld are the held files of the ticket's earlier challenge: a
+	// later build runs them again on its result (advice only), diff_scope sets
+	// them aside by their pinned hash, and with ChallengeRound a green result
+	// commits them and the round's build gets them mounted read-only.
+	ChallengeHeld  []run.ChallengeFile `json:"challenge_held,omitempty"`
+	ChallengeRound bool                `json:"challenge_round,omitempty"`
 }
 
 // ReplayInput is RunWorkflowInput.Replay: what a replay run's
@@ -649,26 +619,11 @@ type VerifyActivityResult struct {
 	DurationMs int64         `json:"duration_ms"`
 	LogSHA256  string        `json:"log_sha256"`
 	Attempts   []run.Attempt `json:"attempts"`
-	// ReferenceOracleSHA256 is RunNamedGateActivity's own Temporal-path
-	// counterpart to cmd/factoryd's GateResult.ReferenceOracleSHA256 --
-	// see its doc comment. Meaningful only when this result came from the
-	// "reference_oracle" named-gate Activity with ReferenceOracleDir
-	// configured; empty for every other Activity that shares this result
-	// shape (RunVerifyActivity, RunFullSuiteVerifyActivity, every other
-	// named gate).
-	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
-	// OracleCanary is the reference_oracle gate's runtime-canary outcome (see
-	// run.OracleCanaryEvidence); nil for every other Activity and when the real
-	// oracle command did not pass (the canary only runs after it did).
-	OracleCanary *run.OracleCanaryEvidence `json:"oracle_canary,omitempty"`
 	// BaseCheck is a failed named or repository gate's rerun on the base
 	// commit (run.GateBaseCheck), made inside the gate's own Activity; nil
-	// for a gate that passed, for the reference oracle and for every other
+	// for a gate that passed and for every other
 	// Activity.
 	BaseCheck *run.GateBaseCheck `json:"base_check,omitempty"`
-	// NotRun is set by the base-commit check of a bug request (oracle_red_on_base)
-	// when the command exited 0 but its log shows that no test ran.
-	NotRun bool `json:"not_run,omitempty"`
 	// Rerun is the second run of RunVerifyActivity's, RunFullSuiteVerify-
 	// Activity's or the baseline's command after a first run whose failure
 	// qualified (verify_rerun.go); when it reached an exit code, Result,
@@ -682,7 +637,7 @@ type VerifyActivityResult struct {
 }
 
 // ReviewStepInput is RunReviewStepActivity's input. Embeds RunWorkflowInput
-// the same way NamedGateActivityInput does, plus which review step this call
+// the same way RepoGateActivityInput does, plus which review step this call
 // is for and this run's relay spend before the review's own launch (the
 // build's): this Activity's relay spec is derived from
 // RunWorkflowInput.RoutePolicy the same way relaySpecFor already does for
@@ -728,9 +683,8 @@ type PreflightInput struct {
 	WorkspacePath string `json:"workspace_path"`
 	// LogDir is RunWorkflowInput.LogDir, carried for the same reason
 	// EvaluateRunInput.LogDir is: progress-feed stage lines only.
-	LogDir               string   `json:"log_dir,omitempty"`
-	AllowedFiles         []string `json:"allowed_files,omitempty"`
-	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
+	LogDir       string   `json:"log_dir,omitempty"`
+	AllowedFiles []string `json:"allowed_files,omitempty"`
 	// ScopeUnapproved is RunWorkflowInput.ScopeUnapproved: AllowedFiles is
 	// then no person's list, and the misprefix check below leaves it out.
 	ScopeUnapproved bool   `json:"scope_unapproved,omitempty"`
@@ -740,6 +694,7 @@ type PreflightInput struct {
 	// PreflightActivity knows to check TicketPath with
 	// policy.TicketStructureBrownfield instead of policy.TicketStructure.
 	RequestTicket bool `json:"request_ticket,omitempty"`
+	NoTicketScope bool `json:"no_ticket_scope,omitempty"`
 	// SpecPath is RunWorkflowInput.SpecPath, carried here so
 	// PreflightActivity can run the same ticketspec header-strictness
 	// check cmd/factoryd's runs against its own spec snapshot
@@ -897,14 +852,12 @@ type PostBuildResult struct {
 }
 
 // CollectEvidenceInput is CollectEvidenceActivity's input.
-// RequiredChangedFiles/RequiredContent come from RunWorkflowInput — parsed
-// once, before the build, per RunWorkflowInput's own doc comment — not
-// re-read from a spec file here.
 type CollectEvidenceInput struct {
-	WorkspacePath        string   `json:"workspace_path"`
-	BaseSHA              string   `json:"base_sha"`
-	RequiredChangedFiles []string `json:"required_changed_files,omitempty"`
-	RequiredContent      []string `json:"required_content,omitempty"`
+	// SetAside are the committed challenge files diff_scope sets aside by
+	// their pinned hash (SC-022).
+	SetAside      []run.ChallengeFile `json:"set_aside,omitempty"`
+	WorkspacePath string              `json:"workspace_path"`
+	BaseSHA       string              `json:"base_sha"`
 	// BuildExitCode/VerifyExitCode gate the verification-output
 	// safety-net commit below: found live (review), committing
 	// verification's dirt unconditionally advanced HEAD even when build
@@ -928,16 +881,16 @@ type CollectEvidenceInput struct {
 	// same as before.
 	FullSuiteRan      bool `json:"full_suite_ran,omitempty"`
 	FullSuiteExitCode int  `json:"full_suite_exit_code,omitempty"`
-	// NamedGatesFailed extends the same gate to the named gates
-	// (lint/security_audit/unit_tests/integration_tests): false (the
+	// RepoGatesFailed extends the same gate to the repository gates
+	// (.factory.yml `gates:`): false (the
 	// zero value, and every caller before this field existed) means
 	// "none configured, or every one that ran exited zero" and leaves
 	// the commit gated on BuildExitCode/VerifyExitCode (and
 	// FullSuiteRan/FullSuiteExitCode) alone, the same as before. Only
-	// set true when a named gate ran and exited non-zero — same
+	// set true when a repository gate ran and exited non-zero — same
 	// reasoning as FullSuiteRan/FullSuiteExitCode's own doc comment, one
 	// gate at a time.
-	NamedGatesFailed bool `json:"named_gates_failed,omitempty"`
+	RepoGatesFailed bool `json:"named_gates_failed,omitempty"`
 	// CheckpointDir/LogDir: see PostBuildInput's matching doc comment —
 	// same reasoning, for this Activity's own safety-net commit.
 	CheckpointDir string `json:"checkpoint_dir,omitempty"`
@@ -976,49 +929,17 @@ type CollectedEvidence struct {
 	// risked exceeding Temporal's own default Activity-result payload
 	// limit for a large diff, on top of bloating every other reader of this
 	// struct.
-	DiffAvailable             bool                        `json:"diff_available,omitempty"`
-	DiffTruncated             bool                        `json:"diff_truncated,omitempty"`
-	DependencyChanges         []evidence.DependencyChange `json:"dependency_changes"`
-	RequiredContentBaseFiles  map[string]string           `json:"required_content_base_files,omitempty"`
-	RequiredContentFinalFiles map[string]string           `json:"required_content_final_files,omitempty"`
-	// Oracles is the committed-oracle evidence for this collection: the
-	// base commit's oracle index (protecting earlier oracles from agent
-	// edits). nil when the base commit has none.
-	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
+	DiffAvailable     bool                        `json:"diff_available,omitempty"`
+	DiffTruncated     bool                        `json:"diff_truncated,omitempty"`
+	DependencyChanges []evidence.DependencyChange `json:"dependency_changes"`
 }
 
-// CommitOraclesInput is CommitOraclesActivity's input. PinnedOracleSHA256 is
-// the tree hash the reference_oracle gate recorded for the oracle content it
-// actually ran against; the Activity refuses to commit bytes that do not hash
-// to it.
-type CommitOraclesInput struct {
-	RunWorkflowInput
-	PinnedOracleSHA256 string `json:"pinned_oracle_sha256"`
-	// ValidateOnly (the request's -no-commit-oracles) runs every check the
-	// commit runs but writes and commits nothing.
-	ValidateOnly bool `json:"validate_only,omitempty"`
-}
-
-// CommittedOracles is CommitOraclesActivity's output. Active false means the
-// manifest declared no target_path and nothing was touched; every other
-// field is then zero and the workflow keeps CollectEvidenceActivity's values.
-// Otherwise ResultSHA/ChangedFiles/DiffStat/Diff* replace CollectEvidenceActivity's
-// (they describe the result commit that now includes the oracles).
-type CommittedOracles struct {
-	Active        bool                `json:"active"`
-	Committed     bool                `json:"committed"`
-	ResultSHA     string              `json:"result_sha,omitempty"`
-	ChangedFiles  []string            `json:"changed_files,omitempty"`
-	DiffStat      *run.DiffStat       `json:"diff_stat,omitempty"`
-	DiffAvailable bool                `json:"diff_available,omitempty"`
-	DiffTruncated bool                `json:"diff_truncated,omitempty"`
-	Oracles       *run.OracleEvidence `json:"oracles,omitempty"`
-	// RequiredContentFinalFiles is the required-content evidence recomputed from
-	// the committed tree: the host commit can write or supersede a path listed in
-	// the ticket's required files, so the pre-commit snapshot from
-	// CollectEvidenceActivity no longer describes ResultSHA (Codex review of the
-	// Temporal parity PR). nil when the ticket declares no required content.
-	RequiredContentFinalFiles map[string]string `json:"required_content_final_files,omitempty"`
+// MeasureChangeSizeInput identifies the committed diff and test patterns.
+type MeasureChangeSizeInput struct {
+	WorkspacePath string   `json:"workspace_path"`
+	BaseSHA       string   `json:"base_sha"`
+	ResultSHA     string   `json:"result_sha"`
+	TestPatterns  []string `json:"test_patterns,omitempty"`
 }
 
 // RunProgress is the snapshot RunWorkflow's RunProgressQueryName query
@@ -1090,19 +1011,9 @@ type RunWorkflowResult struct {
 	// internal/release.MergePolicyCheck rejects any run.Run with a nil
 	// ChangedFiles regardless of outcome, so that round-trip silently
 	// rejected every accepted zero-change Temporal-routed run.
-	ChangedFiles []string      `json:"changed_files"`
-	DiffStat     *run.DiffStat `json:"diff_stat,omitempty"`
-	// Oracles mirrors run.Run.Oracles (see run.OracleEvidence): the
-	// committed-oracle evidence carried from CollectEvidenceActivity /
-	// CommitOraclesActivity so the durable record and release check see it.
-	Oracles *run.OracleEvidence `json:"oracles,omitempty"`
-	// FailedAfterOracleCommit mirrors run.Run.FailedAfterOracleCommit: the
-	// checks whose post-oracle-commit rerun replaced a passing result with a
-	// failing one. Data only: no activity or workflow call depends on it.
-	FailedAfterOracleCommit []string `json:"failed_after_oracle_commit,omitempty"`
-	// OracleCanary mirrors run.Run.OracleCanary: the reference_oracle gate's
-	// runtime-canary outcome (nil when it never ran).
-	OracleCanary *run.OracleCanaryEvidence `json:"oracle_canary,omitempty"`
+	ChangedFiles []string        `json:"changed_files"`
+	DiffStat     *run.DiffStat   `json:"diff_stat,omitempty"`
+	ChangeSize   *run.ChangeSize `json:"change_size,omitempty"`
 	// DiffAvailable/DiffTruncated mirror run.Run's own fields of the same
 	// name — carried through from CollectedEvidence for the same reason
 	// ChangedFiles/DiffStat are above. The diff text itself never appears
@@ -1156,11 +1067,9 @@ type RunWorkflowResult struct {
 	// caller inspecting result.Runs needs a way to tell "this request
 	// failed" apart from "this request reached StateHalted on its own".
 	Err string `json:"error,omitempty"`
-	// ReviewReproductions is what the factory decided about each review
-	// finding that carried a reproduction (SC-022), keyed by the finding's
-	// index; ReviewReproductionRechecks are a corrective build's runs of an
-	// earlier run's held reproductions. Both nil for a run without
-	// ReviewReproduction.
+	// ReviewReproductions and ReviewReproductionRechecks are what the retired
+	// reviewer-reproduction phase decided, set only by a history recorded
+	// before retireReviewReproductionChange.
 	ReviewReproductions        []run.FindingReproduction `json:"review_reproductions,omitempty"`
 	ReviewReproductionRechecks []run.ReviewReproduction  `json:"review_reproduction_rechecks,omitempty"`
 	// TestsRedOnBase is the factory's runs of the changed test files on the
@@ -1168,7 +1077,9 @@ type RunWorkflowResult struct {
 	// took no proof. Notes are policy.EvaluateRunResult.Notes
 	// (run.Run.Notes).
 	TestsRedOnBase *run.TestsRedOnBase `json:"tests_red_on_base,omitempty"`
-	Notes          []string            `json:"notes,omitempty"`
+	// Challenge is the run's challenge record (SC-022); nil when none ran.
+	Challenge *run.ChallengeRecord `json:"challenge,omitempty"`
+	Notes     []string             `json:"notes,omitempty"`
 }
 
 // BaselineVerifyResult is RunBaselineVerifyActivity's result for a run that

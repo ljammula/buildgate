@@ -25,7 +25,7 @@ var ErrBadAnchor = errors.New("a comment names a place that is not part of the d
 // criteria count, a quote a byte-for-byte substring of the anchored section
 // (of the file when no section is named). A comment bound to text that has
 // since been edited or redrafted would otherwise scope a redraft to the wrong
-// place. Other states (oracle_review) have no such passages and pass. The
+// place. Other states have no such passages and pass. The
 // failure wraps ErrBadAnchor (a place the document cannot have) or
 // ErrPassageMoved (text that is gone) and names the comment by its number.
 func checkAnchorsAgainstFiles(dataDir string, r *Request, anchors []RejectionAnchor) error {

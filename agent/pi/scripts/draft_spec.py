@@ -10,7 +10,7 @@ corrective rounds, no canonical verification, no independent review: the
 factory's own request driver (cmd/factoryd/request_driver.go) is what
 validates the result (the drafted skeleton or the handed-over document's
 own structural contract) and decides whether to advance the request or halt it, exactly the same
-"agent output is evidence, never the oracle" split build_app.py's own
+"agent output is evidence, never the verdict" split build_app.py's own
 BUILD_EVIDENCE.json keeps for a build.
 
 Usage:
@@ -82,9 +82,8 @@ EVIDENCE_SCHEMA_VERSION = 1
 CONTEXT_FILE_MAX_BYTES = 32 * 1024
 FILE_INVENTORY_MAX_LINES = 400
 
-# FEEDBACK_HEADER/neutralise_feedback/read_feedback_ex mirror
-# draft_acceptance_oracles.py's own identically-named pieces -- shared
-# here, not duplicated there, since plan_tickets.py already imports this
+# FEEDBACK_HEADER/neutralise_feedback/read_feedback_ex are shared
+# here since plan_tickets.py already imports this
 # module for read_capped_text_file/file_inventory and needs the same
 # operator-feedback handling for its own --feedback-file. {kind} names
 # which stage's draft the feedback is about ("spec" or "plan"), so the
@@ -94,7 +93,7 @@ FEEDBACK_HEADER = prompt_templates.load("draft_feedback", ("kind", "feedback"))
 # MAX_FEEDBACK_BYTES mirrors cmd/factoryd/request_driver.go's own
 # maxFeedbackBytes (12 KiB) -- the Go side already caps what it writes to
 # the feedback file, keeping the newest text; this is a second, independent
-# cap on the read side, exactly like draft_acceptance_oracles.py's own.
+# cap on the read side, on the Go side.
 MAX_FEEDBACK_BYTES = 12 * 1024
 
 

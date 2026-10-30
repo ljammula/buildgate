@@ -105,14 +105,7 @@ func buildCapture(t *testing.T, dataDir string, inputs *[]string) requestdriver.
 	}
 }
 
-func upgradeTwoTickets() []requestdriver.DraftedTicket {
-	return []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1)},
-		{Filename: "002.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 2)},
-	}
-}
-
-func TestV0_0_13SpecReviewRequestIsApprovedWithNoReadBackAndBuildsOnTheOldInput(t *testing.T) {
+func TestV0_0_13SpecReviewRequestBuildsTheApprovedSpecWithoutPlanning(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, r := loadUpgradeRequest(t, "spec_review")
 	if !r.SpecImported {
@@ -133,19 +126,15 @@ func TestV0_0_13SpecReviewRequestIsApprovedWithNoReadBackAndBuildsOnTheOldInput(
 		t.Fatalf("hashes of the approved spec: %v", err)
 	}
 
-	runner, _ := requestdrivertest.StubPlanTicketsRunner(upgradeTwoTickets(), &request.PlanEvidence{}, nil)
-	if err := requestdriver.AdvancePlanning(dp, context.Background(), dataDir, approved, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(dp, context.Background(), dataDir, approved, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatalf("AdvancePlanning: %v", err)
 	}
-	if approved.State != request.StatePlanReview {
-		t.Fatalf("State = %q, want plan_review (error %q)", approved.State, approved.Error)
+	if approved.State != request.StateBuilding || approved.TicketCount != 1 {
+		t.Fatalf("State = %q, tickets %d, want building with one ticket (error %q)", approved.State, approved.TicketCount, approved.Error)
 	}
 	requireOldShape(t, dataDir, approved)
 	requireNoNoteAbout(t, approved, "budget", "read-back")
 
-	if _, err := request.Approve(dataDir, r.ID, "alice", time.Now(), nil); err != nil {
-		t.Fatalf("approve the plan: %v", err)
-	}
 	building, err := request.Load(dataDir, r.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -157,19 +146,21 @@ func TestV0_0_13SpecReviewRequestIsApprovedWithNoReadBackAndBuildsOnTheOldInput(
 	if len(inputs) != 1 {
 		t.Fatalf("builds = %d, want 1 (state %q, error %q)", len(inputs), building.State, building.Error)
 	}
-	requireOldBuildInput(t, inputs[0], building.Tickets[0].SpecPath)
+	spec, err := os.ReadFile(requestdriver.RequestSpecPath(dataDir, r.ID))
+	if err != nil || inputs[0] != string(spec) {
+		t.Fatalf("build input differs from approved spec: %v", err)
+	}
 	requireOldShape(t, dataDir, building)
 }
 
 func TestV0_0_13PlanningRequestPlansAndKeepsTheOldShape(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, r := loadUpgradeRequest(t, "planning")
-	runner, _ := requestdrivertest.StubPlanTicketsRunner(upgradeTwoTickets(), &request.PlanEvidence{}, nil)
-	if err := requestdriver.AdvancePlanning(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{}, runner, time.Now()); err != nil {
+	if err := requestdriver.AdvancePlanning(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingPlanTicketsRunner(t), time.Now()); err != nil {
 		t.Fatalf("AdvancePlanning: %v", err)
 	}
-	if r.State != request.StatePlanReview || r.TicketCount != 2 {
-		t.Fatalf("State = %q, tickets %d, error %q; want plan_review with 2 tickets", r.State, r.TicketCount, r.Error)
+	if r.State != request.StateBuilding || r.TicketCount != 1 {
+		t.Fatalf("State = %q, tickets %d, error %q; want building with one ticket", r.State, r.TicketCount, r.Error)
 	}
 	requireOldShape(t, dataDir, r)
 	if r.PlanBudgetLines != 0 {

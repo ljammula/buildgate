@@ -1,8 +1,8 @@
 package requestdriver
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -74,6 +74,15 @@ type Deps interface {
 	ReplayCommits(ctx context.Context, dir string, worktreePath string, branch string, onto string, commits []string) ([]string, error)
 	PushWithLease(ctx context.Context, dir string, sha string, branch string, expected string) error
 	MoveBranch(dir string, branch string, sha string) error
+	// The git calls of a pr_order carve (pr_order.go), all on the local
+	// repository's objects: ChangedPaths lists the paths base..result
+	// changes; CarveChain checks that carving result's change from base
+	// into the parts (each a list of paths) ends at result's own tree
+	// (workspace.CarveChain); CarveCommit makes the commit of one part on
+	// parent (workspace.CarveCommit). None moves a ref or a worktree.
+	ChangedPaths(dir string, base string, result string) ([]string, error)
+	CarveChain(ctx context.Context, dir string, base string, result string, parts [][]string) error
+	CarveCommit(ctx context.Context, dir string, parent string, result string, paths []string, message string) (string, error)
 	// RestoreBranch points a local branch that is ahead of sha back at it
 	// (workspace.RestoreBranch): ahead is whether it still points past sha.
 	RestoreBranch(dir string, branch string, sha string) (ahead bool, err error)
@@ -82,6 +91,9 @@ type Deps interface {
 	// HostGitVersion is the host's `git version` output, checked against
 	// workspace.GitFloor before a restack's first git call.
 	HostGitVersion(ctx context.Context) (string, error)
+	// ReadJobLog is the log of GitHub Actions job jobID of the pull
+	// request's repository (a CI round's failed check).
+	ReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error)
 }
 
 // RequestDriverOwnsState reports whether driveRequests knows how to
@@ -93,8 +105,8 @@ type Deps interface {
 // cancel-during-a-job fix, needed because a request can be cancelled
 // *while* a job this function already started is still running.
 func RequestDriverOwnsState(state request.State) bool {
-	// oracle_review is deliberately absent, like spec_review and plan_review:
-	// it is a human-wait state the driver never advances (only approve/reject
+	// spec_review and plan_review are deliberately absent:
+	// they are human-wait states the driver never advances (only approve/reject
 	// move it). The job states (request.State.RunsJob) obey the
 	// one-job-per-pass rule; request.WaitingOn reports who waits on whom.
 	return state.RunsJob() || state == request.StatePRReview
@@ -102,10 +114,10 @@ func RequestDriverOwnsState(state request.State) bool {
 
 // stillInState re-loads r's request.json under request.Lock and reports
 // whether it is still in expected -- used right after a long-running job
-// (spec/oracle/plan drafting, a ticket build) returns, before any of its
+// (spec/plan drafting, a ticket build) returns, before any of its
 // outcome is persisted.
 //
-// AdvanceSpecDrafting/AdvanceOracleDrafting/AdvancePlanning/AdvanceBuilding
+// AdvanceSpecDrafting/AdvancePlanning/AdvanceBuilding
 // each hold their own in-memory *request.Request (r), loaded by
 // driveRequests' own request.List call at the *start* of the pass, before
 // the job ran. cancelRequest (internal/api/server.go) and `factoryd
@@ -147,7 +159,7 @@ func stillInState(dataDir string, id string, expected request.State) (bool, erro
 // content, r moves to halted with a reason naming what went wrong, and a notification is dispatched through
 // notify.DispatchExternal the same durable-log-first way save's own
 // notify.PrepareHalt call does for a run.
-func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, specRunner SpecDraftRunner, planRunner PlanTicketsRunner, oracleRunner OracleDraftRunner, buildRunner TicketRunner) error {
+func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, specRunner SpecDraftRunner, planRunner PlanTicketsRunner, buildRunner TicketRunner) error {
 	now := time.Now()
 	switch r.State {
 	case request.StateSubmitted:
@@ -158,8 +170,6 @@ func AdvanceRequest(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		return r.Save(dataDir)
 	case request.StateSpecDrafting:
 		return AdvanceSpecDrafting(dp, ctx, dataDir, r, cfg, specRunner, now)
-	case request.StateOracleDrafting:
-		return AdvanceOracleDrafting(dp, ctx, dataDir, r, cfg, oracleRunner, now)
 	case request.StatePlanning:
 		return AdvancePlanning(dp, ctx, dataDir, r, cfg, planRunner, now)
 	case request.StateBuilding:
@@ -197,9 +207,7 @@ const maxSpecDraftingAttempts = 2
 // retry is true when the drafted spec was refused for its criteria and the
 // caller should draft again.
 func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner SpecDraftRunner, now time.Time, attempt int) (retry bool, err error) {
-	// A spec_review rejection's reason must reach draft_spec.py the same way an
-	// oracle_review rejection already reaches the oracle drafter (see
-	// AdvanceOracleDrafting's identical block) -- this dedicated feedback
+	// A spec_review rejection's reason must reach draft_spec.py -- this dedicated feedback
 	// file is the only channel: request.Reject no longer appends anything
 	// to request.md at all (an adversarial review, 2026-09-24),
 	// since draft_spec.py/plan_tickets.py both fold request.md whole into
@@ -475,79 +483,6 @@ func readImportedSpec(dataDir, id string) (string, error) {
 	return string(data), nil
 }
 
-// AdvanceOracleDrafting runs the oracle-drafting job for r and moves it to
-// oracle_review with the status the job reported. Unlike spec drafting and
-// planning, a job failure never halts the request: a runner error becomes
-// status "failed" and the operator decides at oracle_review (reject to retry,
-// hand-write oracle/, or approve to skip). Three things do not land in review:
-// a stale spec approval (halted, exactly like AdvancePlanning -- the drafter's
-// input changed), a stop request mid-run (r is left as it is, so the next
-// pass re-runs the job), and a job that ended before it produced a draft
-// (OracleDraftJobFailure: the request waits in resume_review with the cause).
-func AdvanceOracleDrafting(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner OracleDraftRunner, now time.Time) error {
-	if err := VerifyApprovedHashes(dataDir, r); err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
-	}
-	in := OracleDraftInput{
-		DataDir:   dataDir,
-		Request:   r,
-		Cfg:       cfg,
-		OracleDir: filepath.Join(request.Dir(dataDir, r.ID), request.RequestOracleDirName),
-	}
-	// The operator's oracle_review rejection reasons reach the drafter through
-	// this file, never through request.md (see request.Reject).
-	if feedback := request.OracleFeedback(r); feedback != "" {
-		in.FeedbackPath = request.OracleFeedbackPath(dataDir, r.ID)
-		if err := os.WriteFile(in.FeedbackPath, []byte(CapFeedback(feedback, MaxFeedbackBytes, "## Oracle rejected ")), 0o600); err != nil {
-			return fmt.Errorf("write oracle feedback: %w", err)
-		}
-	}
-
-	if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
-		return err
-	} else if check != "" {
-		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
-	}
-	draft, jobErr := runner(ctx, in)
-	// Re-stamp after the job returns -- see AdvanceSpecDrafting's
-	// identical comment for why the pre-job now above must not be reused
-	// for a transition that only happens once the job has finished.
-	now = time.Now()
-	// stillInState: see its own doc comment on AdvanceSpecDrafting's
-	// identical check, above.
-	if ok, err := stillInState(dataDir, r.ID, request.StateOracleDrafting); err != nil {
-		return err
-	} else if !ok {
-		log.Printf("request %s: oracle drafting finished but the request left oracle_drafting while it ran (e.g. cancelled) -- discarding the result", r.ID)
-		return nil
-	}
-	switch {
-	case jobErr != nil:
-		if ctx.Err() != nil {
-			return jobErr
-		}
-		if failure := oracleJobFailure(r, jobErr); failure != nil {
-			return unresolvedOracleDrafting(dp, dataDir, r, failure, now)
-		}
-		draft = failedOracleDraft(jobErr)
-	case !draft.Status.Valid():
-		draft = request.OracleDraft{Status: request.OracleDraftFailed, Detail: fmt.Sprintf("oracle drafting returned an invalid status %q", draft.Status)}
-	}
-	// A rejected oracle_review sends this request back through
-	// oracle_drafting again (RejectOracle) -- accumulate the previous
-	// pass's own Spend the same way AdvanceSpecDrafting does for a spec
-	// re-draft, since CompleteOracleDrafting replaces the whole
-	// *OracleDraft record.
-	if r.OracleDraft != nil {
-		draft.Spend = r.OracleDraft.Spend.Add(draft.Spend)
-	}
-	if err := r.CompleteOracleDrafting(draft, now); err != nil {
-		return err
-	}
-	log.Printf("request %s: oracle_drafting -> oracle_review (%s)", r.ID, draft.Status)
-	return saveAndRemind(dp, dataDir, r, now)
-}
-
 // maxPlanningAttempts bounds AdvancePlanning's own automatic re-plan
 // (below) to exactly one retry within a single planning pass: an initial
 // drafting launch, plus at most one more when writeAndValidateDraftedTickets
@@ -561,6 +496,7 @@ type planningInputs struct {
 	planReview    bool // the repository's .factory.yml plan_review
 	testPatterns  []string
 	criteriaCount int
+	spec          []byte // the approved spec.md, verified against its pinned hash
 }
 
 var errPlanningInputsHalted = errors.New("planning inputs halted")
@@ -616,6 +552,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 		testPatterns:  testPatterns,
 		planReview:    planReview,
 		criteriaCount: criteriaCount,
+		spec:          specBytes,
 	}, nil
 }
 
@@ -668,6 +605,10 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 	// The budget the planner is told is the one the review's notes read.
 	r.PlanBudgetLines = cfg.Settings.PRBudgetLines
+	r.PlanVerifyCommand = verifyCommand
+	if !r.PlanImported && request.PlanFeedback(r) == "" && r.SizeReplan == nil {
+		return planApprovedSpec(dp, dataDir, r, inputs, ticketsDir, now)
+	}
 
 	runner = withPlanImport(runner)
 	reviewedTickets, reviewErr := ReviewedTickets(dataDir, r)
@@ -756,19 +697,34 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		}
 		log.Printf("request %s: drafted plan refused (%v) -- re-planning automatically", r.ID, validateErr)
 	}
-	// A request with an approved request-level oracle/ gets each ticket's own
-	// <NNN>.oracle/ derived from it (a no-op for every other request), so the
-	// per-ticket pinning, resolveTicketOracle and the gates work unchanged.
-	if err := request.MaterializeTicketOracles(dataDir, r, requestTickets); err != nil {
-		_ = os.RemoveAll(ticketsDir)
-		return haltOracleMaterialization(dataDir, r, fmt.Sprintf("request-level oracle could not be assigned to tickets: %v -- run `factoryd retry %s` to return the request to oracle_review, where oracle/ can be edited and approved again", err, r.ID), now)
-	}
+	return finishPlanning(dp, dataDir, r, inputs, requestTickets, evidence, now)
+}
 
+// planApprovedSpec writes one ticket without a model launch or launch budget.
+func planApprovedSpec(dp Deps, dataDir string, r *request.Request, inputs planningInputs, ticketsDir string, now time.Time) error {
+	if err := writeDraftFeedback(request.PlanFeedbackPath(dataDir, r.ID), ""); err != nil {
+		return err
+	}
+	if err := clearTicketArtifacts(ticketsDir); err != nil {
+		return fmt.Errorf("clear previous plan's tickets: %w", err)
+	}
+	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
+		return fmt.Errorf("create tickets dir: %w", err)
+	}
+	tickets, err := writeSpecTicket(ticketsDir, DraftedTicket{Filename: specTicketName, Content: string(inputs.spec)})
+	if err != nil {
+		return err
+	}
+	return finishPlanning(dp, dataDir, r, inputs, tickets, nil, now)
+}
+
+// finishPlanning records a planning pass's tickets and evidence on r, then
+// either has the factory approve the plan itself or sends it to plan_review.
+func finishPlanning(dp Deps, dataDir string, r *request.Request, inputs planningInputs, requestTickets []request.Ticket, evidence *request.PlanEvidence, now time.Time) error {
 	r.Tickets = requestTickets
 	r.TicketCount = len(requestTickets)
 	recordPlanEvidence(r, evidence)
-	_, supersedes := materializedOracles(dataDir, r)
-	if r.PlanReviewReason(inputs.planReview, len(supersedes)) == "" {
+	if r.PlanReviewReason(inputs.planReview) == "" {
 		// The spec approval stays the person's; a one-ticket plan nobody
 		// asked to review is approved here with the checks a person's plan
 		// approval makes. A refusal sends the plan to plan_review instead.
@@ -791,6 +747,21 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	r.RefreshReviewNotes(dataDir)
 	log.Printf("request %s: planning -> plan_review (plan drafted: %d ticket(s))", r.ID, r.TicketCount)
 	return saveAndRemind(dp, dataDir, r, now)
+}
+
+// specTicketName is the file name of the ticket the factory writes from the
+// approved spec.
+const specTicketName = "001.spec.md"
+
+// writeSpecTicket writes the approved spec as the ticket. The approval
+// that follows accepts it as a ticket in spec form
+// (request.RequestTicketStructure).
+func writeSpecTicket(ticketsDir string, ticket DraftedTicket) ([]request.Ticket, error) {
+	ticketPath := filepath.Join(ticketsDir, ticket.Filename)
+	if err := os.WriteFile(ticketPath, []byte(ticket.Content), 0o600); err != nil {
+		return nil, fmt.Errorf("write ticket %s: %w", ticket.Filename, err)
+	}
+	return []request.Ticket{{Index: 1, SpecPath: ticketPath}}, nil
 }
 
 // planRedraftable reports whether a plan refused with err gets the one
@@ -859,7 +830,7 @@ func ReadTicketFiles(dir string) ([]DraftedTicket, error) {
 }
 
 // clearTicketArtifacts removes everything inside the request's own tickets
-// directory (NNN.spec.md, NNN.criteria.md, NNN.oracle/) so a re-plan that
+// directory (NNN.spec.md, NNN.criteria.md) so a re-plan that
 // drafts fewer tickets than its predecessor cannot leave stale files behind
 // to be pinned at approval or mounted at build time. A missing directory is
 // fine. The directory itself must be a real directory, not a symlink, and
@@ -977,15 +948,11 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if held, err := holdForEarlierTicket(dp, ctx, dataDir, r, idx, cfg, now); held || err != nil {
 		return err
 	}
+	if parked, err := restackCarvedOntoPredecessor(dp, ctx, dataDir, r, ticket, now); parked || err != nil {
+		return err
+	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
-	args, err := requestBuildArgs(dataDir, r, *ticket, cfg, escalated)
-	if errors.Is(err, errNoRecheck) {
-		return haltWithoutRecheck(dataDir, r, err, now)
-	}
-	if err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
-	}
-	args, recordOf, onBranch, err := startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
+	args, recordOf, onBranch, escalated, err := ticketBuildStart(dp, dataDir, r, ticket, cfg, resumeRunID, escalated)
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
 	}
@@ -1046,9 +1013,6 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// one second after building began -- before the run had even started --
 	// for a build that took four minutes.
 	now = time.Now()
-	// What refused the build goes on the ticket's list (SC-022) at once,
-	// whatever becomes of the request next: every later build rechecks it.
-	noteRunRefusals(dataDir, r, ticket.Index, ticket.RunID)
 	// stillInState: see its own doc comment. Checked once, after runner
 	// above returns (the build itself is the long-running job here), before
 	// any of runErr/runRecord's outcome is persisted below -- a cancel that
@@ -1115,8 +1079,15 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 }
 
 func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, reason string, idx int, now time.Time) error {
+	noteChallenge(ticket, runRecord)
 	switch runRecord.State {
 	case run.StateAccepted:
+		if handled, err := handleOversizedRun(dataDir, r, runRecord, now); handled {
+			return err
+		}
+		if handled, err := handleMixedRun(dp, ctx, dataDir, r, ticket, runRecord, now); handled {
+			return err
+		}
 		// The "merge by hand" hint used to always guess "factoryd/<run-id>", wrong for
 		// a -repository/Temporal-routed run's own real branch -- recorded
 		// here, the one place this ticket's run is known to have reached
@@ -1124,6 +1095,9 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
 		return acceptAfterAdvice(dp, ctx, dataDir, r, ticket, runRecord, cfg, now)
 	case run.StateQuarantined:
+		if handled, oErr := carvedRunRefused(dataDir, r, ticket, runRecord, reason, now); handled {
+			return oErr
+		}
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
 			return cErr
 		}
@@ -1134,6 +1108,9 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		check := quarantineCheckOf(runRecord)
 		return quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
 	case run.StateHalted:
+		if handled, oErr := carvedRunRefused(dataDir, r, ticket, runRecord, reason, now); handled {
+			return oErr
+		}
 		return afterHaltedTicketRun(dp, dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
 	default:
 		// Defensive only: whenever a run record exists (nil runErr, or
@@ -1144,6 +1121,30 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		// expected to actually reach this branch.
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
+}
+
+// handleOversizedRun sends the first oversized request ticket back to
+// planning only after the run's recorded release decision denied it.
+func handleOversizedRun(dataDir string, r *request.Request, record *run.Run, now time.Time) (bool, error) {
+	if record.ChangeSize == nil || record.ReleasePolicy == nil {
+		return false, nil
+	}
+	size, caps := record.ChangeSize, record.ReleasePolicy
+	if size.SourceLines <= caps.MaxChangedLines && size.SourceFiles <= caps.MaxFilesChanged {
+		return false, nil
+	}
+	reason := fmt.Sprintf("run %s exceeded the release size cap: %d source lines, %d source files, %d functions", record.ID, size.SourceLines, size.SourceFiles, size.Functions)
+	decision, err := release.LoadDecision(dataDir, record.Project, record.ID)
+	if err != nil || decision == nil || decision.Allowed || record.PullRequestURL != "" {
+		return true, HaltRequest(dataDir, r, reason+"; the denied release decision or absence of a pull request could not be confirmed", now)
+	}
+	if r.SizeReplan != nil || r.PlanImported {
+		return true, HaltRequest(dataDir, r, reason+"; this plan cannot be sent to planning for size again", now)
+	}
+	if err := r.ReturnToPlanningForSize(record.ID, size, now); err != nil {
+		return true, err
+	}
+	return true, r.Save(dataDir)
 }
 
 // noteLostCause names the cause of a lost build correctly when the request
@@ -1273,28 +1274,11 @@ func unresolvedRunAwaitingDecision(dataDir string, r *request.Request, ticket *r
 // with only a rebuild left to choose. Any other halt halts the request with
 // reason.
 func afterHaltedTicketRun(dp Deps, dataDir string, r *request.Request, runRecord *run.Run, reason string, now time.Time) error {
-	if check := baseOracleQuarantineCheck(runRecord); check != "" {
-		// A verdict on the oracle, not a lost step: the request is
-		// quarantined naming the check, so its next action says what to do.
-		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
-	}
 	cause := run.UnresolvedCauseOf(runRecord)
 	if runRecord.KeptForResume || cause != "" {
 		return EnterResumeReview(dp, dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
 	}
 	return HaltRequest(dataDir, r, reason, now)
-}
-
-// baseOracleQuarantineCheck is the request quarantine check for a run halted
-// before its build by the bug request's oracle check on the base commit, or "".
-func baseOracleQuarantineCheck(runRecord *run.Run) string {
-	switch runRecord.HaltReasonCode {
-	case run.HaltReasonOraclePassesOnBase:
-		return request.QuarantineCheckOracleGreenOnBase
-	case run.HaltReasonOracleNotRunOnBase:
-		return request.QuarantineCheckOracleNotRun
-	}
-	return ""
 }
 
 // ticketStartFailed moves r on after its ticket build failed before its run
@@ -1322,6 +1306,22 @@ func startFailedReason(idx, count int, runErr error, onBranch bool) string {
 		reason += "; this retry was to continue on the earlier attempt's branch: `factoryd retry -from scratch` rebuilds from the base commit instead"
 	}
 	return reason
+}
+
+// ticketBuildStart is the argv of the build AdvanceBuilding starts for ticket
+// and where it starts: a carved ticket's is the replay run of its carved
+// commit (carvedBuildArgs, never escalated); any other is the ordinary
+// build on its starting point (startingPoint).
+func ticketBuildStart(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, resumeRunID string, escalated bool) (args []string, recordOf string, onBranch, escalatedOut bool, err error) {
+	if ticket.Order != nil && !ticket.Pushed() {
+		args, err = carvedBuildArgs(dataDir, r, *ticket, cfg)
+		return args, "", false, false, err
+	}
+	if args, err = requestBuildArgs(dataDir, r, *ticket, cfg, escalated); err != nil {
+		return nil, "", false, escalated, err
+	}
+	args, recordOf, onBranch, err = startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
+	return args, recordOf, onBranch, escalated, err
 }
 
 // withEarlierTicketsWork adds the argument that puts the earlier tickets'
@@ -1475,13 +1475,10 @@ func reviewShapeOnly(runRecord *run.Run) bool {
 
 // quarantineCheckOf names the check a request's quarantine records for a
 // quarantined ticket run, so NextAction leads with that check's remedy:
-// review_reproduction when a reviewer's reproduction refused the run
-// (SC-022), diff_scope when the diff left Allowed-Files (amend-scope), none
+// diff_scope when the diff left Allowed-Files (amend-scope), none
 // otherwise.
 func quarantineCheckOf(runRecord *run.Run) string {
 	switch {
-	case failedGate(runRecord, policy.ReviewReproductionCheck):
-		return request.QuarantineCheckReviewReproduction
 	case failedGate(runRecord, "diff_scope"):
 		return request.QuarantineCheckDiffScope
 	}
@@ -1497,18 +1494,6 @@ func failedGate(runRecord *run.Run, check string) bool {
 		}
 	}
 	return false
-}
-
-// recordTicketRunStarted points ticket ticketIndex's RunID at runID on
-// disk the moment a corrective round's run starts, so the
-// console and status follow the running round instead of showing the
-// quarantined first run as the ticket's state until the round finishes
-// (found live, 2026-09-26 Flutter + Go app run: a red "Quarantined" ticket while
-// the automatic round was fixing it). A locked read-modify-write that
-// changes nothing unless the request is still building, so it can never
-// overwrite a cancel that landed meanwhile.
-func recordTicketRunStarted(dataDir, requestID string, ticketIndex int, runID string) error {
-	return updateBuildingTicket(dataDir, requestID, ticketIndex, func(t *request.Ticket) { t.RunID = runID })
 }
 
 // recordRoundStarted records a corrective round's started run on ticket, in
@@ -1633,11 +1618,6 @@ func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *requ
 		}
 		recordRoundStarted(dataDir, r, ticket, started.ID, advice)
 	})
-	// What refused the round goes on the ticket's list at once, whatever
-	// becomes of the request next.
-	if !advice {
-		noteRunRefusals(dataDir, r, ticket.Index, startedRunID)
-	}
 	// stillInState: see AdvanceBuilding's own identical check and doc
 	// comment. A cancel that lands while this round built must not be
 	// resurrected by the caller's own r.Save calls.
@@ -1702,9 +1682,6 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		diffBase := current.DiffBase()
 		roundRunID := fmt.Sprintf("%s-%03d-%s%d", r.ID, ticket.Index, plan.suffix, roundIndex)
 		args, about, err := plan.args(current, roundIndex, roundRunID, diffBase)
-		if errors.Is(err, errNoRecheck) {
-			return true, haltWithoutRecheck(dataDir, r, err, now)
-		}
 		if err != nil {
 			return true, fmt.Errorf("request %s: ticket %d: %s %d: %w", r.ID, ticket.Index, plan.label, roundIndex, err)
 		}
@@ -1783,6 +1760,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if err != nil {
 			return true, fmt.Errorf("request %s: ticket %d: load quarantined %s run %q: %w", r.ID, ticket.Index, plan.label, loadID, err)
 		}
+		noteChallenge(ticket, nextRun)
 		if !plan.eligible(nextRun) {
 			// Quarantined again, but with nothing a further round of this
 			// kind could fix: a check a build is not told of failed this
@@ -1824,7 +1802,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 // PR-review round (runRoundAttempt) is not built here, and stays on the
 // role's model.
 func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string) ([]string, error) {
-	return correctiveBuildArgs(dataDir, r, ticket, cfg, specPath, roundID, branch, diffBase, false)
+	return correctiveBuildArgs(dataDir, r, ticket, cfg, specPath, roundID, branch, diffBase, false, false)
 }
 
 // correctiveBuildArgs is BuildCorrectiveArgs. onOpenPR is true for an advice
@@ -1833,9 +1811,12 @@ func BuildCorrectiveArgs(dataDir string, r *request.Request, ticket request.Tick
 // forced off and it gets no -pr-closes-issue or -pr-base, and, not being
 // recovery from a failure, it runs on the execution role's model, never the
 // escalation.
-func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR bool) ([]string, error) {
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath, true)
+func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, specPath, roundID, branch, diffBase string, onOpenPR, challengeRound bool) ([]string, error) {
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, roundID, specPath)
 	if err != nil {
+		return nil, err
+	}
+	if err := withChallenge(entry, dataDir, r, ticket, challengeRound); err != nil {
 		return nil, err
 	}
 	if onOpenPR {
@@ -1918,7 +1899,7 @@ func recordPlanEvidence(r *request.Request, evidence *request.PlanEvidence) {
 // reads the ticket's header lines and the project's test patterns and no
 // prose. Every other
 // validation failure this function can return (a bad heading, a missing
-// Allowed-Files/Required-Changed-Files, a Verify-Command drift, an
+// Allowed-Files, a Verify-Command drift, an
 // unclaimed acceptance criterion) is not wrapped with it; planRedraftable
 // decides which of those get the same retry.
 var errPlanInfeasible = errors.New("plan is infeasible")
@@ -1943,12 +1924,14 @@ var errPlanInfeasible = errors.New("plan is infeasible")
 // here reads a ticket's structure (headings, header lines, criterion
 // numbers), never the meaning of its prose: what the factory reads from
 // prose is a note at the review (request.PlanReviewNotes).
+// For a bug request (bug) ticket 1 may not declare Tests-Required: no
+// (request.RefuseBugTestsOptOut): it must add a test that fails on the base.
 // Every other validation failure returns immediately, naming the failing
 // ticket's filename; the caller (AdvancePlanning) keeps a copy of the
 // refused tickets (keepRefusedPlan) and removes ticketsDir on any failure
 // path so a halted request's directory doesn't keep half-valid ticket files
 // around.
-func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string) ([]request.Ticket, error) {
+func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, criteriaCount int, verifyCommand string, testPatterns []string, bug bool) ([]request.Ticket, error) {
 	requestTickets := make([]request.Ticket, 0, len(tickets))
 	contents := make([]string, 0, len(tickets))
 	var infeasible []string
@@ -1976,13 +1959,7 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		} else if len(allowed) == 0 {
 			return nil, contentErr(fmt.Errorf("ticket %s: missing Allowed-Files", ticket.Filename))
 		}
-		required, err := ticketspec.ParseRequiredChangedFiles(ticketPath)
-		if err != nil {
-			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
-		} else if len(required) == 0 {
-			return nil, contentErr(fmt.Errorf("ticket %s: missing Required-Changed-Files", ticket.Filename))
-		}
-		if problem := ticketProtectedPaths(ticket.Filename, allowed, required); problem != "" {
+		if problem := ticketProtectedPaths(ticket.Filename, allowed); problem != "" {
 			infeasible = append(infeasible, problem)
 		}
 		if _, _, err := ticketspec.ParseEstimatedChangedLines(ticketPath); err != nil {
@@ -1992,8 +1969,13 @@ func writeAndValidateDraftedTickets(ticketsDir string, tickets []DraftedTicket, 
 		if err != nil {
 			return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
 		}
+		if bug && i == 0 {
+			if err := request.RefuseBugTestsOptOut(ticketPath); err != nil {
+				return nil, contentErr(fmt.Errorf("ticket %s: %w", ticket.Filename, err))
+			}
+		}
 		if !policy.TicketTestsFeasible(allowed, testPatterns, testsRequiredOptOut) {
-			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_red_on_base gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files and Required-Changed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
+			infeasible = append(infeasible, fmt.Sprintf("ticket %s: Allowed-Files %v can never satisfy the tests_red_on_base gate (no entry is a test file, a directory, or a glob that could be one) and the ticket declares no Tests-Required: no -- <reason> opt-out -- add the test file(s) it will change to Allowed-Files, merge it into the ticket that tests it, or declare the opt-out with a reason", ticket.Filename, allowed))
 		}
 		requestTickets = append(requestTickets, request.Ticket{Index: i + 1, SpecPath: ticketPath})
 		contents = append(contents, ticket.Content)
@@ -2048,18 +2030,18 @@ func keepRefusedPlan(dataDir, id string, tickets []DraftedTicket, reason error) 
 	}
 }
 
-// ticketProtectedPaths reports a ticket whose Allowed-Files or
-// Required-Changed-Files name a path release never merges from a build's own
+// ticketProtectedPaths reports a ticket whose Allowed-Files name a path
+// release never merges from a build's own
 // change (release.MergePolicy's floor: .factory.yml, anything under
-// .factory/, the oracle index): such a build is accepted and then denied at
+// .factory/, .buildgate/): such a build is accepted and then denied at
 // release, after its model spend. Each entry is cleaned and case-folded
 // first, as a case-insensitive worktree would let either spelling through.
-// It reads the two file lists only, never prose, and checks literal entries:
+// It reads the file list only, never prose, and checks literal entries:
 // a broad glob or "." is not refused. Empty when the ticket names none.
-func ticketProtectedPaths(filename string, allowed, required []string) string {
+func ticketProtectedPaths(filename string, allowed []string) string {
 	original := map[string]string{}
 	var folded []string
-	for _, entry := range append(append([]string{}, allowed...), required...) {
+	for _, entry := range allowed {
 		key := strings.ToLower(path.Clean(entry))
 		if _, seen := original[key]; !seen {
 			original[key] = entry
@@ -2074,7 +2056,7 @@ func ticketProtectedPaths(filename string, allowed, required []string) string {
 	if len(named) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ticket %s: names %v, which release never merges from a build (the repository's factory configuration is the operator's to change) -- drop the path from Allowed-Files and Required-Changed-Files, and leave the change to the operator", filename, named)
+	return fmt.Sprintf("ticket %s: names %v, which release never merges from a build (the repository's factory configuration is the operator's to change) -- drop the path from Allowed-Files, and leave the change to the operator", filename, named)
 }
 
 // VerifyApprovedHashes reports an error naming the first approved file
@@ -2093,19 +2075,6 @@ func ticketProtectedPaths(filename string, allowed, required []string) string {
 // plan approval it consumes.
 func VerifyApprovedHashes(dataDir string, r *request.Request) error {
 	return request.VerifyApprovedHashes(dataDir, r)
-}
-
-// haltOracleMaterialization is HaltRequest for a planning-time oracle
-// materialization refusal: the halt carries request.HaltOracleMaterialize so
-// `factoryd retry` returns the request to oracle_review (planning would only
-// fail the same way while oracle/ stays pinned) instead of resuming planning.
-func haltOracleMaterialization(dataDir string, r *request.Request, reason string, now time.Time) error {
-	oldState := r.State
-	if err := r.HaltOracleMaterialization(reason, now); err != nil {
-		return err
-	}
-	log.Printf("request %s: %s -> halted (%s)", r.ID, oldState, reason)
-	return notifyTerminalRequest(dataDir, r, reason, now)
 }
 
 // HaltRequest moves r to halted with reason and saves it, dispatching a
@@ -2246,7 +2215,7 @@ func quarantineRequest(dataDir string, r *request.Request, reason string, now ti
 
 // quarantineRequestWithCheck is quarantineRequest's own extended form:
 // check, when non-empty, is recorded on r.QuarantineCheck (e.g.
-// request.QuarantineCheckReviewReproduction) so NextAction can name the one
+// request.QuarantineCheckDiffScope) so NextAction can name the one
 // command that actually addresses that cause (Follow-up B) -- set AFTER
 // r.Quarantine, since advance() itself unconditionally clears
 // QuarantineCheck on every transition, the same way it clears HaltKind.
@@ -2291,7 +2260,7 @@ func RequestSpecPath(dataDir, id string) string {
 // corrective round (BuildCorrectiveArgs) and its PR-review corrective
 // round (RunCorrectiveRound, pr_review_driver.go) --
 // everything they need computed identically (the legacy
-// full-suite-command fallback, the reference oracle), varying only in id
+// full-suite-command fallback), varying only in id
 // and specPath. Found via adversarial
 // review: BuildCorrectiveArgs used to hand-build its own
 // QueueEntry from scratch and silently dropped ExecutionHarness and the legacy
@@ -2300,7 +2269,7 @@ func RequestSpecPath(dataDir, id string) string {
 // harness instead of the request's actual one. One shared builder keeps
 // them in step: the PR-review round built its own too and ran with no
 // acceptance-criteria file, so no spec_conformity review at all.
-func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string, reproduce bool) (*QueueEntry, error) {
+func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket, cfg WorkerConfig, id, specPath string) (*QueueEntry, error) {
 	// prBase: ticket N (N>1) stacks its draft PR on ticket N-1's own
 	// branch while that PR is still open and unmerged -- see
 	// QueueEntry.PRBase's own doc comment for why.
@@ -2309,9 +2278,12 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("resolve verify command for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	oracleDir, oracleCommand, err := ResolveTicketOracle(dataDir, r, ticket)
-	if err != nil {
-		return nil, fmt.Errorf("reference oracle for request %s ticket %d: %w", r.ID, ticket.Index, err)
+	if verifyCommand == "" {
+		// The ticket the factory wrote from the spec declares none.
+		verifyCommand = r.PlanVerifyCommand
+		if verifyCommand == "" {
+			verifyCommand = r.VerifyCommand
+		}
 	}
 	// fullSuiteCommand/fullSuiteSource: a configured full-suite command
 	// (set at submit, FullSuiteSource "") is forwarded as it is, and an
@@ -2336,29 +2308,20 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, err
 	}
-	review, err := reproductionInputs(dataDir, r, ticket.Index, id, reproduce, cfg.Settings.ReviewReproductions)
-	if err != nil {
-		return nil, err
-	}
 	scopeApproved, scopeWhy := request.ScopeApproved(r, ticket.Index)
-	if !scopeApproved {
+	noTicketScope := isUnmodifiedSpecTicket(dataDir, r, ticket)
+	if !scopeApproved && !noTicketScope {
 		log.Printf("request %s ticket %d: Allowed-Files is not a person's list (%s): files outside it are PR notes", r.ID, ticket.Index, scopeWhy)
 	}
 	return &QueueEntry{
-		ID:                     id,
-		Workspace:              r.Workspace,
-		Project:                r.Project,
-		SpecPath:               specPath,
-		ReviewSpecPath:         review.SpecPath,
-		ReviewReproduction:     review.Reproduce,
-		RecheckReproductions:   review.Recheck,
-		VerifyCommand:          verifyCommand,
-		FullSuiteCommand:       fullSuiteCommand,
-		FullSuiteSource:        fullSuiteSource,
-		NoCommitOracles:        r.NoCommitOracles,
-		Bug:                    r.Bug,
-		ReferenceOracleDir:     oracleDir,
-		ReferenceOracleCommand: oracleCommand,
+		ID:               id,
+		Workspace:        r.Workspace,
+		Project:          r.Project,
+		SpecPath:         specPath,
+		VerifyCommand:    verifyCommand,
+		FullSuiteCommand: fullSuiteCommand,
+		FullSuiteSource:  fullSuiteSource,
+		Bug:              r.Bug && ticket.Index == 1 && ticket.Order == nil,
 		// ExecutionHarness: r.Harnesses["execution"] is `factoryd submit
 		// -harness execution=...` / the API's own "harnesses" field, already
 		// validated at submit time (sessionconfig.ValidateRequestHarnesses)
@@ -2392,6 +2355,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		RequestTicket: true,
 		// ScopeUnapproved: see QueueEntry.ScopeUnapproved's own doc comment.
 		ScopeUnapproved: !scopeApproved,
+		NoTicketScope:   noTicketScope,
+		OrderGroup:      orderGroupOf(ticket),
 		// ExecutionModel: r.Models["execution"] is `factoryd submit
 		// -model execution=...` / the API's own "models" field, already
 		// validated at submit time (sessionconfig.ValidateRequestModels)
@@ -2402,62 +2367,25 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 	}, nil
 }
 
-// reviewInputs are a ticket build's review inputs: SpecPath, the approved
-// spec its review cites (-review-spec), set only with Reproduce; Reproduce, whether it holds and runs
-// the review's reproductions (-review-reproduction, SC-022); and Recheck,
-// its -recheck-reproductions manifest.
-type reviewInputs struct {
-	SpecPath  string
-	Reproduce bool
-	Recheck   string
-}
-
-// reproductionInputs are a ticket build's review inputs. review is false for
-// a restack's replay run, which cannot take a corrective build: it gets none,
-// and the ticket's list stays as it is. hold is the session config's
-// review_reproductions off (the default) gives the build no approved spec and
-// holds no new reproduction, so every finding of the build's review is advice
-// (the spec is still checked against its approval); a ticket
-// whose list is not empty (a refusal recorded while it was on) is still
-// rechecked against that list, and so still holds. A ticket whose list is not
-// empty is never built without it: with no approved spec to run them under,
-// the build is refused (errNoRecheck).
-func reproductionInputs(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
-	in, err := reproductionInputsWithSpec(dataDir, r, index, buildID, review, hold)
-	if !in.Reproduce {
-		in.SpecPath = ""
+// isUnmodifiedSpecTicket recognizes only the factory's verbatim spec ticket.
+// A handed-over or size-replanned ticket and a scope amendment remain plans.
+func isUnmodifiedSpecTicket(dataDir string, r *request.Request, ticket request.Ticket) bool {
+	if r.PlanImported || r.SizeReplan != nil || ticket.ScopeAmendedBy != "" {
+		return false
 	}
-	return in, err
-}
-
-func reproductionInputsWithSpec(dataDir string, r *request.Request, index int, buildID string, review, hold bool) (reviewInputs, error) {
-	if !review {
-		return reviewInputs{}, nil
-	}
-	reviewSpec, err := approvedSpecPath(dataDir, r)
+	spec, err := os.ReadFile(RequestSpecPath(dataDir, r.ID))
 	if err != nil {
-		return reviewInputs{}, err
+		return false
 	}
-	if index < 1 || index > len(r.Tickets) {
-		return reviewInputs{SpecPath: reviewSpec, Reproduce: hold && reviewSpec != ""}, nil
-	}
-	ticket := &r.Tickets[index-1]
-	if reviewSpec == "" {
-		if len(ticket.Reproductions) > 0 {
-			return reviewInputs{}, fmt.Errorf("ticket %d: %w: the request has no approved spec to run them under", index, errNoRecheck)
-		}
-		return reviewInputs{}, nil
-	}
-	recheck, err := ticketRecheck(dataDir, r, ticket, buildID)
-	return reviewInputs{SpecPath: reviewSpec, Reproduce: hold || recheck != "", Recheck: recheck}, err
+	content, err := os.ReadFile(ticket.SpecPath)
+	return err == nil && bytes.Equal(spec, content)
 }
 
 // requestSpecFile is the request's spec, relative to its directory.
 const requestSpecFile = "spec.md"
 
 // approvedSpecPath is the request's spec.md when spec_review approved it by
-// hash: the spec a ticket build's review cites and its reproduction check
-// compares citations with (SC-022). "" for a request with no approved spec
+// hash: the spec a ticket's challenger is given (SC-022). "" for a request with no approved spec
 // hash. A spec whose content no longer matches the approval is an error, so
 // a review never cites an unapproved line.
 func approvedSpecPath(dataDir string, r *request.Request) (string, error) {
@@ -2540,8 +2468,11 @@ func requestBuildArgs(dataDir string, r *request.Request, ticket request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("build spec for request %s ticket %d: %w", r.ID, ticket.Index, err)
 	}
-	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath, true)
+	entry, err := ticketQueueEntry(dataDir, r, ticket, cfg, fmt.Sprintf("%s-%03d", r.ID, ticket.Index), buildSpecPath)
 	if err != nil {
+		return nil, err
+	}
+	if err := withChallenge(entry, dataDir, r, ticket, false); err != nil {
 		return nil, err
 	}
 	if escalated {
@@ -2711,6 +2642,15 @@ func ticketBuildSpecContent(dataDir string, requestRecord *request.Request, tick
 	if err != nil {
 		return "", err
 	}
+	if specContent, readErr := os.ReadFile(RequestSpecPath(dataDir, requestRecord.ID)); readErr == nil && bytes.Equal(specContent, ticketContent) {
+		// The ticket the factory wrote from the spec (writeSpecTicket): the
+		// build is given the spec itself, not the spec twice.
+		input := string(specContent)
+		if block := AnsweredReadBackBlock(requestRecord.ReadBack.Answered()); block != "" {
+			input += "\n" + block
+		}
+		return checkedTicketBuildBaseInput(input, requestRecord.ID)
+	}
 	useApprovedSpec := requestRecord.BuildInput == request.BuildInputApprovedSpec
 	numbers, covErr := request.TicketCoveredCriteria(string(ticketContent))
 	declaresCoverage := covErr == nil
@@ -2842,120 +2782,6 @@ func writeTicketBuildSpecFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
-// TicketOracleMountPath is the fixed, factory-chosen workspace-relative
-// path a ticket's resolved reference oracle is mounted at
-// (-reference-oracle-mount-path) -- deliberately factory-owned, not
-// operator-configurable per ticket the way the standalone CLI flag is:
-// there is exactly one convention for where an auto-wired oracle lives,
-// so a drafted test referencing its own location doesn't need to guess.
-//
-// A dot-directory, deliberately: the oracle is mounted INSIDE the workspace,
-// so during the build phase the in-loop verify command sees it. A plain
-// "oracle" directory is picked up by `go vet ./...`/`go test ./...` on a
-// repository whose module root is the workspace root, where it fails to
-// compile as its own package and fails the whole verify -- found live on
-// todo-service (2026-09-19), where the agent then spent a round trying to
-// modify the read-only mount instead of the task. Go's ./... wildcard, and
-// pytest's default collection, both skip dot-directories.
-const TicketOracleMountPath = request.TicketOracleMountPath
-
-// TicketOracleRunCommandFilename is RUN_COMMAND.txt's own name -- see
-// resolveTicketOracle's doc comment for why this file, not
-// MANIFEST.json or any model-authored content, is this ticket's actual
-// -reference-oracle-command.
-const TicketOracleRunCommandFilename = request.TicketOracleRunCommandFilename
-
-// resolveTicketOracle resolves ticket's own approved reference oracle,
-// if it has one, for BuildRequestBuildArgs to wire into the ticket's
-// build. Returns ("", "", nil) -- not an error -- for the
-// ordinary case, a ticket with no <NNN>.oracle/ directory at all.
-//
-// <NNN>.oracle/ (a sibling of <NNN>.spec.md, sharing its own numbering)
-// is intentionally populated by the OPERATOR, not by any drafting agent
-// or ticket-planning pass: an operator runs agent/pi/scripts/
-// draft_acceptance_oracles.py (Phase 1) manually, reviews its drafted
-// test file(s) the way they'd review any other reviewer-facing
-// artifact, copies whichever ones they trust into <NNN>.oracle/, and
-// writes RUN_COMMAND.txt themselves -- one line, the exact command to
-// run those files. RUN_COMMAND.txt is the one piece of this whole
-// mechanism this function trusts as a real, factory-chosen command
-// (see -reference-oracle-command's own flag help: "should NOT be
-// agent-authored"): unlike every other artifact in this pipeline, its
-// content never passes through a model at all, drafting or otherwise --
-// a prompt-injected ticket/spec could never reach it, since nothing
-// here reads a command from ticket/spec prose.
-//
-// Approved-content re-verification, not just presence: every file
-// actually found under <NNN>.oracle/ (including RUN_COMMAND.txt itself)
-// must already be in r.ApprovedSHA256 with a hash matching its current
-// on-disk content -- the same VerifyApprovedHashes-shaped check
-// StatePlanReview's own Approve call already applies to ticket specs,
-// applied here a second time at the moment that matters most: the
-// instant before this run actually starts. A file added, removed, or
-// edited after plan_review approved a different set is refused outright
-// (an error, not a silent "no oracle" or "use whatever's there now"),
-// since silently launching with unapproved oracle content would defeat
-// the entire point of pinning it at approval.
-func ResolveTicketOracle(dataDir string, r *request.Request, ticket request.Ticket) (oracleDir, command string, err error) {
-	oracleDir = request.TicketOracleDir(ticket.SpecPath)
-	entries, err := os.ReadDir(oracleDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", "", nil
-		}
-		return "", "", fmt.Errorf("read %s: %w", oracleDir, err)
-	}
-	requestDir := request.Dir(dataDir, r.ID)
-	oracleRelDir, err := filepath.Rel(requestDir, oracleDir)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve %s relative to %s: %w", oracleDir, requestDir, err)
-	}
-	sawRunCommand := false
-	for _, entry := range entries {
-		if entry.IsDir() {
-			// Refused, not silently skipped -- same reasoning as
-			// ticketOracleRelPaths' own identical check
-			// (internal/request/approve.go): a subdirectory here would
-			// still get walked into the actual mount by
-			// snapshotAndHashReferenceOracle's own evidence.SnapshotTree
-			// call (run_ticket.go), so silently skipping it here would
-			// mean unapproved content reaches the build regardless of
-			// this whole function's own hash-verification loop.
-			return "", "", fmt.Errorf("ticket %s: %s contains a subdirectory (%s) -- reference-oracle directories must be flat, one file per entry, no nesting", ticket.SpecPath, oracleDir, entry.Name())
-		}
-		relPath := filepath.Join(oracleRelDir, entry.Name())
-		approved, ok := r.ApprovedSHA256[relPath]
-		if !ok {
-			return "", "", fmt.Errorf("ticket %s: %s was never approved (plan_review must be re-approved after adding it)", ticket.SpecPath, relPath)
-		}
-		current, hashErr := request.HashFile(dataDir, r.ID, relPath)
-		if hashErr != nil {
-			return "", "", fmt.Errorf("ticket %s: hash %s: %w", ticket.SpecPath, relPath, hashErr)
-		}
-		if current != approved {
-			return "", "", fmt.Errorf("ticket %s: %s has changed since plan_review approved it -- re-approve before continuing", ticket.SpecPath, relPath)
-		}
-		if entry.Name() == TicketOracleRunCommandFilename {
-			sawRunCommand = true
-		}
-	}
-	if !sawRunCommand {
-		return "", "", fmt.Errorf("ticket %s: %s exists but has no %s -- the operator must author one after reviewing the drafted oracle (see resolveTicketOracle's own doc comment)", ticket.SpecPath, oracleDir, TicketOracleRunCommandFilename)
-	}
-	commandBytes, err := os.ReadFile(filepath.Join(oracleDir, TicketOracleRunCommandFilename))
-	if err != nil {
-		return "", "", fmt.Errorf("read %s: %w", TicketOracleRunCommandFilename, err)
-	}
-	command = strings.TrimSpace(string(commandBytes))
-	if command == "" {
-		return "", "", fmt.Errorf("ticket %s: %s is empty", ticket.SpecPath, TicketOracleRunCommandFilename)
-	}
-	if err := request.ValidateOracleRunCommand(command); err != nil {
-		return "", "", fmt.Errorf("ticket %s: %w", ticket.SpecPath, err)
-	}
-	return oracleDir, command, nil
-}
-
 // RequestNotificationLogPath returns where a request's own durable
 // notification log lives -- <data-dir>/requests/<id>/notifications.log,
 // mirroring run.Dir/"notifications.log" (notify.PrepareHalt's own path)
@@ -3036,10 +2862,9 @@ func NotifyGateExpired(dataDir, id string, now time.Time) error {
 
 // ReviewState reports whether s is one of the states a request waits on the
 // operator in (approve/reject, or resume for a lost step) -- the only states
-// RemindIfDue reminds for. oracle_review is one: it blocks on a human
-// exactly like spec_review and plan_review; so does resume_review.
+// RemindIfDue reminds for: spec_review, plan_review and resume_review.
 func ReviewState(s request.State) bool {
-	return s == request.StateSpecReview || s == request.StateOracleReview || s == request.StatePlanReview || s == request.StateResumeReview
+	return s == request.StateSpecReview || s == request.StatePlanReview || s == request.StateResumeReview
 }
 
 // reminderDue reports whether r, already known to be in a review state,
@@ -3102,65 +2927,9 @@ func RemindIfDue(dataDir, id string, interval time.Duration, now func() time.Tim
 	return nil
 }
 
-// PlanReviewOracleNote describes, for the plan_review reminder, what a request
-// with an approved request-level oracle/ will run: each ticket's materialized
-// oracle files, the one RUN_COMMAND.txt (all read-only: change oracle/ and
-// reject the plan to change them), and every committed path an oracle
-// supersedes, which the host DELETES from the repository on commit. Empty for a
-// request with no request-level oracle, so its reminder is unchanged.
-func PlanReviewOracleNote(dataDir string, r *request.Request) string {
-	if len(request.RequestOraclePins(r)) == 0 {
-		return ""
-	}
-	perTicket, supersedes := materializedOracles(dataDir, r)
-	note := fmt.Sprintf(" Oracle materialized from oracle/ (read-only: reject the plan to re-plan; oracle/ itself is editable only at oracle_review, which `factoryd retry %s` returns to if planning halts on it) -- per ticket: %s. Run command for every ticket: %s (read-only).",
-		r.ID, strings.Join(perTicket, "; "), filepath.Join(request.Dir(dataDir, r.ID), request.RequestOracleDirName, TicketOracleRunCommandFilename))
-	if len(supersedes) > 0 {
-		note += " Approving will DELETE these committed oracle paths (supersedes): " + strings.Join(supersedes, ", ") + "."
-	}
-	return note
-}
-
-// materializedOracles reads each ticket's materialized oracle directory: the
-// per-ticket file lists, and every committed path the manifests supersede
-// (sorted), which the host deletes on commit.
-func materializedOracles(dataDir string, r *request.Request) (perTicket, supersedes []string) {
-	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
-	specs, _ := filepath.Glob(filepath.Join(ticketsDir, "*.spec.md"))
-	sort.Strings(specs)
-	for _, spec := range specs {
-		name := strings.TrimSuffix(filepath.Base(spec), ".spec.md")
-		entries, err := os.ReadDir(request.TicketOracleDir(spec))
-		if err != nil {
-			perTicket = append(perTicket, name+": no oracle")
-			continue
-		}
-		var files []string
-		for _, e := range entries {
-			if e.Name() != request.ManifestFileName && e.Name() != TicketOracleRunCommandFilename {
-				files = append(files, e.Name())
-			}
-		}
-		perTicket = append(perTicket, name+": "+strings.Join(files, ", "))
-		if b, err := os.ReadFile(filepath.Join(request.TicketOracleDir(spec), request.ManifestFileName)); err == nil {
-			var ms []struct {
-				Supersedes []string `json:"supersedes"`
-			}
-			if json.Unmarshal(b, &ms) == nil {
-				for _, m := range ms {
-					supersedes = append(supersedes, m.Supersedes...)
-				}
-			}
-		}
-	}
-	sort.Strings(supersedes)
-	return perTicket, supersedes
-}
-
-// MaxFeedbackBytes caps the feedback file handed to a drafter (oracle, spec,
+// MaxFeedbackBytes caps the feedback file handed to a drafter (spec
 // or plan). Below each script's own 16 KiB read cap so the script never has
-// to truncate it. Named generically since this generalised the oracle
-// stage's own feedback-capping to the spec/plan stages too.
+// to truncate it.
 const MaxFeedbackBytes = 12 * 1024
 
 // lineStartIndex is the index of the first occurrence of heading at the start
@@ -3176,12 +2945,12 @@ func lineStartIndex(s, heading string) int {
 }
 
 // CapFeedback keeps the NEWEST feedback within max bytes. request.
-// OracleFeedback/SpecFeedback/PlanFeedback all render oldest first, so a
+// SpecFeedback/PlanFeedback both render oldest first, so a
 // head cut would drop the operator's current reason once cumulative
 // rejections grow; this keeps the tail, starting at a rejection-section
 // boundary when one is in range, and says that older feedback was omitted.
-// sectionHeading names that boundary ("## Oracle rejected ", "## Spec
-// rejected ", or "## Plan rejected " -- see stageFeedback's own heading
+// sectionHeading names that boundary ("## Spec
+// rejected " or "## Plan rejected " -- see stageFeedback's own heading
 // format in internal/request/approve.go).
 func CapFeedback(feedback string, max int, sectionHeading string) string {
 	if len(feedback) <= max {

@@ -6,7 +6,7 @@ import type { RequestSummary, RequestTicket } from "@/domain/request";
 import { type Run, runIsTerminalForDisplay } from "@/domain/run";
 import { runStop } from "@/domain/runStop";
 import { safeHttpUrl } from "@/domain/safeUrl";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { runPath } from "@/routes/paths";
 import { PrStateChip } from "@/shared/request/PrStateChip";
 import { Button } from "@/ui/Button";
@@ -17,6 +17,7 @@ import { StatusChip, StatusChipForToken } from "@/ui/StatusChip";
 import { StallChip } from "@/ui/Time";
 
 import { AdviceRounds } from "./AdviceRounds";
+import { ChallengeRounds } from "./ChallengeRounds";
 import { Restacks } from "./Restacks";
 import { ReviewRounds } from "./ReviewRounds";
 import { RoundLedger } from "./RoundLedger";
@@ -130,6 +131,7 @@ export function TicketCard({
       <MergeReadinessLine ticket={ticket} />
       <Restacks ticket={ticket} />
       <AdviceRounds ticket={ticket} />
+      <ChallengeRounds ticket={ticket} />
       <ReviewRounds ticket={ticket} />
       {request === undefined ? null : <RoundLedger request={request} ticket={ticket} />}
       {ticket.runId === "" ? null : (

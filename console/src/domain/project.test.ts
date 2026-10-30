@@ -76,7 +76,7 @@ test("POST /projects/check decodes checks, with absent reasons as an empty list"
       passed: false,
       checks: [
         { check: "factory-yml", path: "/repos/app", passed: true },
-        { check: "oracle", path: "/repos/app", passed: false, reasons: ["no tests"] },
+        { check: "lint", path: "/repos/app", passed: false, reasons: ["no tests"] },
       ],
     },
     "POST /projects/check",
@@ -84,7 +84,7 @@ test("POST /projects/check decodes checks, with absent reasons as an empty list"
   expect(response.passed).toBe(false);
   expect(response.checks).toEqual([
     { check: "factory-yml", path: "/repos/app", passed: true, reasons: [] },
-    { check: "oracle", path: "/repos/app", passed: false, reasons: ["no tests"] },
+    { check: "lint", path: "/repos/app", passed: false, reasons: ["no tests"] },
   ]);
   expect(decodeProjectCheckResponse({ passed: true }, "POST /projects/check").checks).toEqual([]);
   expect(() => decodeProjectCheckResponse({ checks: [] }, "POST /projects/check")).toThrow(

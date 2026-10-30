@@ -28,22 +28,11 @@ import (
 // judges the result against the same spec as the first build's, and sees
 // nothing the earlier build or its checks wrote.
 //
-// A run a reviewer's reproduction refused (review_reproduction, SC-022) is
-// one of these: the record tells the build each blocking finding in one
-// cleaned line (handoff.ReproducedFinding: severity, summary, cited spec
-// line, the reproduction's path, one failing test and its kind), never the
-// reproduction or the reviewer's failure scenario, and the build mounts no
-// copy of the reproduction. Like every build of the ticket, it is given
-// -recheck-reproductions from the ticket's list (ticketRecheck): its
-// workflow runs each held copy once on its result, and anything but a pass
-// refuses it again, whatever its own review says.
-//
 // Budget, launch, recording and outcomes are runCorrectiveRounds':
 // -review-corrective-rounds is one budget per ticket build, the launch
 // budget is checked before each round, an accepted round is the ticket's
 // accepted run, and a round that quarantines again runs again only while
-// the budget lasts and only when a round still applies to it; one whose
-// recheck is still failing never does.
+// the budget lasts and only when a round still applies to it.
 func TryCheckCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) (handled bool, err error) {
 	plan := correctivePlan{
 		kind: request.CorrectiveRoundKind, suffix: "corrective", label: "corrective round",
@@ -91,14 +80,8 @@ func withRoundSession(argv []string, cfg WorkerConfig, followed *run.Run) []stri
 // describes the state the run is in (handoff.Load), and what its failed
 // checks allow is "corrective".
 //
-// A failed reference oracle (handoff.BinCorrectiveIfOracleInLoop) counts as
-// corrective here: a request's ticket only has an oracle when it was
-// approved at plan review, and every such ticket's build is already run
-// with the oracle mounted and -reference-oracle-in-loop-retry
-// (BuildTicketRunArgs), so the build given the record sees nothing the
-// first one did not. Everything else is not: a check a build is never told
-// about (a review with no verdict, an unknown check), a halt,
-// and a run with no handoff.
+// Not given: a check a build is never told about (a review with no verdict,
+// an unknown check), a halt, and a run with no handoff.
 func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, bool) {
 	if quarantined.State != run.StateQuarantined || quarantined.HandoffSHA256 == "" {
 		return handoff.Document{}, false
@@ -107,7 +90,7 @@ func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, b
 	if err != nil {
 		return handoff.Document{}, false
 	}
-	if doc.Next != handoff.BinCorrective && doc.Next != handoff.BinCorrectiveIfOracleInLoop {
+	if doc.Next != handoff.BinCorrective {
 		return handoff.Document{}, false
 	}
 	return doc, true
@@ -293,4 +276,12 @@ func writeRecordFile(dir string, doc handoff.Document, start string) (string, er
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// automaticCorrectionMayFollow reports whether an automatic corrective build
+// may follow quarantined on its commits: a build may be given its record
+// (handoffForABuild).
+func automaticCorrectionMayFollow(dataDir string, quarantined *run.Run) bool {
+	_, ok := handoffForABuild(dataDir, quarantined)
+	return ok
 }

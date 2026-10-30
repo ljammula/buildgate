@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -200,7 +201,12 @@ func lockIfFree(dataDir, id string) func() {
 	}
 }
 
-// Load reads one request by id.
+// ErrUnknownState is Load's refusal of a request record whose state this
+// release does not define (a state a past release retired).
+var ErrUnknownState = errors.New("unknown request state")
+
+// Load reads one request by id. A record in a state this release does not
+// define is refused with ErrUnknownState.
 func Load(dataDir, id string) (*Request, error) {
 	b, err := os.ReadFile(Path(dataDir, id))
 	if err != nil {
@@ -209,6 +215,9 @@ func Load(dataDir, id string) (*Request, error) {
 	var r Request
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("parse request: %w", err)
+	}
+	if r.State != "" && !slices.Contains(AllStates(), r.State) {
+		return nil, fmt.Errorf("%w: request %s is in state %q, which this release does not define; finish or cancel it on the earlier release", ErrUnknownState, id, r.State)
 	}
 	r.prevState = r.State
 	return &r, nil

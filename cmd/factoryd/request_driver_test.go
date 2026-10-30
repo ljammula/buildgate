@@ -169,7 +169,7 @@ func TestAdvanceBuildingBuildsThreeTicketsInOrderWithPriorRunChaining(t *testing
 	}
 
 	for i := 1; i <= 3; i++ {
-		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{OpenPullRequest: true}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{OpenPullRequest: true}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests (ticket %d): %v", i, err)
 		}
 	}
@@ -273,7 +273,7 @@ func TestAdvanceBuildingQuarantineOfTicket2LeavesTicket1IntactAndRetryable(t *te
 	}
 
 	for i := 1; i <= 2; i++ {
-		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests (ticket %d): %v", i, err)
 		}
 	}
@@ -348,7 +348,7 @@ func TestAdvanceBuildingRetryStartFailureDoesNotReplayStaleRunID(t *testing.T) {
 	}
 
 	for i := 1; i <= 2; i++ {
-		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), quarantineTicket2); err != nil {
+		if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), quarantineTicket2); err != nil {
 			t.Fatalf("driveRequests (ticket %d): %v", i, err)
 		}
 	}
@@ -384,7 +384,7 @@ func TestAdvanceBuildingRetryStartFailureDoesNotReplayStaleRunID(t *testing.T) {
 		}
 		return errors.New("sandbox image pull failed")
 	}
-	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), startFailure); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), startFailure); err != nil {
 		t.Fatalf("driveRequests after retry: %v", err)
 	}
 
@@ -526,7 +526,7 @@ func TestDriveRequestsPublishesTheActiveRequestDuringItsJob(t *testing.T) {
 		during = currentActiveRequests()
 		return "", nil, errors.New("stop here")
 	}
-	_ = driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, spec, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t))
+	_ = driveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, spec, requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t))
 	if len(during) != 1 || during[0] != "req-1" {
 		t.Errorf("active requests during the job = %v, want [req-1]", during)
 	}

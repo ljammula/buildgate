@@ -13,8 +13,8 @@ not add others):
 e.g. "`sub.py` providing `subtract_numbers(a, b)`" -- carry that name over
 verbatim here rather than abstracting it into a description of what it does
 (e.g. do not write "a subtraction operation" in place of "sub.py's
-subtract_numbers"). The approved spec is the contract every later stage,
-including oracle drafting, builds from; a later stage cannot recover a name
+subtract_numbers"). The approved spec is the contract every later stage
+builds from; a later stage cannot recover a name
 this document drops.)
 
 ## Non-goals

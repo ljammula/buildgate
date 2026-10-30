@@ -2,20 +2,16 @@ package workflow
 
 import (
 	"context"
-	"reflect"
-	"slices"
 	"sync"
 	"testing"
 
 	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/temporal"
 	temporalworkflow "go.temporal.io/sdk/workflow"
 
 	"buildgate/internal/reproduction"
 	"buildgate/internal/reviewstep"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
-	"buildgate/internal/unresolved"
 )
 
 // heldFixture is one held reproduction of the review's first finding.
@@ -37,7 +33,8 @@ type reproductionPhase struct {
 	passes []ReproductionRunInput
 }
 
-func runReproductionPhase(t *testing.T, input RunWorkflowInput, held []run.HeldReproduction, launch func(ReproductionRunInput) (ReproductionRunResult, error), legacy bool) reproductionPhase {
+func runReproductionPhase(t *testing.T, input RunWorkflowInput, held []run.HeldReproduction, launch func(ReproductionRunInput) (ReproductionRunResult, error), legacy bool, retired ...bool) reproductionPhase {
+	retiredPhase := len(retired) > 0 && retired[0]
 	t.Helper()
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
@@ -53,6 +50,11 @@ func runReproductionPhase(t *testing.T, input RunWorkflowInput, held []run.HeldR
 	if legacy {
 		env.OnGetVersion(reviewReproductionChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
+	if retiredPhase {
+		env.OnGetVersion(retireReviewReproductionChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.Version(1))
+	} else {
+		env.OnGetVersion(retireReviewReproductionChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
 	env.RegisterActivityWithOptions(func(context.Context, ReviewStepInput) (VerifyActivityResult, error) {
 		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "combined_review.py"}, ExitCode: reviewstep.CombinedExitBase}, Reproductions: held}, nil
 	}, activity.RegisterOptions{Name: RunReviewStepActivityName})
@@ -64,7 +66,7 @@ func runReproductionPhase(t *testing.T, input RunWorkflowInput, held []run.HeldR
 		p.passes = append(p.passes, in)
 		mu.Unlock()
 		return launch(in)
-	}, activity.RegisterOptions{Name: RunReviewReproductionActivityName})
+	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.ExecuteWorkflow(RunWorkflow, input)
 	p.err = env.GetWorkflowError()
 	if p.err == nil {
@@ -91,129 +93,41 @@ func byPass(results map[string]ReproductionRunResult) func(ReproductionRunInput)
 	}
 }
 
-// reproductionGate is the review_reproduction gate's result, and whether it
-// was recorded.
-func reproductionGate(result RunWorkflowResult) (run.GateResult, bool) {
-	for _, g := range result.GateResults {
-		if g.Check == "review_reproduction" {
-			return g, true
-		}
-	}
-	return run.GateResult{}, false
-}
-
-// Each row of SC-022's table (reproduction.Decide), through the workflow:
-// which launches it makes, in order, and what the finding and the run come
-// to.
-func TestReproductionPhaseFollowsTheDecisionTable(t *testing.T) {
-	fail, pass := reproRun(reproduction.OutcomeFailed, reproduction.KindFail), reproRun(reproduction.OutcomePassed, reproduction.KindPass)
-	errored := reproRun(reproduction.OutcomeFailed, reproduction.KindError)
-	compile := reproRun(reproduction.OutcomeCompile, reproduction.KindCompile)
-	missing := reproRun(reproduction.OutcomeMissing, reproduction.KindMissing)
-	skipped := reproRun(reproduction.OutcomeInconclusive, reproduction.KindSkipped)
-	for _, tc := range []struct {
-		name         string
-		literal      bool
-		onBranch     bool
-		runs         map[string]ReproductionRunResult
-		wantCalls    []string
-		wantVerdict  reproduction.Verdict
-		wantAccepted bool
-	}{
-		{name: "passes on the result", runs: map[string]ReproductionRunResult{"head1": pass}, wantCalls: []string{"repro-0-head1"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "does not compile on the result", runs: map[string]ReproductionRunResult{"head1": compile}, wantCalls: []string{"repro-0-head1"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "leaves no report", runs: map[string]ReproductionRunResult{"head1": missing}, wantCalls: []string{"repro-0-head1"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "is skipped", runs: map[string]ReproductionRunResult{"head1": skipped}, wantCalls: []string{"repro-0-head1"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "fails once", runs: map[string]ReproductionRunResult{"head1": fail, "head2": pass}, wantCalls: []string{"repro-0-head1", "repro-0-head2"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "fails twice and passes on the base", runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": pass}, wantCalls: []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}, wantVerdict: reproduction.VerdictBlocks},
-		{name: "fails twice and does not compile on the base", runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": compile}, wantCalls: []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}, wantVerdict: reproduction.VerdictBlocks},
-		{name: "fails twice and fails another way on the base", runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": errored}, wantCalls: []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}, wantVerdict: reproduction.VerdictBlocks},
-		{name: "fails twice and the base leaves no report", runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": missing}, wantCalls: []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "fails the same way on the base", runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail}, wantCalls: []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-		{name: "fails the same way on the base and holds the literal", literal: true, runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail}, wantCalls: []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}, wantVerdict: reproduction.VerdictBlocks},
-		{name: "fails twice with the base unknown", onBranch: true, runs: map[string]ReproductionRunResult{"head1": fail, "head2": fail}, wantCalls: []string{"repro-0-head1", "repro-0-head2"}, wantVerdict: reproduction.VerdictAdvice, wantAccepted: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := reproductionInput()
-			if tc.onBranch {
-				input.OnBranch = "factoryd/earlier"
-			}
-			held := heldFixture()
-			held.HoldsLiteral = tc.literal
-			p := runReproductionPhase(t, input, []run.HeldReproduction{held}, byPass(tc.runs), false)
-			if p.err != nil {
-				t.Fatalf("workflow error: %v", p.err)
-			}
-			if !slices.Equal(p.calls, tc.wantCalls) {
-				t.Errorf("launches = %v, want %v", p.calls, tc.wantCalls)
-			}
-			for _, in := range p.passes {
-				wantCommit := p.result.ResultSHA
-				if in.Pass == "base" {
-					wantCommit = "fixture-base-sha"
-				}
-				if in.Commit != wantCommit || in.Held.SHA256 != held.SHA256 {
-					t.Errorf("%s ran on %q with hash %q, want %q and the held hash", in.Pass, in.Commit, in.Held.SHA256, wantCommit)
-				}
-			}
-			if len(p.result.ReviewReproductions) != 1 {
-				t.Fatalf("ReviewReproductions = %+v, want one", p.result.ReviewReproductions)
-			}
-			got := p.result.ReviewReproductions[0]
-			wantDisposition := run.DispositionAdvice
-			if tc.wantVerdict == reproduction.VerdictBlocks {
-				wantDisposition = run.DispositionBlocks
-			}
-			if got.Reproduction.Verdict != string(tc.wantVerdict) || got.Disposition != wantDisposition || got.Reproduction.Reason == "" || len(got.Reproduction.Runs) != len(tc.wantCalls) {
-				t.Errorf("finding = %+v, want verdict %s, disposition %s, a reason and one run per launch", got, tc.wantVerdict, wantDisposition)
-			}
-			gate, ok := reproductionGate(p.result)
-			if !ok || gate.Passed != tc.wantAccepted {
-				t.Errorf("review_reproduction gate = %+v (recorded %v), want passed=%v", gate, ok, tc.wantAccepted)
-			}
-			if wantState := map[bool]run.State{true: run.StateAccepted, false: run.StateQuarantined}[tc.wantAccepted]; p.result.State != wantState {
-				t.Errorf("state = %s, want %s", p.result.State, wantState)
-			}
-		})
-	}
-}
-
-// A reproduction the shape rules refused is advice with no launch, and does
-// not fail the check.
-func TestRefusedReproductionIsAdviceWithNoLaunch(t *testing.T) {
-	held := []run.HeldReproduction{{Finding: 2, Path: "README.md", Refused: "the reproduction path does not match the test patterns"}}
-	p := runReproductionPhase(t, reproductionInput(), held, byPass(nil), false)
+// A history recorded before retireReviewReproductionChange (DefaultVersion of
+// that change) replays the retired phase: a finding's reproduction is run
+// head1, then head2 and the base only while it fails.
+func TestHistoryRecordedBeforeTheRetirementReplaysTheReproductionPhase(t *testing.T) {
+	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
+	p := runReproductionPhase(t, reproductionInput(), []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail}), false)
 	if p.err != nil {
 		t.Fatalf("workflow error: %v", p.err)
 	}
-	if len(p.calls) != 0 {
-		t.Errorf("launches = %v, want none", p.calls)
+	if want := []string{"repro-0-head1", "repro-0-head2", "repro-0-base"}; len(p.calls) != len(want) || p.calls[0] != want[0] || p.calls[1] != want[1] || p.calls[2] != want[2] {
+		t.Errorf("launches = %v, want %v", p.calls, want)
 	}
-	if got := p.result.ReviewReproductions; len(got) != 1 || got[0].Finding != 2 || got[0].Disposition != run.DispositionAdvice || got[0].Reproduction.Verdict != run.ReproductionVerdictNotRun || got[0].Reproduction.Refused == "" {
-		t.Errorf("ReviewReproductions = %+v, want the third finding as advice, not run, with its refusal", got)
-	}
-	if gate, ok := reproductionGate(p.result); !ok || !gate.Passed || p.result.State != run.StateAccepted {
-		t.Errorf("gate = %+v (%v), state %s; want a passing check and an accepted run", gate, ok, p.result.State)
+	if len(p.result.ReviewReproductions) != 1 {
+		t.Errorf("ReviewReproductions = %+v, want the one decided finding", p.result.ReviewReproductions)
 	}
 }
 
-// P2.6: a run without -review-reproduction (a bare factoryd -ticket) launches
-// no reproduction and records no review_reproduction check, whatever its
-// review held.
-func TestSingleTicketRunSchedulesNoReproduction(t *testing.T) {
+// From retireReviewReproductionChange on, a review writes no test the
+// factory runs: no reproduction and no recheck is scheduled, whatever the
+// input holds, and no review_reproduction check is recorded.
+func TestRetiredReviewReproductionSchedulesNoLaunch(t *testing.T) {
 	input := reproductionInput()
-	input.ReviewReproduction = false
 	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
 	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
-	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": reproRun(reproduction.OutcomePassed, reproduction.KindPass), "recheck": fail}), false)
+	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail, "recheck": fail}), false, true)
 	if p.err != nil {
 		t.Fatalf("workflow error: %v", p.err)
 	}
-	if len(p.calls) != 0 || p.result.ReviewReproductions != nil || p.result.ReviewReproductionRechecks != nil {
-		t.Errorf("launches %v, findings %+v, rechecks %+v; want none", p.calls, p.result.ReviewReproductions, p.result.ReviewReproductionRechecks)
+	if len(p.calls) != 0 || p.result.State != run.StateAccepted {
+		t.Errorf("launches = %v, state %s; want none and an accepted run", p.calls, p.result.State)
 	}
-	if _, ok := reproductionGate(p.result); ok || p.result.State != run.StateAccepted {
-		t.Errorf("gates = %+v, state %s; want no review_reproduction check and an accepted run", p.result.GateResults, p.result.State)
+	for _, g := range p.result.GateResults {
+		if g.Check == "review_reproduction" {
+			t.Errorf("gates = %+v, want no review_reproduction check", p.result.GateResults)
+		}
 	}
 }
 
@@ -229,100 +143,5 @@ func TestHistoryRecordedBeforeReviewReproductionSchedulesNoReproduction(t *testi
 	}
 	if len(p.calls) != 0 {
 		t.Errorf("launches = %v, want none at DefaultVersion", p.calls)
-	}
-	if _, ok := reproductionGate(p.result); ok {
-		t.Errorf("gates = %+v, want no review_reproduction check", p.result.GateResults)
-	}
-}
-
-// A corrective build's recheck runs each held copy once on the result
-// commit, before the review: a pass on every ID passes, anything else is
-// still failing and fails the check.
-func TestRecheckRunsEachHeldCopyOnceOnTheResult(t *testing.T) {
-	pass, fail := reproRun(reproduction.OutcomePassed, reproduction.KindPass), reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
-	for _, tc := range []struct {
-		name         string
-		res          ReproductionRunResult
-		wantVerdict  reproduction.Verdict
-		wantAccepted bool
-	}{
-		{"passes", pass, reproduction.VerdictPasses, true},
-		{"still fails", fail, reproduction.VerdictStillFailing, false},
-		{"does not compile", reproRun(reproduction.OutcomeCompile, reproduction.KindCompile), reproduction.VerdictStillFailing, false},
-		{"leaves no report", reproRun(reproduction.OutcomeMissing, reproduction.KindMissing), reproduction.VerdictStillFailing, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input := reproductionInput()
-			input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
-			p := runReproductionPhase(t, input, nil, byPass(map[string]ReproductionRunResult{"recheck": tc.res}), false)
-			if p.err != nil {
-				t.Fatalf("workflow error: %v", p.err)
-			}
-			if !slices.Equal(p.calls, []string{"repro-recheck-0"}) || p.passes[0].Commit != p.result.ResultSHA {
-				t.Fatalf("launches = %v on %q, want one recheck on the result %q", p.calls, p.passes[0].Commit, p.result.ResultSHA)
-			}
-			if got := p.result.ReviewReproductionRechecks; len(got) != 1 || got[0].Verdict != string(tc.wantVerdict) || len(got[0].Runs) != 1 {
-				t.Errorf("rechecks = %+v, want one %s with its run", got, tc.wantVerdict)
-			} else if got[0].Recheck == nil || !reflect.DeepEqual(*got[0].Recheck, input.RecheckReproductions[0]) {
-				t.Errorf("recheck entry = %+v, want the manifest entry it ran %+v", got[0].Recheck, input.RecheckReproductions[0])
-			}
-			if gate, ok := reproductionGate(p.result); !ok || gate.Passed != tc.wantAccepted {
-				t.Errorf("gate = %+v (%v), want passed=%v", gate, ok, tc.wantAccepted)
-			}
-		})
-	}
-}
-
-// A result commit that adds or changes the reproduction's path is still
-// failing, whatever its launch would report (the Activity launches nothing
-// for it).
-func TestRecheckResultCommitAddingPathIsStillFailing(t *testing.T) {
-	input := reproductionInput()
-	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
-	p := runReproductionPhase(t, input, nil, func(in ReproductionRunInput) (ReproductionRunResult, error) {
-		return ReproductionRunResult{Run: run.ReproductionRun{Pass: in.Pass, Commit: in.Commit}, PathInCommit: true}, nil
-	}, false)
-	if p.err != nil {
-		t.Fatalf("workflow error: %v", p.err)
-	}
-	if got := p.result.ReviewReproductionRechecks; len(got) != 1 || got[0].Verdict != string(reproduction.VerdictStillFailing) {
-		t.Errorf("rechecks = %+v, want still failing", got)
-	}
-	if p.result.State != run.StateQuarantined {
-		t.Errorf("state = %s, want quarantined", p.result.State)
-	}
-}
-
-// A reproduction the factory could not hold or mount halts the run as no
-// verdict on the work.
-func TestReproductionUnheldHaltsWithItsCause(t *testing.T) {
-	p := runReproductionPhase(t, reproductionInput(), []run.HeldReproduction{heldFixture()}, func(ReproductionRunInput) (ReproductionRunResult, error) {
-		return ReproductionRunResult{}, temporal.NewNonRetryableApplicationError("review reproduction: hash", ReproductionUnheldFailureType, nil)
-	}, false)
-	if p.err == nil {
-		t.Fatal("workflow succeeded, want a halt")
-	}
-	if got := UnresolvedCauseFromError(p.err); got != unresolved.ReproductionUnheld {
-		t.Errorf("cause = %q, want %q", got, unresolved.ReproductionUnheld)
-	}
-}
-
-// A request run with code review off (-review-reproduction set, no review
-// step in the plan) launches no reproduction or recheck and records no
-// review_reproduction check: a passing check would have nothing behind it.
-func TestCodeReviewOffRecordsNoReviewReproductionCheck(t *testing.T) {
-	input := reproductionInput()
-	input.CodeReviewPolicy = "off"
-	input.RecheckReproductions = []run.RecheckEntry{{RunID: "run-q", HeldReproduction: heldFixture()}}
-	fail := reproRun(reproduction.OutcomeFailed, reproduction.KindFail)
-	p := runReproductionPhase(t, input, []run.HeldReproduction{heldFixture()}, byPass(map[string]ReproductionRunResult{"head1": fail, "head2": fail, "base": fail, "recheck": fail}), false)
-	if p.err != nil {
-		t.Fatalf("workflow error: %v", p.err)
-	}
-	if len(p.calls) != 0 || p.result.ReviewReproductions != nil || p.result.ReviewReproductionRechecks != nil {
-		t.Errorf("launches %v, findings %+v, rechecks %+v; want none", p.calls, p.result.ReviewReproductions, p.result.ReviewReproductionRechecks)
-	}
-	if g, ok := reproductionGate(p.result); ok {
-		t.Errorf("review_reproduction = %+v, want no check recorded", g)
 	}
 }

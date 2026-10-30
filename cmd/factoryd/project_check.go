@@ -14,6 +14,7 @@ import (
 	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
 	"buildgate/internal/projectconfig"
+	"buildgate/internal/request"
 )
 
 // ProjectCheckResult is one project-level structural check's outcome —
@@ -497,7 +498,7 @@ func evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ti
 			// below, there is no "convention not adopted yet" case for a
 			// request's own spec snapshot, which always exists.
 			checks = append(checks, namedCheck{"ticket_structure", ticketPath, func(content string) (bool, []string) {
-				return policy.TicketStructureBrownfield(content)
+				return request.RequestTicketStructure(content)
 			}, false})
 		} else {
 			ticketAdvisory := false

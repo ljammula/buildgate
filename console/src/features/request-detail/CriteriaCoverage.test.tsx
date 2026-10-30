@@ -11,7 +11,7 @@ const SPEC =
 
 function plan(covered: string): string {
   return (
-    "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n" +
+    "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n" +
     "### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n" +
     `### Acceptance criteria covered\n\n${covered}\n\n## Out of scope\n\nnone\n`
   );

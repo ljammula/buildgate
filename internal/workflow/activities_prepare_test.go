@@ -15,24 +15,6 @@ import (
 	"go.temporal.io/sdk/testsuite"
 )
 
-// TestPreflightActivityDoesNotHaltOnPreDirtyRequiredFile pins that a declared
-// Required-Changed-Files already dirty before the run is no refusal: the
-// required-file check is a note in the pull request, and a check that refuses
-// must execute something.
-func TestPreflightActivityDoesNotHaltOnPreDirtyRequiredFile(t *testing.T) {
-	workspacePath := testfixture.NewGitRepo(t)
-	if err := os.WriteFile(filepath.Join(workspacePath, "content.txt"), []byte("pre-existing dirt\n"), 0o644); err != nil {
-		t.Fatalf("simulate pre-existing dirt: %v", err)
-	}
-	activities := &Activities{}
-	if err := activities.PreflightActivity(context.Background(), PreflightInput{
-		WorkspacePath:        workspacePath,
-		RequiredChangedFiles: []string{"content.txt"},
-	}); err != nil {
-		t.Fatalf("PreflightActivity with a pre-dirty required file: %v, want nil", err)
-	}
-}
-
 // TestPreflightActivityHaltsOnMisprefixedAllowedFile is the Temporal-path
 // counterpart to cmd/factoryd's own
 // TestIntegrationRejectsMisprefixedAllowedFilesPath -- proves this Activity
@@ -69,8 +51,7 @@ func TestPreflightActivityHaltsOnMisprefixedAllowedFile(t *testing.T) {
 }
 
 // A misprefixed path in an Allowed-Files list no person approved halts
-// nothing (it is the model's guess and refuses nothing); the same path in
-// Required-Changed-Files still does.
+// nothing (it is the model's guess and refuses nothing).
 func TestPreflightActivityLeavesAnUnapprovedAllowedFilesListUnchecked(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	if err := os.MkdirAll(filepath.Join(workspacePath, "backend", "internal"), 0o755); err != nil {
@@ -89,15 +70,15 @@ func TestPreflightActivityLeavesAnUnapprovedAllowedFilesListUnchecked(t *testing
 		t.Fatalf("an unapproved Allowed-Files list halted the preflight: %v", err)
 	}
 	if err := activities.PreflightActivity(context.Background(), PreflightInput{
-		WorkspacePath: workspacePath, RequiredChangedFiles: []string{"internal/note.go"}, ScopeUnapproved: true,
+		WorkspacePath: workspacePath, AllowedFiles: []string{"internal/note.go"},
 	}); err == nil {
-		t.Fatal("a misprefixed Required-Changed-Files path no longer halts the preflight")
+		t.Fatal("a misprefixed approved Allowed-Files path no longer halts the preflight")
 	}
 }
 
 // TestPreflightActivityAllowsANewFileThatDoesNotExistAnywhereYet confirms
 // the guard above does not false-positive on the ordinary case: an
-// Allowed-Files/Required-Changed-Files entry naming a file the ticket is
+// Allowed-Files entry naming a file the ticket is
 // about to create for the first time.
 func TestPreflightActivityAllowsANewFileThatDoesNotExistAnywhereYet(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
@@ -110,17 +91,6 @@ func TestPreflightActivityAllowsANewFileThatDoesNotExistAnywhereYet(t *testing.T
 	}
 }
 
-func TestPreflightActivityAllowsCleanRequiredFile(t *testing.T) {
-	workspacePath := testfixture.NewGitRepo(t)
-	activities := &Activities{}
-	if err := activities.PreflightActivity(context.Background(), PreflightInput{
-		WorkspacePath:        workspacePath,
-		RequiredChangedFiles: []string{"content.txt"},
-	}); err != nil {
-		t.Fatalf("PreflightActivity on a clean workspace: %v", err)
-	}
-}
-
 func TestPreflightActivitySkippedWithoutDeclaration(t *testing.T) {
 	workspacePath := testfixture.NewGitRepo(t)
 	if err := os.WriteFile(filepath.Join(workspacePath, "content.txt"), []byte("dirt\n"), 0o644); err != nil {
@@ -129,7 +99,7 @@ func TestPreflightActivitySkippedWithoutDeclaration(t *testing.T) {
 
 	activities := &Activities{}
 	if err := activities.PreflightActivity(context.Background(), PreflightInput{WorkspacePath: workspacePath}); err != nil {
-		t.Fatalf("PreflightActivity with no declared Required-Changed-Files: %v", err)
+		t.Fatalf("PreflightActivity with no declared Allowed-Files: %v", err)
 	}
 }
 
@@ -226,6 +196,22 @@ func TestPreflightAllowsTicketWithOnlyRequiredHeaders(t *testing.T) {
 		SpecPath:      specPath,
 	}); err != nil {
 		t.Fatalf("PreflightActivity with no declared ticket headers: %v", err)
+	}
+}
+
+func TestPreflightTreatsSpecTicketScopeHeaderAsProse(t *testing.T) {
+	workspacePath := testfixture.NewGitRepo(t)
+	specPath := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(specPath, []byte("# Spec\n\nAllowed-Files: /a-path-in-the-spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	input := PreflightInput{WorkspacePath: workspacePath, SpecPath: specPath, RequestTicket: true, NoTicketScope: true}
+	if err := (&Activities{}).PreflightActivity(context.Background(), input); err != nil {
+		t.Fatalf("spec ticket preflight: %v", err)
+	}
+	input.NoTicketScope = false
+	if err := (&Activities{}).PreflightActivity(context.Background(), input); err == nil {
+		t.Fatal("a plan ticket with the same invalid scope must fail preflight")
 	}
 }
 

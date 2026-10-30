@@ -15,7 +15,7 @@ import (
 	"buildgate/internal/run"
 )
 
-// A request-level job (spec, oracle or plan drafting) launches its worker and
+// A request-level job (spec or plan drafting) launches its worker and
 // relay containers under the request's id in the run label, with the owner
 // marker at <data-dir>/runs/<request-id>/sandbox-owner.pid. There is no run
 // record behind that id, so ReconcileOrphans and ReconcileRelayOrphans, which

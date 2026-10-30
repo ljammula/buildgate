@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -31,12 +30,6 @@ const toolchainImageRepo = "localhost:5050/buildgate-toolchain"
 // toolchainImageTimeout bounds one derived image's pulls, build and push.
 const toolchainImageTimeout = 20 * time.Minute
 
-// agentTestVectors are the two files of this package the build scripts' tests
-// read, staged beside them by stageAgentTests.
-//
-//go:embed testdata/sanitize_vectors.json testdata/criterion_key_vectors.json
-var agentTestVectors embed.FS
-
 // agentTestNeedsPytest is a test module no worker image can load.
 var agentTestNeedsPytest = regexp.MustCompile(`(?m)^(import|from) pytest`)
 
@@ -57,10 +50,7 @@ func stageAgentTests(dest string) error {
 	if err := copyEmbedded(pi.Scripts, filepath.Join(dest, "agent", "pi"), skip); err != nil {
 		return err
 	}
-	if err := copyEmbedded(pi.Tests, filepath.Join(dest, "agent", "pi"), skip); err != nil {
-		return err
-	}
-	return copyEmbedded(agentTestVectors, filepath.Join(dest, "cmd", "factoryd"), skip)
+	return copyEmbedded(pi.Tests, filepath.Join(dest, "agent", "pi"), skip)
 }
 
 // copyEmbedded writes every file of fsys under dest, but those skip names.

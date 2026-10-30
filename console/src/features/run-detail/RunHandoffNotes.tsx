@@ -1,5 +1,5 @@
 import { type HandoffNotes, handoffNoteSections } from "@/domain/handoff";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 
 export interface RunHandoffNotesProps {
   readonly notes: HandoffNotes | null;

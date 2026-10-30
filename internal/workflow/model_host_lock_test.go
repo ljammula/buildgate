@@ -75,7 +75,7 @@ func TestRunSandboxWithRetriesAcquiresAndReleasesModelHostLock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, &relaySpec, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+		_, _ = activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, &relaySpec, nil, nil, nil, nil, "sh", "-c", "true")
 	}()
 
 	deadline := time.Now().Add(10 * time.Second)
@@ -164,7 +164,7 @@ func TestRunSandboxWithRetriesSkipsModelHostLockWhenConcurrencyZero(t *testing.T
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, &relaySpec, nil, nil, "", "", nil, nil, "sh", "-c", "true")
+		_, _ = activities.runSandboxWithRetries(context.Background(), input, logPath, 1, nil, nil, &relaySpec, nil, nil, nil, nil, "sh", "-c", "true")
 	}()
 
 	select {

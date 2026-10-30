@@ -205,7 +205,7 @@ func runAgentsDraftJob(ctx context.Context, in agentsDraftJobInput) (agentsDraft
 		in.SandboxImage, in.Settings.SandboxDocker, sandboxUser, workerUID, runID, sandboxDataDir,
 		in.Settings.SandboxMemory, in.Settings.SandboxCPUs, in.Settings.SandboxTmpfsSize,
 		nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-		"", "", roleOverride.WorkerEnv, roleOverride.Skills, agentsDraftInterpreter, args[1:]...,
+		roleOverride.WorkerEnv, roleOverride.Skills, agentsDraftInterpreter, args[1:]...,
 	)
 	if err != nil {
 		return agentsDraftJobResult{}, fmt.Errorf("AGENTS.md draft job failed: %s", oneLineAgentsDraftError(err))

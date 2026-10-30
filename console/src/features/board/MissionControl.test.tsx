@@ -76,13 +76,13 @@ describe("the board", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Mission Control" }),
     ).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Spec (4)" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Spec (3)" })).toBeInTheDocument();
     const board = screen.getByRole("region", { name: "Board" });
     expect(
       within(board)
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
-    ).toEqual(["Spec (4)", "Plan (1)", "Building (2)", "PR review (0)", "Finished (1)"]);
+    ).toEqual(["Spec (3)", "Plan (1)", "Building (2)", "PR review (0)", "Finished (1)"]);
     // Every request is a card in the list of its column: a stuck one in the
     // column of the step it stopped at.
     const ids = (column: string) =>
@@ -92,7 +92,6 @@ describe("the board", () => {
         .sort();
     expect(ids("Spec")).toEqual([
       "card-req-halted",
-      "card-req-oracle-review",
       "card-req-quarantined",
       "card-req-spec-review",
     ]);
@@ -343,7 +342,7 @@ describe("deciding from a card", () => {
   test("a review card links to the request page with Review, and never offers Approve", async () => {
     const { server: fake } = renderApp(<BoardScreen />, { server: fixtureServer() });
     await screen.findByTestId("card-req-spec-review");
-    for (const id of ["req-spec-review", "req-plan-review", "req-oracle-review"]) {
+    for (const id of ["req-spec-review", "req-plan-review"]) {
       expect(within(card(id)).getByRole("link", { name: "Review" })).toHaveAttribute(
         "href",
         `/requests/${id}`,
@@ -354,7 +353,7 @@ describe("deciding from a card", () => {
     }
     // An approval passes a gate: no card in any column offers one.
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
-    expect(screen.getAllByTestId(/^card-/)).toHaveLength(8);
+    expect(screen.getAllByTestId(/^card-/)).toHaveLength(7);
     // Every button the board itself offers can be pressed without an approve call.
     for (const control of within(screen.getByRole("region", { name: "Board" })).getAllByRole(
       "button",
@@ -517,17 +516,17 @@ describe("health strip", () => {
     );
   });
 
-  test("five requests behind a dead worker are counted as waiting for one; none in a job state shows no such fact", async () => {
+  test("four requests behind a dead worker are counted as waiting for one; none in a job state shows no such fact", async () => {
     const first = renderApp(<BoardScreen />, {
       server: server(
-        ["submitted", "spec_drafting", "oracle_drafting", "planning", "building"].map((state) =>
+        ["submitted", "spec_drafting", "planning", "building"].map((state) =>
           requestJson({ id: `req-${state}`, state }),
         ),
         [{ on: "GET /queue-run", reply: () => json({ state: "stale" }) }],
       ),
     });
     expect(await screen.findByTestId("health-need-worker")).toHaveTextContent(
-      "5 requests, not advancing",
+      "4 requests, not advancing",
     );
     first.unmount();
     renderApp(<BoardScreen />, {
@@ -752,7 +751,7 @@ describe("activity", () => {
   test("the fixture list shows fifteen moves; requests with no history show no section", async () => {
     const first = renderApp(<BoardScreen />, { server: fixtureServer() });
     const region = await screen.findByRole("region", { name: "Activity" });
-    expect(within(region).getAllByTestId("activity-entry")).toHaveLength(15);
+    expect(within(region).getAllByTestId("activity-entry")).toHaveLength(13);
     first.unmount();
     renderApp(<BoardScreen />, { server: server([requestJson({ id: "req-a", state: "done" })]) });
     await screen.findByTestId("card-req-a");
@@ -771,7 +770,7 @@ describe("Board and List", () => {
     );
     await userEvent.click(within(view).getByRole("button", { name: "List" }));
     expect(screen.queryByRole("region", { name: "Board" })).not.toBeInTheDocument();
-    expect(screen.getByText("Needs you (6)")).toBeInTheDocument();
+    expect(screen.getByText("Needs you (5)")).toBeInTheDocument();
     expect(screen.getByText("Working (1)")).toBeInTheDocument();
     expect(screen.getByText("Finished (1)")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Needs you" })).toBeInTheDocument();
@@ -794,7 +793,7 @@ describe("Board and List", () => {
     renderApp(<BoardScreen />, { server: fixtureServer() });
     await screen.findByRole("region", { name: "Board" });
     await waitFor(() => {
-      expect(document.title).toBe("(6) Buildgate");
+      expect(document.title).toBe("(5) Buildgate");
     });
   });
 
@@ -1095,7 +1094,7 @@ describe("groups inside a column", () => {
       within(spec)
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent),
-    ).toEqual(["Stuck (2)", "Spec review (1)", "Oracle review (1)"]);
+    ).toEqual(["Stuck (2)", "Spec review (1)"]);
     expect(groupCards(spec, "Stuck").sort()).toEqual(["card-req-halted", "card-req-quarantined"]);
     expect(groupNames(column("Plan"))).toEqual(["Plan review"]);
     // A worker lost mid-build waits in Building, above the builds.
@@ -1114,14 +1113,13 @@ describe("groups inside a column", () => {
     expect(waiting).toEqual([
       "card-req-every-field",
       "card-req-halted",
-      "card-req-oracle-review",
       "card-req-plan-review",
       "card-req-pr-ready",
       "card-req-quarantined",
       "card-req-spec-review",
     ]);
     await waitFor(() => {
-      expect(document.title).toBe("(7) Buildgate");
+      expect(document.title).toBe("(6) Buildgate");
     });
   });
 
@@ -1160,7 +1158,7 @@ describe("groups inside a column", () => {
           ...requestJson({ id: "req-q1", state: "spec_drafting" }),
           wait: { kind: "job_slot", position: 1 },
         },
-        requestJson({ id: "req-run", state: "oracle_drafting" }),
+        requestJson({ id: "req-run", state: "spec_drafting" }),
       ]),
     });
     await screen.findByTestId("card-req-plan");
@@ -1420,7 +1418,7 @@ describe("a long Spec column", () => {
       }),
     ),
     ...Array.from({ length: 2 }, (_, i) =>
-      requestJson({ id: `req-oracle-${i}`, state: "oracle_review", title: `Oracle ${i}` }),
+      requestJson({ id: `req-draft-${i}`, state: "spec_drafting", title: `Draft ${i}` }),
     ),
     {
       ...requestJson({ id: "req-stuck", state: "quarantined", title: "Stuck one" }),
@@ -1514,15 +1512,15 @@ describe("a long Spec column", () => {
   test("the chips carry each group's count, narrow the column to one group and give it back", async () => {
     renderApp(<BoardScreen />, { server: server(many) });
     await screen.findByTestId("card-req-stuck");
-    expect(chipStates()).toEqual(["All:true", "Stuck 1:false", "Spec 5:false", "Oracle 2:false"]);
+    expect(chipStates()).toEqual(["All:true", "Stuck 1:false", "Spec 5:false", "Drafting 2:false"]);
     expect(
       within(specList())
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label")),
-    ).toEqual(["Stuck", "Spec review", "Oracle review"]);
+    ).toEqual(["Stuck", "Spec review", "Drafting"]);
 
     await userEvent.click(within(chipRow()).getByRole("button", { name: "Spec 5" }));
-    expect(chipStates()).toEqual(["All:false", "Stuck 1:false", "Spec 5:true", "Oracle 2:false"]);
+    expect(chipStates()).toEqual(["All:false", "Stuck 1:false", "Spec 5:true", "Drafting 2:false"]);
     // Only that group, and all of it.
     expect(shownCards()).toEqual([
       "card-req-spec-0",
@@ -1549,7 +1547,7 @@ describe("a long Spec column", () => {
   test("the chip is not in the URL, and one group needs no chips", async () => {
     const { location } = renderApp(<BoardScreen />, { server: server(many) });
     await screen.findByTestId("card-req-stuck");
-    await userEvent.click(within(chipRow()).getByRole("button", { name: "Oracle 2" }));
+    await userEvent.click(within(chipRow()).getByRole("button", { name: "Drafting 2" }));
     expect(location()).toBe("/");
   });
 
@@ -1576,12 +1574,9 @@ describe("a long Spec column", () => {
     expect(more).toHaveAttribute("aria-expanded", "false");
     // A group that fits has no such button.
     expect(
-      within(within(specList()).getByRole("group", { name: "Oracle review" })).queryByRole(
-        "button",
-        {
-          name: /more$/,
-        },
-      ),
+      within(within(specList()).getByRole("group", { name: "Drafting" })).queryByRole("button", {
+        name: /more$/,
+      }),
     ).not.toBeInTheDocument();
     await userEvent.click(more);
     expect(specCards()).toHaveLength(5);
@@ -1689,14 +1684,19 @@ describe("a long Spec column", () => {
     fake.set("GET /requests", () => json(many.filter((r) => r !== stuck)));
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => {
-      expect(chipStates()).toEqual(["All:true", "Spec 5:false", "Oracle 2:false"]);
+      expect(chipStates()).toEqual(["All:true", "Spec 5:false", "Drafting 2:false"]);
     });
     expect(within(specList()).getAllByRole("group")).toHaveLength(2);
     // Another request gets stuck later: every group is still shown.
     fake.set("GET /requests", () => json(many));
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => {
-      expect(chipStates()).toEqual(["All:true", "Stuck 1:false", "Spec 5:false", "Oracle 2:false"]);
+      expect(chipStates()).toEqual([
+        "All:true",
+        "Stuck 1:false",
+        "Spec 5:false",
+        "Drafting 2:false",
+      ]);
     });
     expect(within(specList()).getAllByRole("group")).toHaveLength(3);
   });
@@ -1704,14 +1704,14 @@ describe("a long Spec column", () => {
   test("the tab title's count is every request that waits, with a chip pressed and with groups folded to three", async () => {
     renderApp(<BoardScreen />, { server: server(many) });
     await screen.findByTestId("card-req-stuck");
-    // Eight wait; three specs are drawn before "+2 more" is opened, plus the two oracles and the stuck one.
+    // Six wait; three specs are drawn before "+2 more" is opened, plus the two drafts and the stuck one.
     expect(shownCards()).toHaveLength(6);
     await waitFor(() => {
-      expect(document.title).toBe("(8) Buildgate");
+      expect(document.title).toBe("(6) Buildgate");
     });
-    await userEvent.click(within(chipRow()).getByRole("button", { name: "Oracle 2" }));
+    await userEvent.click(within(chipRow()).getByRole("button", { name: "Drafting 2" }));
     expect(shownCards()).toHaveLength(2);
-    expect(document.title).toBe("(8) Buildgate");
+    expect(document.title).toBe("(6) Buildgate");
     expect(screen.getByRole("heading", { level: 2, name: "Spec (8)" })).toBeInTheDocument();
   });
 
@@ -1731,7 +1731,7 @@ describe("a long Spec column", () => {
     const links = screen.getAllByRole("link", { name: /^Open in Triage/ });
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", "/triage");
-    expect(links[0]).toHaveTextContent("Open in Triage (10 wait on you)");
+    expect(links[0]).toHaveTextContent("Open in Triage (8 wait on you)");
   });
 
   test("each column has its own chips, pressed apart from the others", async () => {

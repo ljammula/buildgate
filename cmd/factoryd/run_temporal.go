@@ -91,16 +91,8 @@ type temporalSliceOptions struct {
 	// instead of policy.TicketStructure -- see -request-ticket's own flag
 	// help and QueueEntry.RequestTicket's doc comment.
 	RequestTicket bool
-	// ReferenceOracleInLoopRetry carries -reference-oracle-in-loop-retry
-	// onto RunWorkflowInput.ReferenceOracleInLoopRetry (see that field's
-	// doc comment) for both runViaTemporal and runViaRepositoryOwner --
-	// the oracle dir/mount path/command themselves already travel as
-	// their own positional parameters, since the post-build gate needs
-	// them regardless of this opt-in.
-	ReferenceOracleInLoopRetry bool
-	// NoCommitOracles carries -no-commit-oracles onto RunWorkflowInput.NoCommitOracles.
-	NoCommitOracles bool
-	// Bug carries -bug onto RunWorkflowInput.Bug.
+	// Bug carries -bug onto RunWorkflowInput.Bug: ticket 1 of a bug request,
+	// whose Tests-Required opt-out is not honoured.
 	Bug bool
 	// ResumeFrom carries -resume-worktree-of onto RunWorkflowInput.ResumeFrom:
 	// the halted run whose kept worktree this run adopts.
@@ -333,25 +325,26 @@ func (impl realTemporal) stillRunning(temporalClient client.Client, execution cl
 func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 	priorRunID, priorRunState, priorRunProjectPath, priorRunResultSHA := priorRunFields(o.Slice.PriorRun)
 	return workflow.RunWorkflowInput{
-		ReleaseProtectedPaths: o.ReleasePolicy.ProtectedPaths,
-		Ticket:                o.Ticket,
-		WorkspacePath:         o.WorkspacePath,
-		SpecPath:              o.SpecSnapshotPath,
-		BaseSHA:               o.BaseSHA,
-		AllowedFiles:          o.AllowedFiles,
-		RequiredChangedFiles:  o.RequiredChangedFiles,
-		RequiredContent:       o.RequiredContent,
-		TestPatterns:          o.TestPatterns,
-		TestsRequiredOptOut:   o.TestsRequiredOptOut,
-		AllowedPaths:          o.AllowedPaths,
-		ScopeUnapproved:       o.ScopeUnapproved,
-		TicketPath:            o.Slice.TicketPath,
-		TicketNumber:          o.Slice.TicketNumber,
-		RequestTicket:         o.Slice.RequestTicket,
-		PriorRunID:            priorRunID,
-		PriorRunState:         priorRunState,
-		PriorRunProjectPath:   priorRunProjectPath,
-		PriorRunResultSHA:     priorRunResultSHA,
+		ReleaseProtectedPaths:  o.ReleasePolicy.ProtectedPaths,
+		ReleaseMaxFilesChanged: o.ReleasePolicy.MaxFilesChanged,
+		ReleaseMaxChangedLines: o.ReleasePolicy.MaxChangedLines,
+		Ticket:                 o.Ticket,
+		WorkspacePath:          o.WorkspacePath,
+		SpecPath:               o.SpecSnapshotPath,
+		BaseSHA:                o.BaseSHA,
+		AllowedFiles:           o.AllowedFiles,
+		TestPatterns:           o.TestPatterns,
+		TestsRequiredOptOut:    o.TestsRequiredOptOut,
+		AllowedPaths:           o.AllowedPaths,
+		ScopeUnapproved:        o.ScopeUnapproved,
+		NoTicketScope:          o.NoTicketScope,
+		TicketPath:             o.Slice.TicketPath,
+		TicketNumber:           o.Slice.TicketNumber,
+		RequestTicket:          o.Slice.RequestTicket,
+		PriorRunID:             priorRunID,
+		PriorRunState:          priorRunState,
+		PriorRunProjectPath:    priorRunProjectPath,
+		PriorRunResultSHA:      priorRunResultSHA,
 		// Always true: every build runs in an isolated worktree. The field
 		// stays on RunWorkflowInput (workflow input is not changed here).
 		IsolateWorkspace:   true,
@@ -400,10 +393,6 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		InstallRegistries:                o.sandboxBlock().Registries,
 		InstallRepoKey:                   o.sandboxRepoKey(),
 		ConfiguredSandboxImage:           o.ConfiguredSandboxImage,
-		ReferenceOracleDir:               o.ReferenceOracleDir,
-		ReferenceOracleMountPath:         o.ReferenceOracleMountPath,
-		ReferenceOracleInLoopRetry:       o.Slice.ReferenceOracleInLoopRetry,
-		NoCommitOracles:                  o.Slice.NoCommitOracles,
 		Bug:                              o.Slice.Bug,
 		SandboxImage:                     o.SandboxImage,
 		SandboxDocker:                    o.SandboxDocker,
@@ -424,11 +413,19 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		ReviewSkills:                     o.Skills.Review,
 		Thinking:                         o.Thinking,
 		ReviewThinking:                   o.ReviewThinking,
+		Challenge:                        o.Challenge,
+		ChallengeSpecPath:                o.ChallengeSpecPath,
+		ChallengeSpecSHA256:              o.ChallengeSpecSHA256,
+		ChallengeCriteria:                o.ChallengeCriteria,
+		ChallengeAnswers:                 o.ChallengeAnswers,
+		ChallengeApprovedSHA256:          o.ChallengeApprovedSHA256,
+		ChallengeApprovedBytes:           o.ChallengeApprovedBytes,
+		ChallengerThinking:               o.ChallengerThinking,
+		ChallengerHarness:                o.ChallengerHarness,
+		ChallengerRelayPolicy:            o.ChallengerRelayPolicy,
+		ChallengeHeld:                    o.ChallengeHeld,
+		ChallengeRound:                   o.ChallengeRound,
 		ReviewRelayPolicy:                o.ReviewRelayPolicy,
-		ReviewReproduction:               o.ReviewReproduction,
-		ReviewSpecPath:                   o.ReviewSpecPath,
-		ReviewSpecSHA256:                 o.ReviewSpecSHA256,
-		RecheckReproductions:             o.RecheckReproductions,
 	}
 }
 

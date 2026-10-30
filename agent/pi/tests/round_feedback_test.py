@@ -282,10 +282,6 @@ class BuildLoopFeedbackTests(unittest.TestCase):
 			self.assertTrue(text.endswith("line 3999"))
 			self.assertLess(len(text), len(noisy))
 
-			passed_oracle, oracle_tail = build_app.run_reference_oracle(root, oracle_command="echo 'FAIL: want 12'; exit 1", log_dir=logs)
-			self.assertFalse(passed_oracle)
-			self.assertEqual(oracle_tail, "FAIL: want 12")
-			self.assertTrue((logs / build_app.ORACLE_LOG).is_file())
 
 	def test_a_resumed_build_is_told_the_named_log_is_gone(self):
 		with tempfile.TemporaryDirectory() as directory:
@@ -304,9 +300,9 @@ class BuildLoopFeedbackTests(unittest.TestCase):
 			root.mkdir()
 			stale = root / ".pi-build-session" / "feedback" / "round-1"
 			stale.mkdir(parents=True)
-			(stale / build_app.ORACLE_LOG).write_text("from an earlier invocation\n")
+			(stale / build_app.FAST_CHECK_LOG).write_text("from an earlier invocation\n")
 			result, _ = self.run_failing_build(root, rounds=1, max_rounds=1)
-			self.assertFalse((stale / build_app.ORACLE_LOG).exists())
+			self.assertFalse((stale / build_app.FAST_CHECK_LOG).exists())
 			self.assertEqual(result.rounds[0].failure_log, ".pi-build-session/feedback/round-1/verify.log")
 
 	def test_round_records_survive_a_resume(self):

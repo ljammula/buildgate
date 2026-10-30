@@ -245,7 +245,6 @@ describe("moveCriterion", () => {
 const TICKET = [
   "Verify-Command: go test ./...",
   "Allowed-Files: a.go, a_test.go",
-  "Required-Changed-Files: a.go",
   "",
   "## Goal",
   "g",
@@ -281,9 +280,9 @@ describe("ticket header lines", () => {
   });
 
   test("adds a missing line after the header lines that are there, or first", () => {
-    const without = TICKET.replace("Required-Changed-Files: a.go\n", "");
+    const without = TICKET.replace("Allowed-Files: a.go, a_test.go\n", "");
     expect(
-      setTicketHeaderValue(without, "Required-Changed-Files:", "a.go", requiredTicketHeaderKeys),
+      setTicketHeaderValue(without, "Allowed-Files:", "a.go, a_test.go", requiredTicketHeaderKeys),
     ).toBe(TICKET);
     expect(
       setTicketHeaderValue("## Goal\n", "Verify-Command:", "true", requiredTicketHeaderKeys),

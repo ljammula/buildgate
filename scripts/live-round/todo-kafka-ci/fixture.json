@@ -1,0 +1,7 @@
+{
+  "repo": "todo-kafka-service",
+  "verify_command": "make test",
+  "preflight_profile": "brownfield",
+  "ci_check": "ci",
+  "comments": []
+}

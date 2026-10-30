@@ -167,13 +167,11 @@ type Params struct {
 	VerifyCommand         string
 	VerifyCommandExplicit bool
 	FullSuiteCommand      string
-	NoCommitOracles       bool
-	DraftOracles          bool
 	// PlanReview is `factoryd submit -plan-review`; Settings.PlanReview
 	// (the session key plan_review) opts in too.
 	PlanReview bool
-	// Bug is `factoryd submit -bug`: stored on the request, which then drafts
-	// oracles whether or not DraftOracles is set.
+	// Bug is `factoryd submit -bug`: stored on the request, whose ticket 1
+	// must add a test that fails on the base commit and passes on the result.
 	Bug bool
 	// ImportedSpec is the content of `factoryd submit -spec-file`: a
 	// finished spec the operator hands over. It must contain at least one
@@ -421,13 +419,10 @@ func addRepoGates(gateCommands map[string]*string, cfg *projectconfig.Config) []
 // read back by this package's own Submit; the rest exist purely so the
 // same .factory.yml read and the same precedence rules apply here as in
 // every other caller of this logic.
-// gateCommands is keyed by policy.CommandGate.ID (see policy.CommandGates),
-// one *string per command gate a caller wants defaulted from .factory.yml;
-// a caller uninterested in a given gate's resolved value (requestsubmit's
-// own Submit, which never uses the named-gate commands) still passes a
-// non-nil placeholder for every registry entry, matching the "always
-// receives one flag per registry entry" contract the CLI edge (cmd/
-// factoryd's newRunFlags) already has -- see this function's own tests.
+// gateCommands receives the repository gates the committed .factory.yml
+// defines (`gates:`), keyed by policy.RepoGateCheck(id); a caller
+// uninterested in their values (requestsubmit's own Submit) passes an empty
+// map. nil takes none.
 func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, preflightProfile, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget int, meterCostBudget int64) error {
 	cfg, found, err := projectconfig.Load(workspaceDir)
 	if err != nil {
@@ -445,18 +440,6 @@ func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, v
 	if !explicit["fast-check-command"] && cfg.FastCheckCommand != "" {
 		*fastCheckCommand = cfg.FastCheckCommand
 		applied = append(applied, "fast-check-command")
-	}
-	projectGateCommands := cfg.GateCommands()
-	for _, g := range policy.CommandGates {
-		dest, ok := gateCommands[g.ID]
-		if !ok || dest == nil {
-			continue
-		}
-		value := projectGateCommands[g.ID]
-		if !explicit[g.Flag] && value != "" {
-			*dest = value
-			applied = append(applied, g.Flag)
-		}
 	}
 	applied = append(applied, addRepoGates(gateCommands, cfg)...)
 	if len(cfg.TestPatterns) > 0 {
@@ -572,14 +555,6 @@ func validateDraftingInputs(workspace string, p Params) error {
 		return fmt.Errorf("-spec-file: %w", err)
 	}
 	return validateImportedTickets(p.ImportedSpec, p.ImportedTickets)
-}
-
-// recordOracleOptions stores the request's oracle options: a bug request
-// always has the oracle stage, since it needs a test that fails first.
-func recordOracleOptions(req *request.Request, p Params) {
-	req.NoCommitOracles = p.NoCommitOracles
-	req.Bug = p.Bug
-	req.DraftOracles = p.DraftOracles || p.Bug
 }
 
 // ImportedTicket is one handed-over ticket: its file name (NNN.spec.md)
@@ -742,11 +717,7 @@ func Submit(p Params) (Result, error) {
 		explicit["preflight-profile"] = true
 	}
 	var discardedFastCheckCommand string
-	discardedGateCommands := make(map[string]*string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		var discarded string
-		discardedGateCommands[g.ID] = &discarded
-	}
+	discardedGateCommands := map[string]*string{}
 	var discardedProtectedPaths string
 	var discardedTestPatterns []string
 	// discardedTokenCeiling/discardedCostCeiling seed as the caller's own
@@ -799,7 +770,7 @@ func Submit(p Params) (Result, error) {
 		return Result{}, err
 	}
 	req.FullSuiteCommand, req.FullSuiteSource = fullSuiteCommand, fullSuiteSource
-	recordOracleOptions(req, p)
+	req.Bug = p.Bug
 	req.PlanReview = p.PlanReview || p.Settings.PlanReview
 	req.PlanImported = len(p.ImportedTickets) > 0
 	if err := recordHandedOverPlanCriteria(req, p.ImportedSpec); err != nil {

@@ -2,7 +2,6 @@ package requestdrivertest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,17 +34,6 @@ func FailingPlanTicketsRunner(t *testing.T) requestdriver.PlanTicketsRunner {
 	return func(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig, verifyCommand string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		t.Fatal("planTicketsRunner must not be called")
 		return nil, nil, nil
-	}
-}
-
-// FailingOracleDraftRunner is FailingSpecDraftRunner's sibling for the oracle
-// drafting job -- used everywhere driveRequests must not touch
-// oracle_drafting (every pre-existing test: no request there sets
-// -draft-oracles).
-func FailingOracleDraftRunner(t *testing.T) requestdriver.OracleDraftRunner {
-	return func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		t.Fatal("oracleDraftRunner must not be called")
-		return request.OracleDraft{}, nil
 	}
 }
 
@@ -143,42 +131,6 @@ func SaveRunFixture(t *testing.T, dataDir, id, requestID, startedAt string, toke
 	}
 }
 
-// OracleStageFixture writes a spec_review request (spec.md present, workspace
-// with a .factory.yml verify_command) and approves the spec, so the returned
-// request sits wherever spec approval routes it: oracle_drafting when
-// draftOracles, planning otherwise.
-func OracleStageFixture(t *testing.T, draftOracles bool) (dataDir, id string) {
-	t.Helper()
-	dataDir = t.TempDir()
-	id = "req-1"
-	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: make verify\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := request.SaveText(dataDir, id, "some request text"); err != nil {
-		t.Fatal(err)
-	}
-	r := request.New(id, workspace, "app", request.Source{Kind: request.SourceText}, time.Now())
-	r.PlanReview = true // most tests drive the plan_review gate; PlanReviewOff clears it
-	r.State = request.StateSpecReview
-	r.DraftOracles = draftOracles
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(TwoCriteriaSpec), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
-		t.Fatalf("approve spec: %v", err)
-	}
-	return dataDir, id
-}
-
-// NoOracleScriptCfg points the production drafting runner at a script that
-// does not exist, so it records not_implemented instead of launching a
-// sandbox: the state-machine tests here exercise routing, not drafting.
-var NoOracleScriptCfg = requestdriver.WorkerConfig{OracleDraftScript: "/nonexistent/draft_acceptance_oracles.py"}
-
 func LoadRequest(t *testing.T, dataDir, id string) *request.Request {
 	t.Helper()
 	r, err := request.Load(dataDir, id)
@@ -186,25 +138,6 @@ func LoadRequest(t *testing.T, dataDir, id string) *request.Request {
 		t.Fatal(err)
 	}
 	return r
-}
-
-func StubOracleDraftRunner(draft request.OracleDraft, err error) (requestdriver.OracleDraftRunner, *[]requestdriver.OracleDraftInput) {
-	var calls []requestdriver.OracleDraftInput
-	return func(ctx context.Context, in requestdriver.OracleDraftInput) (request.OracleDraft, error) {
-		calls = append(calls, in)
-		return draft, err
-	}, &calls
-}
-
-func MoveToOracleReview(t *testing.T, dataDir, id string, draft request.OracleDraft) {
-	t.Helper()
-	r := LoadRequest(t, dataDir, id)
-	if err := r.CompleteOracleDrafting(draft, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
 }
 
 const HandoverVerify = "python3 -m unittest tests/test_product_lab.py"
@@ -313,7 +246,6 @@ func ValidBrownfieldTicket(verifyCommand string, criteria ...int) string {
 	}
 	return fmt.Sprintf(`Verify-Command: %s
 Allowed-Files: internal/payments/refunds.go, internal/payments/refunds_test.go
-Required-Changed-Files: internal/payments/refunds.go
 
 ## Goal
 
@@ -442,6 +374,13 @@ func CountNotificationLogLines(t *testing.T, dataDir, id string) int {
 func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id string) {
 	t.Helper()
 	dataDir, id = ApprovedPlanningFixture(t, TwoCriteriaSpec, "make verify")
+	// These fixtures need the supplied drafted tickets, including multi-ticket
+	// plans. An ended handover enters the planning-job path.
+	r := LoadRequest(t, dataDir, id)
+	r.PlanImported, r.PlanImportEnded = true, true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	tickets := make([]requestdriver.DraftedTicket, 0, n)
 	for i := 1; i <= n; i++ {
 		// Each ticket claims both of TwoCriteriaSpec's own acceptance
@@ -454,7 +393,7 @@ func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id st
 		})
 	}
 	runner, _ := StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, FailingSpecDraftRunner(t), runner, FailingOracleDraftRunner(t), FailingBuildRunner(t)); err != nil {
+	if err := DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, FailingSpecDraftRunner(t), runner, FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests (planning): %v", err)
 	}
 	// A one-ticket plan is approved by the factory in the planning step; a
@@ -463,6 +402,11 @@ func BuildingFixture(dp requestdriver.Deps, t *testing.T, n int) (dataDir, id st
 		if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
 			t.Fatalf("approve plan: %v", err)
 		}
+	}
+	r = LoadRequest(t, dataDir, id)
+	r.PlanImported, r.PlanImportEnded = false, false
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
 	}
 	return dataDir, id
 }
@@ -497,99 +441,6 @@ func AcceptingBuildRunner(t *testing.T, dataDir string) requestdriver.TicketRunn
 		}
 		return nil
 	}
-}
-
-const MaterializerOracleBody = "package x\n\nimport \"testing\"\n\nfunc TestOracleX(t *testing.T) {}\n"
-
-// RequestOracleFixtureAtReview builds a -draft-oracles request that has passed
-// oracle_review with the given request-level oracle (nothing written when
-// files is nil, i.e. the operator skipped the stage) and sits in planning.
-func RequestOracleFixtureAtReview(t *testing.T, files map[string]string) (dataDir, id string) {
-	t.Helper()
-	dataDir = t.TempDir()
-	id = "req-1"
-	workspace := t.TempDir()
-	if err := request.SaveText(dataDir, id, "some request text"); err != nil {
-		t.Fatal(err)
-	}
-	r := request.New(id, workspace, "app", request.Source{Kind: request.SourceText}, time.Now())
-	r.PlanReview = true // most tests drive the plan_review gate; PlanReviewOff clears it
-	r.VerifyCommand = "make verify"
-	r.DraftOracles = true
-	r.State = request.StateSpecReview
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, id), []byte(TwoCriteriaSpec), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
-		t.Fatalf("approve spec: %v", err)
-	}
-	r, err := request.Load(dataDir, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.State != request.StateOracleDrafting {
-		t.Fatalf("state %s, want oracle_drafting", r.State)
-	}
-	r.State = request.StateOracleReview
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	if files != nil {
-		dir := filepath.Join(request.Dir(dataDir, id), request.RequestOracleDirName)
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		for n, b := range files {
-			if err := os.WriteFile(filepath.Join(dir, n), []byte(b), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	return dataDir, id
-}
-
-// RequestOracleFixture is RequestOracleFixtureAtReview plus the oracle_review
-// approval.
-func RequestOracleFixture(t *testing.T, files map[string]string) (dataDir, id string) {
-	t.Helper()
-	dataDir, id = RequestOracleFixtureAtReview(t, files)
-	if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
-		t.Fatalf("approve oracle_review: %v", err)
-	}
-	return dataDir, id
-}
-
-func TwoOracleFiles(command string) map[string]string {
-	manifest, _ := json.Marshal([]map[string]any{
-		{"criterion": "A retried POST /refunds with the same idempotency key returns the original result.", "oracle_file": "retry_oracle_test.go", "criterion_index": 1, "target_path": "internal/payments/retry_oracle_test.go", "supersedes": []string{"internal/payments/old_oracle_test.go"}},
-		{"criterion": "2. A non-idempotent POST /refunds still processes normally.", "oracle_file": "plain_oracle_test.go", "criterion_index": 2},
-	})
-	return map[string]string{
-		"MANIFEST.json":        string(manifest),
-		"RUN_COMMAND.txt":      command,
-		"retry_oracle_test.go": strings.Replace(MaterializerOracleBody, "package x", "package payments", 1), // fits its target_path dir
-		"plain_oracle_test.go": MaterializerOracleBody,
-	}
-}
-
-func PlanTwoTickets(dp requestdriver.Deps, t *testing.T, dataDir string) *request.Request {
-	t.Helper()
-	tickets := []requestdriver.DraftedTicket{
-		{Filename: "001.spec.md", Content: ValidBrownfieldTicket("make verify", 1)},
-		{Filename: "002.spec.md", Content: ValidBrownfieldTicket("make verify", 2)},
-	}
-	runner, _ := StubPlanTicketsRunner(tickets, &request.PlanEvidence{}, nil)
-	if err := DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, FailingSpecDraftRunner(t), runner, FailingOracleDraftRunner(t), FailingBuildRunner(t)); err != nil {
-		t.Fatal(err)
-	}
-	r, err := request.Load(dataDir, "req-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
 }
 
 // StubReviewCorrectiveRunner installs a package-var override for the

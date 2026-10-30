@@ -23,10 +23,6 @@ const (
 	// BinCorrective: the build agent can fix it, and being told what failed
 	// does not weaken the check.
 	BinCorrective Bin = "corrective"
-	// BinCorrectiveIfOracleInLoop: telling a build what failed exposes the
-	// reference oracle, so it is corrective only when the operator already
-	// lets the build see the oracle (-reference-oracle-in-loop-retry).
-	BinCorrectiveIfOracleInLoop Bin = "corrective_if_oracle_in_loop"
 	// BinNever: feeding it back would defeat the check, or there is nothing
 	// a build can do about it.
 	BinNever Bin = "never"
@@ -42,10 +38,6 @@ const (
 var bins = map[string]Bin{
 	"canonical_verify":  BinCorrective,
 	"full_suite_verify": BinCorrective,
-	"lint":              BinCorrective,
-	"security_audit":    BinCorrective,
-	"unit_tests":        BinCorrective,
-	"integration_tests": BinCorrective,
 	"diff_scope":        BinCorrective,
 	// The changed tests pass on the base commit (they do not exercise the
 	// change), or no test file changed: a build can fix each when told, in one
@@ -54,22 +46,12 @@ var bins = map[string]Bin{
 	policy.TestsRedOnBaseCheck: BinCorrective,
 	// The review fails only when the reviewer gave no verdict: there is
 	// nothing to tell a build, and the run's request waits in
-	// resume_review. A finding reaches a build only through
-	// review_reproduction (SC-022).
+	// resume_review. A finding is advice (SC-022).
 	"code_review": BinNever,
-	// A reviewer's finding whose reproduction the factory ran and saw
-	// fail (SC-022): one corrective build is told the finding in one line.
-	policy.ReviewReproductionCheck: BinCorrective,
-
-	policy.ReferenceOracleGateID: BinCorrectiveIfOracleInLoop,
-
-	// A bug request's oracle that passes on the base commit: the operator
-	// supplies a test that fails.
-	"oracle_red_on_base": BinOperator,
 }
 
 // BinOf returns the bin of a failed check. A repository's own gate
-// (repo-<id>, .factory.yml gates:) is a command like the named gates. A
+// (repo-<id>, .factory.yml gates:) is a command like the repository gates. A
 // check this package does not know is BinNever: an unknown failure is not
 // handed to a build.
 func BinOf(check string) Bin {
@@ -112,11 +94,9 @@ func rank(b Bin) int {
 	switch b {
 	case BinCorrective:
 		return 0
-	case BinCorrectiveIfOracleInLoop:
-		return 1
 	case BinNever:
-		return 2
+		return 1
 	default:
-		return 3
+		return 2
 	}
 }

@@ -34,9 +34,6 @@
       "duration_s": 184.7,
       "fast_check_ran": false,
       "fast_check_passed": null,
-      "oracle_command": null,
-      "oracle_passed": null,
-      "oracle_output_tail": "",
       "blockers": [
         "canonical verification failed"
       ],
@@ -68,9 +65,6 @@
       "duration_s": 210.255867137108,
       "fast_check_ran": false,
       "fast_check_passed": null,
-      "oracle_command": null,
-      "oracle_passed": null,
-      "oracle_output_tail": "",
       "blockers": [],
       "changed_files": [],
       "failure_signature": "",

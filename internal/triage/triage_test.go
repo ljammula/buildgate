@@ -695,105 +695,6 @@ func TestFailureMarkerPatternsIgnoreWarningsAndLabelExceptionsNeutrally(t *testi
 	}
 }
 
-// TestTriageDiffScopeOracleHint proves that a diff_scope quarantine
-// should name the possibility that an active, PASSING reference oracle
-// forced the out-of-scope edit -- but only then, never merely because an
-// oracle was configured for the run (see oracleScopeHint's own doc
-// comment for the 2026-09-22 live incident this covers).
-func TestTriageDiffScopeOracleHint(t *testing.T) {
-	const id = "run1"
-	baseRun := func(dataDir string) *run.Run {
-		writeRunFile(t, dataDir, id, "spec.snapshot.md", "# Ticket\n\nAllowed-Files: internal/handler/calc_test.go\n")
-		return &run.Run{
-			ID:           id,
-			State:        run.StateQuarantined,
-			ChangedFiles: []string{"internal/handler/calc_test.go", "internal/domain/errors.go"},
-			GateResults:  []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "diff_scope", Passed: false}},
-		}
-	}
-
-	t.Run("no reference oracle configured: no hint", func(t *testing.T) {
-		dataDir := t.TempDir()
-		r := baseRun(dataDir)
-		got := Run(r, dataDir)
-		if strings.Contains(got, "the oracle may be wrong") {
-			t.Errorf("unexpected oracle hint with no ReferenceOracleDir: %q", got)
-		}
-		if !strings.HasPrefix(got, "diff_scope: changed internal/domain/errors.go outside Allowed-Files") {
-			t.Errorf("Run() = %q", got)
-		}
-	})
-
-	t.Run("reference oracle configured but its gate failed: no hint", func(t *testing.T) {
-		dataDir := t.TempDir()
-		r := baseRun(dataDir)
-		r.ReferenceOracleDir = filepath.Join(dataDir, "oracle")
-		r.GateResults = append(r.GateResults, run.GateResult{Check: "reference_oracle", Passed: false})
-		got := Run(r, dataDir)
-		if strings.Contains(got, "the oracle may be wrong") {
-			t.Errorf("unexpected oracle hint when reference_oracle gate failed: %q", got)
-		}
-	})
-
-	t.Run("reference oracle configured and its gate never ran: no hint", func(t *testing.T) {
-		dataDir := t.TempDir()
-		r := baseRun(dataDir)
-		r.ReferenceOracleDir = filepath.Join(dataDir, "oracle")
-		got := Run(r, dataDir)
-		if strings.Contains(got, "the oracle may be wrong") {
-			t.Errorf("unexpected oracle hint with no reference_oracle gate result: %q", got)
-		}
-	})
-
-	t.Run("reference oracle active and passing: hint present, generic name when MANIFEST.json is unreadable", func(t *testing.T) {
-		dataDir := t.TempDir()
-		r := baseRun(dataDir)
-		r.ReferenceOracleDir = filepath.Join(dataDir, "oracle")
-		r.GateResults = append(r.GateResults, run.GateResult{Check: "reference_oracle", Passed: true})
-		got := Run(r, dataDir)
-		want := "the file was touched to satisfy oracle (the reference oracle): the oracle may be wrong, not the build"
-		if !strings.Contains(got, want) {
-			t.Errorf("Run() = %q, want it to contain %q", got, want)
-		}
-	})
-
-	t.Run("reference oracle active and passing: names the covered criterion from MANIFEST.json", func(t *testing.T) {
-		dataDir := t.TempDir()
-		r := baseRun(dataDir)
-		r.ReferenceOracleDir = filepath.Join(dataDir, "oracle")
-		if err := os.MkdirAll(r.ReferenceOracleDir, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		manifest := `[{"criterion": "1. Unknown operations return an error.", "oracle_file": "oracle_007_test.go"}]`
-		if err := os.WriteFile(filepath.Join(r.ReferenceOracleDir, "MANIFEST.json"), []byte(manifest), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		r.GateResults = append(r.GateResults, run.GateResult{Check: "reference_oracle", Passed: true})
-		got := Run(r, dataDir)
-		want := "the file was touched to satisfy oracle 1. Unknown operations return an error.: the oracle may be wrong, not the build"
-		if !strings.Contains(got, want) {
-			t.Errorf("Run() = %q, want it to contain %q", got, want)
-		}
-	})
-
-	t.Run("a passing but unrelated gate never triggers the hint", func(t *testing.T) {
-		// Only diff_scope failing plus a passing reference_oracle gate
-		// counts -- some other failing gate must not pick up the hint.
-		dataDir := t.TempDir()
-		r := &run.Run{
-			ID:                 id,
-			State:              run.StateQuarantined,
-			ChangedFiles:       []string{"internal/refund/refund.go"},
-			GateResults:        []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "tests_red_on_base", Passed: false}, {Check: "reference_oracle", Passed: true}},
-			ReferenceOracleDir: filepath.Join(dataDir, "oracle"),
-		}
-		got := Run(r, dataDir)
-		if got != "tests_red_on_base: no test file changed" {
-			t.Errorf("Run() = %q", got)
-		}
-	})
-}
-
 // A step that ran with setup and exited 95 with the setup line in its log is
 // worded as a setup failure naming the command, quoted; a step that ran no
 // setup and prints the same line and exits 95 is an ordinary exit sentence,
@@ -931,22 +832,6 @@ func TestTheProvidersSentenceInModelTextNamesNothing(t *testing.T) {
 	}
 }
 
-func TestTriageNamesAnOraclePassingOnTheBase(t *testing.T) {
-	r := &run.Run{ID: "run1", State: run.StateHalted, HaltReasonCode: run.HaltReasonOraclePassesOnBase, HaltError: "temporal workflow did not complete: ..."}
-	want := "halted before the build: the acceptance oracle passes on the base commit, so it does not reproduce the bug; no model call was made"
-	if got := Run(r, t.TempDir()); got != want {
-		t.Errorf("Run() = %q, want %q", got, want)
-	}
-}
-
-func TestTriageNamesAnOracleThatRanNoTestOnTheBase(t *testing.T) {
-	r := &run.Run{ID: "run1", State: run.StateHalted, HaltReasonCode: run.HaltReasonOracleNotRunOnBase, HaltError: "temporal workflow did not complete: ..."}
-	want := "halted before the build: the acceptance oracle ran no test on the base commit (timeout, command not found, or no tests collected), so it says nothing about the bug; no model call was made"
-	if got := Run(r, t.TempDir()); got != want {
-		t.Errorf("Run() = %q, want %q", got, want)
-	}
-}
-
 // TestTriageCodeReviewSaysTheReviewerGaveNoVerdict covers the code_review
 // gate's sentence: it fails only when the reviewer gave no verdict, which the
 // run record says; findings never change it, and a record with no review
@@ -993,38 +878,4 @@ func TestTriageCodeReviewSaysTheReviewerGaveNoVerdict(t *testing.T) {
 			t.Errorf("Run() = %q, want %q", got, want)
 		}
 	})
-}
-
-func TestTriageRunNamesACheckThatFailedOnlyAfterTheOracleCommit(t *testing.T) {
-	r := &run.Run{
-		ID:    "run1",
-		State: run.StateQuarantined,
-		GateResults: []run.GateResult{
-			{Check: "canonical_verify", Passed: true},
-			{Check: "full_suite_verify", Passed: false, ExitCode: 1},
-		},
-		FailedAfterOracleCommit: []string{"full_suite_verify"},
-	}
-	got := Run(r, t.TempDir())
-	r.FailedAfterOracleCommit = nil
-	plain := Run(r, t.TempDir())
-	r.FailedAfterOracleCommit = []string{"full_suite_verify"}
-	if plain == "" {
-		plain = "full_suite_verify failed"
-	}
-	if want := plain + " (passed before the oracle files were committed; a build cannot change them)"; got != want {
-		t.Fatalf("Run = %q, want the ordinary sentence %q plus the note", got, plain)
-	}
-	// A long repository gate name and a long log line: the note survives whole under the cap.
-	long := "repo-" + strings.Repeat("x", 32)
-	r.GateResults[1].Check = long
-	r.FailedAfterOracleCommit = []string{long}
-	if got := Run(r, t.TempDir()); len(got) > maxTriageSentenceLen || !strings.HasSuffix(got, afterOracleCommitSuffix) {
-		t.Fatalf("Run = %q (%d bytes), want the whole note under %d bytes", got, len(got), maxTriageSentenceLen)
-	}
-	// Not marked: the ordinary sentence.
-	r.FailedAfterOracleCommit = nil
-	if got := Run(r, t.TempDir()); strings.Contains(got, "oracle files") {
-		t.Fatalf("unmarked check got the oracle-commit sentence: %q", got)
-	}
 }

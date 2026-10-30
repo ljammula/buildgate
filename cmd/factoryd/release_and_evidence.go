@@ -122,7 +122,7 @@ const subscriptionCostAggregateSuffix = " (includes subscription-billed runs; AP
 // runViaTemporal/runViaRepositoryOwner (called from runMain, where these
 // flag pointers are in scope) can build the identical policy to pass down
 // to applyRunWorkflowResult, rather than each re-deriving it.
-func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxInsertions int, rollbackPlan string, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck bool) release.MergePolicy {
+func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxChangedLines int, rollbackPlan string, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck bool) release.MergePolicy {
 	var protectedPaths []string
 	if protectedPathsCSV != "" {
 		protectedPaths = strings.Split(protectedPathsCSV, ",")
@@ -130,7 +130,7 @@ func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxInsert
 	return release.MergePolicy{
 		ProtectedPaths:                 protectedPaths,
 		MaxFilesChanged:                maxFilesChanged,
-		MaxInsertions:                  maxInsertions,
+		MaxChangedLines:                maxChangedLines,
 		RollbackPlan:                   rollbackPlan,
 		AllowOverrides:                 allowOverrides,
 		AllowDependencyLockfileChanges: allowDependencyLockfileChanges,
@@ -232,7 +232,7 @@ func runReleasePolicy(p release.MergePolicy) *run.ReleasePolicy {
 	return &run.ReleasePolicy{
 		ProtectedPaths:                 p.ProtectedPaths,
 		MaxFilesChanged:                p.MaxFilesChanged,
-		MaxInsertions:                  p.MaxInsertions,
+		MaxChangedLines:                p.MaxChangedLines,
 		RollbackPlan:                   p.RollbackPlan,
 		AllowOverrides:                 p.AllowOverrides,
 		AllowDependencyLockfileChanges: p.AllowDependencyLockfileChanges,
@@ -257,7 +257,7 @@ func mergePolicyFromRun(r *run.Run) (release.MergePolicy, bool) {
 	return release.MergePolicy{
 		ProtectedPaths:                 p.ProtectedPaths,
 		MaxFilesChanged:                p.MaxFilesChanged,
-		MaxInsertions:                  p.MaxInsertions,
+		MaxChangedLines:                p.MaxChangedLines,
 		RollbackPlan:                   p.RollbackPlan,
 		AllowOverrides:                 p.AllowOverrides,
 		AllowDependencyLockfileChanges: p.AllowDependencyLockfileChanges,
@@ -314,7 +314,7 @@ func releasePullRequestWithheldReason(decision *release.Decision) string {
 // releasePolicyCanNeverAllow reports whether policy can never allow a
 // release decision regardless of any run's own evidence: MergePolicyCheck
 // denies unconditionally whenever RollbackPlan == "", MaxFilesChanged ==
-// 0, or MaxInsertions == 0 -- and those are this repo's own documented
+// 0, or MaxChangedLines == 0 -- and those are this repo's own documented
 // -release-* flag defaults (see releasePolicyFromFlags above), so an
 // operator who turns on -open-pull-request without also setting real
 // values for these three would otherwise get no pull requests, ever, with
@@ -328,7 +328,7 @@ func releasePolicyCanNeverAllow(policy release.MergePolicy) bool {
 // releasePolicyNeverAllowsWarning is the loud, startup-time line
 // warnIfReleasePolicyCanNeverAllow logs -- named as a const so a test can
 // assert on its exact text without duplicating it.
-const releasePolicyNeverAllowsWarning = "warning: -open-pull-request is set but the release policy denies by default (no -release-rollback-plan and/or -release-max-files-changed=0/-release-max-insertions=0 means every run will be denied and no pull request will ever open); set real values or PRs will never appear"
+const releasePolicyNeverAllowsWarning = "warning: -open-pull-request is set but the release policy denies by default (no -release-rollback-plan and/or -release-max-files-changed=0/-release-max-changed-lines=0 means every run will be denied and no pull request will ever open); set real values or PRs will never appear"
 
 // releasePolicyWarnedOnce guards releasePolicyNeverAllowsWarning's own
 // log line -- deliberately NOT a sync.Once wrapping the whole call (an
@@ -909,6 +909,9 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	if r.DiffStat != nil {
 		fmt.Fprintf(&b, "**Diff:** %d file(s), +%d/-%d\n\n", r.DiffStat.FilesChanged, r.DiffStat.Insertions, r.DiffStat.Deletions)
 	}
+	if size := r.ChangeSize; size != nil && (r.PRBudgetLines > 0 && size.SourceLines > r.PRBudgetLines || size.Functions > 25) {
+		fmt.Fprintf(&b, "**Change size:** %d source lines, %d source files, %d functions.\n\n", size.SourceLines, size.SourceFiles, size.Functions)
+	}
 	if len(r.GateResults) > 0 {
 		b.WriteString("## Gates\n\n")
 		for _, g := range r.GateResults {
@@ -935,18 +938,14 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	// "tests_red_on_base: pass" with no changed test file otherwise has no
 	// way to tell "a test that fails on the base satisfied this" apart from
 	// "the ticket opted out and why".
-	writeOracleOptOutLine(&b, r)
 	if r.TestsRequiredOptOut != "" {
 		fmt.Fprintf(&b, "`tests_red_on_base` opted out: %s\n\n", sanitizeMarkdownField(r.TestsRequiredOptOut))
 	}
 	writeNotesSection(&b, r.Notes)
 	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
-	// Every policy.CommandGate always gets its own line, even when the
-	// project never configured one -- "not configured" is a real,
-	// distinct state a reviewer needs to see, not silence the way an
-	// undeclared ticket-scoped gate (diff_scope) is: that has no "the operator
-	// should have configured this" implication, these project-scoped ones do.
-	writeNamedGatesSection(&b, r)
+	b.WriteString(renderChallengeMarkdown(r.Challenge))
+	b.WriteString(renderCarvedChallengeMarkdown(r.Replay))
+	writeRepoGatesSection(&b, r)
 	writeChangedFilesAndDependencies(&b, r)
 	if totalCostMicroUSD, totalTokens, partial := relaySpendSummary(r.Attempts); totalCostMicroUSD > 0 || totalTokens > 0 || partial {
 		fmt.Fprintf(&b, "**Relay spend:** %s\n\n", relaySpendLine(totalCostMicroUSD, totalTokens, partial, run.SubscriptionBilled(r.Attempts)))
@@ -965,28 +964,6 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 		fmt.Fprintf(&b, "\nCloses %s\n", r.PRCloses)
 	}
 	return b.String()
-}
-
-// writeOracleOptOutLine says what became of a `-no-commit-oracles` request.
-func writeOracleOptOutLine(b *strings.Builder, r *run.Run) {
-	if r.OraclesNotCommittedByRequest {
-		switch {
-		case r.Oracles != nil && len(r.Oracles.Authored) > 0:
-			b.WriteString("Oracle commit opt-out requested (`-no-commit-oracles`) but oracles WERE committed by the factory: the worker that ran this did not honour it (mixed-version deployment).\n\n")
-		default:
-			oracleGated := false
-			for _, g := range r.GateResults {
-				if g.Check == "reference_oracle" && g.Passed {
-					oracleGated = true
-				}
-			}
-			if oracleGated {
-				b.WriteString("Oracle commit opt-out requested (`-no-commit-oracles`; honoured on single-binary deploys): the oracle gated this run and no factory oracle commit is recorded.\n\n")
-			} else {
-				b.WriteString("Oracle commit opt-out requested (`-no-commit-oracles`; honoured on single-binary deploys); no reference oracle ran.\n\n")
-			}
-		}
-	}
 }
 
 // maxRenderedNotes caps the lines of the "## Notes" section.
@@ -1024,35 +1001,16 @@ func noteLine(n string) string {
 	return sanitizePRField(words) + ": `" + sanitizePRField(value) + "`"
 }
 
-// writeNamedGatesSection lists every command gate and the repository's own
-// gates.
-func writeNamedGatesSection(b *strings.Builder, r *run.Run) {
-	b.WriteString("## Named gates\n\n")
-	namedGateResults := make(map[string]run.GateResult, len(r.GateResults))
-	for _, g := range r.GateResults {
-		namedGateResults[g.Check] = g
+// writeRepoGatesSection lists the repository's own gates, when the run
+// recorded any.
+func writeRepoGatesSection(b *strings.Builder, r *run.Run) {
+	var lines strings.Builder
+	writeRepoGateLines(&lines, r.GateResults)
+	if lines.Len() == 0 {
+		return
 	}
-	for _, g := range gatepolicy.CommandGates {
-		check := g.ID
-		gateResult, ran := namedGateResults[check]
-		status := "not configured"
-		if ran {
-			status = "pass"
-			if !gateResult.Passed {
-				status = "FAIL"
-			}
-		}
-		fmt.Fprintf(b, "- `%s`: %s\n", check, status)
-		// The reference-oracle content hash (SC-012, PR #151 review
-		// round-2 follow-up) only exists when -reference-oracle-dir was
-		// configured -- empty otherwise, including for every other named
-		// gate, so this line is added only when there's something real
-		// to show.
-		if check == gatepolicy.ReferenceOracleGateID && gateResult.ReferenceOracleSHA256 != "" {
-			fmt.Fprintf(b, "  - reference-oracle content: `sha256:%s`\n", gateResult.ReferenceOracleSHA256)
-		}
-	}
-	writeRepoGateLines(b, r.GateResults)
+	b.WriteString("## Repository gates\n\n")
+	b.WriteString(lines.String())
 	b.WriteString("\n")
 }
 
@@ -1278,16 +1236,14 @@ const reviewerAdviceMaxRendered = 20
 
 // renderReviewerAdviceMarkdown renders the "## Reviewer advice" PR-body
 // section: every finding of the review step (agent/pi/scripts/
-// combined_review.py, internal/codereview) that did not refuse the run --
-// Disposition "advice", or "" on a record from before reproductions; a
-// finding that blocks never reaches an accepted run's body. nil (the
+// combined_review.py, internal/codereview), all of them advice. nil (the
 // ticket never ran the review, i.e. -code-review-policy was "off" or the
 // run never reached it) renders nothing at all.
 //
 // Each finding is one line, `- **<severity>** <summary>`, both made safe by
 // handoff's rules for what someone else wrote (one line, cut to a fixed
 // length, no backtick, escape or recognisable secret): never the failure
-// scenario, the file, or a reproduction. Findings are sorted high severity
+// scenario or the file. Findings are sorted high severity
 // first, then medium, then low, stable within a severity, and capped at
 // reviewerAdviceMaxRendered, with a final "… N more" line naming how many
 // were left out.
@@ -1302,12 +1258,7 @@ func renderReviewerAdviceMarkdown(cr *run.CodeReviewResult) string {
 		b.WriteString(" Reviewer unavailable.")
 	}
 	b.WriteString("\n\n")
-	var advice []run.CodeReviewFinding
-	for _, f := range cr.Findings {
-		if f.Disposition != run.DispositionBlocks {
-			advice = append(advice, f)
-		}
-	}
+	advice := slices.Clone(cr.Findings)
 	if cr.Available && len(advice) == 0 {
 		b.WriteString("No findings.\n\n")
 		return b.String()
@@ -1378,4 +1329,59 @@ func invalidateStoredReleaseDecision(dataDir, project, runID, reason string) {
 	if err := release.InvalidateDecision(dataDir, project, runID, reason, time.Now().Format(time.RFC3339)); err != nil {
 		log.Printf("run %s: warning: could not invalidate release decision: %v", runID, err)
 	}
+}
+
+// renderChallengeMarkdown renders the "## Challenge" PR-body section (SC-022):
+// the committed tests (path and criterion), the red ones, and the notes (no
+// challenger role, no verdict and why, files held and not run, shape refusals,
+// collection not proven). Every value is cleaned like the review's; never a
+// file's content. nil renders nothing.
+func renderChallengeMarkdown(c *run.ChallengeRecord) string {
+	if c == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Challenge\n\n")
+	switch c.Verdict {
+	case run.ChallengeNoVerdict:
+		fmt.Fprintf(&b, "No verdict: %s.\n\n", handoff.CleanSentence(c.Cause))
+	case run.ChallengeRed:
+		b.WriteString("Held tests that fail on this change (not committed):\n\n")
+	default:
+		if c.Rerun {
+			b.WriteString("The held tests of the earlier challenge pass on this change.\n\n")
+		} else {
+			b.WriteString("Tests committed on this branch by the factory:\n\n")
+		}
+	}
+	for _, f := range c.Files {
+		if (c.Verdict == run.ChallengeGreen && f.Verdict != run.ChallengeGreen) || (c.Verdict == run.ChallengeRed && f.Verdict != run.ChallengeRed) {
+			continue
+		}
+		if c.Verdict == run.ChallengeNoVerdict || f.Refused != "" {
+			continue
+		}
+		fmt.Fprintf(&b, "- `%s` (%s)\n", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion))
+	}
+	for _, note := range c.Notes {
+		fmt.Fprintf(&b, "- Note: %s\n", handoff.CleanSentence(note))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// renderCarvedChallengeMarkdown renders the challenge files of the mixed run a
+// carved ticket was cut from, for which no round ran (SC-022): only the first
+// carved ticket's replay record holds any. Nothing renders for any other run.
+func renderCarvedChallengeMarkdown(rp *run.Replay) string {
+	if rp == nil || rp.Carve == nil || len(rp.Carve.Notes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Challenge of the mixed change\n\n")
+	for _, note := range rp.Carve.Notes {
+		fmt.Fprintf(&b, "- %s\n", handoff.CleanSentence(note))
+	}
+	b.WriteString("\n")
+	return b.String()
 }

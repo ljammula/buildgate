@@ -62,9 +62,6 @@ type runOptions struct {
 	// InstallCacheImages is sandbox_install_cache_images.
 	InstallCacheImages int
 
-	ReferenceOracleDir       string
-	ReferenceOracleMountPath string
-
 	MaxRounds           int
 	TimeoutMinutes      int
 	BuildAppMaxAttempts int
@@ -89,13 +86,12 @@ type runOptions struct {
 	GoModuleDir     string
 	ComposeServices composeServicesOptions
 
-	AllowedFiles         []string
-	RequiredChangedFiles []string
-	RequiredContent      []string
-	TestPatterns         []string
-	TestsRequiredOptOut  string
-	AllowedPaths         []string
-	ScopeUnapproved      bool
+	AllowedFiles        []string
+	TestPatterns        []string
+	TestsRequiredOptOut string
+	AllowedPaths        []string
+	ScopeUnapproved     bool
+	NoTicketScope       bool
 
 	Slice         temporalSliceOptions
 	ReleasePolicy release.MergePolicy
@@ -107,14 +103,21 @@ type runOptions struct {
 	ReviewThinking    string
 	ReviewRelayPolicy *sandbox.RoutePolicy
 
-	// ReviewReproduction, ReviewSpecPath, ReviewSpecSHA256 and
-	// RecheckReproductions are -review-reproduction, -review-spec's
-	// snapshot and hash, and -recheck-reproductions' checked manifest; see
-	// the RunWorkflowInput fields of the same names.
-	ReviewReproduction   bool
-	ReviewSpecPath       string
-	ReviewSpecSHA256     string
-	RecheckReproductions []run.RecheckEntry
+	// Challenge..ChallengeRound and the Challenger fields are -challenge's
+	// flags and roles.challenger's resolved values; see the RunWorkflowInput
+	// fields of the same names.
+	Challenge               bool
+	ChallengeSpecPath       string
+	ChallengeSpecSHA256     string
+	ChallengeCriteria       int
+	ChallengeAnswers        []int
+	ChallengeApprovedSHA256 string
+	ChallengeApprovedBytes  int
+	ChallengerThinking      string
+	ChallengerHarness       string
+	ChallengerRelayPolicy   *sandbox.RoutePolicy
+	ChallengeHeld           []run.ChallengeFile
+	ChallengeRound          bool
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not

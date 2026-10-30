@@ -34,39 +34,12 @@ const VerifyCommandPrefix = "Verify-Command:"
 // accepted with an unrelated file changed alongside the intended one.
 const AllowedFilesPrefix = "Allowed-Files:"
 
-// RequiredChangedFilesPrefix is the machine-readable line a ticket spec.md
-// may contain to declare which of its files a run must actually modify,
-// e.g. "Required-Changed-Files: path/a.dart, path/a_test.dart" — a
-// comma-separated list, same format as Allowed-Files. A passing
-// Verify-Command only proves the declared command exited 0; it doesn't
-// prove the required implementation change was made (found live: an
-// agent round that stalled after writing only unrelated scaffolding still
-// passed a Verify-Command that never depended on the missing change, and
-// the run was accepted with no code review catching it). This key is
-// optional and additive to Allowed-Files, not a replacement for it —
-// Allowed-Files still bounds what a run may touch; this bounds what it
-// must.
-const RequiredChangedFilesPrefix = "Required-Changed-Files:"
-
-// RequiredContentPrefix is the machine-readable line a ticket spec.md may
-// contain — one per required string, repeated as needed — to declare a
-// literal substring that must appear in the final content of at least one
-// Required-Changed-Files file and must NOT have already been present in
-// that same file at the run's base commit. Required-Changed-Files alone
-// only proves a file has *some* diff; a required file touched only
-// cosmetically (whitespace, an unrelated line) still satisfies it. This
-// key closes that remaining gap by pinning a concrete marker of the real
-// change — e.g. a new widget's Key literal or a new test's function name
-// — the same way Verify-Command pins the real acceptance command instead
-// of trusting prose.
-const RequiredContentPrefix = "Required-Content:"
-
 // TestsRequiredPrefix is the machine-readable line a ticket spec.md may
 // contain to opt out of the tests_red_on_base gate, e.g.
 // "Tests-Required: no -- this ticket only updates documentation". The
 // gate defaults to requiring at least one changed file to match the
 // repo's test patterns; this key is the ticket's own declared exception,
-// and (unlike Allowed-Files:/Required-Changed-Files:) it must carry a
+// and (unlike Allowed-Files:) it must carry a
 // reason, since an unexplained opt-out defeats the point of a gate that
 // exists to catch an untested change.
 const TestsRequiredPrefix = "Tests-Required:"
@@ -86,8 +59,6 @@ const EstimatedChangedLinesPrefix = "Estimated-Changed-Lines:"
 var KnownHeaderKeys = []string{
 	VerifyCommandPrefix,
 	AllowedFilesPrefix,
-	RequiredChangedFilesPrefix,
-	RequiredContentPrefix,
 	TestsRequiredPrefix,
 	EstimatedChangedLinesPrefix,
 }
@@ -203,8 +174,6 @@ func NearMissHeaderKeys(specPath string) ([]NearMissHeaderKey, error) {
 var headerParsers = map[string]func(specPath string) error{
 	VerifyCommandPrefix:         func(specPath string) error { _, err := ParseVerifyCommand(specPath); return err },
 	AllowedFilesPrefix:          func(specPath string) error { _, err := ParseAllowedFiles(specPath); return err },
-	RequiredChangedFilesPrefix:  func(specPath string) error { _, err := ParseRequiredChangedFiles(specPath); return err },
-	RequiredContentPrefix:       func(specPath string) error { _, err := ParseRequiredContent(specPath); return err },
 	TestsRequiredPrefix:         func(specPath string) error { _, err := ParseTestsRequiredOptOut(specPath); return err },
 	EstimatedChangedLinesPrefix: func(specPath string) error { _, _, err := ParseEstimatedChangedLines(specPath); return err },
 }
@@ -219,6 +188,16 @@ var headerParsers = map[string]func(specPath string) error{
 // (nil when the ticket is clean), in KnownHeaderKeys order for malformed
 // headers followed by near-miss keys in file order.
 func HeaderStrictnessProblems(specPath string) ([]string, error) {
+	return headerStrictnessProblems(specPath, false)
+}
+
+// SpecTicketHeaderStrictnessProblems leaves Allowed-Files-shaped prose in
+// the verbatim spec alone; the factory's spec ticket has no ticket scope.
+func SpecTicketHeaderStrictnessProblems(specPath string) ([]string, error) {
+	return headerStrictnessProblems(specPath, true)
+}
+
+func headerStrictnessProblems(specPath string, noTicketScope bool) ([]string, error) {
 	present, err := PresentHeaderKeys(specPath)
 	if err != nil {
 		return nil, err
@@ -226,6 +205,9 @@ func HeaderStrictnessProblems(specPath string) ([]string, error) {
 
 	var problems []string
 	for _, prefix := range KnownHeaderKeys {
+		if noTicketScope && prefix == AllowedFilesPrefix {
+			continue
+		}
 		if !present[prefix] {
 			continue
 		}
@@ -246,6 +228,9 @@ func HeaderStrictnessProblems(specPath string) ([]string, error) {
 		return nil, err
 	}
 	for _, nm := range nearMisses {
+		if noTicketScope && nm.Known == AllowedFilesPrefix {
+			continue
+		}
 		problems = append(problems, fmt.Sprintf("FAIL  %-24s looks like a misspelling of %s -- rename it, or the header it was meant to declare is silently unenforced", nm.Found, nm.Known))
 	}
 	return problems, nil
@@ -349,41 +334,8 @@ func ParseAllowedFiles(specPath string) ([]string, error) {
 	return parseFileListKeyLine(specPath, AllowedFilesPrefix)
 }
 
-// ParseRequiredChangedFiles returns the ticket's declared list of files a
-// run must actually change, or nil if the ticket doesn't declare one —
-// callers should skip this check entirely in that case, matching
-// Allowed-Files' optional-key pattern, so tickets written before this key
-// existed keep their prior, unenforced behavior rather than failing
-// closed unexpectedly.
-func ParseRequiredChangedFiles(specPath string) ([]string, error) {
-	return parseFileListKeyLine(specPath, RequiredChangedFilesPrefix)
-}
-
-// ParseRequiredContent returns the ticket's declared list of literal
-// strings that must be newly present in the final content of a required
-// file, or nil if the ticket doesn't declare any — callers should skip
-// this check entirely in that case, matching Required-Changed-Files'
-// optional-key pattern. Unlike Allowed-Files/Required-Changed-Files, this
-// key may appear on multiple lines (one per required string), since a
-// single comma-separated line can't safely hold values that may
-// themselves contain commas (e.g. a Go function signature).
-func ParseRequiredContent(specPath string) ([]string, error) {
-	values, err := parseAllTopLevelKeyLines(specPath, RequiredContentPrefix)
-	if err != nil {
-		return nil, err
-	}
-	var required []string
-	for _, v := range values {
-		if v == "" {
-			return nil, fmt.Errorf("ticket spec %s: %s line has no content", specPath, RequiredContentPrefix)
-		}
-		required = append(required, v)
-	}
-	return required, nil
-}
-
 // parseFileListKeyLine is the shared comma-separated-file-list parsing
-// behind ParseAllowedFiles and ParseRequiredChangedFiles.
+// behind ParseAllowedFiles.
 func parseFileListKeyLine(specPath, prefix string) ([]string, error) {
 	val, found, err := parseTopLevelKeyLine(specPath, prefix)
 	if err != nil {
@@ -413,8 +365,8 @@ func parseFileListKeyLine(specPath, prefix string) ([]string, error) {
 	// could have rejected before the agent ever started. Failing closed
 	// here, at parse time, is the single choke point every execution path
 	// (direct, Temporal RunWorkflow, RepositoryOwnerWorkflow) already
-	// shares, since all three call ParseAllowedFiles/
-	// ParseRequiredChangedFiles once, before branching on how to execute.
+	// shares, since all three call ParseAllowedFiles
+	// once, before branching on how to execute.
 	if invalid := invalidWorkspaceRelativePaths(files); len(invalid) > 0 {
 		return nil, fmt.Errorf("ticket spec %s: %s declares path(s) that are not valid workspace-relative paths (must not be absolute and must not contain a \"..\" segment): %v", specPath, prefix, invalid)
 	}
@@ -489,7 +441,7 @@ func RewriteAllowedFilesLine(specPath string, add []string) (string, error) {
 // possibly match a workspace-relative git diff path: absolute paths, and
 // paths containing a ".." segment that would escape the checkout root.
 // This is a syntactic check only — it does not require the path to exist
-// in the tree, since Required-Changed-Files routinely names a file the
+// in the tree, since Allowed-Files routinely names a file the
 // ticket expects to be newly created and so cannot exist at base.
 func invalidWorkspaceRelativePaths(paths []string) []string {
 	var invalid []string
@@ -560,7 +512,7 @@ func isValidWorkspaceRelativePath(p string) bool {
 // Found via a real live brownfield run against a Flutter + Go app repo,
 // 2026-09-11: a ticket (hand-written, but the same shape a real
 // goal_pilot.py /spec-plan drafting produced for an earlier ticket in the
-// same session) declared Allowed-Files/Required-Changed-Files the way a
+// same session) declared Allowed-Files the way a
 // human or an LLM naturally thinks of a package path, with no awareness
 // that this repo's own application code lives under backend/, not the git
 // root. diff_scope correctly quarantined the run
@@ -572,7 +524,7 @@ func isValidWorkspaceRelativePath(p string) bool {
 // path before the build rather than after.
 //
 // Deliberately NOT "path doesn't exist anywhere" (see
-// invalidWorkspaceRelativePaths's own doc comment): Required-Changed-Files
+// invalidWorkspaceRelativePaths's own doc comment): Allowed-Files
 // routinely, legitimately names a file the ticket is about to create for
 // the first time, which cannot exist anywhere yet -- that is the ordinary
 // case, not an error, and is not reported here. Only a path that fails to
@@ -723,22 +675,6 @@ func keyLineFinder(prefix string, value *string, found *bool) func(line string) 
 		}
 		return false
 	}
-}
-
-// parseAllTopLevelKeyLines is parseTopLevelKeyLine's multi-value sibling:
-// it collects every top-level line starting with prefix instead of
-// stopping at the first, for keys a ticket may declare more than once
-// (e.g. one Required-Content: line per required string, since the values
-// themselves may contain commas and so can't share Allowed-Files'
-// single-line comma-separated format).
-func parseAllTopLevelKeyLines(specPath, prefix string) (values []string, err error) {
-	err = forEachTopLevelLine(specPath, func(raw string) (stop bool) {
-		if rest, ok := strings.CutPrefix(raw, prefix); ok {
-			values = append(values, strings.TrimSpace(rest))
-		}
-		return false
-	})
-	return values, err
 }
 
 // forEachTopLevelLine scans specPath and calls fn with each top-level

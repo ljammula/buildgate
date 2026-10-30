@@ -25,8 +25,6 @@ func TestStageAgentTestsLaysOutTheSuiteAsInTheRepository(t *testing.T) {
 		"agent/pi/scripts/harness_adapters.py",
 		"agent/pi/tests/build_app_test.py",
 		"agent/pi/tests/fixtures/codex_round1.jsonl",
-		"cmd/factoryd/testdata/sanitize_vectors.json",
-		"cmd/factoryd/testdata/criterion_key_vectors.json",
 	} {
 		if _, err := os.Stat(filepath.Join(dest, filepath.FromSlash(want))); err != nil {
 			t.Errorf("staged tree lacks %s: %v", want, err)

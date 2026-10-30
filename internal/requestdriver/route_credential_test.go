@@ -109,6 +109,7 @@ func TestASpecDraftingJobWithNoUsableRouteCredentialWaitsInResumeReview(t *testi
 
 func TestAPlanDraftingJobWithNoUsableRouteCredentialWaitsInResumeReview(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	r := requestdrivertest.LoadRequest(t, dataDir, id)
 	runner := func(context.Context, string, *request.Request, requestdriver.WorkerConfig, string) ([]requestdriver.DraftedTicket, *request.PlanEvidence, error) {
 		return nil, nil, errExpiredCredential
@@ -132,22 +133,6 @@ func TestAReadBackWithNoUsableRouteCredentialWaitsInResumeReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantRouteCredentialWait(t, dataDir, r.ID, request.StateSpecDrafting)
-}
-
-// An oracle-drafting job that returned the resolver's error (no
-// OracleDraftJobFailure: it never launched) is a job failure with the cause,
-// not a failed draft.
-func TestAnOracleDraftingJobWithNoUsableRouteCredentialWaitsInResumeReview(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	runner, _ := requestdrivertest.StubOracleDraftRunner(request.OracleDraft{}, errExpiredCredential)
-	if err := driveOracleDrafting(t, dp, context.Background(), dataDir, runner); err != nil {
-		t.Fatal(err)
-	}
-	got := wantRouteCredentialWait(t, dataDir, id, request.StateOracleDrafting)
-	if got.OracleDraft != nil {
-		t.Errorf("OracleDraft = %+v, want none", got.OracleDraft)
-	}
 }
 
 // errRoundCredential is a round's runner refused before its run record
@@ -191,7 +176,7 @@ func TestACorrectiveRoundRefusedForItsRouteCredentialWaitsInResumeReview(t *test
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	branch := "factoryd/" + id + "-001"
-	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "lint")
+	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
 	orig := requestdriver.ReviewCorrectiveRunner
 	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
 	calls := 0
@@ -200,7 +185,7 @@ func TestACorrectiveRoundRefusedForItsRouteCredentialWaitsInResumeReview(t *test
 		return errRoundCredential
 	}
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	got := requestdrivertest.LoadRequest(t, dataDir, id)
@@ -253,31 +238,5 @@ func TestAResumeOfAKeptBuildRefusedForItsRouteCredentialKeepsTheBuild(t *testing
 	}
 	if _, err := got.ResumeDecide(request.ResumeRound, "alice", time.Now()); err != nil {
 		t.Fatalf("resume after the refusal: %v", err)
-	}
-}
-
-// Unlike any other job failure, an oracle-drafting pass a resume started
-// that is refused for its credential again waits in resume_review again, as
-// every other drafting job does: only a fresh credential gets it further.
-func TestAResumedOracleDraftingPassRefusedForItsRouteCredentialWaitsAgain(t *testing.T) {
-	dp := newFakeDeps(t)
-	dataDir, id := requestdrivertest.OracleStageFixture(t, true)
-	runner, calls := requestdrivertest.StubOracleDraftRunner(request.OracleDraft{}, errExpiredCredential)
-	if err := driveOracleDrafting(t, dp, context.Background(), dataDir, runner); err != nil {
-		t.Fatal(err)
-	}
-	first := wantRouteCredentialWait(t, dataDir, id, request.StateOracleDrafting)
-	if _, err := resumeOracleDrafting(dataDir, id, requestdriver.ResumeGate{Containers: &requestdrivertest.FakeJobContainers{}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := driveOracleDrafting(t, dp, context.Background(), dataDir, runner); err != nil {
-		t.Fatal(err)
-	}
-	second := requestdrivertest.LoadRequest(t, dataDir, id)
-	if second.State != request.StateResumeReview || second.Resume == nil || second.Resume.Cause != unresolved.RouteCredential || second.Resume.Generation != first.Resume.Generation+1 {
-		t.Fatalf("state %s resume %+v, want resume_review again with route_credential", second.State, second.Resume)
-	}
-	if second.OracleDraft != nil || len(*calls) != 2 {
-		t.Errorf("OracleDraft %+v, runner calls %d: want no draft and two passes", second.OracleDraft, len(*calls))
 	}
 }

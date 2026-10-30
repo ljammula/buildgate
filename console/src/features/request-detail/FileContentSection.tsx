@@ -2,7 +2,7 @@ import { Pencil } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { RejectionAnchor } from "@/domain/request";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { Button } from "@/ui/Button";
 import { CopyButton } from "@/ui/CopyButton";
 import { Disclosure } from "@/ui/Disclosure";

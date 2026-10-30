@@ -102,32 +102,6 @@ func TestLaunchSpecRejectsUnsafeConfiguration(t *testing.T) {
 		// network connect`, the same class of gap relayEgressNetworkName's
 		// own rejection above closes for the primary Network field.
 		{"unlisted compose network", func(s *LaunchSpec) { s.ComposeNetwork = "bridge" }},
-		// ReferenceOracleDir/ReferenceOracleMountPath validation, added
-		// alongside the reference_oracle gate mount itself (GitHub Codex
-		// App review, PR #151): the same absolute-path and
-		// set-together-or-neither rules InputDir already enforces above,
-		// plus the mount path itself must be relative (it's joined onto
-		// workerContainerWorkDir, an absolute path already).
-		{"relative reference-oracle dir", func(s *LaunchSpec) { s.ReferenceOracleDir = "oracle" }},
-		{"reference-oracle dir without mount path", func(s *LaunchSpec) { s.ReferenceOracleDir = "/oracle" }},
-		{"reference-oracle mount path without dir", func(s *LaunchSpec) { s.ReferenceOracleMountPath = "verify" }},
-		// Containment check added in round 2 of the same review: a
-		// source equal to or beneath WorkDir is exactly as tamperable
-		// as the Allowed-Files-only convention this field exists to
-		// improve on, since the build worker has full read-write
-		// access to WorkDir already.
-		{"reference-oracle dir equal to workspace", func(s *LaunchSpec) {
-			s.ReferenceOracleDir = s.WorkDir
-			s.ReferenceOracleMountPath = "verify"
-		}},
-		{"reference-oracle dir inside workspace", func(s *LaunchSpec) {
-			s.ReferenceOracleDir = s.WorkDir + "/verify"
-			s.ReferenceOracleMountPath = "verify"
-		}},
-		{"absolute reference-oracle mount path", func(s *LaunchSpec) {
-			s.ReferenceOracleDir = "/oracle"
-			s.ReferenceOracleMountPath = "/verify"
-		}},
 	}
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
@@ -238,46 +212,7 @@ func TestDockerCommandUsesRestrictedProfile(t *testing.T) {
 	}
 }
 
-// TestDockerCommandMountsReferenceOracleReadOnly is the regression test
-// for the reference_oracle gate's read-only overlay mount (GitHub Codex
-// App review, PR #151): when ReferenceOracleDir/ReferenceOracleMountPath
-// are set, DockerCommand must bind-mount that host directory read-only
-// at the given path INSIDE /workspace -- nested over the already-rw
-// workspace mount above it, the same technique already used for
-// /workspace/.git:ro -- so the reference oracle is never writable by the
-// worker, regardless of what -workspace itself allows.
-func TestDockerCommandMountsReferenceOracleReadOnly(t *testing.T) {
-	s := validSpec()
-	s.ReferenceOracleDir = "/tmp/oracle"
-	s.ReferenceOracleMountPath = "verify"
-	args := s.DockerCommand("docker")
-	joined := " " + strings.Join(args, " ") + " "
-	if !strings.Contains(joined, " --volume /tmp/oracle:/workspace/verify:ro ") {
-		t.Errorf("Docker args missing the read-only reference-oracle overlay mount: %v", args)
-	}
-}
-
-// TestDockerCommandOmitsReferenceOracleMountWhenUnset confirms the
-// converse: leaving both fields empty (the default -- an operator who
-// never sets -reference-oracle-dir) produces no such mount at all,
-// matching the plain, weaker Allowed-Files-only behavior this repo had
-// before ReferenceOracleDir existed.
-func TestDockerCommandOmitsReferenceOracleMountWhenUnset(t *testing.T) {
-	args := validSpec().DockerCommand("docker")
-	joined := " " + strings.Join(args, " ") + " "
-	if strings.Contains(joined, "/workspace/verify:ro") || strings.Contains(joined, "oracle") {
-		t.Errorf("Docker args unexpectedly mount a reference-oracle overlay with both fields unset: %v", args)
-	}
-}
-
-// TestReferenceOracleSourceContained is the direct unit test for the
-// helper extracted from LaunchSpec.Validate's own containment check
-// (found via review, PR #153, round 2): a caller that snapshots
-// ReferenceOracleDir before ever building a LaunchSpec -- both
-// cmd/factoryd's runGate and RunNamedGateActivity do -- must apply this
-// check to the ORIGINAL configured source itself, since Validate only
-// ever sees the (always-safe-by-construction) snapshot destination by
-// the time a LaunchSpec exists.
+// TestPathContained is the direct unit test for PathContained.
 //
 // Every non-empty case uses a real t.TempDir() tree, not a fake path
 // string: the function now canonicalizes (Abs + EvalSymlinks) both
@@ -285,7 +220,7 @@ func TestDockerCommandOmitsReferenceOracleMountWhenUnset(t *testing.T) {
 // "/workspace" would silently fail closed (report "contained") on every
 // case regardless of the real answer -- exactly the false-positive this
 // test must not paper over.
-func TestReferenceOracleSourceContained(t *testing.T) {
+func TestPathContained(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "workspace")
 	beneath := filepath.Join(workDir, "verify")
@@ -310,20 +245,20 @@ func TestReferenceOracleSourceContained(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ReferenceOracleSourceContained(tc.workDir, tc.dir); got != tc.want {
-				t.Errorf("ReferenceOracleSourceContained(%q, %q) = %v, want %v", tc.workDir, tc.dir, got, tc.want)
+			if got := PathContained(tc.workDir, tc.dir); got != tc.want {
+				t.Errorf("PathContained(%q, %q) = %v, want %v", tc.workDir, tc.dir, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestReferenceOracleSourceContainedCanonicalizesRelativePaths is the
+// TestPathContainedCanonicalizesRelativePaths is the
 // regression test for the first Codex round-3 finding on PR #153: a
-// relative -reference-oracle-dir compared against an absolute workDir
+// relative directory compared against an absolute workDir
 // used to make filepath.Rel return a mixed-absolute/relative error,
 // which the old implementation read as "not contained" -- the unsafe
 // default -- rather than resolving the relative path first.
-func TestReferenceOracleSourceContainedCanonicalizesRelativePaths(t *testing.T) {
+func TestPathContainedCanonicalizesRelativePaths(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "workspace")
 	insideRel := filepath.Join(workDir, "oracle")
@@ -346,17 +281,17 @@ func TestReferenceOracleSourceContainedCanonicalizesRelativePaths(t *testing.T) 
 		}
 	})
 
-	if !ReferenceOracleSourceContained(workDir, "oracle") {
-		t.Error("ReferenceOracleSourceContained with a relative dir beneath workDir = false, want true")
+	if !PathContained(workDir, "oracle") {
+		t.Error("PathContained with a relative dir beneath workDir = false, want true")
 	}
 }
 
-// TestReferenceOracleSourceContainedResolvesSymlinkedAncestors is the
+// TestPathContainedResolvesSymlinkedAncestors is the
 // regression test for the second Codex round-3 finding on PR #153: an
-// absolute -reference-oracle-dir whose real location is inside workDir
+// absolute directory whose real location is inside workDir
 // only via a symlinked ancestor used to pass the purely lexical
 // comparison, since the symlink's own target was never resolved.
-func TestReferenceOracleSourceContainedResolvesSymlinkedAncestors(t *testing.T) {
+func TestPathContainedResolvesSymlinkedAncestors(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "workspace")
 	realOracleParent := filepath.Join(workDir, "real-oracle-parent")
@@ -369,7 +304,7 @@ func TestReferenceOracleSourceContainedResolvesSymlinkedAncestors(t *testing.T) 
 	}
 
 	// symlinkAncestor lives OUTSIDE workDir and points at a directory
-	// INSIDE it -- an operator-configured -reference-oracle-dir reached
+	// INSIDE it -- a configured directory reached
 	// through symlinkAncestor looks like a sibling of workDir lexically,
 	// but its real, EvalSymlinks-resolved location is beneath workDir.
 	symlinkAncestor := filepath.Join(root, "symlinked-ancestor")
@@ -378,15 +313,15 @@ func TestReferenceOracleSourceContainedResolvesSymlinkedAncestors(t *testing.T) 
 	}
 	dirThroughSymlink := filepath.Join(symlinkAncestor, "oracle")
 
-	if !ReferenceOracleSourceContained(workDir, dirThroughSymlink) {
-		t.Error("ReferenceOracleSourceContained through a symlinked ancestor resolving inside workDir = false, want true")
+	if !PathContained(workDir, dirThroughSymlink) {
+		t.Error("PathContained through a symlinked ancestor resolving inside workDir = false, want true")
 	}
 }
 
-// TestReferenceOracleSourceContainedRejectsWorkspaceOwnedSymlinkEvenWhenItResolvesOutside
+// TestPathContainedRejectsWorkspaceOwnedSymlinkEvenWhenItResolvesOutside
 // is the regression test for the GitHub Codex App's round-5 finding on
 // PR #154: a canonical-only check (the fix for the round-3 finding
-// above) accepts a configured "-reference-oracle-dir $workDir/link/oracle"
+// above) accepts a configured "$workDir/link/oracle"
 // once "link" is a symlink to some external directory, since the fully
 // resolved path is no longer beneath workDir. But "link" itself is a
 // small file living INSIDE the writable workspace -- the worker can
@@ -395,7 +330,7 @@ func TestReferenceOracleSourceContainedResolvesSymlinkedAncestors(t *testing.T) 
 // despite the operator's own original configuration. The raw, lexical
 // path must be rejected outright regardless of where the symlink
 // currently resolves.
-func TestReferenceOracleSourceContainedRejectsWorkspaceOwnedSymlinkEvenWhenItResolvesOutside(t *testing.T) {
+func TestPathContainedRejectsWorkspaceOwnedSymlinkEvenWhenItResolvesOutside(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -416,8 +351,8 @@ func TestReferenceOracleSourceContainedRejectsWorkspaceOwnedSymlinkEvenWhenItRes
 	}
 	dirThroughWorkspaceOwnedLink := filepath.Join(link, "oracle")
 
-	if !ReferenceOracleSourceContained(workDir, dirThroughWorkspaceOwnedLink) {
-		t.Error("ReferenceOracleSourceContained through a workspace-owned symlink resolving outside workDir = false, want true (the symlink itself is worker-writable)")
+	if !PathContained(workDir, dirThroughWorkspaceOwnedLink) {
+		t.Error("PathContained through a workspace-owned symlink resolving outside workDir = false, want true (the symlink itself is worker-writable)")
 	}
 }
 
@@ -1982,134 +1917,6 @@ fi`}
 	}
 	if string(after) != string(before) {
 		t.Fatalf(".git pointer changed during the run: before=%q after=%q -- the read-only mount did not hold", before, after)
-	}
-}
-
-// TestRunLiveDockerCannotWriteReferenceOracleMount is the live-Docker
-// counterpart to TestDockerCommandMountsReferenceOracleReadOnly: that
-// test only asserts the generated `docker` command string contains the
-// `:ro` overlay mount flag for ReferenceOracleDir/ReferenceOracleMountPath
-// (internal/sandbox/docker_test.go); nothing before this test actually
-// spun up a real container and tried to write through it, so a Docker
-// engine/storage-driver combination that silently ignored `:ro` on a
-// nested overlay mount (the same class of engine-specific quirk
-// sandbox-image's own local-registry digest workaround exists for, see
-// .local-registry's own doc comment in the Makefile) would have gone
-// undetected. Reproduces the same "attempt the write inside the
-// container, assert REWRITE-BLOCKED via the log, then assert the
-// host-side file is still byte-identical" shape
-// TestRunLiveDockerCannotRewriteWorktreeGitPointer above uses for the
-// .git pointer -- this proves the mechanism a future generated
-// reference oracle would depend on actually holds, before building
-// anything on top of it.
-//
-// referenceOracleAttacks is the one place TestRunLiveDockerCannotWriteReferenceOracleMount
-// names its three attacks -- its own shell script and both marker-check
-// loops derive from this list, not three independently hardcoded copies,
-// so renaming or adding an attack can't silently desync script vs. check.
-var referenceOracleAttacks = []string{"OVERWRITE", "CREATE", "DELETE"}
-
-func TestRunLiveDockerCannotWriteReferenceOracleMount(t *testing.T) {
-	if os.Getenv("DOCKER_SANDBOX_LIVE") != "1" {
-		t.Skip("set DOCKER_SANDBOX_LIVE=1 to run the real Docker acceptance test")
-	}
-	liveRoot := os.Getenv("DOCKER_SANDBOX_LIVE_ROOT")
-	if liveRoot == "" {
-		liveRoot = os.TempDir()
-	}
-	workDir, err := os.MkdirTemp(liveRoot, "factoryd-sandbox-live-oracle-workspace-")
-	if err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
-	if err := os.Chmod(workDir, 0o777); err != nil {
-		t.Fatalf("chmod workspace: %v", err)
-	}
-
-	// oracleDir is deliberately a sibling of workDir, not a subdirectory
-	// of it -- ReferenceOracleSourceContained (LaunchSpec.Validate) halts
-	// the run outright if the two overlap, the same contract
-	// -reference-oracle-dir's own flag help documents on the real CLI.
-	oracleDir, err := os.MkdirTemp(liveRoot, "factoryd-sandbox-live-oracle-source-")
-	if err != nil {
-		t.Fatalf("create oracle source dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(oracleDir) })
-	oracleFile := filepath.Join(oracleDir, "expected.txt")
-	const oracleContents = "pristine reference output\n"
-	if err := os.WriteFile(oracleFile, []byte(oracleContents), 0o666); err != nil {
-		t.Fatalf("write oracle fixture: %v", err)
-	}
-
-	spec := validSpec()
-	spec.Image = os.Getenv("DOCKER_SANDBOX_IMAGE")
-	if spec.Image == "" {
-		spec.Image = resolveDigestForLiveTest(t, "golang:1.26-bookworm")
-	}
-	spec.WorkDir = workDir
-	spec.User = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
-	spec.InputDir = ""
-	spec.ReferenceOracleDir = oracleDir
-	spec.ReferenceOracleMountPath = "verify"
-	logDir, err := os.MkdirTemp(liveRoot, "factoryd-sandbox-log-oracle-")
-	if err != nil {
-		t.Fatalf("create log dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(logDir) })
-	spec.LogPath = filepath.Join(logDir, "worker.log")
-	spec.DataDir = t.TempDir()
-	// Three separate attacks in one run, each independently reported:
-	// overwrite the existing oracle file, create a new file inside the
-	// mount, and delete the existing file. A worker that could pull off
-	// any one of these could tamper with a future reference-oracle
-	// check's expected output (or its own fixtures) before that check
-	// ever ran against it.
-	spec.Command = []string{"/bin/sh", "-c", `set -e
-if echo tampered > /workspace/verify/expected.txt 2>/tmp/write-err; then
-  echo OVERWRITE-SUCCEEDED
-else
-  echo "OVERWRITE-BLOCKED: $(cat /tmp/write-err)"
-fi
-if echo new > /workspace/verify/worker-authored.txt 2>/tmp/create-err; then
-  echo CREATE-SUCCEEDED
-else
-  echo "CREATE-BLOCKED: $(cat /tmp/create-err)"
-fi
-if rm -f /workspace/verify/expected.txt 2>/tmp/delete-err; then
-  echo DELETE-SUCCEEDED
-else
-  echo "DELETE-BLOCKED: $(cat /tmp/delete-err)"
-fi`}
-	result, err := Run(context.Background(), "docker", spec)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	logContents, _ := os.ReadFile(spec.LogPath)
-	log := string(logContents)
-	// Derived from one list, not two independently hardcoded marker sets
-	// (found via review): a future rename/addition to the shell script's
-	// own markers above only needs to change referenceOracleAttacks, and
-	// both the "worker must not succeed" and "attempt must be observed"
-	// checks below stay in sync automatically instead of one silently
-	// checking for a marker the script can never emit.
-	for _, attack := range referenceOracleAttacks {
-		if strings.Contains(log, attack+"-SUCCEEDED") {
-			t.Errorf("sandbox worker %s-SUCCEEDED against the read-only reference-oracle mount -- log=%s", attack, log)
-		}
-		if !strings.Contains(log, attack+"-BLOCKED") {
-			t.Errorf("worker's %s attempt neither succeeded nor was observed as blocked -- test itself may be broken; exit=%d log=%s", attack, result.ExitCode, log)
-		}
-	}
-
-	afterContents, err := os.ReadFile(oracleFile)
-	if err != nil {
-		t.Fatalf("read oracle fixture after run (expected it to still exist): %v", err)
-	}
-	if string(afterContents) != oracleContents {
-		t.Fatalf("oracle fixture changed during the run: before=%q after=%q -- the read-only mount did not hold", oracleContents, afterContents)
-	}
-	if _, err := os.Stat(filepath.Join(oracleDir, "worker-authored.txt")); err == nil {
-		t.Fatal("worker-authored.txt exists in the oracle source dir after the run -- the worker wrote into it despite the read-only mount")
 	}
 }
 

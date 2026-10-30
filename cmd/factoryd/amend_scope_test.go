@@ -13,7 +13,7 @@ import (
 // amendScopeFixtureTicket is a minimal ticket spec.md with a single
 // top-level Allowed-Files: line -- amendScopeMain's own success-path test
 // widens it.
-const amendScopeFixtureTicket = "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+const amendScopeFixtureTicket = "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
 
 // newAmendScopeMainFixture writes a fully-formed, quarantined, one-ticket
 // request -- request.md, request.json, tickets/001.spec.md -- with that

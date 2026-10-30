@@ -121,5 +121,5 @@ func writeAndValidateScopedTickets(ticketsDir string, r *request.Request, review
 	if err != nil {
 		return nil, err
 	}
-	return writeAndValidateDraftedTickets(ticketsDir, spliced, criteriaCount, verifyCommand, testPatterns)
+	return writeAndValidateDraftedTickets(ticketsDir, spliced, criteriaCount, verifyCommand, testPatterns, r.Bug)
 }

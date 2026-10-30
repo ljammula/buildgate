@@ -70,8 +70,7 @@ function fileTargets(
  * The places a "Request changes" note can point at, for the documents the
  * request's state puts under review: spec.md's sections and each acceptance
  * criterion at spec_review; each ticket file's sections at plan_review.
- * Empty in any other state (an oracle review's files have no sections the
- * console reads).
+ * Empty in any other state.
  */
 export function anchorTargets(request: RequestSummary): AnchorTarget[] {
   if (request.state === "spec_review" && request.spec !== "") {

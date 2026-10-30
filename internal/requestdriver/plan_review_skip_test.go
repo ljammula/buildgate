@@ -14,6 +14,17 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
+// usePlanningJob sets up a request whose original handed-over plan has ended,
+// so tests of drafted plans exercise a path that invokes the planning job.
+func usePlanningJob(t *testing.T, dataDir, id string) {
+	t.Helper()
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	r.PlanImported, r.PlanImportEnded = true, true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // planOnce drives one planning pass over a request of TwoCriteriaSpec whose
 // plan is the given number of tickets (one covers both criteria; two cover one
 // each) and returns the request as saved.
@@ -32,9 +43,18 @@ func planOnce(t *testing.T, dataDir, id string, tickets int) *request.Request {
 // planDrafted is planOnce for the given drafted tickets and worker config.
 func planDrafted(t *testing.T, dataDir, id string, drafted []requestdriver.DraftedTicket, cfg requestdriver.WorkerConfig) *request.Request {
 	t.Helper()
+	// These tests exercise a drafted plan, which now requires feedback to
+	// enter the planning job instead of copying the approved spec.
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	if request.PlanFeedback(r) == "" && !r.PlanAsHandedOver() {
+		r.Rejections = append(r.Rejections, request.Rejection{By: request.FactoryActor, ForStage: request.StatePlanReview, Reason: "exercise drafted plan"})
+		if err := r.Save(dataDir); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dp := newFakeDeps(t)
 	runner, _ := requestdrivertest.StubPlanTicketsRunner(drafted, &request.PlanEvidence{}, nil)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	return requestdrivertest.LoadRequest(t, dataDir, id)
@@ -67,35 +87,6 @@ func TestOneTicketPlanGoesStraightToBuilding(t *testing.T) {
 	}
 	if n := requestdrivertest.CountNotificationLogLines(t, dataDir, id); n != 0 {
 		t.Errorf("%d notification(s) sent, want none for a plan that skips review", n)
-	}
-}
-
-// The oracle files of the ticket are pinned with it, as a person's approval
-// pins them, and a changed one stops the build the same way.
-func TestOneTicketPlanPinsTheTicketsOracleFiles(t *testing.T) {
-	files := requestdrivertest.TwoOracleFiles("go test ./.oracle/...\n")
-	files["MANIFEST.json"] = strings.Replace(files["MANIFEST.json"], `,"supersedes":["internal/payments/old_oracle_test.go"]`, "", 1)
-	dataDir, id := requestdrivertest.RequestOracleFixture(t, files)
-	requestdrivertest.PlanReviewOff(t, dataDir, id)
-
-	r := planOnce(t, dataDir, id, 1)
-	if r.State != request.StateBuilding {
-		t.Fatalf("state %s (%s), want building", r.State, r.Error)
-	}
-	var oracle []string
-	for rel := range r.ApprovedSHA256 {
-		if strings.HasPrefix(rel, "tickets/001.oracle/") {
-			oracle = append(oracle, rel)
-		}
-	}
-	if len(oracle) == 0 {
-		t.Fatalf("ApprovedSHA256 = %v, want ticket 1's oracle files pinned", r.ApprovedSHA256)
-	}
-	if err := os.WriteFile(filepath.Join(request.Dir(dataDir, id), oracle[0]), []byte("changed\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := request.VerifyApprovedHashes(dataDir, r); err == nil {
-		t.Error("an oracle file edited after the factory's approval verifies, want a mismatch")
 	}
 }
 
@@ -136,7 +127,7 @@ func TestAPlanAPersonSentBackWaitsAtPlanReview(t *testing.T) {
 		t.Fatalf("state %s (%s), want plan_review for 2 tickets", r.State, r.Error)
 	}
 	requestdrivertest.PlanReviewOff(t, dataDir, id)
-	if _, err := request.Reject(dataDir, id, "alice", "merge them", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "alice", "merge them", nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := planOnce(t, dataDir, id, 1); got.State != request.StatePlanReview {
@@ -165,16 +156,6 @@ func TestAPlanSentBackFromAHaltWaitsAtPlanReview(t *testing.T) {
 	}
 }
 
-// A one-ticket plan whose oracles supersede committed paths (the host deletes
-// them on commit) is shown to a person.
-func TestOneTicketPlanWhoseOraclesSupersedePathsWaitsAtPlanReview(t *testing.T) {
-	dataDir, id := requestdrivertest.RequestOracleFixture(t, requestdrivertest.TwoOracleFiles("go test ./.oracle/...\n"))
-	requestdrivertest.PlanReviewOff(t, dataDir, id)
-	if r := planOnce(t, dataDir, id, 1); r.State != request.StatePlanReview {
-		t.Fatalf("state %s (%s), want plan_review for an oracle that supersedes a path", r.State, r.Error)
-	}
-}
-
 // A refused draft's note does not outlive the retry whose plan the factory approves.
 func TestRetriedOneTicketPlanClearsTheDraftHalt(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
@@ -196,7 +177,7 @@ func TestOneTicketPlanKeepsItsReviewNotes(t *testing.T) {
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
 	requestdrivertest.PlanReviewOff(t, dataDir, id)
 	big := requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)
-	big = strings.Replace(big, "Required-Changed-Files: internal/payments/refunds.go\n", "Required-Changed-Files: internal/payments/refunds.go\nEstimated-Changed-Lines: 900\n", 1)
+	big = strings.Replace(big, "Allowed-Files: internal/payments/refunds.go, internal/payments/refunds_test.go\n", "Allowed-Files: internal/payments/refunds.go, internal/payments/refunds_test.go\nEstimated-Changed-Lines: 900\n", 1)
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
 	cfg.Settings.PRBudgetLines = 400
 	r := planDrafted(t, dataDir, id, []requestdriver.DraftedTicket{{Filename: "001.spec.md", Content: big}}, cfg)
@@ -205,23 +186,5 @@ func TestOneTicketPlanKeepsItsReviewNotes(t *testing.T) {
 	}
 	if len(r.ReviewNotes) != 1 || !strings.Contains(r.ReviewNotes[0], "estimates 900 changed lines, over the 400-line budget") {
 		t.Errorf("ReviewNotes = %q, want the over-budget note", r.ReviewNotes)
-	}
-}
-
-// The fallback: a bug request needs ticket 1 to hold an oracle; a one-ticket
-// plan without one is not approved by the factory but waits for a person.
-func TestBugPlanWithoutAnOracleFallsBackToPlanReview(t *testing.T) {
-	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
-	r := requestdrivertest.LoadRequest(t, dataDir, id)
-	r.PlanReview, r.Bug = false, true
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-	got := planOnce(t, dataDir, id, 1)
-	if got.State != request.StatePlanReview {
-		t.Fatalf("state %s (%s), want plan_review", got.State, got.Error)
-	}
-	if _, pinned := got.ApprovedSHA256["tickets/001.spec.md"]; pinned {
-		t.Errorf("ApprovedSHA256 = %v, want no ticket pinned by a refused factory approval", got.ApprovedSHA256)
 	}
 }

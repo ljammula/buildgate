@@ -1,10 +1,10 @@
-// Package reproduction decides whether a model reviewer's finding may refuse
-// a run (SC-022): the shape rules a reproduction must pass before the factory
-// holds it (Check), the registry of runners that build the factory's own
-// command for it and read the runner's structured report (Runner, For), and
-// the verdict over the factory's runs of it on the result and base commits
-// (Decide, Recheck). It is pure: it runs no process and reads no file; the
-// workflow launches each run in a gate sandbox and passes the report in.
+// Package reproduction decides over the factory's own run of a test file it
+// holds (SC-022): the path rules a held file must pass (CheckPath), the
+// registry of runners that build the factory's command for it and read the
+// runner's structured report (Runner, For), and the verdicts over its runs on
+// the result and base commits (Decide, Recheck, DecideRedOnBase). It is pure:
+// it runs no process and reads no file; the workflow launches each run in a
+// gate sandbox and passes the report in.
 package reproduction
 
 import "time"

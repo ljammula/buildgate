@@ -60,6 +60,8 @@ const (
 const (
 	AttemptRoleExecution = "execution"
 	AttemptRoleReview    = "review"
+	// AttemptRoleChallenger is the challenger job's role (SC-022).
+	AttemptRoleChallenger = "challenger"
 )
 
 // RetainBuildArtifacts copies what a build left in workspace that removing
@@ -288,20 +290,6 @@ type Attempt struct {
 	// Nil for an attempt with no sandbox launch, and when nothing could be
 	// read.
 	Resources *AttemptResources `json:"sandbox_resources,omitempty"`
-	// ReferenceOracleSHA256 mirrors GateResult.ReferenceOracleSHA256 (see
-	// its own doc comment), recorded on the attempt itself too -- found
-	// via review, PR #152 round 2: the gate's own hash computation runs
-	// before the sandboxed launch it protects, but a launch failure after
-	// that (a halt, not a quarantine) never reaches the point where a
-	// GateResult is built at all, so without this the hash a real
-	// attempt was launched with -- even one that then failed -- would be
-	// silently dropped rather than durably recorded anywhere. Set for a
-	// "reference_oracle" attempt with -reference-oracle-dir configured;
-	// also set on a "build" attempt when -reference-oracle-in-loop-retry
-	// is additionally configured -- found via review: this doc comment
-	// previously claimed "reference_oracle" exclusively, which this
-	// second case now contradicts. Empty otherwise.
-	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
 	// Role is the session-config role (internal/modelrole.RoleExecution/
 	// RoleReview, recorded here as a plain string -- internal/run stays a
 	// leaf package modelrole itself is never imported into, per
@@ -309,7 +297,7 @@ type Attempt struct {
 	// was driven under: "execution" for a "build" attempt (every round,
 	// corrective retries included -- they are still Kind "build"), and
 	// "review" for a "spec_conformity" attempt. Empty for any other Kind
-	// (verify/full_suite_verify/reference_oracle/...), which never
+	// (verify/full_suite_verify/...), which never
 	// resolve a roles: entry at all, and for an attempt recorded before
 	// this field existed.
 	Role string `json:"role,omitempty"`
@@ -516,17 +504,6 @@ type GateResult struct {
 	// Phase 4 evidence list. It makes the evidence tamper-evident: the
 	// verify.log on disk can be checked against this hash after the fact.
 	LogSHA256 string `json:"log_sha256"`
-	// ReferenceOracleSHA256 is the "reference_oracle" gate's own
-	// content-hash counterpart to LogSHA256, added per PR #151's review
-	// (round 2: safety-contract.md SC-012 requires the oracle hash
-	// itself be recorded, not only the command's output) — the
-	// evidence.SHA256Tree digest of -reference-oracle-dir's content at
-	// the moment this gate ran, computed only when that flag is set
-	// (empty for every other named gate, and for a reference_oracle run
-	// that never configured -reference-oracle-dir at all). Proves WHICH
-	// oracle content produced this specific result, independent of
-	// whatever that host directory contains later.
-	ReferenceOracleSHA256 string `json:"reference_oracle_sha256,omitempty"`
 	// BaseCheck is what rerunning a failed command gate on the commit the
 	// ticket's work started from showed (see GateBaseCheck). nil for a gate
 	// that passed, for a check that is not a named or repository command
@@ -598,104 +575,41 @@ func (g GateResult) FailedDifferentlyOnBase() bool {
 	return !g.Passed && g.BaseCheck != nil && g.BaseCheck.Outcome == GateBaseFailsDifferently
 }
 
-// OracleCanaryEvidence records one runtime-canary check of a RUN_COMMAND.txt:
-// the verdict (oraclecanary.Verdict as a string) and the two exit codes it was
-// judged from. Ecosystem is empty when no snapshot could be built, in which
-// case Verdict is "UNSUPPORTED" and CanaryExitCode is -1.
-type OracleCanaryEvidence struct {
-	Verdict        string `json:"verdict"`
-	Ecosystem      string `json:"ecosystem,omitempty"`
-	RealExitCode   int    `json:"real_exit_code"`
-	CanaryExitCode int    `json:"canary_exit_code"`
-	Message        string `json:"message,omitempty"`
-}
-
-// OracleFile is one file the factory host authored into a run's result
-// commit (an accepted acceptance oracle, or the .buildgate/oracles.json
-// index) together with the SHA-256 of the exact bytes it committed.
-type OracleFile struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
-}
-
-// OracleEvidence is the host-collected record that lets the gates treat a
-// committed acceptance oracle differently from an ordinary changed file.
-// nil (and therefore absent from the JSON) for every run in a repository
-// with no .buildgate/oracles.json at its base commit and no oracle commit
-// of its own, so all pre-existing run records and gate behaviour are
-// unchanged.
-//
-// Every exemption it grants is keyed on a content hash, never on a path
-// alone: two writers (the factory host and the sandboxed agent) can both
-// touch the same path, and only the factory's bytes are pinned.
-type OracleEvidence struct {
-	// Authored is what factoryd itself committed this run: oracle files
-	// and the index, each with the hash of the committed bytes.
-	Authored []OracleFile `json:"authored,omitempty"`
-	// Deleted is the manifest-declared supersession deletions factoryd
-	// itself committed this run.
-	Deleted []string `json:"deleted,omitempty"`
-	// BaseIndexPaths is every target_path listed in .buildgate/oracles.json
-	// as read from BaseSHA. These are protected from agent edits.
-	BaseIndexPaths []string `json:"base_index_paths,omitempty"`
-	// BaseIndexSHA256 maps each of those paths to the sha256 the base
-	// commit's index pinned for it (see MatchesBaseIndexPin).
-	BaseIndexSHA256 map[string]string `json:"base_index_sha256,omitempty"`
-	// ResultSHA256 and BaseSHA256 are the SHA-256 of the blob at ResultSHA
-	// / BaseSHA for every candidate path (authored, deleted, base-index and
-	// changed .buildgate/ paths) that is actually changed by this run. A
-	// path absent from the map is absent from that commit.
-	ResultSHA256 map[string]string `json:"result_sha256,omitempty"`
-	BaseSHA256   map[string]string `json:"base_sha256,omitempty"`
-}
-
-// FactoryAuthoredIntact reports whether path p is a factory-authored
-// oracle write whose blob at ResultSHA still hashes to the pinned hash, or
-// a manifest-declared supersession deletion that is in fact absent at
-// ResultSHA. Path membership alone never suffices.
-func (o *OracleEvidence) FactoryAuthoredIntact(p string) bool {
-	if o == nil {
-		return false
-	}
-	got, present := o.ResultSHA256[p]
-	for _, a := range o.Authored {
-		if a.Path == p && a.SHA256 != "" && present && got == a.SHA256 {
-			return true
-		}
-	}
-	if !present {
-		for _, d := range o.Deleted {
-			if d == p {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// MatchesBaseIndexPin reports whether the blob at ResultSHA for p hashes to
-// the sha256 the base commit's .buildgate/oracles.json PINNED for it. This is
-// what exempts a path that only appears in a cumulative -diff-base inventory
-// because an earlier round committed it. It is deliberately keyed on the
-// index's pinned hash and NOT on "unchanged from the round's base bytes":
-// after a quarantined review round advances the branch, the round base can
-// itself contain a tampered oracle, and byte-equality with that base would
-// then wave the tampering through (found via adversarial review).
-func (o *OracleEvidence) MatchesBaseIndexPin(p string) bool {
-	if o == nil {
-		return false
-	}
-	pin, ok := o.BaseIndexSHA256[p]
-	got, present := o.ResultSHA256[p]
-	return ok && pin != "" && present && got == pin
-}
-
 // DiffStat summarizes the size of the accepted diff between BaseSHA and
 // ResultSHA — the "diff size" evidence from the plan's Phase 4 list.
 type DiffStat struct {
 	FilesChanged int `json:"files_changed"`
 	Insertions   int `json:"insertions"`
 	Deletions    int `json:"deletions"`
+}
+
+// ChangeSize is the host's source-only measurement of a committed diff.
+type ChangeSize struct {
+	SourceLines int              `json:"source_lines"`
+	SourceFiles int              `json:"source_files"`
+	Functions   int              `json:"functions"`
+	Files       []ChangeSizeFile `json:"files"`
+}
+
+// PROrder is the repository's `.factory.yml` pr_order as a request ticket's
+// run read it (from the commit that file was read from), and the group the
+// ticket is limited to when the host carved it from a mixed change. The
+// release decision reads the run's changed files against it.
+type PROrder struct {
+	// Groups are the patterns of each group, in order (internal/prorder).
+	Groups [][]string `json:"groups"`
+	// TicketGroup is the 1-based group a carved ticket's pull request is
+	// limited to (len(Groups)+1 for the files no group lists); 0 for a ticket
+	// that is not carved, whose change may touch one group only.
+	TicketGroup int `json:"ticket_group,omitempty"`
+}
+
+// ChangeSizeFile records git's counts and enclosing hunk names for one file.
+type ChangeSizeFile struct {
+	Path       string   `json:"path"`
+	Insertions int      `json:"insertions"`
+	Deletions  int      `json:"deletions"`
+	Functions  []string `json:"functions"`
 }
 
 // AgentEvidenceSchemaVersion is the schema_version this struct's own field
@@ -780,30 +694,13 @@ type ReviewVerdictRecheck struct {
 // whatever concrete correctness/security/data-loss/concurrency defect the
 // reviewer found, each with its own failure scenario.
 //
-// A finding blocks a run only through a reproduction the factory runs
-// (SC-022). SpecLine is the line of the approved spec it cites; Reproduction
-// is what the factory recorded about the reproduction it carried, never the
-// reproduction's content (which lives in a host copy checked against
-// SHA256); Disposition is "blocks" or "advice", "" for a record from before
-// reproductions. All three are omitted when unset, so an older record
-// re-encodes byte for byte.
+// A finding is advice: it refuses nothing (SC-022).
 type CodeReviewFinding struct {
-	Severity        string              `json:"severity"`
-	File            string              `json:"file,omitempty"`
-	Line            int                 `json:"line,omitempty"`
-	Summary         string              `json:"summary"`
-	FailureScenario string              `json:"failure_scenario,omitempty"`
-	SpecLine        *SpecCitation       `json:"spec_line,omitempty"`
-	Reproduction    *ReviewReproduction `json:"reproduction,omitempty"`
-	Disposition     string              `json:"disposition,omitempty"`
-}
-
-// SpecCitation is the line of the approved spec a finding cites: its number
-// and the text the reviewer gave for it. The factory compares the text with
-// the line (SC-022); this record is what the reviewer said.
-type SpecCitation struct {
-	Number int    `json:"number"`
-	Text   string `json:"text"`
+	Severity        string `json:"severity"`
+	File            string `json:"file,omitempty"`
+	Line            int    `json:"line,omitempty"`
+	Summary         string `json:"summary"`
+	FailureScenario string `json:"failure_scenario,omitempty"`
 }
 
 // ReviewReproduction is what the run record keeps of a finding's
@@ -895,12 +792,23 @@ func TestsRedOnBaseDir(runDir string) string {
 
 // TestsRedOnBase is what the run record keeps of the tests_red_on_base proof
 // (SC-008): the verdict, a one-line reason, and for each changed test file
-// the factory ran, the hash of the copy it ran and its launches. Never the
-// files' content.
+// the factory ran, the hash of the copy it ran and its launches, and each
+// changed test file it did not run or judge with the reason. Never the files'
+// content.
 type TestsRedOnBase struct {
 	Verdict string         `json:"verdict"`
 	Reason  string         `json:"reason,omitempty"`
 	Files   []TestsRedFile `json:"files,omitempty"`
+	// SkippedFiles are the changed test files the proof neither ran nor
+	// judged, each with the reason the factory observed.
+	SkippedFiles []TestsRedSkipped `json:"skipped_files,omitempty"`
+}
+
+// TestsRedSkipped is one changed test file the tests_red_on_base proof did
+// not run or judge, and why (a fixed sentence, never the file's content).
+type TestsRedSkipped struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 // TestsRedFile is one changed test file of the proof: its path, the SHA-256
@@ -1485,7 +1393,7 @@ type Run struct {
 	TemporalTaskQueue  string `json:"temporal_task_queue,omitempty"`
 	TemporalAddress    string `json:"temporal_address,omitempty"`
 	// SpecSHA256 is the hash of the ticket spec file's content at the
-	// moment factoryd read it — the "acceptance-oracle hash" from the
+	// moment factoryd read it — the spec hash from the
 	// plan's Phase 4 evidence list. Ticket specs are mutable prose files;
 	// this pins exactly which version of the ticket a run was judged
 	// against.
@@ -1525,8 +1433,7 @@ type Run struct {
 	// 2026-09-03 Opus factory-pipeline review.
 	SkipProjectCheck bool `json:"skip_project_check,omitempty"`
 	// SpecTicketScopeMismatchFields records which of
-	// Allowed-Files:/Required-Changed-Files:/Verify-Command:/
-	// Required-Content: -ticket-file declared differently (or not at all)
+	// Allowed-Files:/Verify-Command: -ticket-file declared differently (or not at all)
 	// than -spec's own snapshot, when this run proceeded anyway via the
 	// explicit -allow-spec-ticket-scope-mismatch opt-out -- empty/absent
 	// for a run that never hit the mismatch, and never populated for a
@@ -1568,6 +1475,9 @@ type Run struct {
 	// replayed onto a new base, which the run judges instead of building
 	// (see Replay). Written once, when the run's record is created.
 	Replay *Replay `json:"replay,omitempty"`
+	// PROrder is set on a request ticket's run in a repository whose
+	// committed .factory.yml has a pr_order.
+	PROrder *PROrder `json:"pr_order,omitempty"`
 	// DiffBaseSHA is set only when -diff-base overrode the range the
 	// diff-shape checks (diff_scope, tests_red_on_base, the required-file
 	// and required-content notes) and the PR-body evidence were
@@ -1653,8 +1563,7 @@ type Run struct {
 	// code is wrong". Values: HaltReasonRelayCeilingExceeded,
 	// HaltReasonComposeServicesRejected, HaltReasonReviewInstructionsFailed,
 	// HaltReasonFactoryDirFailed, HaltReasonBaselineVerifyFailed,
-	// HaltReasonOraclePassesOnBase, and an
-	// UnresolvedCause for a halt that is no verdict on the work.
+	// an UnresolvedCause for a halt that is no verdict on the work.
 	// Empty for every halt cause that predates this field or has no such
 	// need -- most halts already carry enough signal in their own
 	// structured evidence (GateResults, Attempts, ...).
@@ -1680,15 +1589,6 @@ type Run struct {
 	// touched no AGENTS.md and has no proposal (nothing was read), and in a
 	// record written before the field existed.
 	MemoryEdit *MemoryEdit `json:"memory_edit,omitempty"`
-	// Oracles is the committed-acceptance-oracle evidence (see
-	// OracleEvidence); nil unless the base commit carries an oracle index
-	// or this run's factory host committed oracles.
-	Oracles *OracleEvidence `json:"oracles,omitempty"`
-	// FailedAfterOracleCommit names the checks (a GateResult.Check) that
-	// passed on the build's tree and failed only when the factory host reran
-	// them on the tree with the committed oracle files. Empty for a run with
-	// no such check.
-	FailedAfterOracleCommit []string `json:"failed_after_oracle_commit,omitempty"`
 	// DependencyLockfilesTouched is filename-based evidence only and never
 	// affects run state or a gate. Like ChangedFiles, it deliberately has no
 	// `omitempty`: a genuinely computed empty result must serialize as `[]`,
@@ -1706,6 +1606,11 @@ type Run struct {
 	// from the base commit, empty when it launched none.
 	ComposeServices []string  `json:"compose_services,omitempty"`
 	DiffStat        *DiffStat `json:"diff_stat,omitempty"`
+	// ChangeSize is nil until the host has measured the committed diff.
+	ChangeSize *ChangeSize `json:"change_size,omitempty"`
+	// PRBudgetLines is the session's note threshold at run start; zero disables
+	// the line threshold, while the function threshold still applies.
+	PRBudgetLines int `json:"pr_budget_lines,omitempty"`
 	// DiffAvailable is true when a full unified diff between BaseSHA and the
 	// workspace state at the moment evidence was collected was snapshotted
 	// to this run's own durable directory (see DiffPath) — worktree-
@@ -1857,39 +1762,10 @@ type Run struct {
 	// separate one-turn launch -- see internal/codereview's package doc
 	// comment). Nil for a run that never ran this gate.
 	CodeReview *CodeReviewResult `json:"code_review,omitempty"`
-	// ReviewReproductionRechecks are a corrective build's runs of the
-	// reproductions an earlier run's review held (-recheck-reproductions,
-	// SC-022): one per reproduction, its one run on this run's result
-	// commit, and Verdict "passes" or "still_failing". Nil for every other
-	// run.
-	ReviewReproductionRechecks []ReviewReproduction `json:"review_reproduction_rechecks,omitempty"`
-	// ReviewReproductionRechecksGiven are the -recheck-reproductions entries
-	// this run was given, recorded when it starts, whether or not its
-	// workflow reached the recheck (a run whose gates failed does not).
-	// Evidence only: what a later build rechecks is the ticket's list on the
-	// request (request.Ticket.Reproductions).
-	ReviewReproductionRechecksGiven []RecheckEntry `json:"review_reproduction_rechecks_given,omitempty"`
-	// ReferenceOracleDir is the -reference-oracle-dir this run was
-	// configured with, recorded so any finalization site -- including a
-	// reclaimed run, which sees only this record -- can find the oracle's
-	// MANIFEST.json to learn which criteria the oracle covers. Empty when
-	// none was configured. A path, not content: the content hash is
-	// recorded separately on the attempts that ran against it.
-	ReferenceOracleDir string `json:"reference_oracle_dir,omitempty"`
-	// OraclesNotCommittedByRequest records the request's explicit
-	// -no-commit-oracles opt-out: the oracle gated the build but the host
-	// wrote nothing to the target repository.
-	OraclesNotCommittedByRequest bool `json:"oracles_not_committed_by_request,omitempty"`
-	// OracleCoveredCriteria is the acceptance criteria MANIFEST.json says
-	// the oracle checks deterministically (entries with a non-null
-	// oracle_file), so the release evidence can say which criteria had a
-	// second, non-LLM check. Empty when there is no oracle or no manifest.
-	OracleCoveredCriteria []string `json:"oracle_covered_criteria,omitempty"`
-	// OracleCanary is the outcome of the reference_oracle gate's runtime
-	// canary: after the real oracle command passed, the SAME command ran
-	// against a known-failing snapshot of the oracle. nil when the gate never
-	// got that far (no oracle, or the real command failed).
-	OracleCanary *OracleCanaryEvidence `json:"oracle_canary,omitempty"`
+	// Challenge is the ticket's challenge as this run saw it (SC-022): the
+	// challenger job's held files and the factory's run of them. Nil for a
+	// run that was not challenged and re-ran no held file.
+	Challenge *ChallengeRecord `json:"challenge,omitempty"`
 	// BaselineVerify is the verify command's result on the base commit,
 	// run before the build's first round (see BaselineVerify's own doc
 	// comment). Read from the run's baseline record by cmd/factoryd's save,
@@ -1969,7 +1845,7 @@ type Run struct {
 type ReleasePolicy struct {
 	ProtectedPaths                 []string `json:"protected_paths,omitempty"`
 	MaxFilesChanged                int      `json:"max_files_changed"`
-	MaxInsertions                  int      `json:"max_insertions"`
+	MaxChangedLines                int      `json:"max_changed_lines"`
 	RollbackPlan                   string   `json:"rollback_plan"`
 	AllowOverrides                 bool     `json:"allow_overrides,omitempty"`
 	AllowDependencyLockfileChanges bool     `json:"allow_dependency_lockfile_changes,omitempty"`
@@ -2433,14 +2309,60 @@ func (r *Run) DiffBase() string {
 	return r.BaseSHA
 }
 
-// FailedOnlyAfterOracleCommit reports whether check passed on the build's
-// tree and failed only on the tree with the committed oracle files
-// (FailedAfterOracleCommit).
-func (r *Run) FailedOnlyAfterOracleCommit(check string) bool {
-	for _, c := range r.FailedAfterOracleCommit {
-		if c == check {
-			return true
-		}
-	}
-	return false
+// ChallengeFile is one test file of a challenge (SC-022): where it is
+// committed, the hash of the host's copy, the criterion it cites and what the
+// factory's runs of it decided. Never the file's content.
+type ChallengeFile struct {
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256,omitempty"`
+	HostPath string `json:"host_path,omitempty"`
+	// Criterion is the header's label, "AC-<n>" or "answer-<n>".
+	Criterion string   `json:"criterion,omitempty"`
+	Runner    string   `json:"runner,omitempty"`
+	TestIDs   []string `json:"test_ids,omitempty"`
+	// Refused is the shape rule that kept the file out (not held); NotRun is
+	// why a held file was not run (no valid header).
+	Refused string `json:"refused,omitempty"`
+	NotRun  string `json:"not_run,omitempty"`
+	// Verdict is "green", "red", "broken" (a compile or collection error, or
+	// no report) or "advice" (red once, then green); "" for a file not run.
+	Verdict  string             `json:"verdict,omitempty"`
+	Failures []ChallengeFailure `json:"failures,omitempty"`
 }
+
+// ChallengeFailure is one failing test of a red challenge file: its name and
+// its assertion, each one cleaned line.
+type ChallengeFailure struct {
+	Test      string `json:"test"`
+	Assertion string `json:"assertion,omitempty"`
+}
+
+// ChallengeRecord is a run's challenge (SC-022): Verdict "green", "red" or
+// "no_verdict" (Cause names why); Rerun marks a run that ran held files of an
+// earlier challenge instead of a new job; CommittedSHA is the commit that
+// holds the green files, the run's ResultSHA then.
+type ChallengeRecord struct {
+	Verdict      string            `json:"verdict"`
+	Cause        string            `json:"cause,omitempty"`
+	Rerun        bool              `json:"rerun,omitempty"`
+	Files        []ChallengeFile   `json:"files,omitempty"`
+	Notes        []string          `json:"notes,omitempty"`
+	CommittedSHA string            `json:"committed_sha,omitempty"`
+	Launches     []ReproductionRun `json:"launches,omitempty"`
+	// SnapshotSHA256, MaskedPaths and RemovedPaths are the challenger job's
+	// instruction-file snapshot (SC-019), as an attempt records them.
+	SnapshotSHA256 string   `json:"snapshot_sha256,omitempty"`
+	MaskedPaths    []string `json:"masked_paths,omitempty"`
+	RemovedPaths   []string `json:"removed_paths,omitempty"`
+}
+
+// ChallengeDirName is the directory, in the run directory, of a challenge's
+// held copies.
+const ChallengeDirName = "challenge"
+
+// The verdicts of a ChallengeRecord.
+const (
+	ChallengeGreen     = "green"
+	ChallengeRed       = "red"
+	ChallengeNoVerdict = "no_verdict"
+)

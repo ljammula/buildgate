@@ -30,7 +30,6 @@ import (
 	"buildgate/internal/evidence"
 	"buildgate/internal/harness"
 	"buildgate/internal/notify"
-	"buildgate/internal/oraclemanifest"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
@@ -115,13 +114,6 @@ func flagsWasVisited(flags *flag.FlagSet, name string) bool {
 	return found
 }
 
-func explicitValue(flags *flag.FlagSet, name, value string) string {
-	if flagsWasVisited(flags, name) {
-		return value
-	}
-	return ""
-}
-
 var apiStartMu sync.Mutex
 
 func main() {
@@ -170,41 +162,13 @@ func loadCodeReview(r *run.Run, dataDir, id string) {
 	r.CodeReview = &result
 }
 
-// loadOracleCoverage fills r.OracleCoveredCriteria from the operator's
-// MANIFEST.json in r.ReferenceOracleDir, so the release evidence can say
-// which criteria had a deterministic second check. Unlike the review's
-// findings it depends only on the run record, so a reclaimed run -- which must not read
-// workspace evidence at all -- can still call it. ReadHostileFile because
-// the directory is operator-populated: a symlink, FIFO or oversized
-// MANIFEST.json must not hang or exhaust this process.
-func loadOracleCoverage(r *run.Run, id string) {
-	// Cleared first for the same stale-state reason as loadCodeReview.
-	r.OracleCoveredCriteria = nil
-	if r.ReferenceOracleDir == "" {
-		return
-	}
-	data, err := evidence.ReadHostileFile(filepath.Join(r.ReferenceOracleDir, "MANIFEST.json"), maxAgentEvidenceFileSize)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Printf("run %s: warning: could not read oracle MANIFEST.json: %v\n", id, err)
-		}
-		return
-	}
-	covered, err := oraclemanifest.CoveredCriteria(data)
-	if err != nil {
-		fmt.Printf("run %s: warning: %v\n", id, err)
-		return
-	}
-	r.OracleCoveredCriteria = covered
-}
-
 // loadAgentEvidence reads the host's copy of the build's BUILD_EVIDENCE.json
 // from the run's directory, if present, and attaches it to r.AgentEvidence. Shared by the run setup and
 // runViaTemporal so the durable audit record — the agent's own reported
 // provider/model/rounds/usage, distinct from the gate outcome that
 // decides accept/quarantine — is recorded identically. A missing or unparseable file is logged as
 // a warning, not an error: BUILD_EVIDENCE.json is best-effort agent
-// self-reporting, never the acceptance oracle.
+// self-reporting, never the acceptance check.
 //
 // Also retains run.AgentReportFileName — the agent's own free-text
 // account of what it did, written into workspace by build_app.py

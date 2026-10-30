@@ -2,7 +2,7 @@ import { Link } from "react-router";
 
 import type { RequestTicket } from "@/domain/request";
 import { runPath } from "@/routes/paths";
-import { EscapedText } from "@/shared/oracle/EscapedText";
+import { EscapedText } from "@/shared/text/EscapedText";
 import { RelativeTime } from "@/ui/RelativeTime";
 import { StatusChipForToken } from "@/ui/StatusChip";
 

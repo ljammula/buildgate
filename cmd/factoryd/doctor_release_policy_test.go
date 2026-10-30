@@ -8,7 +8,7 @@ import (
 // TestDoctorCheckReleasePolicyWarnsWhenDenyingAll is the regression test
 // for the doctor-visibility half of the deny-all release policy gap:
 // before this check existed, a
-// session config with no release_max_files_changed/release_max_insertions/
+// session config with no release_max_files_changed/release_max_changed_lines/
 // release_rollback_plan set (MergePolicyCheck's own always-deny case) was
 // invisible to `factoryd doctor` -- an operator only learned about it
 // after a first accepted run silently produced no pull request.
@@ -21,7 +21,7 @@ func TestDoctorCheckReleasePolicyWarnsWhenDenyingAll(t *testing.T) {
 	if !c.Advisory {
 		t.Error("Advisory = false, want true: this must warn, not fail worker's shared preflight -- see this check's own doc comment")
 	}
-	if !strings.Contains(c.Fix, "release_max_files_changed") || !strings.Contains(c.Fix, "release_max_insertions") || !strings.Contains(c.Fix, "release_rollback_plan") {
+	if !strings.Contains(c.Fix, "release_max_files_changed") || !strings.Contains(c.Fix, "release_max_changed_lines") || !strings.Contains(c.Fix, "release_rollback_plan") {
 		t.Errorf("Fix = %q, want it to name all three session-config keys to add", c.Fix)
 	}
 }

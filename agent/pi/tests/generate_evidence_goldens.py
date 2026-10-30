@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Regenerates internal/evidence/testdata/golden/*.json from the REAL
 Python writers (build_app.write_evidence_json, code_review.write_code_review_evidence_json,
-draft_spec.write_evidence, plan_tickets.write_evidence,
-draft_acceptance_oracles.write_evidence), called with a fixed, realistic
+draft_spec.write_evidence, plan_tickets.write_evidence), called with a fixed, realistic
 input and a fixed clock so the output is byte-stable across runs.
 
 These goldens are the fixture half of the ABI test described in
@@ -189,21 +188,6 @@ def generate(out_dir: Path) -> dict[str, Path]:
 		agents_md_used=True, thinking="high",
 	)
 	written["plan_evidence.json"] = target
-
-	# 5. Oracle draft evidence.json, via
-	# draft_acceptance_oracles.write_evidence.
-	draft_acceptance_oracles = _load("draft_acceptance_oracles")
-	_freeze_clock(draft_acceptance_oracles)
-	target = out_dir / "oracle_draft_evidence.json"
-	draft_acceptance_oracles.write_evidence(
-		target, usage=usage, agent_exit_code=0, duration_s=90.0,
-		agents_md_used=True, criteria_count=3, oracle_count=2,
-		status="drafted", dropped_count=0, feedback_truncated=False,
-		failure_reason=None,
-		failures=[{"criterion_index": 3, "reason": "model produced no usable oracle"}],
-		salvaged_count=1, thinking="max",
-	)
-	written["oracle_draft_evidence.json"] = target
 
 	# The two fixed-name writers' own scratch subdirectories are no
 	# longer needed once their content is copied into out_dir under this

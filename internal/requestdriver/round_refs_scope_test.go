@@ -32,7 +32,7 @@ func TestRetryFromRoundDoesNotLeakToTheNextTicket(t *testing.T) {
 	}
 	drive := func() {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestRoundRefsOfAnEarlierPlanSurviveASendBack(t *testing.T) {
 		onReady(&run.Run{ID: runID})
 		return quarantinedRun(t, dataDir, runID, sha40(1), sha40(0xc1), "canonical_verify")
 	}
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if rec.refs[oldRef] != sha40(0xa1) {

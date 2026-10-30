@@ -115,9 +115,9 @@ describe("ErrorCallout", () => {
   });
 
   test("shows the server's own message as the next step, one part per line, with nothing left to disclose", () => {
-    render(<ErrorCallout error={new ApiError(500, '{"error":"spec.md bad | oracle missing"}')} />);
+    render(<ErrorCallout error={new ApiError(500, '{"error":"spec.md bad | file missing"}')} />);
     expect(screen.getByRole("heading", { name: "Request failed (500)" })).toBeInTheDocument();
-    expect(screen.getByText(/spec\.md bad/).textContent).toBe("spec.md bad\noracle missing");
+    expect(screen.getByText(/spec\.md bad/).textContent).toBe("spec.md bad\nfile missing");
     expect(screen.queryByText("See details below.")).not.toBeInTheDocument();
     expect(screen.queryByText("Details")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();

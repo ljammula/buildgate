@@ -131,13 +131,13 @@ func TestLearningChainsRejectAmbiguousIdentityAndConfig(t *testing.T) {
 			f.GateResults[0].Command = nil
 			a.GateResults[0].Command = nil
 		}, "missing_command_evidence"},
-		{"missing named gate command", func(f, a *run.Run) {
-			f.GateResults = []run.GateResult{{Check: "lint", Passed: false}}
-			a.GateResults = []run.GateResult{{Check: "lint", Passed: true}}
+		{"missing full suite command", func(f, a *run.Run) {
+			f.GateResults = []run.GateResult{{Check: "full_suite_verify", Passed: false}}
+			a.GateResults = []run.GateResult{{Check: "full_suite_verify", Passed: true}}
 		}, "missing_command_evidence"},
 		{"changed check command", func(f, a *run.Run) {
-			f.GateResults = []run.GateResult{{Check: "lint", Passed: false, Command: []string{"lint", "--strict"}}}
-			a.GateResults = []run.GateResult{{Check: "lint", Passed: true, Command: []string{"lint"}}}
+			f.GateResults = []run.GateResult{{Check: "full_suite_verify", Passed: false, Command: []string{"make", "full", "--strict"}}}
+			a.GateResults = []run.GateResult{{Check: "full_suite_verify", Passed: true, Command: []string{"make", "full"}}}
 		}, "check_command_changed"},
 	}
 	for _, tt := range tests {

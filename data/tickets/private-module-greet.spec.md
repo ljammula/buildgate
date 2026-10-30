@@ -32,9 +32,7 @@ with the module the package already depends on, and test it.
 
 Allowed-Files: greet.go, greet_test.go
 
-Required-Changed-Files: greet.go, greet_test.go
 
-Required-Content: shout.Loud
 
 ## Acceptance / verification
 

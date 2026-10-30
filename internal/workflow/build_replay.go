@@ -10,9 +10,11 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 
+	"buildgate/internal/prorder"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
+	"buildgate/internal/workspace"
 )
 
 // replayStage is the progress stage of ApplyReplayActivity.
@@ -33,9 +35,18 @@ func (a *Activities) ApplyReplayActivity(ctx context.Context, input RunWorkflowI
 	of, rp, err := checkReplay(ctx, a.dataDirFor(input), input)
 	if err != nil {
 		progressMark(ctx, logDir, replayStage, "end", "fail", err.Error())
+		var hostErr hostReadError
+		if errors.As(err, &hostErr) {
+			// A host read that failed says nothing about the replay: the
+			// Activity is retried, and a run it never judged is no verdict.
+			return BuildActivityResult{}, fmt.Errorf("the replay could not be checked: %w", err)
+		}
 		return BuildActivityResult{}, temporal.NewNonRetryableApplicationError("replay run refused: "+err.Error(), ReplayFailureType, nil)
 	}
 	detail := fmt.Sprintf("judging %s, the %d commit(s) of run %s replayed onto %s: nothing is built", shortSHA(rp.HeadSHA), len(rp.Commits), of.ID, shortSHA(rp.OntoSHA))
+	if rp.Carve != nil {
+		detail = fmt.Sprintf("judging %s, carved from run %s for pr_order group %d onto %s: nothing is built", shortSHA(rp.HeadSHA), of.ID, rp.Carve.Group, shortSHA(rp.OntoSHA))
+	}
 	progressMark(ctx, logDir, replayStage, "note", "", detail)
 	progressMark(ctx, logDir, replayStage, "end", "pass", "")
 	now := time.Now().UTC()
@@ -44,6 +55,18 @@ func (a *Activities) ApplyReplayActivity(ctx context.Context, input RunWorkflowI
 	result := runner.Result{Command: attempt.Command, ExitCode: 0, StartedAt: now, FinishedAt: now, ImageDigest: attempt.ImageDigest}
 	return BuildActivityResult{Result: result, Attempts: []run.Attempt{attempt}}, nil
 }
+
+// hostReadError is a replay check that could not read what it checks (a git
+// command, a run record): a transient host failure, not a finding that the
+// replay does not fit. ApplyReplayActivity retries it instead of refusing the
+// replay, so only a real mismatch is a refusal (ReplayFailureType).
+type hostReadError struct{ err error }
+
+func (e hostReadError) Error() string { return e.err.Error() }
+func (e hostReadError) Unwrap() error { return e.err }
+
+// hostRead marks err as a failed read.
+func hostRead(err error) error { return hostReadError{err} }
 
 // checkReplay checks a replay run against what the host can re-derive and
 // returns the run whose commits were replayed (Replay.OfRunID) and the
@@ -72,7 +95,7 @@ func checkReplay(ctx context.Context, dataDir string, input RunWorkflowInput) (*
 	}
 	self, err := run.Load(dataDir, input.RunID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load the run's own record: %w", err)
+		return nil, nil, hostRead(fmt.Errorf("load the run's own record: %w", err))
 	}
 	rp := self.Replay
 	if err := checkReplayRecord(self, input.Replay); err != nil {
@@ -80,6 +103,10 @@ func checkReplay(ctx context.Context, dataDir string, input RunWorkflowInput) (*
 	}
 	if err := checkReplayedWorktree(ctx, input.WorkspacePath, rp); err != nil {
 		return nil, nil, err
+	}
+	if rp.Carve != nil {
+		of, err := checkCarvedReplay(ctx, dataDir, input, self, rp)
+		return of, rp, err
 	}
 	sources := make([]*run.Run, 0, len(rp.SourceRunIDs))
 	var of *run.Run
@@ -231,7 +258,7 @@ func checkReplayedCommits(ctx context.Context, dir string, rp *run.Replay) error
 func replayRange(ctx context.Context, dir, side, from, to string) ([]string, error) {
 	commits, merges, err := runner.GitRevListRange(ctx, dir, from, to)
 	if err != nil {
-		return nil, fmt.Errorf("list the %s commits: %w", side, err)
+		return nil, hostRead(fmt.Errorf("list the %s commits: %w", side, err))
 	}
 	if len(merges) > 0 {
 		return nil, fmt.Errorf("the %s commits include merge commit %s", side, shortSHA(merges[0]))
@@ -302,4 +329,100 @@ func sameDirectory(a, b string) bool {
 	ra, errA := filepath.EvalSymlinks(a)
 	rb, errB := filepath.EvalSymlinks(b)
 	return errA == nil && errB == nil && ra == rb
+}
+
+// checkCarvedReplay checks a replay run of a carved commit against what the
+// host can re-derive, and returns its source run. The source is the accepted,
+// sandboxed run of this repository and request whose release decision was
+// denied for its changed files' pr_order groups and for nothing the carve
+// could not change (checkCarveSource). The carved commit is the only commit
+// of OntoSHA..HeadSHA, a child of OntoSHA; OntoSHA is the source's diff base
+// or a descendant of it; and its tree is derived here again, from OntoSHA's
+// tree and the source result's files of the group, never taken from the
+// record.
+func checkCarvedReplay(ctx context.Context, dataDir string, input RunWorkflowInput, self *run.Run, rp *run.Replay) (*run.Run, error) {
+	source, err := checkCarveSource(dataDir, rp.OfRunID, input.IsolatedRepoDir, self)
+	if err != nil {
+		return nil, err
+	}
+	if source.ResultSHA == "" || rp.SourceHeadSHA != source.ResultSHA || rp.Commits[0].Original != source.ResultSHA {
+		return nil, fmt.Errorf("the carved commit is of %s, not of %s, the result of run %s", shortSHA(rp.SourceHeadSHA), shortSHA(source.ResultSHA), source.ID)
+	}
+	if source.DiffBase() == "" || rp.UpstreamSHA != source.DiffBase() {
+		return nil, fmt.Errorf("the carve starts after %s, not after %s, the diff base of run %s", shortSHA(rp.UpstreamSHA), shortSHA(source.DiffBase()), source.ID)
+	}
+	under, err := runner.GitReplayIsAncestor(ctx, input.WorkspacePath, rp.UpstreamSHA, rp.OntoSHA)
+	if err != nil {
+		return nil, hostRead(fmt.Errorf("read whether %s is under %s: %w", shortSHA(rp.UpstreamSHA), shortSHA(rp.OntoSHA), err))
+	}
+	if !under {
+		return nil, fmt.Errorf("the commit carved onto, %s, is not the diff base %s or a descendant of it", shortSHA(rp.OntoSHA), shortSHA(rp.UpstreamSHA))
+	}
+	commits, err := replayRange(ctx, input.WorkspacePath, "carved", rp.OntoSHA, rp.HeadSHA)
+	if err != nil {
+		return nil, err
+	}
+	if len(commits) != 1 || commits[0] != rp.HeadSHA || rp.Commits[0].Replayed != rp.HeadSHA {
+		return nil, fmt.Errorf("the carve is %d commit(s) after %s, not the one commit %s", len(commits), shortSHA(rp.OntoSHA), shortSHA(rp.HeadSHA))
+	}
+	changed, err := runner.GitDiffNameOnly(input.WorkspacePath, source.DiffBase(), source.ResultSHA)
+	if err != nil {
+		return nil, hostRead(fmt.Errorf("list the files run %s changed: %w", source.ID, err))
+	}
+	var files []string
+	for _, part := range prorder.Order(rp.Carve.Groups).Carve(changed) {
+		if part.Group == rp.Carve.Group-1 {
+			files = part.Files
+		}
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("run %s changed no file of pr_order group %d", source.ID, rp.Carve.Group)
+	}
+	want, err := workspace.CarveTree(ctx, input.WorkspacePath, rp.OntoSHA, source.ResultSHA, files)
+	if err != nil {
+		return nil, hostRead(fmt.Errorf("derive the carved tree: %w", err))
+	}
+	got, err := workspace.TreeOf(ctx, input.WorkspacePath, rp.HeadSHA)
+	if err != nil {
+		return nil, hostRead(err)
+	}
+	if got != want {
+		return nil, fmt.Errorf("the carved commit %s holds tree %s, not the tree %s that %d file(s) of run %s carved onto %s make", shortSHA(rp.HeadSHA), shortSHA(got), shortSHA(want), len(files), source.ID, shortSHA(rp.OntoSHA))
+	}
+	return source, nil
+}
+
+// checkCarveSource loads the run a carve is made from and checks it is an
+// accepted, sandboxed run of this repository and self's request, with no
+// override, whose release decision exists, is not invalidated and denied the
+// run for its pr_order groups (release.PROrderReasons): only a run the
+// repository's own order refused is carved.
+func checkCarveSource(dataDir, id, repoDir string, self *run.Run) (*run.Run, error) {
+	source, err := run.Load(dataDir, id)
+	switch {
+	case err != nil:
+		return nil, hostRead(fmt.Errorf("load run %s carved from: %w", id, err))
+	case source.State != run.StateAccepted:
+		return nil, fmt.Errorf("run %s carved from is %s, not accepted", id, source.State)
+	case !source.Sandboxed():
+		return nil, fmt.Errorf("run %s carved from has no build attempt that ran in the sandbox", id)
+	case !sameDirectory(source.ProjectPath, repoDir):
+		return nil, fmt.Errorf("run %s carved from was made in %s, not in this repository", id, source.ProjectPath)
+	case source.RequestID != self.RequestID:
+		return nil, fmt.Errorf("run %s carved from is of request %q, not of this run's request %q", id, source.RequestID, self.RequestID)
+	case len(source.Overrides) > 0:
+		return nil, fmt.Errorf("run %s carved from records %d override(s): an overridden run is never carved", id, len(source.Overrides))
+	case len(release.PROrderReasons(*source)) == 0:
+		return nil, fmt.Errorf("run %s carved from changed no more than one pr_order group", id)
+	}
+	decision, err := release.LoadDecision(dataDir, release.ProjectOf(source), id)
+	switch {
+	case err != nil:
+		return nil, hostRead(fmt.Errorf("load the release decision of run %s carved from: %w", id, err))
+	case decision == nil:
+		return nil, fmt.Errorf("run %s carved from has no release decision", id)
+	case decision.Invalidated || decision.Allowed:
+		return nil, fmt.Errorf("run %s carved from has a release decision that is not a denial for its pr_order groups", id)
+	}
+	return source, nil
 }

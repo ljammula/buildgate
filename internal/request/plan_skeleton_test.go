@@ -10,7 +10,6 @@ import (
 
 const validTicket = `Verify-Command: make verify
 Allowed-Files: internal/foo/foo.go, internal/foo/foo_test.go
-Required-Changed-Files: internal/foo/foo.go
 
 ## Goal
 
@@ -573,5 +572,21 @@ func TestSpecAcceptanceCriteriaLargePreambleAndHeadingDocumentIsLinearEnough(t *
 	}
 	if elapsed := time.Since(started); elapsed >= 2*time.Second {
 		t.Fatalf("parsing 15000-item preamble and 10000 headings took %s", elapsed)
+	}
+}
+
+// A request ticket is the shape the planning job drafts or the approved spec's
+// own skeleton (the one ticket the factory writes for a request submitted
+// without a plan); anything else is refused with the ticket shape's reasons.
+func TestRequestTicketStructureAcceptsATicketAndTheSpecForm(t *testing.T) {
+	if ok, reasons := RequestTicketStructure(validTicket); !ok {
+		t.Errorf("a drafted ticket was refused: %v", reasons)
+	}
+	spec := "# Spec\n\n## Problem\n\np\n\n## Scope\n\ns\n\n## Non-goals\n\nn\n\n## Affected services and packages\n\na\n\n## Acceptance criteria\n\n1. one\n\n## Risks\n\nr\n\n## Open questions\n\nNone.\n"
+	if ok, reasons := RequestTicketStructure(spec); !ok {
+		t.Errorf("a spec in spec form was refused: %v", reasons)
+	}
+	if ok, reasons := RequestTicketStructure("## Goal\n\nonly a goal\n"); ok || len(reasons) == 0 {
+		t.Errorf("a ticket off both forms was accepted: %v", reasons)
 	}
 }

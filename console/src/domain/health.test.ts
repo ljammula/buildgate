@@ -105,10 +105,10 @@ test("queued counts the requests a live worker's server gave a position", () => 
 });
 
 test("with no live worker there is no queue length, only what needs a worker", () => {
-  // The server gives no queue position without a live worker: five requests
+  // The server gives no queue position without a live worker: four requests
   // in job states must never read as an empty queue.
-  const requests = ["submitted", "spec_drafting", "oracle_drafting", "planning", "building"].map(
-    (state) => wire({ id: state, state }),
+  const requests = ["submitted", "spec_drafting", "planning", "building"].map((state) =>
+    wire({ id: state, state }),
   );
   const waiting = [
     ...requests,
@@ -118,12 +118,12 @@ test("with no live worker there is no queue length, only what needs a worker", (
   for (const body of [{ state: "stale" }, { state: "absent" }, {}]) {
     const health = factoryHealth(status(body), waiting);
     expect(health.queued).toBeNull();
-    expect(health.needWorker).toBe(5);
+    expect(health.needWorker).toBe(4);
     expect(health.running).toEqual([]);
   }
   const unknown = factoryHealth(null, waiting);
   expect(unknown.queued).toBeNull();
-  expect(unknown.needWorker).toBe(5);
+  expect(unknown.needWorker).toBe(4);
 });
 
 test("the last transition is the newest move of any request", () => {

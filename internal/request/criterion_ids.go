@@ -126,35 +126,6 @@ func criteriaCarryIDs(criteria []string) bool {
 // criterionIDPrefixRE matches the "AC-N: " label a criterion starts with.
 var criterionIDPrefixRE = regexp.MustCompile(`^(\d+[.)]\s+)?AC-\d+:\s*`)
 
-// stripCriterionID returns text without its "AC-N: " label (after the item's
-// own number, if it has one), so a manifest that quotes a criterion with or
-// without the label matches the spec's.
-func stripCriterionID(text string) string {
-	t := strings.TrimSpace(text)
-	if m := criterionIDPrefixRE.FindStringSubmatch(t); m != nil {
-		return m[1] + t[len(m[0]):]
-	}
-	return text
-}
-
-// manifestLabel returns the "AC-N" label a manifest entry's criterion text
-// carries, or "".
-func manifestLabel(text string) string {
-	if m := criterionIDPrefixRE.FindString(strings.TrimSpace(text)); m != "" {
-		if i := strings.Index(m, "AC-"); i >= 0 {
-			return strings.TrimRight(strings.TrimSpace(m[i:]), ":")
-		}
-	}
-	return ""
-}
-
-// manifestLabelMismatch reports whether text carries a label that is not
-// AC-<index>. An unlabelled quote matches.
-func manifestLabelMismatch(text string, index int) bool {
-	label := manifestLabel(text)
-	return label != "" && label != fmt.Sprintf("AC-%d", index)
-}
-
 // criterionLeadRE strips a folded criterion's "N. AC-N: " prefix.
 var criterionLeadRE = regexp.MustCompile(`^\d+[.)]\s+AC-\d+:\s*`)
 
@@ -201,19 +172,14 @@ func ticketTestsCited(content string) map[int]bool {
 }
 
 // noTestNotes returns one note for each criterion of a spec that carries IDs
-// that no ticket covering it cites in its Tests to add and no approved
-// oracle covers (oracleCovered is nil when the request has no approved
-// oracle, and the note then does not mention one). "No plan step" is ValidatePlanCoverage's refusal, so only
+// that no ticket covering it cites in its Tests to add. "No plan step" is ValidatePlanCoverage's refusal, so only
 // listed criteria are considered. The note is built from numbers; the
 // reading is of list text, so it is advice.
-func noTestNotes(criteria []string, tickets []PlanTicket, oracleCovered map[int]bool) []string {
+func noTestNotes(criteria []string, tickets []PlanTicket) []string {
 	if !criteriaCarryIDs(criteria) {
 		return nil
 	}
 	covered := map[int]bool{}
-	for n := range oracleCovered {
-		covered[n] = true
-	}
 	listed := map[int]bool{}
 	for _, t := range tickets {
 		numbers, err := TicketCoveredCriteria(t.Content)
@@ -232,36 +198,8 @@ func noTestNotes(criteria []string, tickets []PlanTicket, oracleCovered map[int]
 	for i := range criteria {
 		if n := i + 1; listed[n] && !covered[n] {
 			note := fmt.Sprintf("criterion %d has no test: no covering ticket's Tests to add cites AC-%d", n, n)
-			if oracleCovered != nil {
-				note += " and no approved oracle covers it"
-			}
 			notes = append(notes, note)
 		}
 	}
 	return notes
-}
-
-// OracleCoveredCriteria returns the criterion numbers the request's approved
-// oracle covers: the manifest entries with an oracle file and a criterion
-// index. Nil when the request has no approved request-level oracle.
-func OracleCoveredCriteria(dataDir string, r *Request) map[int]bool {
-	pins := RequestOraclePins(r)
-	if len(pins) == 0 {
-		return nil
-	}
-	covered := map[int]bool{}
-	data, err := readPinnedRequestOracleFile(dataDir, r, pins, ManifestFileName)
-	if err != nil {
-		return covered
-	}
-	entries, err := parseAllManifestEntries(data)
-	if err != nil {
-		return covered
-	}
-	for _, e := range entries {
-		if e.hasIndex && e.oracleFile != "" {
-			covered[e.index] = true
-		}
-	}
-	return covered
 }

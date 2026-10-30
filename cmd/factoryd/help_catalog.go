@@ -49,7 +49,7 @@ func commandCatalog() []commandInfo {
 		{"setup", "", "Choose the model and coding agent every run uses", groupStart, func() *flag.FlagSet { fs, _ := newSetupFlags(); return fs }},
 
 		{"submit", "<workspace> [text]", "Record a request for a repository; the worker drafts, plans and builds it", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newSubmitFlags(); return fs }},
-		{"approve", "<request-id>", "Release a request from its spec, oracle or plan review", groupRequests, func() *flag.FlagSet { fs, _, _ := newApproveFlags(); return fs }},
+		{"approve", "<request-id>", "Release a request from its spec or plan review", groupRequests, func() *flag.FlagSet { fs, _, _ := newApproveFlags(); return fs }},
 		{"reject", "<request-id>", "Send a review back for a redraft, with the reason", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newRejectFlags(); return fs }},
 		{"answer", "<request-id>", "Answer a question of a handed-over spec's read-back at spec review", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newAnswerFlags(); return fs }},
 		{"retry", "<request-id>", "Rebuild the ticket of a quarantined or halted request", groupRequests, func() *flag.FlagSet { fs, _, _, _, _ := newRetryFlags(); return fs }},
@@ -107,7 +107,7 @@ func commandCatalog() []commandInfo {
 // doctorFlagSet is doctor's FlagSet as doctorMain builds it: the flags of
 // newDoctorFlags and the five it registers on the set afterwards.
 func doctorFlagSet() *flag.FlagSet {
-	fs, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ := newDoctorFlags()
+	fs, _, _, _, _, _, _, _, _, _, _, _, _ := newDoctorFlags()
 	doctorRegisterNotifyTestFlag(fs)
 	doctorRegisterYesFlag(fs)
 	doctorRegisterListModelsFlag(fs)

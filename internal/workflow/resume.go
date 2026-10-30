@@ -51,8 +51,7 @@ type ResumeFrom struct {
 	DiffBaseSHA string `json:"diff_base_sha,omitempty"`
 	// BeyondBase is true when the halted run's worktree is past the request's
 	// base: its build had begun or it produced a result, or it was chained
-	// after an earlier ticket's run. A bug request's oracle check on the base
-	// commit is not made for such a resume; for one lost earlier it is.
+	// after an earlier ticket's run.
 	BeyondBase bool `json:"beyond_base,omitempty"`
 }
 
@@ -86,7 +85,6 @@ var roundRecordFields = map[string]int{
 	"usage": jsonObject | jsonNull, "verify_command": jsonString | jsonNull, "verify_passed": jsonBool | jsonNull,
 	"verify_timed_out": jsonBool, "verify_output_tail": jsonString, "duration_s": jsonInt | jsonFloat,
 	"fast_check_ran": jsonBool, "fast_check_passed": jsonBool | jsonNull,
-	"oracle_command": jsonString | jsonNull, "oracle_passed": jsonBool | jsonNull, "oracle_output_tail": jsonString,
 	"failure_signature": jsonString, "failure_log": jsonString, "agent_notes": jsonString, "autofix": jsonObject | jsonNull,
 	"verify_rerun": jsonObject | jsonNull,
 }

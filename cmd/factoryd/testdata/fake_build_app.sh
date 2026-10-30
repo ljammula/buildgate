@@ -10,11 +10,7 @@
 #   commit_extra - like commit, but also edits and commits an unrelated
 #                  file (used to test the diff-scope gate)
 #   commit_other - edits and commits a different file (other.txt) instead
-#                  of content.txt, leaving content.txt untouched (used to
-#                  test the required-files-changed gate)
-#   commit_with_marker - like commit, but content.txt's new line includes
-#                  the fixed string REQUIRED_MARKER_STRING (used to test
-#                  the required-content-present gate's passing case)
+#                  of content.txt, leaving content.txt untouched
 #   rewind_and_commit - resets the workspace back to its root commit
 #                  (discarding whatever commits led up to base_sha) and
 #                  commits a new file from there, simulating a harness
@@ -41,7 +37,6 @@ max_rounds=""
 timeout_minutes=""
 review_base_sha=""
 verify_command=""
-reference_oracle_command=""
 baseline_failure=""
 
 while [ $# -gt 0 ]; do
@@ -52,7 +47,6 @@ while [ $# -gt 0 ]; do
 	--timeout-minutes) timeout_minutes="$2"; shift 2 ;;
 	--review-base-sha) review_base_sha="$2"; shift 2 ;;
 	--verify-command) verify_command="$2"; shift 2 ;;
-	--reference-oracle-command) reference_oracle_command="$2"; shift 2 ;;
 	--baseline-failure) baseline_failure="$2"; shift 2 ;;
 	--harness) shift 2 ;;
 	*) echo "fake_build_app: unrecognized arg $1" >&2; exit 2 ;;
@@ -70,7 +64,6 @@ for name_val in "workspace:$workspace" "spec:$spec" \
 done
 
 echo "fake_build_app: mode=${FAKE_BUILD_APP_MODE:-unset} workspace=$workspace review_base_sha=$review_base_sha verify_command=$verify_command"
-echo "fake_build_app: reference_oracle_command=$reference_oracle_command"
 if [ -n "$baseline_failure" ]; then
 	echo "fake_build_app: baseline_failure=$(tr '\n' '|' <"$baseline_failure")"
 fi
@@ -148,7 +141,7 @@ if [ "${FAKE_BUILD_APP_MODE:-}" != "commit_other" ]; then
 fi
 
 # $FAKE_PLANT_FILE: also writes agent-authored bytes at that workspace path
-# (an agent squatting on an approved oracle target_path).
+# (an agent squatting on a path the factory host will commit to).
 if [ -n "${FAKE_PLANT_FILE:-}" ]; then
 	mkdir -p "$(dirname "$FAKE_PLANT_FILE")"
 	printf 'package mood\n\n// planted by the agent\n' >"$FAKE_PLANT_FILE"
@@ -164,10 +157,6 @@ fi
 # AGENTS.md (an agent editing the section a memory change owns).
 if [ -n "${FAKE_FENCE_LINE:-}" ]; then
 	awk -v line="$FAKE_FENCE_LINE" '/^<!-- buildgate:memory:end -->$/ { print line } { print }' AGENTS.md >AGENTS.md.tmp && mv AGENTS.md.tmp AGENTS.md
-fi
-
-if [ "${FAKE_BUILD_APP_MODE:-}" = "commit_with_marker" ]; then
-	echo "REQUIRED_MARKER_STRING" >>content.txt
 fi
 
 if [ "${FAKE_BUILD_APP_MODE:-}" = "rewind_and_commit" ]; then
@@ -210,7 +199,7 @@ if [ "${FAKE_BUILD_APP_MODE:-}" = "lockfile" ]; then
 	printf 'packages: {}\n' >frontend/pubspec.lock
 fi
 
-if [ "${FAKE_BUILD_APP_MODE:-}" = "commit" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "commit_extra" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "commit_other" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "commit_with_marker" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "infra_once" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "lockfile" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "tamper_spec_and_commit_extra" ]; then
+if [ "${FAKE_BUILD_APP_MODE:-}" = "commit" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "commit_extra" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "commit_other" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "infra_once" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "lockfile" ] || [ "${FAKE_BUILD_APP_MODE:-}" = "tamper_spec_and_commit_extra" ]; then
 	git add -A
 	git commit -q -m "agent commit"
 fi

@@ -521,46 +521,6 @@ class PiAdapter:
 		except Exception:
 			return None
 
-	def line_event(self, line: str) -> dict | None:
-		"""One streamed stdout line as the harness-neutral facts a bounded
-		streaming digest needs (see draft_acceptance_oracles.AgentDigest):
-		`stream_reset`/`stream_delta` (text being streamed), `turn` (an
-		assistant turn ended), `failed`, `error`, `text` (the turn's full
-		text; "" clears it) and `usage`. None for a line that carries none."""
-		try:
-			event = json.loads(line)
-		except (json.JSONDecodeError, RecursionError):
-			return None
-		if not isinstance(event, dict):
-			return None
-		kind = event.get("type")
-		if kind == "message_start":
-			return {"stream_reset": True}
-		if kind == "message_update":
-			delta = event.get("assistantMessageEvent")
-			if isinstance(delta, dict) and isinstance(delta.get("delta"), str):
-				return {"stream_delta": delta["delta"]}
-			return None
-		if kind == "agent_end":
-			return {"usage": parse_usage(line)}
-		if kind != "message_end":
-			return None
-		message = event.get("message")
-		if not isinstance(message, dict) or message.get("role") != "assistant":
-			return None
-		out: dict = {"turn": True}
-		if message.get("stopReason") == "error":
-			out["failed"] = True
-			out["error"] = str(message.get("errorMessage") or "stopReason=error")
-		content = message.get("content")
-		if isinstance(content, list):
-			texts = [c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str)]
-			if texts:
-				out["text"] = "\n".join(texts)
-		elif isinstance(content, str):
-			out["text"] = content
-		return out
-
 
 class PiforkAdapter(PiAdapter):
 	"""A fork of Pi packaged into the operator's own worker image: the same
@@ -828,31 +788,6 @@ class CodexAdapter:
 			usage=usage or None,
 		)
 
-	def line_event(self, line: str) -> dict | None:
-		try:
-			event = json.loads(line)
-		except (json.JSONDecodeError, RecursionError):
-			return None
-		if not isinstance(event, dict):
-			return None
-		kind = event.get("type")
-		if kind == "turn.completed":
-			out: dict = {"turn": True}
-			usage = _codex_usage(event.get("usage"))
-			if usage:
-				out["usage"] = usage
-			return out
-		if kind in ("error", "turn.failed"):
-			message = event.get("message") if kind == "error" else (event.get("error") or {}).get("message")
-			out = {"turn": True, "failed": True, "text": ""} if kind == "turn.failed" else {}
-			if isinstance(message, str) and message:
-				out["error"] = message
-			return out or None
-		item = event.get("item")
-		if kind == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message" and isinstance(item.get("text"), str):
-			return {"text": item["text"]}
-		return None
-
 	def progress_note(self, line: str) -> str | None:
 		try:
 			event = json.loads(line)
@@ -1037,28 +972,6 @@ class CopilotAdapter:
 			turn_errors=(failed, total),
 			usage=None,  # the CLI reports no token counts; the relay ledger is authoritative
 		)
-
-	def line_event(self, line: str) -> dict | None:
-		try:
-			event = json.loads(line)
-		except (json.JSONDecodeError, RecursionError):
-			return None
-		if not isinstance(event, dict):
-			return None
-		kind = event.get("type")
-		data = event.get("data") if isinstance(event.get("data"), dict) else {}
-		if kind == "assistant.message":
-			content = data.get("content")
-			return {"text": content} if isinstance(content, str) and content.strip() else None
-		if kind == "model.call_finished":
-			if data.get("outcome") == "success":
-				return {"turn": True}
-			return {"turn": True, "failed": True, "text": ""}
-		if kind in ("model.call_failure", "session.error"):
-			message = data.get("errorMessage") if kind == "model.call_failure" else data.get("message")
-			if isinstance(message, str) and message.strip().strip('"'):
-				return {"error": message.strip().strip('"')}
-		return None
 
 	def progress_note(self, line: str) -> str | None:
 		try:

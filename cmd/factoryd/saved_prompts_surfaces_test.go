@@ -52,7 +52,7 @@ func TestASavedBuildPromptReachesOnlyTheOperatorsReaders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(t, dataDir, runID, "factoryd/"+runID, strings.Repeat("1", 40), strings.Repeat("2", 40), "repo-lint")
 	rr.Project = "prompts-project"
 	if err := rr.Save(dataDir); err != nil {
 		t.Fatal(err)

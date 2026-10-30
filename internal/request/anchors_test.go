@@ -144,7 +144,7 @@ func TestRejectAnchoredNeedsAnAnchorOrANote(t *testing.T) {
 func TestRejectWithoutAnchorsRecordsNoAnchorFields(t *testing.T) {
 	dataDir := t.TempDir()
 	newApprovableRequest(t, dataDir, "req-1", StateSpecReview, false)
-	r, err := Reject(dataDir, "req-1", "bob", "plain", fixedNow)
+	r, err := RejectAnchored(dataDir, "req-1", "bob", "plain", nil, fixedNow)
 	if err != nil {
 		t.Fatal(err)
 	}

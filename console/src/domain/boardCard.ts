@@ -51,7 +51,6 @@ export interface CardFacts {
 
 const ASKS: Readonly<Record<string, string>> = {
   spec_review: "Review the drafted spec.",
-  oracle_review: "Review the drafted acceptance tests.",
   plan_review: "Review the drafted tickets.",
   resume_review: "Decide how to resume the step a lost worker left.",
   pr_review: "Review and merge its pull requests.",

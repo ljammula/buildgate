@@ -42,6 +42,37 @@ import (
 // adviceRoundName names an advice round in logs and push reasons.
 const adviceRoundName = "advice round"
 
+// roundFlavor is what differs between the rounds that follow an accepted run
+// on its open pull request's branch and share the push, comment and restore
+// rules (SC-022): the advice round and the challenge round.
+type roundFlavor struct {
+	name string
+	kind string
+	tag  string
+	// comment is the one PR comment after a confirmed push.
+	comment func(current, round *run.Run) string
+	// replaces, when set, decides whether an accepted round's result replaces
+	// current: a challenge round's only when its challenge is green.
+	replaces func(round *run.Run) bool
+	// declined, when set, is the PR comment for a round whose result was not
+	// pushed (current stands): "" posts nothing.
+	declined func(dataDir string, current, round *run.Run) string
+	// pushFailureEndsRound, when set, makes a push or read-back that failed
+	// once sent end the round as no verdict, with a note, instead of halting
+	// the request: a challenge never halts (SC-022).
+	pushFailureEndsRound bool
+}
+
+var adviceFlavor = roundFlavor{name: adviceRoundName, kind: request.AdviceRoundKind, tag: request.RoundTagAdvice, comment: adviceComment}
+
+// flavorOf is the flavor of the round left in flight on a ticket.
+func flavorOf(adv *request.TicketAdvice) roundFlavor {
+	if adv != nil && adv.Challenge {
+		return challengeFlavor
+	}
+	return adviceFlavor
+}
+
 // adviceStart is the sentence an advice round's record opens with: where the
 // build starts, and that the attempt it follows was accepted.
 const adviceStart = startsOnItsBranch + " That attempt was accepted: what follows is not a failure but a reviewer's concerns about it."
@@ -77,10 +108,20 @@ func adviceRoundApplies(ticket *request.Ticket, current *run.Run, cfg WorkerConf
 // request and branch recorded are accepted's: the rounds build on that
 // branch and open nothing.
 func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, accepted *run.Run, cfg WorkerConfig, now time.Time) error {
-	if cfg.Settings.ReviewAdviceRounds > 0 && accepted.PullRequestURL != "" {
+	noteChallenge(ticket, accepted)
+	if (cfg.Settings.ReviewAdviceRounds > 0 || challengeRoundApplies(ticket, accepted, cfg)) && accepted.PullRequestURL != "" {
 		// The rounds push to the run's open pull request: the ticket records
 		// it before the first, as acceptTicketRun would.
 		ticket.Branch, ticket.PRURL = accepted.Branch, accepted.PullRequestURL
+	}
+	if challengeRoundApplies(ticket, accepted, cfg) {
+		pushed, stop, err := runChallengeRound(dp, ctx, dataDir, r, ticket, accepted, cfg, now)
+		if stop {
+			return err
+		}
+		if pushed != nil {
+			accepted, now = pushed, time.Now()
+		}
 	}
 	if _, stop, err := runAdviceRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
 		return err
@@ -134,7 +175,7 @@ func runAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Req
 	if stop {
 		return nil, true, err
 	}
-	return concludeAdviceRound(dp, ctx, dataDir, r, ticket, current, launched, time.Now())
+	return concludeAdviceRound(dp, ctx, dataDir, r, ticket, current, launched, adviceFlavor, time.Now())
 }
 
 // adviceBudgetRefusal is why an advice round after current may not launch,
@@ -167,7 +208,7 @@ func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket,
 	if err != nil {
 		return nil, fmt.Errorf("build spec: %w", err)
 	}
-	argv, err := correctiveBuildArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, current.DiffBase(), true)
+	argv, err := correctiveBuildArgs(dataDir, r, *ticket, cfg, buildSpecPath, roundRunID, current.Branch, current.DiffBase(), true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -187,22 +228,38 @@ func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket,
 // caller's next save records the round with the ticket's next step, and
 // until then the round stays in flight on disk, so a pass that is lost in
 // between settles it again (a repeated push of the same commit is a no-op).
-func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, now time.Time) (pushed *run.Run, stop bool, err error) {
-	slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, now)
+func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, fl roundFlavor, now time.Time) (pushed *run.Run, stop bool, err error) {
+	slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, fl, now)
 	if ended.outcome != request.RoundAccepted {
-		log.Printf("request %s: ticket %d/%d: advice round %s %s; run %s stands", r.ID, ticket.Index, r.TicketCount, ended.loadID, ended.outcome, current.ID)
+		log.Printf("request %s: ticket %d/%d: %s %s %s; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, ended.loadID, ended.outcome, current.ID)
+		if fl.declined != nil {
+			roundRun, _ := run.Load(dataDir, ended.loadID)
+			commentDeclined(dp, ctx, dataDir, r, ticket, fl, current, roundRun)
+		}
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
 		return nil, stop, err
 	}
 	roundRun, err := run.Load(dataDir, ended.loadID)
+	if err == nil && fl.replaces != nil && !fl.replaces(roundRun) {
+		ticket.Rounds[slice].Error = "the round was accepted but its challenge is not green"
+		log.Printf("request %s: ticket %d/%d: %s %s accepted without a green challenge; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, roundRun.ID, current.ID)
+		commentDeclined(dp, ctx, dataDir, r, ticket, fl, current, roundRun)
+		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
+		return nil, stop, err
+	}
 	if err != nil {
 		ticket.Rounds[slice].Error = fmt.Sprintf("load the round's run: %v", err)
 		log.Printf("request %s: ticket %d/%d: advice round %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, ended.loadID, ticket.Rounds[slice].Error, current.ID)
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
 		return nil, stop, err
 	}
-	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, adviceRoundName)
+	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, fl.name)
 	switch {
+	case failed != "" && fl.pushFailureEndsRound:
+		ticket.Rounds[slice].Error = "no verdict: " + failed
+		log.Printf("request %s: ticket %d/%d: %s %s: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, fl.name, roundRun.ID, failed, current.ID)
+		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
+		return nil, stop, err
 	case failed != "":
 		return nil, true, HaltRequest(dataDir, r, failed, now)
 	case refused != "":
@@ -216,7 +273,7 @@ func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *reques
 	log.Printf("request %s: ticket %d/%d: advice round %s accepted and pushed to %s as %s", r.ID, ticket.Index, r.TicketCount, roundRun.ID, current.Branch, roundRun.ResultSHA)
 	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, adviceComment(current, roundRun)); err != nil {
+	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, fl.comment(current, roundRun)); err != nil {
 		log.Printf("request %s: ticket %d: comment on %s about advice round %s: %v", r.ID, ticket.Index, ticket.PRURL, roundRun.ID, err)
 	}
 	return roundRun, false, nil
@@ -226,15 +283,15 @@ func concludeAdviceRound(dp Deps, ctx context.Context, dataDir string, r *reques
 // as ended, on ticket, ends it in flight, makes current the ticket's run
 // again and tags the round's commit; it returns the round's index in
 // ticket.Rounds.
-func recordAdviceRound(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, now time.Time) int {
+func recordAdviceRound(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, ended correctiveLaunch, fl roundFlavor, now time.Time) int {
 	ticket.Advice = nil
 	ticket.RunID = current.ID
 	ticket.Rounds = append(ticket.Rounds, request.Round{
-		Index: ticket.NextRoundIndex(), Kind: request.AdviceRoundKind, RunID: ended.loadID, Outcome: ended.outcome,
+		Index: ticket.NextRoundIndex(), Kind: fl.kind, RunID: ended.loadID, Outcome: ended.outcome,
 		StartFailure: ended.startFailure, Unresolved: ended.unresolved, Error: ended.errText,
 		At: now.UTC().Format(time.RFC3339Nano),
 	})
-	tagRoundByID(dp, dataDir, r, ticket, ended.loadID, request.RoundTagAdvice, now)
+	tagRoundByID(dp, dataDir, r, ticket, ended.loadID, fl.tag, now)
 	return len(ticket.Rounds) - 1
 }
 
@@ -330,11 +387,15 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	if err := ClearKeptRunsOfRequest(dataDir, r.ID); err != nil {
 		log.Printf("request %s: ticket %d: discard the advice round's kept worktree: %v", r.ID, ticket.Index, err)
 	}
-	pushed, stop, err := concludeAdviceRound(dp, ctx, dataDir, r, ticket, current, ended, now)
+	fl := flavorOf(ticket.Advice)
+	pushed, stop, err := concludeAdviceRound(dp, ctx, dataDir, r, ticket, current, ended, fl, now)
 	if stop {
 		return err
 	}
 	last := current
+	if pushed == nil && fl.kind == request.ChallengeRoundKind {
+		pushed = current
+	}
 	if pushed != nil {
 		if last, stop, err = runAdviceRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
 			return err
@@ -403,7 +464,7 @@ func abandonInFlightAdvice(dp Deps, dataDir string, r *request.Request, now time
 			return false, fmt.Errorf("request %s: ticket %d: %w", r.ID, ticket.Index, wait)
 		}
 		log.Printf("request %s: ticket %d: the advice round left in flight (run %s, %s) is recorded as not pushed; run %s stands", r.ID, ticket.Index, ended.loadID, ended.outcome, current.ID)
-		slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, now)
+		slice := recordAdviceRound(dp, dataDir, r, ticket, current, ended, flavorOf(ticket.Advice), now)
 		ticket.Rounds[slice].Error = strings.TrimPrefix(ticket.Rounds[slice].Error+"; the request left building before the advice round was settled, so nothing was pushed", "; ")
 		if stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now); stop {
 			return true, err

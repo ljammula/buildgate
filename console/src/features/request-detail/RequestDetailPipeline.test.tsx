@@ -63,13 +63,6 @@ describe("the pipeline stepper", () => {
     expect(status("planning")).toBe("pending");
   });
 
-  test("shows a -draft-oracles request its oracle steps before it reaches them", async () => {
-    openRequest(requestWire({ state: "spec_review", title: "Oracles ahead", draft_oracles: true }));
-    await screen.findByRole("heading", { level: 1, name: "Oracles ahead" });
-    expect(step("oracle_review")).toBeInTheDocument();
-    expect(status("oracle_review")).toBe("pending");
-  });
-
   test("marks accepted-awaiting-PR as needs-you, not failed, and survives a very long reason", async () => {
     openRequest(
       requestWire({
@@ -95,45 +88,6 @@ describe("the pipeline stepper", () => {
     );
     await screen.findByRole("heading", { level: 1, name: "Accepted" });
     expect(status("pr_review")).toBe("needsYou");
-  });
-
-  test("hides the opt-in oracle steps entirely unless the request actually visited one", async () => {
-    const pump = async (state: string, history: string[]) => {
-      const view = openRequest(
-        requestWire({
-          state,
-          title: "Oracle stage",
-          history: history.slice(0, -1).map((from, i) =>
-            historyWire({
-              from,
-              to: history[i + 1] ?? "",
-              at: `2026-09-19T09:0${i}:00Z`,
-              by: "factory",
-            }),
-          ),
-        }),
-      );
-      await screen.findByRole("heading", { level: 1, name: "Oracle stage" });
-      return view;
-    };
-
-    // Flag-less and still before planning: not rendered at all.
-    let view = await pump("spec_review", ["spec_drafting", "spec_review"]);
-    expect(screen.queryByTestId("pipeline-step-oracle_review")).not.toBeInTheDocument();
-    view.unmount();
-
-    // Flag-less and past the oracle stage: hidden entirely.
-    view = await pump("planning", ["spec_review", "planning"]);
-    for (const name of ["oracle_drafting", "oracle_review"]) {
-      expect(screen.queryByTestId(`pipeline-step-${name}`)).not.toBeInTheDocument();
-    }
-    view.unmount();
-
-    // oracle_review: labelled, current, the drafting step before it done.
-    await pump("oracle_review", ["spec_review", "oracle_drafting", "oracle_review"]);
-    expect(within(step("oracle_drafting")).getByText("Oracle drafting")).toBeInTheDocument();
-    expect(status("oracle_review")).toBe("current");
-    expect(status("oracle_drafting")).toBe("done");
   });
 
   test("lists every step in order, one row each, with 'Done' last", async () => {

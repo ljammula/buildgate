@@ -108,6 +108,8 @@ export interface RequestTicket {
   readonly advice: TicketAdvice | null;
   /** The advice rounds that have ended on this ticket, oldest first. */
   readonly adviceRounds: readonly ReviewRound[];
+  /** The challenge round that ended on this ticket (at most one), oldest first. */
+  readonly challengeRounds: readonly ReviewRound[];
   /** The round ledger: every build round that ended in a commit, oldest first. */
   readonly roundTags: readonly RoundTag[];
   /** The planner's declared `Estimated-Changed-Lines`; 0 when the ticket declares none. */
@@ -147,7 +149,7 @@ export interface RoundTag {
   /** The round number, per ticket, from 1. */
   readonly n: number;
   readonly runId: string;
-  /** "build", "corrective", "conformity", "pr_review", "restack" or "advice"; server-owned, so a string. */
+  /** "build", "corrective", "conformity", "pr_review", "restack", "advice" or "challenge"; server-owned, so a string. */
   readonly kind: string;
   readonly sha: string;
   readonly ref: string;
@@ -225,10 +227,13 @@ export function decodeRequestTicket(o: JsonObject, at: string): RequestTicket {
   return {
     // A round with another kind is a corrective round before any pull
     // request exists (the build's business, not the review's), a restack,
-    // or an advice round.
+    // an advice round or a challenge round.
     reviewRounds: rounds.filter((entry) => entry.kind === "").map((entry) => entry.round),
     restackRounds: rounds.filter((entry) => entry.kind === "restack").map((entry) => entry.round),
     adviceRounds: rounds.filter((entry) => entry.kind === "advice").map((entry) => entry.round),
+    challengeRounds: rounds
+      .filter((entry) => entry.kind === "challenge")
+      .map((entry) => entry.round),
     advice: optObject(o, "advice", at, (a, aAt) => ({
       of: optString(a, "of", aAt),
       runId: optString(a, "run_id", aAt),
@@ -559,30 +564,6 @@ function decodeRequestTransition(o: JsonObject, at: string): RequestTransition {
 }
 
 /**
- * One criterion's eligibility verdict from `oracle_draft.criteria` (found
- * via a console operator walkthrough): parallels
- * `internal/request.OracleDraftCriterion`, one line per acceptance
- * criterion the drafter judged, whether or not it ended up covered by an
- * oracle file. Surfaced so a `none_eligible`/`drafted` outcome comes with a
- * receipt ("why wasn't criterion 3 testable") instead of only the drafter's
- * own free-text summary.
- */
-export interface OracleDraftCriterion {
-  readonly number: number;
-  readonly eligible: boolean;
-  readonly reason: string;
-}
-
-function decodeOracleDraftCriterion(o: JsonObject, at: string): OracleDraftCriterion {
-  const number = optNumber(o, "number", at);
-  return {
-    number: number === null ? 0 : Math.trunc(number),
-    eligible: optBoolean(o, "eligible", at),
-    reason: optString(o, "reason", at),
-  };
-}
-
-/**
  * internal/request.ResumeInfo: the step a lost worker left behind. `refused`
  * is why a resume of a lost build was refused; while it is non-empty only
  * "rebuild from scratch" or cancel are possible.
@@ -678,13 +659,6 @@ export interface RequestSummary {
   readonly workspace: string;
   readonly project: string;
   readonly state: string;
-  readonly oracleDraftStatus: string;
-  readonly oracleDraftDetail: string;
-  /**
-   * Set by the server when oracle_review was approved with no oracle files
-   * after a draft that was not a deliberate none_eligible.
-   */
-  readonly oracleSkipWarning: string;
   /**
    * The factory's notes on what the review gate shows (spec_review,
    * plan_review). Advice from its reading of the text: nothing depends on them.
@@ -754,7 +728,6 @@ export interface RequestSummary {
   readonly costSummary: CostSummary | null;
   /** Empty for a request predating the field or never moved out of its initial state. */
   readonly history: readonly RequestTransition[];
-  readonly oracleDraftCriteria: readonly OracleDraftCriterion[];
   /**
    * The single factory-authored next step. Empty on a server predating the
    * field, in which case callers fall back to their own next-step copy.
@@ -767,11 +740,6 @@ export interface RequestSummary {
    */
   readonly approveNextState: string;
   /**
-   * Submitted with `-draft-oracles`: the oracle stages are part of this
-   * request's pipeline from the start.
-   */
-  readonly draftOracles: boolean;
-  /**
    * Submitted with `-plan-review` (or the `plan_review` session key): the
    * request waits at plan review even when its plan is one ticket.
    */
@@ -782,8 +750,7 @@ export interface RequestSummary {
    */
   readonly canSendBack: boolean;
   /**
-   * canSendBack narrowed to the "plan" target (an approved spec, and no
-   * oracle stage skipped): the send-back dialog defaults to "spec" and
+   * canSendBack narrowed to the "plan" target (an approved spec): the send-back dialog defaults to "spec" and
    * disables "plan" when false.
    */
   readonly canSendBackToPlan: boolean;
@@ -857,26 +824,6 @@ function decodeInspection(o: JsonObject, at: string): Inspection {
   };
 }
 
-/**
- * oracle_draft is parsed tolerantly: anything that is not an object with
- * string fields reads as absent rather than throwing.
- */
-function oracleDraftField(raw: unknown, key: string): string {
-  if (!isObject(raw)) return "";
-  const value = raw[key];
-  return typeof value === "string" ? value : "";
-}
-
-function oracleDraftCriteria(raw: unknown, at: string): OracleDraftCriterion[] {
-  const list = isObject(raw) ? raw.criteria : null;
-  if (!Array.isArray(list)) return [];
-  const out: OracleDraftCriterion[] = [];
-  list.forEach((entry: unknown, index) => {
-    if (isObject(entry)) out.push(decodeOracleDraftCriterion(entry, `${at}[${index}]`));
-  });
-  return out;
-}
-
 function sourceKindOf(raw: unknown, at: string): string {
   return isObject(raw) ? optString(raw, "kind", at) : "";
 }
@@ -887,8 +834,6 @@ export function isMemoryRequest(request: Pick<RequestSummary, "sourceKind">): bo
 }
 
 export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary {
-  const oracleDraft = o.oracle_draft;
-  const skipWarning = o.oracle_skip_warning;
   const activeJob = o.active_job;
   return {
     id: reqString(o, "id", at),
@@ -921,18 +866,13 @@ export function decodeRequestSummary(o: JsonObject, at: string): RequestSummary 
     edits: objectList(o, "edits", at, decodeRequestEdit),
     costSummary: optObject(o, "cost_summary", at, decodeCostSummary),
     history: objectList(o, "history", at, decodeRequestTransition),
-    oracleDraftStatus: oracleDraftField(oracleDraft, "status"),
-    oracleDraftDetail: oracleDraftField(oracleDraft, "detail"),
-    oracleSkipWarning: typeof skipWarning === "string" ? skipWarning : "",
     reviewNotes: stringList(o, "review_notes", at),
     planBudgetLines: numberOr(o, "plan_budget_lines", at, 0),
     activeJob: isObject(activeJob) ? decodeActiveJob(activeJob, `${at}.active_job`) : null,
-    oracleDraftCriteria: oracleDraftCriteria(oracleDraft, `${at}.oracle_draft.criteria`),
     nextAction: optString(o, "next_action", at),
     canSendBack: optBoolean(o, "can_send_back", at),
     canSendBackToPlan: optBoolean(o, "can_send_back_to_plan", at),
     approveNextState: optString(o, "approve_next_state", at),
-    draftOracles: optBoolean(o, "draft_oracles", at),
     planReview: optBoolean(o, "plan_review", at),
     wait: optObject(o, "wait", at, decodeRequestWait),
     quarantineCheck: stringOrNull(o, "quarantine_check", at),

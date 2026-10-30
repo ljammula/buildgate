@@ -2,35 +2,111 @@ package reproduction
 
 import (
 	"bytes"
+	"errors"
 	"sort"
 
 	"buildgate/internal/sandbox"
 )
 
-// CheckChangedTest decides whether one test file a change added or changed
-// can be run by the tests_red_on_base proof: a clean relative path outside
-// .factory/ and .git, a non-empty text file within MaxContentBytes, one
-// runner that applies to it in a repository whose root holds root, and
-// between one and MaxTestIDs test IDs. The path is already a test file of
+// MaxHeldBytes caps the host copy of a changed test file the factory holds
+// and mounts: a file the base commit already holds has no other size cap.
+const MaxHeldBytes = 4 << 20
+
+// The reasons a changed test file is not run or judged. Each is a fixed
+// sentence, read from what the factory observed; it is recorded on the run and
+// named in the pull request's note. A refusal is never a verdict on the change.
+var (
+	errUnreadable   = errors.New("it is empty, binary or could not be read at the result commit")
+	errHeldTooLarge = errors.New("it is over the 4 MiB the factory holds")
+	errAddedTooBig  = errors.New("it is a new file over the 32 KiB cap on a new test file")
+	errAddedTooMany = errors.New("it is a new file with more test IDs than the cap of 20 on a new test file")
+	errParse        = errors.New("the runner's host parse of it failed")
+	errNoTests      = errors.New("the runner reads no test ID in it")
+	errNoJudged     = errors.New("the change adds or changes no test of it (its changes lie outside any test)")
+)
+
+// ChangedTest is one test file of a change: its path, its content at the
+// result commit and at the base commit (Base is nil when the base commit lacks
+// the file), the lines the change touched in it (Changes, from the diff of the
+// two), and the root files of the result commit that select a runner.
+type ChangedTest struct {
+	Path    string
+	Result  []byte
+	Base    []byte
+	Changes LineChanges
+	Root    RootFacts
+}
+
+// JudgeChangedTest decides which tests of one test file a change added or
+// changed the tests_red_on_base proof can run and judge: a clean relative path
+// outside .factory/ and .git, a non-empty text file, one runner that applies to
+// it in a repository whose root holds Root. The path is already a test file of
 // the change, so the reviewer-only rules (spec citation, tracked path,
-// protected path) do not apply. A refusal means the file is not run; it is
-// never a verdict on the change.
-func CheckChangedTest(p string, content []byte, root RootFacts) (Accepted, error) {
-	if !cleanRelative(p) || reserved(sandbox.FoldPath(p)) {
+// protected path) do not apply.
+//
+// The judged test IDs are the change's own: an ID the result copy holds and the
+// base copy does not (or all of them for a file the base lacks), and one whose
+// span in the result copy holds a line the change added or rewrote, or from
+// which it removed lines. Every other test of the file is not judged. A file
+// the base commit holds has no size or test-count cap (MaxHeldBytes aside); a
+// new file keeps MaxContentBytes and MaxTestIDs. The error is the reason the
+// file is not run or judged.
+func JudgeChangedTest(c ChangedTest) (Accepted, error) {
+	if !cleanRelative(c.Path) || reserved(sandbox.FoldPath(c.Path)) {
 		return Accepted{}, errPathShape
 	}
-	if len(content) == 0 || len(content) > MaxContentBytes || bytes.IndexByte(content, 0) >= 0 {
-		return Accepted{}, errContent
+	if len(c.Result) == 0 || bytes.IndexByte(c.Result, 0) >= 0 {
+		return Accepted{}, errUnreadable
 	}
-	r, ok := For(p, root)
+	added := len(c.Base) == 0
+	switch {
+	case added && len(c.Result) > MaxContentBytes:
+		return Accepted{}, errAddedTooBig
+	case len(c.Result) > MaxHeldBytes:
+		return Accepted{}, errHeldTooLarge
+	}
+	r, ok := For(c.Path, c.Root)
 	if !ok {
 		return Accepted{}, errNoRunner
 	}
-	ids, err := r.TestIDs(p, content)
-	if err != nil || len(ids) == 0 || len(ids) > MaxTestIDs {
-		return Accepted{}, errTestIDs
+	spans, err := r.Tests(c.Path, c.Result)
+	if err != nil {
+		return Accepted{}, errParse
 	}
-	return Accepted{Path: p, Runner: r.ID(), TestIDs: ids}, nil
+	if len(spans) == 0 {
+		return Accepted{}, errNoTests
+	}
+	var baseIDs map[string]bool
+	if !added {
+		if baseSpans, err := r.Tests(c.Path, c.Base); err == nil {
+			baseIDs = map[string]bool{}
+			for _, id := range spanIDs(baseSpans) {
+				baseIDs[id] = true
+			}
+		}
+	}
+	var judged []string
+	for _, s := range spans {
+		if added || (baseIDs != nil && !baseIDs[s.ID]) || c.Changes.touches(s) {
+			judged = append(judged, s.ID)
+		}
+	}
+	switch {
+	case len(judged) == 0:
+		return Accepted{}, errNoJudged
+	case added && len(judged) > MaxTestIDs:
+		return Accepted{}, errAddedTooMany
+	}
+	return Accepted{Path: c.Path, Runner: r.ID(), TestIDs: judged}, nil
+}
+
+// spanIDs are the IDs of spans, in order.
+func spanIDs(spans []TestSpan) []string {
+	ids := make([]string, len(spans))
+	for i, s := range spans {
+		ids[i] = s.ID
+	}
+	return ids
 }
 
 // FileRuns is the factory's launches of one changed test file: its test IDs

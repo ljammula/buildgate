@@ -1,0 +1,28 @@
+import pytest
+
+def helper():
+    return 1
+
+@pytest.mark.slow
+def test_top(n):
+    """doc
+    def test_in_docstring():
+    still the docstring
+"""
+    def inner():
+        pass
+
+    # a comment between statements
+    assert helper() == 1
+
+
+class TestGroup:
+    def test_one(self):
+        assert True
+
+    @pytest.mark.slow
+    def test_two(self):
+        assert True
+        assert True
+
+def test_last(): pass

@@ -19,7 +19,7 @@ const requestJobScriptTimeoutSlack = 90 * time.Second
 // function. hasRelay/hasRegistryProxy/composeReadyTimeout are
 // sandboxAttemptMargin's own parameters (sandbox_exec.go): every drafting
 // job passes (true, false, 0) since a relay is mandatory
-// (resolveRequestJobRelaySpec/resolveOracleRelaySpec both refuse to run
+// (resolveRequestJobRelaySpec refuses to run
 // without one) and none of the three configures a registry proxy or
 // compose services.
 //

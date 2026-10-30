@@ -25,7 +25,7 @@ func waitingAt(t *testing.T, state request.State, waited time.Duration) (dataDir
 }
 
 func TestExpireIfDueHaltsAReviewPastItsExpiry(t *testing.T) {
-	for _, state := range []request.State{request.StateSpecReview, request.StateOracleReview, request.StatePlanReview} {
+	for _, state := range []request.State{request.StateSpecReview, request.StatePlanReview} {
 		dataDir, id := waitingAt(t, state, 3*time.Hour)
 		expired, err := requestdriver.ExpireIfDue(dataDir, id, 2*time.Hour, time.Now())
 		if err != nil || !expired {

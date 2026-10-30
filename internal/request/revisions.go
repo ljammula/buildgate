@@ -34,10 +34,9 @@ type Revision struct {
 	Files     []string `json:"files"`
 	// FeedbackSupplied records whether Reason was actually fed back to the
 	// redrafting pass that followed this rejection -- true for every
-	// spec_review/oracle_review/plan_review rejection, since Reject only
-	// snapshots a revision for those three states and each one's reason
-	// now reaches its own stage's drafter (SpecFeedback/OracleFeedback/
-	// PlanFeedback). Recorded explicitly, not left implicit, so an
+	// spec_review/plan_review rejection, since Reject only
+	// snapshots a revision for those two states and each one's reason
+	// now reaches its own stage's drafter (SpecFeedback/PlanFeedback). Recorded explicitly, not left implicit, so an
 	// operator reviewing an older revision (snapshotted before this field
 	// existed, so it decodes as false) can tell a redraft that never saw
 	// their note apart from one that did.
@@ -156,7 +155,7 @@ func SnapshotRevision(dataDir, id, by, reason string, fromState State, relPaths 
 		Files:     files,
 		// See Revision.FeedbackSupplied's own doc comment: true for every
 		// state Reject actually snapshots a revision from.
-		FeedbackSupplied: fromState == StateSpecReview || fromState == StateOracleReview || fromState == StatePlanReview,
+		FeedbackSupplied: fromState == StateSpecReview || fromState == StatePlanReview,
 	}
 	if err := writeRevisionMeta(id, dir, meta); err != nil {
 		return 0, err

@@ -66,10 +66,10 @@ const (
 	// in that time), so nothing could be learned of the step's workflow.
 	// A shorter stall is ridden out and is not one.
 	TemporalUnreachable Cause = "temporal_unreachable"
-	// ReproductionUnheld: the factory could not hold a reviewer's
-	// reproduction it had accepted (SC-022): its host copy could not be
-	// written, its hash no longer matched before a launch, or the launch
-	// refused its read-only mount. The reproduction was never judged.
+	// ReproductionUnheld: the factory could not hold a test file it had
+	// accepted (SC-022): its host copy could not be written, its hash no
+	// longer matched before a launch, or the launch refused its read-only
+	// mount. The file was never judged.
 	ReproductionUnheld Cause = "reproduction_unheld"
 	// RouteCredential: the step's model route had no credential the factory
 	// could use: it could not be read from its source on the host (a missing
@@ -95,7 +95,7 @@ var causes = map[Cause]string{
 	DraftingJob:      "the job of the %s step ended before it produced a draft, so there is nothing to review",
 
 	TemporalUnreachable: "factoryd lost contact with the Temporal server while the %s step ran",
-	ReproductionUnheld:  "the factory could not hold or mount the reviewer's reproduction for the %s step",
+	ReproductionUnheld:  "the factory could not hold or mount a test file it holds for the %s step",
 	RouteCredential:     "the model route's credential was missing or expired too soon for the %s step, so the work was not judged; refresh it first (a chatgpt-codex route: `codex login` on the host)",
 }
 

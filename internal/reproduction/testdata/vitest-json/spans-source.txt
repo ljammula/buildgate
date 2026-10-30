@@ -1,0 +1,16 @@
+import { describe, it, expect } from 'vitest'
+
+describe('outer', () => {
+  it('first', () => {
+    expect(f(1)).toBe(2)
+  })
+
+  describe('inner', () => {
+    it('deep', async () => {
+      // it('commented', () => {})
+      expect(`}`).toBe("(")
+    })
+  })
+})
+
+it('top', () => {})

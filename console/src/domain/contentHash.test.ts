@@ -1,7 +1,6 @@
 import { type JsonObject, asObject } from "@/domain/decode";
 import {
   expectedSha256For,
-  oracleExpectedSha256,
   readBackAnswersKey,
   readBackAnswersSha256,
   sha256Hex,
@@ -39,20 +38,12 @@ test("sha256Hex matches a known SHA-256 digest", () => {
   );
 });
 
-test("sha256HexBytes hashes raw bytes, not decoded text (a non-UTF-8 oracle file must hash to the digest the server computed)", () => {
+test("sha256HexBytes hashes raw bytes, not decoded text (a non-UTF-8 file must hash to the digest the server computed)", () => {
   // python3 -c "import hashlib; print(hashlib.sha256(bytes([255,254,0])).hexdigest())"
   expect(sha256HexBytes(new Uint8Array([0xff, 0xfe, 0x00]))).toBe(
     "ba778c0261008c8f71ae4061ad0162ffcbe63b52c91f89f236738131d1217ec7",
   );
   expect(sha256HexBytes(new TextEncoder().encode("hello"))).toBe(sha256Hex("hello"));
-});
-
-test("oracleExpectedSha256 keys each shown file as oracle/NAME", () => {
-  expect(oracleExpectedSha256({ "RUN_COMMAND.txt": "aa", "a_test.go": "bb" })).toEqual({
-    "oracle/RUN_COMMAND.txt": "aa",
-    "oracle/a_test.go": "bb",
-  });
-  expect(oracleExpectedSha256({})).toEqual({});
 });
 
 describe("expectedSha256For", () => {
@@ -110,11 +101,6 @@ describe("golden vectors (test/fixtures/vectors/content-hash.json)", () => {
     tickets: { index: number; spec_path: string; content: string }[];
     want: Record<string, string>;
   }
-  interface OracleVector {
-    name: string;
-    shown: Record<string, string>;
-    want: Record<string, string>;
-  }
   interface ReadBackVector {
     name: string;
     questions: { id: string; text: string; answer: string }[];
@@ -123,12 +109,10 @@ describe("golden vectors (test/fixtures/vectors/content-hash.json)", () => {
 
   const digests = vectors.digests as DigestVector[];
   const approvals = vectors.approvals as ApprovalVector[];
-  const oracleApprovals = vectors.oracle_approvals as OracleVector[];
 
   test("every section is present", () => {
     expect(digests.length).toBeGreaterThan(0);
     expect(approvals.length).toBeGreaterThan(0);
-    expect(oracleApprovals.length).toBeGreaterThan(0);
   });
 
   for (const d of digests) {
@@ -150,12 +134,6 @@ describe("golden vectors (test/fixtures/vectors/content-hash.json)", () => {
         content: t.content,
       }));
       expect(expectedSha256For(request(a.state, a.spec, tickets))).toEqual(a.want);
-    });
-  }
-
-  for (const o of oracleApprovals) {
-    test(`oracle approval: ${o.name}`, () => {
-      expect(oracleExpectedSha256(o.shown)).toEqual(o.want);
     });
   }
 

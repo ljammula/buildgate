@@ -50,7 +50,6 @@ func loggedNotifications(t *testing.T, dataDir string) []notify.Notification {
 func TestAReviewNotificationSaysWhatIsAskedOfWhichRequest(t *testing.T) {
 	for state, ask := range map[request.State]string{
 		request.StateSpecReview:   "Spec ready for your review",
-		request.StateOracleReview: "Acceptance tests ready for your review",
 		request.StatePlanReview:   "Plan ready for your review",
 		request.StateResumeReview: "A step was lost: choose how to continue",
 	} {

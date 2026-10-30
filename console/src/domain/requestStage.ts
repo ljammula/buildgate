@@ -10,8 +10,6 @@ export const PIPELINE_STATES = [
   "submitted",
   "spec_drafting",
   "spec_review",
-  "oracle_drafting",
-  "oracle_review",
   "planning",
   "plan_review",
   "building",

@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +40,7 @@ func runInputGoldenConfig(t *testing.T) string {
 		"roles:\n" +
 		"  execution: { model: builder, thinking: medium, escalation: { model: builder, thinking: low } }\n" +
 		"  review: { model: reviewer, thinking: high }\n" +
+		"  challenger: { model: reviewer, thinking: low, harness: codex, allow_shared_model: true }\n" +
 		"registry_proxy_image: registry-proxy@sha256:" + strings.Repeat("c", 64) + "\n" +
 		"compose_services_memory: 3g\n" +
 		"compose_services_cpus: \"1.5\"\n" +
@@ -46,7 +50,7 @@ func runInputGoldenConfig(t *testing.T) string {
 		"compose_services_require_digest: true\n" +
 		"release_protected_paths: \"deploy/,.github/\"\n" +
 		"release_max_files_changed: 7\n" +
-		"release_max_insertions: 77\n" +
+		"release_max_changed_lines: 77\n" +
 		"release_rollback_plan: revert it\n" +
 		"round_session_continuity: true\n"
 }
@@ -54,16 +58,15 @@ func runInputGoldenConfig(t *testing.T) string {
 // runInputGoldenFlags is the full flag set of the golden runs: the run flags
 // that reach RunWorkflowInput, each with a value that is not its default.
 // -compose-services stays at its default (true), which is the value the JSON
-// shows. -recheck-reproductions names a held copy under a quarantined run
-// the flags write into dataDir. Not set, so absent from the golden: -prior-run,
+// shows. Not set, so absent from the golden: -prior-run,
 // -on-branch, -diff-base, -resume-worktree-of and -replay (each needs an
 // earlier run; TestReplayRunWorkflowInputMatchesGolden covers -replay, which
 // also refuses -earlier-attempt),
 // -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
 // covers it), and the
-// spec's Required-Content and the config's skills, test patterns and allowed paths.
+// spec's Tests-Required opt-out and the config's skills, test patterns and allowed paths.
 // -resume-session-of names the quarantined run, which kept no session.
-// inputs is the directory the flag files (spec, criteria, oracle) are written to.
+// inputs is the directory the flag files (spec, criteria) are written to.
 func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, address string) []string {
 	t.Helper()
 	write := func(name, content string) string {
@@ -73,25 +76,18 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		}
 		return path
 	}
-	oracleDir := filepath.Join(inputs, "oracle")
-	if err := os.MkdirAll(oracleDir, 0o755); err != nil {
-		t.Fatalf("create oracle dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(oracleDir, "check.sh"), []byte("exit 0\n"), 0o644); err != nil {
-		t.Fatalf("write oracle check: %v", err)
-	}
-	// A quarantined run's held reproduction, for -recheck-reproductions.
-	held := filepath.Join(dataDir, "runs", "golden-quarantined", "review-repro", "0", "held_test.go")
-	if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
-		t.Fatalf("create the held reproduction's directory: %v", err)
-	}
-	if err := os.WriteFile(held, []byte("package p\n"), 0o444); err != nil {
-		t.Fatalf("write the held reproduction: %v", err)
-	}
 	if err := (&run.Run{ID: "golden-quarantined", RequestID: "req-golden", TicketIndex: 1, ProjectPath: workspace}).Save(dataDir); err != nil {
 		t.Fatalf("save the quarantined run: %v", err)
 	}
-	manifest := fmt.Sprintf(`{"request_id":"req-golden","reproductions":[{"run_id":"golden-quarantined","finding":0,"path":"held_test.go","sha256":"%s","host_path":%q,"spec_line":3,"test_ids":["TestHeld"],"runner":"go-test-json"}]}`, strings.Repeat("a", 64), held)
+	// A held challenge file of the quarantined run, for -challenge-held.
+	held := filepath.Join(dataDir, "runs", "golden-quarantined", run.ChallengeDirName, "0", "edge_test.go")
+	if err := os.MkdirAll(filepath.Dir(held), 0o755); err != nil {
+		t.Fatalf("create the held file's directory: %v", err)
+	}
+	if err := os.WriteFile(held, []byte("package p\n"), 0o444); err != nil {
+		t.Fatalf("write the held file: %v", err)
+	}
+	heldManifest := fmt.Sprintf(`[{"path":"edge_test.go","sha256":"%s","host_path":%q,"criterion":"AC-1"}]`, strings.Repeat("a", 64), held)
 	head, err := runGit(t, workspace, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("read the workspace's head: %v", err)
@@ -119,21 +115,13 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-fast-check-command", "echo fast",
 		"-verify-max-attempts", "4",
 		"-full-suite-command", "echo full",
-		"-lint-command", "echo lint",
-		"-security-command", "echo security",
-		"-unit-test-command", "echo unit",
-		"-integration-test-command", "echo integration",
-		"-reference-oracle-command", "sh verify/check.sh",
-		"-reference-oracle-dir", oracleDir,
-		"-reference-oracle-mount-path", "verify",
-		"-reference-oracle-in-loop-retry",
-		"-no-commit-oracles",
 		"-bug",
 		"-sandbox-image", fakeSandboxImage,
 		"-registry-proxy",
-		"-review-reproduction",
-		"-review-spec", write("approved-spec.md", "# Approved spec\n\n- `Parse` returns a map.\n"),
-		"-recheck-reproductions", write("recheck.json", manifest),
+		"-challenge", "-challenge-spec", write("challenge-spec.md", challengeGoldenSpec+"\nAnswered.\n"),
+		"-challenge-approved-sha256", challengeGoldenSpecSHA256(), "-challenge-approved-bytes", strconv.Itoa(len(challengeGoldenSpec)),
+		"-challenge-criteria", "3", "-challenge-answers", "2,5",
+		"-challenge-held", write("held.json", heldManifest), "-challenge-round",
 		"-resume-session-of", "golden-quarantined",
 	}
 }
@@ -247,16 +235,6 @@ func runInputGoldenRunWith(t *testing.T, runID string, prepare func(workspace, i
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t))...)
 	out, _ := cmd.CombinedOutput()
 	t.Logf("factoryd output:\n%s", out)
-	// The run record keeps the recheck it was given from its start, for the
-	// build that follows it even when its gates fail before the recheck. A
-	// replay run is given none.
-	if slices.Contains(flags, "-recheck-reproductions") {
-		rec, err := run.Load(dataDir, runID)
-		if err != nil || len(rec.ReviewReproductionRechecksGiven) != 1 || rec.ReviewReproductionRechecksGiven[0].RunID != "golden-quarantined" {
-			t.Errorf("run record's rechecks given = %+v (%v), want the manifest's one entry", rec, err)
-		}
-	}
-
 	resolve := func(path string) string {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
@@ -323,20 +301,57 @@ func TestRepositoryOwnerRunWorkflowInputFromFullFlagSetMatchesGolden(t *testing.
 // with -replay), plus -on-branch, -diff-base and -replay for a commit
 // replayed onto the workspace's head.
 func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
+	replayGolden(t, "run_workflow_input_replay.golden.json", nil)
+}
+
+// TestCarvedReplayRunWorkflowInputMatchesGolden is the same comparison for a
+// carved ticket's run: a replay whose record names a pr_order group, with
+// -order-group, so the flags a carved build is started with are accepted by
+// the run's own parser and reach the workflow.
+func TestCarvedReplayRunWorkflowInputMatchesGolden(t *testing.T) {
+	replayGolden(t, "run_workflow_input_carved.golden.json", &run.Carve{Groups: [][]string{{"db/"}}, Group: 1})
+}
+
+// replayGolden runs the replay golden run, with carve set on the record when
+// non-nil, and compares the workflow input with golden.
+func replayGolden(t *testing.T, golden string, carve *run.Carve) {
+	t.Helper()
 	var dataDir string
 	address, placeholders := runInputGoldenRunWith(t, "unused", func(workspace, inputs string, flags []string) ([]string, [][2]string) {
 		onto, head := replayedBranch(t, workspace, "buildgate/req-golden/t2-restack1")
-		for _, refused := range []string{"-earlier-attempt", "-run-id", "-review-spec", "-recheck-reproductions", "-resume-session-of"} {
+		for _, refused := range []string{"-earlier-attempt", "-run-id", "-resume-session-of"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
 			}
 		}
-		// A replay run's review is advice only: it takes no reproduction input.
-		if i := slices.Index(flags, "-review-reproduction"); i >= 0 {
-			flags = slices.Delete(flags, i, i+1)
+		for _, refused := range []string{"-challenge", "-challenge-round"} {
+			if i := slices.Index(flags, refused); i >= 0 {
+				flags = slices.Delete(flags, i, i+1)
+			}
+		}
+		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers", "-challenge-approved-sha256", "-challenge-approved-bytes"} {
+			if i := slices.Index(flags, refused); i >= 0 {
+				flags = slices.Delete(flags, i, i+2)
+			}
 		}
 		dataDir = flags[slices.Index(flags, "-data-dir")+1]
-		flags = append(flags, "-on-branch", "buildgate/req-golden/t2-restack1", "-diff-base", onto, "-replay", writeReplayFile(t, inputs, onto, head))
+		replay := writeReplayFile(t, inputs, onto, head)
+		if carve != nil {
+			record, err := run.ReadReplayFile(replay)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Carve = carve
+			data, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(replay, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			flags = append(flags, "-order-group", strconv.Itoa(carve.Group))
+		}
+		flags = append(flags, "-on-branch", "buildgate/req-golden/t2-restack1", "-diff-base", onto, "-replay", replay)
 		return flags, [][2]string{{head, "<REPLAY_HEAD>"}}
 	})
 	entries, err := os.ReadDir(filepath.Join(dataDir, "runs"))
@@ -351,7 +366,7 @@ func TestReplayRunWorkflowInputMatchesGolden(t *testing.T) {
 	}
 	runID := runs[0]
 	placeholders = append([][2]string{{runID, "<RUN_ID>"}}, placeholders...)
-	compareRunInputGolden(t, "run_workflow_input_replay.golden.json", startedRunWorkflowInput(t, address, runID), placeholders)
+	compareRunInputGolden(t, golden, startedRunWorkflowInput(t, address, runID), placeholders)
 }
 
 // replayedBranch creates branch in workspace with one commit on its HEAD, as
@@ -387,9 +402,10 @@ func replayedBranch(t *testing.T, workspace, branch string) (onto, head string) 
 	return onto, head
 }
 
-// goldenFactoryYML is the committed .factory.yml of the golden runs: setup and
-// autofix have no flag, so this file is the only way they reach the input.
-const goldenFactoryYML = "setup:\n  - npm ci\n  - make generate\nautofix:\n  - gofmt -w .\n"
+// goldenFactoryYML is the committed .factory.yml of the golden runs: setup,
+// autofix and the repository's own gates have no flag, so this file is the
+// only way they reach the input.
+const goldenFactoryYML = "setup:\n  - npm ci\n  - make generate\nautofix:\n  - gofmt -w .\ngates:\n  - id: lint\n    command: echo lint\n"
 
 // commitFactoryYML commits content as workspace's .factory.yml.
 func commitFactoryYML(t *testing.T, workspace, content string) {
@@ -402,4 +418,13 @@ func commitFactoryYML(t *testing.T, workspace, content string) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
+}
+
+// challengeGoldenSpec is the approved spec the golden's challenge flags name;
+// the file holds it followed by the read-back answers.
+const challengeGoldenSpec = "# Approved spec\n\n- `Parse` returns a map.\n"
+
+func challengeGoldenSpecSHA256() string {
+	sum := sha256.Sum256([]byte(challengeGoldenSpec))
+	return hex.EncodeToString(sum[:])
 }

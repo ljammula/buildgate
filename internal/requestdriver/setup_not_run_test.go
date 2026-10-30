@@ -146,38 +146,3 @@ func TestNoCorrectiveBuildForASetupFailureAtTheStartOfABuild(t *testing.T) {
 		}
 	}
 }
-
-// A rerun after the oracle commit that exits as a failed setup step follows a
-// build that ran and passed: it is sorted as the failed check it is.
-func TestASetupFailureInARerunAfterTheOracleCommitKeepsItsSorting(t *testing.T) {
-	dataDir := t.TempDir()
-	r := setupFailedRun(t, "run-rerun", stoppedBuild{buildExit: 0, verifyExit: 0, tokens: 5, committed: true})
-	logPath := filepath.Join(t.TempDir(), "rerun.log")
-	if err := os.WriteFile(logPath, []byte(run.SetupFailedPrefix+"make generate\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	digest := r.Attempts[0].SetupSHA256
-	r.Attempts = append(r.Attempts,
-		run.Attempt{Kind: "verify_after_oracle_commit", ExitCode: run.SetupFailedExitCode, SetupSHA256: digest, LogPath: logPath},
-		run.Attempt{Kind: "lint_after_oracle_commit", ExitCode: run.SetupFailedExitCode, SetupSHA256: digest, LogPath: logPath},
-	)
-	r.GateResults = []run.GateResult{
-		{Check: "canonical_verify", Command: []string{"sh", "-c", "make verify"}, ExitCode: run.SetupFailedExitCode},
-		{Check: "lint", Command: []string{"sh", "-c", "make lint"}, ExitCode: run.SetupFailedExitCode},
-	}
-	if err := handoff.Sync(r, dataDir); err != nil {
-		t.Fatal(err)
-	}
-	doc := handoff.Build(r, dataDir)
-	if doc.Next != handoff.BinCorrective {
-		t.Errorf("Next = %q, want corrective", doc.Next)
-	}
-	for _, c := range doc.Checks {
-		if c.Bin != handoff.BinCorrective || strings.Contains(c.Finding, "before its first agent turn") {
-			t.Errorf("check %+v, want the check's ordinary bin and sentence", c)
-		}
-	}
-	if _, ok := handoffForABuild(dataDir, r); !ok {
-		t.Error("handoffForABuild = false, want true")
-	}
-}

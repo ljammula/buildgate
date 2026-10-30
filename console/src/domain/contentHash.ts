@@ -19,24 +19,11 @@ export function sha256Hex(content: string): string {
 }
 
 /**
- * The hex SHA-256 of raw bytes -- Go's `sha256Hex` in internal/request. Used
- * for oracle files, which are hashed as received (never re-encoded from
- * decoded text) so the digest is the server's own.
+ * The hex SHA-256 of raw bytes -- Go's `sha256Hex` in internal/request. The digest of bytes
+ * hashed as received, never re-encoded from decoded text.
  */
 export function sha256HexBytes(bytes: Uint8Array): string {
   return bytesToHex(sha256(bytes));
-}
-
-/**
- * The `expected_sha256` map for an oracle_review approval: each file the
- * operator was shown (`shown`: file name -> hash of the bytes displayed),
- * keyed the way internal/request.requestOracleRelPaths keys them:
- * `oracle/NAME`.
- */
-export function oracleExpectedSha256(shown: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [name, hash] of Object.entries(shown)) out[`oracle/${name}`] = hash;
-  return out;
 }
 
 /**

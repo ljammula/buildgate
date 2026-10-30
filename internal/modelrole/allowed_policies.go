@@ -55,7 +55,7 @@ func ValidateAllowedPolicies(s sessionconfig.Settings) error {
 		return fmt.Errorf("modelrole: %w", err)
 	}
 
-	for _, r := range []Role{RolePlanning, RoleExecution, RoleReview} {
+	for _, r := range []Role{RolePlanning, RoleExecution, RoleReview, RoleChallenger} {
 		rc := roleConfig(s, r)
 		if rc == nil || rc.Model == "" {
 			continue

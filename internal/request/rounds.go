@@ -20,6 +20,7 @@ const (
 	RoundTagPRReview   = "pr_review"
 	RoundTagRestack    = RestackRoundKind
 	RoundTagAdvice     = AdviceRoundKind
+	RoundTagChallenge  = ChallengeRoundKind
 )
 
 // RoundTag is one entry of a ticket's round ledger: the commit a build round
@@ -117,7 +118,7 @@ func (r *Request) retryFromRoundCheck(n int) error {
 		return fmt.Errorf("request %s: no ticket is being built, so there is no round %d to retry from %w", r.ID, n, ErrIllegalTransition)
 	}
 	ticket := &r.Tickets[r.TicketIndex-1]
-	if r.HaltKind == HaltAcceptedNoPR || r.HaltKind == HaltOracleMaterialize || r.HaltKind == HaltGateExpired {
+	if r.HaltKind == HaltAcceptedNoPR || r.HaltKind == HaltGateExpired {
 		return fmt.Errorf("request %s: a request halted as %q rebuilds nothing, so it cannot retry from round %d %w", r.ID, r.HaltKind, n, ErrIllegalTransition)
 	}
 	if ticket.Pushed() {
@@ -191,6 +192,9 @@ type TicketAdvice struct {
 	Of    string `json:"of"`
 	RunID string `json:"run_id,omitempty"`
 	Since string `json:"since"`
+	// Challenge marks the ticket's challenge round (ChallengeRoundKind): the
+	// same in-flight marker, settled by the same pass.
+	Challenge bool `json:"challenge,omitempty"`
 }
 
 // LiveRunID is the run of the ticket's that may be running now: its advice

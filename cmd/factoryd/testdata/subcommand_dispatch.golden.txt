@@ -234,7 +234,7 @@ $ factoryd approve -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd approve [flags] <request-id>
-stderr:   Release a request from its spec, oracle or plan review
+stderr:   Release a request from its spec or plan review
 
 $ factoryd reject -zz-not-a-flag
 exit 1

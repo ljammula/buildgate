@@ -76,7 +76,6 @@ export type Brightness = "light" | "dark";
 const STATUS_BY_TOKEN: Readonly<Record<string, Status>> = {
   // needsHuman (amber): operator-actionable right now.
   spec_review: "needsHuman",
-  oracle_review: "needsHuman",
   plan_review: "needsHuman",
   changes_requested: "needsHuman",
   halted: "needsHuman",
@@ -84,7 +83,6 @@ const STATUS_BY_TOKEN: Readonly<Record<string, Status>> = {
   // working (blue): the factory is still doing something.
   submitted: "working",
   spec_drafting: "working",
-  oracle_drafting: "working",
   planning: "working",
   building: "working",
   pr_review: "working",
@@ -238,8 +236,6 @@ const REQUEST_STATES: Readonly<Record<string, RequestStateRow>> = {
   submitted: { label: "Submitted", verbs: [] },
   spec_drafting: { label: "Spec drafting", verbs: [] },
   spec_review: { label: "Spec review", verbs: REVIEW },
-  oracle_drafting: { label: "Oracle drafting", verbs: [] },
-  oracle_review: { label: "Oracle review", verbs: REVIEW },
   planning: { label: "Planning", verbs: [] },
   plan_review: { label: "Plan review", verbs: REVIEW },
   building: { label: "Building", verbs: [] },

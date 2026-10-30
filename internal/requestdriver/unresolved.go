@@ -6,12 +6,14 @@ import (
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sanitize"
 	"buildgate/internal/unresolved"
 	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 )
 
 // unresolvedCauseOf is why runRecord says nothing about the work, "" when
@@ -144,4 +146,24 @@ func afterUnjudgedTicketRun(dp Deps, dataDir string, r *request.Request, runReco
 		return false, nil
 	}
 	return true, EnterResumeReview(dp, dataDir, r, lostStepOf(dataDir, runRecord, cause, keepForResume(dataDir, runRecord)), now)
+}
+
+// maxJobFailureDetailBytes caps the job's own words in the reason line.
+const maxJobFailureDetailBytes = 300
+
+// jobFailureDetail is err as one sanitised line of at most
+// maxJobFailureDetailBytes, cut on a rune boundary.
+func jobFailureDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	line := sanitize.Line(err.Error())
+	if len(line) <= maxJobFailureDetailBytes {
+		return line
+	}
+	cut := maxJobFailureDetailBytes
+	for cut > 0 && !utf8.RuneStart(line[cut]) {
+		cut--
+	}
+	return line[:cut] + "..."
 }

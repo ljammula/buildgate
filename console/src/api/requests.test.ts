@@ -85,7 +85,6 @@ describe("reads", () => {
       ["req-done", "done"],
       ["req-every-field", "resume_review"],
       ["req-halted", "halted"],
-      ["req-oracle-review", "oracle_review"],
       ["req-plan-review", "plan_review"],
       ["req-quarantined", "quarantined"],
       ["req-spec-review", "spec_review"],
@@ -142,7 +141,6 @@ describe("writes", () => {
         verifyCommand: "make verify",
         fullSuiteCommand: "make test",
         preflightProfile: "go",
-        draftOracles: true,
         planReview: true,
         by: "jane",
       }),
@@ -152,7 +150,7 @@ describe("writes", () => {
     expect(sent.headers).toEqual(WRITE);
     expect(sent.body).toBe(
       '{"workspace":"/repos/app","text":"add a thing","verify_command":"make verify",' +
-        '"full_suite_command":"make test","preflight_profile":"go","draft_oracles":true,"plan_review":true,"by":"jane"}',
+        '"full_suite_command":"make test","preflight_profile":"go","plan_review":true,"by":"jane"}',
     );
 
     const minimal = await sentBy((http) =>
@@ -160,7 +158,6 @@ describe("writes", () => {
         workspace: "/repos/app",
         text: "t",
         verifyCommand: "",
-        draftOracles: false,
         planReview: false,
         by: "",
       }),
@@ -403,7 +400,7 @@ describe("watchRequests", () => {
     unsubscribe();
     expect(calls[0]!.url).toBe("/requests/events");
     expect(calls[0]!.init.headers).toEqual(READ);
-    expect(values).toHaveLength(8);
+    expect(values).toHaveLength(7);
     expect(values[0]!.id).toBe("req-building");
     expect(values[0]!.state).toBe("building");
   });

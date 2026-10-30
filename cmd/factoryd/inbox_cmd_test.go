@@ -45,7 +45,7 @@ func TestInboxListsWaitingRequestsAcrossProfilesOldestFirst(t *testing.T) {
 	def, work := f.roots["default"], f.roots["work"]
 
 	saveWaitingRequest(t, def, "spec-a", "Add login page", request.StateSpecReview, 5*time.Hour, nil)
-	saveWaitingRequest(t, work, "oracle-b", "Fix the cache", request.StateOracleReview, 30*time.Minute, nil)
+	saveWaitingRequest(t, work, "spec-b", "Fix the cache", request.StateSpecReview, 30*time.Minute, nil)
 	saveWaitingRequest(t, work, "plan-c", "Split the module", request.StatePlanReview, 26*time.Hour, nil)
 	saveWaitingRequest(t, def, "pr-d", "Ship the export", request.StatePRReview, 2*time.Hour, func(r *request.Request) {
 		r.Tickets = []request.Ticket{{Index: 1, PRURL: "https://github.com/o/r/pull/7"}}
@@ -72,7 +72,7 @@ func TestInboxListsWaitingRequestsAcrossProfilesOldestFirst(t *testing.T) {
 			ids = append(ids, strings.Fields(line)[3])
 		}
 	}
-	if want := []string{"plan-c", "spec-a", "halt-e", "pr-d", "oracle-b", "quar-f"}; strings.Join(ids, ",") != strings.Join(want, ",") {
+	if want := []string{"plan-c", "spec-a", "halt-e", "pr-d", "spec-b", "quar-f"}; strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Fatalf("order = %v, want oldest first %v\n%s", ids, want, text)
 	}
 	for _, want := range []string{

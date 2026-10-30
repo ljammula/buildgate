@@ -16,7 +16,7 @@ func requestIn(state State) *Request {
 }
 
 func TestEnterResumeReviewFromEveryLostStepState(t *testing.T) {
-	for _, from := range []State{StateSpecDrafting, StateOracleDrafting, StatePlanning, StateBuilding, StatePRReview} {
+	for _, from := range []State{StateSpecDrafting, StatePlanning, StateBuilding, StatePRReview} {
 		t.Run(string(from), func(t *testing.T) {
 			r := requestIn(from)
 			r.WaitingSince, r.NotifyCount = "earlier", 3
@@ -55,7 +55,7 @@ func wantResume(from State) *ResumeInfo {
 }
 
 func TestEnterResumeReviewRefusesEveryOtherState(t *testing.T) {
-	for _, from := range []State{StateSubmitted, StateSpecReview, StateOracleReview, StatePlanReview, StateDone, StateQuarantined, StateHalted, StateCancelled, StateResumeReview} {
+	for _, from := range []State{StateSubmitted, StateSpecReview, StatePlanReview, StateDone, StateQuarantined, StateHalted, StateCancelled, StateResumeReview} {
 		r := requestIn(from)
 		err := r.EnterResumeReview(from, LostStep{RunID: "", Cause: unresolved.WorkerLost}, fixedNow)
 		if !errors.Is(err, ErrIllegalTransition) {
@@ -73,7 +73,7 @@ func TestEnterResumeReviewRefusesEveryOtherState(t *testing.T) {
 }
 
 func TestResumeDecideReturnsToTheLostState(t *testing.T) {
-	for _, from := range []State{StateSpecDrafting, StateOracleDrafting, StatePlanning, StateBuilding, StatePRReview} {
+	for _, from := range []State{StateSpecDrafting, StatePlanning, StateBuilding, StatePRReview} {
 		for _, verb := range []string{ResumeRound, ResumeScratch} {
 			t.Run(string(from)+"/"+verb, func(t *testing.T) {
 				r := requestIn(from)

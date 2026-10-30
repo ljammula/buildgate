@@ -29,29 +29,6 @@
   "last_ask": "every-field last_ask",
   "ticket_index": 1,
   "ticket_count": 1,
-  "dropped_reproductions": [
-    {
-      "ticket": 3,
-      "run_id": "every-field run_id",
-      "finding": 3,
-      "path": "every-field path",
-      "refused": "every-field refused",
-      "sha256": "every-field sha256",
-      "host_path": "every-field host_path",
-      "spec_line": 3,
-      "test_ids": [
-        "every-field test_ids"
-      ],
-      "runner": "every-field runner",
-      "holds_literal": true,
-      "refused_runs": [
-        "every-field refused_runs"
-      ],
-      "by": "every-field by",
-      "at": "2026-09-10T09:00:00Z",
-      "why": "every-field why"
-    }
-  ],
   "error": "every-field error",
   "resume": {
     "from_state": "building",
@@ -153,7 +130,6 @@
   "verify_command": "every-field verify_command",
   "full_suite_command": "every-field full_suite_command",
   "full_suite_source": "every-field full_suite_source",
-  "no_commit_oracles": true,
   "preflight_profile": "every-field preflight_profile",
   "rejections": [
     {
@@ -194,7 +170,6 @@
       "diff_truncated": true
     }
   ],
-  "draft_oracles": true,
   "plan_review": true,
   "bug": true,
   "spec_imported": true,
@@ -230,61 +205,35 @@
     "every-field review_notes"
   ],
   "plan_budget_lines": 3,
+  "plan_verify_command": "every-field plan_verify_command",
+  "size_replan": {
+    "run_id": "every-field run_id",
+    "measurement": {
+      "source_lines": 3,
+      "source_files": 3,
+      "functions": 3,
+      "files": [
+        {
+          "path": "every-field path",
+          "insertions": 3,
+          "deletions": 3,
+          "functions": [
+            "every-field functions"
+          ]
+        }
+      ]
+    },
+    "groups": [
+      [
+        "every-field groups"
+      ]
+    ]
+  },
   "draft_halt": {
     "stage": "",
     "reason": "every-field reason",
     "at": "2026-09-10T09:00:00Z"
   },
-  "oracle_draft": {
-    "status": "drafted",
-    "detail": "every-field detail",
-    "proposed_command": "every-field proposed_command",
-    "files": [
-      "every-field files"
-    ],
-    "compile_problems": [
-      "every-field compile_problems"
-    ],
-    "spec_warnings": [
-      "every-field spec_warnings"
-    ],
-    "auto_redrafted": true,
-    "generated_run_command_sha256": "every-field generated_run_command_sha256",
-    "criteria": [
-      {
-        "number": 3,
-        "eligible": true,
-        "reason": "every-field reason"
-      }
-    ],
-    "model": "every-field model",
-    "thinking": "every-field thinking",
-    "spend": {
-      "role": "every-field role",
-      "model": "every-field model",
-      "input_tokens": 3,
-      "output_tokens": 3,
-      "cost_micro_usd": 3,
-      "spend_partial": true,
-      "skills": [
-        "every-field skills"
-      ],
-      "skills_sha256": "every-field skills_sha256",
-      "design_guide": "every-field design_guide",
-      "design_guide_sha256": "every-field design_guide_sha256",
-      "at": "2026-09-10T09:00:00Z",
-      "by_model": [
-        {
-          "role": "every-field role",
-          "model": "every-field model",
-          "input_tokens": 3,
-          "output_tokens": 3,
-          "cost_micro_usd": 3
-        }
-      ]
-    }
-  },
-  "oracle_skip_warning": "every-field oracle_skip_warning",
   "models": {
     "every-field key": "every-field models"
   },
@@ -313,8 +262,14 @@
         "head_sha": "every-field head_sha",
         "blockers": [
           "every-field blockers"
+        ],
+        "notes": [
+          "every-field notes"
         ]
       },
+      "ci_triaged": [
+        "every-field ci_triaged"
+      ],
       "notified_pr": "every-field notified_pr",
       "pr_not_ready_since": "2026-09-10T09:00:00Z",
       "seen_thread_ids": [
@@ -329,6 +284,7 @@
           "thread_ids": [
             "every-field thread_ids"
           ],
+          "ci_check": "every-field ci_check",
           "run_id": "every-field run_id",
           "prior_run_ids": [
             "every-field prior_run_ids"
@@ -372,54 +328,50 @@
       "advice": {
         "of": "every-field of",
         "run_id": "every-field run_id",
-        "since": "every-field since"
+        "since": "every-field since",
+        "challenge": true
       },
+      "challenged": true,
+      "challenge_run_id": "every-field challenge_run_id",
+      "challenge_rounded": true,
       "retarget": {
         "from": "every-field from",
         "to": "every-field to",
         "at": "2026-09-10T09:00:00Z"
       },
-      "reproductions": [
-        {
-          "run_id": "every-field run_id",
-          "finding": 3,
-          "path": "every-field path",
-          "refused": "every-field refused",
-          "sha256": "every-field sha256",
-          "host_path": "every-field host_path",
-          "spec_line": 3,
-          "test_ids": [
-            "every-field test_ids"
-          ],
-          "runner": "every-field runner",
-          "holds_literal": true,
-          "refused_runs": [
-            "every-field refused_runs"
-          ],
-          "unheld": true
-        }
-      ],
-      "content": "Verify-Command: true\nAllowed-Files: a.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
+      "order": {
+        "source_run_id": "every-field source_run_id",
+        "groups": [
+          [
+            "every-field groups"
+          ]
+        ],
+        "group": 3,
+        "first": 3,
+        "commit": "every-field commit",
+        "onto": "every-field onto",
+        "branch": "every-field branch"
+      },
+      "content": "Verify-Command: true\nAllowed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n",
       "full_path": "/data/requests/req-every-field/tickets/001.spec.md"
     }
   ],
   "cost_summary": {
     "spec": 0.000003,
     "plan": 0.000003,
-    "oracle": 0.000003,
     "runs": 0,
-    "total": 0.000009,
+    "total": 0.000006,
     "currency": "usd",
     "complete": false,
     "estimated": true,
-    "tokens": 18,
+    "tokens": 12,
     "tokens_complete": false,
     "by_model": [
       {
         "role": "every-field role",
         "model": "every-field model",
-        "tokens": 18,
-        "cost_micro_usd": 9
+        "tokens": 12,
+        "cost_micro_usd": 6
       }
     ]
   },

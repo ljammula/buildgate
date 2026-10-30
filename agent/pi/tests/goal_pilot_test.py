@@ -901,7 +901,6 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			# own prose already promises both.
 			self.assertIn("Verify-Command: make verify && make verify-full", updated)
 			self.assertIn("Allowed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
-			self.assertIn("Required-Changed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
 			# The declaration must land inside ## Verification, before ##
 			# Commit -- not after it, which would silently become part of
 			# the commit-message section instead.
@@ -964,7 +963,7 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			# Exactly one Verify-Command: line, not two -- the stale one was
 			# replaced in place, not left alongside a second, fresh one.
 			self.assertEqual(updated.count("Verify-Command:"), 1)
-			# Allowed-Files:/Required-Changed-Files: (unaffected by the
+			# Allowed-Files: (unaffected by the
 			# override) must survive untouched, not be dropped as a side
 			# effect of rewriting Verify-Command:.
 			self.assertIn("Allowed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
@@ -997,7 +996,7 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			self.assertEqual(modified, [])
 			self.assertNotIn("Verify-Command:", ticket_path.read_text())
 
-	def test_skips_ticket_already_declaring_all_three_keys(self):
+	def test_skips_ticket_already_declaring_both_keys(self):
 		with tempfile.TemporaryDirectory() as d:
 			pilot_dir = Path(d)
 			tickets_dir = pilot_dir / "spec" / "tickets"
@@ -1007,7 +1006,6 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 				TICKET_002_TEMPLATE
 				+ "\nVerify-Command: make verify-full\n"
 				+ "Allowed-Files: isprime.py\n"
-				+ "Required-Changed-Files: isprime.py\n"
 			)
 
 			modified = goal_pilot.inject_ticketspec_keys(pilot_dir)
@@ -1015,15 +1013,14 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			# Not modified, and the hand-declared Verify-Command is not
 			# overwritten with the fixed default -- an existing declaration
 			# (hand-edited, or from a prior run of this function) always
-			# wins, once all three keys are already present.
+			# wins, once both keys are already present.
 			self.assertEqual(modified, [])
 			self.assertIn("Verify-Command: make verify-full", ticket_path.read_text())
 
 	def test_fills_only_missing_keys_when_partially_declared(self):
 		# Real bug found via review: a ticket declaring only
 		# Verify-Command: by hand used to be treated as "already fully
-		# declared" and skipped entirely, silently leaving Allowed-Files:/
-		# Required-Changed-Files: undeclared.
+		# declared" and skipped entirely, silently leaving Allowed-Files: undeclared.
 		with tempfile.TemporaryDirectory() as d:
 			pilot_dir = Path(d)
 			tickets_dir = pilot_dir / "spec" / "tickets"
@@ -1038,15 +1035,13 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			# The hand-declared Verify-Command survives untouched...
 			self.assertIn("Verify-Command: make verify-full", updated)
 			self.assertNotIn("Verify-Command: make verify &&", updated)
-			# ...but the two missing keys are now filled in.
+			# ...but the missing key is now filled in.
 			self.assertIn("Allowed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
-			self.assertIn("Required-Changed-Files: isprime.py, test_isprime.py, ARCHITECTURE.md, PROGRESS.md", updated)
 
 	def test_still_injects_verify_command_with_no_extractable_path_at_all(self):
 		# Verify-Command: doesn't depend on knowing any file path, so it's
-		# injected even for a ticket this vague -- only Allowed-Files:/
-		# Required-Changed-Files: (which do need real paths to be
-		# meaningful) are skipped.
+		# injected even for a ticket this vague -- only Allowed-Files:
+		# (which needs real paths to be meaningful) is skipped.
 		with tempfile.TemporaryDirectory() as d:
 			pilot_dir = Path(d)
 			tickets_dir = pilot_dir / "spec" / "tickets"
@@ -1064,7 +1059,6 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			updated = ticket_path.read_text()
 			self.assertIn("Verify-Command: make verify && make verify-full", updated)
 			self.assertNotIn("Allowed-Files:", updated)
-			self.assertNotIn("Required-Changed-Files:", updated)
 
 	def test_skips_allowed_files_but_still_injects_verify_command_with_only_boilerplate_paths(self):
 		# Real bug found live, twice: calc-app tickets 002-003
@@ -1075,7 +1069,7 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 		# extract_required_change_paths found were the two the mandatory
 		# closing instruction always contributes. `if not paths: continue`
 		# never fires in that case (paths is ["ARCHITECTURE.md",
-		# "PROGRESS.md"], not empty), so Allowed-Files/Required-Changed-Files
+		# "PROGRESS.md"], not empty), so Allowed-Files
 		# got injected as just those two -- which then quarantines any
 		# correct implementation the moment it touches real source files,
 		# exactly the failure the "nothing concrete to declare" skip exists
@@ -1107,7 +1101,6 @@ class InjectTicketspecKeysTests(unittest.TestCase):
 			updated = ticket_path.read_text()
 			self.assertIn("Verify-Command: make verify && make verify-full", updated)
 			self.assertNotIn("Allowed-Files:", updated)
-			self.assertNotIn("Required-Changed-Files:", updated)
 
 	def test_already_declared_verify_command_is_left_alone_with_only_boilerplate_paths(self):
 		# The other half of the same fix: if Verify-Command: is already

@@ -25,7 +25,7 @@ const replaySpec = "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: conte
 func replayEnv(t *testing.T) []string {
 	t.Helper()
 	return isolatedSessionConfigEnv(t, "sandbox_docker: "+filepath.Join(testdataDir(t), "fake_docker.sh")+"\n"+
-		"release_max_files_changed: 10\nrelease_max_insertions: 100\nrelease_rollback_plan: revert the commit\n")
+		"release_max_files_changed: 10\nrelease_max_changed_lines: 100\nrelease_rollback_plan: revert the commit\n")
 }
 
 // gitOut runs git in dir and returns its trimmed output, failing the test on
@@ -235,25 +235,5 @@ func TestIntegrationReplayRunRunsTheFullSuiteDespiteCadence(t *testing.T) {
 	ran := slices.ContainsFunc(r.GateResults, func(g run.GateResult) bool { return g.Check == "full_suite_verify" && g.Passed })
 	if r.State != run.StateAccepted || !r.FullSuiteScheduled || !ran {
 		t.Fatalf("replay run: state %q, full suite scheduled %v, gates %+v; want accepted with the full suite run", r.State, r.FullSuiteScheduled, r.GateResults)
-	}
-}
-
-// TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketIsANote: the
-// diff is measured from the new base, so a required file that only the
-// earlier work (now part of the base) changed is a note on the run, not a
-// change of this ticket's.
-func TestIntegrationReplayRunRequiredFileOnlyInTheEarlierTicketIsANote(t *testing.T) {
-	ws := newFixtureRepo(t)
-	dataDir := t.TempDir()
-	env := replayEnv(t)
-	source := acceptedSource(t, ws, dataDir, "true", env)
-	onto := commitOnMain(t, ws, "earlier.txt", "the earlier ticket's file\n")
-	const branch = "buildgate/req-1/t1-restack1"
-	_, file := replayOnto(t, ws, source, onto, branch)
-	spec := "# Ticket: fixture\n\n## Out of scope\n\nAllowed-Files: content.txt, earlier.txt\nRequired-Changed-Files: earlier.txt\n"
-
-	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "fail", "true", spec, "30s", env, replayRunFlags(branch, onto, file), dataDir)
-	if r.State != run.StateAccepted || !noteWith(r, "required file not changed: earlier.txt") {
-		t.Fatalf("replay run: state %q, notes %q; want accepted with a note naming earlier.txt", r.State, r.Notes)
 	}
 }

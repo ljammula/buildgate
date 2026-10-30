@@ -1,0 +1,20 @@
+package com.example;
+
+import org.junit.jupiter.api.Test;
+
+class AddTest {
+    /* a comment
+       over two lines { */
+    @Test
+    void sums() {
+        char c = '{';
+        String s = "}";
+        assertEquals(2, add(1, 1));
+    }
+
+    int helper() { return 1; }
+
+    @Test
+    @Disabled
+    public void later() throws Exception { }
+}

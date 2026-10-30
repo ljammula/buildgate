@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"buildgate/internal/harness"
-	"buildgate/internal/policy"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
@@ -12,8 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"go.temporal.io/sdk/activity"
@@ -82,7 +79,7 @@ func autofixArgs(commands []string) []string {
 // by the submitting process -- see cmd/factoryd/run_temporal.go) -- empty
 // when roles.execution is unset, which omits --thinking entirely and
 // preserves today's argv byte-for-byte.
-func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, referenceOracleCommand, thinking, harness string, setup ...string) []string {
+func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeoutMinutes int, baseSHA, verifyCommand, fastCheckCommand, thinking, harness string, setup ...string) []string {
 	args := []string{
 		buildAppScript,
 		"--workspace", workspace,
@@ -99,19 +96,6 @@ func buildActivityArgs(buildAppScript, workspace, spec string, maxRounds, timeou
 	}
 	for _, c := range setup {
 		args = append(args, "--setup-command", c)
-	}
-	if referenceOracleCommand != "" {
-		// build_app.py's own --reference-oracle-command (Phase 0.5): the
-		// Temporal/-repository counterpart of cmd/factoryd's buildAppArgs'
-		// identical parameter.
-		// Only ever non-empty when RunBuildActivity also mounted the
-		// snapshotted oracle into this same container (input.
-		// ReferenceOracleInLoopRetry) -- the command is meaningless without
-		// its files, and never forwarded on the strength of
-		// ReferenceOracleCommand alone (that field also drives the separate
-		// post-build named gate, which every existing user of it relies on
-		// staying the only place oracle content is exposed).
-		args = append(args, "--reference-oracle-command", referenceOracleCommand)
 	}
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
@@ -196,17 +180,6 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 	if err != nil {
 		return BuildActivityResult{}, temporal.NewApplicationError(err.Error(), InfrastructureFailureType)
 	}
-	// Same fail-closed placement for the in-loop reference oracle: a run
-	// that asked for it (input.ReferenceOracleInLoopRetry) but did not
-	// carry all three of its siblings must fail before any host mutation
-	// or container launch, never quietly run without the in-loop check the
-	// submitter believes is active. cmd/factoryd already rejects the same
-	// combination at flag-parse time; this is the defense-in-depth copy for
-	// any other submitter of RunWorkflowInput.
-	if input.ReferenceOracleInLoopRetry && (input.ReferenceOracleDir == "" || input.ReferenceOracleMountPath == "" || input.GateCommands[policy.ReferenceOracleGateID] == "") {
-		return BuildActivityResult{}, temporal.NewApplicationError("ReferenceOracleInLoopRetry requires ReferenceOracleDir, ReferenceOracleMountPath, and ReferenceOracleCommand to all be set", InfrastructureFailureType)
-	}
-
 	// Two-phase intent protocol closing the crash window between the
 	// subprocess finishing and the checkpoint rename below: if a prior
 	// attempt of this exact Activity execution recorded intent but never
@@ -264,34 +237,7 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 		activity.GetLogger(ctx).Warn("exclude harness artifacts via info/exclude", "error", err)
 	}
 
-	// In-loop reference oracle (Phase 0.5), the Temporal/-repository
-	// counterpart of cmd/factoryd's build-phase block: opt-in via
-	// input.ReferenceOracleInLoopRetry only
-	// (validated complete above), snapshotted-then-hashed through the same
-	// sandbox.SnapshotReferenceOracle that this file's named-gate Activity also uses, mounted read-only into THIS build container,
-	// with the command forwarded to build_app.py. All three locals stay
-	// empty otherwise, so every existing run -- including one that
-	// configured the oracle trio solely for the post-build gate -- is
-	// byte-for-byte unchanged. "reference-oracle-build-snapshot", distinct
-	// from the gate's "reference-oracle-snapshot": both can be alive in one
-	// run and one launch's cleanup must never remove the other's copy.
-	var buildOracleDir, buildOracleMountPath, buildOracleCommand, buildOracleSHA256 string
-	if input.ReferenceOracleInLoopRetry {
-		snapshotDir, absErr := filepath.Abs(filepath.Join(a.logDirFor(input), "reference-oracle-build-snapshot"))
-		if absErr != nil {
-			return BuildActivityResult{}, temporal.NewApplicationErrorWithCause("resolve reference-oracle build snapshot path", InfrastructureFailureType, absErr)
-		}
-		buildOracleSHA256, err = sandbox.SnapshotReferenceOracle(input.WorkspacePath, input.ReferenceOracleDir, snapshotDir)
-		if err != nil {
-			return BuildActivityResult{}, temporal.NewApplicationErrorWithCause("reference-oracle build snapshot", InfrastructureFailureType, err)
-		}
-		defer os.RemoveAll(snapshotDir)
-		buildOracleDir = snapshotDir
-		buildOracleMountPath = input.ReferenceOracleMountPath
-		buildOracleCommand = input.GateCommands[policy.ReferenceOracleGateID]
-	}
-
-	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), buildOracleCommand, input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
+	args := buildActivityArgs(a.buildAppScriptFor(input), input.WorkspacePath, input.SpecPath, a.maxRoundsFor(input), a.timeoutMinutesFor(input), input.BaseSHA, a.verifyCommandFor(input), a.fastCheckCommandFor(input), input.Thinking, harnessArg(input.Harness), input.SetupCommands...)
 	// The build script is the only reader of the autofix list (see
 	// TestOnlyTheBuildReadsAutofix): it runs the commands inside each round.
 	args = append(args, autofixArgs(input.AutofixCommands)...)
@@ -395,11 +341,6 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 			RelayCeilingExceeded:      res.RelayCeilingExceeded,
 			RelaySpendPartial:         res.RelaySpendPartial,
 			RelayCalls:                run.AttemptCalls(res.RelayCalls),
-			// safety-contract.md SC-012: the oracle content hash is
-			// recorded with the attempt that ran against it, the same as
-			// cmd/factoryd's buildAttempt. Empty unless the in-loop
-			// oracle was mounted into this build.
-			ReferenceOracleSHA256: buildOracleSHA256,
 		})
 		if err := saveActivityAttemptJournal(ctx, a.checkpointDirFor(input), "build", attempts); err != nil {
 			return err
@@ -422,11 +363,12 @@ func (a *Activities) runBuild(ctx context.Context, input RunWorkflowInput) (prog
 				args...,
 			)
 		}
-		skills, err := a.boundSkills(relayRoleExecution, input.Skills)
+		skills, launchCtx, unmount, err := a.buildLaunchInputs(runCtx, input)
+		defer unmount()
 		if err != nil {
 			return runner.Result{}, err
 		}
-		return a.runSandboxWithRetries(forBuildLaunch(runCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, buildOracleDir, buildOracleMountPath, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
+		return a.runSandboxWithRetries(forBuildLaunch(launchCtx), input, logPath, a.buildMaxAttemptsFor(input), beforeAttempt, afterAttempt, relaySpec, registrySpec, composeSpec, executionHarnessEnv(input), skills, buildAppInterpreter, args...)
 	})
 	runErr = a.dropFinishedBuildSession(ctx, input, runErr)
 	runErr = withModelRouteFailure(runErr, subResult)

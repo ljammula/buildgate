@@ -68,7 +68,7 @@ func TestTicketWithADeniedReleaseDecisionHaltsTheRequestBeforeTheNextTicket(t *t
 			runner := deniedThenAcceptingRunner(t, dataDir, id, c.decision, &built)
 			cfg := requestdriver.WorkerConfig{OpenPullRequest: true}
 			for i := 0; i < 3; i++ {
-				if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+				if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 					t.Fatalf("driveRequests (pass %d): %v", i+1, err)
 				}
 			}
@@ -100,7 +100,7 @@ func TestTicketWithAnAllowedReleaseDecisionAndNoPullRequestStillAdvances(t *test
 	var built []string
 	runner := deniedThenAcceptingRunner(t, dataDir, id, &release.Decision{Project: "app", Allowed: true}, &built)
 	for i := 0; i < 2; i++ {
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests (pass %d): %v", i+1, err)
 		}
 	}
@@ -120,7 +120,7 @@ func TestRetryAfterADeniedTicketOpensItsPullRequestAndBuildsTheNextTicket(t *tes
 	cfg := requestdriver.WorkerConfig{OpenPullRequest: true}
 	drive := func() {
 		t.Helper()
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -164,7 +164,7 @@ func TestTicketWithADeniedReleaseDecisionStillAdvancesWhenPullRequestsAreOff(t *
 			var built []string
 			runner := deniedThenAcceptingRunner(t, dataDir, id, decision, &built)
 			for i := 0; i < 2; i++ {
-				if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), runner); err != nil {
+				if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 					t.Fatalf("driveRequests (pass %d): %v", i+1, err)
 				}
 			}

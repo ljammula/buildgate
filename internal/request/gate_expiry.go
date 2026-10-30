@@ -17,7 +17,7 @@ const HaltGateExpired HaltKind = "gate_expired"
 // is normal.
 func ExpiringGate(s State) bool {
 	switch s {
-	case StateSpecReview, StateOracleReview, StatePlanReview, StateResumeReview:
+	case StateSpecReview, StatePlanReview, StateResumeReview:
 		return true
 	}
 	return false
@@ -136,7 +136,7 @@ func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (r *Re
 
 // ReopenReview is the recovery of a gate_expired halt: halted -> the review
 // the request was waiting at, with a fresh entry time and reminder state. The
-// spec, oracle or plan under review is untouched and nothing is redrafted.
+// spec or plan under review is untouched and nothing is redrafted.
 // A resume_review needs the lost step it waits on (Resume).
 func (r *Request) ReopenReview(by, reason string, now time.Time) error {
 	if r.State != StateHalted || r.HaltKind != HaltGateExpired {

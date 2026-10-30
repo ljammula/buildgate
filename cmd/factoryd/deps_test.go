@@ -101,11 +101,15 @@ type fakeForge struct {
 	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
 	patchIDFn                     func(dir, sha string) (string, error)
 	replayCommitsFn               func(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error)
+	changedPathsFn                func(dir, base, result string) ([]string, error)
+	carveChainFn                  func(ctx context.Context, dir, base, result string, parts [][]string) error
+	carveCommitFn                 func(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error)
 	pushWithLeaseFn               func(ctx context.Context, dir, sha, branch, expected string) error
 	moveBranchFn                  func(dir, branch, sha string) error
 	restoreBranchFn               func(dir, branch, sha string) (bool, error)
 	commentOnPullRequestFn        func(ctx context.Context, prURL, body string) error
 	hostGitVersionFn              func(ctx context.Context) (string, error)
+	readJobLogFn                  func(ctx context.Context, prURL string, jobID int64) (string, error)
 	userLoginFn                   func() (string, error)
 }
 
@@ -165,6 +169,15 @@ func (f *fakeForge) patchID(dir, sha string) (string, error) { return f.patchIDF
 func (f *fakeForge) replayCommits(ctx context.Context, dir, worktreePath, branch, onto string, commits []string) ([]string, error) {
 	return f.replayCommitsFn(ctx, dir, worktreePath, branch, onto, commits)
 }
+func (f *fakeForge) changedPaths(dir, base, result string) ([]string, error) {
+	return f.changedPathsFn(dir, base, result)
+}
+func (f *fakeForge) carveChain(ctx context.Context, dir, base, result string, parts [][]string) error {
+	return f.carveChainFn(ctx, dir, base, result, parts)
+}
+func (f *fakeForge) carveCommit(ctx context.Context, dir, parent, result string, paths []string, message string) (string, error) {
+	return f.carveCommitFn(ctx, dir, parent, result, paths, message)
+}
 func (f *fakeForge) pushWithLease(ctx context.Context, dir, sha, branch, expected string) error {
 	return f.pushWithLeaseFn(ctx, dir, sha, branch, expected)
 }
@@ -176,6 +189,9 @@ func (f *fakeForge) restoreBranch(dir, branch, sha string) (bool, error) {
 }
 func (f *fakeForge) commentOnPullRequest(ctx context.Context, prURL, body string) error {
 	return f.commentOnPullRequestFn(ctx, prURL, body)
+}
+func (f *fakeForge) readJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
+	return f.readJobLogFn(ctx, prURL, jobID)
 }
 func (f *fakeForge) hostGitVersion(ctx context.Context) (string, error) {
 	return f.hostGitVersionFn(ctx)
@@ -389,6 +405,15 @@ func newTestDeps(t testing.TB) *deps {
 		replayCommitsFn: func(context.Context, string, string, string, string, []string) ([]string, error) {
 			return nil, errors.New("test forge: nothing is replayed")
 		},
+		changedPathsFn: func(string, string, string) ([]string, error) {
+			return nil, errors.New("test forge: no paths are listed")
+		},
+		carveChainFn: func(context.Context, string, string, string, [][]string) error {
+			return errors.New("test forge: nothing is carved")
+		},
+		carveCommitFn: func(context.Context, string, string, string, []string, string) (string, error) {
+			return "", errors.New("test forge: nothing is carved")
+		},
 		pushWithLeaseFn: func(context.Context, string, string, string, string) error {
 			return errors.New("test forge: nothing is pushed with a lease")
 		},
@@ -401,6 +426,9 @@ func newTestDeps(t testing.TB) *deps {
 		},
 		hostGitVersionFn: func(context.Context) (string, error) {
 			return "", errors.New("test forge: no git version is read")
+		},
+		readJobLogFn: func(context.Context, string, int64) (string, error) {
+			return "", errors.New("test forge: no job log is read")
 		},
 		userLoginFn: realForge.userLogin,
 	}

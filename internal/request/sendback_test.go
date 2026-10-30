@@ -2,8 +2,6 @@ package request
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -160,94 +158,11 @@ func TestSendBackToPlanRefusedWithoutApprovedSpec(t *testing.T) {
 	}
 }
 
-func TestSendBackRefusedForHaltOracleMaterialize(t *testing.T) {
-	dataDir := t.TempDir()
-	r := newQuarantinedRequestWithPlan(t, dataDir, "req-1", StateHalted, true, false)
-	r.HaltKind = HaltOracleMaterialize
-	if err := r.Save(dataDir); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := SendBack(dataDir, "req-1", "alice", "try again", SendBackToPlan, fixedNow)
-	if !errors.Is(err, ErrIllegalTransition) {
-		t.Fatalf("err = %v, want ErrIllegalTransition", err)
-	}
-	if !strings.Contains(err.Error(), "factoryd retry") {
-		t.Errorf("err = %v, want it to name `factoryd retry` as the actual recovery", err)
-	}
-}
-
 func TestSendBackInvalidTargetRefused(t *testing.T) {
 	dataDir := t.TempDir()
 	_, err := SendBack(dataDir, "does-not-exist", "alice", "a reason", SendBackTarget("bogus"), fixedNow)
 	if err == nil || !strings.Contains(err.Error(), "bogus") {
 		t.Fatalf("err = %v, want it to name the invalid target -- checked before any file is even loaded", err)
-	}
-}
-
-// An adversarial review of SendBack (2026-09-26) found: a send-back to
-// spec must drop the request-level oracle/* pins too, or the redrafted
-// oracle fails every later VerifyApprovedHashes and cancel is the only exit.
-func TestSendBackToSpecDropsRequestOraclePinsAndSkipWarning(t *testing.T) {
-	dataDir := t.TempDir()
-	r := newQuarantinedRequestWithPlan(t, dataDir, "req-1", StateQuarantined, true, true)
-	r.DraftOracles = true
-	r.ApprovedSHA256[requestOracleRelPrefix+"test_missed_days.py"] = "0ac1e"
-	r.OracleSkipWarning = "the oracle stage is being skipped"
-	if err := r.Save(dataDir); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	got, err := SendBack(dataDir, "req-1", "alice", "reword criterion 8", SendBackToSpec, fixedNow)
-	if err != nil {
-		t.Fatalf("SendBack: %v", err)
-	}
-	if len(got.ApprovedSHA256) != 0 {
-		t.Errorf("ApprovedSHA256 = %v, want every pin (spec, tickets, oracle) dropped", got.ApprovedSHA256)
-	}
-	if got.OracleSkipWarning != "" {
-		t.Errorf("OracleSkipWarning = %q, want cleared", got.OracleSkipWarning)
-	}
-}
-
-// The same adversarial review found: a -draft-oracles request whose
-// oracle review was never approved for the current spec must not reach
-// planning (it would build with no oracle and no skip warning).
-func TestSendBackToPlanRequiresOracleApprovalForCurrentSpec(t *testing.T) {
-	specApproved := Transition{From: StateSpecReview, To: StateOracleDrafting}
-	oracleApproved := Transition{From: StateOracleReview, To: StatePlanning}
-	cases := []struct {
-		name    string
-		history []Transition
-		wantErr bool
-	}{
-		{"oracle never reviewed", []Transition{specApproved}, true},
-		{"oracle approved after spec", []Transition{specApproved, oracleApproved}, false},
-		{"oracle approved only for an earlier spec", []Transition{specApproved, oracleApproved, specApproved}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dataDir := t.TempDir()
-			r := newQuarantinedRequestWithPlan(t, dataDir, "req-1", StateHalted, true, false)
-			r.DraftOracles = true
-			r.History = append(r.History, tc.history...)
-			if err := r.Save(dataDir); err != nil {
-				t.Fatalf("Save: %v", err)
-			}
-			_, err := SendBack(dataDir, "req-1", "alice", "replan", SendBackToPlan, fixedNow)
-			if tc.wantErr {
-				if !errors.Is(err, ErrIllegalTransition) {
-					t.Fatalf("SendBack err = %v, want ErrIllegalTransition", err)
-				}
-				if got, _ := Load(dataDir, "req-1"); got.State != StateHalted {
-					t.Errorf("State = %q, want unchanged %q", got.State, StateHalted)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("SendBack: %v", err)
-			}
-		})
 	}
 }
 
@@ -269,71 +184,6 @@ func TestPlanFeedbackDropsNotesFromBeforeASpecSendBack(t *testing.T) {
 	}
 	if spec := SpecFeedback(r); !strings.Contains(spec, "reword criterion 8") || strings.Contains(spec, "split ticket 2") {
 		t.Errorf("SpecFeedback = %q, want only the spec send-back note", spec)
-	}
-}
-
-// A round-2 review found: a send-back to spec moves the oracle files
-// drafted against the old spec aside and forgets the draft, so a
-// failed redraft can't leave them in oracle/ to be approved and pinned.
-func TestSendBackToSpecSupersedesOldOracleFiles(t *testing.T) {
-	dataDir := t.TempDir()
-	r := newQuarantinedRequestWithPlan(t, dataDir, "req-1", StateQuarantined, true, true)
-	r.DraftOracles = true
-	r.OracleDraft = &OracleDraft{Status: "drafted", Files: []string{"test_missed_days.py"}}
-	if err := r.Save(dataDir); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	oracleDir := filepath.Join(Dir(dataDir, "req-1"), RequestOracleDirName)
-	if err := os.MkdirAll(oracleDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(oracleDir, "test_missed_days.py"), []byte("old oracle"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := SendBack(dataDir, "req-1", "alice", "reword criterion 8", SendBackToSpec, fixedNow)
-	if err != nil {
-		t.Fatalf("SendBack: %v", err)
-	}
-	if _, err := os.Stat(oracleDir); !os.IsNotExist(err) {
-		t.Errorf("oracle/ still present (err=%v), want moved aside", err)
-	}
-	moved, err := os.ReadFile(filepath.Join(Dir(dataDir, "req-1"), RequestOracleDirName+"-rejected", "test_missed_days.py"))
-	if err != nil || string(moved) != "old oracle" {
-		t.Errorf("oracle-rejected/test_missed_days.py = %q, %v; want the old oracle kept for reference", moved, err)
-	}
-	if got.OracleDraft != nil {
-		t.Errorf("OracleDraft = %+v, want nil", got.OracleDraft)
-	}
-}
-
-// The same round-2 review also found: SendBackPlanAllowed is the one
-// rule the hint, SendBack and the API's can_send_back_to_plan share.
-func TestSendBackPlanAllowed(t *testing.T) {
-	specApproved := Transition{From: StateSpecReview, To: StateOracleDrafting}
-	oracleApproved := Transition{From: StateOracleReview, To: StatePlanning}
-	cases := []struct {
-		name         string
-		specPinned   bool
-		draftOracles bool
-		history      []Transition
-		want         bool
-	}{
-		{"no approved spec", false, false, nil, false},
-		{"approved spec, no oracles", true, false, nil, true},
-		{"oracles never reviewed", true, true, []Transition{specApproved}, false},
-		{"oracles reviewed after spec", true, true, []Transition{specApproved, oracleApproved}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := &Request{DraftOracles: tc.draftOracles, History: tc.history, ApprovedSHA256: map[string]string{}}
-			if tc.specPinned {
-				r.ApprovedSHA256[specFileName] = "deadbeef"
-			}
-			if got := r.SendBackPlanAllowed(); got != tc.want {
-				t.Errorf("SendBackPlanAllowed = %v, want %v", got, tc.want)
-			}
-		})
 	}
 }
 

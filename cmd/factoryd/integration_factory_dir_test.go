@@ -63,7 +63,7 @@ func TestIntegrationFactoryDirIsMountedFromTheCommitTheConfigWasReadFrom(t *test
 	if out, err := runGit(t, ws, "add", ".factory"); err != nil {
 		t.Fatalf("git add: %v: %s", err, out)
 	}
-	commitFactoryYML(t, ws, "lint_command: sh .factory/lint.sh\n")
+	commitFactoryYML(t, ws, "gates:\n  - id: lint\n    command: sh .factory/lint.sh\n")
 	trusted, err := runGit(t, ws, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func assertFactoryDirChangeRefusedAtRelease(t *testing.T, r *run.Run, dataDir, w
 	if r.State != run.StateAccepted {
 		t.Fatalf("state = %q, want %q (gates: %+v)", r.State, run.StateAccepted, r.GateResults)
 	}
-	if passed, found := gatePassed(r, "lint"); !found || !passed {
+	if passed, found := gatePassed(r, "repo-lint"); !found || !passed {
 		t.Errorf("lint gate found=%v passed=%v, want passed", found, passed)
 	}
 	decision := readReleaseDecision(t, dataDir, release.ProjectFromWorkspace(ws), r.ID)

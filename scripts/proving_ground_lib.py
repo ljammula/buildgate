@@ -64,10 +64,10 @@ def load_fixtures(path: str, repo_root: str) -> List[Dict[str, Any]]:
 def _load_fixture_file(path: str, repo_root: str) -> List[Dict[str, Any]]:
     """Load and validate one fixtures file.
 
-    `repo` is expanded (~); `repo`, `spec` and `oracle_dir`, when relative,
-    are resolved against repo_root (this repo's own fixture repos, tickets
-    and oracles live under testdata/fixtures, data/tickets and data/oracles
-    there, not next to the fixtures file).
+    `repo` is expanded (~); `repo` and `spec`, when relative,
+    are resolved against repo_root (this repo's own fixture repos and tickets
+    live under testdata/fixtures and data/tickets there, not next to the
+    fixtures file).
     """
     with open(path) as fh:
         data = json.load(fh)
@@ -91,7 +91,7 @@ def _load_fixture_file(path: str, repo_root: str) -> List[Dict[str, Any]]:
             )
         g = dict(f)
         g["repo"] = os.path.expanduser(f["repo"])
-        for key in ("repo", "spec", "oracle_dir"):
+        for key in ("repo", "spec"):
             if g.get(key) and not os.path.isabs(g[key]):
                 g[key] = os.path.join(repo_root, g[key])
         out.append(g)
@@ -160,7 +160,7 @@ def _rule_infra(run_json: Dict[str, Any], category: str) -> bool:
 def _rule_false_accept_is_factoryd_bug(run_json: Dict[str, Any], category: str) -> bool:
     # Accepting a run that a deterministic, evidence-based gate should have
     # failed is the default explanation for a false accept: the ticket
-    # declared its scope/oracle correctly (that's what "expect
+    # declared its scope correctly (that's what "expect
     # quarantine:<gate>" means here), so the gate not catching it points at
     # the gate's own evaluation, not the ticket or the model's code.
     return category == "false_accept"
@@ -168,7 +168,7 @@ def _rule_false_accept_is_factoryd_bug(run_json: Dict[str, Any], category: str) 
 
 _SCOPE_GATES = {"diff_scope", "tests_red_on_base"}
 _BUILD_QUALITY_GATES = {
-    "canonical_verify", "unit_tests", "integration_tests", "lint", "security_audit", "full_suite_verify",
+    "canonical_verify", "full_suite_verify",
 }
 
 
@@ -428,8 +428,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f.get(a.name) or "")
     elif a.cmd == "list":
         for f in load_fixtures(a.fixtures, a.repo_root):
-            print("%-32s repo=%s expect=%s oracle=%s" % (
-                f["label"], f["repo"], f["expect"], os.path.basename(f.get("oracle_dir") or "") or "-"))
+            print("%-32s repo=%s expect=%s" % (f["label"], f["repo"], f["expect"]))
     elif a.cmd == "validate":
         fixtures = load_fixtures(a.fixtures, a.repo_root)
         print("%d fixture(s) parsed ok" % len(fixtures))

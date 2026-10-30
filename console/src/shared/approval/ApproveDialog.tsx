@@ -8,7 +8,7 @@ import type { RequestSummary } from "@/domain/request";
 import { stateLabel } from "@/domain/status";
 import type { CostSummary } from "@/domain/usage";
 
-import { nextStateAfterApprove, oracleSkipWarningFor } from "./approvalText";
+import { nextStateAfterApprove } from "./approvalText";
 import { FlowDialog } from "./FlowDialog";
 import type { FlowProps } from "./flowTypes";
 import { OperatorGate } from "./OperatorGate";
@@ -21,14 +21,6 @@ export interface ApproveDialogProps extends FlowProps {
    */
   readonly costSummary?: CostSummary | null;
   /**
-   * The `expected_sha256` map to send, overriding the one derived from
-   * `request`. oracle_review passes `oracleExpectedSha256(...)` of the oracle
-   * files it DISPLAYED (an empty map means the approval skips the oracle
-   * stage). Omit it for spec_review / plan_review: the map is then computed
-   * from the displayed `request` itself.
-   */
-  readonly expectedSha256?: Readonly<Record<string, string>> | null;
-  /**
    * The read-back questions whose answer box holds text not yet saved: the
    * dialog warns that the text is not part of this approval.
    */
@@ -39,8 +31,7 @@ export interface ApproveDialogProps extends FlowProps {
  * "Approve this request?": restates the state transition, ticket count,
  * usage so far and prior rejections, then POSTs `/requests/{id}/approve`
  * with `{ by, expected_sha256 }`. The hashes bind the approval to the
- * content the operator was shown: they are computed from the `request` prop
- * (or the `expectedSha256` override), never from a fetch made at confirm
+ * content the operator was shown: they are computed from the `request` prop, never from a fetch made at confirm
  * time, so a spec or ticket changed on disk since the display makes the
  * server refuse (409) and the error stays on screen with the dialog open.
  * Renders nothing when closed or when the console cannot write; prompts
@@ -49,7 +40,6 @@ export interface ApproveDialogProps extends FlowProps {
 export function ApproveDialog({
   request,
   costSummary = null,
-  expectedSha256 = null,
   unsavedAnswers = [],
   open,
   onOpenChange,
@@ -63,7 +53,6 @@ export function ApproveDialog({
         <ApproveBody
           request={request}
           costSummary={costSummary}
-          expectedSha256={expectedSha256}
           unsavedAnswers={unsavedAnswers}
           by={by}
           onOpenChange={onOpenChange}
@@ -77,7 +66,6 @@ export function ApproveDialog({
 interface BodyProps {
   readonly request: RequestSummary;
   readonly costSummary: CostSummary | null;
-  readonly expectedSha256: Readonly<Record<string, string>> | null;
   readonly unsavedAnswers: readonly string[];
   readonly by: string;
   readonly onOpenChange: (open: boolean) => void;
@@ -87,7 +75,6 @@ interface BodyProps {
 function ApproveBody({
   request: latestRequest,
   costSummary,
-  expectedSha256: latestExpectedSha256,
   unsavedAnswers,
   by,
   onOpenChange,
@@ -100,24 +87,18 @@ function ApproveBody({
   // a change since then is refused by the server instead of being approved
   // unread.
   const [request] = useState(latestRequest);
-  const [expectedSha256] = useState(latestExpectedSha256);
   const approve = useApproveRequest(request.id);
   const next =
     request.approveNextState !== ""
       ? request.approveNextState
       : (nextStateAfterApprove(request.state) ?? request.state);
   const cost = request.costSummary ?? costSummary;
-  const skipWarning = oracleSkipWarningFor(request, expectedSha256);
-  const skipsOracle =
-    request.state === "oracle_review" &&
-    expectedSha256 !== null &&
-    Object.keys(expectedSha256).length === 0;
 
   async function confirm() {
     try {
       const updated = await approve.mutateAsync({
         by,
-        expectedSha256: expectedSha256 ?? expectedSha256For(request),
+        expectedSha256: expectedSha256For(request),
       });
       onDone?.(updated);
       onOpenChange(false);
@@ -145,12 +126,6 @@ function ApproveBody({
             formatUsageLines(cost).map((line) => <li key={line}>Usage so far: {line}</li>)
           )}
           <li>Prior rejections: {request.rejections.length}</li>
-          {skipsOracle && skipWarning === null ? (
-            <li className="mt-2">
-              No oracle files: the build will have no request-level acceptance test.
-            </li>
-          ) : null}
-          {skipWarning !== null ? <li className="text-tone-danger mt-2">{skipWarning}</li> : null}
           {request.state === "spec_review" && unsavedAnswers.length > 0 ? (
             <li className="text-tone-danger mt-2">
               {`Unsaved answer${unsavedAnswers.length === 1 ? "" : "s"} to ${unsavedAnswers.join(", ")}: ` +

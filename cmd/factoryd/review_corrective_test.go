@@ -28,11 +28,11 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 
 	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		// The round's own review refused it through a new reproduction.
-		return requestdrivertest.ReproductionRefusedOn(t, dataDir, roundRunID, branch, baseSHA, fmt.Sprintf("%040d", 3))
+		return requestdrivertest.CorrectableQuarantine(t, dataDir, roundRunID, branch, baseSHA, fmt.Sprintf("%040d", 3))
 	})
 
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), buildRunner); err != nil {
+	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {
@@ -48,11 +48,11 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 	}
 	// The exhausted-rounds message quotes the last round's own reason, so
 	// the operator sees why without opening each run.
-	if !strings.Contains(loaded.Error, "rounds exhausted") || !strings.Contains(loaded.Error, "review_reproduction: the factory's run of the reviewer's reproduction") {
+	if !strings.Contains(loaded.Error, "rounds exhausted") || !strings.Contains(loaded.Error, "tests_red_on_base") {
 		t.Errorf("Error = %q, want the exhausted message quoting the last round's reason", loaded.Error)
 	}
-	if loaded.QuarantineCheck != request.QuarantineCheckReviewReproduction {
-		t.Errorf("QuarantineCheck = %q, want %q", loaded.QuarantineCheck, request.QuarantineCheckReviewReproduction)
+	if loaded.QuarantineCheck != "" {
+		t.Errorf("QuarantineCheck = %q, want %q", loaded.QuarantineCheck, "")
 	}
 	tk := loaded.Tickets[0]
 	if tk.Branch != "" || tk.PRURL != "" {

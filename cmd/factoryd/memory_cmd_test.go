@@ -106,7 +106,7 @@ func (f *memFix) quarantinedRunWithNotes(id, notesFile string) *run.Run {
 	if err := os.WriteFile(filepath.Join(runDir, "agent-notes.md"), []byte(notesFile), 0o600); err != nil {
 		f.t.Fatal(err)
 	}
-	rr := requestdrivertest.QuarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "lint")
+	rr := requestdrivertest.QuarantinedOn(f.t, f.data, id, "factoryd/"+id, strings.Repeat("1", 40), strings.Repeat("2", 40), "repo-lint")
 	rr.Project, rr.RepositoryRoot = f.project, f.root
 	if err := rr.Save(f.data); err != nil {
 		f.t.Fatal(err)
@@ -357,7 +357,7 @@ var offCases = map[string]struct {
 		}
 	}, "factoryd memory on"},
 	"kill switch": {func(t *testing.T, f *memFix) {
-		if err := release.Engage(f.data, f.project, "operator", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
+		if err := engageKillSwitch(f.data, f.project, "operator", "halt", func() string { return "2026-10-09T00:00:00Z" }); err != nil {
 			t.Fatal(err)
 		}
 	}, "kill switch"},
@@ -821,7 +821,7 @@ func driveMemoryRequest(t *testing.T, f *memFix, id string, want request.State) 
 		if loaded.State == want || i == 4 {
 			return loaded.State
 		}
-		if err := driveRequests(f.dp, context.Background(), f.data, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		if err := driveRequests(f.dp, context.Background(), f.data, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
@@ -901,10 +901,9 @@ func TestMemoryRequestPlanIsItsOneTicket(t *testing.T) {
 		t.Fatalf("tickets = %+v (%v), want one", loaded.Tickets, err)
 	}
 	for key, want := range map[string]string{
-		"Verify-Command:":         "make test",
-		"Allowed-Files:":          "AGENTS.md",
-		"Required-Changed-Files:": "AGENTS.md",
-		"Tests-Required:":         "no -- this change edits only AGENTS.md",
+		"Verify-Command:": "make test",
+		"Allowed-Files:":  "AGENTS.md",
+		"Tests-Required:": "no -- this change edits only AGENTS.md",
 	} {
 		if got := ticketHeader(t, loaded.Tickets[0].SpecPath, key); got != want {
 			t.Errorf("ticket header %s %q, want %q", key, got, want)

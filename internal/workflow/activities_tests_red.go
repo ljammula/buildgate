@@ -47,15 +47,21 @@ type TestsRedHoldInput struct {
 type TestsRedHoldResult struct {
 	Held   []run.HeldReproduction `json:"held,omitempty"`
 	Reason string                 `json:"reason,omitempty"`
+	// Skipped are the changed test files not held, each with its reason.
+	Skipped []run.TestsRedSkipped `json:"skipped,omitempty"`
 }
 
 // HoldChangedTestsActivity reads each changed test file from the result
-// commit, added files first and then modified ones (each group sorted), keeps
-// those a runner takes (reproduction.CheckChangedTest), up to
+// commit and from the base commit, added files first and then modified ones
+// (each group sorted), judges the change's own tests in it
+// (reproduction.JudgeChangedTest: the IDs the file gained and those whose span
+// holds a line the change added or removed, from git diff -U0 on the host),
+// keeps the files a runner takes with a judged test, up to
 // reproduction.MaxReproductions, and copies each to the run's own directory
-// (run.TestsRedOnBaseDir), mode 0444, recording its SHA-256. The content never
-// reaches the workflow, its history or the run record. A copy that cannot be
-// written is ReproductionUnheldFailureType: no verdict on the work.
+// (run.TestsRedOnBaseDir), mode 0444, recording its SHA-256. A file it does
+// not hold is recorded in Skipped with the reason it observed. The content
+// never reaches the workflow, its history or the run record. A copy that
+// cannot be written is ReproductionUnheldFailureType: no verdict on the work.
 func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRedHoldInput) (TestsRedHoldResult, error) {
 	tracked, err := treePaths(ctx, input.WorkspacePath, input.Commit)
 	if err != nil {
@@ -67,28 +73,63 @@ func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRe
 	}
 	dir := run.TestsRedOnBaseDir(a.logDirFor(input.RunWorkflowInput))
 	var res TestsRedHoldResult
+	skip := func(p, reason string) {
+		res.Skipped = append(res.Skipped, run.TestsRedSkipped{Path: p, Reason: reason})
+	}
 	for _, p := range a.addedFirst(ctx, input) {
 		if len(res.Held) >= reproduction.MaxReproductions {
-			break
-		}
-		content, err := readCommitFile(ctx, input.WorkspacePath, input.Commit, p)
-		if err != nil || content == "" {
+			skip(p, fmt.Sprintf("only %d changed test files are run and this one came after them", reproduction.MaxReproductions))
 			continue
 		}
-		accepted, err := reproduction.CheckChangedTest(p, []byte(content), root)
+		changed, reason := changedTestAt(ctx, input, p, root)
+		if reason != "" {
+			skip(p, reason)
+			continue
+		}
+		accepted, err := reproduction.JudgeChangedTest(changed)
 		if err != nil {
+			skip(p, err.Error())
 			continue
 		}
-		h, err := holdOne(dir, len(res.Held), accepted, []byte(content), false)
+		h, err := holdOne(dir, len(res.Held), accepted, changed.Result, false)
 		if err != nil {
 			return TestsRedHoldResult{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("hold the changed tests: %v", err), ReproductionUnheldFailureType, err)
 		}
 		res.Held = append(res.Held, h)
 	}
 	if len(res.Held) == 0 {
-		res.Reason = "no changed test file has a test runner the factory can run"
+		res.Reason = "no changed test file could be run or judged (the files and their reasons are listed)"
 	}
 	return res, nil
+}
+
+// changedTestAt reads one changed test file at the result and the base commit
+// and the lines the change touched in it. A non-empty reason says why it could
+// not be read.
+func changedTestAt(ctx context.Context, input TestsRedHoldInput, p string, root reproduction.RootFacts) (reproduction.ChangedTest, string) {
+	c := reproduction.ChangedTest{Path: p, Root: root}
+	result, err := readCommitFile(ctx, input.WorkspacePath, input.Commit, p)
+	if err != nil {
+		return c, "it could not be read at the result commit: " + err.Error()
+	}
+	c.Result = []byte(result)
+	base := ""
+	if input.Base != "" {
+		if base, err = readCommitFile(ctx, input.WorkspacePath, input.Base, p); err != nil {
+			return c, "it could not be read at the base commit: " + err.Error()
+		}
+	}
+	if base == "" {
+		return c, ""
+	}
+	c.Base = []byte(base)
+	diff, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(input.WorkspacePath),
+		"--literal-pathspecs", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", input.Base, input.Commit, "--", p)...).Output()
+	if err != nil {
+		return c, "its diff against the base commit could not be read"
+	}
+	c.Changes = reproduction.ParseHunks(diff)
+	return c, ""
 }
 
 // addedFirst is input.Files with the files input.Commit adds against

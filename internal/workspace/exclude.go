@@ -13,7 +13,7 @@ import (
 // factory bookkeeping, never app source: the model's session transcript,
 // the report and evidence written after the build, and the staged-file
 // manifest.
-var HarnessArtifacts = []string{".pi-build-session/", ".pi-build-round-state.json", ".pi-conformity-session/", ".pi-code-review-session/", ".pi-combined-review-session/", "BUILD_REPORT.md", "BUILD_EVIDENCE.json", "CONFORMITY_EVIDENCE.json", "CODE_REVIEW_EVIDENCE.json", ".ticket-runner-staged.json"}
+var HarnessArtifacts = []string{".pi-build-session/", ".pi-build-round-state.json", ".pi-conformity-session/", ".pi-code-review-session/", ".pi-combined-review-session/", ".pi-challenge-session/", "BUILD_REPORT.md", "BUILD_EVIDENCE.json", "CONFORMITY_EVIDENCE.json", "CODE_REVIEW_EVIDENCE.json", ".ticket-runner-staged.json"}
 
 // ExcludeHarnessArtifacts appends HarnessArtifacts to the repository's
 // own info/exclude, so they are ignored without touching the tracked

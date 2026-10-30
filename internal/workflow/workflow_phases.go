@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -37,15 +36,15 @@ func widenForTimeoutMinutes(options temporalworkflow.ActivityOptions, timeoutMin
 }
 
 // buildToVerdict runs everything after the pre-build checks: build, verify,
-// the gates, evidence, the tests_red_on_base proof, the review steps, the
-// oracle commit and the policy verdict, in that order.
+// the gates, evidence, the tests_red_on_base proof, the review steps and
+// the policy verdict, in that order.
 func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input *RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) error {
 	verify, err := buildAndVerify(ctx, ids, buildVerifyCtx, *input, current, result, worktreePath, branch)
 	if err != nil {
 		return err
 	}
 
-	gates, err := postVerifyGates(ctx, ids, buildVerifyCtx, buildVerifyActivityOptions, input, current, result, worktreePath, branch)
+	gates, err := postVerifyGates(ctx, ids, buildVerifyCtx, input, current, result, worktreePath, branch)
 	if err != nil {
 		return err
 	}
@@ -60,19 +59,66 @@ func buildToVerdict(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return err
 	}
 
-	reviews, err := runReviewSteps(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
-	if err != nil {
+	var reviews reviewOutcome
+	version := temporalworkflow.GetVersion(ctx, changeSizeMeasurementChange, temporalworkflow.DefaultVersion, 1)
+	passed := beforeReviewPassed(*input, result, gates, testsRed)
+	if version == 1 && passed {
+		if err := measureChangeSize(ctx, ids, *input, current, result, worktreePath, branch); err != nil {
+			return err
+		}
+	}
+	if version == temporalworkflow.DefaultVersion || passed && !overSizeCap(*input, result.ChangeSize) {
+		reviews, err = runReviewSteps(ctx, ids, buildVerifyCtx, *input, current, result, gates, worktreePath, branch)
+		if err != nil {
+			return err
+		}
+	} else {
+		result.CodeReviewConfigured = input.CodeReviewPolicy != "" && input.CodeReviewPolicy != codereview.PolicyOff
+	}
+
+	if err := runChallenge(ctx, ids, buildVerifyCtx, *input, current, result, reviews, passed && version == 1 && !overSizeCap(*input, result.ChangeSize), worktreePath, branch); err != nil {
 		return err
 	}
 
-	if err = oracleCommitPhase(ctx, ids, buildVerifyActivityOptions, *input, current, result, worktreePath, branch, &gates, &evidenceResult, &verify, reviews); err != nil {
-		return err
-	}
+	// Marks the executions that no longer commit a reference oracle's bytes
+	// or verify the committed tree (referenceOracleRemovedChange).
+	temporalworkflow.GetVersion(ctx, referenceOracleRemovedChange, temporalworkflow.DefaultVersion, 1)
 
 	if err = evaluateRun(ctx, ids, *input, current, result, worktreePath, branch, verify, evidenceResult, gates, reviews, testsRed); err != nil {
 		return err
 	}
 	return nil
+}
+
+// Histories before this marker replay without the measurement Activity.
+const changeSizeMeasurementChange = "source-change-size"
+
+func beforeReviewPassed(input RunWorkflowInput, result *RunWorkflowResult, gates gateOutcome, testsRed testsRedOutcome) bool {
+	if !earlierGatesPassed(result, gates) {
+		return false
+	}
+	scope := policy.Scope{AllowedFiles: input.AllowedFiles, Unapproved: input.ScopeUnapproved, AllowedPaths: input.AllowedPaths}
+	if scope.Declared() && len(scope.Judge(policy.ExcludeHarnessByproducts(result.ChangedFiles)).Refused()) != 0 {
+		return false
+	}
+	gate, _ := policy.TestsRedOnBase(policy.TestFiles(result.ChangedFiles, input.TestPatterns), input.TestsRequiredOptOut, input.Bug, testsRed.policyInput())
+	return gate.Passed
+}
+
+func measureChangeSize(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) error {
+	current.Stage, current.StartedAt = "change_size", temporalworkflow.Now(ctx)
+	in := MeasureChangeSizeInput{WorkspacePath: input.WorkspacePath, BaseSHA: input.effectiveDiffBase(), ResultSHA: result.ResultSHA, TestPatterns: input.TestPatterns}
+	if err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "measure-change-size"), MeasureChangeSizeActivityName, in).Get(ctx, &result.ChangeSize); err != nil {
+		return wrapActivityFailure("measure change size activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	if result.ChangeSize == nil {
+		return wrapActivityFailure("measure change size activity", fmt.Errorf("measurement returned no result"), result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	return nil
+}
+
+func overSizeCap(input RunWorkflowInput, size *run.ChangeSize) bool {
+	return size != nil && (size.SourceFiles > input.ReleaseMaxFilesChanged || size.SourceLines > input.ReleaseMaxChangedLines)
 }
 
 // captureRunBase records the commit this run is evaluated against
@@ -262,23 +308,19 @@ func runBuildStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 	return build, err
 }
 
-// gateOutcome is what postVerifyGates found: the full-suite and named-gate
-// results the later phases read and the oracle-commit phase may replace.
+// gateOutcome is what postVerifyGates found: the full-suite and repository-gate
+// results the later phases read.
 type gateOutcome struct {
 	fullSuite    VerifyActivityResult
 	ranFullSuite bool
-	// namedGateInputs and namedGatesFailed are the named gates' results.
-	namedGateInputs  []policy.NamedGateInput
-	namedGatesFailed bool
-	// passedReferenceOracleSHA256 is the tree hash the reference_oracle
-	// gate ran against, set only when that gate ran AND passed: the pin
-	// CommitOraclesActivity verifies against.
-	passedReferenceOracleSHA256 string
+	// repoGateInputs and repoGatesFailed are the repository gates' results.
+	repoGateInputs  []policy.RepoGateInput
+	repoGatesFailed bool
 }
 
-// postVerifyGates runs the full-suite check and the named gates, each only
+// postVerifyGates runs the full-suite check and the repository gates, each only
 // once canonical verification passed. It sets input.GateCommands.
-func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input *RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) (gateOutcome, error) {
+func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input *RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string) (gateOutcome, error) {
 	// Full-suite regression check (gap 3 of the plan's 2026-08-28 readiness
 	// review), ported from cmd/factoryd: optional, and only
 	// run once canonical verification itself passed — a run already
@@ -306,66 +348,42 @@ func postVerifyGates(ctx temporalworkflow.Context, ids *activityIDs, buildVerify
 		ranFullSuite = true
 	}
 
-	// The named gates (lint, security_audit, unit_tests,
-	// integration_tests, reference_oracle), as full-suite is: each project-configured
+	// The repository gates, as full-suite is: each project-configured
 	// command runs here, via RunNamedGateActivityName, only once canonical
 	// verification itself passed.
-	var namedGateInputs []policy.NamedGateInput
-	namedGatesFailed := false
-	// The tree hash the reference_oracle gate ran against, set only when that
-	// gate ran AND passed: the pin CommitOraclesActivity verifies against.
-	var passedReferenceOracleSHA256 string
+	var repoGateInputs []policy.RepoGateInput
+	repoGatesFailed := false
 	if result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 {
 		gateChecks, gateCommands := gateChecksToRun(ctx, *input)
-		// The commands the gates below ran with are the ones the
-		// post-oracle-commit rerun gets: a repository's own gates are
-		// rerun only when they ran here.
+		// The commands the gates below ran with: a repository's own gates
+		// are in them only when they ran here.
 		input.GateCommands = gateCommands
 		for _, check := range gateChecks {
 			command := input.GateCommands[check]
 			var gateResult VerifyActivityResult
 			current.Stage, current.StartedAt = check, temporalworkflow.Now(ctx)
-			gateCtx := buildVerifyCtx
-			oracleCanary := false
-			if check == policy.ReferenceOracleGateID {
-				// The gate Activity runs the oracle command and then its runtime
-				// canary, each bounded by half the deadline: double the
-				// single-command budget, as for the post-oracle-commit verify.
-				oracleCanary = true
-				oracleGateOptions := buildVerifyActivityOptions
-				oracleGateOptions.StartToCloseTimeout *= 2
-				gateCtx = temporalworkflow.WithActivityOptions(ctx, oracleGateOptions)
-			}
-			if err := temporalworkflow.ExecuteActivity(ids.withRetries(gateCtx, "gate-"+check), RunNamedGateActivityName, NamedGateActivityInput{RunWorkflowInput: *input, Check: check, Command: command, OracleCanary: oracleCanary}).Get(ctx, &gateResult); err != nil {
+			if err := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "gate-"+check), RunNamedGateActivityName, RepoGateActivityInput{RunWorkflowInput: *input, Check: check, Command: command}).Get(ctx, &gateResult); err != nil {
 				return gateOutcome{}, wrapActivityFailure("run "+check+" gate activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 			}
 			result.Attempts = append(result.Attempts, gateResult.Attempts...)
-			if gateResult.OracleCanary != nil {
-				result.OracleCanary = gateResult.OracleCanary
-			}
-			namedGateInputs = append(namedGateInputs, policy.NamedGateInput{
-				Check:                 check,
-				Command:               gateResult.Result.Command,
-				ExitCode:              gateResult.Result.ExitCode,
-				DurationMs:            gateResult.DurationMs,
-				LogSHA256:             gateResult.LogSHA256,
-				ReferenceOracleSHA256: gateResult.ReferenceOracleSHA256,
-				BaseCheck:             gateResult.BaseCheck,
+			repoGateInputs = append(repoGateInputs, policy.RepoGateInput{
+				Check:      check,
+				Command:    gateResult.Result.Command,
+				ExitCode:   gateResult.Result.ExitCode,
+				DurationMs: gateResult.DurationMs,
+				LogSHA256:  gateResult.LogSHA256,
+				BaseCheck:  gateResult.BaseCheck,
 			})
 			if gateResult.Result.ExitCode != 0 {
-				namedGatesFailed = true
-			}
-			if check == policy.ReferenceOracleGateID && gateResult.Result.ExitCode == 0 {
-				passedReferenceOracleSHA256 = gateResult.ReferenceOracleSHA256
+				repoGatesFailed = true
 			}
 		}
 	}
 	return gateOutcome{
-		fullSuite:                   fullSuite,
-		ranFullSuite:                ranFullSuite,
-		namedGateInputs:             namedGateInputs,
-		namedGatesFailed:            namedGatesFailed,
-		passedReferenceOracleSHA256: passedReferenceOracleSHA256,
+		fullSuite:       fullSuite,
+		ranFullSuite:    ranFullSuite,
+		repoGateInputs:  repoGateInputs,
+		repoGatesFailed: repoGatesFailed,
 	}, nil
 }
 
@@ -384,11 +402,9 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		// own doc comment — a corrective round's own BaseSHA is just its
 		// checkout point, not the cumulative diff base a -diff-base
 		// override names.
-		BaseSHA:              input.effectiveDiffBase(),
-		RequiredChangedFiles: input.RequiredChangedFiles,
-		RequiredContent:      input.RequiredContent,
-		BuildExitCode:        result.Build.ExitCode,
-		VerifyExitCode:       result.Verify.ExitCode,
+		BaseSHA:        input.effectiveDiffBase(),
+		BuildExitCode:  result.Build.ExitCode,
+		VerifyExitCode: result.Verify.ExitCode,
 		// FullSuiteRan/FullSuiteExitCode: found via review (GitHub Codex
 		// App, PR #33, same round as the reorder above) — without these,
 		// CollectEvidenceActivity's safety-net commit was gated only on
@@ -403,9 +419,10 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		// readiness review.
 		FullSuiteRan:      gates.ranFullSuite,
 		FullSuiteExitCode: gates.fullSuite.Result.ExitCode,
-		NamedGatesFailed:  gates.namedGatesFailed,
+		RepoGatesFailed:   gates.repoGatesFailed,
 		CheckpointDir:     input.CheckpointDir,
 		LogDir:            input.LogDir,
+		SetAside:          input.ChallengeHeld,
 	}
 	current.Stage, current.StartedAt = "evidence", temporalworkflow.Now(ctx)
 	if err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "collect-evidence"), CollectEvidenceActivityName, collectInput).Get(ctx, &evidenceResult); err != nil {
@@ -423,7 +440,6 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 	result.DiffAvailable = evidenceResult.DiffAvailable
 	result.DiffTruncated = evidenceResult.DiffTruncated
 	result.DependencyChanges = evidenceResult.DependencyChanges
-	result.Oracles = evidenceResult.Oracles
 	// OR'd with the build-time value, not overwritten: either
 	// PostBuildActivity (build-time dirt) or CollectEvidenceActivity
 	// (verification-time dirt) committing on this run's behalf makes the
@@ -445,10 +461,10 @@ type reviewOutcome struct {
 }
 
 // earlierGatesPassed reports whether build, canonical verification, the full
-// suite and the named gates all passed: the point from which the proof of the
+// suite and the repository gates all passed: the point from which the proof of the
 // changed tests and the review run.
 func earlierGatesPassed(result *RunWorkflowResult, gates gateOutcome) bool {
-	return result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed
+	return result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.repoGatesFailed
 }
 
 // runReviewSteps runs the review step (planReviewSteps) once every earlier
@@ -469,12 +485,12 @@ func runReviewSteps(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	}
 	steps, legacy := planReviewSteps(ctx, input, result.CodeReviewConfigured)
 	outcome.legacy = legacy
-	// SC-022: only at version 1, only for a run given -review-reproduction,
-	// and only when the plan runs the review step: with code review off no
-	// review_reproduction check is recorded, since nothing would stand
-	// behind it. A corrective build's recheck runs first, after the gates
-	// and before its own review.
-	outcome.reproductions.ran = !legacy && input.ReviewReproduction && len(steps) > 0
+	// A history recorded before retireReviewReproductionChange may hold the
+	// retired reviewer-reproduction phase (a run given -review-reproduction,
+	// which no Worker sets any more): it replays unchanged. From that change
+	// on a review writes no test the factory runs, so no run takes the phase.
+	retired := temporalworkflow.GetVersion(ctx, retireReviewReproductionChange, temporalworkflow.DefaultVersion, 1) == 1
+	outcome.reproductions.ran = !retired && !legacy && input.ReviewReproduction && len(steps) > 0
 	if outcome.reproductions.ran {
 		rechecks, err := recheckReproductions(ctx, ids, buildVerifyCtx, input, current, result, worktreePath, branch)
 		if err != nil {
@@ -526,70 +542,24 @@ func runOneReviewStep(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 	return stepResult, nil
 }
 
-// oracleCommitPhase commits the verified reference-oracle bytes into the
-// result when every gate and review passed, then re-runs verification against
-// the committed tree. It may replace verify, gates and evidence with the
-// committed tree's results.
-func oracleCommitPhase(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, gates *gateOutcome, evidenceResult *CollectedEvidence, verify *VerifyActivityResult, reviews reviewOutcome) error {
-	// Committed oracles: the factory host commits the verified oracle bytes
-	// into the result. It has to be here rather than in
-	// CollectEvidenceActivity because the review (above) can only run after
-	// that Activity, and an oracle must never be committed for a run whose
-	// declared review gave no verdict. Same predicate as the verification
-	// safety-net commit plus "reference oracle passed" and "the review gave
-	// a verdict if declared". The Activity itself is a no-op unless the
-	// manifest declares a target_path.
-	if oracleCommitWanted(input, result, gates, reviews) {
-		var committedOracles CommittedOracles
-		current.Stage, current.StartedAt = "commit_oracles", temporalworkflow.Now(ctx)
-		if err := temporalworkflow.ExecuteActivity(ids.with(ctx, "commit-oracles"), CommitOraclesActivityName, CommitOraclesInput{RunWorkflowInput: input, PinnedOracleSHA256: gates.passedReferenceOracleSHA256, ValidateOnly: input.NoCommitOracles}).Get(ctx, &committedOracles); err != nil {
-			return wrapActivityFailure("commit accepted oracles activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker || ActivityCommittedFromError(err), worktreePath, branch)
-		}
-		if committedOracles.Active {
-			result.ResultSHA = committedOracles.ResultSHA
-			result.ChangedFiles = committedOracles.ChangedFiles
-			result.DiffStat = committedOracles.DiffStat
-			result.DiffAvailable = committedOracles.DiffAvailable
-			result.DiffTruncated = committedOracles.DiffTruncated
-			result.Oracles = committedOracles.Oracles
-			evidenceResult.ChangedFiles = committedOracles.ChangedFiles
-			if committedOracles.RequiredContentFinalFiles != nil {
-				evidenceResult.RequiredContentFinalFiles = committedOracles.RequiredContentFinalFiles
-			}
-			result.CommittedByWorker = result.CommittedByWorker || committedOracles.Committed
-		}
-
-		if committedOracles.Committed {
-			if err := rerunVerifyOnCommittedTree(ctx, ids, buildVerifyActivityOptions, input, current, result, worktreePath, branch, gates, verify); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // evaluateRun builds the policy input from everything the earlier phases
 // found and records the verdict (EvaluateRunActivity) in result.
 func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, verify VerifyActivityResult, evidenceResult CollectedEvidence, gates gateOutcome, reviews reviewOutcome, testsRed testsRedOutcome) error {
 	policyInput := policy.EvaluateRunInput{
-		VerifyCommand:             result.Verify.Command,
-		BuildExitCode:             result.Build.ExitCode,
-		VerifyExitCode:            result.Verify.ExitCode,
-		VerifyDurationMs:          verify.DurationMs,
-		VerifyLogSHA256:           verify.LogSHA256,
-		VerifyRerun:               verify.Rerun,
-		ChangedFiles:              evidenceResult.ChangedFiles,
-		AllowedFiles:              input.AllowedFiles,
-		ScopeUnapproved:           input.ScopeUnapproved,
-		AllowedPaths:              input.AllowedPaths,
-		RequiredChangedFiles:      input.RequiredChangedFiles,
-		RequiredContent:           input.RequiredContent,
-		RequiredContentBaseFiles:  evidenceResult.RequiredContentBaseFiles,
-		RequiredContentFinalFiles: evidenceResult.RequiredContentFinalFiles,
-		NamedGates:                legacyConformityGates(gates.namedGateInputs, reviews),
-		TestPatterns:              input.TestPatterns,
-		TestsRequiredOptOut:       input.TestsRequiredOptOut,
-		Oracles:                   result.Oracles,
+		VerifyCommand:       result.Verify.Command,
+		BuildExitCode:       result.Build.ExitCode,
+		VerifyExitCode:      result.Verify.ExitCode,
+		VerifyDurationMs:    verify.DurationMs,
+		VerifyLogSHA256:     verify.LogSHA256,
+		VerifyRerun:         verify.Rerun,
+		ChangedFiles:        evidenceResult.ChangedFiles,
+		AllowedFiles:        input.AllowedFiles,
+		ScopeUnapproved:     input.ScopeUnapproved,
+		AllowedPaths:        input.AllowedPaths,
+		RepoGates:           legacyConformityGates(gates.repoGateInputs, reviews),
+		TestPatterns:        input.TestPatterns,
+		TestsRequiredOptOut: input.TestsRequiredOptOut,
+		TestsOptOutRefused:  input.Bug,
 	}
 	if gates.ranFullSuite {
 		policyInput.FullSuiteCommand = gates.fullSuite.Result.Command
@@ -598,7 +568,6 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 		policyInput.FullSuiteLogSHA256 = gates.fullSuite.LogSHA256
 		policyInput.FullSuiteRerun = gates.fullSuite.Rerun
 	}
-	policyInput.ReviewReproduction = reviews.reproductions.policyInput()
 	policyInput.TestsRedOnBase = testsRed.policyInput()
 	if reviews.ranCodeReview {
 		policyInput.CodeReviewCommand = reviews.codeReview.Result.Command
@@ -616,66 +585,6 @@ func evaluateRun(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkfl
 	result.State = run.StateQuarantined
 	if evalResult.Accepted {
 		result.State = run.StateAccepted
-	}
-	return nil
-}
-
-// oracleCommitWanted is the predicate for committing the verified oracle
-// bytes: the verification safety-net commit's, plus "reference oracle
-// passed" and "the review gave a verdict if declared".
-func oracleCommitWanted(input RunWorkflowInput, result *RunWorkflowResult, gates *gateOutcome, reviews reviewOutcome) bool {
-	return gates.passedReferenceOracleSHA256 != "" && input.ReferenceOracleDir != "" &&
-		result.Build.ExitCode == 0 && result.Verify.ExitCode == 0 && (!gates.ranFullSuite || gates.fullSuite.Result.ExitCode == 0) && !gates.namedGatesFailed &&
-		(!result.CodeReviewConfigured || (reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0)) &&
-		!legacyConformityBlocksOracleCommit(input, reviews) && !reviews.reproductions.refuses()
-}
-
-// The host commit changed HEAD after every gate ran, so canonical
-// verification (and the full suite, when declared) re-runs against the
-// committed tree, (Codex review of
-// #202). A failing re-run replaces the run's own result so the
-// canonical_verify / full_suite_verify gate quarantines; a re-run that
-// left the workspace dirty fails the run, since its output is in no
-// commit. The Activity also re-runs the named gates, so its budget is
-// scaled by the phase count (verify, full suite, named gates).
-func rerunVerifyOnCommittedTree(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyActivityOptions temporalworkflow.ActivityOptions, input RunWorkflowInput, current *RunProgress, result *RunWorkflowResult, worktreePath, branch string, gates *gateOutcome, verify *VerifyActivityResult) error {
-	postVerifyOptions := buildVerifyActivityOptions
-	postVerifyOptions.StartToCloseTimeout *= time.Duration(postOracleCommitPhaseCount(input))
-	postVerifyCtx := temporalworkflow.WithActivityOptions(ctx, postVerifyOptions)
-	var post PostOracleCommitVerifyResult
-	current.Stage, current.StartedAt = "post_oracle_commit_verify", temporalworkflow.Now(ctx)
-	if err := temporalworkflow.ExecuteActivity(ids.withRetries(postVerifyCtx, "post-oracle-commit-verify"), RunPostOracleCommitVerifyActivityName, input).Get(ctx, &post); err != nil {
-		return wrapActivityFailure("run post-oracle-commit verify activity", err, result.Attempts, result.BaseSHA, true, worktreePath, branch)
-	}
-	result.Attempts = append(result.Attempts, post.Attempts...)
-	if post.Verify.Result.ExitCode != 0 {
-		*verify = post.Verify
-		result.Verify = post.Verify.Result
-		result.FailedAfterOracleCommit = append(result.FailedAfterOracleCommit, "canonical_verify")
-	}
-	if post.FullSuite != nil && post.FullSuite.Result.ExitCode != 0 {
-		gates.fullSuite = *post.FullSuite
-		result.FailedAfterOracleCommit = append(result.FailedAfterOracleCommit, "full_suite_verify")
-	}
-	// A named gate that fails on the committed tree replaces that
-	// gate's earlier (passing) result so the gate quarantines the run.
-	for _, g := range post.NamedGates {
-		if g.Result.Result.ExitCode == 0 {
-			continue
-		}
-		gates.namedGatesFailed = true
-		result.FailedAfterOracleCommit = append(result.FailedAfterOracleCommit, g.Check)
-		for i := range gates.namedGateInputs {
-			if gates.namedGateInputs[i].Check == g.Check {
-				gates.namedGateInputs[i].Command = g.Result.Result.Command
-				gates.namedGateInputs[i].ExitCode = g.Result.Result.ExitCode
-				gates.namedGateInputs[i].DurationMs = g.Result.DurationMs
-				gates.namedGateInputs[i].LogSHA256 = g.Result.LogSHA256
-			}
-		}
-	}
-	if !post.Clean {
-		return wrapActivityFailure("post-oracle-commit verification", errors.New("post-commit verification left the workspace dirty: its output is not in the result commit, so the accepted tree could differ from what passed"), result.Attempts, result.BaseSHA, true, worktreePath, branch)
 	}
 	return nil
 }

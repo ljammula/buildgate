@@ -26,7 +26,9 @@
       "role": "planning",
       "stage": "agents_file_drafting",
       "kind": "inline-assembly",
-      "template_refs": ["draft_agents.prompt.md"],
+      "template_refs": [
+        "draft_agents.prompt.md"
+      ],
       "description": "Combines the shared missing-AGENTS.md instructions, the repository workspace, and bounded repository context for the planning-role draft job."
     },
     {
@@ -36,7 +38,9 @@
       "role": "planning",
       "stage": "spec_drafting",
       "kind": "inline-assembly",
-      "template_refs": ["read_back.prompt.md"],
+      "template_refs": [
+        "read_back.prompt.md"
+      ],
       "description": "Quotes a handed-over spec between delimiters and asks for the read-back shown at spec review: a summary and the questions the spec leaves open."
     },
     {
@@ -46,7 +50,9 @@
       "role": "planning",
       "stage": "spec_and_plan_feedback",
       "kind": "inline-assembly",
-      "template_refs": ["draft_feedback.prompt.md"],
+      "template_refs": [
+        "draft_feedback.prompt.md"
+      ],
       "description": "Adds sanitized spec-review or plan-review feedback as a delimited guidance section in the drafting prompt."
     },
     {
@@ -56,7 +62,9 @@
       "role": "planning",
       "stage": "spec_example_check",
       "kind": "inline-assembly",
-      "template_refs": ["draft_spec.example_check.prompt.md"],
+      "template_refs": [
+        "draft_spec.example_check.prompt.md"
+      ],
       "description": "Combines a bounded listing of worked examples with instructions for checking their expected outputs."
     },
     {
@@ -78,43 +86,6 @@
       "description": "Combines the approved spec and original request with repository context, optional design guidance and revision feedback, and ticket-planning instructions."
     },
     {
-      "id": "prompt-source:draft-oracles.criteria-context",
-      "source_path": "agent/pi/scripts/draft_acceptance_oracles.py",
-      "fragment": "build_prompt",
-      "role": "planning",
-      "stage": "oracle_drafting",
-      "kind": "inline-assembly",
-      "template_refs": [
-        "draft_acceptance_oracles.qualification.prompt.md",
-        "draft_acceptance_oracles.go.prompt.md",
-        "draft_acceptance_oracles.python.prompt.md",
-        "draft_acceptance_oracles.feedback.prompt.md",
-        "draft_acceptance_oracles.prior_imports.prompt.md",
-        "draft_acceptance_oracles.answers.prompt.md"
-      ],
-      "description": "Combines acceptance criteria, other-criterion context, the read-back answers approved with the spec, repository file inventory, optional feedback and prior Python imports, and the selected ecosystem's oracle-writing instructions."
-    },
-    {
-      "id": "prompt-source:draft-oracles.feedback",
-      "source_path": "agent/pi/scripts/draft_acceptance_oracles.py",
-      "fragment": "FEEDBACK_HEADER / build_prompt",
-      "role": "planning",
-      "stage": "oracle_feedback",
-      "kind": "inline-assembly",
-      "template_refs": ["draft_acceptance_oracles.feedback.prompt.md"],
-      "description": "Adds sanitized operator feedback to the per-criterion oracle drafting prompt as guidance."
-    },
-    {
-      "id": "prompt-source:draft-oracles.criterion-index",
-      "source_path": "agent/pi/scripts/draft_acceptance_oracles.py",
-      "fragment": "draft_one_criterion / CRITERION_INDEX_ADDENDUM",
-      "role": "planning",
-      "stage": "oracle_drafting",
-      "kind": "inline-assembly",
-      "template_refs": ["draft_acceptance_oracles.criterion_index.prompt.md"],
-      "description": "Appends the criterion number, total count, and per-criterion/default oracle filenames after the common oracle prompt."
-    },
-    {
       "id": "prompt-source:build-corrective.context",
       "source_path": "agent/pi/scripts/build_app.py",
       "fragment": "corrective_prompt",
@@ -125,7 +96,6 @@
         "build_corrective.intro.prompt.md",
         "build_corrective.verify.prompt.md",
         "build_corrective.excerpt.prompt.md",
-        "build_corrective.oracle.prompt.md",
         "build_corrective.reviewer.prompt.md",
         "build_corrective.history.prompt.md",
         "build_corrective.log.prompt.md",
@@ -133,7 +103,7 @@
         "build_corrective.stuck.prompt.md",
         "build_corrective.closing.prompt.md"
       ],
-      "description": "Assembles the build agent's corrective-turn instructions from round state and available verification, oracle, review, history, log, agent-note, and missing-log context."
+      "description": "Assembles the build agent's corrective-turn instructions from round state and available verification, review, history, log, agent-note, and missing-log context."
     },
     {
       "id": "prompt-source:review-instructions-diff",
@@ -142,7 +112,9 @@
       "role": "review",
       "stage": "review",
       "kind": "inline-assembly",
-      "template_refs": ["review.instructions_diff.prompt.md"],
+      "template_refs": [
+        "review.instructions_diff.prompt.md"
+      ],
       "description": "Formats the repository instruction-file changes supplied to code review and combined review prompts, bounded by the instruction-diff size limits."
     },
     {
@@ -152,7 +124,9 @@
       "role": "execution",
       "stage": "ticket_build",
       "kind": "inline-assembly",
-      "template_refs": ["build_round_checklist.prompt.md"],
+      "template_refs": [
+        "build_round_checklist.prompt.md"
+      ],
       "description": "Starts the build turn with the ticket spec and appends the verification-aware definition-of-done checklist; optional service configuration, baseline or earlier-attempt records, and handoff context is prepended."
     },
     {
@@ -172,7 +146,9 @@
       "role": "execution",
       "stage": "build_correction",
       "kind": "inline-assembly",
-      "template_refs": ["build_corrective.stuck.prompt.md"],
+      "template_refs": [
+        "build_corrective.stuck.prompt.md"
+      ],
       "description": "Adds a repeated-failure streak warning when applicable."
     },
     {
@@ -182,7 +158,10 @@
       "role": "execution",
       "stage": "build_handoff_notes",
       "kind": "inline-assembly",
-      "template_refs": ["build_handoff_notes.prompt.md", "build_passed_notes.prompt.md"],
+      "template_refs": [
+        "build_handoff_notes.prompt.md",
+        "build_passed_notes.prompt.md"
+      ],
       "description": "Selects the handoff-notes instruction for a failed build or the passed-build notes turn."
     },
     {
@@ -196,16 +175,12 @@
         "combined_review.prompt.md",
         "combined_review.diff_self.prompt.md",
         "combined_review.diff_inline.prompt.md",
-        "combined_review.advice.prompt.md",
         "code_review.advice_scope_rule.prompt.md",
         "code_review.advice_severity_rule.prompt.md",
-        "code_review.scope_rule.prompt.md",
-        "code_review.severity_rule.prompt.md",
-        "code_review.reproduction_rule.prompt.md",
         "code_review.command_outcome_rule.prompt.md",
         "review.instructions_diff.prompt.md"
       ],
-      "description": "Assembles the review prompt: the diff (inline or self-fetched), the ticket spec, the command-outcome rule, the answer format and the optional repository-instruction diff; with reproductions, also the approved spec numbered by line and the scope, severity and reproduction rules; without, the advice scope and severity rules."
+      "description": "Assembles the review prompt: the diff (inline or self-fetched), the ticket spec, the command-outcome rule, the answer format and the optional repository-instruction diff; the advice scope and severity rules."
     },
     {
       "id": "prompt-source:goal-pilot-command-wrapper",
@@ -216,6 +191,18 @@
       "kind": "inline-assembly",
       "template_refs": [],
       "description": "Invokes the harness-native /spec-plan and /contract-plan commands with file or project paths; command definitions and harness-provided context are opaque and out of scope."
+    },
+    {
+      "id": "prompt-source:challenge",
+      "source_path": "agent/pi/scripts/challenge.py",
+      "fragment": "challenge_prompt",
+      "role": "challenger",
+      "stage": "challenge",
+      "kind": "inline-assembly",
+      "template_refs": [
+        "challenge.prompt.md"
+      ],
+      "description": "Assembles the challenger prompt: the approved spec with the read-back answers, the paths the change touches, the file cap and the derivation-header rule."
     }
   ]
 }

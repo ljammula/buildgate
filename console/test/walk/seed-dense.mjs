@@ -12,7 +12,6 @@ const requests = path.join(walkDir, "data", "requests");
 
 const sources = [
   "req-spec-review",
-  "req-oracle-review",
   "req-plan-review",
   "req-building",
   "req-quarantined",

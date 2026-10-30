@@ -73,10 +73,6 @@ const installRestorePrelude = `d=` + InstallDir + `; if [ -r "$d/paths" ]; then 
 	`if [ -s "$d/inputs.sha256" ] && ! sha256sum -c --status "$d/inputs.sha256" >/dev/null 2>&1; then ` +
 	`echo "buildgate: install inputs changed; running install"; sh "$d/commands" || exit 95; fi; fi`
 
-// InstallRestorePrelude is installRestorePrelude, for a caller that reports
-// what the wrapper runs.
-func InstallRestorePrelude() string { return installRestorePrelude }
-
 // InstallKeyInputs is everything that decides what an install writes, and so
 // which install image a run may reuse.
 type InstallKeyInputs struct {

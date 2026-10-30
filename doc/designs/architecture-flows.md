@@ -76,8 +76,7 @@ piped or logged output gets one plain line per change.
 ## 2. Request lifecycle (console/API level)
 
 A *request* is the console's own unit of work, not yet a sandboxed run.
-`spec_review`/`plan_review` are always human stages; `-draft-oracles`
-adds a third, `oracle_review`. `building` runs unattended. Merge is
+`spec_review`/`plan_review` are always human stages. `building` runs unattended. Merge is
 never a state here — it stays a human action outside the system.
 
 ```text
@@ -86,11 +85,6 @@ submitted -> spec_drafting -> spec_review* -> planning -> plan_review*
                                               building -> pr_review -> done | closed
                                                   |
                                     quarantined/halted --(retry)--> building
-
--draft-oracles only, inserted between spec_review and planning:
-  spec_review* -> oracle_drafting -> oracle_review* -> planning
-                        ^                  |
-                        +--(reject)--------+
 
 * = needs you (human review stage)
 ```
@@ -112,13 +106,13 @@ loop
   LoadRequestStep            read request.json, say what is next   (light queue)
     |-- done / closed / cancelled ------------------> workflow ends
     |-- submitted ----------------------------------> AdvanceRequest (light queue)
-    |-- spec_drafting, oracle_drafting, planning,
+    |-- spec_drafting, planning,
     |   building, pr_review ------------------------> AdvanceRequest (jobs queue,
     |                                                 max_parallel_jobs at once):
     |                                                 one drafting job, the plan,
     |                                                 one ticket's build (a RunWorkflow,
     |                                                 section 4), or one PR poll
-    |-- spec_review, oracle_review, plan_review,
+    |-- spec_review, plan_review,
     |   resume_review ------------------------------> wait for a decision;
     |                                                 RemindRequest every
     |                                                 -hitl-reminder-interval
@@ -181,11 +175,7 @@ RunWorkflow result: accepted / quarantined / halted
 Conditional Activities not on every run: `CheckChainSuccessorActivity`/
 `ValidateSliceChainActivity` (multi-ticket chain), `RollbackIsolatedWorkspaceActivity`
 (setup fails before build), `RunFullSuiteVerifyActivity`/`RunNamedGateActivity`
-(declared full-suite/named-gate policy). Oracle-carrying runs add, in
-order, `RunNamedGateActivity` for `reference_oracle`, `CommitOraclesActivity`
-(after every gate and the review passed), then
-`RunPostOracleCommitVerifyActivity`; see
-[`USAGE_REFERENCE.md`](../../USAGE_REFERENCE.md) "Oracle-approved runs".
+(declared full-suite/repository-gate policy).
 
 Completed Activities are durable: their checkpoints are reused, never
 redone. An interrupted build, verify, gate or review step is never rerun

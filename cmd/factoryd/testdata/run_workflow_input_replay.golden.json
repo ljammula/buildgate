@@ -27,11 +27,7 @@
   "fast_check_command": "echo fast",
   "full_suite_command": "echo full",
   "gate_commands": {
-    "integration_tests": "echo integration",
-    "lint": "echo lint",
-    "reference_oracle": "sh verify/check.sh",
-    "security_audit": "echo security",
-    "unit_tests": "echo unit"
+    "repo-lint": "echo lint"
   },
   "harness": "pi",
   "instruction_base_sha": "<BASE_SHA>",
@@ -40,12 +36,8 @@
   "isolated_repo_dir": "<WORKSPACE>",
   "log_dir": "<DATA_DIR>/runs/<RUN_ID>",
   "max_rounds": 7,
-  "no_commit_oracles": true,
   "on_branch": "buildgate/req-golden/t2-restack1",
   "project_config_commit_sha": "<BASE_SHA>",
-  "reference_oracle_dir": "<INPUTS>/oracle",
-  "reference_oracle_in_loop_retry": true,
-  "reference_oracle_mount_path": "verify",
   "registry_proxy_policy": {
     "cache_bytes": 1073741824,
     "image": "registry-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -115,6 +107,8 @@
     "worker_model_extra_json": "{\"reasoning\":true}",
     "worker_model_id": "builder-model-id"
   },
+  "release_max_changed_lines": 77,
+  "release_max_files_changed": 7,
   "release_protected_paths": [
     "deploy/",
     ".github/"
@@ -128,9 +122,6 @@
     ]
   },
   "request_ticket": true,
-  "required_changed_files": [
-    "content.txt"
-  ],
   "review_harness": "pi",
   "review_relay_policy": {
     "allow_plaintext_upstream": false,

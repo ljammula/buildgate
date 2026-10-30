@@ -20,6 +20,7 @@ import (
 func TestPlanRedraftOnAnotherModelKeepsEachModelsSpend(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.ApprovedPlanningFixture(t, requestdrivertest.TwoCriteriaSpec, "make verify")
+	usePlanningJob(t, dataDir, id)
 	plan := []requestdriver.DraftedTicket{
 		{Filename: "001.spec.md", Content: requestdrivertest.ValidBrownfieldTicket("make verify", 1, 2)},
 	}
@@ -30,13 +31,13 @@ func TestPlanRedraftOnAnotherModelKeepsEachModelsSpend(t *testing.T) {
 				return plan, &request.PlanEvidence{Model: spend.Model, Spend: spend}, nil
 			},
 		)
-		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingOracleDraftRunner(t), requestdrivertest.FailingBuildRunner(t)); err != nil {
+		if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
 			t.Fatalf("driveRequests: %v", err)
 		}
 	}
 
 	drive(&request.JobSpend{Role: "planning", Model: "model-local", InputTokens: 9000, OutputTokens: 3000, At: time.Unix(1000, 0)})
-	if _, err := request.Reject(dataDir, id, "alice", "plan it on the other model", time.Now()); err != nil {
+	if _, err := request.RejectAnchored(dataDir, id, "alice", "plan it on the other model", nil, time.Now()); err != nil {
 		t.Fatalf("reject plan: %v", err)
 	}
 	drive(&request.JobSpend{Role: "planning", Model: "model-hosted", InputTokens: 30000, OutputTokens: 5000, CostMicroUSD: 14000, SpendPartial: true, At: time.Unix(2000, 0)})

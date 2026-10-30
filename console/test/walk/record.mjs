@@ -240,14 +240,7 @@ await say("Plan review: which ticket claims each acceptance criterion", 3200);
 await scrollTo(main().getByRole("region", { name: "Criteria coverage" }));
 await say("A criterion no ticket claims is called out", 3000);
 await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
-await say("Approve stays off until every oracle file has been opened", 3000);
-for (const tile of await main()
-  .getByRole("button", { name: /bytes · sha256/ })
-  .all()) {
-  await tile.click();
-  await pause(900);
-}
-await say("Each file is shown whole; the approval pins them by hash", 3000);
+await say("Approve pins the tickets by hash", 3000);
 await main().getByRole("button", { name: "Approve", exact: true }).click();
 await nameIfAsked();
 await dialog().getByText("Approve this request?").waitFor();

@@ -48,23 +48,6 @@ func TestResolveRequestJobRoleRoutesModeSpecDraftingFallsBackToExecution(t *test
 	}
 }
 
-// TestResolveRequestJobRoleRoutesModeOracleDraftingFallsBackToExecution
-// is the same proof for modelrole.StageOracleDrafting (roles.review).
-func TestResolveRequestJobRoleRoutesModeOracleDraftingFallsBackToExecution(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
-	cfg := requestdriver.WorkerConfig{Settings: routesModeExecutionOnlySettings()}
-	got, err := resolveRequestJobRole(cfg, modelrole.StageOracleDrafting, "oracle drafting", "", "")
-	if err != nil {
-		t.Fatalf("resolveRequestJobRole: %v", err)
-	}
-	if got.RouteSelection == nil {
-		t.Fatalf("resolveRequestJobRole = %+v, want a RouteSelection", got)
-	}
-	if got.RouteSelection.ModelName != "luna" || got.RouteSelection.RouteName != "litellm" {
-		t.Errorf("RouteSelection = %+v, want roles.execution's own model/route (luna/litellm)", got.RouteSelection)
-	}
-}
-
 // TestResolveRequestJobRoleRoutesModeUsesItsOwnRoleWhenConfigured proves
 // the fallback only fires for an UNSET role: when roles.planning is
 // itself configured, it is used directly, not roles.execution's.
@@ -90,9 +73,7 @@ func TestResolveRequestJobRoleRoutesModeUsesItsOwnRoleWhenConfigured(t *testing.
 // modelChoice parameter (a request's own r.Models["planning"]) reaches
 // modelrole.SelectRoute only when this stage's role actually resolves to
 // planning itself: accepted when it names a member of
-// roles.planning.allowed, and never even consulted for
-// modelrole.StageOracleDrafting (the review role, never
-// requester-selectable).
+// roles.planning.allowed.
 func TestResolveRequestJobRolePassesPlanningModelChoice(t *testing.T) {
 	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
@@ -108,17 +89,6 @@ func TestResolveRequestJobRolePassesPlanningModelChoice(t *testing.T) {
 	}
 	if got.RouteSelection == nil || got.RouteSelection.ModelName != "sonnet" {
 		t.Fatalf("RouteSelection = %+v, want the planning choice sonnet", got.RouteSelection)
-	}
-
-	// modelChoice is never applied to oracle drafting (the review role):
-	// "sonnet" is not even a roles.review model, so passing it through
-	// would refuse the job outright if it were consulted at all.
-	got, err = resolveRequestJobRole(cfg, modelrole.StageOracleDrafting, "oracle drafting", "sonnet", "")
-	if err != nil {
-		t.Fatalf("resolveRequestJobRole(oracle drafting): %v", err)
-	}
-	if got.RouteSelection == nil || got.RouteSelection.ModelName != "luna" {
-		t.Fatalf("RouteSelection = %+v, want roles.execution's own fallback model (luna), unaffected by the planning choice", got.RouteSelection)
 	}
 }
 
@@ -198,10 +168,10 @@ func TestResolveRequestJobRoleAllowNoCredentialReachesTheSelection(t *testing.T)
 		"model-a": {ID: "model-a", Routes: []string{"local"}},
 	}
 	settings.Roles = &sessionconfig.Roles{
-		Review: &sessionconfig.RoleConfig{Model: "model-a"},
+		Planning: &sessionconfig.RoleConfig{Model: "model-a"},
 	}
 	cfg := requestdriver.WorkerConfig{Settings: settings}
-	got, err := resolveRequestJobRole(cfg, modelrole.StageOracleDrafting, "oracle drafting", "", "")
+	got, err := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", "", "")
 	if err != nil {
 		t.Fatalf("resolveRequestJobRole: %v", err)
 	}
@@ -217,15 +187,15 @@ func TestResolveRequestJobRoleAllowNoCredentialReachesTheSelection(t *testing.T)
 func TestResolveRequestJobRoleUnresolvableModelErrorsWithRoleAndModel(t *testing.T) {
 	settings := sessionconfig.DefaultSettings()
 	settings.Roles = &sessionconfig.Roles{
-		Review: &sessionconfig.RoleConfig{Model: "no-such-model"},
+		Planning: &sessionconfig.RoleConfig{Model: "no-such-model"},
 	}
 	cfg := requestdriver.WorkerConfig{Settings: settings}
-	_, err := resolveRequestJobRole(cfg, modelrole.StageOracleDrafting, "oracle drafting", "", "")
+	_, err := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", "", "")
 	if err == nil {
 		t.Fatal("resolveRequestJobRole(unresolvable model) = nil error, want one")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "review") || !strings.Contains(msg, "no-such-model") || !strings.Contains(msg, "oracle drafting") {
+	if !strings.Contains(msg, "planning") || !strings.Contains(msg, "no-such-model") || !strings.Contains(msg, "spec drafting") {
 		t.Errorf("resolveRequestJobRole error = %q, want it to name the role, model, and job", msg)
 	}
 }

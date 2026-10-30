@@ -237,7 +237,7 @@ func TestAmendScopeRefusesAlreadyAllowedFile(t *testing.T) {
 
 // noAllowedFilesTicket is wellFormedApprovableTicket with its Allowed-Files:
 // line removed entirely.
-const noAllowedFilesTicket = "Verify-Command: true\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+const noAllowedFilesTicket = "Verify-Command: true\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
 
 // TestAmendScopeRefusesNoAllowedFilesLine covers a ticket spec.md with no
 // top-level Allowed-Files: line at all -- there is no scope to widen.
@@ -253,7 +253,7 @@ func TestAmendScopeRefusesNoAllowedFilesLine(t *testing.T) {
 // twoAllowedFilesTicket declares Allowed-Files: twice at top level --
 // ambiguous which one diff_scope's own gate actually enforces
 // (ParseAllowedFiles silently uses only the first).
-const twoAllowedFilesTicket = "Verify-Command: true\nAllowed-Files: a.go\nAllowed-Files: b.go\nRequired-Changed-Files: a.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
+const twoAllowedFilesTicket = "Verify-Command: true\nAllowed-Files: a.go\nAllowed-Files: b.go\n\n## Goal\n\ng\n\n## Plan\n\n### Files to touch\n\n- a.go\n\n### Steps\n\n1. s\n\n### Tests to add\n\n- t\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nnone\n"
 
 // TestAmendScopeRefusesTwoAllowedFilesLines covers a ticket spec.md
 // declaring Allowed-Files: more than once at top level.

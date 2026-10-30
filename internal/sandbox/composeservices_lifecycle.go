@@ -193,7 +193,7 @@ type ComposeServicesSpec struct {
 	// Phase namespaces this lifecycle's own evidence (services.json and
 	// TeardownAttempt's per-service logs) from any other phase's lifecycle
 	// sharing the same dataDir/runID -- e.g. "build", "verify",
-	// "full_suite_verify", or a named gate's own check name. internal/
+	// "full_suite_verify", or a repository gate's own check name. internal/
 	// workflow's Activities construct a fresh ComposeServicesLifecycle per
 	// phase against the same run, so leaving this empty (a caller that only ever creates one compose lifecycle per run)
 	// would otherwise let a later phase's report overwrite an earlier

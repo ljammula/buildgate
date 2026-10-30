@@ -22,12 +22,6 @@ var launchSpecViolations = []struct {
 	{"relative git common dir target", "git", func(s *LaunchSpec) { s.gitCommonDir, s.gitCommonDirTarget = "/git", "git" }},
 	{"git common dir without target", "git", func(s *LaunchSpec) { s.gitCommonDir, s.gitCommonDirTarget = "/git", "" }},
 	{"relative input dir", "inputdir", func(s *LaunchSpec) { s.InputDir = "inputs" }},
-	{"relative oracle dir", "oracle", func(s *LaunchSpec) { s.ReferenceOracleDir, s.ReferenceOracleMountPath = "oracle", "oracle" }},
-	{"oracle dir without mount path", "oracle", func(s *LaunchSpec) { s.ReferenceOracleDir, s.ReferenceOracleMountPath = "/tmp/oracle", "" }},
-	{"absolute oracle mount path", "oracle", func(s *LaunchSpec) { s.ReferenceOracleDir, s.ReferenceOracleMountPath = "/tmp/oracle", "/oracle" }},
-	{"oracle dir inside workspace", "oracle", func(s *LaunchSpec) {
-		s.ReferenceOracleDir, s.ReferenceOracleMountPath = "/tmp/workspace/oracle", "oracle"
-	}},
 	{"invalid input mount", "inputs", func(s *LaunchSpec) { s.Inputs = []InputMount{{Source: "/tmp/in", Target: "../in"}} }},
 	{"missing log path", "logpath", func(s *LaunchSpec) { s.LogPath = "" }},
 	{"missing name", "name", func(s *LaunchSpec) { s.Name = "" }},

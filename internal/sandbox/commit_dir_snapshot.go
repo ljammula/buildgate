@@ -417,7 +417,7 @@ func writeCommitDir(ctx context.Context, repoDir, tree, name, dst string, record
 		return snap, commitDirWriteFailed(err)
 	}
 	mask := WorkspaceMask{Source: root, Target: name, Dir: true}
-	if err := validateWorkspaceMask(mask, ""); err != nil {
+	if err := validateWorkspaceMask(mask); err != nil {
 		return snap, commitDirRefuse("%v", err)
 	}
 	sum, err := hashSnapshot(root, []WorkspaceMask{mask})

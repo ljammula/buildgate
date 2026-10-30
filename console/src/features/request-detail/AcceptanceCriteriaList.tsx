@@ -1,6 +1,6 @@
 /**
  * The numbered acceptance criteria supplied by the Go request parser, with a
- * count: lets an operator check plan and oracle coverage against the factory's
+ * count: lets an operator check plan coverage against the factory's
  * numbering without re-parsing the markdown in the browser. Renders nothing
  * when the server has none.
  */

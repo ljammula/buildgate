@@ -39,7 +39,6 @@ const routes =
         "/app/projects?project=app&tab=release",
         "/requests/new",
         "/requests/req-spec-review",
-        "/requests/req-oracle-review",
         "/requests/req-plan-review",
         "/requests/req-building",
         "/requests/req-quarantined",

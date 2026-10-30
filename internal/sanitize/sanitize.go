@@ -2,13 +2,10 @@
 // store in a durable record and show verbatim on an operator surface
 // (factoryd status, halt/quarantine notifications, the console) --
 // terminal escape sequences, control characters, and obvious secrets
-// stripped or redacted. Extracted from cmd/factoryd/oracle_draft_job.go's
-// own sanitizeLogText (unchanged logic, moved so internal/triage --
-// which cannot import cmd/factoryd, a package main -- can reuse it
-// rather than reimplementing the same stripping: a quarantine triage
-// sentence started quoting lines straight out of a verify log, which
-// agent-written code produced and so is exactly as untrusted as the
-// oracle-draft script output this package already existed to sanitize).
+// stripped or redacted. Shared by cmd/factoryd and internal/triage, which
+// cannot import cmd/factoryd, a package main: a quarantine triage sentence
+// quotes lines straight out of a verify log, which agent-written code
+// produced and so is exactly as untrusted as a drafting script's output.
 package sanitize
 
 import (
@@ -64,7 +61,7 @@ var (
 // Text alone does NOT fold line-breaking whitespace (\r, \n, \t, U+2028/
 // U+2029, ...) to a single space -- categories Zl/Zp aren't Cf or Cc, so
 // they pass through unchanged, which is correct for text that is
-// legitimately allowed to be multi-line (e.g. a retained oracle-draft
+// legitimately allowed to be multi-line (e.g. a retained drafting
 // failure summary). A caller building a SINGLE-line operator-facing
 // string from untrusted text (a triage marker, a quoted log reason, a
 // pi-stderr hint) must call Line, not Text, or a `\r`/U+2028 embedded in

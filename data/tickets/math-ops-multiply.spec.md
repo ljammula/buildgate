@@ -38,9 +38,7 @@ both functions.
 
 Allowed-Files: add.py, tests/test_add.py
 
-Required-Changed-Files: add.py, tests/test_add.py
 
-Required-Content: multiply_numbers
 
 ## Acceptance / verification
 

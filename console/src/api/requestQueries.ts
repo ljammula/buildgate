@@ -7,7 +7,6 @@ import {
   type UseQueryResult,
   queryOptions,
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -16,17 +15,8 @@ import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/api/ApiProvider";
 import type { Http } from "@/api/http";
 import { keepNewer } from "@/api/keepNewer";
-import {
-  type FetchedOracleFile,
-  type PutOracleRunCommandOptions,
-  getRequestOracle,
-  getRequestOracleFile,
-  getRequestTicketOracle,
-  getRequestTicketOracleFile,
-  putRequestOracleRunCommand,
-} from "@/api/oracle";
 import { requestListRefreshMs } from "@/api/polling";
-import { isOracleKey, isUnderRequest, queryKeys } from "@/api/queryKeys";
+import { isUnderRequest, queryKeys } from "@/api/queryKeys";
 import {
   type ApproveRequestOptions,
   type CreateRequestOptions,
@@ -50,9 +40,8 @@ import {
   updateRequestTicket,
   watchRequests,
 } from "@/api/requests";
-import { ApiError } from "@/domain/apiError";
+import type { ApiError } from "@/domain/apiError";
 import { compareTimestamps } from "@/domain/elapsed";
-import type { OracleListing } from "@/domain/oracle";
 import type { RequestSummary, RevisionDetail, RevisionSummary } from "@/domain/request";
 
 /**
@@ -283,96 +272,10 @@ export function useRequestRevision(
   });
 }
 
-export function useRequestOracle(id: string, enabled = true): UseQueryResult<OracleListing> {
-  const { http } = useApi();
-  return useQuery({
-    queryKey: queryKeys.requests.oracle(id),
-    queryFn: ({ signal }) => getRequestOracle(http, id, signal),
-    enabled,
-  });
-}
-
-/** A ticket's oracle listing; a server without the route, or a ticket it does not know, has no files. */
-const noTicketFiles: OracleListing = {
-  files: [],
-  problems: [],
-  state: "",
-  draftStatus: "",
-  draftDetail: "",
-  proposedCommand: "",
-};
-
-/** One ticket's oracle listing, with a 404 read as "no files". */
-function ticketOracleListingOptions(http: Http, id: string, ticket: number) {
-  return queryOptions({
-    queryKey: queryKeys.requests.ticketOracle(id, ticket),
-    queryFn: async ({ signal }): Promise<OracleListing> => {
-      try {
-        return await getRequestTicketOracle(http, id, ticket, signal);
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return noTicketFiles;
-        throw error;
-      }
-    },
-  });
-}
-
-/**
- * The oracle listing of each of `tickets` (ticket indexes), as results in the
- * same order. A 404 is an empty listing, not an error.
- */
-export function useTicketOracleListings(
-  id: string,
-  tickets: readonly number[],
-): UseQueryResult<OracleListing>[] {
-  const { http } = useApi();
-  return useQueries({
-    queries: tickets.map((ticket) => ticketOracleListingOptions(http, id, ticket)),
-  });
-}
-
-/** One oracle file a review may show: the request's own, or a ticket's when `ticket` is set. */
-export interface OracleFileRef {
-  readonly name: string;
-  /** The listing's hash for it: part of the query key, so a changed listing refetches. */
-  readonly sha256: string;
-  readonly ticket?: number;
-}
-
-/**
- * One oracle file's content at its listed hash. Never refetched on its own
- * (the hash in the key is the version) and never retried: an error is shown.
- */
-function oracleFileOptions(http: Http, id: string, file: OracleFileRef) {
-  const { name, sha256, ticket } = file;
-  return queryOptions({
-    queryKey:
-      ticket === undefined
-        ? queryKeys.requests.oracleFileAt(id, name, sha256)
-        : queryKeys.requests.ticketOracleFileAt(id, ticket, name, sha256),
-    queryFn: ({ signal }): Promise<FetchedOracleFile> =>
-      ticket === undefined
-        ? getRequestOracleFile(http, id, name, signal)
-        : getRequestTicketOracleFile(http, id, ticket, name, signal),
-    retry: false,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  });
-}
-
-/** The content of each of `files`, as results in the same order; pass only the files to fetch. */
-export function useOracleFiles(
-  id: string,
-  files: readonly OracleFileRef[],
-): UseQueryResult<FetchedOracleFile>[] {
-  const { http } = useApi();
-  return useQueries({ queries: files.map((file) => oracleFileOptions(http, id, file)) });
-}
-
 /**
  * A write that answers with the request's new record: the record goes
- * straight into the cache, and everything under the request (revisions,
- * oracle listings) is refetched, since a state change can alter any of it.
+ * straight into the cache, and everything under the request (its
+ * revisions) is refetched, since a state change can alter any of it.
  */
 function useRequestWrite<TInput>(
   write: (input: TInput) => Promise<RequestSummary>,
@@ -390,18 +293,10 @@ function useRequestWrite<TInput>(
         }),
     onSuccess: (request) => {
       cacheRequest(client, request, true);
-      // Everything under the request is stale now. The oracle listings are
-      // only marked, not refetched: they are served in one state only, so a
-      // refetch fired by the very approval that left that state is refused
-      // (409) while its panel is still unmounting (found on the live walk,
-      // 2026-10-05). A panel that is still wanted refetches when it renders.
+      // Everything under the request is stale now.
       const id = request.id;
       void client.invalidateQueries({
-        predicate: (query) => isUnderRequest(query.queryKey, id) && !isOracleKey(query.queryKey),
-      });
-      void client.invalidateQueries({
-        predicate: (query) => isUnderRequest(query.queryKey, id) && isOracleKey(query.queryKey),
-        refetchType: "none",
+        predicate: (query) => isUnderRequest(query.queryKey, id),
       });
     },
   });
@@ -481,22 +376,4 @@ export function useUpdateRequestTicket(id: string, ticket: number) {
   return useRequestWrite(({ content, ...options }: UpdateContentInput) =>
     updateRequestTicket(http, id, ticket, content, options),
   );
-}
-
-export interface PutOracleRunCommandInput extends PutOracleRunCommandOptions {
-  readonly content: string;
-}
-
-export function usePutOracleRunCommand(id: string) {
-  const { http } = useApi();
-  const client = useQueryClient();
-  return useMutation<undefined, ApiError, PutOracleRunCommandInput>({
-    mutationFn: async ({ content, ...options }) => {
-      await putRequestOracleRunCommand(http, id, content, options);
-      return undefined;
-    },
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: queryKeys.requests.detail(id) });
-    },
-  });
 }

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"buildgate/internal/policy"
 	"buildgate/internal/request"
 	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
@@ -315,11 +314,7 @@ func TestApplyProjectConfigDefaultsCeilingTightenOnly(t *testing.T) {
 			var testPatterns []string
 			var meterTokenCeiling int
 			var meterCostCeilingMicroUSD int64
-			gateCommands := make(map[string]*string, len(policy.CommandGates))
-			for _, g := range policy.CommandGates {
-				var v string
-				gateCommands[g.ID] = &v
-			}
+			gateCommands := map[string]*string{}
 
 			err := ApplyProjectConfigDefaults(map[string]bool{}, dir, &verifyCommand, &fastCheckCommand, gateCommands, &preflightProfile, &releaseProtectedPaths, &testPatterns, &meterTokenCeiling, &meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget)
 
@@ -518,7 +513,7 @@ func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 	}
 }
 
-const handedOverTicket = "Verify-Command: make verify\nAllowed-Files: refunds.go, refunds_test.go\nRequired-Changed-Files: refunds.go, refunds_test.go\n\n" +
+const handedOverTicket = "Verify-Command: make verify\nAllowed-Files: refunds.go, refunds_test.go\n\n" +
 	"## Goal\n\nIdempotent refunds.\n\n## Plan\n\n### Files to touch\n\n- refunds.go\n\n### Steps\n\n1. Add the key check.\n\n" +
 	"### Tests to add\n\n- a retry test\n\n### Acceptance criteria covered\n\n- 1\n\n## Out of scope\n\nCharges.\n"
 

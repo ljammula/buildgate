@@ -13,8 +13,7 @@
 //
 // Steps (each PASS/FAIL, screenshot in <scratch>/shots):
 //   submit         New request form (workspace, request.md text, draft
-//                  oracles, verify command + preflight profile in
-//                  Advanced) submits and lands on the new request's own
+//                  verify command + preflight profile in Advanced) submits and lands on the new request's own
 //                  /requests/<id> detail page -- the id used by every
 //                  later step is derived from that URL, not passed in
 //   board          request row visible with a short title, no "queue-run is
@@ -25,8 +24,6 @@
 //   edit           Edit disables Approve while dirty; Save lands a new
 //                  criterion; the parsed-criteria list shows it
 //   approve-spec   confirm sheet names the real next state
-//   oracle         oracle review approved (all files shown, or skip with
-//                  its consequence stated)
 //   approve-plan   plan approved
 //   build          the ticket's run appears on the request page; the run
 //                  page links back to its request and finishes
@@ -99,17 +96,6 @@ const waitForState = async (states, timeout) => {
 const main = () => page.getByRole('main');
 const dialog = () => page.getByRole('dialog');
 const button = (name, opts = {}) => main().getByRole('button', { name, exact: opts.exact ?? true }).first();
-// Expands every oracle file tile the server lists, by name: approval stays
-// disabled until each listed file has been shown.
-const showOracleFiles = async (listingPath) => {
-  const listing = await api(listingPath);
-  const names = (listing.files ?? []).map((f) => f.name);
-  for (const name of names) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    await main().getByRole('button', { name: new RegExp(`^${escaped}`) }).click();
-  }
-  return { names, problems: listing.problems ?? [] };
-};
 const dialogButton = (name) => dialog().getByRole('button', { name, exact: true });
 
 async function step(name, fn) {
@@ -138,7 +124,6 @@ try {
     await page.getByRole('heading', { name: 'New request' }).first().waitFor({ timeout: MIN });
     await page.getByLabel('Workspace path').fill(workspace);
     await page.getByLabel('Request', { exact: true }).fill(REQUEST_TEXT);
-    await page.getByLabel('Draft oracles').check();
     await page.getByRole('button', { name: 'Advanced' }).click();
     await page.getByLabel(/Verify command/).fill(VERIFY_COMMAND);
     await page.getByLabel(/Preflight profile/).fill(PREFLIGHT_PROFILE);
@@ -213,43 +198,14 @@ try {
   await step('approve-spec', async () => {
     await button('Approve').click();
     const sheet = await dialog().innerText();
-    if (!/oracle_drafting|Oracle drafting/.test(sheet)) throw new Error('approve sheet does not name oracle drafting as the next state');
+    if (!/planning|Planning/.test(sheet)) throw new Error('approve sheet does not name planning as the next state');
     await dialogButton('Approve').click();
-    await waitForState(['oracle_drafting', 'oracle_review'], MIN);
-  });
-
-  await step('oracle', async () => {
-    await waitForState(['oracle_review'], 15 * MIN);
-    await waitForText(/Oracle review/, 2 * MIN, 'oracle review on screen');
-    const r = await req();
-    const approveAny = main().getByRole('button', { name: /^Approve( \(skip oracle\))?$/ }).first();
-    await approveAny.waitFor({ timeout: MIN });
-    if ((await approveAny.innerText()).includes('skip oracle')) {
-      await approveAny.click();
-      if (!/no request-level acceptance test/i.test(await dialog().innerText())) throw new Error('skip-oracle sheet does not state the consequence');
-      await dialogButton('Approve').click();
-      return `skipped (${r.oracle_draft?.status}; ${r.oracle_draft?.criteria?.length ?? 0} criterion verdicts)`;
-    }
-    const shown = await showOracleFiles(`/requests/${requestId}/oracle`);
-    if (shown.problems.length) throw new Error(`oracle listing has problems that block approval: ${shown.problems.join('; ')}`);
-    const approve = button('Approve');
-    const end = Date.now() + MIN;
-    while (await approve.isDisabled()) {
-      if (Date.now() > end) throw new Error(`oracle Approve never enabled after showing ${shown.names.length} file(s)`);
-      await page.waitForTimeout(1000);
-    }
-    await approve.click();
-    await dialogButton('Approve').click();
-    return `approved ${shown.names.length} oracle file(s): ${shown.names.join(', ')}`;
+    await waitForState(['planning', 'plan_review'], MIN);
   });
 
   await step('approve-plan', async () => {
     await waitForState(['plan_review'], 15 * MIN);
     await waitForText(/Plan review/, 2 * MIN, 'plan review on screen');
-    const r0 = await req();
-    for (const t of r0.tickets ?? []) {
-      await showOracleFiles(`/requests/${requestId}/tickets/${t.index}/oracle`).catch(() => {});
-    }
     const approve = button('Approve');
     const end = Date.now() + MIN;
     while (await approve.isDisabled()) {

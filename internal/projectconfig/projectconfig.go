@@ -32,8 +32,7 @@ import (
 const FileName = ".factory.yml"
 
 // DirName is the repository directory a project keeps the scripts its
-// FileName commands call in. Like FileName it is protected at release, and no
-// oracle may be committed under it.
+// FileName commands call in. Like FileName it is protected at release.
 const DirName = ".factory"
 
 // PreflightProfileBrownfield mirrors cmd/factoryd's own preflightProfileBrownfield
@@ -56,42 +55,12 @@ type Config struct {
 	// before VerifyCommand each round, short-circuiting it on failure --
 	// see -fast-check-command in cmd/factoryd.
 	FastCheckCommand string `yaml:"fast_check_command"`
-	// LintCommand/SecurityCommand/UnitTestCommand/IntegrationTestCommand/
-	// ReferenceOracleCommand are optional named gates, extended
-	// for reference-oracle diffing, each run in the sandbox after canonical
-	// verification passes and recorded as its own pass/fail/not-configured
-	// gate in the release decision --
-	// "lint"/"security_audit"/"unit_tests"/"integration_tests"/
-	// "reference_oracle" respectively. Threaded exactly the way
-	// FastCheckCommand already is (projectconfig -> -lint-command/etc. ->
-	// applyProjectConfigDefaults -> run). Unset means the gate never runs
-	// and is recorded as "not configured", never as passed.
-	//
-	// ReferenceOracleCommand specifically: unlike the other three, which
-	// check the *implementation's own declared tests*, this one is meant
-	// to run a check that is NOT agent-authored -- a script checked into
-	// the repo outside the ticket's Allowed-Files, comparing the
-	// candidate's output against an independent, pre-existing oracle
-	// (published test vectors, an existing reference implementation) --
-	// so its pass/fail is evidence the agent's own self-authored tests
-	// cannot fabricate. See that note's "Worth it" verdict for #5: proven
-	// in the sense that differential/reference testing against a known-
-	// good oracle is a demonstrated technique (Carlini's C-compiler
-	// project used GCC this way), but this specific gate is a new,
-	// unvalidated mechanism -- exercise it on a real ticket with a real
-	// oracle before trusting its result the way canonical_verify's is
-	// trusted.
-	LintCommand     string `yaml:"lint_command"`
-	SecurityCommand string `yaml:"security_command"`
 	// FullSuiteCommand is the repo-wide regression command the "full_suite_verify"
 	// gate runs. The default release policy requires that gate to have passed,
 	// and the worker/request path has no per-ticket flag for it, so without
 	// this default no queued ticket could ever open a pull request (found live
 	// on a Flutter + Go app repo, 2026-09-19).
-	FullSuiteCommand       string `yaml:"full_suite_command"`
-	UnitTestCommand        string `yaml:"unit_test_command"`
-	IntegrationTestCommand string `yaml:"integration_test_command"`
-	ReferenceOracleCommand string `yaml:"reference_oracle_command"`
+	FullSuiteCommand string `yaml:"full_suite_command"`
 	// TestPatterns is the tests_red_on_base gate boundary: glob patterns
 	// (path.Match syntax) matched against a run's changed-file inventory,
 	// both the full repo-relative path and the bare basename, so
@@ -108,6 +77,12 @@ type Config struct {
 	// entry is a path.Match glob of the whole path (policy.PathAllowed). Empty (the
 	// default) bounds nothing. A person wrote it, so it always refuses.
 	AllowedPaths []string `yaml:"allowed_paths"`
+	// PROrder lists path groups that ship as separate, stacked pull requests,
+	// in order: each group is a list of patterns in allowed_paths syntax. A
+	// request ticket whose accepted run changes files of more than one group
+	// is carved into one pull request per group it touches (internal/prorder).
+	// Empty (the default) orders nothing.
+	PROrder [][]string `yaml:"pr_order"`
 	// RequiredBinaries names executables the operator-selected worker image
 	// must provide for this repository's verify/setup commands.
 	RequiredBinaries    []string `yaml:"required_binaries"`
@@ -216,10 +191,6 @@ const MaxRepoGates = 16
 
 var repoGateIDRE = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
-// RepoGateReservedSuffix mirrors internal/workflow's post-oracle-commit
-// attempt-kind suffix (TestRepoGateReservedSuffixMatchesTheRerunKind).
-const RepoGateReservedSuffix = "_after_oracle_commit"
-
 // RepoGateCommands returns Config.Gates keyed by policy.RepoGateCheck(id),
 // the form a run's gate commands take.
 func (c Config) RepoGateCommands() map[string]string {
@@ -243,12 +214,6 @@ func (c *Config) validateGates() error {
 		if !repoGateIDRE.MatchString(g.ID) {
 			return fmt.Errorf("gates[%d].id %q must match %s", i, g.ID, repoGateIDRE)
 		}
-		// "<check>_after_oracle_commit" is the attempt kind and log name of
-		// a gate's rerun on the committed tree: an id ending in it would
-		// share them with another gate's rerun.
-		if strings.HasSuffix(g.ID, RepoGateReservedSuffix) {
-			return fmt.Errorf("gates[%d].id %q must not end in %q", i, g.ID, RepoGateReservedSuffix)
-		}
 		if seen[g.ID] {
 			return fmt.Errorf("gates[%d].id %q is listed twice", i, g.ID)
 		}
@@ -258,30 +223,6 @@ func (c *Config) validateGates() error {
 		}
 	}
 	return nil
-}
-
-// GateCommands returns this config's operator-configured command-gate
-// values, keyed by policy.CommandGate.ID (policy.CommandGates' own
-// ProjectKey field says which YAML key each one reads) -- the YAML keys
-// stay individual Config fields (they're the operator-facing ABI other
-// tooling may read/write directly), but every caller that just wants
-// "the configured command for gate X" goes through this instead of
-// naming a field, so a new registry entry needs one field here (its
-// YAML key) and one line in the map below, not a change at every call
-// site.
-func (c Config) GateCommands() map[string]string {
-	raw := map[string]string{
-		"lint_command":             c.LintCommand,
-		"security_command":         c.SecurityCommand,
-		"unit_test_command":        c.UnitTestCommand,
-		"integration_test_command": c.IntegrationTestCommand,
-		"reference_oracle_command": c.ReferenceOracleCommand,
-	}
-	out := make(map[string]string, len(policy.CommandGates))
-	for _, g := range policy.CommandGates {
-		out[g.ID] = raw[g.ProjectKey]
-	}
-	return out
 }
 
 var designGuideNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -319,6 +260,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validateAllowedPaths(c.AllowedPaths); err != nil {
+		return err
+	}
+	if err := validatePROrder(c.PROrder); err != nil {
 		return err
 	}
 	if err := validateCommandList("setup", c.Setup); err != nil {
@@ -598,6 +542,20 @@ func validateAllowedPaths(patterns []string) error {
 		}
 		if _, err := path.Match(p, ""); err != nil {
 			return fmt.Errorf("allowed_paths entry %q is not a valid pattern: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// validatePROrder checks pr_order: each group a non-empty list whose entries
+// are valid allowed_paths patterns.
+func validatePROrder(groups [][]string) error {
+	for i, group := range groups {
+		if len(group) == 0 {
+			return fmt.Errorf("pr_order group %d must list at least one pattern", i+1)
+		}
+		if err := validateAllowedPaths(group); err != nil {
+			return fmt.Errorf("pr_order group %d: %s", i+1, strings.TrimPrefix(err.Error(), "allowed_paths "))
 		}
 	}
 	return nil

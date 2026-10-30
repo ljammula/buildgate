@@ -365,7 +365,7 @@ class MainHarnessFlagTests(unittest.TestCase):
 class HarnessFlagTests(unittest.TestCase):
 	"""Every model-bound script exposes --harness with the adapters' names, default pi."""
 
-	SCRIPT_NAMES = ("build_app", "combined_review", "draft_spec", "plan_tickets", "draft_acceptance_oracles")
+	SCRIPT_NAMES = ("build_app", "combined_review", "draft_spec", "plan_tickets")
 
 	def test_each_script_lists_the_adapter_choices(self):
 		for name in self.SCRIPT_NAMES:
