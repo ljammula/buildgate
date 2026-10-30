@@ -163,6 +163,16 @@ class OneShot(unittest.TestCase):
 		m = baseline.measure(runs, beside={})
 		self.assertEqual((m["one_shot"], m["tickets"]), (2, 5))
 
+	def test_advice_restack_and_older_challenge_runs_belong_to_the_ticket_they_follow(self):
+		runs = [
+			run("t-1", state="accepted", ticket="req-001", created_at="2026-10-01T00:00:00Z"),
+			run("t-2", state="accepted", ticket="req-001-advice1", created_at="2026-10-01T01:00:00Z"),
+			run("t-3", state="accepted", ticket="req-001-challenge1", created_at="2026-10-01T02:00:00Z"),
+			run("t-4", state="accepted", ticket="req-001-restack1", created_at="2026-10-01T03:00:00Z"),
+		]
+		m = baseline.measure(runs, beside={})
+		self.assertEqual((m["one_shot"], m["tickets"]), (1, 1))
+
 
 class RoundsToGreen(unittest.TestCase):
 	def test_counts_accepted_runs_with_recorded_rounds_only(self):

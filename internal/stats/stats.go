@@ -45,10 +45,10 @@ const (
 
 // followUpRun matches the suffix of a run that follows a ticket's own run: a
 // PR-review, conformity, corrective or advice round, each possibly with
-// -fix<N>. The suffix follows the ticket's three-digit index, so a ticket
+// -fix<N>, or a restack's replay run. The suffix follows the ticket's three-digit index, so a ticket
 // merely named "api-review1" keeps its name (the same rule as
 // scripts/baseline.py).
-var followUpRun = regexp.MustCompile(`(-\d{3})-(review|conformity|corrective|advice)\d+(?:-fix\d+)?$`)
+var followUpRun = regexp.MustCompile(`(-\d{3})-(review|conformity|corrective|advice|restack)\d+(?:-fix\d+)?$`)
 
 // isPRReviewRound reports whether r is a PR-review round of its ticket. An
 // advice round is not one: it is never a pull request sent back.
@@ -62,6 +62,11 @@ func isPRReviewRound(r *run.Run) bool {
 // (Metrics.AdviceRounds) and decides nothing of its ticket's outcome, its
 // pull request's opening or its being sent back.
 var adviceRun = regexp.MustCompile(`-\d{3}-advice\d+$`)
+
+// restackRun matches a restack's replay run (<request>-<ticket>-restack<n>):
+// it replays the ticket's pushed commits onto a moved base and builds
+// nothing, so it decides nothing of its ticket's outcome either.
+var restackRun = regexp.MustCompile(`-\d{3}-restack\d+$`)
 
 // Options narrows and shapes a report.
 type Options struct {
@@ -375,10 +380,14 @@ func metricsOf(list []series) Metrics {
 }
 
 // withoutAdviceRounds counts s's advice-round runs in m.AdviceRounds and
-// returns s without them: the ticket's outcome is its other runs'.
+// returns s without them or its restack runs: the ticket's outcome is its
+// other runs'.
 func (m *Metrics) withoutAdviceRounds(s series) series {
 	kept := make([]*run.Run, 0, len(s.runs))
 	for _, r := range s.runs {
+		if restackRun.MatchString(ticketName(r)) {
+			continue
+		}
 		if !adviceRun.MatchString(ticketName(r)) {
 			kept = append(kept, r)
 			continue

@@ -333,12 +333,14 @@ def round_signatures(record: Dict[str, Any], report: str, progress: str) -> List
 
 # ---- measures ---------------------------------------------------------------
 
-_FOLLOW_UP_RUN = re.compile(r"(?<=-\d{3})-(?:review|conformity|corrective)\d+(?:-fix\d+)?$")
+_FOLLOW_UP_RUN = re.compile(r"(?<=-\d{3})-(?:review|conformity|corrective|advice|restack|challenge)\d+(?:-fix\d+)?$")
 
 
 def ticket_of(record: Dict[str, Any]) -> Tuple[str, str]:
 	"""The ticket a run belongs to, as (project, ticket): its own ticket
-	with a PR-review or conformity round's suffix removed. The suffix
+	with a follow-up run's suffix removed (a PR-review, conformity,
+	corrective or advice round, a restack's replay, or an older record's
+	challenge round). The suffix
 	follows the ticket's three-digit index, so a ticket merely named
 	"api-review1" keeps its name. A run with no ticket is its own ticket."""
 	return (project_of(record), _FOLLOW_UP_RUN.sub("", str(record.get("ticket") or record["id"])))
