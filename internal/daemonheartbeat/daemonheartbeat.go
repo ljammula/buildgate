@@ -153,6 +153,9 @@ type Heartbeat struct {
 	// behind, which the request records alone can't: an older request can
 	// re-enter a job state while a newer one's build runs.
 	ActiveRequests []string `json:"active_requests,omitempty"`
+	// Draining is true while a drain request (RequestDrain) is on disk: the
+	// worker finishes the steps in flight and starts no new one.
+	Draining bool `json:"draining,omitempty"`
 	// SlotRequests are the requests whose step holds one of the JobSlots
 	// right now: every entry of ActiveRequests, plus a pr_review pass, which
 	// runs on the jobs queue but is not a job (stop and upgrade do not wait
@@ -184,6 +187,38 @@ const (
 // Worker reports whether hb was written by `factoryd worker` (it serves a
 // Temporal address) rather than an old process that is not a worker.
 func (h Heartbeat) Worker() bool { return h.TemporalAddress != "" }
+
+// DrainPath is the marker file whose presence asks dataDir's worker to drain.
+func DrainPath(dataDir string) string {
+	return filepath.Join(dataDir, "worker-drain")
+}
+
+// RequestDrain asks dataDir's worker to finish the steps in flight and start
+// no new one. The worker reads the file before it starts every step; a new
+// worker clears it on start.
+func RequestDrain(dataDir string) error {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return fmt.Errorf("create data dir: %w", err)
+	}
+	if err := os.WriteFile(DrainPath(dataDir), []byte(time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write drain marker: %w", err)
+	}
+	return nil
+}
+
+// ClearDrain removes the drain marker; none present is not an error.
+func ClearDrain(dataDir string) error {
+	if err := os.Remove(DrainPath(dataDir)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove drain marker: %w", err)
+	}
+	return nil
+}
+
+// Draining reports whether a drain request is on disk for dataDir.
+func Draining(dataDir string) bool {
+	_, err := os.Stat(DrainPath(dataDir))
+	return err == nil
+}
 
 // WorkerActiveRequests returns the ActiveRequests and JobSlots of dataDir's
 // worker heartbeat, or (nil, 1) when there is no heartbeat or it

@@ -230,6 +230,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			RouteWorkerModel:    workerModel,
 			GitHubLogin:         githubLogin,
 			ActiveRequests:      currentActiveRequests(),
+			Draining:            daemonheartbeat.Draining(dataDir),
 			SlotRequests:        slotHolders(),
 			RepositoryWaits:     repositoryWaits.snapshot(),
 			JobSlots:            slots,
@@ -338,6 +339,16 @@ func workerRoute(dataDir string, now time.Time) (mode, model string) {
 		return "", ""
 	}
 	return sanitize.Line(hb.RouteCredentialMode), sanitize.Line(hb.RouteWorkerModel)
+}
+
+// workerDrainStatusLine says a live worker is draining (a restart asked it to
+// finish its steps and start no new one), or "" when it is not.
+func workerDrainStatusLine(dataDir string, now time.Time) string {
+	hb, err := daemonheartbeat.Read(workerHeartbeatPath(dataDir))
+	if err != nil || daemonheartbeat.Stale(hb, now, workerStaleAfter) || !hb.Draining {
+		return ""
+	}
+	return "worker draining: finishing the steps in flight, starting no new step (`factoryd restart` is waiting to restart it)"
 }
 
 // workerRouteStatusLine renders workerRoute as `factoryd status`'s own

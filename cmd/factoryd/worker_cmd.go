@@ -63,6 +63,11 @@ func workerMain(dp *deps, args []string) error {
 	if err := backend.Refused(); err != nil {
 		return fmt.Errorf("factoryd worker: %w", err)
 	}
+	// A drain asked of the worker before this one belongs to it: this worker
+	// is the restart that drain was for.
+	if err := daemonheartbeat.ClearDrain(dataDir); err != nil {
+		return err
+	}
 	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, githubLogin, string(backend.Backend), cfg.Settings.MaxParallelJobs)
 	if err != nil {
 		return err

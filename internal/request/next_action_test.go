@@ -238,3 +238,21 @@ func TestPlanFeedbackOnlyCarriesPlanStageRejections(t *testing.T) {
 		t.Errorf("PlanFeedback = %q", fb)
 	}
 }
+
+func TestAwaitingPullRequestMessagesSayTheBranchIsLocalAndHowToPushIt(t *testing.T) {
+	r := &Request{
+		ID: "req-1", State: StateHalted, HaltKind: HaltAcceptedNoPR, Workspace: "/work/app",
+		Error:   "ticket 1/1: diff changes 1080 source lines, limit is 1000 (denied by release policy)",
+		Tickets: []Ticket{{Index: 1, RunID: "run-9", Branch: "factoryd/run-9"}},
+	}
+	want := "git -C /work/app push origin factoryd/run-9"
+	for name, got := range map[string]string{"label": r.AwaitingPullRequestLabel(), "next action": r.NextAction()} {
+		if !strings.Contains(got, want) || !strings.Contains(got, "local only") {
+			t.Errorf("%s = %q, want the local-branch note and %q", name, got, want)
+		}
+	}
+	r.Error = "no pull request was opened"
+	if got := r.NextAction(); !strings.Contains(got, want) {
+		t.Errorf("not-denied next action = %q, want %q", got, want)
+	}
+}

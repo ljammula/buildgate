@@ -163,7 +163,7 @@ type requestStatusEntry struct {
 	// one entry per ticket that has an open pull request -- the
 	// PR-review driver's own per-ticket PR status (Ticket.PRState: "open"
 	// -- the default, shown when PRState is still "" -- "ready", "approved",
-	// "merged", or "closed"), followed by ",ready-to-merge" when the poll's last
+	// "merged", or "closed"), followed by ",draft" (the current ticket of a building request) or ",safe-to-merge" (an earlier ticket of one: its advice rounds are done), then ",ready-to-merge" when the poll's last
 	// ready-to-merge check passed (Ticket.MergeReadiness). Empty when this request has no ticket with a PR yet
 	// (every state before building/pr_review, or a ticket not yet
 	// opened).
@@ -196,9 +196,30 @@ func requestTicketPRSummary(r *request.Request) string {
 		if t.MergeReadiness != nil && t.MergeReadiness.Ready {
 			state += ",ready-to-merge"
 		}
+		state += buildingTicketMark(r, t)
 		parts = append(parts, fmt.Sprintf("%d:%s", t.Index, state))
 	}
 	return strings.Join(parts, " ")
+}
+
+// buildingTicketMark is what a building request's ticket PR adds to its
+// state in the summary: ",draft" while it is the request's current ticket
+// (its advice rounds may still push to it, so merging it now drops them), and
+// ",safe-to-merge" once a later ticket has started building, which happens
+// only after its advice rounds are done. The PR's base still has to be main
+// (it is retargeted once the earlier ticket merges). Nothing for a merged or
+// closed PR or outside building.
+func buildingTicketMark(r *request.Request, t request.Ticket) string {
+	if r.State != request.StateBuilding || t.PRState == "merged" || t.PRState == "closed" {
+		return ""
+	}
+	if t.Index == r.TicketIndex {
+		return ",draft"
+	}
+	if t.Index < r.TicketIndex {
+		return ",safe-to-merge"
+	}
+	return ""
 }
 
 // requestRowSuffix is what follows a request's row in the table: its
@@ -610,6 +631,9 @@ func statusMain(args []string) error {
 	// workerRoute's own doc comment.
 	routeMode, routeModel := workerRoute(*dataDir, now)
 	routeLine := workerRouteStatusLine(*dataDir, now)
+	if drain := workerDrainStatusLine(*dataDir, now); drain != "" {
+		routeLine = strings.TrimSuffix(drain+"\n"+routeLine, "\n")
+	}
 	// roles: visibility (P0e): one line per configured role
 	// (planning/execution/review), each naming the alias it resolved to,
 	// its worker model id, and its thinking level -- the per-role
