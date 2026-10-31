@@ -36,24 +36,39 @@ func challengeEnabled(dataDir string, r *request.Request) (approved string, ok b
 // challengeCriteriaHeading heads the block that names a spec's criteria by ID.
 const challengeCriteriaHeading = "# Acceptance criteria by ID"
 
-// criterionNumberRE matches the "N. " a folded criterion starts with.
-var criterionNumberRE = regexp.MustCompile(`^\d+[.)]\s+`)
+// criterionLeadRE matches what a folded criterion starts with: its number,
+// then any AC-n label the spec gave it. Group 1 is the number, group 2 the
+// label's.
+var criterionLeadRE = regexp.MustCompile(`^(\d+)[.)]\s+(?:AC-(\d+):\s*)?`)
 
 // challengeCriteriaBlock names each of a spec's criteria by the AC-n ID a
-// challenge file's header cites, when the spec's own text does not label
-// them (a handed-over spec, or bullets the factory numbers): the challenger
-// can cite only a number the text it reads shows. "" when the criteria carry
-// their IDs, or there are none.
+// challenge file's header cites, unless every criterion is labelled with its
+// own position (a drafted spec): the challenger can cite only a number the
+// text it reads shows, and a handed-over spec may label none, some, or label
+// them out of order. A label the spec gave is left out of the text here, so
+// the block holds one ID per criterion. "" when there are none.
 func challengeCriteriaBlock(criteria []string) string {
-	if len(criteria) == 0 || request.CriteriaCarryIDs(criteria) {
+	if len(criteria) == 0 || criteriaLabelledInPlace(criteria) {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\nThe spec above does not label its criteria; the factory numbers them as below, and a test file's header cites one of these IDs.\n", challengeCriteriaHeading)
+	fmt.Fprintf(&b, "%s\n\nThe spec above does not label each criterion with its own number; the factory numbers them as below, and a test file's header cites one of these IDs.\n", challengeCriteriaHeading)
 	for i, c := range criteria {
-		fmt.Fprintf(&b, "\nAC-%d: %s\n", i+1, criterionNumberRE.ReplaceAllString(c, ""))
+		fmt.Fprintf(&b, "\nAC-%d: %s\n", i+1, criterionLeadRE.ReplaceAllString(c, ""))
 	}
 	return b.String()
+}
+
+// criteriaLabelledInPlace reports whether criterion i of the folded list
+// starts with the label AC-(i+1).
+func criteriaLabelledInPlace(criteria []string) bool {
+	for i, c := range criteria {
+		m := criterionLeadRE.FindStringSubmatch(c)
+		if m == nil || m[2] != strconv.Itoa(i+1) {
+			return false
+		}
+	}
+	return true
 }
 
 // withChallenge sets entry's challenge inputs for a build of ticket (SC-022):

@@ -109,10 +109,9 @@ func validateSpecSize(content string) error {
 	return nil
 }
 
-// CriteriaCarryIDs reports whether every folded criterion (as
-// SpecAcceptanceCriteria returns it) starts with its
+// criteriaCarryIDs reports whether every folded criterion starts with its
 // ID ("N. AC-N: ..."), which is the spec a no-test note may be made for.
-func CriteriaCarryIDs(criteria []string) bool {
+func criteriaCarryIDs(criteria []string) bool {
 	if len(criteria) == 0 {
 		return false
 	}
@@ -134,7 +133,7 @@ var criterionLeadRE = regexp.MustCompile(`^\d+[.)]\s+AC-\d+:\s*`)
 // whose wording is not in an EARS form. The reading is of prose, so it is
 // advice only.
 func earsNotes(criteria []string) []string {
-	if !CriteriaCarryIDs(criteria) {
+	if !criteriaCarryIDs(criteria) {
 		return nil
 	}
 	var notes []string
@@ -177,7 +176,7 @@ func ticketTestsCited(content string) map[int]bool {
 // listed criteria are considered. The note is built from numbers; the
 // reading is of list text, so it is advice.
 func noTestNotes(criteria []string, tickets []PlanTicket) []string {
-	if !CriteriaCarryIDs(criteria) {
+	if !criteriaCarryIDs(criteria) {
 		return nil
 	}
 	covered := map[int]bool{}

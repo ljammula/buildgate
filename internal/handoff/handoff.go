@@ -702,11 +702,11 @@ func fileList(files []string) string {
 }
 
 // quote puts a value from the build or a reviewer in double quotes. Build
-// already made it one line; a quote or backslash inside it is escaped with a
+// already made it one line; a double quote inside it is escaped with a
 // backslash, so the value cannot close its own quotation and keeps its own
 // quotes (a reviewer's `note="a,b"` example means what it said).
 func quote(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
 // NoteLine is the first line of the build agent's retained notes of the run in

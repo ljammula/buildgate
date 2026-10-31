@@ -71,7 +71,8 @@ func TestChangedApprovedSpecIsNoChallengeNotAFailedBuild(t *testing.T) {
 
 // A spec whose criteria carry no AC-n label (a handed-over spec of bullets)
 // gives the challenger each criterion by the ID the host accepts in a test
-// file's header; one whose criteria are labelled is given as it is.
+// file's header, a label out of place dropped from its text; one whose every
+// criterion is labelled with its own number is given as it is.
 func TestChallengerIsGivenTheIDOfEachUnlabelledCriterion(t *testing.T) {
 	for _, tc := range []struct {
 		name, spec string
@@ -81,6 +82,10 @@ func TestChallengerIsGivenTheIDOfEachUnlabelledCriterion(t *testing.T) {
 		{"bullets", "# Thing\n\n## Wanted behaviour\n\n- A limit can be set.\n- A negative limit is rejected.\n",
 			[]string{"# Acceptance criteria by ID", "\nAC-1: A limit can be set.\n", "\nAC-2: A negative limit is rejected.\n"}, "2"},
 		{"labelled", "## Acceptance criteria\n\n1. AC-1: When x, the system shall y.\n", nil, "1"},
+		{"labelled out of order", "## Acceptance criteria\n\n- AC-2: x\n- AC-1: y\n",
+			[]string{"\nAC-1: x\n", "\nAC-2: y\n"}, "2"},
+		{"partly labelled", "## Acceptance criteria\n\n- y\n- AC-1: x\n",
+			[]string{"\nAC-1: y\n", "\nAC-2: x\n"}, "2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dataDir, r, ticket := challengeArgsFixture(t)

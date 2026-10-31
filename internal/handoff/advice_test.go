@@ -61,7 +61,8 @@ func TestAdviceOfARunWithNoReviewHasNoFindings(t *testing.T) {
 
 // TestAdviceSectionSaysItsSubjectOnce: the reviewer's section says once that
 // the attempt was accepted, whether or not a challenge section came first, and
-// a reviewer's own double quotes reach the brief escaped, not rewritten.
+// a reviewer's own double quotes reach the brief escaped, not rewritten, and a
+// backslash as it was.
 func TestAdviceSectionSaysItsSubjectOnce(t *testing.T) {
 	finding := AdviceFinding{Severity: "high", File: "lib/request.rb", Line: 9, Summary: `drops note="a,text/html,b"`, FailureScenario: `a path ending in \ stays one value`}
 	red := ChallengeFile{Path: "test/edge_test.rb", Criterion: "AC-1"}
@@ -81,7 +82,7 @@ func TestAdviceSectionSaysItsSubjectOnce(t *testing.T) {
 			if n := strings.Count(md, "passed every check and was accepted"); n != 1 {
 				t.Errorf("the brief says the attempt was accepted %d times, want once:\n%s", n, md)
 			}
-			if !strings.Contains(section, `"drops note=\"a,text/html,b\""`) || !strings.Contains(section, `"a path ending in \\ stays one value"`) {
+			if !strings.Contains(section, `"drops note=\"a,text/html,b\""`) || !strings.Contains(section, `"a path ending in \ stays one value"`) {
 				t.Errorf("the reviewer's quotes were not kept escaped:\n%s", section)
 			}
 		})
