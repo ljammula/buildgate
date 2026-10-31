@@ -34,6 +34,10 @@ type challengeRun struct {
 	jobs     int
 	launches []string
 	commits  [][]run.ChallengeFile
+	// verifies counts the verify command's runs; undos are the result commits
+	// the branch was moved back to.
+	verifies int
+	undos    []string
 }
 
 func runChallengePhase(t *testing.T, input RunWorkflowInput, job ChallengerJobResult, launch func(ReproductionRunInput) ReproductionRunResult, version temporalworkflow.Version) challengeRun {
@@ -64,6 +68,13 @@ type challengeFixture struct {
 	inTurn, legacy bool
 	order          *[]string
 	orderMu        sync.Mutex
+	// redOnCommit makes the verify command fail once the held files are
+	// committed; undoErr is the error the undo Activity fails with; noVerifyChange
+	// replays a history recorded before verifyChallengeCommitChange.
+	redOnCommit    bool
+	verifyErr      error // the verify Activity's error once the files are committed
+	undoErr        error
+	noVerifyChange bool
 }
 
 func (f *challengeFixture) record(name string) {
@@ -77,13 +88,22 @@ func (f *challengeFixture) record(name string) {
 
 func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJobResult, launch func(ReproductionRunInput) ReproductionRunResult, version temporalworkflow.Version, commitErr error, fx *challengeFixture) challengeRun {
 	t.Helper()
+	var out challengeRun
+	var mu sync.Mutex
+	committed := false
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
 		},
 		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			out.verifies++
+			if fx.verifyErr != nil && committed {
+				return VerifyActivityResult{}, fx.verifyErr
+			}
 			exit := 0
-			if fx.gateFails {
+			if fx.gateFails || fx.redOnCommit && committed {
 				exit = 1
 			}
 			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: exit}}, nil
@@ -95,6 +115,9 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 	env.OnGetVersion(challengeChange, temporalworkflow.DefaultVersion, 1).Return(version)
 	if fx.serial {
 		env.OnGetVersion(parallelChallengeChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
+	if fx.noVerifyChange {
+		env.OnGetVersion(verifyChallengeCommitChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
 	if fx.legacy {
 		env.OnGetVersion(challengeWithReviewByMemoryChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
@@ -116,8 +139,6 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 		}
 		return VerifyActivityResult{Result: runner.Result{Command: []string{"python3", "combined_review.py"}, ExitCode: exit}}, nil
 	}, activity.RegisterOptions{Name: RunReviewStepActivityName})
-	var out challengeRun
-	var mu sync.Mutex
 	env.RegisterActivityWithOptions(func(context.Context, ChallengerJobInput) (ChallengerJobResult, error) {
 		fx.record("job-start")
 		if fx.onJob != nil {
@@ -137,13 +158,20 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.RegisterActivityWithOptions(func(_ context.Context, in CommitChallengeInput) (CommitChallengeResult, error) {
 		mu.Lock()
+		defer mu.Unlock()
 		out.commits = append(out.commits, in.Files)
-		mu.Unlock()
 		if commitErr != nil {
 			return CommitChallengeResult{}, commitErr
 		}
+		committed = true
 		return CommitChallengeResult{SHA: "c0ffee"}, nil
 	}, activity.RegisterOptions{Name: CommitChallengeActivityName})
+	env.RegisterActivityWithOptions(func(_ context.Context, in UndoChallengeCommitInput) error {
+		mu.Lock()
+		defer mu.Unlock()
+		out.undos = append(out.undos, in.ResultSHA)
+		return fx.undoErr
+	}, activity.RegisterOptions{Name: UndoChallengeCommitActivityName})
 	env.ExecuteWorkflow(RunWorkflow, input)
 	out.err = env.GetWorkflowError()
 	if out.err == nil {
@@ -360,6 +388,103 @@ func TestChallengeGreenThatFailedToCommitIsNoVerdict(t *testing.T) {
 	c := p.result.Challenge
 	if p.err != nil || c == nil || c.Verdict != run.ChallengeNoVerdict || c.CommittedSHA != "" || c.Cause == "" || p.result.ResultSHA == "c0ffee" {
 		t.Fatalf("err %v, challenge %+v, sha %q; want no_verdict with a cause, nothing committed", p.err, c, p.result.ResultSHA)
+	}
+}
+
+func greenOneFile() ChallengerJobResult {
+	return ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
+}
+
+// The verify command runs on the commit that adds the held files, and a pass
+// keeps the commit as the run's result.
+func TestChallengeCommitIsVerifiedAndKeptWhenGreen(t *testing.T) {
+	p := runChallengePhaseWith(t, challengeInput(), greenOneFile(), passAll, 1, nil, &challengeFixture{})
+	if p.err != nil || p.result.ResultSHA != "c0ffee" || p.result.Challenge.CommittedSHA != "c0ffee" || len(p.undos) != 0 {
+		t.Fatalf("err %v, sha %q, challenge %+v, undos %v; want the commit kept", p.err, p.result.ResultSHA, p.result.Challenge, p.undos)
+	}
+	if p.verifies != 2 {
+		t.Errorf("verify ran %d times, want 2 (the build's, the challenge commit's)", p.verifies)
+	}
+}
+
+// A verify command that fails on the committed files undoes the commit: the
+// result and the changed files stay the build's, and the verdict is no verdict.
+func TestChallengeCommitThatFailsVerifyIsUndone(t *testing.T) {
+	p := runChallengePhaseWith(t, challengeInput(), greenOneFile(), passAll, 1, nil, &challengeFixture{redOnCommit: true})
+	c := p.result.Challenge
+	if p.err != nil || c == nil || c.Verdict != run.ChallengeNoVerdict || c.CommittedSHA != "" || p.result.ResultSHA == "c0ffee" {
+		t.Fatalf("err %v, challenge %+v, sha %q; want no_verdict, nothing committed", p.err, c, p.result.ResultSHA)
+	}
+	if !strings.HasPrefix(c.Cause, "the held challenge files fail the verify command once committed: ") || len(c.Notes) == 0 || c.Notes[len(c.Notes)-1] != c.Cause {
+		t.Errorf("cause %q, notes %v; want the prefixed cause recorded as a note", c.Cause, c.Notes)
+	}
+	if len(p.undos) != 1 || p.undos[0] != p.result.ResultSHA {
+		t.Errorf("undos %v, result sha %q; want one reset to the unchanged result", p.undos, p.result.ResultSHA)
+	}
+	for _, f := range p.result.ChangedFiles {
+		if f == "p/edge_test.go" {
+			t.Errorf("changed files %v hold the undone file", p.result.ChangedFiles)
+		}
+	}
+}
+
+// The same through the parallel order (the review and the challenge overlap,
+// the files commit after the join): the red commit is undone, and the verify's
+// attempt is on the run.
+func TestChallengeCommitThatFailsVerifyIsUndoneInTheParallelOrder(t *testing.T) {
+	input := challengeInput()
+	p := runChallengePhaseWith(t, input, greenOneFile(), passAll, 1, nil, &challengeFixture{redOnCommit: true})
+	c := p.result.Challenge
+	if p.err != nil || c == nil || !c.WithReview || c.Verdict != run.ChallengeNoVerdict || len(p.undos) != 1 || p.result.ResultSHA == "c0ffee" {
+		t.Fatalf("err %v, challenge %+v, undos %v, sha %q; want the parallel order, no_verdict and one undo", p.err, c, p.undos, p.result.ResultSHA)
+	}
+	if !strings.Contains(c.Cause, "verify exited 1") {
+		t.Errorf("cause %q, want the exit status", c.Cause)
+	}
+}
+
+// A verify step that errors undoes the commit too, and the cause says the
+// verify did not finish, not that the files are bad. Its attempt is recorded.
+func TestChallengeCommitWhoseVerifyErrorsIsUndoneWithoutBlamingTheFiles(t *testing.T) {
+	fx := &challengeFixture{verifyErr: temporal.NewNonRetryableApplicationError("sandbox lost", "infra", nil, []run.Attempt{{Kind: "verify", LogPath: "challenge-verify.log"}})}
+	p := runChallengePhaseWith(t, challengeInput(), greenOneFile(), passAll, 1, nil, fx)
+	c := p.result.Challenge
+	if p.err != nil || c == nil || c.Verdict != run.ChallengeNoVerdict || len(p.undos) != 1 {
+		t.Fatalf("err %v, challenge %+v, undos %v; want no_verdict and one undo", p.err, c, p.undos)
+	}
+	if !strings.HasPrefix(c.Cause, "the verify of the committed held challenge files did not finish: ") || strings.Contains(c.Cause, "fail the verify command") {
+		t.Errorf("cause %q; want the did-not-finish wording", c.Cause)
+	}
+	n := 0
+	for _, a := range p.result.Attempts {
+		if a.Kind == "verify" && a.LogPath == "challenge-verify.log" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d challenge-verify attempts on the run, want 1", n)
+	}
+}
+
+// A branch the undo could not move back is not reported as fine: the run halts.
+func TestChallengeCommitUndoFailureHaltsTheRun(t *testing.T) {
+	fx := &challengeFixture{redOnCommit: true, undoErr: temporal.NewNonRetryableApplicationError("reset failed", "git", nil)}
+	p := runChallengePhaseWith(t, challengeInput(), greenOneFile(), passAll, 1, nil, fx)
+	if p.err == nil && p.result.State == run.StateAccepted {
+		t.Fatalf("undo failure: run accepted with challenge %+v; want a halt", p.result.Challenge)
+	}
+	if len(p.undos) != 1 {
+		t.Errorf("undos %v, want one attempt", p.undos)
+	}
+}
+
+// A history recorded before verifyChallengeCommitChange replays unchanged: the
+// commit is not verified and a red verify command is never asked.
+func TestHistoryRecordedBeforeTheChallengeCommitVerifyReplaysUnchanged(t *testing.T) {
+	fx := &challengeFixture{redOnCommit: true, noVerifyChange: true}
+	p := runChallengePhaseWith(t, challengeInput(), greenOneFile(), passAll, 1, nil, fx)
+	if p.err != nil || p.result.ResultSHA != "c0ffee" || p.verifies != 1 || len(p.undos) != 0 {
+		t.Fatalf("err %v, sha %q, verifies %d, undos %v; want the old unverified commit", p.err, p.result.ResultSHA, p.verifies, p.undos)
 	}
 }
 

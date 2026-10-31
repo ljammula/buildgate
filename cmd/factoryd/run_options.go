@@ -142,14 +142,14 @@ func runDirOfCheckpointDir(checkpointDir string) string {
 
 // overallTimeout is the whole run's deadline: -timeout when set, else
 // TimeoutMinutes plus five minutes, plus the challenge phase's own time
-// (workflow.ChallengePhaseAllowance) for a run that may challenge.
+// (workflow.ChallengePhaseTime: the phase's launches and one verify of the committed files) for a run that may challenge.
 func (o runOptions) overallTimeout() time.Duration {
 	if o.OverallTimeout != 0 {
 		return o.OverallTimeout
 	}
 	timeout := time.Duration(o.TimeoutMinutes+5) * time.Minute
 	if o.Challenge || len(o.ChallengeHeld) > 0 {
-		timeout += workflow.ChallengePhaseAllowance
+		timeout += workflow.ChallengePhaseTime(o.TimeoutMinutes)
 	}
 	return timeout
 }
