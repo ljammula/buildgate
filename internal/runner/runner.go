@@ -480,6 +480,15 @@ func GitIsAncestor(dir, ancestor, descendant string) (bool, error) {
 	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w", ancestor, descendant, err)
 }
 
+// GitResetHard moves HEAD, and the branch it is on, to sha and makes the
+// index and the tracked files match it. Untracked files are left alone.
+func GitResetHard(dir, sha string) error {
+	if out, err := exec.Command("git", "-C", dir, "reset", "--hard", sha).CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset --hard %s: %w: %s", sha, err, out)
+	}
+	return nil
+}
+
 // GitShowFile returns path's content as of sha in dir, and whether it
 // existed there at all. A file that didn't exist yet at sha (e.g. one the
 // current run newly created) is a normal, expected case — not an error —

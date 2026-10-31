@@ -93,7 +93,7 @@ func runChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx
 	if err := judgeChallenge(ctx, ids, buildVerifyCtx, input, result, false, worktreePath, branch); err != nil {
 		return err
 	}
-	return commitGreenChallenge(ctx, ids, input, result, worktreePath, branch)
+	return commitGreenChallenge(ctx, ids, buildVerifyCtx, input, result, worktreePath, branch)
 }
 
 // judgeChallenge runs the challenger job (a fresh run) or takes the held files
@@ -123,10 +123,10 @@ func judgeChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 
 // commitGreenChallenge commits result.Challenge's green files when it is a
 // green verdict of a first build or of a challenge round.
-func commitGreenChallenge(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) error {
+func commitGreenChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) error {
 	rec := result.Challenge
 	if rec != nil && rec.Verdict == run.ChallengeGreen && (!rec.Rerun || input.ChallengeRound) {
-		return commitChallenge(ctx, ids, input, result, rec, worktreePath, branch)
+		return commitChallenge(ctx, ids, buildVerifyCtx, input, result, rec, worktreePath, branch)
 	}
 	return nil
 }
@@ -184,7 +184,7 @@ func reviewWithChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVe
 		return reviews, challengeErr
 	}
 	if reviews.ranCodeReview && reviews.codeReview.Result.ExitCode == 0 {
-		return reviews, commitGreenChallenge(ctx, ids, input, result, worktreePath, branch)
+		return reviews, commitGreenChallenge(ctx, ids, buildVerifyCtx, input, result, worktreePath, branch)
 	}
 	return reviews, nil
 }
@@ -384,7 +384,7 @@ func challengeVerdict(files []run.ChallengeFile) string {
 // commitChallenge commits the green files onto the run's branch (the host's one
 // step that commits pinned files) and makes that commit the run's result.
 // A failed commit is a note: the run goes on with its own result.
-func commitChallenge(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, result *RunWorkflowResult, rec *run.ChallengeRecord, worktreePath, branch string) error {
+func commitChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, rec *run.ChallengeRecord, worktreePath, branch string) error {
 	var files []run.ChallengeFile
 	for _, f := range rec.Files {
 		if f.Verdict == run.ChallengeGreen {
@@ -404,10 +404,53 @@ func commitChallenge(ctx temporalworkflow.Context, ids *activityIDs, input RunWo
 		rec.Notes = append(rec.Notes, rec.Cause)
 		return nil
 	}
+	if temporalworkflow.GetVersion(ctx, verifyChallengeCommitChange, temporalworkflow.DefaultVersion, 1) == 1 {
+		if cause, err := verifyChallengeCommit(ctx, ids, buildVerifyCtx, input, result, worktreePath, branch); err != nil || cause != "" {
+			if err == nil {
+				rec.Verdict, rec.Cause = run.ChallengeNoVerdict, "the held challenge files fail the verify command once committed: "+cause
+				rec.Notes = append(rec.Notes, rec.Cause)
+			}
+			return err
+		}
+	}
 	result.ResultSHA, rec.CommittedSHA = out.SHA, out.SHA
 	// The committed files are part of the change the pr_order check judges.
 	result.ChangedFiles = withPaths(result.ChangedFiles, files)
 	return nil
+}
+
+// verifyChallengeCommitChange is the GetVersion change ID from which
+// commitChallenge runs the verify command on the commit that adds the held
+// files and, when it fails, moves the branch back to the result commit. The
+// factory ran only the held files' own test IDs, which a test table row, a
+// type error or a vet failure in a held file escapes (SC-022). DefaultVersion
+// keeps the commit unchecked.
+const verifyChallengeCommitChange = "verify-challenge-commit"
+
+// verifyChallengeCommit runs the verify command on the challenge commit the
+// worktree is at. When it passes, cause and err are empty. When it fails (a
+// non-zero exit, or an Activity error with the workflow still running) the
+// commit is undone and cause says why; a failed undo, or a cancelled context,
+// is the returned error, which halts the run: a branch left on a red commit is
+// not reported as fine.
+func verifyChallengeCommit(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) (cause string, err error) {
+	var verify VerifyActivityResult
+	verr := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "challenge-verify"), RunVerifyActivityName, input).Get(ctx, &verify)
+	switch {
+	case verr != nil && ctx.Err() != nil:
+		return "", wrapActivityFailure("verify the challenge commit", verr, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	case verr != nil:
+		cause = "the verify step failed: " + cleanCause(verr.Error())
+	case verify.Result.ExitCode != 0:
+		cause = fmt.Sprintf("verify exited %d", verify.Result.ExitCode)
+	default:
+		return "", nil
+	}
+	undo := UndoChallengeCommitInput{RunWorkflowInput: input, ResultSHA: result.ResultSHA}
+	if uerr := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "challenge-undo"), UndoChallengeCommitActivityName, undo).Get(ctx, nil); uerr != nil {
+		return "", wrapActivityFailure("undo the challenge commit after a failed verify ("+cause+")", uerr, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
+	}
+	return cause, nil
 }
 
 // cleanCause is a failure's text as one short line.

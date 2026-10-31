@@ -110,6 +110,36 @@ func TestCommitChallengeCommitsPinnedFilesAsAChildOfTheResult(t *testing.T) {
 	}
 }
 
+// The undo step moves the worktree and its branch back to the result commit,
+// and refuses a commit it cannot resolve.
+func TestUndoChallengeCommitMovesTheBranchBackToTheResult(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "edge_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	if err := os.Remove(filepath.Join(f.repo, "p", "edge_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.acts.CommitChallengeActivity(context.Background(), CommitChallengeInput{RunWorkflowInput: f.input, ResultSHA: f.commit, Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.acts.UndoChallengeCommitActivity(context.Background(), UndoChallengeCommitInput{RunWorkflowInput: f.input, ResultSHA: f.commit}); err != nil {
+		t.Fatal(err)
+	}
+	head, err := exec.Command("git", "-C", f.repo, "rev-parse", "HEAD").Output()
+	if err != nil || strings.TrimSpace(string(head)) != f.commit {
+		t.Fatalf("HEAD = %q, %v; want %s", head, err, f.commit)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge_test.go")); !os.IsNotExist(err) {
+		t.Errorf("the committed file is still in the worktree: %v", err)
+	}
+	if err := f.acts.UndoChallengeCommitActivity(context.Background(), UndoChallengeCommitInput{RunWorkflowInput: f.input, ResultSHA: "nonesuch"}); err == nil {
+		t.Error("an unknown commit was accepted")
+	}
+}
+
 // diff_scope sets a committed challenge file aside by its pinned hash, never
 // by its path: the same path with other content is still a changed file.
 func TestSetAsideChallengeFilesIsByHashNeverByPath(t *testing.T) {
