@@ -148,7 +148,7 @@ func markerFactsAt(ctx context.Context, dir, commit string, tracked, paths []str
 // markersAt reads the marker files commit tracks in the directory d.
 func markersAt(ctx context.Context, dir, commit, d string, present map[string]bool) (reproduction.Markers, error) {
 	m := reproduction.Markers{}
-	for _, name := range reproduction.MarkerFiles() {
+	for _, name := range reproduction.MarkerFiles(d) {
 		p := path.Join(d, name)
 		if !present[p] {
 			continue

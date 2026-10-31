@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -632,5 +633,59 @@ func TestPytestCommandRunsTheRepositorysOwnPython(t *testing.T) {
 	}
 	if !strings.Contains(script, `"$BG_PY" -m pytest`) || !strings.Contains(script, "BG_PY=python3;") {
 		t.Errorf("script %q, want python3 as the fallback interpreter", script)
+	}
+}
+
+// A nested project's tests run in its directory, but the setup commands may
+// have built the virtualenv at the repository root: the nearest one wins.
+func TestNestedPytestFindsTheNearestVirtualenvUpToTheRoot(t *testing.T) {
+	stub := func(t *testing.T, dir, name string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "bin", "python"), []byte("#!/bin/sh\necho "+name+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name, want string
+		venvs      map[string]string
+	}{
+		{"only at the root", "root", map[string]string{".venv": "root"}},
+		{"the middle directory before the root", "middle", map[string]string{".venv": "root", "svc/venv": "middle"}},
+		{"the project directory first", "project", map[string]string{".venv": "root", "svc/api/.venv": "project"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "svc", "api"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for d, name := range tc.venvs {
+				stub(t, filepath.Join(root, d), name)
+			}
+			cmd := exec.Command("sh", "-c", pytestInterpreter("svc/api")+`echo "$("$BG_PY")"`)
+			cmd.Dir, cmd.Env = filepath.Join(root, "svc", "api"), []string{"PATH=/usr/bin:/bin"}
+			out, err := cmd.Output()
+			if err != nil || strings.TrimSpace(string(out)) != tc.want {
+				t.Fatalf("ran %q (err %v), want the %s interpreter", out, err, tc.want)
+			}
+		})
+	}
+}
+
+// A requirements.txt below the root is a tool's list, not a Python project:
+// a test beside one runs from the project at the root.
+func TestRequirementsTxtMarksAPythonProjectOnlyAtTheRoot(t *testing.T) {
+	if !slices.Contains(MarkerFiles("."), "requirements.txt") {
+		t.Error("the root's markers lack requirements.txt")
+	}
+	for _, d := range []string{"tests", "docs/build"} {
+		if slices.Contains(MarkerFiles(d), "requirements.txt") {
+			t.Errorf("MarkerFiles(%q) holds requirements.txt", d)
+		}
+		if !slices.Contains(MarkerFiles(d), "pyproject.toml") {
+			t.Errorf("MarkerFiles(%q) lacks pyproject.toml", d)
+		}
 	}
 }

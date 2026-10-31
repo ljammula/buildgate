@@ -131,19 +131,24 @@ type Markers map[string][]byte
 
 // Facts holds the marker files of the judged commit by directory,
 // repository-relative ("." the root): the caller reads, for each path a
-// runner is chosen for, each of MarkerFiles in each of its Ancestors that
+// runner is chosen for, each of MarkerFiles(dir) in each of its Ancestors that
 // the commit holds. A directory with none may be absent or empty.
 type Facts map[string]Markers
 
-// MarkerFiles are the file names, in one directory, Markers may hold.
-func MarkerFiles() []string {
-	return []string{
-		"go.mod",
-		"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini", "tox.ini",
+// MarkerFiles are the file names Markers may hold for the directory dir
+// (repository-relative, "." the root). A requirements.txt marks a Python
+// project only at the root: below it one is a tool's or a docs build's list
+// (docs/, tests/), and choosing that directory would run its tests away from
+// the project's own root, interpreter and import path.
+func MarkerFiles(dir string) []string {
+	python := []string{"pyproject.toml", "setup.py", "setup.cfg", "pytest.ini", "tox.ini"}
+	if dir == "." {
+		python = append(python, "requirements.txt")
+	}
+	return append(append([]string{"go.mod"}, python...),
 		"package.json", "vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs",
 		"pom.xml",
-		"Gemfile",
-	}
+		"Gemfile")
 }
 
 // Ancestors are the directories that enclose the repository path p, the
