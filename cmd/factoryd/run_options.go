@@ -111,6 +111,7 @@ type runOptions struct {
 	ChallengeSpecSHA256     string
 	ChallengeCriteria       int
 	ChallengeAnswers        []int
+	ChallengeCovered        []int
 	ChallengeApprovedSHA256 string
 	ChallengeApprovedBytes  int
 	ChallengerThinking      string

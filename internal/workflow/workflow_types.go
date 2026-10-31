@@ -538,6 +538,9 @@ type RunWorkflowInput struct {
 	ChallengeSpecSHA256 string `json:"challenge_spec_sha256,omitempty"`
 	ChallengeCriteria   int    `json:"challenge_criteria,omitempty"`
 	ChallengeAnswers    []int  `json:"challenge_answers,omitempty"`
+	// ChallengeCovered are the criteria the ticket and the tickets before it
+	// cover: a file's header may cite only these. Empty: any 1..ChallengeCriteria.
+	ChallengeCovered []int `json:"challenge_covered,omitempty"`
 	// ChallengeApprovedSHA256 is the hash spec_review approved for spec.md,
 	// which the first ChallengeApprovedBytes bytes of the snapshot must match.
 	ChallengeApprovedSHA256 string `json:"challenge_approved_sha256,omitempty"`

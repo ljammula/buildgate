@@ -112,6 +112,18 @@ func challengeHeaderOf(content []byte, criteria int, answers []int) string {
 	return found
 }
 
+// challengeInScope reports whether header (as challengeHeaderOf returns it)
+// cites a criterion the ticket or an earlier one covers. An answer-<n>, and
+// any header when covered is empty, is in scope.
+func challengeInScope(header string, covered []int) bool {
+	n, ok := strings.CutPrefix(header, "AC-")
+	if !ok || len(covered) == 0 {
+		return true
+	}
+	v, err := strconv.Atoi(n)
+	return err == nil && slices.Contains(covered, v)
+}
+
 // RunChallengerJobActivity runs the challenger job once and holds its files.
 // Every failure to run it is a Cause on the result, never an error: a
 // challenge never halts a run (SC-022). Only a stopped worker or a lost lease
@@ -447,6 +459,10 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 				noCriteriaNoted = true
 				notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
 			}
+		}
+		if file.NotRun == "" && !challengeInScope(file.Criterion, in.ChallengeCovered) {
+			file.NotRun = "cites a criterion outside the ticket's and earlier tickets' coverage"
+			notes = append(notes, fmt.Sprintf("a challenge file citing %s, a criterion outside the ticket's and earlier tickets' coverage, was held and not run: %s", file.Criterion, cleanNoteName(p)))
 		}
 		files = append(files, file)
 		held++

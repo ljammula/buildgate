@@ -120,7 +120,7 @@ func runInputGoldenFlags(t *testing.T, workspace, dataDir, inputs, runID, addres
 		"-registry-proxy",
 		"-challenge", "-challenge-spec", write("challenge-spec.md", challengeGoldenSpec+"\nAnswered.\n"),
 		"-challenge-approved-sha256", challengeGoldenSpecSHA256(), "-challenge-approved-bytes", strconv.Itoa(len(challengeGoldenSpec)),
-		"-challenge-criteria", "3", "-challenge-answers", "2,5",
+		"-challenge-criteria", "3", "-challenge-answers", "2,5", "-challenge-covered", "1,3",
 		"-challenge-held", write("held.json", heldManifest), "-challenge-round",
 		"-resume-session-of", "golden-quarantined",
 	}
@@ -329,7 +329,7 @@ func replayGolden(t *testing.T, golden string, carve *run.Carve) {
 				flags = slices.Delete(flags, i, i+1)
 			}
 		}
-		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers", "-challenge-approved-sha256", "-challenge-approved-bytes"} {
+		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers", "-challenge-covered", "-challenge-approved-sha256", "-challenge-approved-bytes"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
 			}

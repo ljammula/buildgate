@@ -309,6 +309,7 @@ type runFlags struct {
 	challengeSpec                *string
 	challengeCriteria            *int
 	challengeAnswers             *string
+	challengeCovered             *string
 	challengeApprovedSHA256      *string
 	challengeApprovedBytes       *int
 	challengeHeld                *string
@@ -355,6 +356,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.challenge = flags.Bool("challenge", false, "internal: after every gate and the review, run the challenger job once on the result (SC-022); a request's ticket build sets it")
 	f.challengeSpec = flags.String("challenge-spec", "", "internal: the request's approved spec.md with the read-back answers appended, which the challenger is given")
 	f.challengeCriteria = flags.Int("challenge-criteria", 0, "internal: how many numbered acceptance criteria a challenge file's header may cite")
+	f.challengeCovered = flags.String("challenge-covered", "", "internal: the acceptance criteria numbers this ticket and the tickets before it cover, comma-separated; a challenge file may cite only these")
 	f.challengeAnswers = flags.String("challenge-answers", "", "internal: the numbers of the answered read-back questions a challenge file's header may cite, comma-separated")
 	f.challengeApprovedSHA256 = flags.String("challenge-approved-sha256", "", "internal: the SHA-256 spec_review approved for the request's spec.md, which the first -challenge-approved-bytes bytes of -challenge-spec must match")
 	f.challengeApprovedBytes = flags.Int("challenge-approved-bytes", 0, "internal: how many leading bytes of -challenge-spec are the approved spec.md; the rest is the read-back answers")
@@ -2702,6 +2704,7 @@ func (tr *ticketRun) dispatch() error {
 			ChallengeSpecSHA256:     tr.challengeSpecSHA256,
 			ChallengeCriteria:       *tr.rf.challengeCriteria,
 			ChallengeAnswers:        challengeAnswerNumbers(*tr.rf.challengeAnswers),
+			ChallengeCovered:        challengeAnswerNumbers(*tr.rf.challengeCovered),
 			ChallengeApprovedSHA256: *tr.rf.challengeApprovedSHA256,
 			ChallengeApprovedBytes:  *tr.rf.challengeApprovedBytes,
 			ChallengerThinking:      tr.challengerThinking,

@@ -275,7 +275,7 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	}
 	if entry.Challenge {
 		args = append(args, "-challenge", "-challenge-spec", entry.ChallengeSpecPath,
-			"-challenge-criteria", strconv.Itoa(entry.ChallengeCriteria), "-challenge-answers", joinInts(entry.ChallengeAnswers),
+			"-challenge-criteria", strconv.Itoa(entry.ChallengeCriteria), "-challenge-answers", joinInts(entry.ChallengeAnswers), "-challenge-covered", joinInts(entry.ChallengeCovered),
 			"-challenge-approved-sha256", entry.ChallengeApprovedSHA256, "-challenge-approved-bytes", strconv.Itoa(entry.ChallengeApprovedBytes))
 	}
 	if entry.ChallengeHeld != "" {
