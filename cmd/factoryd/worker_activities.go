@@ -92,6 +92,11 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 		requestdriver.PruneRoundRefs(a.dp, r)
 	}
 	step := requestStepFor(r.State, a.cfg)
+	if step.Advance != "" && daemonheartbeat.Draining(a.dataDir) {
+		// A draining worker refuses every step: ask again at the repository
+		// retry pace, not every couple of seconds for the whole drain.
+		step.RetryAfter = max(step.RetryAfter, requestRepoBusyRetryAfter)
+	}
 	if r.State == request.StateBuilding && r.StackedWait != nil {
 		step.Wait = stackedWaitRecheck(a.cfg)
 	}
@@ -259,6 +264,12 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// waiting on.
 			slotRequests.add(id)
 			defer slotRequests.remove(id)
+			// A pr_review pass is no job, so the heartbeat lists it only in
+			// SlotRequests: the drain wait covers it, and it is refused here
+			// once the heartbeat lists it.
+			if err := a.refuseWhileDraining(); err != nil {
+				return "", err
+			}
 		}
 		ownSteps := 0
 		if onJobs && r.State.RunsJob() {

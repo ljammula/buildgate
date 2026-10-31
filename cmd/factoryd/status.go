@@ -184,6 +184,7 @@ type requestStatusEntry struct {
 // grows by one field, never a second line.
 func requestTicketPRSummary(r *request.Request) string {
 	var parts []string
+	lowest := lowestUnmergedBelowCurrent(r)
 	for _, t := range r.Tickets {
 		if t.PRURL == "" {
 			continue
@@ -196,27 +197,40 @@ func requestTicketPRSummary(r *request.Request) string {
 		if t.MergeReadiness != nil && t.MergeReadiness.Ready {
 			state += ",ready-to-merge"
 		}
-		state += buildingTicketMark(r, t)
+		state += buildingTicketMark(r, t, lowest)
 		parts = append(parts, fmt.Sprintf("%d:%s", t.Index, state))
 	}
 	return strings.Join(parts, " ")
 }
 
+// lowestUnmergedBelowCurrent is the index of the lowest ticket below the
+// current one whose PR is open: its base is the default branch or a merged
+// ticket's branch, so it is the only one that is safe to merge now. A higher
+// one is stacked on a ticket that has not merged. 0 when there is none.
+func lowestUnmergedBelowCurrent(r *request.Request) int {
+	for _, t := range r.Tickets {
+		if t.Index < r.TicketIndex && t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
+			return t.Index
+		}
+	}
+	return 0
+}
+
 // buildingTicketMark is what a building request's ticket PR adds to its
 // state in the summary: ",draft" while it is the request's current ticket
 // (its advice rounds may still push to it, so merging it now drops them), and
-// ",safe-to-merge" once a later ticket has started building, which happens
-// only after its advice rounds are done. The PR's base still has to be main
+// ",safe-to-merge" for the lowest unmerged earlier ticket once a later one has
+// started building, which happens only after its advice rounds are done. The PR's base still has to be main
 // (it is retargeted once the earlier ticket merges). Nothing for a merged or
 // closed PR or outside building.
-func buildingTicketMark(r *request.Request, t request.Ticket) string {
+func buildingTicketMark(r *request.Request, t request.Ticket, lowest int) string {
 	if r.State != request.StateBuilding || t.PRState == "merged" || t.PRState == "closed" {
 		return ""
 	}
 	if t.Index == r.TicketIndex {
 		return ",draft"
 	}
-	if t.Index < r.TicketIndex {
+	if t.Index == lowest {
 		return ",safe-to-merge"
 	}
 	return ""

@@ -301,3 +301,86 @@ func TestWorkerHeartbeatAndStatusShowDraining(t *testing.T) {
 		t.Errorf("status line = %q, want draining", line)
 	}
 }
+
+// startProcessesIn is startDefaultProcesses for any profile's data dir.
+func (h *upgradeHarness) startProcessesIn(dir string) (queuePID, servePID int) {
+	queue, serve := standIn(h.t), standIn(h.t)
+	writePIDFile(h.t, dir, "quickstart-queue-run.pid", queue.Process.Pid)
+	writeConsoleRecord(h.t, dir, serve.Process.Pid)
+	return queue.Process.Pid, serve.Process.Pid
+}
+
+func TestRestartMarksEveryWorkerAndRestartsTheStoppedOnesWhenAStopIsRefused(t *testing.T) {
+	fastDrainPoll(t)
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	defDir, workDir := h.profiles.roots["default"], h.profiles.roots["work"]
+	defQ, defS := h.startProcessesIn(defDir)
+	workQ, workS := h.startProcessesIn(workDir)
+	writeFreshWorkerHeartbeat(t, defDir, defQ, "localhost:7233", 3)
+	writeFreshWorkerHeartbeat(t, workDir, workQ, "localhost:7233", 3)
+	// Both idle workers are marked even though no step runs in either.
+	// Right after the drain (executable is looked up next) the work dir's
+	// worker starts a step anyway, as a worker that read no marker would.
+	fakeHostOf(dp).executableFn = func() (string, error) {
+		if !daemonheartbeat.Draining(defDir) || !daemonheartbeat.Draining(workDir) {
+			t.Errorf("an idle worker was not marked: default %v, work %v", daemonheartbeat.Draining(defDir), daemonheartbeat.Draining(workDir))
+		}
+		writeFreshWorkerHeartbeat(t, workDir, workQ, "localhost:7233", 3, "req-late")
+		return "/installed/factoryd", nil
+	}
+	var out bytes.Buffer
+	err := restartRun(dp, nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "started again") {
+		t.Fatalf("want a refusal that says the stopped workers were started again, got %v\n%s", err, out.String())
+	}
+	if alive(defQ) || alive(defS) {
+		t.Error("the default worker was not stopped")
+	}
+	if !alive(workQ) || !alive(workS) {
+		t.Error("the work worker, whose step runs, was stopped")
+	}
+	if len(h.spawned) != 2 || !strings.Contains(h.spawned[0], defDir) || !strings.Contains(h.spawned[1], defDir) {
+		t.Errorf("the stopped default worker and console were not started again: %v", h.spawned)
+	}
+	if daemonheartbeat.Draining(defDir) || daemonheartbeat.Draining(workDir) {
+		t.Error("a drain request was left behind")
+	}
+}
+
+func TestRestartWaitsForAPRReviewPassThatOnlyHoldsASlot(t *testing.T) {
+	fastDrainPoll(t)
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	dir := h.profiles.roots["default"]
+	queuePID, servePID := h.startDefaultProcesses()
+	hb := daemonheartbeat.Heartbeat{
+		PID: queuePID, StartedAt: time.Now().Format(time.RFC3339Nano), UpdatedAt: time.Now().Format(time.RFC3339Nano),
+		SlotRequests: []string{"req-pr"}, JobSlots: 3, TemporalAddress: "localhost:7233",
+	}
+	if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(dir), hb); err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan struct{})
+	go func() {
+		for !daemonheartbeat.Draining(dir) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(100 * time.Millisecond)
+		// Nothing may have been stopped while the pass held its slot.
+		if !alive(queuePID) || !alive(servePID) {
+			t.Error("the worker was stopped under a pr_review pass")
+		}
+		writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
+		close(released)
+	}()
+	var out bytes.Buffer
+	if err := restartRun(dp, nil, &out); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out.String())
+	}
+	select {
+	case <-released:
+	default:
+		t.Error("restart did not wait for the slot holder")
+	}
+}

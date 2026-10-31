@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +18,7 @@ import (
 
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/sanitize"
 	"buildgate/internal/spinner"
 )
 
@@ -26,7 +29,7 @@ import (
 // install` runs this as its last step but one.
 func restartMain(dp *deps, args []string) error {
 	// Ctrl-C abandons the wait for a drain (and clears the drain request).
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	return restartRunContext(ctx, dp, args, os.Stdout, term.IsTerminal(int(os.Stdout.Fd())))
 }
@@ -42,49 +45,49 @@ func restartRun(dp *deps, args []string, w io.Writer) error {
 	return restartRunContext(context.Background(), dp, args, w, false)
 }
 
-// drainWorkers asks the worker of every data dir in dirs with a step in
-// flight to drain (finish what runs, start nothing new), then waits until no
-// step is in flight. ctx ending abandons the wait: the drain requests are
-// cleared and the error says so. The request stays on disk when it returns
-// nil: the worker started next clears it.
-func drainWorkers(ctx context.Context, w io.Writer, dirs []string, tty bool) (err error) {
-	active := upgradeActive(dirs, time.Now())
-	if len(active) == 0 {
-		return nil
-	}
-	var asked []string
-	clear := func() {
-		for _, dir := range asked {
-			if cErr := daemonheartbeat.ClearDrain(dir); cErr != nil {
-				fmt.Fprintf(w, "restart: could not clear the drain request in %s: %v\n", dir, cErr)
-			}
-		}
-	}
-	defer func() {
-		if err != nil {
-			clear()
-		}
-	}()
+// restartBusy lists, as "<request> (<dir>)", the requests the workers of dirs
+// hold a job slot for: a running step, and a pr_review pass (whose corrective
+// build is no job, so ActiveRequests alone misses it).
+func restartBusy(dirs []string, now time.Time) []string {
+	var out []string
 	for _, dir := range dirs {
-		if ids, _ := daemonheartbeat.WorkerActiveRequests(dir, time.Now()); len(ids) == 0 {
-			continue
+		for _, id := range daemonheartbeat.WorkerBusyRequests(dir, now) {
+			out = append(out, fmt.Sprintf("%s (%s)", sanitize.Line(id), dir))
 		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// drainWorkers asks the worker of every data dir in dirs (all of them: an
+// idle worker would otherwise start a build during a long wait) to drain,
+// finish what runs and start nothing new, then waits until none holds a slot.
+// ctx ending abandons the wait: the drain requests are cleared and the error
+// says so. The caller clears the requests when it is done.
+func drainWorkers(ctx context.Context, w io.Writer, dirs []string, tty bool) (err error) {
+	for _, dir := range dirs {
 		if err := daemonheartbeat.RequestDrain(dir); err != nil {
 			return err
 		}
-		asked = append(asked, dir)
+	}
+	busy := restartBusy(dirs, time.Now())
+	if len(busy) == 0 {
+		return nil
 	}
 	sp := spinner.New(w, tty)
-	sp.Start("draining: waiting for " + strings.Join(active, ", ") + " to finish its step; no new step starts")
+	text := func() string {
+		return "draining: waiting for " + strings.Join(busy, ", ") + " to finish its step; no new step starts"
+	}
+	sp.Start(text())
 	defer sp.Stop("")
-	for len(active) > 0 {
+	for len(busy) > 0 {
 		select {
 		case <-ctx.Done():
 			return errors.New("restart abandoned while draining: the drain request is cleared and the worker starts steps again")
 		case <-time.After(upgradeWaitInterval):
 		}
-		if active = upgradeActive(dirs, time.Now()); len(active) > 0 {
-			sp.Set("draining: waiting for " + strings.Join(active, ", ") + " to finish its step; no new step starts")
+		if busy = restartBusy(dirs, time.Now()); len(busy) > 0 {
+			sp.Set(text())
 		}
 	}
 	return nil
@@ -113,29 +116,43 @@ func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer
 	// the processes of the data dirs before it. The workers drain first: they
 	// finish the steps in flight and start no new one, so the wait ends even
 	// in a request whose tickets build back to back.
-	if err := drainWorkers(ctx, w, dirs, tty); err != nil {
+	var workerDirs []string
+	for _, p := range running {
+		if p.Kind == "worker" && !slices.Contains(workerDirs, p.DataDir) {
+			workerDirs = append(workerDirs, p.DataDir)
+		}
+	}
+	// Whatever way this returns, no drain request is left for a worker that
+	// keeps running (the started worker clears its own on start as well).
+	defer func() {
+		for _, dir := range workerDirs {
+			_ = daemonheartbeat.ClearDrain(dir)
+		}
+	}()
+	if err := drainWorkers(ctx, w, workerDirs, tty); err != nil {
 		return err
 	}
 	now = time.Now()
-	defer func() {
-		// A restart that fails before the new worker starts leaves no drain
-		// behind on a worker that is still running.
-		if err != nil {
-			for _, dir := range dirs {
-				_ = daemonheartbeat.ClearDrain(dir)
-			}
-		}
-	}()
 	binary, err := dp.host.executable()
 	if err != nil {
 		return fmt.Errorf("find this binary: %w", err)
 	}
-	var notStopped []string
+	var notStopped, stoppedDirs []string
 	for _, dir := range dirs {
 		out := hostcontrol.StopDataDir(dp, w, dir, false, now)
 		if out.Refused {
-			return fmt.Errorf("a build step started in %s while stopping; run `factoryd restart` again once it ends", dir)
+			// The workers stopped before this one must not stay down.
+			var already []upgradeProcess
+			for _, p := range running {
+				if slices.Contains(stoppedDirs, p.DataDir) {
+					already = append(already, p)
+				}
+			}
+			restarted := upgradeRestart(dp, w, binary, already)
+			fmt.Fprintf(w, "restarted: %s\n", strings.Join(restarted, "; "))
+			return fmt.Errorf("a build step started in %s while stopping; the workers already stopped were started again; run `factoryd restart` once that step ends", dir)
 		}
+		stoppedDirs = append(stoppedDirs, dir)
 		if out.Failed {
 			// What did stop is started again before this is reported: a
 			// console that will not exit must not leave the worker,
