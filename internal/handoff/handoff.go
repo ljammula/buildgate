@@ -324,7 +324,7 @@ const adviceIntro = adviceLead + adviceBody
 // which already says it, the section starts at adviceBody.
 const adviceLead = "That attempt passed every check and was accepted. "
 
-const adviceBody = "Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks. Check each one against the code. Fix each one that is real, with a test that fails without the fix; leave the code as it is for each one that is not. Every check, and a fresh review, runs again on what this build commits.\n\n"
+const adviceBody = "Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks, and a reviewer can be wrong. Take each one in turn. First write the test its \"how it would fail\" describes (with none, the smallest test of what its summary says is wrong), where the repository keeps its tests, and run it on the code as it is, before changing anything: if it passes, the concern is not real. If it fails, read the approved specification: where the spec does not ask for the behaviour the reviewer expects, the concern is not one to act on. Fix the code only for a concern whose test fails and whose behaviour the spec asks for, keep its test, then run the repository's tests and the spec's own examples again: a fix that changes a behaviour the spec states is wrong. For each concern you leave, remove the test you wrote for it if it fails (never a file the factory mounted), leave the code as it is, and say why in one line in your notes. Every check, and a fresh review, runs again on what this build commits.\n\n"
 
 // line is the finding's one list line, the reviewer's words quoted.
 func (f AdviceFinding) line() string {

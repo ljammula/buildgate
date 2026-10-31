@@ -95,7 +95,7 @@ accepted run, pull request open
 | Rule | What the factory does |
 |---|---|
 | Open items | The head run's red held tests (from its challenge record, a re-run included) and its `high` review findings |
-| Brief | One record file: the red tests first (path, criterion, failing test names, never content), then the review findings (at most 5, by severity). Where a finding and a red test name the same file, the brief says so once; agreement does not raise a severity |
+| Brief | One record file: the red tests first (path, criterion, failing test names, never content), then the review findings (at most 5, by severity). Where a finding and a red test name the same file, the brief says so once; agreement does not raise a severity. For each finding the builder first runs the test its failure scenario describes on the unchanged code, and changes code only when that test fails and the spec asks for the behaviour; a review finding is an opinion, and a fix for a wrong one can break what the spec states |
 | Budget | `review_advice_rounds` (0 to 3, 3 by default) counts every round. A head with a red test gets at least one round even at 0, the one round a red challenge always had |
 | Push | An accepted round is pushed unless a held test green on the head is red or broken on the round. A push that failed once sent halts the request, whatever the round was given: the commit may be on the remote |
 | Commit of the tests | Every round while the tests are not yet committed runs the held files with the commit allowed; the first round whose held tests are all green commits them on the branch |
