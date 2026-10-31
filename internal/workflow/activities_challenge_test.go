@@ -122,10 +122,24 @@ func TestUndoChallengeCommitMovesTheBranchBackToTheResult(t *testing.T) {
 	if err := os.Remove(filepath.Join(f.repo, "p", "edge_test.go")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.acts.CommitChallengeActivity(context.Background(), CommitChallengeInput{RunWorkflowInput: f.input, ResultSHA: f.commit, Files: files}); err != nil {
+	out, err := f.acts.CommitChallengeActivity(context.Background(), CommitChallengeInput{RunWorkflowInput: f.input, ResultSHA: f.commit, Files: files})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.acts.UndoChallengeCommitActivity(context.Background(), UndoChallengeCommitInput{RunWorkflowInput: f.input, ResultSHA: f.commit}); err != nil {
+	// Refused: a challenge commit that is not HEAD, and a parent that is not the result.
+	for name, in := range map[string]UndoChallengeCommitInput{
+		"HEAD is not the challenge commit": {RunWorkflowInput: f.input, ResultSHA: f.commit, CommitSHA: f.commit},
+		"parent is not the result commit":  {RunWorkflowInput: f.input, ResultSHA: out.SHA, CommitSHA: out.SHA},
+		"unknown result":                   {RunWorkflowInput: f.input, ResultSHA: "nonesuch", CommitSHA: out.SHA},
+	} {
+		if err := f.acts.UndoChallengeCommitActivity(context.Background(), in); err == nil {
+			t.Errorf("%s: the undo was not refused", name)
+		}
+		if h, _ := exec.Command("git", "-C", f.repo, "rev-parse", "HEAD").Output(); strings.TrimSpace(string(h)) != out.SHA {
+			t.Fatalf("%s: a refused undo moved HEAD to %s", name, h)
+		}
+	}
+	if err := f.acts.UndoChallengeCommitActivity(context.Background(), UndoChallengeCommitInput{RunWorkflowInput: f.input, ResultSHA: f.commit, CommitSHA: out.SHA}); err != nil {
 		t.Fatal(err)
 	}
 	head, err := exec.Command("git", "-C", f.repo, "rev-parse", "HEAD").Output()
@@ -134,9 +148,6 @@ func TestUndoChallengeCommitMovesTheBranchBackToTheResult(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.repo, "p", "edge_test.go")); !os.IsNotExist(err) {
 		t.Errorf("the committed file is still in the worktree: %v", err)
-	}
-	if err := f.acts.UndoChallengeCommitActivity(context.Background(), UndoChallengeCommitInput{RunWorkflowInput: f.input, ResultSHA: "nonesuch"}); err == nil {
-		t.Error("an unknown commit was accepted")
 	}
 }
 

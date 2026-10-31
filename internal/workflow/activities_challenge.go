@@ -550,33 +550,42 @@ func (a *Activities) CommitChallengeActivity(ctx context.Context, in CommitChall
 }
 
 // UndoChallengeCommitInput is UndoChallengeCommitActivity's input: the run's
-// input and the commit the worktree goes back to (the run's result before the
-// challenge commit).
+// input, the commit the worktree goes back to (the run's result before the
+// challenge commit) and the challenge commit it leaves.
 type UndoChallengeCommitInput struct {
 	RunWorkflowInput
 	ResultSHA string `json:"result_sha"`
+	CommitSHA string `json:"commit_sha"`
 }
 
 // UndoChallengeCommitActivity hard-resets the worktree and its branch to the
 // result commit, dropping the challenge commit CommitChallengeActivity made
-// on top of it (SC-022). It refuses unless the result commit is an ancestor of
-// HEAD, and it checks HEAD is the result commit afterwards: a branch left on
-// the commit is an error the workflow halts on.
+// on top of it (SC-022). It refuses unless HEAD is that challenge commit and
+// its parent is the result commit, so it never drops other work, and it checks
+// HEAD is the result commit afterwards: a branch left on the commit is an
+// error the workflow halts on.
 func (a *Activities) UndoChallengeCommitActivity(ctx context.Context, in UndoChallengeCommitInput) error {
-	if in.ResultSHA == "" {
-		return errors.New("no result commit to go back to")
+	if in.ResultSHA == "" || in.CommitSHA == "" {
+		return errors.New("no result commit or challenge commit to undo")
 	}
-	ok, err := runner.GitIsAncestor(in.WorkspacePath, in.ResultSHA, "HEAD")
+	head, err := runner.GitRevParseHEAD(in.WorkspacePath)
 	if err != nil {
-		return fmt.Errorf("check the result commit is behind the challenge commit: %w", err)
+		return fmt.Errorf("read HEAD before the undo: %w", err)
 	}
-	if !ok {
-		return fmt.Errorf("the result commit %s is not behind HEAD", in.ResultSHA)
+	if head != in.CommitSHA {
+		return fmt.Errorf("HEAD is %s, not the challenge commit %s: not undoing", head, in.CommitSHA)
+	}
+	parent, err := runner.GitRevParseRef(in.WorkspacePath, "HEAD^")
+	if err != nil {
+		return fmt.Errorf("read the challenge commit's parent: %w", err)
+	}
+	if parent != in.ResultSHA {
+		return fmt.Errorf("the challenge commit's parent is %s, not the result commit %s: not undoing", parent, in.ResultSHA)
 	}
 	if err := runner.GitResetHard(in.WorkspacePath, in.ResultSHA); err != nil {
 		return err
 	}
-	head, err := runner.GitRevParseHEAD(in.WorkspacePath)
+	head, err = runner.GitRevParseHEAD(in.WorkspacePath)
 	if err != nil {
 		return fmt.Errorf("read HEAD after the reset: %w", err)
 	}

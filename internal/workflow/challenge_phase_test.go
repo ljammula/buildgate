@@ -72,6 +72,7 @@ type challengeFixture struct {
 	// committed; undoErr is the error the undo Activity fails with; noVerifyChange
 	// replays a history recorded before verifyChallengeCommitChange.
 	redOnCommit    bool
+	verifyErr      error // the verify Activity's error once the files are committed
 	undoErr        error
 	noVerifyChange bool
 }
@@ -98,6 +99,9 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 			mu.Lock()
 			defer mu.Unlock()
 			out.verifies++
+			if fx.verifyErr != nil && committed {
+				return VerifyActivityResult{}, fx.verifyErr
+			}
 			exit := 0
 			if fx.gateFails || fx.redOnCommit && committed {
 				exit = 1
@@ -421,6 +425,44 @@ func TestChallengeCommitThatFailsVerifyIsUndone(t *testing.T) {
 		if f == "p/edge_test.go" {
 			t.Errorf("changed files %v hold the undone file", p.result.ChangedFiles)
 		}
+	}
+}
+
+// The same through the parallel order (the review and the challenge overlap,
+// the files commit after the join): the red commit is undone, and the verify's
+// attempt is on the run.
+func TestChallengeCommitThatFailsVerifyIsUndoneInTheParallelOrder(t *testing.T) {
+	input := challengeInput()
+	p := runChallengePhaseWith(t, input, greenOneFile(), passAll, 1, nil, &challengeFixture{redOnCommit: true})
+	c := p.result.Challenge
+	if p.err != nil || c == nil || !c.WithReview || c.Verdict != run.ChallengeNoVerdict || len(p.undos) != 1 || p.result.ResultSHA == "c0ffee" {
+		t.Fatalf("err %v, challenge %+v, undos %v, sha %q; want the parallel order, no_verdict and one undo", p.err, c, p.undos, p.result.ResultSHA)
+	}
+	if !strings.Contains(c.Cause, "verify exited 1") {
+		t.Errorf("cause %q, want the exit status", c.Cause)
+	}
+}
+
+// A verify step that errors undoes the commit too, and the cause says the
+// verify did not finish, not that the files are bad. Its attempt is recorded.
+func TestChallengeCommitWhoseVerifyErrorsIsUndoneWithoutBlamingTheFiles(t *testing.T) {
+	fx := &challengeFixture{verifyErr: temporal.NewNonRetryableApplicationError("sandbox lost", "infra", nil, []run.Attempt{{Kind: "verify", LogPath: "challenge-verify.log"}})}
+	p := runChallengePhaseWith(t, challengeInput(), greenOneFile(), passAll, 1, nil, fx)
+	c := p.result.Challenge
+	if p.err != nil || c == nil || c.Verdict != run.ChallengeNoVerdict || len(p.undos) != 1 {
+		t.Fatalf("err %v, challenge %+v, undos %v; want no_verdict and one undo", p.err, c, p.undos)
+	}
+	if !strings.HasPrefix(c.Cause, "the verify of the committed held challenge files did not finish: ") || strings.Contains(c.Cause, "fail the verify command") {
+		t.Errorf("cause %q; want the did-not-finish wording", c.Cause)
+	}
+	n := 0
+	for _, a := range p.result.Attempts {
+		if a.Kind == "verify" && a.LogPath == "challenge-verify.log" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d challenge-verify attempts on the run, want 1", n)
 	}
 }
 

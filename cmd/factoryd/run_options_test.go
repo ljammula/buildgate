@@ -92,8 +92,8 @@ func TestRunThatMayChallengeGetsTheChallengePhasesTime(t *testing.T) {
 		want time.Duration
 	}{
 		{"no challenge", runOptions{TimeoutMinutes: 45}, base},
-		{"first build with -challenge", runOptions{TimeoutMinutes: 45, Challenge: true}, base + workflow.ChallengePhaseAllowance},
-		{"challenge round", runOptions{TimeoutMinutes: 45, ChallengeHeld: []run.ChallengeFile{{Path: "a_test.go"}}}, base + workflow.ChallengePhaseAllowance},
+		{"first build with -challenge", runOptions{TimeoutMinutes: 45, Challenge: true}, base + workflow.ChallengePhaseTime(45)},
+		{"challenge round", runOptions{TimeoutMinutes: 45, ChallengeHeld: []run.ChallengeFile{{Path: "a_test.go"}}}, base + workflow.ChallengePhaseTime(45)},
 		{"explicit -timeout", runOptions{TimeoutMinutes: 45, Challenge: true, OverallTimeout: 20 * time.Minute}, 20 * time.Minute},
 	} {
 		if got := tc.opts.overallTimeout(); got != tc.want {

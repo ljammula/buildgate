@@ -60,6 +60,15 @@ const challengeJobActivityLimit = challengeJobLimit + 20*time.Minute
 // challenge phase is bounded by.
 const ChallengePhaseAllowance = challengeJobActivityLimit + 2*maxChallengeFiles*reproductionActivityLimit
 
+// ChallengePhaseTime is ChallengePhaseAllowance plus one verify of the
+// committed held files (verifyChallengeCommit), which runs with the build and
+// verify options a run of timeoutMinutes gets: a run near its deadline is not
+// cut off while the branch is on a commit not yet verified.
+func ChallengePhaseTime(timeoutMinutes int) time.Duration {
+	verify := widenForTimeoutMinutes(temporalworkflow.ActivityOptions{StartToCloseTimeout: ActivityStartToCloseTimeout}, timeoutMinutes)
+	return ChallengePhaseAllowance + verify.StartToCloseTimeout
+}
+
 // challengeContext is ctx with the challenge Activities' options: the
 // build/verify options with one attempt and a start-to-close that covers the
 // job and its hold.
@@ -405,9 +414,9 @@ func commitChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerify
 		return nil
 	}
 	if temporalworkflow.GetVersion(ctx, verifyChallengeCommitChange, temporalworkflow.DefaultVersion, 1) == 1 {
-		if cause, err := verifyChallengeCommit(ctx, ids, buildVerifyCtx, input, result, worktreePath, branch); err != nil || cause != "" {
+		if cause, err := verifyChallengeCommit(ctx, ids, buildVerifyCtx, input, result, out.SHA, worktreePath, branch); err != nil || cause != "" {
 			if err == nil {
-				rec.Verdict, rec.Cause = run.ChallengeNoVerdict, "the held challenge files fail the verify command once committed: "+cause
+				rec.Verdict, rec.Cause = run.ChallengeNoVerdict, cause
 				rec.Notes = append(rec.Notes, rec.Cause)
 			}
 			return err
@@ -433,20 +442,24 @@ const verifyChallengeCommitChange = "verify-challenge-commit"
 // commit is undone and cause says why; a failed undo, or a cancelled context,
 // is the returned error, which halts the run: a branch left on a red commit is
 // not reported as fine.
-func verifyChallengeCommit(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, worktreePath, branch string) (cause string, err error) {
+func verifyChallengeCommit(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, commitSHA, worktreePath, branch string) (cause string, err error) {
 	var verify VerifyActivityResult
 	verr := temporalworkflow.ExecuteActivity(ids.withRetries(buildVerifyCtx, "challenge-verify"), RunVerifyActivityName, input).Get(ctx, &verify)
 	switch {
 	case verr != nil && ctx.Err() != nil:
 		return "", wrapActivityFailure("verify the challenge commit", verr, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	case verr != nil:
-		cause = "the verify step failed: " + cleanCause(verr.Error())
+		// A failed Activity's attempts travel in the error's details.
+		result.Attempts = append(result.Attempts, AttemptsFromError(verr)...)
+		cause = "the verify of the committed held challenge files did not finish: " + cleanCause(verr.Error())
 	case verify.Result.ExitCode != 0:
-		cause = fmt.Sprintf("verify exited %d", verify.Result.ExitCode)
+		result.Attempts = append(result.Attempts, verify.Attempts...)
+		cause = fmt.Sprintf("the held challenge files fail the verify command once committed: verify exited %d", verify.Result.ExitCode)
 	default:
+		result.Attempts = append(result.Attempts, verify.Attempts...)
 		return "", nil
 	}
-	undo := UndoChallengeCommitInput{RunWorkflowInput: input, ResultSHA: result.ResultSHA}
+	undo := UndoChallengeCommitInput{RunWorkflowInput: input, ResultSHA: result.ResultSHA, CommitSHA: commitSHA}
 	if uerr := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "challenge-undo"), UndoChallengeCommitActivityName, undo).Get(ctx, nil); uerr != nil {
 		return "", wrapActivityFailure("undo the challenge commit after a failed verify ("+cause+")", uerr, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
