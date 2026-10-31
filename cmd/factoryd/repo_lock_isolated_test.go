@@ -82,6 +82,40 @@ func TestAcquireIsolatedRunLockReturnsBusyAfterTheBound(t *testing.T) {
 	}
 }
 
+// A worker's ticket (a ctx marked by withWaitForRepoLock) queues behind an
+// exclusive holder for longer than the bound — another request's advice
+// round holds the lock for its whole build — and takes the lock once the
+// holder releases it, instead of failing with ErrBusy and halting its
+// request.
+func TestAcquireIsolatedRunLockWorkerWaitsPastTheBound(t *testing.T) {
+	ws := newFixtureRepo(t)
+	holder, err := wsisolation.AcquireDirectLock(ws)
+	if err != nil {
+		t.Fatalf("AcquireDirectLock: %v", err)
+	}
+	old := isolatedRunLockWait
+	isolatedRunLockWait = 50 * time.Millisecond
+	defer func() { isolatedRunLockWait = old }()
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(4 * isolatedRunLockWait)
+		// Signal before releasing: the waiter can only take the lock after
+		// Close, so it always sees the signal.
+		close(released)
+		holder.Close()
+	}()
+	lock, err := acquireIsolatedRunLock(withWaitForRepoLock(context.Background()), ws, func(*wsisolation.DirectLock) {}, repoLockReport{})
+	if err != nil {
+		t.Fatalf("acquireIsolatedRunLock for a worker's ticket: %v, want the lock after the holder releases it", err)
+	}
+	defer lock.Close()
+	select {
+	case <-released:
+	default:
+		t.Fatal("took the lock while the exclusive holder still held it")
+	}
+}
+
 func TestAcquireIsolatedRunLockSharedWaitHonoursContextCancel(t *testing.T) {
 	ws := newFixtureRepo(t)
 	holder, err := wsisolation.AcquireDirectLock(ws)

@@ -68,6 +68,11 @@ func checkEarlierPR(dp Deps, ctx context.Context, dataDir string, r *request.Req
 	if err != nil {
 		return stackHold{wait: fmt.Sprintf("ticket %d/%d waits: ticket %d's pull request %s could not be read (%v). If gh is not logged in or cannot reach GitHub, fix that (`gh auth status`); the worker reads it again every PR poll", idx, r.TicketCount, earlier.Index, earlier.PRURL, err)}, nil
 	}
+	// The base GitHub reports, as the PR poll records it: a later ticket
+	// retargets onto it once this one merges, and a person may have moved it.
+	if state.BaseRefName != "" {
+		earlier.PRBase = state.BaseRefName
+	}
 	switch {
 	case state.MergedAt != nil || state.State == forge.PRStateMerged:
 		recordTicketMerged(earlier)
@@ -79,7 +84,40 @@ func checkEarlierPR(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		return stackHold{wait: fmt.Sprintf("ticket %d/%d waits: ticket %d's pull request %s reported state %q; the worker reads it again every PR poll", idx, r.TicketCount, earlier.Index, earlier.PRURL, state.State)}, nil
 	}
 	noteReopenedPR(earlier, state)
+	if err := retargetWhileBuilding(dp, ctx, dataDir, r, earlier, state); err != nil {
+		return stackHold{}, err
+	}
 	return checkEarlierTicketBranch(dp, ctx, dataDir, r, idx, earlier)
+}
+
+// retargetWhileBuilding moves earlier's open pull request off the branch of
+// a ticket that has merged, while the request is still building. The PR
+// poll that otherwise retargets (pollTicketPR) runs only in pr_review, which
+// a request of several tickets reaches after its last one is built, so
+// without this a stacked pull request keeps a merged branch as its base for
+// the rest of the build, and a person merging it merges into that branch,
+// not the real base. Only a pull request that needs no restack is moved
+// here (its commits still sit on the merged ticket's, as after a merge
+// commit); one that needs a restack, or whose need cannot be told, is left
+// to the PR poll, which restacks before it retargets.
+func retargetWhileBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Request, earlier *request.Ticket, state forge.ReviewState) error {
+	merged := mergedTicketOnBranch(r, earlier, state.BaseRefName)
+	if merged == nil || earlier.Restack != nil {
+		return nil
+	}
+	need, err := checkRestackNeed(dp, ctx, dataDir, r, earlier)
+	if err != nil {
+		log.Printf("request %s: ticket %d: pull request %s is stacked on merged ticket %d, but whether it needs a restack cannot be told (%v); the PR poll decides and retargets it", r.ID, earlier.Index, earlier.PRURL, merged.Index, err)
+		return nil
+	}
+	if need.needed {
+		log.Printf("request %s: ticket %d: pull request %s is stacked on merged ticket %d and needs a restack first; the PR poll restacks and retargets it", r.ID, earlier.Index, earlier.PRURL, merged.Index)
+		return nil
+	}
+	if !retargetOffMergedTicket(dp, ctx, dataDir, r, earlier, merged, state) {
+		return nil
+	}
+	return r.Save(dataDir)
 }
 
 // checkEarlierTicketBranch checks prev's open pull-request branch on origin.
