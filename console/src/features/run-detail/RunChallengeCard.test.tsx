@@ -61,6 +61,27 @@ test("a red challenge lists the failing tests and shows no commit", () => {
   expect(screen.getByText("TestTwo: want 2, got 3")).toBeInTheDocument();
 });
 
+test("a file that ran in a group says its verdict is the group's", () => {
+  renderApp(
+    <RunChallengeCard
+      run={runWith({
+        verdict: "red",
+        files: [
+          {
+            path: "web/a.test.js",
+            criterion: "AC-1",
+            verdict: "red",
+            group: true,
+            failures: [{ test: "verify command", assertion: "exit status 1" }],
+          },
+        ],
+      })}
+    />,
+  );
+  const file = screen.getByTestId("run-challenge-file");
+  expect(within(file).getByText(/not a verdict on this file alone/)).toBeInTheDocument();
+});
+
 test("a challenge with no verdict names its cause", () => {
   renderApp(
     <RunChallengeCard run={runWith({ verdict: "no_verdict", cause: "the job was lost" })} />,

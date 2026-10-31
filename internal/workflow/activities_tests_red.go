@@ -67,9 +67,9 @@ func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRe
 	if err != nil {
 		return TestsRedHoldResult{}, temporal.NewApplicationErrorWithCause("list the result commit's paths", InfrastructureFailureType, err)
 	}
-	root, err := rootFactsAt(ctx, input.WorkspacePath, input.Commit, tracked)
+	facts, err := markerFactsAt(ctx, input.WorkspacePath, input.Commit, tracked, input.Files)
 	if err != nil {
-		return TestsRedHoldResult{}, temporal.NewApplicationErrorWithCause("read the result commit's root files", InfrastructureFailureType, err)
+		return TestsRedHoldResult{}, temporal.NewApplicationErrorWithCause("read the result commit's runner marker files", InfrastructureFailureType, err)
 	}
 	dir := run.TestsRedOnBaseDir(a.logDirFor(input.RunWorkflowInput))
 	var res TestsRedHoldResult
@@ -81,7 +81,7 @@ func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRe
 			skip(p, fmt.Sprintf("only %d changed test files are run and this one came after them", reproduction.MaxReproductions))
 			continue
 		}
-		changed, reason := changedTestAt(ctx, input, p, root)
+		changed, reason := changedTestAt(ctx, input, p, facts)
 		if reason != "" {
 			skip(p, reason)
 			continue
@@ -106,8 +106,8 @@ func (a *Activities) HoldChangedTestsActivity(ctx context.Context, input TestsRe
 // changedTestAt reads one changed test file at the result and the base commit
 // and the lines the change touched in it. A non-empty reason says why it could
 // not be read.
-func changedTestAt(ctx context.Context, input TestsRedHoldInput, p string, root reproduction.RootFacts) (reproduction.ChangedTest, string) {
-	c := reproduction.ChangedTest{Path: p, Root: root}
+func changedTestAt(ctx context.Context, input TestsRedHoldInput, p string, facts reproduction.Facts) (reproduction.ChangedTest, string) {
+	c := reproduction.ChangedTest{Path: p, Facts: facts}
 	result, err := readCommitFile(ctx, input.WorkspacePath, input.Commit, p)
 	if err != nil {
 		return c, "it could not be read at the result commit: " + err.Error()

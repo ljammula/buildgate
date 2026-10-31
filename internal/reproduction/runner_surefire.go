@@ -36,11 +36,11 @@ func (surefireXML) ID() string { return "surefire-xml" }
 const surefireSourceRoot = "src/test/java/"
 
 // Applies: Surefire's default includes under a module's src/test/java, in a
-// repository with a root pom.xml.
-func (surefireXML) Applies(p string, root RootFacts) bool {
+// project directory with a pom.xml.
+func (surefireXML) Applies(p string, m Markers) bool {
 	return strings.Contains("/"+p, "/"+surefireSourceRoot) &&
 		baseMatches(p, "Test*.java", "*Test.java", "*Tests.java", "*TestCase.java") &&
-		root.Has("pom.xml")
+		m.Has("pom.xml")
 }
 
 var (
@@ -135,18 +135,19 @@ func surefireSelector(class string, ids []string) string {
 // this launch wrote: a commit that tracks a report there (a stale pass)
 // leaves none, and the launch reads as missing.
 func (surefireXML) Command(inv Invocation) Command {
-	i := strings.Index("/"+inv.Path, "/"+surefireSourceRoot)
-	module := inv.Path[:i]
-	fqcn := strings.ReplaceAll(strings.TrimSuffix(inv.Path[i+len(surefireSourceRoot):], ".java"), "/", ".")
+	rel := inv.rel()
+	i := strings.Index("/"+rel, "/"+surefireSourceRoot)
+	module := rel[:i]
+	fqcn := strings.ReplaceAll(strings.TrimSuffix(rel[i+len(surefireSourceRoot):], ".java"), "/", ".")
 	class := path.Base(strings.ReplaceAll(fqcn, ".", "/"))
 	reports := module + "target/surefire-reports"
 	report := reports + "/TEST-" + fqcn + ".xml"
 	pom := shellQuote(module + "pom.xml")
-	script := fmt.Sprintf(`rm -rf -- %s || exit 125; log=$(mktemp) || exit 125; mvn -B -q -f %s test-compile >"$log" 2>&1; rc=$?; cat "$log"; `+
+	script := inv.inDir(fmt.Sprintf(`rm -rf -- %s || exit 125; log=$(mktemp) || exit 125; mvn -B -q -f %s test-compile >"$log" 2>&1; rc=$?; cat "$log"; `+
 		`if [ "$rc" -ne 0 ]; then grep -qF -- %s "$log" && exit %d; exit %d; fi; `+
 		"mvn -B -q -f %s -Dtest=%s -Dsurefire.failIfNoSpecifiedTests=false -Djunit.jupiter.execution.timeout.default=%ds -Djunit.jupiter.execution.timeout.thread.mode.default=SEPARATE_THREAD test; rc=$?; cp %s %s 2>/dev/null; exit $rc",
-		shellQuote(reports), pom, shellQuote("/"+inv.Path), surefireCompileExit, surefireBuildExit,
-		pom, shellQuote(surefireSelector(class, inv.TestIDs)), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath))
+		shellQuote(reports), pom, shellQuote("/"+rel), surefireCompileExit, surefireBuildExit,
+		pom, shellQuote(surefireSelector(class, inv.TestIDs)), int(PerTestTimeout.Seconds()), shellQuote(report), shellQuote(inv.ReportPath)))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 

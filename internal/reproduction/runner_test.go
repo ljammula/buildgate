@@ -280,38 +280,109 @@ func TestMinitestIDsNameTheirClass(t *testing.T) {
 }
 
 func TestForChoosesExactlyOneRunnerByPathAndRoot(t *testing.T) {
-	vitestPkg := RootFacts{"package.json": []byte(`{"devDependencies":{"vitest":"^3.2.4"}}`)}
-	jestPkg := RootFacts{"package.json": []byte(`{"devDependencies":{"jest":"^29"}}`)}
+	vitestPkg := Markers{"package.json": []byte(`{"devDependencies":{"vitest":"^3.2.4"}}`)}
+	jestPkg := Markers{"package.json": []byte(`{"devDependencies":{"jest":"^29"}}`)}
 	cases := []struct {
 		path string
-		root RootFacts
+		root Markers
 		want string
 	}{
-		{"internal/x/x_test.go", RootFacts{"go.mod": nil}, "go-test-json"},
-		{"internal/x/x_test.go", RootFacts{}, ""},
-		{"tests/test_x.py", RootFacts{"pyproject.toml": nil}, "pytest-junitxml"},
-		{"pkg/x_test.py", RootFacts{"requirements.txt": nil}, "pytest-junitxml"},
-		{"tests/x.py", RootFacts{"pyproject.toml": nil}, ""},
+		{"internal/x/x_test.go", Markers{"go.mod": nil}, "go-test-json"},
+		{"internal/x/x_test.go", Markers{}, ""},
+		{"tests/test_x.py", Markers{"pyproject.toml": nil}, "pytest-junitxml"},
+		{"pkg/x_test.py", Markers{"requirements.txt": nil}, "pytest-junitxml"},
+		{"tests/x.py", Markers{"pyproject.toml": nil}, ""},
 		{"src/a.test.ts", vitestPkg, "vitest-json"},
-		{"src/a.spec.tsx", RootFacts{"vitest.config.ts": nil}, "vitest-json"},
+		{"src/a.spec.tsx", Markers{"vitest.config.ts": nil}, "vitest-json"},
 		{"src/a.test.ts", jestPkg, ""},
 		{"src/__tests__/a.ts", vitestPkg, ""},
-		{"core/src/test/java/com/x/FooTest.java", RootFacts{"pom.xml": nil}, "surefire-xml"},
-		{"src/main/java/com/x/FooTest.java", RootFacts{"pom.xml": nil}, ""},
-		{"src/test/java/com/x/FooTest.java", RootFacts{"build.gradle": nil}, ""},
-		{"test/models/cart_test.rb", RootFacts{"Gemfile": nil}, "minitest-json"},
-		{"spec/cart_spec.rb", RootFacts{"Gemfile": nil}, ""},
-		{"src/lib_test.rs", RootFacts{"Cargo.toml": nil}, ""},
+		{"core/src/test/java/com/x/FooTest.java", Markers{"pom.xml": nil}, "surefire-xml"},
+		{"src/main/java/com/x/FooTest.java", Markers{"pom.xml": nil}, ""},
+		{"src/test/java/com/x/FooTest.java", Markers{"build.gradle": nil}, ""},
+		{"test/models/cart_test.rb", Markers{"Gemfile": nil}, "minitest-json"},
+		{"spec/cart_spec.rb", Markers{"Gemfile": nil}, ""},
+		{"src/lib_test.rs", Markers{"Cargo.toml": nil}, ""},
 	}
 	for _, c := range cases {
-		r, ok := For(c.path, c.root)
+		r, dir, ok := For(c.path, Facts{".": c.root})
 		got := ""
 		if ok {
 			got = r.ID()
 		}
-		if got != c.want {
-			t.Errorf("For(%q) = %q, want %q", c.path, got, c.want)
+		if got != c.want || ok && dir != "." {
+			t.Errorf("For(%q) = %q in %q, want %q in the root", c.path, got, dir, c.want)
 		}
+	}
+}
+
+// TestForChoosesTheNearestProjectDirectory checks a test file belongs to the
+// nearest enclosing directory whose markers some runner accepts for it, the
+// root included, and that the runner's command runs there.
+func TestForChoosesTheNearestProjectDirectory(t *testing.T) {
+	goMod := Markers{"go.mod": []byte("module x\n")}
+	vitestPkg := Markers{"package.json": []byte(`{"devDependencies":{"vitest":"^3.2.4"}}`)}
+	jestPkg := Markers{"package.json": []byte(`{"devDependencies":{"jest":"^29"}}`)}
+	cases := []struct {
+		name, path string
+		facts      Facts
+		runner     string
+		dir        string
+	}{
+		{"a Go module in a subdirectory", "backend/internal/store/x_test.go",
+			Facts{".": {}, "backend": goMod, "frontend": vitestPkg}, "go-test-json", "backend"},
+		{"a vitest package in a subdirectory", "frontend/src/a.test.ts",
+			Facts{"backend": goMod, "frontend": vitestPkg}, "vitest-json", "frontend"},
+		{"a module at the root", "internal/store/x_test.go", Facts{".": goMod}, "go-test-json", "."},
+		{"a module at the root and a test at the root", "x_test.go", Facts{".": goMod}, "go-test-json", "."},
+		{"a nested module inside another", "tools/gen/sub/x_test.go",
+			Facts{".": goMod, "tools/gen": goMod}, "go-test-json", "tools/gen"},
+		{"a nearer directory no runner accepts is passed over", "web/src/a.test.ts",
+			Facts{".": vitestPkg, "web": jestPkg}, "vitest-json", "."},
+		{"no directory a runner accepts", "frontend/src/a.test.ts", Facts{"frontend": jestPkg}, "", ""},
+		{"markers in a sibling directory only", "backend/x_test.go", Facts{"frontend": goMod}, "", ""},
+		{"the nearest directory wins over the root", "pkg/x_test.py",
+			Facts{"pkg": {"pyproject.toml": nil}, ".": goMod}, "pytest-junitxml", "pkg"},
+	}
+	for _, c := range cases {
+		r, dir, ok := For(c.path, c.facts)
+		got := ""
+		if ok {
+			got = r.ID()
+		}
+		if got != c.runner || dir != c.dir {
+			t.Errorf("%s: For(%q) = %q in %q, want %q in %q", c.name, c.path, got, dir, c.runner, c.dir)
+		}
+	}
+}
+
+func TestAncestorsAreNearestFirstEndingAtTheRoot(t *testing.T) {
+	if got := strings.Join(Ancestors("a/b/c_test.go"), ","); got != "a/b,a,." {
+		t.Errorf("Ancestors = %q", got)
+	}
+	if got := strings.Join(Ancestors("c_test.go"), ","); got != "." {
+		t.Errorf("Ancestors = %q", got)
+	}
+}
+
+// TestNestedCommandsRunInTheProjectDirectory pins the whole script of a Go
+// and a vitest launch in a subdirectory: a cd that ends the launch when it
+// fails, then the path or package relative to the directory.
+func TestNestedCommandsRunInTheProjectDirectory(t *testing.T) {
+	goCmd := goTest{}.Command(Invocation{Path: "backend/internal/store/x_test.go", Dir: "backend", TestIDs: []string{"TestA"}, ReportPath: "/workspace/.buildgate-reproduction-report"})
+	if want := "cd 'backend' || exit 125; go test -json -count=1 -run '^(TestA)$' -timeout 90s './internal/store' > '/workspace/.buildgate-reproduction-report'"; goCmd.Script != want {
+		t.Errorf("go script\n got %q\nwant %q", goCmd.Script, want)
+	}
+	vi := vitestJSON{}.Command(Invocation{Path: "frontend/src/a.test.ts", Dir: "frontend", TestIDs: []string{"adds"}, ReportPath: "/workspace/.buildgate-reproduction-report"})
+	if want := "cd 'frontend' || exit 125; npx --no-install vitest run 'src/a.test.ts' --reporter=json --outputFile='/workspace/.buildgate-reproduction-report' --testTimeout=60000 -t '(?:^|\\s)(?:adds)$'"; vi.Script != want {
+		t.Errorf("vitest script\n got %q\nwant %q", vi.Script, want)
+	}
+	rootCmd := goTest{}.Command(Invocation{Path: "x_test.go", Dir: ".", TestIDs: []string{"TestA"}, ReportPath: "/r"})
+	if got := rootCmd.Script; strings.Contains(got, "cd ") {
+		t.Errorf("a root launch changes directory: %q", got)
+	}
+	py := pytestJUnit{}.Command(Invocation{Path: "svc/tests/test_x.py", Dir: "svc", TestIDs: []string{"test_a"}, ReportPath: "/r", HelperDir: "/h"}).Script
+	if !strings.HasPrefix(py, "cd 'svc' || exit 125; ") || !strings.Contains(py, "'tests/test_x.py::test_a'") {
+		t.Errorf("pytest script %q", py)
 	}
 }
 

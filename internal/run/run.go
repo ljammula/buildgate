@@ -849,15 +849,19 @@ func ReviewReproductionDir(runDir string) string {
 // literal of the cited line that no tracked file of the base commit holds
 // (reproduction.NewLiteral). Never the content.
 type HeldReproduction struct {
-	Finding      int      `json:"finding"`
-	Path         string   `json:"path"`
-	Refused      string   `json:"refused,omitempty"`
-	SHA256       string   `json:"sha256,omitempty"`
-	HostPath     string   `json:"host_path,omitempty"`
-	SpecLine     int      `json:"spec_line,omitempty"`
-	TestIDs      []string `json:"test_ids,omitempty"`
-	Runner       string   `json:"runner,omitempty"`
-	HoldsLiteral bool     `json:"holds_literal,omitempty"`
+	Finding  int      `json:"finding"`
+	Path     string   `json:"path"`
+	Refused  string   `json:"refused,omitempty"`
+	SHA256   string   `json:"sha256,omitempty"`
+	HostPath string   `json:"host_path,omitempty"`
+	SpecLine int      `json:"spec_line,omitempty"`
+	TestIDs  []string `json:"test_ids,omitempty"`
+	Runner   string   `json:"runner,omitempty"`
+	// Dir is the project directory the runner runs in, repository-relative
+	// ("" or "." the root): the nearest directory enclosing Path whose
+	// marker files select Runner (reproduction.For).
+	Dir          string `json:"dir,omitempty"`
+	HoldsLiteral bool   `json:"holds_literal,omitempty"`
 }
 
 // FindingReproduction is what the factory decided about one finding's
@@ -2317,9 +2321,11 @@ type ChallengeFile struct {
 	SHA256   string `json:"sha256,omitempty"`
 	HostPath string `json:"host_path,omitempty"`
 	// Criterion is the header's label, "AC-<n>" or "answer-<n>".
-	Criterion string   `json:"criterion,omitempty"`
-	Runner    string   `json:"runner,omitempty"`
-	TestIDs   []string `json:"test_ids,omitempty"`
+	Criterion string `json:"criterion,omitempty"`
+	Runner    string `json:"runner,omitempty"`
+	// Dir is the project directory Runner runs in, as on HeldReproduction.
+	Dir     string   `json:"dir,omitempty"`
+	TestIDs []string `json:"test_ids,omitempty"`
 	// Refused is the shape rule that kept the file out (not held); NotRun is
 	// why a held file was not run (no valid header).
 	Refused string `json:"refused,omitempty"`
@@ -2328,6 +2334,11 @@ type ChallengeFile struct {
 	// no report) or "advice" (red once, then green); "" for a file not run.
 	Verdict  string             `json:"verdict,omitempty"`
 	Failures []ChallengeFailure `json:"failures,omitempty"`
+	// Group marks a file no runner covers, which ran together with the
+	// record's other Group files under the repository's verify command:
+	// Verdict and Failures are that one run's, never a verdict on this file
+	// alone.
+	Group bool `json:"group,omitempty"`
 }
 
 // ChallengeFailure is one failing test of a red challenge file: its name and

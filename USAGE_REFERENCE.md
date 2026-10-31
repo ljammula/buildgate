@@ -1223,7 +1223,13 @@ sandbox on a scratch worktree of the commit (the run's image, setup
 commands, `.factory/`, registry proxy and compose services, no model route),
 mounted read-only, under a reproduction runner's own command and per-test
 timeout (Go, pytest, vitest, Maven Surefire, Minitest), and reads the runner's
-structured report on the host. A copy that cannot be held, no longer matches
+structured report on the host. A test file belongs to its nearest enclosing
+project directory, the repository root included, whose marker files a runner
+accepts for it (`go.mod`; a `package.json` declaring vitest or a vitest config;
+a pytest config or `requirements.txt`; `pom.xml`; `Gemfile`), and the runner's
+command runs in that directory: a repository with `backend/go.mod` and
+`frontend/package.json` and nothing at its root runs each side's tests there.
+A copy that cannot be held, no longer matches
 its hash before a launch, or whose mount is refused halts the run with the
 unresolved cause `reproduction_unheld`.
 
@@ -1247,7 +1253,7 @@ and a carved ticket's replay run never challenge.
 | Step | What the factory does |
 |---|---|
 | Hold | The job writes at most 5 new test files in the repository's own framework, each with a header line `buildgate-challenge: AC-<n>` or `buildgate-challenge: answer-<n>` in its first 5 lines. The host takes the new files from git, keeps those that are a new clean relative path matching `test_patterns`, not tracked (case-folded), not an instruction, `.factory/` or protected path, of at most 64 KiB, copies each once to `<run dir>/challenge/` (mode 0444) and pins its SHA-256. A refused file is a note naming the rule; a file with no valid header is held, not run, and a note |
-| Run | Each held file runs in a gate sandbox on a scratch worktree of the result commit (the run's image, setup commands, `.factory/`, registry proxy, no model route), mounted read-only after its hash is checked. A file a reproduction runner covers (Go, Vitest, pytest, Maven Surefire, Minitest) runs under that runner's command: every ID passed is green, a failed ID red, a compile or collection error or a missing report a broken challenge (a note, no round). Other files run together under the repository's `verify_command`, whose exit status is the verdict, with a note that collection is not proven. A red result is run once more as a separate launch and is red only if both are; red then green is advice |
+| Run | Each held file runs in a gate sandbox on a scratch worktree of the result commit (the run's image, setup commands, `.factory/`, registry proxy, no model route), mounted read-only after its hash is checked. A file a reproduction runner covers (Go, Vitest, pytest, Maven Surefire, Minitest; in the file's nearest project directory, as for `tests_red_on_base`) runs under that runner's command: every ID passed is green, a failed ID red, a compile or collection error or a missing report a broken challenge (a note, no round). Other files run together under the repository's `verify_command`, whose exit status is the group's verdict, with a note that collection is not proven; a red group is listed as one run that failed, never as files that each failed. A red result is run once more as a separate launch and is red only if both are; red then green is advice |
 | Green | With the review's verdict given, the factory commits the green files as a child of the result commit, re-reading each from the commit against its pinned hash; that commit is the run's result. `diff_scope` sets the files aside by their pinned hash, never by path |
 | Red | The run is judged and released as usual; the record carries each red file (path, criterion, failing tests, at most 20 lines each). Once the pull request is open, the red files are open items of the advice rounds ("Advice rounds" above), listed before the review's findings in the same record; a file still red after the last round is advice in the pull request (path, criterion and the build's one-line reason). With no pull request open, or for a mixed run `pr_order` carves, no round runs: the red and broken files are in the run record, and a carved run's are listed on the first carved ticket's pull request with a note that no round ran |
 | Review gave no verdict | Nothing is committed; the run waits in `resume_review` with the challenge on its record, and the build after the resume challenges the ticket afresh |

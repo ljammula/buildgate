@@ -229,3 +229,39 @@ func TestHoldChangedTestsNamesTheFilesPastTheCap(t *testing.T) {
 		t.Errorf("hold = %+v, %v; want the file past the cap named with its reason", res, err)
 	}
 }
+
+// A repository with no marker at its root and a project in each of two
+// subdirectories: each changed test file is held for the runner of its
+// nearest project directory, which the hold records so the launch runs there.
+func TestHoldChangedTestsChoosesEachFilesNearestProjectDirectory(t *testing.T) {
+	f := newReproFixture(t)
+	if err := os.Remove(filepath.Join(f.repo, "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(f.repo, "backend", "go.mod"), "module example.com/b\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(f.repo, "frontend", "package.json"), `{"devDependencies":{"vitest":"^3.2.4"}}`)
+	f.commit = trustedCommit(t, f.repo)
+	f.input.BaseSHA = f.commit
+	writeFile(t, filepath.Join(f.repo, "backend", "internal", "store", "store_test.go"), redNewTest)
+	writeFile(t, filepath.Join(f.repo, "frontend", "src", "a.test.ts"), "import { it } from 'vitest'\n\nit('adds', () => {})\n")
+	writeFile(t, filepath.Join(f.repo, "docs", "x_test.go"), redNewTest)
+	result := trustedCommit(t, f.repo)
+	res, err := f.holdChanged(result, "backend/internal/store/store_test.go", "frontend/src/a.test.ts", "docs/x_test.go")
+	if err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	got := map[string]string{}
+	for _, h := range res.Held {
+		got[h.Path] = h.Runner + " in " + h.Dir
+	}
+	want := map[string]string{
+		"backend/internal/store/store_test.go": "go-test-json in backend",
+		"frontend/src/a.test.ts":               "vitest-json in frontend",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("held = %v, want %v", got, want)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Path != "docs/x_test.go" {
+		t.Errorf("skipped = %+v, want docs/x_test.go with no runner", res.Skipped)
+	}
+}

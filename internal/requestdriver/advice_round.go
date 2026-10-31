@@ -429,7 +429,7 @@ func challengeComment(reds []run.ChallengeFile, current, roundRun *run.Run) stri
 		if verdict[f.Path] == run.ChallengeGreen {
 			fixed.WriteString(line)
 		} else {
-			still.WriteString(line)
+			still.WriteString(line + groupNote(f))
 		}
 	}
 	var b strings.Builder
@@ -462,9 +462,19 @@ func challengeDeclinedComment(dataDir string, reds []run.ChallengeFile, roundRun
 	var b strings.Builder
 	b.WriteString("A challenge test the factory ran against this change still fails; a round did not make it pass, so the tests are not committed. For each one a person decides whether the code or the test is wrong:\n")
 	for _, f := range reds {
-		fmt.Fprintf(&b, "\n- `%s` (%s): %s", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion), reason)
+		fmt.Fprintf(&b, "\n- `%s` (%s)%s: %s", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion), groupNote(f), reason)
 	}
 	return b.String()
+}
+
+// groupNote is, for a held file that ran together with others under the
+// verify command (run.ChallengeFile.Group), the clause saying its red is the
+// group's; "" for a file a runner judged.
+func groupNote(f run.ChallengeFile) string {
+	if !f.Group {
+		return ""
+	}
+	return " " + handoff.GroupFailedNote
 }
 
 // commentDeclined posts the declined comment on the ticket's pull request

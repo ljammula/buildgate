@@ -87,7 +87,7 @@ func holdOne(dir string, finding int, acc reproduction.Accepted, content []byte,
 	sum := sha256.Sum256(content)
 	held := run.HeldReproduction{
 		Finding: finding, Path: acc.Path, SHA256: hex.EncodeToString(sum[:]),
-		SpecLine: acc.SpecLine, TestIDs: acc.TestIDs, Runner: acc.Runner,
+		SpecLine: acc.SpecLine, TestIDs: acc.TestIDs, Runner: acc.Runner, Dir: acc.Dir,
 		HoldsLiteral: holdsLiteral,
 	}
 	target, err := filepath.Abs(filepath.Join(dir, strconv.Itoa(finding), filepath.FromSlash(acc.Path)))
@@ -119,26 +119,47 @@ func holdOne(dir string, finding int, acc reproduction.Accepted, content []byte,
 	return held, nil
 }
 
-// rootFactsAt reads the root files of commit that select a reproduction
-// runner (reproduction.MarkerFiles) from the repository at dir, given the
-// commit's tracked paths, by a host git that runs nothing of the repository's.
-func rootFactsAt(ctx context.Context, dir, commit string, tracked []string) (reproduction.RootFacts, error) {
+// markerFactsAt reads the files of commit that select a reproduction runner
+// for each of paths: each of reproduction.MarkerFiles in each directory
+// enclosing a path (reproduction.Ancestors, the root included) that the
+// commit tracks, from the repository at dir, by a host git that runs nothing
+// of the repository's.
+func markerFactsAt(ctx context.Context, dir, commit string, tracked, paths []string) (reproduction.Facts, error) {
 	present := map[string]bool{}
 	for _, p := range tracked {
 		present[p] = true
 	}
-	root := reproduction.RootFacts{}
+	facts := reproduction.Facts{}
+	for _, p := range paths {
+		for _, d := range reproduction.Ancestors(p) {
+			if _, seen := facts[d]; seen {
+				break // and every directory above it
+			}
+			m, err := markersAt(ctx, dir, commit, d, present)
+			if err != nil {
+				return nil, err
+			}
+			facts[d] = m
+		}
+	}
+	return facts, nil
+}
+
+// markersAt reads the marker files commit tracks in the directory d.
+func markersAt(ctx context.Context, dir, commit, d string, present map[string]bool) (reproduction.Markers, error) {
+	m := reproduction.Markers{}
 	for _, name := range reproduction.MarkerFiles() {
-		if !present[name] {
+		p := path.Join(d, name)
+		if !present[p] {
 			continue
 		}
-		content, err := readCommitFile(ctx, dir, commit, name)
+		content, err := readCommitFile(ctx, dir, commit, p)
 		if err != nil {
-			return nil, fmt.Errorf("read %s at the judged commit: %w", name, err)
+			return nil, fmt.Errorf("read %s at the judged commit: %w", p, err)
 		}
-		root[name] = []byte(content)
+		m[name] = []byte(content)
 	}
-	return root, nil
+	return m, nil
 }
 
 // treePaths lists every path tracked in commit of the repository at dir.
@@ -449,7 +470,7 @@ func stageReproductionLaunch(input ReproductionRunInput, r reproduction.Runner, 
 	}
 	l.masks = []sandbox.WorkspaceMask{{Source: l.staged, Target: input.Held.Path}}
 	l.checks = []stagedCheck{{l.staged, input.Held.SHA256}}
-	l.cmd = r.Command(reproduction.Invocation{Path: input.Held.Path, TestIDs: input.Held.TestIDs, ReportPath: "/workspace/" + reproductionReportName, HelperDir: reproductionHelperDir})
+	l.cmd = r.Command(reproduction.Invocation{Path: input.Held.Path, Dir: input.Held.Dir, TestIDs: input.Held.TestIDs, ReportPath: "/workspace/" + reproductionReportName, HelperDir: reproductionHelperDir})
 	if err := os.MkdirAll(l.helpers, 0o755); err != nil {
 		return l, fmt.Errorf("create the helper directory: %w", err)
 	}
@@ -631,7 +652,7 @@ func classifyReproduction(l reproductionLaunch, input ReproductionRunInput, resu
 		sum := sha256.Sum256(report)
 		res.Run.ReportSHA256 = hex.EncodeToString(sum[:])
 	}
-	kinds, outcome := l.runner.Classify(input.Held.Path, report, result.ExitCode, input.Held.TestIDs)
+	kinds, outcome := l.runner.Classify(reproduction.Rel(input.Held.Dir, input.Held.Path), report, result.ExitCode, input.Held.TestIDs)
 	res.Run.Outcome, res.Run.ExitCode, res.Run.LogPath = string(outcome), result.ExitCode, result.LogPath
 	res.Run.Tests = make(map[string]string, len(kinds))
 	for id, k := range kinds {

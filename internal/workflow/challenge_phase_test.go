@@ -281,6 +281,31 @@ func TestChallengeFilesWithoutARunnerRunTogetherUnderTheVerifyCommand(t *testing
 	}
 }
 
+// A red group is the group's verdict: each of its files is red, so the run's
+// challenge is red, and each is marked as having run in the group, never as
+// failing on its own; a file a runner judged keeps its own verdict.
+func TestARedGroupIsMarkedAsTheGroupsVerdict(t *testing.T) {
+	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("a_test.rb", "AC-1", ""), challengeFile("b_test.rb", "AC-2", ""), challengeFile("p/edge_test.go", "AC-3", "go-test-json")}}
+	launch := func(in ReproductionRunInput) ReproductionRunResult {
+		if len(in.Group) > 0 {
+			return failAll(in)
+		}
+		return passAll(in)
+	}
+	p := runChallengePhase(t, challengeInput(), job, launch, 1)
+	c := p.result.Challenge
+	if p.err != nil || c == nil || c.Verdict != run.ChallengeRed {
+		t.Fatalf("err %v, challenge %+v; want red", p.err, c)
+	}
+	for _, f := range c.Files {
+		wantGroup := f.Runner == ""
+		wantVerdict := map[bool]string{true: run.ChallengeRed, false: run.ChallengeGreen}[wantGroup]
+		if f.Group != wantGroup || f.Verdict != wantVerdict {
+			t.Errorf("%s: group %v verdict %q; want group %v verdict %q", f.Path, f.Group, f.Verdict, wantGroup, wantVerdict)
+		}
+	}
+}
+
 // A later build runs the held files again and starts no job; it commits only
 // in a challenge round.
 func TestLaterBuildRunsHeldFilesAgainWithoutAJob(t *testing.T) {

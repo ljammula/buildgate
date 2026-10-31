@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"buildgate/internal/handoff"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
 )
@@ -45,6 +46,16 @@ func TestLoadChallengeHeldChecksEveryEntry(t *testing.T) {
 			t.Errorf("%s: the manifest was accepted", name)
 		}
 	}
+	for dir, ok := range map[string]bool{"": true, ".": true, "web": true, "we": false, "../web": false, "other": false} {
+		manifest := filepath.Join(t.TempDir(), "held.json")
+		body := fmt.Sprintf(`[{"path":"web/a.test.ts","dir":%q,"sha256":%q,"host_path":%q}]`, dir, sha, good)
+		if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadChallengeHeld(dataDir, manifest); (err == nil) != ok {
+			t.Errorf("project directory %q: err %v, want accepted %v", dir, err, ok)
+		}
+	}
 }
 
 func TestRenderChallengeMarkdownNamesFilesAndNotesNeverContent(t *testing.T) {
@@ -71,6 +82,34 @@ func TestRenderChallengeMarkdownNamesFilesAndNotesNeverContent(t *testing.T) {
 	}
 	if renderChallengeMarkdown(nil) != "" {
 		t.Error("a run with no challenge renders a section")
+	}
+}
+
+// Files that ran together under the verify command, whose run failed, are
+// named under the group's own sentence, never under "Held tests that fail" as
+// files that each failed; a file a runner judged red stays under it.
+func TestRenderChallengeMarkdownNamesARedGroupAsOneRun(t *testing.T) {
+	groupFailure := []run.ChallengeFailure{{Test: "verify command", Assertion: "exit status 1"}}
+	files := []run.ChallengeFile{{Path: "p/own_test.go", Criterion: "AC-1", Verdict: run.ChallengeRed, Runner: "go-test-json"}}
+	for _, p := range []string{"web/a.test.js", "web/b.test.js", "web/c.test.js"} {
+		files = append(files, run.ChallengeFile{Path: p, Criterion: "AC-2", Verdict: run.ChallengeRed, Failures: groupFailure, Group: true})
+	}
+	body := renderChallengeMarkdown(&run.ChallengeRecord{Verdict: run.ChallengeRed, Files: files})
+	own, group, ok := strings.Cut(body, handoff.GroupFailedLead)
+	if !ok {
+		t.Fatalf("body lacks the group's sentence:\n%s", body)
+	}
+	if !strings.Contains(own, "Held tests that fail on this change") || !strings.Contains(own, "p/own_test.go") || strings.Contains(own, "web/") {
+		t.Errorf("the files a runner judged:\n%s", own)
+	}
+	for _, p := range []string{"web/a.test.js", "web/b.test.js", "web/c.test.js"} {
+		if !strings.Contains(group, "- `"+p+"` (AC-2)") {
+			t.Errorf("the group lacks %s:\n%s", p, group)
+		}
+	}
+	onlyGroup := renderChallengeMarkdown(&run.ChallengeRecord{Verdict: run.ChallengeRed, Files: files[1:]})
+	if strings.Contains(onlyGroup, "Held tests that fail") || !strings.Contains(onlyGroup, handoff.GroupFailedLead) {
+		t.Errorf("a red group alone:\n%s", onlyGroup)
 	}
 }
 

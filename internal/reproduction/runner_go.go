@@ -27,8 +27,8 @@ type goTest struct{}
 
 func (goTest) ID() string { return "go-test-json" }
 
-func (goTest) Applies(p string, root RootFacts) bool {
-	return strings.HasSuffix(p, "_test.go") && root.Has("go.mod")
+func (goTest) Applies(p string, m Markers) bool {
+	return strings.HasSuffix(p, "_test.go") && m.Has("go.mod")
 }
 
 // Tests are the file's top-level func TestXxx(t *testing.T), TestMain
@@ -101,16 +101,17 @@ func takesTestingT(fn *ast.FuncDecl, testing string) bool {
 }
 
 func (goTest) Command(inv Invocation) Command {
-	pkg := "./" + path.Dir(inv.Path)
-	if path.Dir(inv.Path) == "." {
+	rel := inv.rel()
+	pkg := "./" + path.Dir(rel)
+	if path.Dir(rel) == "." {
 		pkg = "."
 	}
 	// The binary's own timeout ends before the launch's, so the report
 	// names the test that was running.
 	timeout := launchTimeout(inv.TestIDs) - 30*time.Second
 	run := "^(" + strings.Join(inv.TestIDs, "|") + ")$"
-	script := fmt.Sprintf("go test -json -count=1 -run %s -timeout %ds %s > %s",
-		shellQuote(run), int(timeout.Seconds()), shellQuote(pkg), shellQuote(inv.ReportPath))
+	script := inv.inDir(fmt.Sprintf("go test -json -count=1 -run %s -timeout %ds %s > %s",
+		shellQuote(run), int(timeout.Seconds()), shellQuote(pkg), shellQuote(inv.ReportPath)))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 

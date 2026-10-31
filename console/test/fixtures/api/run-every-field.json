@@ -465,6 +465,7 @@
         "host_path": "every-field host_path",
         "criterion": "every-field criterion",
         "runner": "every-field runner",
+        "dir": "every-field dir",
         "test_ids": [
           "every-field test_ids"
         ],
@@ -476,7 +477,8 @@
             "test": "every-field test",
             "assertion": "every-field assertion"
           }
-        ]
+        ],
+        "group": true
       }
     ],
     "notes": [

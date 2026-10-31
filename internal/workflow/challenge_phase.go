@@ -235,16 +235,17 @@ func runnableChallengeFiles(files []run.ChallengeFile) []int {
 // runHeldChallenge runs every runnable held file on commit by the held-file run
 // path (RunReviewReproductionActivity): a runner covers a file's path, its
 // per-test report is the verdict; the rest run together under the repository's
-// verify command, whose exit status is the verdict. A red result is run again
-// as a separate launch, and is red only when both are. Sets each file's
-// verdict and the record's.
+// verify command, whose exit status is the verdict of the group, recorded on
+// each of its files with Group set (never a verdict on one file alone). A red
+// result is run again as a separate launch, and is red only when both are.
+// Sets each file's verdict and the record's.
 func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, rec *run.ChallengeRecord, commit string) error {
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	var group []run.HeldReproduction
 	var groupIdx []int
 	for _, i := range runnableChallengeFiles(rec.Files) {
 		f := &rec.Files[i]
-		h := run.HeldReproduction{Finding: i, Path: f.Path, SHA256: f.SHA256, HostPath: f.HostPath, TestIDs: f.TestIDs, Runner: f.Runner}
+		h := run.HeldReproduction{Finding: i, Path: f.Path, SHA256: f.SHA256, HostPath: f.HostPath, TestIDs: f.TestIDs, Runner: f.Runner, Dir: f.Dir}
 		if f.Runner == "" || len(f.TestIDs) == 0 {
 			group, groupIdx = append(group, h), append(groupIdx, i)
 			continue
@@ -275,7 +276,7 @@ func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 			return run.ChallengeRed, []run.ChallengeFailure{{Test: "verify command", Assertion: fmt.Sprintf("exit status %d", r.ExitCode)}}
 		})
 		for _, i := range groupIdx {
-			rec.Files[i].Verdict, rec.Files[i].Failures = verdict.verdict, verdict.failures
+			rec.Files[i].Verdict, rec.Files[i].Failures, rec.Files[i].Group = verdict.verdict, verdict.failures, true
 		}
 		rec.Launches = append(rec.Launches, launches...)
 		if verdict.verdict == challengeBroken {

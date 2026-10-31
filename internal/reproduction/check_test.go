@@ -6,7 +6,6 @@ func goodJudged() Judged {
 	return Judged{
 		Tracked:   []string{"go.mod", "internal/parse/parse.go", "internal/parse/parse_test.go", "vendorlink"},
 		Protected: []string{"internal/secret/", "Makefile"},
-		Root:      RootFacts{"go.mod": []byte("module x\n")},
 	}
 }
 

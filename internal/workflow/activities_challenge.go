@@ -383,11 +383,11 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 	if err != nil {
 		return nil, nil, err
 	}
-	root, err := rootFactsAt(ctx, in.WorkspacePath, in.Commit, tracked)
+	facts, err := markerFactsAt(ctx, in.WorkspacePath, in.Commit, tracked, untracked)
 	if err != nil {
 		return nil, nil, err
 	}
-	judged := reproduction.Judged{TestPatterns: in.TestPatterns, Tracked: tracked, Protected: in.ReleaseProtectedPaths, Root: root}
+	judged := reproduction.Judged{TestPatterns: in.TestPatterns, Tracked: tracked, Protected: in.ReleaseProtectedPaths}
 	dir := filepath.Join(a.logDirFor(in.RunWorkflowInput), run.ChallengeDirName)
 	var files []run.ChallengeFile
 	var notes []string
@@ -422,7 +422,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 			continue
 		}
 		acc := reproduction.Accepted{Path: p}
-		if r, ok := reproduction.For(p, root); ok {
+		if r, runDir, ok := reproduction.For(p, facts); ok {
 			if spans, err := r.Tests(p, content); err == nil {
 				for _, s := range spans {
 					acc.TestIDs = append(acc.TestIDs, s.ID)
@@ -431,7 +431,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 					acc.TestIDs = nil
 				}
 				if len(acc.TestIDs) > 0 {
-					acc.Runner = r.ID()
+					acc.Runner, acc.Dir = r.ID(), runDir
 				}
 			}
 		}
@@ -439,7 +439,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 		if err != nil {
 			return files, notes, err
 		}
-		file.SHA256, file.HostPath, file.Runner, file.TestIDs = h.SHA256, h.HostPath, h.Runner, h.TestIDs
+		file.SHA256, file.HostPath, file.Runner, file.Dir, file.TestIDs = h.SHA256, h.HostPath, h.Runner, h.Dir, h.TestIDs
 		if file.Criterion = challengeHeaderOf(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
 			file.NotRun = "no valid derivation header"
 			notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(p))
