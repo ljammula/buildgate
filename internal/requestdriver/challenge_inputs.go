@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -30,6 +31,29 @@ const (
 func challengeEnabled(dataDir string, r *request.Request) (approved string, ok bool, err error) {
 	approved, err = approvedSpecPath(dataDir, r)
 	return approved, approved != "", err
+}
+
+// challengeCriteriaHeading heads the block that names a spec's criteria by ID.
+const challengeCriteriaHeading = "# Acceptance criteria by ID"
+
+// criterionNumberRE matches the "N. " a folded criterion starts with.
+var criterionNumberRE = regexp.MustCompile(`^\d+[.)]\s+`)
+
+// challengeCriteriaBlock names each of a spec's criteria by the AC-n ID a
+// challenge file's header cites, when the spec's own text does not label
+// them (a handed-over spec, or bullets the factory numbers): the challenger
+// can cite only a number the text it reads shows. "" when the criteria carry
+// their IDs, or there are none.
+func challengeCriteriaBlock(criteria []string) string {
+	if len(criteria) == 0 || request.CriteriaCarryIDs(criteria) {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\nThe spec above does not label its criteria; the factory numbers them as below, and a test file's header cites one of these IDs.\n", challengeCriteriaHeading)
+	for i, c := range criteria {
+		fmt.Fprintf(&b, "\nAC-%d: %s\n", i+1, criterionNumberRE.ReplaceAllString(c, ""))
+	}
+	return b.String()
 }
 
 // withChallenge sets entry's challenge inputs for a build of ticket (SC-022):
@@ -69,17 +93,21 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 			log.Printf("request %s ticket %d: no challenge: %s changed while it was read", r.ID, ticket.Index, requestSpecFile)
 			return nil
 		}
-		criteria, err := request.SpecAcceptanceCriteriaCount(string(spec))
+		criteriaText, err := request.SpecAcceptanceCriteria(string(spec))
 		if err != nil {
-			criteria = 0
+			criteriaText = nil
 			log.Printf("request %s ticket %d: no AC-n header can be valid for the challenger: %v", r.ID, ticket.Index, err)
 		}
+		criteria := len(criteriaText)
 		approvedBytes := len(spec)
 		answered := r.ReadBack.Answered()
 		if r.ReadBack == nil {
 			answered = nil
 		}
 		input := string(spec)
+		if block := challengeCriteriaBlock(criteriaText); block != "" {
+			input += "\n\n" + block
+		}
 		if block := AnsweredReadBackBlock(answered); block != "" {
 			input += "\n\n" + block + "\n"
 		}

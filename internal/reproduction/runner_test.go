@@ -246,6 +246,24 @@ func TestVitestIDsFollowDescribeNesting(t *testing.T) {
 	}
 }
 
+func TestVitestTestsInsideATableSuiteHaveNoID(t *testing.T) {
+	src := "import { describe, test } from 'vitest'\n" +
+		"describe.each([false, true])(\n" +
+		"  'mode %s', (mode) => {\n" +
+		"    test('inside each', () => { f(mode) })\n" +
+		"    describe('nested', () => { it('deeper', () => {}) })\n" +
+		"  })\n" +
+		"describe.for([[1, 2]])('pair %i', ([a]) => { it('inside for', () => {}) })\n" +
+		"describe.each`\n  a | b\n  ${1} | ${2}\n`('table $a', ({a}) => { it('inside a tagged table', () => {}) })\n" +
+		"describe('plain', () => { it('after the tables', () => {}) })\n" +
+		"test('top', () => {})\n"
+	ids, _ := testIDs(vitestJSON{}, "src/a.test.ts", []byte(src))
+	want := []string{"plain > after the tables", "top"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("TestIDs = %q, want %q", ids, want)
+	}
+}
+
 func TestMinitestIDsNameTheirClass(t *testing.T) {
 	src := "require \"test_helper\"\n\nmodule Shop\n  class CartTest < ActiveSupport::TestCase\n" +
 		"    test \"adds an item\" do\n    end\n\n    def test_empty?\n    end\n\n    def helper\n    end\n  end\nend\n"
