@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -30,6 +31,44 @@ const (
 func challengeEnabled(dataDir string, r *request.Request) (approved string, ok bool, err error) {
 	approved, err = approvedSpecPath(dataDir, r)
 	return approved, approved != "", err
+}
+
+// challengeCriteriaHeading heads the block that names a spec's criteria by ID.
+const challengeCriteriaHeading = "# Acceptance criteria by ID"
+
+// criterionLeadRE matches what a folded criterion starts with: its number,
+// then any AC-n label the spec gave it. Group 1 is the number, group 2 the
+// label's.
+var criterionLeadRE = regexp.MustCompile(`^(\d+)[.)]\s+(?:AC-(\d+):\s*)?`)
+
+// challengeCriteriaBlock names each of a spec's criteria by the AC-n ID a
+// challenge file's header cites, unless every criterion is labelled with its
+// own position (a drafted spec): the challenger can cite only a number the
+// text it reads shows, and a handed-over spec may label none, some, or label
+// them out of order. A label the spec gave is left out of the text here, so
+// the block holds one ID per criterion. "" when there are none.
+func challengeCriteriaBlock(criteria []string) string {
+	if len(criteria) == 0 || criteriaLabelledInPlace(criteria) {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\nThe spec above does not label each criterion with its own number; the factory numbers them as below, and a test file's header cites one of these IDs.\n", challengeCriteriaHeading)
+	for i, c := range criteria {
+		fmt.Fprintf(&b, "\nAC-%d: %s\n", i+1, criterionLeadRE.ReplaceAllString(c, ""))
+	}
+	return b.String()
+}
+
+// criteriaLabelledInPlace reports whether criterion i of the folded list
+// starts with the label AC-(i+1).
+func criteriaLabelledInPlace(criteria []string) bool {
+	for i, c := range criteria {
+		m := criterionLeadRE.FindStringSubmatch(c)
+		if m == nil || m[2] != strconv.Itoa(i+1) {
+			return false
+		}
+	}
+	return true
 }
 
 // withChallenge sets entry's challenge inputs for a build of ticket (SC-022):
@@ -69,17 +108,21 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 			log.Printf("request %s ticket %d: no challenge: %s changed while it was read", r.ID, ticket.Index, requestSpecFile)
 			return nil
 		}
-		criteria, err := request.SpecAcceptanceCriteriaCount(string(spec))
+		criteriaText, err := request.SpecAcceptanceCriteria(string(spec))
 		if err != nil {
-			criteria = 0
+			criteriaText = nil
 			log.Printf("request %s ticket %d: no AC-n header can be valid for the challenger: %v", r.ID, ticket.Index, err)
 		}
+		criteria := len(criteriaText)
 		approvedBytes := len(spec)
 		answered := r.ReadBack.Answered()
 		if r.ReadBack == nil {
 			answered = nil
 		}
 		input := string(spec)
+		if block := challengeCriteriaBlock(criteriaText); block != "" {
+			input += "\n\n" + block
+		}
 		if block := AnsweredReadBackBlock(answered); block != "" {
 			input += "\n\n" + block + "\n"
 		}

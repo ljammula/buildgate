@@ -58,3 +58,33 @@ func TestAdviceOfARunWithNoReviewHasNoFindings(t *testing.T) {
 		t.Errorf("a run with no review gave findings: %+v", doc.AdviceFindings)
 	}
 }
+
+// TestAdviceSectionSaysItsSubjectOnce: the reviewer's section says once that
+// the attempt was accepted, whether or not a challenge section came first, and
+// a reviewer's own double quotes reach the brief escaped, not rewritten, and a
+// backslash as it was.
+func TestAdviceSectionSaysItsSubjectOnce(t *testing.T) {
+	finding := AdviceFinding{Severity: "high", File: "lib/request.rb", Line: 9, Summary: `drops note="a,text/html,b"`, FailureScenario: `a path ending in \ stays one value`}
+	red := ChallengeFile{Path: "test/edge_test.rb", Criterion: "AC-1"}
+	for _, tc := range []struct {
+		name string
+		doc  Document
+	}{
+		{"advice only", Document{AdviceFindings: []AdviceFinding{finding}}},
+		{"after a challenge section", Document{ChallengeFiles: []ChallengeFile{red}, AdviceFindings: []AdviceFinding{finding}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := tc.doc.Markdown()
+			section := md[strings.Index(md, "## A reviewer's concerns"):]
+			if !strings.Contains(section, "\n\n"+adviceBody[:30]) && !strings.Contains(section, "\n\n"+adviceLead+adviceBody[:30]) {
+				t.Errorf("the reviewer's section does not open with its lead or body:\n%s", section)
+			}
+			if n := strings.Count(md, "passed every check and was accepted"); n != 1 {
+				t.Errorf("the brief says the attempt was accepted %d times, want once:\n%s", n, md)
+			}
+			if !strings.Contains(section, `"drops note=\"a,text/html,b\""`) || !strings.Contains(section, `"a path ending in \ stays one value"`) {
+				t.Errorf("the reviewer's quotes were not kept escaped:\n%s", section)
+			}
+		})
+	}
+}

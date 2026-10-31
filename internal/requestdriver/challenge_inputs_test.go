@@ -69,6 +69,60 @@ func TestChangedApprovedSpecIsNoChallengeNotAFailedBuild(t *testing.T) {
 	}
 }
 
+// A spec whose criteria carry no AC-n label (a handed-over spec of bullets)
+// gives the challenger each criterion by the ID the host accepts in a test
+// file's header, a label out of place dropped from its text; one whose every
+// criterion is labelled with its own number is given as it is.
+func TestChallengerIsGivenTheIDOfEachUnlabelledCriterion(t *testing.T) {
+	for _, tc := range []struct {
+		name, spec string
+		want       []string
+		criteria   string
+	}{
+		{"bullets", "# Thing\n\n## Wanted behaviour\n\n- A limit can be set.\n- A negative limit is rejected.\n",
+			[]string{"# Acceptance criteria by ID", "\nAC-1: A limit can be set.\n", "\nAC-2: A negative limit is rejected.\n"}, "2"},
+		{"labelled", "## Acceptance criteria\n\n1. AC-1: When x, the system shall y.\n", nil, "1"},
+		{"labelled out of order", "## Acceptance criteria\n\n- AC-2: x\n- AC-1: y\n",
+			[]string{"\nAC-1: x\n", "\nAC-2: y\n"}, "2"},
+		{"partly labelled", "## Acceptance criteria\n\n- y\n- AC-1: x\n",
+			[]string{"\nAC-1: y\n", "\nAC-2: x\n"}, "2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir, r, ticket := challengeArgsFixture(t)
+			if err := os.WriteFile(filepath.Join(request.Dir(dataDir, r.ID), "spec.md"), []byte(tc.spec), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sum, err := request.HashFile(dataDir, r.ID, "spec.md")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.ApprovedSHA256 = map[string]string{"spec.md": sum}
+			args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, ticket, requestdriver.WorkerConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input, err := os.ReadFile(requestdrivertest.ArgValue(args, "-challenge-spec"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(input), tc.spec) {
+				t.Errorf("the challenger's input does not start with the approved spec:\n%s", input)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(string(input), w) {
+					t.Errorf("the challenger's input lacks %q:\n%s", w, input)
+				}
+			}
+			if tc.want == nil && strings.Contains(string(input), "# Acceptance criteria by ID") {
+				t.Errorf("a spec with labelled criteria got the ID block:\n%s", input)
+			}
+			if got := requestdrivertest.ArgValue(args, "-challenge-criteria"); got != tc.criteria {
+				t.Errorf("-challenge-criteria = %s, want %s", got, tc.criteria)
+			}
+		})
+	}
+}
+
 func requestdrivertestHas(args []string, flag string) bool {
 	for _, a := range args {
 		if a == flag {

@@ -324,7 +324,7 @@ const adviceIntro = adviceLead + adviceBody
 // which already says it, the section starts at adviceBody.
 const adviceLead = "That attempt passed every check and was accepted. "
 
-const adviceBody = " passed every check and was accepted. Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks. Check each one against the code. Fix each one that is real, with a test that fails without the fix; leave the code as it is for each one that is not. Every check, and a fresh review, runs again on what this build commits.\n\n"
+const adviceBody = "Its code review raised the concerns below about it: they are a reviewer's opinion, not failed checks. Check each one against the code. Fix each one that is real, with a test that fails without the fix; leave the code as it is for each one that is not. Every check, and a fresh review, runs again on what this build commits.\n\n"
 
 // line is the finding's one list line, the reviewer's words quoted.
 func (f AdviceFinding) line() string {
@@ -702,10 +702,11 @@ func fileList(files []string) string {
 }
 
 // quote puts a value from the build or a reviewer in double quotes. Build
-// already made it one line; a quote inside it becomes a single one, so the
-// value cannot close its own quotation.
+// already made it one line; a double quote inside it is escaped with a
+// backslash, so the value cannot close its own quotation and keeps its own
+// quotes (a reviewer's `note="a,b"` example means what it said).
 func quote(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, "'") + `"`
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
 // NoteLine is the first line of the build agent's retained notes of the run in

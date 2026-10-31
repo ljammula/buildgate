@@ -138,8 +138,8 @@ func (a *Activities) RunChallengerJobActivity(ctx context.Context, in Challenger
 // readApprovedChallengeSpec reads the spec snapshot the challenger is given
 // and checks it twice: the whole snapshot against the hash taken with it, and
 // its leading ChallengeApprovedBytes (the approved spec.md; the rest is the
-// read-back answers) against the hash spec_review approved. cause is "" when
-// both match.
+// criteria-by-ID block and the read-back answers) against the hash
+// spec_review approved. cause is "" when both match.
 func readApprovedChallengeSpec(in RunWorkflowInput) (spec []byte, cause string) {
 	spec, err := evidence.ReadHostileFile(in.ChallengeSpecPath, maxChallengeSpec)
 	if err != nil {

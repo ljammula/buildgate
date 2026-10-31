@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -36,8 +37,10 @@ const vitestIDSep = " > "
 // Tests reads the file's describe/suite and it/test calls whose first
 // argument is a plain string literal, outside comments and strings. A test
 // inside describes is "outer > inner > title". A call through .each or .for
-// has no static title and is not an ID. A test spans from the line of its call
-// to the line of its closing parenthesis.
+// has no static title and is not an ID, and neither is a test inside a suite
+// made through one: vitest names it by the suite's title for each row, which
+// the file does not hold. A test spans from the line of its call to the line
+// of its closing parenthesis.
 func (vitestJSON) Tests(_ string, content []byte) ([]TestSpan, error) {
 	s := jsScanner{src: string(content)}
 	for {
@@ -46,7 +49,7 @@ func (vitestJSON) Tests(_ string, content []byte) ([]TestSpan, error) {
 			break
 		}
 		open := jsOpen{title: call.title, suite: call.suite, depth: call.depth, span: -1}
-		if !call.suite {
+		if !call.suite && !s.inTableSuite() {
 			s.spans = append(s.spans, TestSpan{ID: s.qualified(call.title), Start: s.line(call.at), End: s.line(len(s.src))})
 			open.span = len(s.spans) - 1
 		}
@@ -61,7 +64,8 @@ func (vitestJSON) Tests(_ string, content []byte) ([]TestSpan, error) {
 type jsOpen struct {
 	title string
 	suite bool
-	depth int // paren depth inside the call
+	table bool // a suite called through .each or .for: no static title
+	depth int  // paren depth inside the call
 	span  int
 }
 
@@ -85,6 +89,17 @@ type jsScanner struct {
 
 // line is the 1-based line of the offset.
 func (s *jsScanner) line(off int) int { return 1 + strings.Count(s.src[:min(off, len(s.src))], "\n") }
+
+// inTableSuite reports whether the cursor is inside a suite called through
+// .each or .for.
+func (s *jsScanner) inTableSuite() bool {
+	for _, o := range s.open {
+		if o.table {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *jsScanner) qualified(title string) string {
 	var parts []string
@@ -199,6 +214,7 @@ func (s *jsScanner) identifier() (jsCall, bool) {
 	}
 	suite, ok := jsCallee(chain)
 	if !ok {
+		s.tableSuite(chain)
 		return jsCall{}, false
 	}
 	j := skipSpace(s.src, s.i)
@@ -216,6 +232,59 @@ func (s *jsScanner) identifier() (jsCall, bool) {
 		return jsCall{}, false
 	}
 	return jsCall{title: title, suite: suite, depth: s.depth, at: start}, true
+}
+
+// tableSuite opens, for describe.each(rows)(title, fn) or
+// describe.each`rows`(title, fn) at the cursor (also .for), the call that
+// holds the suite's body, so the tests inside it are known to have no static
+// name. The cursor ends inside that call, past its opening parenthesis.
+func (s *jsScanner) tableSuite(chain []string) {
+	if (chain[0] != "describe" && chain[0] != "suite") || !slices.ContainsFunc(chain[1:], func(m string) bool { return m == "each" || m == "for" }) {
+		return
+	}
+	j := skipSpace(s.src, s.i)
+	switch {
+	case j < len(s.src) && s.src[j] == '`':
+		_, n := jsString(s.src[j:])
+		j += n
+	case j < len(s.src) && s.src[j] == '(':
+		end, ok := s.matchingParen(j)
+		if !ok {
+			return
+		}
+		j = end + 1
+	default:
+		return
+	}
+	j = skipSpace(s.src, j)
+	if j >= len(s.src) || s.src[j] != '(' {
+		return
+	}
+	s.depth++
+	s.i = j + 1
+	s.open = append(s.open, jsOpen{suite: true, table: true, depth: s.depth, span: -1})
+}
+
+// matchingParen is the offset of the parenthesis that closes the one at
+// open, skipping comments and strings; false when the source ends first.
+func (s *jsScanner) matchingParen(open int) (int, bool) {
+	sub := jsScanner{src: s.src, i: open + 1}
+	for depth := 1; sub.i < len(sub.src); {
+		switch c := sub.src[sub.i]; {
+		case sub.skipCommentOrString():
+		case c == '(':
+			depth++
+			sub.i++
+		case c == ')':
+			if depth--; depth == 0 {
+				return sub.i, true
+			}
+			sub.i++
+		default:
+			sub.i++
+		}
+	}
+	return 0, false
 }
 
 // jsCallee: describe/suite (a suite) or it/test (a test), with modifiers
