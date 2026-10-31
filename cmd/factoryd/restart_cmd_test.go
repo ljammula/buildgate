@@ -3,12 +3,16 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/request"
+	"go.temporal.io/sdk/temporal"
 	"os/exec"
 )
 
@@ -44,21 +48,6 @@ func TestRestartBringsBackTheWorkerAndConsoleWithThisBinary(t *testing.T) {
 	}
 }
 
-func TestRestartNeverInterruptsABuild(t *testing.T) {
-	dp := newTestDeps(t)
-	h := restartHarness(dp, t)
-	queuePID, servePID := h.startDefaultProcesses()
-	writeFreshWorkerHeartbeat(t, h.profiles.roots["default"], queuePID, "localhost:7233", 3, "req-42")
-	var out bytes.Buffer
-	err := restartRun(dp, nil, &out)
-	if err == nil || !strings.Contains(err.Error(), "req-42") || !strings.Contains(err.Error(), "factoryd restart") {
-		t.Fatalf("want a refusal naming req-42 and what to run after it, got %v\n%s", err, out.String())
-	}
-	if !alive(queuePID) || !alive(servePID) || len(h.spawned) != 0 {
-		t.Errorf("a build was interrupted: worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
-	}
-}
-
 func TestRestartAllowsABuildingRequestWithNoStepInFlight(t *testing.T) {
 	dp := newTestDeps(t)
 	h := restartHarness(dp, t)
@@ -77,6 +66,9 @@ func TestRestartAllowsABuildingRequestWithNoStepInFlight(t *testing.T) {
 	}
 	if alive(queuePID) || alive(servePID) || len(h.spawned) != 2 {
 		t.Errorf("not restarted: worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
+	}
+	if daemonheartbeat.Draining(dir) {
+		t.Error("a drain was requested with no step in flight")
 	}
 }
 
@@ -209,5 +201,103 @@ func TestDoctorReportsAWorkerThatCannotUseTheGitHubLogin(t *testing.T) {
 	}
 	if !strings.Contains(checks[0].Err.Error(), "push the branch") {
 		t.Errorf("Err = %v, want it to say what fails", checks[0].Err)
+	}
+}
+
+func fastDrainPoll(t *testing.T) {
+	t.Helper()
+	prev := upgradeWaitInterval
+	upgradeWaitInterval = 10 * time.Millisecond
+	t.Cleanup(func() { upgradeWaitInterval = prev })
+}
+
+func TestRestartWithAStepInFlightDrainsThenRestarts(t *testing.T) {
+	fastDrainPoll(t)
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	queuePID, servePID := h.startDefaultProcesses()
+	dir := h.profiles.roots["default"]
+	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3, "req-42")
+	// The fake worker: once it sees the drain marker its step finishes.
+	go func() {
+		for !daemonheartbeat.Draining(dir) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
+	}()
+	var out bytes.Buffer
+	if err := restartRun(dp, nil, &out); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out.String())
+	}
+	if alive(queuePID) || alive(servePID) || len(h.spawned) != 2 {
+		t.Errorf("not restarted: worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
+	}
+	if !strings.Contains(out.String(), "draining") {
+		t.Errorf("output does not say it drained:\n%s", out.String())
+	}
+}
+
+func TestRestartAbandonedWhileDrainingClearsTheDrainAndRestartsNothing(t *testing.T) {
+	fastDrainPoll(t)
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	queuePID, servePID := h.startDefaultProcesses()
+	dir := h.profiles.roots["default"]
+	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3, "req-42")
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for !daemonheartbeat.Draining(dir) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel() // Ctrl-C
+	}()
+	var out bytes.Buffer
+	err := restartRunContext(ctx, dp, nil, &out, false)
+	if err == nil || !strings.Contains(err.Error(), "abandoned") {
+		t.Fatalf("want an abandoned error, got %v\n%s", err, out.String())
+	}
+	if daemonheartbeat.Draining(dir) {
+		t.Error("the drain request was left behind")
+	}
+	if !alive(queuePID) || !alive(servePID) || len(h.spawned) != 0 {
+		t.Errorf("something was restarted: worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
+	}
+}
+
+func TestAWorkerStartsNoStepWhileTheDrainMarkerExists(t *testing.T) {
+	dataDir := t.TempDir()
+	acts := &requestActivities{dp: newTestDeps(t), dataDir: dataDir}
+	if err := daemonheartbeat.RequestDrain(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	_, err := acts.AdvanceRequest(context.Background(), "req-1")
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != drainingErrorType {
+		t.Fatalf("AdvanceRequest while draining = %v, want a %s error", err, drainingErrorType)
+	}
+	if err := daemonheartbeat.ClearDrain(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	// Without the marker the step proceeds as far as loading the request,
+	// which does not exist here: any error but a drain one.
+	if _, err := acts.AdvanceRequest(context.Background(), "req-1"); errors.As(err, &appErr) && appErr.Type() == drainingErrorType {
+		t.Errorf("AdvanceRequest refused as draining with no marker: %v", err)
+	}
+}
+
+func TestWorkerHeartbeatAndStatusShowDraining(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := daemonheartbeat.RequestDrain(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	writeFreshWorkerHeartbeat(t, dataDir, os.Getpid(), "localhost:7233", 3)
+	hb, _ := daemonheartbeat.Read(workerHeartbeatPath(dataDir))
+	hb.Draining = true
+	if err := daemonheartbeat.Write(workerHeartbeatPath(dataDir), hb); err != nil {
+		t.Fatal(err)
+	}
+	if line := workerDrainStatusLine(dataDir, time.Now()); !strings.Contains(line, "draining") {
+		t.Errorf("status line = %q, want draining", line)
 	}
 }

@@ -631,6 +631,9 @@ func statusMain(args []string) error {
 	// workerRoute's own doc comment.
 	routeMode, routeModel := workerRoute(*dataDir, now)
 	routeLine := workerRouteStatusLine(*dataDir, now)
+	if drain := workerDrainStatusLine(*dataDir, now); drain != "" {
+		routeLine = strings.TrimSuffix(drain+"\n"+routeLine, "\n")
+	}
 	// roles: visibility (P0e): one line per configured role
 	// (planning/execution/review), each naming the alias it resolved to,
 	// its worker model id, and its thinking level -- the per-role

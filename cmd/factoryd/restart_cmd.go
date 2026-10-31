@@ -1,16 +1,22 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
+
+	"golang.org/x/term"
 
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/spinner"
 )
 
 // restartMain implements `factoryd restart`: every profile's running worker
@@ -19,7 +25,10 @@ import (
 // keeps building with the code it started with until it is restarted; `make
 // install` runs this as its last step but one.
 func restartMain(dp *deps, args []string) error {
-	return restartRun(dp, args, os.Stdout)
+	// Ctrl-C abandons the wait for a drain (and clears the drain request).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return restartRunContext(ctx, dp, args, os.Stdout, term.IsTerminal(int(os.Stdout.Fd())))
 }
 
 // newRestartFlags is restart's flag set: it takes no flag and no argument.
@@ -30,6 +39,58 @@ func newRestartFlags() *flag.FlagSet {
 }
 
 func restartRun(dp *deps, args []string, w io.Writer) error {
+	return restartRunContext(context.Background(), dp, args, w, false)
+}
+
+// drainWorkers asks the worker of every data dir in dirs with a step in
+// flight to drain (finish what runs, start nothing new), then waits until no
+// step is in flight. ctx ending abandons the wait: the drain requests are
+// cleared and the error says so. The request stays on disk when it returns
+// nil: the worker started next clears it.
+func drainWorkers(ctx context.Context, w io.Writer, dirs []string, tty bool) (err error) {
+	active := upgradeActive(dirs, time.Now())
+	if len(active) == 0 {
+		return nil
+	}
+	var asked []string
+	clear := func() {
+		for _, dir := range asked {
+			if cErr := daemonheartbeat.ClearDrain(dir); cErr != nil {
+				fmt.Fprintf(w, "restart: could not clear the drain request in %s: %v\n", dir, cErr)
+			}
+		}
+	}
+	defer func() {
+		if err != nil {
+			clear()
+		}
+	}()
+	for _, dir := range dirs {
+		if ids, _ := daemonheartbeat.WorkerActiveRequests(dir, time.Now()); len(ids) == 0 {
+			continue
+		}
+		if err := daemonheartbeat.RequestDrain(dir); err != nil {
+			return err
+		}
+		asked = append(asked, dir)
+	}
+	sp := spinner.New(w, tty)
+	sp.Start("draining: waiting for " + strings.Join(active, ", ") + " to finish its step; no new step starts")
+	defer sp.Stop("")
+	for len(active) > 0 {
+		select {
+		case <-ctx.Done():
+			return errors.New("restart abandoned while draining: the drain request is cleared and the worker starts steps again")
+		case <-time.After(upgradeWaitInterval):
+		}
+		if active = upgradeActive(dirs, time.Now()); len(active) > 0 {
+			sp.Set("draining: waiting for " + strings.Join(active, ", ") + " to finish its step; no new step starts")
+		}
+	}
+	return nil
+}
+
+func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer, tty bool) (err error) {
 	flags := newRestartFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -49,10 +110,22 @@ func restartRun(dp *deps, args []string, w io.Writer) error {
 		return nil
 	}
 	// Never under a build: the stop below would refuse it, after stopping
-	// the processes of the data dirs before it.
-	if active := upgradeActive(dirs, now); len(active) > 0 {
-		return fmt.Errorf("a build step is running for %s (a ticket build, advice round, challenge or restack); the worker keeps the binary it started with until `factoryd restart` once that step ends, which can be between two tickets of the same request (`factoryd watch <request>`)", strings.Join(active, ", "))
+	// the processes of the data dirs before it. The workers drain first: they
+	// finish the steps in flight and start no new one, so the wait ends even
+	// in a request whose tickets build back to back.
+	if err := drainWorkers(ctx, w, dirs, tty); err != nil {
+		return err
 	}
+	now = time.Now()
+	defer func() {
+		// A restart that fails before the new worker starts leaves no drain
+		// behind on a worker that is still running.
+		if err != nil {
+			for _, dir := range dirs {
+				_ = daemonheartbeat.ClearDrain(dir)
+			}
+		}
+	}()
 	binary, err := dp.host.executable()
 	if err != nil {
 		return fmt.Errorf("find this binary: %w", err)
@@ -137,6 +210,6 @@ func doctorCheckWorkerBinary(dp *deps, dataDir string, now time.Time) (check doc
 		Name:     name,
 		Advisory: true,
 		Err:      fmt.Errorf("the running worker (pid %d) is %s and this is %s: a worker builds with the code it started with", hb.PID, runs, version),
-		Fix:      "`factoryd restart` restarts the worker and the console with this binary; it refuses only while a build step is running, not while a request waits between two of its tickets",
+		Fix:      "`factoryd restart` restarts the worker and the console with this binary; it asks a worker with a step in flight to drain (finish it, start no new step) and waits for that before restarting",
 	}, true
 }
