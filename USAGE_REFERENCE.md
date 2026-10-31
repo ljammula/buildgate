@@ -1196,7 +1196,10 @@ in its review or a red held challenge test ("The challenger"), gets up to
 request moves on; one with a red held test gets at least one, even at `0`. The
 code review and the challenger are the ticket's two review personas: they run
 together on the same commit, and each round hands the builder what both found
-in one record (`doc/designs/review-personas.md`).
+in one record (`doc/designs/review-personas.md`). The record asks the builder to
+act on a review finding only when the test its failure scenario describes fails
+on the unchanged code and the spec asks for the behaviour, and to note why it
+left any other.
 With the default budgets a ticket can take up to seven builds before
 `pr_review` (its first, three corrective rounds, three advice rounds), each with
 its own review and checks;
