@@ -221,8 +221,10 @@ quarantined | halted -> planning | spec_drafting
 opens against ticket N-1's own branch instead of the repo default branch,
 so it shows only its own delta rather than repeating ticket N-1's
 already-open commits; it stays draft until ticket N-1 merges, at which
-point it's automatically retargeted onto ticket N-1's own base and can be
-marked ready. Review each PR while it is stacked, and merge bottom-up
+point it's automatically retargeted onto ticket N-1's own base (by the next
+PR poll, or, while later tickets are still building, before the next
+ticket builds) and can be marked ready. Check a stacked PR's base before
+merging it. Review each PR while it is stacked, and merge bottom-up
 (ticket 1 first). With squash merges, a retargeted PR's Files tab also
 shows ticket N-1's changes (it shares ticket N-1's original commit), but
 merging it lands only ticket N's own change.

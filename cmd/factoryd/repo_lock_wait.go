@@ -129,7 +129,12 @@ var isolatedRunLockWait = 2 * time.Minute
 // It then takes the lock shared, polling so ctx can cancel, for up to
 // isolatedRunLockWait; two isolated runs starting together thus never fail
 // because the other briefly holds the lock exclusively for its reconcile.
-// Past the bound it returns wsisolation.ErrBusy, in every mode.
+// Past the bound it returns wsisolation.ErrBusy. A ctx marked by
+// withWaitForRepoLock has no bound: a worker's ticket waits until the holder
+// releases the lock or ctx ends, because the holder may be another request's
+// whole build on its pull request's branch (an advice or review round holds
+// the lock exclusively for its run), and the ticket must queue behind it,
+// not halt its request.
 func acquireIsolatedRunLock(ctx context.Context, workspace string, reconcile func(*wsisolation.DirectLock), report repoLockReport) (*wsisolation.DirectLock, error) {
 	exclusive, err := wsisolation.AcquireDirectLock(workspace)
 	switch {
@@ -141,7 +146,13 @@ func acquireIsolatedRunLock(ctx context.Context, workspace string, reconcile fun
 	case !errors.Is(err, wsisolation.ErrBusy):
 		return nil, err
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, isolatedRunLockWait)
+	var waitCtx context.Context
+	var cancel context.CancelFunc
+	if waitsForRepoLock(ctx) {
+		waitCtx, cancel = context.WithCancel(ctx)
+	} else {
+		waitCtx, cancel = context.WithTimeout(ctx, isolatedRunLockWait)
+	}
 	defer cancel()
 	lock, err := wsisolation.AcquireDirectLockShared(workspace)
 	if errors.Is(err, wsisolation.ErrBusy) {

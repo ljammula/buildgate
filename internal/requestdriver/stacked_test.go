@@ -685,3 +685,103 @@ func TestStackedParkKeepsTheLostBuildToResume(t *testing.T) {
 		t.Fatalf("built=%d args=%v, want ticket 2's lost build %s continued", len(built), built[len(built)-1], lost)
 	}
 }
+
+// TestAdvanceBuildingRetargetsAStackedPROffAMergedTicket: while a request
+// of several tickets is still building (the PR poll that retargets runs
+// only in pr_review), the check before ticket 3 builds sees ticket 2's open
+// pull request still based on merged ticket 1's branch and moves it onto
+// ticket 1's base, so a person merging it merges into main, not into a
+// merged ticket's branch.
+func TestAdvanceBuildingRetargetsAStackedPROffAMergedTicket(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir, edits := stackedRetargetWhileBuildingFixture(dp, t)
+	var built [][]string
+	runner := acceptingStackedBuildRunner(t, dataDir, &built)
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+		t.Fatalf("advance building ticket 3: %v", err)
+	}
+	want := r.Tickets[1].PRURL + " -> main"
+	if len(*edits) != 1 || (*edits)[0] != want {
+		t.Fatalf("gh pr edit calls = %v, want [%s]", *edits, want)
+	}
+	if r.Tickets[1].PRBase != "main" || r.Tickets[1].Retarget == nil {
+		t.Errorf("ticket 2 PRBase=%q retarget=%v, want main and a recorded retarget", r.Tickets[1].PRBase, r.Tickets[1].Retarget)
+	}
+	if len(built) != 1 {
+		t.Errorf("built %d tickets, want ticket 3 built after the retarget", len(built))
+	}
+}
+
+// TestAdvanceBuildingLeavesAStackedPRThatNeedsARestack: after a squash
+// merge of ticket 1, ticket 2's commits no longer sit on main; it needs a
+// restack, which only the PR poll runs, so the build-time check does not
+// retarget it.
+func TestAdvanceBuildingLeavesAStackedPRThatNeedsARestack(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir, edits := stackedRetargetWhileBuildingFixture(dp, t)
+	dp.roundResultDescendsFromHeadFn = func(string, string, string) (bool, error) { return false, nil }
+	var built [][]string
+	runner := acceptingStackedBuildRunner(t, dataDir, &built)
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, stackedCfg, runner, time.Now()); err != nil {
+		t.Fatalf("advance building ticket 3: %v", err)
+	}
+	if len(*edits) != 0 {
+		t.Fatalf("gh pr edit calls = %v, want none: the PR needs a restack first", *edits)
+	}
+	if r.Tickets[1].PRBase != "factoryd/run-1" {
+		t.Errorf("ticket 2 PRBase = %q, want the base GitHub reports", r.Tickets[1].PRBase)
+	}
+}
+
+// stackedRetargetWhileBuildingFixture is stackedRetargetFixture for a
+// three-ticket request building ticket 3: ticket 1 merged into main with a
+// merge commit, ticket 2's pull request open and still based on ticket 1's
+// branch, its branch on origin at its run's result.
+func stackedRetargetWhileBuildingFixture(dp *fakeDeps, t *testing.T) (*request.Request, string, *[]string) {
+	t.Helper()
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 3)
+	r.State = request.StateBuilding
+	r.TicketIndex = 3
+	r.Tickets[2].RunID = ""
+	r.Tickets[2].PRURL = ""
+	r.Tickets[0].Branch = "factoryd/run-1"
+	r.Tickets[0].PRState = "merged"
+	r.Tickets[0].PRBase = "main"
+	r.Tickets[1].PRBase = "factoryd/run-1"
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	stacked, err := run.Load(dataDir, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stacked.StackBaseSHA = requestdrivertest.TicketRunResultSHA(1)
+	if err := stacked.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	mainTip := strings.Repeat("7", 40)
+	ticket2URL := r.Tickets[1].PRURL
+	dp.remoteBranchHeadSHAFn = func(_ context.Context, _, branch string) (string, error) {
+		if branch == "main" {
+			return mainTip, nil
+		}
+		// Ticket 2's pull-request branch, at its run's result.
+		return requestdrivertest.TicketRunResultSHA(2), nil
+	}
+	dp.fetchBranchCommitFn = func(context.Context, string, string, string) error { return nil }
+	dp.roundResultDescendsFromHeadFn = func(_, ancestor, descendant string) (bool, error) {
+		return ancestor == requestdrivertest.TicketRunResultSHA(1) && descendant == mainTip, nil
+	}
+	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
+		if prURL != ticket2URL {
+			t.Fatalf("read unexpected PR %q (ticket 1 is merged and must not be read)", prURL)
+		}
+		return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: requestdrivertest.TicketRunResultSHA(2)}, nil
+	}
+	edits := new([]string)
+	dp.retargetPullRequestBaseFn = func(ctx context.Context, prURL, base string) error {
+		*edits = append(*edits, prURL+" -> "+base)
+		return nil
+	}
+	return r, dataDir, edits
+}
