@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,59 @@ func challengeCriteriaBlock(criteria []string) string {
 		fmt.Fprintf(&b, "\nAC-%d: %s\n", i+1, criterionLeadRE.ReplaceAllString(c, ""))
 	}
 	return b.String()
+}
+
+// challengeCoveredBlockHeading heads the block naming the criteria a ticket's
+// challenge may test.
+const challengeCoveredBlockHeading = "# Criteria this ticket covers"
+
+// challengeCovered are the criteria numbers ticket and the tickets before it
+// cover, sorted: the only ones its challenge may test, since a later ticket's
+// criteria are not built yet. nil when ticket's own coverage cannot be read
+// (a spec-as-ticket or hand-written ticket): the challenge is then not
+// narrowed. Tickets before it whose coverage cannot be read claim nothing.
+func challengeCovered(tickets []request.Ticket, ticket request.Ticket) []int {
+	seen := map[int]bool{}
+	for _, t := range tickets {
+		if t.Index > ticket.Index {
+			continue
+		}
+		content, err := os.ReadFile(t.SpecPath)
+		if err != nil {
+			if t.Index == ticket.Index {
+				return nil
+			}
+			continue
+		}
+		numbers, err := request.TicketCoveredCriteria(string(content))
+		if err != nil {
+			if t.Index == ticket.Index {
+				return nil
+			}
+			continue
+		}
+		for _, n := range numbers {
+			seen[n] = true
+		}
+	}
+	covered := make([]int, 0, len(seen))
+	for n := range seen {
+		covered = append(covered, n)
+	}
+	slices.Sort(covered)
+	return covered
+}
+
+// challengeCoveredBlock names the criteria covered, for the challenger to read.
+func challengeCoveredBlock(covered []int) string {
+	if len(covered) == 0 {
+		return ""
+	}
+	ids := make([]string, len(covered))
+	for i, n := range covered {
+		ids[i] = fmt.Sprintf("AC-%d", n)
+	}
+	return fmt.Sprintf("%s\n\nWrite tests only for these criteria: %s. The other criteria belong to tickets not built yet, and a test file citing one is not run.\n", challengeCoveredBlockHeading, strings.Join(ids, ", "))
 }
 
 // criteriaLabelledInPlace reports whether criterion i of the folded list
@@ -126,11 +180,16 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 		if block := AnsweredReadBackBlock(answered); block != "" {
 			input += "\n\n" + block + "\n"
 		}
+		covered := challengeCovered(r.Tickets, ticket)
+		if block := challengeCoveredBlock(covered); block != "" {
+			input += "\n\n" + block
+		}
 		path := filepath.Join(dir, challengeInputFile)
 		if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 			return fmt.Errorf("write the challenge input: %w", err)
 		}
 		entry.Challenge, entry.ChallengeSpecPath, entry.ChallengeCriteria, entry.ChallengeAnswers = true, path, criteria, answeredNumbers(answered)
+		entry.ChallengeCovered = covered
 		entry.ChallengeApprovedSHA256, entry.ChallengeApprovedBytes = r.ApprovedSHA256[requestSpecFile], approvedBytes
 		return nil
 	}

@@ -17,6 +17,10 @@
   ],
   "challenge_approved_bytes": 42,
   "challenge_approved_sha256": "633ffe8bfad8f7385a34368f0075fc2a35e3bbb1c9707a96a91b3c3a439487ca",
+  "challenge_covered": [
+    1,
+    3
+  ],
   "challenge_criteria": 3,
   "challenge_held": [
     {

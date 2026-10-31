@@ -1,6 +1,7 @@
 package requestdriver_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,5 +159,48 @@ func TestHeldChallengeFilesLeaveOutFilesHeldAndNotRun(t *testing.T) {
 	}
 	if !strings.Contains(string(manifest), "a_test.go") || strings.Contains(string(manifest), "b_test.go") {
 		t.Fatalf("manifest = %s, want only the file that carries a header", manifest)
+	}
+}
+
+// A ticket's challenge may test only the criteria it and the tickets before it
+// cover: ticket 2 of 3 gets {1,2,3}, never ticket 3's 4.
+func TestChallengeIsScopedToTheCriteriaOfTheTicketAndEarlierOnes(t *testing.T) {
+	dataDir, r, _ := challengeArgsFixture(t)
+	spec := "## Acceptance criteria\n\n1. AC-1: a\n2. AC-2: b\n3. AC-3: c\n4. AC-4: d\n"
+	if err := os.WriteFile(filepath.Join(request.Dir(dataDir, r.ID), "spec.md"), []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := request.HashFile(dataDir, r.ID, "spec.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ApprovedSHA256 = map[string]string{"spec.md": sum}
+	covers := [][]int{{1, 2}, {3}, {4}}
+	r.Tickets = nil
+	for i, c := range covers {
+		path := filepath.Join(request.Dir(dataDir, r.ID), fmt.Sprintf("%03d.spec.md", i+1))
+		if err := os.WriteFile(path, []byte(requestdrivertest.ValidBrownfieldTicket("pytest", c...)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r.Tickets = append(r.Tickets, request.Ticket{Index: i + 1, SpecPath: path})
+	}
+	// Ticket 2 reads the commit the request started from off ticket 1's run.
+	r.Tickets[0].RunID = "req-1-001"
+	if err := (&run.Run{ID: "req-1-001", RequestID: r.ID, BaseSHA: "abc123"}).Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	args, err := requestdriver.BuildRequestBuildArgs(dataDir, r, r.Tickets[1], requestdriver.WorkerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := requestdrivertest.ArgValue(args, "-challenge-covered"); got != "1,2,3" {
+		t.Errorf("-challenge-covered = %q, want 1,2,3", got)
+	}
+	input, err := os.ReadFile(requestdrivertest.ArgValue(args, "-challenge-spec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(input), "Write tests only for these criteria: AC-1, AC-2, AC-3.") {
+		t.Errorf("the challenger's input does not name the covered criteria:\n%s", input)
 	}
 }

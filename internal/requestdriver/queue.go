@@ -119,6 +119,7 @@ type QueueEntry struct {
 	ChallengeSpecPath       string `json:"challenge_spec_path,omitempty"`
 	ChallengeCriteria       int    `json:"challenge_criteria,omitempty"`
 	ChallengeAnswers        []int  `json:"challenge_answers,omitempty"`
+	ChallengeCovered        []int  `json:"challenge_covered,omitempty"`
 	ChallengeApprovedSHA256 string `json:"challenge_approved_sha256,omitempty"`
 	ChallengeApprovedBytes  int    `json:"challenge_approved_bytes,omitempty"`
 	ChallengeHeld           string `json:"challenge_held,omitempty"`

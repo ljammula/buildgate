@@ -192,6 +192,25 @@ func TestChallengeHeaderRules(t *testing.T) {
 	}
 }
 
+// A header citing a criterion of a later ticket is held and not run; an
+// answer, a covered criterion and an empty covered list stay in scope.
+func TestChallengeInScope(t *testing.T) {
+	for name, tc := range map[string]struct {
+		header  string
+		covered []int
+		want    bool
+	}{
+		"covered":    {"AC-2", []int{1, 2}, true},
+		"later":      {"AC-3", []int{1, 2}, false},
+		"answer":     {"answer-9", []int{1, 2}, true},
+		"empty list": {"AC-3", nil, true},
+	} {
+		if got := challengeInScope(tc.header, tc.covered); got != tc.want {
+			t.Errorf("%s: in scope = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 // A first build's green challenge commits the held files as the run's result.
 func TestChallengeGreenCommitsTheHeldFiles(t *testing.T) {
 	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
