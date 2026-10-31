@@ -1424,6 +1424,18 @@ func (r *Request) awaitingPRBranch() string {
 	return ""
 }
 
+// localBranchHint says the accepted ticket's branch exists only in the
+// request's workspace (no pull request was opened, so nothing pushed it) and
+// gives the push to run before opening or merging it by hand. Empty when the
+// branch or the workspace is unknown.
+func (r *Request) localBranchHint() string {
+	branch := r.awaitingPRBranch()
+	if branch == "" || r.Workspace == "" {
+		return "."
+	}
+	return fmt.Sprintf(". The branch is local only, never pushed: run `git -C %s push origin %s` first", r.Workspace, branch)
+}
+
 // releasePolicyDenialMarker is the exact substring
 // internal/requestdriver/pr_review_driver.go's own noPullRequestHaltReason writes into
 // r.Error when the release decision denied the PR outright (as opposed to
@@ -1455,9 +1467,9 @@ func (r *Request) AwaitingPullRequestLabel() string {
 		branch = " on branch " + b
 	}
 	if strings.Contains(r.Error, releasePolicyDenialMarker) {
-		return fmt.Sprintf("accepted, awaiting pull request: the code is built and verified%s, but the release policy denied it -- fix the release policy configuration named above, then `factoryd retry %s` to re-evaluate; retrying unchanged will just deny again. Or merge the branch by hand.", branch, r.ID)
+		return fmt.Sprintf("accepted, awaiting pull request: the code is built and verified%s, but the release policy denied it -- fix the release policy configuration named above, then `factoryd retry %s` to re-evaluate; retrying unchanged will just deny again. Or merge the branch by hand%s", branch, r.ID, r.localBranchHint())
 	}
-	return fmt.Sprintf("accepted, awaiting pull request: the code is built and verified%s; run `factoryd retry %s` with pull requests enabled (worker -open-pull-request) to open it, or merge the branch by hand", branch, r.ID)
+	return fmt.Sprintf("accepted, awaiting pull request: the code is built and verified%s; run `factoryd retry %s` with pull requests enabled (worker -open-pull-request) to open it, or merge the branch by hand%s", branch, r.ID, r.localBranchHint())
 }
 
 // NextAction returns the one factory-authored sentence naming what the
@@ -1637,9 +1649,9 @@ func (r *Request) haltedNextAction() string {
 			branch = b
 		}
 		if strings.Contains(r.Error, releasePolicyDenialMarker) {
-			return fmt.Sprintf("fix the release policy configuration named above, then `factoryd retry %s` to re-evaluate -- retrying unchanged will just deny again; or merge branch `%s` by hand", r.ID, branch)
+			return fmt.Sprintf("fix the release policy configuration named above, then `factoryd retry %s` to re-evaluate -- retrying unchanged will just deny again; or merge branch `%s` by hand%s", r.ID, branch, r.localBranchHint())
 		}
-		return fmt.Sprintf("`factoryd retry %s` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `%s` by hand", r.ID, branch)
+		return fmt.Sprintf("`factoryd retry %s` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `%s` by hand%s", r.ID, branch, r.localBranchHint())
 	default:
 		return fmt.Sprintf("fix the cause named above, then `factoryd retry %s`%s", r.ID, r.sendBackHint())
 	}

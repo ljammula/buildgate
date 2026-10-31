@@ -92,7 +92,7 @@
     "accepted_tickets": 1,
     "cost_per_accepted_ticket_micro_usd": 1512000
   },
-  "next_action": "`factoryd retry req-halted` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `factory/req-halted-1` by hand",
+  "next_action": "`factoryd retry req-halted` with pull requests enabled (worker -open-pull-request) to open it, or merge branch `factory/req-halted-1` by hand. The branch is local only, never pushed: run `git -C /repos/app push origin factory/req-halted-1` first",
   "inspect": {
     "tickets": [
       {
