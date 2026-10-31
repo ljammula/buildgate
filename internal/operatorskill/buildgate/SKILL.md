@@ -131,6 +131,8 @@ and rebuilds the install, so give the command (`factoryd upgrade`, with `-wait`
 if a request is building) and never run it. So is `factoryd restart`, which
 stops and starts the operator's worker and console with the installed binary:
 when `factoryd doctor` warns `worker runs this factoryd`, relay its fix line.
+It refuses only while a build step is running, so it can be run between two
+tickets of a request that stays `building`.
 
 ## Gates belong to the operator
 

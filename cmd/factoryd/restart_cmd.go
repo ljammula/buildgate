@@ -51,7 +51,7 @@ func restartRun(dp *deps, args []string, w io.Writer) error {
 	// Never under a build: the stop below would refuse it, after stopping
 	// the processes of the data dirs before it.
 	if active := upgradeActive(dirs, now); len(active) > 0 {
-		return fmt.Errorf("a request is building: %s; the worker keeps the binary it started with until `factoryd restart` once it reaches a gate (`factoryd watch <request>`)", strings.Join(active, ", "))
+		return fmt.Errorf("a build step is running for %s (a ticket build, advice round, challenge or restack); the worker keeps the binary it started with until `factoryd restart` once that step ends, which can be between two tickets of the same request (`factoryd watch <request>`)", strings.Join(active, ", "))
 	}
 	binary, err := dp.host.executable()
 	if err != nil {
@@ -61,7 +61,7 @@ func restartRun(dp *deps, args []string, w io.Writer) error {
 	for _, dir := range dirs {
 		out := hostcontrol.StopDataDir(dp, w, dir, false, now)
 		if out.Refused {
-			return fmt.Errorf("a request started building in %s while stopping; run `factoryd restart` again once it reaches a gate", dir)
+			return fmt.Errorf("a build step started in %s while stopping; run `factoryd restart` again once it ends", dir)
 		}
 		if out.Failed {
 			// What did stop is started again before this is reported: a
@@ -137,6 +137,6 @@ func doctorCheckWorkerBinary(dp *deps, dataDir string, now time.Time) (check doc
 		Name:     name,
 		Advisory: true,
 		Err:      fmt.Errorf("the running worker (pid %d) is %s and this is %s: a worker builds with the code it started with", hb.PID, runs, version),
-		Fix:      "`factoryd restart` restarts the worker and the console with this binary; it refuses while a request is building",
+		Fix:      "`factoryd restart` restarts the worker and the console with this binary; it refuses only while a build step is running, not while a request waits between two of its tickets",
 	}, true
 }

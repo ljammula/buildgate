@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/request"
 	"os/exec"
 )
 
@@ -55,6 +56,27 @@ func TestRestartNeverInterruptsABuild(t *testing.T) {
 	}
 	if !alive(queuePID) || !alive(servePID) || len(h.spawned) != 0 {
 		t.Errorf("a build was interrupted: worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
+	}
+}
+
+func TestRestartAllowsABuildingRequestWithNoStepInFlight(t *testing.T) {
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	queuePID, servePID := h.startDefaultProcesses()
+	dir := h.profiles.roots["default"]
+	// The request record says building (ticket 2 waits for ticket 1's pull
+	// request), but the worker's heartbeat lists no step in flight.
+	r := &request.Request{ID: "req-7", State: request.StateBuilding, TicketCount: 3, TicketIndex: 2}
+	if err := r.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
+	var out bytes.Buffer
+	if err := restartRun(dp, nil, &out); err != nil {
+		t.Fatalf("restart between two tickets: %v\n%s", err, out.String())
+	}
+	if alive(queuePID) || alive(servePID) || len(h.spawned) != 2 {
+		t.Errorf("not restarted: worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
 	}
 }
 
