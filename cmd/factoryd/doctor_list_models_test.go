@@ -833,3 +833,19 @@ func TestCopilotServableModelIDsFallsBackWhenFilterEmptiesIt(t *testing.T) {
 		t.Fatalf("copilotSuggestionClause(nil) = %q, want empty", clause)
 	}
 }
+
+// TestDoctorModelListingBasePath: an Anthropic Messages model is listed at
+// GET /v1/models though its worker is given the bare API root; every other
+// api is listed under the worker's base path.
+func TestDoctorModelListingBasePath(t *testing.T) {
+	for _, tc := range []struct{ api, base, want string }{
+		{"anthropic-messages", "", "/v1"},
+		{"openai-completions", "/v1", "/v1"},
+		{"openai-responses", "/api/v1", "/api/v1"},
+		{"", "", ""},
+	} {
+		if got := doctorModelListingBasePath(tc.api, tc.base); got != tc.want {
+			t.Errorf("doctorModelListingBasePath(%q, %q) = %q, want %q", tc.api, tc.base, got, tc.want)
+		}
+	}
+}

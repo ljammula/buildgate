@@ -1284,8 +1284,8 @@ openai             static                   none (allow_no_credential)
                                             or ANTHROPIC_API_KEY as
                                             Authorization header
 anthropic          static                   ANTHROPIC_API_KEY,
-                                            Authorization (placeholder,
-                                            not live-tested -- see below)
+                                            X-Api-Key (native Messages
+                                            API -- see below)
 copilot             github-copilot           GitHub OAuth login token, sent
                                             as the bearer token
 chatgpt-codex       chatgpt-codex            codex-cli auth.json (OAuth)
@@ -1329,31 +1329,48 @@ worker's base URL is the upstream plus `worker_base_path`). `quickstart -route o
 credential (`-credential` or `ANTHROPIC_API_KEY`, sent as
 `Authorization`).
 
-### Anthropic (`static`, placeholder)
+### Anthropic (`static`)
 
 ```yaml
 routes:
   anthropic:
     credential_mode: static
     upstream: https://api.anthropic.com
-    allowed_path_prefix: /v1
-    worker_base_path: /v1
+    allowed_path_prefix: /v1/messages
     credential_env: ANTHROPIC_API_KEY
 models:
-  claude-sonnet-5:
-    id: claude-sonnet-5
-    api: openai-completions
+  claude-sonnet-5-5:
+    id: claude-sonnet-5-5
+    api: anthropic-messages
     routes: [anthropic]
     context_window: 200000
+    reasoning: true
+    extra_json:
+      maxTokens: 64000
+      compat: { forceAdaptiveThinking: true }
+      thinkingLevelMap: { "off": null }
 ```
 
-`quickstart -route anthropic` targets Anthropic's OpenAI-compatible
-endpoint (`https://api.anthropic.com/v1`, Chat Completions-shaped), not
-its native Messages API -- **placeholder, not live-tested**.
-Takes `-model-id`/`-context-window` like the other routes (defaults
-`claude-sonnet-5`/200000); the credential is `-credential` or
-`ANTHROPIC_API_KEY`. No `credential_header` is set (defaults to
-`X-Api-Key`; this endpoint's own convention is `Authorization: Bearer`).
+`quickstart -route anthropic` writes this: Anthropic's native Messages API,
+with the key from `-credential` or `ANTHROPIC_API_KEY`, sent as `X-Api-Key`
+(the default `credential_header`). `-model-id`/`-context-window` change the
+model (default `claude-sonnet-5-5`/`200000`; the models take 1M, and a smaller
+window keeps each request smaller).
+
+| Key | Why |
+|---|---|
+| no `worker_base_path` | The worker's client is given the bare API root and appends `/v1/messages` itself |
+| `reasoning`, `compat.forceAdaptiveThinking` | Thinking is `adaptive`, with the role's thinking level as its effort; current Claude models refuse a `budget_tokens` budget |
+| `thinkingLevelMap.off: null` | The worker never sends thinking `disabled`, which Claude Opus 5.5 and Sonnet 5.5 refuse |
+| `maxTokens` | Pi caps a model it does not know at 16384 output tokens |
+
+Live-proven on the `pi` harness; `pifork` and `copilot` pass config
+validation with it but have not run it; `codex` speaks only
+`openai-responses`. Only a `static` route carries it, and the worker's
+network policy admits exactly `POST /v1/messages`. The meter reads Anthropic's request and usage shapes,
+cache reads and writes included, and prices each model from the price table.
+A second model on the same route (e.g. `claude-opus-5-5` for planning and
+review) is another `models:` entry with the same fields.
 
 ### GitHub Copilot (`github-copilot`)
 
@@ -1455,7 +1472,7 @@ roles:
 |---|---|---|
 | copilot | `GET <copilot host>/models` after the token exchange, with Copilot's own client headers | `max_prompt_tokens`, else `max_context_window_tokens` |
 | openai-compatible | `GET <route upstream><route worker_base_path>/models` | not reported; pass `-context-window` |
-| anthropic | none (quickstart never probes this endpoint's own listing) | default `claude-sonnet-5` / `200000`; a different `-model-id` needs `-context-window` |
+| anthropic | none (quickstart never probes this endpoint's own listing) | default `claude-sonnet-5-5` / `200000`; a different `-model-id` needs `-context-window` |
 | chatgpt-codex | none (backend speaks only `POST /responses`) | default `gpt-6-luna` / `272000`; a different `-model-id` needs `-context-window` |
 
 - `factoryd doctor -list-models` prints the list for the configured route

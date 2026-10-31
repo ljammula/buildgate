@@ -1128,14 +1128,14 @@ func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doc
 		check := doctorCheck{Name: doctorRouteCheckName(r.label, fmt.Sprintf("worker model API (%s)", r.workerAPI))}
 		switch r.workerAPI {
 		case meter.RequestFormatOpenAICompletions:
-		case meter.RequestFormatOpenAIResponses:
+		case meter.RequestFormatOpenAIResponses, meter.WorkerAPIAnthropicMessages:
 			if r.workerModelID == "" {
-				check.Err = fmt.Errorf("openai-responses requires %s", r.keys.workerModelID)
+				check.Err = fmt.Errorf("%s requires %s", r.workerAPI, r.keys.workerModelID)
 				check.Fix = fmt.Sprintf("set %s to the entitled upstream model id", r.keys.workerModelID)
 			}
 		default:
 			check.Err = fmt.Errorf("unsupported worker model API %q", r.workerAPI)
-			check.Fix = "use openai-completions or openai-responses"
+			check.Fix = "use openai-completions, openai-responses or anthropic-messages"
 		}
 		checks = append(checks, check)
 	}
@@ -1158,7 +1158,7 @@ func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doc
 			c1 := doctorCheckRelayUpstreamHostResolvesInSandbox(ctx, in.sandboxDocker, image, r.upstream, r.keys)
 			c1.Name = doctorRouteCheckName(r.label, c1.Name)
 			checks = append(checks, c1)
-			c2 := doctorCheckRelayUpstreamReachableFromSandbox(ctx, in.sandboxDocker, image, r.upstream, r.workerBasePath, r.workerModelID, in.egressCABundle, r.keys)
+			c2 := doctorCheckRelayUpstreamReachableFromSandbox(ctx, in.sandboxDocker, image, r.upstream, doctorModelListingBasePath(r.workerAPI, r.workerBasePath), r.workerModelID, in.egressCABundle, r.keys)
 			c2.Name = doctorRouteCheckName(r.label, c2.Name)
 			checks = append(checks, c2)
 		}
@@ -1928,6 +1928,16 @@ func doctorFixImageByBuilding(dp *deps, dockerBinary string, im doctorImage, rep
 	check.Name += fmt.Sprintf(" -- built by make %s", im.makeTarget)
 	check.Use = im.flag + " " + built
 	return check, built
+}
+
+// doctorModelListingBasePath is the path the upstream's model listing sits
+// under: the worker's base path, except for Anthropic's Messages API, whose
+// client is given the bare API root and whose listing is GET /v1/models.
+func doctorModelListingBasePath(workerAPI, workerBasePath string) string {
+	if workerAPI == meter.WorkerAPIAnthropicMessages {
+		return "/v1"
+	}
+	return workerBasePath
 }
 
 // doctorCheckRelayUpstreamPathComposition is the regression check for the

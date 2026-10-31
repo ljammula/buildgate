@@ -128,12 +128,7 @@ func relayPolicyForRoute(s sessionconfig.Settings, model sessionconfig.Model, ro
 	// UsageFormat is derived purely from the model's effective API --
 	// routes:/models:/roles: is the only session-config schema, and
 	// there is no per-session or per-request override of it.
-	var usageFormat string
-	if api == meter.RequestFormatOpenAIResponses {
-		usageFormat = meter.UsageFormatOpenAIResponses
-	} else {
-		usageFormat = meter.UsageFormatOpenAI
-	}
+	usageFormat := meter.UsageFormatForWorkerAPI(api)
 
 	// A model with no price-table entry prices at $0 (prices.ErrNoPrice);
 	// sessionconfig already refused a malformed table at load.

@@ -193,9 +193,11 @@ func (p RoutePolicy) RouteAccess(dataDir string, binaries []string) (RouteAccess
 // routeEndpoint reads p.Upstream into the endpoint the policy admits and the
 // base URL the worker is given. The relay forwards a worker's request path
 // onto the upstream's own path, so the admitted path is the two joined: one
-// exact path for chatgpt-codex and github-copilot (each serves one API path,
-// and other paths on the same host the worker has no business with), a
-// prefix for a static route, whose API may have several. An exact path also
+// exact path for chatgpt-codex, github-copilot and an anthropic-messages
+// model (each serves one API path, and other paths on the same host the
+// worker has no business with: under /v1/messages, Anthropic's
+// /v1/messages/batches would start requests the meter cannot price), a
+// prefix for any other static route, whose API may have several. An exact path also
 // leaves the worker no path segment to put a credential placeholder in,
 // which the supervisor would resolve.
 func (p RoutePolicy) routeEndpoint() (RouteEndpoint, string, error) {
@@ -226,7 +228,8 @@ func (p RoutePolicy) routeEndpoint() (RouteEndpoint, string, error) {
 	}
 	upstreamPath := strings.TrimRight(upstream.Path, "/")
 	endpoint.Path = upstreamPath + prefix
-	endpoint.PathIsPrefix = p.AuthMode != meter.CredentialModeChatGPTCodex && p.AuthMode != meter.CredentialModeGitHubCopilot
+	endpoint.PathIsPrefix = p.AuthMode != meter.CredentialModeChatGPTCodex && p.AuthMode != meter.CredentialModeGitHubCopilot &&
+		p.WorkerModelAPI != meter.WorkerAPIAnthropicMessages
 
 	baseURL := upstream.Scheme + "://" + upstream.Host + upstreamPath
 	if trimmed := strings.Trim(p.WorkerBasePath, "/"); trimmed != "" {
@@ -339,10 +342,7 @@ func (p RoutePolicy) MeterConfig(dataDir, runID, sandboxName string) (map[string
 	if err != nil {
 		return nil, err
 	}
-	requestFormat := p.WorkerModelAPI
-	if requestFormat == "" {
-		requestFormat = meter.RequestFormatOpenAICompletions
-	}
+	requestFormat := meter.RequestFormatForWorkerAPI(p.WorkerModelAPI)
 	config := map[string]any{
 		"run":                                   runName,
 		"sandbox":                               sandboxName,
