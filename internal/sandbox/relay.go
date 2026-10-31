@@ -161,10 +161,12 @@ type RoutePolicy struct {
 	// where that same wire shape is read back). Empty (default) preserves
 	// today's Anthropic-only wiring exactly.
 	WorkerModelID string `json:"worker_model_id"`
-	// WorkerModelAPI selects the pi provider API used by the generated
-	// worker model entry: meter.RequestFormatOpenAICompletions (the
-	// historical default) or meter.RequestFormatOpenAIResponses. A Responses
-	// selection requires WorkerModelID so it cannot be silently ignored.
+	// WorkerModelAPI selects the provider API of the generated worker model
+	// entry: meter.RequestFormatOpenAICompletions (the default),
+	// meter.RequestFormatOpenAIResponses or meter.WorkerAPIAnthropicMessages
+	// (Anthropic's native Messages API: the worker's client appends
+	// /v1/messages to the base URL itself). A Responses or Messages selection
+	// requires WorkerModelID so it cannot be silently ignored.
 	WorkerModelAPI string `json:"worker_model_api,omitempty"`
 	// WorkerBasePath, only used alongside WorkerModelID, is the path
 	// segment appended to the relay's own fixed internal address to build
@@ -502,11 +504,11 @@ func (p RoutePolicy) validateFormats() error {
 	if p.UsageFormat != "" && p.UsageFormat != meter.UsageFormatAnthropic && p.UsageFormat != meter.UsageFormatOpenAI && p.UsageFormat != meter.UsageFormatOpenAIResponses {
 		return fmt.Errorf("relay usage format must be %q, %q, or %q", meter.UsageFormatAnthropic, meter.UsageFormatOpenAI, meter.UsageFormatOpenAIResponses)
 	}
-	if p.WorkerModelAPI != "" && p.WorkerModelAPI != meter.RequestFormatOpenAICompletions && p.WorkerModelAPI != meter.RequestFormatOpenAIResponses {
-		return fmt.Errorf("relay worker model API must be %q or %q", meter.RequestFormatOpenAICompletions, meter.RequestFormatOpenAIResponses)
+	if p.WorkerModelAPI != "" && p.WorkerModelAPI != meter.RequestFormatOpenAICompletions && p.WorkerModelAPI != meter.RequestFormatOpenAIResponses && p.WorkerModelAPI != meter.WorkerAPIAnthropicMessages {
+		return fmt.Errorf("relay worker model API must be %q, %q or %q", meter.RequestFormatOpenAICompletions, meter.RequestFormatOpenAIResponses, meter.WorkerAPIAnthropicMessages)
 	}
-	if p.WorkerModelAPI == meter.RequestFormatOpenAIResponses && p.WorkerModelID == "" {
-		return errors.New("relay worker model id is required when worker API is \"openai-responses\"")
+	if (p.WorkerModelAPI == meter.RequestFormatOpenAIResponses || p.WorkerModelAPI == meter.WorkerAPIAnthropicMessages) && p.WorkerModelID == "" {
+		return fmt.Errorf("relay worker model id is required when worker API is %q", p.WorkerModelAPI)
 	}
 	if p.UpstreamAuthHeader != "" && !strings.EqualFold(p.UpstreamAuthHeader, meter.CredentialHeaderXAPIKey) && !strings.EqualFold(p.UpstreamAuthHeader, meter.CredentialHeaderAuthorization) {
 		return fmt.Errorf("relay credential header must be %q or %q", meter.CredentialHeaderXAPIKey, meter.CredentialHeaderAuthorization)
@@ -558,6 +560,11 @@ func (p RoutePolicy) validateAuthModeRoute() error {
 	if p.AuthMode == meter.CredentialModeGitHubCopilot && p.WorkerModelID == "" {
 		return errors.New("relay worker model id is required when auth mode is \"github-copilot\": the worker must reach the relay as an OpenAI-compatible provider")
 	}
+	// Anthropic's Messages API is reached only on a static route: the
+	// Copilot and ChatGPT routes each pin one OpenAI-shaped path.
+	if p.WorkerModelAPI == meter.WorkerAPIAnthropicMessages && p.AuthMode != "" && p.AuthMode != meter.CredentialModeStatic {
+		return fmt.Errorf("worker model API %q needs a %q route, not %q", meter.WorkerAPIAnthropicMessages, meter.CredentialModeStatic, p.AuthMode)
+	}
 	if p.AuthMode == meter.CredentialModeGitHubCopilot {
 		if err := meter.ValidateGitHubCopilotRoute(p.Upstream); err != nil {
 			return err
@@ -586,29 +593,25 @@ func (p RoutePolicy) validateWorkerModel() error {
 	if strings.ContainsAny(p.WorkerModelID, "\x00\r\n\t") {
 		return errors.New("relay worker model id must not contain a control character")
 	}
-	// WorkerModelID set means the worker talks to this relay as an
-	// OpenAI-compatible provider, so every response the relay meters is
-	// OpenAI-shaped by construction -- pairing it with UsageFormatAnthropic
-	// is not a policy choice, it is a misconfiguration, and one that fails
-	// silently and late (found live, 2026-09-08): the Anthropic SSE parser
-	// ignores every OpenAI content chunk without complaint, then dies on the
-	// terminal "data: [DONE]", so every single request falls back to
-	// exhaustUsageBudgets' conservative estimate and the token budget is
-	// gone within a dozen requests -- surfacing to the caller as an
+	// With WorkerModelID set, the response shape the relay meters is the one
+	// the worker's model api speaks, so any other usage format set is a
+	// misconfiguration that fails silently and late (found live,
+	// 2026-09-08): the Anthropic SSE parser ignores every OpenAI content
+	// chunk, then dies on the terminal "data: [DONE]", so every request
+	// falls back to exhaustUsageBudgets' conservative estimate and the token
+	// budget is gone within a dozen requests -- surfacing to the caller as an
 	// indistinguishable-from-a-real-outage 429. Reject it at configuration
 	// time instead of paying for it a stream at a time.
 	workerModelAPI := p.WorkerModelAPI
 	if workerModelAPI == "" {
 		workerModelAPI = meter.RequestFormatOpenAICompletions
 	}
-	if p.WorkerModelID != "" && p.UsageFormat == meter.UsageFormatAnthropic {
+	want := meter.UsageFormatForWorkerAPI(workerModelAPI)
+	if p.WorkerModelID != "" && p.UsageFormat == meter.UsageFormatAnthropic && want != meter.UsageFormatAnthropic {
 		return fmt.Errorf("relay usage format must be OpenAI-compatible when a worker model id is set: use %q for Chat Completions or %q for Responses", meter.UsageFormatOpenAI, meter.UsageFormatOpenAIResponses)
 	}
-	if p.WorkerModelID != "" && workerModelAPI == meter.RequestFormatOpenAIResponses && p.UsageFormat == meter.UsageFormatOpenAI {
-		return fmt.Errorf("relay usage format must be %q when worker model API is %q", meter.UsageFormatOpenAIResponses, meter.RequestFormatOpenAIResponses)
-	}
-	if p.WorkerModelID != "" && workerModelAPI == meter.RequestFormatOpenAICompletions && p.UsageFormat == meter.UsageFormatOpenAIResponses {
-		return fmt.Errorf("relay usage format must be %q when worker model API is %q", meter.UsageFormatOpenAI, meter.RequestFormatOpenAICompletions)
+	if p.WorkerModelID != "" && p.UsageFormat != "" && p.UsageFormat != want {
+		return fmt.Errorf("relay usage format must be %q when worker model API is %q", want, workerModelAPI)
 	}
 	// Enforced here, not only by cmd/factoryd's own flag validation (found
 	// via review, Codex, PR #59): a RoutePolicy submitted directly through

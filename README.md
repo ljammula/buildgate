@@ -322,7 +322,7 @@ worker image (`make pifork-image`,
 | Route | `credential_mode` | Credential (host-side only) | Notes |
 |---|---|---|---|
 | OpenAI-compatible endpoint (local ai-stack, vLLM, Ollama, OpenAI, any gateway) | `static` | None, or an `Authorization` header | `upstream: <URL>`, `allowed_path_prefix: /v1` (must match `worker_base_path`); model `id` from `GET <URL>/v1/models`; `api: openai-responses` for a Responses-only model |
-| Anthropic | `static` | `ANTHROPIC_API_KEY` | Placeholder, not live-tested. Its OpenAI-compatible endpoint, not the native Messages API |
+| Anthropic API key (Pi) | `static` | `ANTHROPIC_API_KEY` | The native Messages API (`api: anthropic-messages`); default model `claude-sonnet-5-5` with adaptive thinking. The Codex CLI cannot speak it |
 | GitHub Copilot (Pi, a Pi fork or the Copilot CLI harness) | `github-copilot` | The route's `github_token_file`, then `GITHUB_COPILOT_TOKEN`, then `~/.pi/agent/auth.json` | One entitled model `id`. A model that can't run under the configured worker API is refused with the reason |
 | ChatGPT (Codex OAuth) | `chatgpt-codex` | `~/.codex/auth.json`, read fresh per launch, never refreshed or written | Model `gpt-6-luna`. A launch whose token expires before the step's time budget ends is refused (fix: run any `codex` command). Upstream and paths are pinned |
 

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -212,12 +214,10 @@ func TestQuickstartWritesRoutesConfigChatGPTCodex(t *testing.T) {
 	}
 }
 
-// TestQuickstartWritesRoutesConfigAnthropic proves -route anthropic
-// writes routes:/models:/roles: too (2026-09-27: the operator decided
-// this route targets Anthropic's OpenAI-compatible endpoint instead of
-// its native Messages API, specifically so it can be represented in
-// routes: mode at all -- see anthropicOpenAICompatDefaultModelID's own
-// doc comment). Placeholder, not live-tested.
+// TestQuickstartWritesRoutesConfigAnthropic proves -route anthropic writes
+// a native Messages API route the sandbox runtime and the meter accept: the
+// worker is given the bare API root (its client appends /v1/messages), the
+// policy admits /v1/messages, and the meter parses Anthropic's shapes.
 func TestQuickstartWritesRoutesConfigAnthropic(t *testing.T) {
 	dp := newTestDeps(t)
 	opts := &quickstartOptions{
@@ -238,13 +238,52 @@ func TestQuickstartWritesRoutesConfigAnthropic(t *testing.T) {
 	if sel.Policy.AuthMode != meter.CredentialModeStatic {
 		t.Errorf("AuthMode = %q, want %q", sel.Policy.AuthMode, meter.CredentialModeStatic)
 	}
-	if sel.Policy.WorkerModelID != "claude-sonnet-5" {
-		t.Errorf("WorkerModelID = %q, want %q", sel.Policy.WorkerModelID, "claude-sonnet-5")
+	if sel.Policy.WorkerModelID != anthropicDefaultModelID {
+		t.Errorf("WorkerModelID = %q, want %q", sel.Policy.WorkerModelID, anthropicDefaultModelID)
 	}
-	if sel.Policy.WorkerModelAPI != meter.RequestFormatOpenAICompletions {
-		t.Errorf("WorkerModelAPI = %q, want %q", sel.Policy.WorkerModelAPI, meter.RequestFormatOpenAICompletions)
+	if sel.Policy.WorkerModelAPI != meter.WorkerAPIAnthropicMessages {
+		t.Errorf("WorkerModelAPI = %q, want %q", sel.Policy.WorkerModelAPI, meter.WorkerAPIAnthropicMessages)
 	}
-	if sel.Policy.AllowedPathPrefix != "/v1" {
-		t.Errorf("AllowedPathPrefix = %q, want /v1", sel.Policy.AllowedPathPrefix)
+	if sel.Policy.UsageFormat != meter.UsageFormatAnthropic {
+		t.Errorf("UsageFormat = %q, want %q", sel.Policy.UsageFormat, meter.UsageFormatAnthropic)
+	}
+	if sel.Policy.AllowedPathPrefix != "/v1/messages" || sel.Policy.WorkerBasePath != "" {
+		t.Errorf("AllowedPathPrefix, WorkerBasePath = %q, %q, want /v1/messages and empty", sel.Policy.AllowedPathPrefix, sel.Policy.WorkerBasePath)
+	}
+	var extra map[string]any
+	if err := json.Unmarshal([]byte(sel.Policy.WorkerModelExtraJSON), &extra); err != nil {
+		t.Fatalf("worker model JSON %q: %v", sel.Policy.WorkerModelExtraJSON, err)
+	}
+	if extra["reasoning"] != true || extra["maxTokens"] != float64(anthropicDefaultMaxOutputTokens) {
+		t.Errorf("worker model JSON = %s, want reasoning and a %d-token output cap", sel.Policy.WorkerModelExtraJSON, anthropicDefaultMaxOutputTokens)
+	}
+	if compat, _ := extra["compat"].(map[string]any); compat["forceAdaptiveThinking"] != true {
+		t.Errorf("worker model JSON = %s, want compat.forceAdaptiveThinking", sel.Policy.WorkerModelExtraJSON)
+	}
+	if levels, _ := extra["thinkingLevelMap"].(map[string]any); levels == nil || levels["off"] != nil {
+		t.Errorf("worker model JSON = %s, want thinkingLevelMap.off null", sel.Policy.WorkerModelExtraJSON)
+	} else if _, ok := levels["off"]; !ok {
+		t.Errorf("worker model JSON = %s, want thinkingLevelMap.off present and null", sel.Policy.WorkerModelExtraJSON)
+	}
+	access, err := sel.Policy.RouteAccess(t.TempDir(), []string{"/usr/bin/node"})
+	if err != nil {
+		t.Fatalf("RouteAccess: %v", err)
+	}
+	for _, want := range []string{"FACTORY_MODEL_BASE_URL=https://api.anthropic.com", "FACTORY_MODEL_API=anthropic-messages"} {
+		if !slices.Contains(access.Environment, want) {
+			t.Errorf("worker environment %v lacks %q", access.Environment, want)
+		}
+	}
+	// Exactly /v1/messages: a prefix would admit /v1/messages/batches,
+	// whose requests the meter cannot price.
+	if access.Endpoint.Path != "/v1/messages" || access.Endpoint.PathIsPrefix {
+		t.Errorf("endpoint path = %q (prefix %v), want exactly /v1/messages", access.Endpoint.Path, access.Endpoint.PathIsPrefix)
+	}
+	config, err := sel.Policy.MeterConfig(t.TempDir(), "run-1", "sandbox-1")
+	if err != nil {
+		t.Fatalf("MeterConfig: %v", err)
+	}
+	if config["request_format"] != meter.RequestFormatAnthropic || config["usage_format"] != meter.UsageFormatAnthropic {
+		t.Errorf("meter formats = %v, %v, want anthropic, anthropic", config["request_format"], config["usage_format"])
 	}
 }

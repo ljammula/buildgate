@@ -224,11 +224,11 @@ func doctorListModels(ctx context.Context, w io.Writer, in doctorInputs) error {
 		// arbitrary openai-compatible endpoint -- there is no distinct
 		// credential mode for "Anthropic" to switch on, so this treats an
 		// empty or api.anthropic.com upstream as the Anthropic route (item
-		// 5, round-2 review): its Messages API has no OpenAI-shaped
-		// GET /v1/models listing, so this says so plainly instead of
-		// building a bogus lookup URL and reporting a confusing failure.
+		// 5, round-2 review): its GET /v1/models takes the key in another
+		// header than this OpenAI-shaped lookup sends, so this says so
+		// plainly instead of reporting a confusing failure.
 		if doctorUpstreamLooksAnthropic(in.relayUpstream) {
-			fmt.Fprintln(w, "listing not supported for this route (the Anthropic Messages API has no GET /v1/models-shaped listing).")
+			fmt.Fprintln(w, "listing not supported for this route (doctor lists only OpenAI-compatible and Copilot endpoints; take models.<m>.id from Anthropic's model list).")
 			return nil
 		}
 		basePath := in.relayWorkerBasePath

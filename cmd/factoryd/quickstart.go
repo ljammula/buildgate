@@ -1735,23 +1735,31 @@ func quickstartWarnIfWeakModel(w io.Writer, modelID string) {
 // sessionconfig.Config to write plus any credential environment variables
 // the daemon process needs, including chatgpt-codex and the
 // detected-login-first route prompt.
-// anthropicOpenAICompatDefaultModelID/anthropicOpenAICompatDefaultContextWindow
-// are `quickstart -route anthropic`'s own defaults when the operator
-// gives no -model-id/-context-window. This route targets Anthropic's
-// OpenAI-compatible endpoint (https://api.anthropic.com/v1, Chat
-// Completions-shaped), not its native Messages API -- an operator
-// decision (2026-09-27) to keep this route representable in routes:/
-// models: mode at all (a routes: mode Model.ID is required non-empty;
-// the native Messages API only works with an EMPTY worker model id,
-// which routes: mode has no way to express -- see the git history on
-// this route's own case in quickstartBuildConfig for the fuller
-// analysis). Placeholder, not live-tested: nothing in this repo's own
-// live-validation runs has exercised Anthropic's OpenAI-compatible
-// endpoint yet.
+// anthropicDefaultModelID/anthropicDefaultContextWindow are `quickstart
+// -route anthropic`'s defaults when the operator gives no
+// -model-id/-context-window. The route speaks Anthropic's native Messages
+// API (models.<m>.api: anthropic-messages).
 const (
-	anthropicOpenAICompatDefaultModelID       = "claude-sonnet-5"
-	anthropicOpenAICompatDefaultContextWindow = 200000
+	anthropicDefaultModelID       = "claude-sonnet-5-5"
+	anthropicDefaultContextWindow = 200000
 )
+
+// anthropicWorkerModelExtra is the pi model entry a current Claude model
+// needs: adaptive thinking with the role's thinking level as its effort
+// (forceAdaptiveThinking; these models refuse budget_tokens), an output cap
+// above pi's 16384 default for an unknown model, and no "off" level, since
+// thinking {type: disabled} is refused by Claude Opus 5.5 and Sonnet 5.5.
+func anthropicWorkerModelExtra() map[string]any {
+	return map[string]any{
+		"maxTokens":        anthropicDefaultMaxOutputTokens,
+		"compat":           map[string]any{"forceAdaptiveThinking": true},
+		"thinkingLevelMap": map[string]any{"off": nil},
+	}
+}
+
+// anthropicDefaultMaxOutputTokens is the output cap quickstart gives a
+// Claude model's worker entry.
+const anthropicDefaultMaxOutputTokens = 64000
 
 // applyHarness settles the harness (askHarness) and writes it, and the
 // worker image that goes with it, into the config being built.
@@ -2138,7 +2146,7 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 
 	modelID := b.opts.ModelID
 	if modelID == "" {
-		modelID = anthropicOpenAICompatDefaultModelID
+		modelID = anthropicDefaultModelID
 	}
 	if strings.Contains(modelID, "/") {
 		return nil, nil, fmt.Errorf("-model-id must not contain a slash, got %q", modelID)
@@ -2147,7 +2155,7 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 
 	contextWindow := b.opts.ContextWindow
 	if !b.opts.ContextWindowExplicit {
-		contextWindow = anthropicOpenAICompatDefaultContextWindow
+		contextWindow = anthropicDefaultContextWindow
 	}
 	if contextWindow <= 0 {
 		return nil, nil, fmt.Errorf("-context-window must be a positive integer, got %d", contextWindow)
@@ -2155,33 +2163,25 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 
 	routeName := "anthropic"
 	modelKey := modelID
-	basePath := "/v1"
-	// This targets Anthropic's OpenAI-compatible endpoint
-	// (https://api.anthropic.com/v1, Chat Completions-shaped), not
-	// its native Messages API -- see anthropicOpenAICompatDefaultModelID's
-	// own doc comment for why. Untested live (placeholder). No
-	// credential_header is set: empty currently defaults to
-	// X-Api-Key (internal/sandbox/relay_lifecycle.go, "Anthropic's
-	// own convention"), which is likely wrong for this
-	// OpenAI-compatible endpoint's own Authorization: Bearer
-	// convention -- left as the operator's own explicit choice
-	// rather than silently overridden; revisit once this route is
-	// actually live-validated.
+	// Anthropic's native Messages API: the worker's client is given the bare
+	// API root and appends /v1/messages itself, and sends the key as
+	// X-Api-Key (the default credential_header).
 	b.cfg.Routes = map[string]sessionconfig.Route{
 		routeName: {
 			CredentialMode:    meter.CredentialModeStatic,
-			Upstream:          "https://api.anthropic.com",
-			AllowedPathPrefix: "/v1",
-			WorkerBasePath:    &basePath,
+			Upstream:          anthropicDefaultUpstream,
+			AllowedPathPrefix: "/v1/messages",
 			CredentialEnv:     "ANTHROPIC_API_KEY",
 		},
 	}
 	b.cfg.Models = map[string]sessionconfig.Model{
 		modelKey: {
 			ID:            modelID,
-			API:           meter.RequestFormatOpenAICompletions,
+			API:           meter.WorkerAPIAnthropicMessages,
 			Routes:        []string{routeName},
 			ContextWindow: contextWindow,
+			Reasoning:     true,
+			ExtraJSON:     anthropicWorkerModelExtra(),
 		},
 	}
 	b.cfg.Roles = quickstartSingleModelRoles(modelKey, modelID)

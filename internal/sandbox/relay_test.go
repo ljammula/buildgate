@@ -81,6 +81,28 @@ func TestRelaySpecRejectsUnsafeConfiguration(t *testing.T) {
 		{"responses worker API without a worker model id", func(s *RouteSpec) {
 			s.WorkerModelAPI = meter.RequestFormatOpenAIResponses
 		}},
+		{"messages worker API without a worker model id", func(s *RouteSpec) {
+			s.WorkerModelAPI = meter.WorkerAPIAnthropicMessages
+			s.UsageFormat = meter.UsageFormatAnthropic
+		}},
+		{"messages worker API with an OpenAI usage format", func(s *RouteSpec) {
+			s.WorkerModelID = "claude-sonnet-5-5"
+			s.WorkerModelAPI = meter.WorkerAPIAnthropicMessages
+			s.UsageFormat = meter.UsageFormatOpenAI
+		}},
+		{"unknown worker API", func(s *RouteSpec) { s.WorkerModelAPI = "gemini" }},
+		{"messages worker API on a github-copilot route", func(s *RouteSpec) {
+			s.WorkerModelID = "claude-sonnet-5-5"
+			s.WorkerModelAPI = meter.WorkerAPIAnthropicMessages
+			s.UsageFormat = meter.UsageFormatAnthropic
+			s.AuthMode = meter.CredentialModeGitHubCopilot
+		}},
+		{"messages worker API on a chatgpt-codex route", func(s *RouteSpec) {
+			s.WorkerModelID = "claude-sonnet-5-5"
+			s.WorkerModelAPI = meter.WorkerAPIAnthropicMessages
+			s.UsageFormat = meter.UsageFormatAnthropic
+			s.AuthMode = meter.CredentialModeChatGPTCodex
+		}},
 		{"run id newline", func(s *RouteSpec) { s.RunID = "run\n123" }},
 		{"missing data dir", func(s *RouteSpec) { s.DataDir = "" }},
 		{"relative data dir", func(s *RouteSpec) { s.DataDir = "relative/data" }},
@@ -94,6 +116,18 @@ func TestRelaySpecRejectsUnsafeConfiguration(t *testing.T) {
 				t.Fatal("Validate unexpectedly succeeded")
 			}
 		})
+	}
+}
+
+// TestRelaySpecAcceptsAnthropicMessagesWorker: a worker on Anthropic's native
+// Messages API names its model and is metered in Anthropic's shapes.
+func TestRelaySpecAcceptsAnthropicMessagesWorker(t *testing.T) {
+	s := validRelaySpec()
+	s.WorkerModelID = "claude-sonnet-5-5"
+	s.WorkerModelAPI = meter.WorkerAPIAnthropicMessages
+	s.UsageFormat = meter.UsageFormatAnthropic
+	if err := s.Validate(); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
 	}
 }
 
@@ -1002,5 +1036,21 @@ func TestRelayPolicyValidatesBilling(t *testing.T) {
 		if err := policy.Validate(); err == nil {
 			t.Errorf("%s: Validate() = nil, want a control-character refusal", name)
 		}
+	}
+}
+
+// TestRoutePolicyRefusesMessagesAPIOffAStaticRoute: Anthropic's Messages API
+// runs only on a static route; a Copilot or ChatGPT route is refused by name
+// before launch, not by the network policy mid-run.
+func TestRoutePolicyRefusesMessagesAPIOffAStaticRoute(t *testing.T) {
+	for _, mode := range []string{meter.CredentialModeGitHubCopilot, meter.CredentialModeChatGPTCodex} {
+		p := RoutePolicy{AuthMode: mode, WorkerModelID: "claude-sonnet-5-5", WorkerModelAPI: meter.WorkerAPIAnthropicMessages}
+		if err := p.validateAuthModeRoute(); err == nil || !strings.Contains(err.Error(), "needs a \"static\" route") {
+			t.Errorf("%s route with anthropic-messages: err = %v, want the static-route refusal", mode, err)
+		}
+	}
+	static := RoutePolicy{AuthMode: meter.CredentialModeStatic, Upstream: "https://api.anthropic.com", WorkerModelID: "claude-sonnet-5-5", WorkerModelAPI: meter.WorkerAPIAnthropicMessages}
+	if err := static.validateAuthModeRoute(); err != nil {
+		t.Errorf("static route with anthropic-messages: err = %v, want nil", err)
 	}
 }
