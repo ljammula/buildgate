@@ -418,6 +418,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		ChallengeSpecSHA256:              o.ChallengeSpecSHA256,
 		ChallengeCriteria:                o.ChallengeCriteria,
 		ChallengeAnswers:                 o.ChallengeAnswers,
+		ChallengeCovered:                 o.ChallengeCovered,
 		ChallengeApprovedSHA256:          o.ChallengeApprovedSHA256,
 		ChallengeApprovedBytes:           o.ChallengeApprovedBytes,
 		ChallengerThinking:               o.ChallengerThinking,

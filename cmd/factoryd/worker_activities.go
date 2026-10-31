@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/daemonheartbeat"
 	"cmp"
 	"context"
 	"errors"
@@ -57,6 +58,21 @@ func (a *requestActivities) registerLight(w temporalworker.Worker) {
 	w.RegisterActivityWithOptions(a.HaltLostRequestStep, activity.RegisterOptions{Name: workflow.HaltLostRequestStepActivityName})
 }
 
+// drainingErrorType is the application error type of a step the worker
+// declined to start because a drain was asked of it; RequestWorkflow handles
+// it as any failed step and asks again after the step's retry pause.
+const drainingErrorType = "Draining"
+
+// refuseWhileDraining is the one place a worker decides whether to start a
+// step (ticket build, advice round, PR-review pass, drafting): it does not
+// while the drain marker is on disk in its data dir.
+func (a *requestActivities) refuseWhileDraining() error {
+	if daemonheartbeat.Draining(a.dataDir) {
+		return temporal.NewApplicationError("the worker is draining for a restart: no new step starts", drainingErrorType)
+	}
+	return nil
+}
+
 // requestStepRetryAfter is how long RequestWorkflow waits before re-running a
 // step that returned an error: the worker poll rate.
 const requestStepRetryAfter = 2 * time.Second
@@ -76,6 +92,11 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 		requestdriver.PruneRoundRefs(a.dp, r)
 	}
 	step := requestStepFor(r.State, a.cfg)
+	if step.Advance != "" && daemonheartbeat.Draining(a.dataDir) {
+		// A draining worker refuses every step: ask again at the repository
+		// retry pace, not every couple of seconds for the whole drain.
+		step.RetryAfter = max(step.RetryAfter, requestRepoBusyRetryAfter)
+	}
 	if r.State == request.StateBuilding && r.StackedWait != nil {
 		step.Wait = stackedWaitRecheck(a.cfg)
 	}
@@ -207,6 +228,9 @@ const requestHeartbeatInterval = 5 * time.Second
 // and a cancel of the activity, or of the request, cancels the step. A stall of the connection to
 // Temporal shorter than the heartbeat timeout does not.
 func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (string, error) {
+	if err := a.refuseWhileDraining(); err != nil {
+		return "", err
+	}
 	// One step per request at a time. A second RequestWorkflow for the same
 	// request (an older binary's wake started one under another id) must not
 	// run the step beside the first: it fails with stepInProgressErrorType,
@@ -240,6 +264,12 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// waiting on.
 			slotRequests.add(id)
 			defer slotRequests.remove(id)
+			// A pr_review pass is no job, so the heartbeat lists it only in
+			// SlotRequests: the drain wait covers it, and it is refused here
+			// once the heartbeat lists it.
+			if err := a.refuseWhileDraining(); err != nil {
+				return "", err
+			}
 		}
 		ownSteps := 0
 		if onJobs && r.State.RunsJob() {
@@ -247,6 +277,12 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			ownSteps = 1
 			addActiveRequest(id)
 			defer removeActiveRequest(id)
+			// Checked again now that the heartbeat lists the step: a drain
+			// asked between the first check and here is waited out by
+			// `factoryd restart` only for steps it can see.
+			if err := a.refuseWhileDraining(); err != nil {
+				return "", err
+			}
 		}
 		if r.State == request.StateBuilding {
 			// A memory request whose AGENTS.md moved since it was proposed

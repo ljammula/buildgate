@@ -20,15 +20,15 @@ type vitestJSON struct{}
 func (vitestJSON) ID() string { return "vitest-json" }
 
 // Applies: vitest's default include, *.test.* and *.spec.* with a JS or TS
-// extension, in a repository with vitest at its root.
-func (vitestJSON) Applies(p string, root RootFacts) bool {
+// extension, in a project directory that declares vitest.
+func (vitestJSON) Applies(p string, m Markers) bool {
 	var globs []string
 	for _, kind := range []string{"test", "spec"} {
 		for _, ext := range []string{"js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"} {
 			globs = append(globs, "*."+kind+"."+ext)
 		}
 	}
-	return baseMatches(p, globs...) && root.hasVitest()
+	return baseMatches(p, globs...) && m.hasVitest()
 }
 
 // vitestIDSep joins a test's describe titles and its own title into its ID.
@@ -312,8 +312,8 @@ func skipSpace(s string, i int) int {
 }
 
 func (vitestJSON) Command(inv Invocation) Command {
-	script := fmt.Sprintf("npx --no-install vitest run %s --reporter=json --outputFile=%s --testTimeout=%d%s",
-		shellQuote(inv.Path), shellQuote(inv.ReportPath), PerTestTimeout.Milliseconds(), vitestNamePattern(inv.TestIDs))
+	script := inv.inDir(fmt.Sprintf("npx --no-install vitest run %s --reporter=json --outputFile=%s --testTimeout=%d%s",
+		shellQuote(inv.rel()), shellQuote(inv.ReportPath), PerTestTimeout.Milliseconds(), vitestNamePattern(inv.TestIDs)))
 	return Command{Script: script, ReportPath: inv.ReportPath, Timeout: launchTimeout(inv.TestIDs)}
 }
 

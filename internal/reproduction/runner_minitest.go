@@ -22,8 +22,8 @@ const minitestReporter = "bg_repro_reporter.rb"
 
 func (minitestJSON) ID() string { return "minitest-json" }
 
-func (minitestJSON) Applies(p string, root RootFacts) bool {
-	return baseMatches(p, "*_test.rb", "test_*.rb") && root.Has("Gemfile")
+func (minitestJSON) Applies(p string, m Markers) bool {
+	return baseMatches(p, "*_test.rb", "test_*.rb") && m.Has("Gemfile")
 }
 
 var (
@@ -92,8 +92,8 @@ func rbBlockEnd(lines []string, i int, brace bool) int {
 }
 
 func (minitestJSON) Command(inv Invocation) Command {
-	script := fmt.Sprintf("BG_REPRO_REPORT=%s BG_REPRO_TEST_TIMEOUT=%d ruby -Itest -Ilib -I%s -rbg_repro_reporter -e 'BgRepro.load_test(ARGV[0])' %s%s",
-		shellQuote(inv.ReportPath), int(PerTestTimeout.Seconds()), shellQuote(inv.HelperDir), shellQuote(inv.Path), minitestNameFilter(inv.TestIDs))
+	script := inv.inDir(fmt.Sprintf("BG_REPRO_REPORT=%s BG_REPRO_TEST_TIMEOUT=%d ruby -Itest -Ilib -I%s -rbg_repro_reporter -e 'BgRepro.load_test(ARGV[0])' %s%s",
+		shellQuote(inv.ReportPath), int(PerTestTimeout.Seconds()), shellQuote(inv.HelperDir), shellQuote(inv.rel()), minitestNameFilter(inv.TestIDs)))
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(minitestReporter), Timeout: launchTimeout(inv.TestIDs)}
 }
 

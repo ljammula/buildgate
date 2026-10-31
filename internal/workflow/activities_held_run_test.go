@@ -202,6 +202,33 @@ func TestReproductionNeverRunsOnTheRunWorktree(t *testing.T) {
 	}
 }
 
+// A held file whose runner runs in a project directory below the root (Dir)
+// launches its command there, with the package relative to it, and its
+// report is classified as for a file at the root.
+func TestReproductionInAProjectDirectoryRunsThere(t *testing.T) {
+	f := newReproFixture(t)
+	h := f.held()
+	h.Dir = "p"
+	res, err := f.launch(h, reproductionPassHead1, f.commit)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if len(f.creates) != 1 {
+		t.Fatalf("launches = %d, want 1", len(f.creates))
+	}
+	argv := f.creates[0].Command
+	script := argv[len(argv)-1]
+	if len(f.input.SetupCommands) > 0 {
+		script = argv[4]
+	}
+	if !strings.HasPrefix(script, "cd 'p' || exit 125; go test -json") || !strings.Contains(script, " '.' > '/workspace/"+reproductionReportName+"'") {
+		t.Errorf("script = %q, want the package run from p", script)
+	}
+	if res.Run.Outcome != string(reproduction.OutcomeFailed) || res.Run.Tests["TestRepro"] != string(reproduction.KindFail) {
+		t.Errorf("run = %+v, want a failed TestRepro", res.Run)
+	}
+}
+
 // A recheck mounts the factory's held copy over the path in a scratch
 // checkout of the result commit: what the run's worktree holds at that path
 // (here an untracked edit) is never what runs.

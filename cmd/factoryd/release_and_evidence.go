@@ -1332,10 +1332,11 @@ func invalidateStoredReleaseDecision(dataDir, project, runID, reason string) {
 }
 
 // renderChallengeMarkdown renders the "## Challenge" PR-body section (SC-022):
-// the committed tests (path and criterion), the red ones, and the notes (no
-// challenger role, no verdict and why, files held and not run, shape refusals,
-// collection not proven). Every value is cleaned like the review's; never a
-// file's content. nil renders nothing.
+// the committed tests (path and criterion), the red ones (a group that ran
+// together under the verify command after its own sentence, never as files
+// that each failed), and the notes (no challenger role, no verdict and why,
+// files held and not run, shape refusals, collection not proven). Every value
+// is cleaned like the review's; never a file's content. nil renders nothing.
 func renderChallengeMarkdown(c *run.ChallengeRecord) string {
 	if c == nil {
 		return ""
@@ -1346,7 +1347,7 @@ func renderChallengeMarkdown(c *run.ChallengeRecord) string {
 	case run.ChallengeNoVerdict:
 		fmt.Fprintf(&b, "No verdict: %s.\n\n", handoff.CleanSentence(c.Cause))
 	case run.ChallengeRed:
-		b.WriteString("Held tests that fail on this change (not committed):\n\n")
+		writeRedChallengeFiles(&b, c.Files)
 	default:
 		if c.Rerun {
 			b.WriteString("The held tests of the earlier challenge pass on this change.\n\n")
@@ -1355,19 +1356,53 @@ func renderChallengeMarkdown(c *run.ChallengeRecord) string {
 		}
 	}
 	for _, f := range c.Files {
-		if (c.Verdict == run.ChallengeGreen && f.Verdict != run.ChallengeGreen) || (c.Verdict == run.ChallengeRed && f.Verdict != run.ChallengeRed) {
+		if c.Verdict != run.ChallengeGreen || f.Verdict != run.ChallengeGreen || f.Refused != "" {
 			continue
 		}
-		if c.Verdict == run.ChallengeNoVerdict || f.Refused != "" {
-			continue
-		}
-		fmt.Fprintf(&b, "- `%s` (%s)\n", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion))
+		writeChallengeFileLine(&b, f)
 	}
 	for _, note := range c.Notes {
 		fmt.Fprintf(&b, "- Note: %s\n", handoff.CleanSentence(note))
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// writeRedChallengeFiles writes a red challenge's red files: those a runner
+// judged, under their heading, then those that ran together under the
+// repository's verify command, under handoff.GroupFailedLead.
+func writeRedChallengeFiles(b *strings.Builder, files []run.ChallengeFile) {
+	var own, group []run.ChallengeFile
+	for _, f := range files {
+		switch {
+		case f.Verdict != run.ChallengeRed || f.Refused != "":
+		case f.Group:
+			group = append(group, f)
+		default:
+			own = append(own, f)
+		}
+	}
+	if len(own) > 0 {
+		b.WriteString("Held tests that fail on this change (not committed):\n\n")
+		for _, f := range own {
+			writeChallengeFileLine(b, f)
+		}
+	}
+	if len(group) > 0 {
+		if len(own) > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "%s (not committed):\n\n", handoff.GroupFailedLead)
+		for _, f := range group {
+			writeChallengeFileLine(b, f)
+		}
+	}
+}
+
+// writeChallengeFileLine writes one challenge file's list line: path and
+// criterion, cleaned.
+func writeChallengeFileLine(b *strings.Builder, f run.ChallengeFile) {
+	fmt.Fprintf(b, "- `%s` (%s)\n", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion))
 }
 
 // renderCarvedChallengeMarkdown renders the challenge files of the mixed run a

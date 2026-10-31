@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -153,6 +154,9 @@ type Heartbeat struct {
 	// behind, which the request records alone can't: an older request can
 	// re-enter a job state while a newer one's build runs.
 	ActiveRequests []string `json:"active_requests,omitempty"`
+	// Draining is true while a drain request (RequestDrain) is on disk: the
+	// worker finishes the steps in flight and starts no new one.
+	Draining bool `json:"draining,omitempty"`
 	// SlotRequests are the requests whose step holds one of the JobSlots
 	// right now: every entry of ActiveRequests, plus a pr_review pass, which
 	// runs on the jobs queue but is not a job (stop and upgrade do not wait
@@ -184,6 +188,76 @@ const (
 // Worker reports whether hb was written by `factoryd worker` (it serves a
 // Temporal address) rather than an old process that is not a worker.
 func (h Heartbeat) Worker() bool { return h.TemporalAddress != "" }
+
+// DrainPath is the marker file whose presence asks dataDir's worker to drain.
+func DrainPath(dataDir string) string {
+	return filepath.Join(dataDir, "worker-drain")
+}
+
+// RequestDrain asks dataDir's worker to finish the steps in flight and start
+// no new one. The worker reads the file before it starts every step; a new
+// worker clears it on start. The file names its owner, the asking process: a
+// marker whose owner has exited (killed, hung up) no longer drains.
+func RequestDrain(dataDir string) error {
+	return requestDrainAs(dataDir, os.Getpid())
+}
+
+func requestDrainAs(dataDir string, pid int) error {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return fmt.Errorf("create data dir: %w", err)
+	}
+	body := fmt.Sprintf("%d\n%s\n", pid, time.Now().UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(DrainPath(dataDir), []byte(body), 0o600); err != nil {
+		return fmt.Errorf("write drain marker: %w", err)
+	}
+	return nil
+}
+
+// ClearDrain removes the drain marker; none present is not an error.
+func ClearDrain(dataDir string) error {
+	if err := os.Remove(DrainPath(dataDir)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove drain marker: %w", err)
+	}
+	return nil
+}
+
+// Draining reports whether a drain request is on disk for dataDir and its
+// owner still runs. A marker whose owner is gone is removed and reported
+// absent: nothing is left to restart the worker it would hold back.
+func Draining(dataDir string) bool {
+	b, err := os.ReadFile(DrainPath(dataDir))
+	if err != nil {
+		return false
+	}
+	var pid int
+	if _, err := fmt.Sscanf(string(b), "%d", &pid); err == nil && pid > 0 {
+		if kerr := syscall.Kill(pid, 0); kerr == syscall.ESRCH {
+			_ = ClearDrain(dataDir)
+			return false
+		}
+	}
+	return true
+}
+
+// WorkerBusyRequests returns the requests dataDir's worker holds a job slot
+// for: its heartbeat's SlotRequests (every running job and every pr_review
+// pass, whose corrective build is no job) with ActiveRequests, or nil when
+// there is no fresh heartbeat.
+func WorkerBusyRequests(dataDir string, now time.Time) []string {
+	hb, err := Read(WorkerPath(dataDir))
+	if err != nil || Stale(hb, now, WorkerStaleAfter) {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range append(append([]string{}, hb.ActiveRequests...), hb.SlotRequests...) {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 // WorkerActiveRequests returns the ActiveRequests and JobSlots of dataDir's
 // worker heartbeat, or (nil, 1) when there is no heartbeat or it

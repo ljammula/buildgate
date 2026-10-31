@@ -71,8 +71,9 @@ func (tr *ticketRun) snapshotChallengeInputs() error {
 }
 
 // loadChallengeHeld reads the JSON list of held challenge files at path and
-// checks each: a clean relative path, a SHA-256, and a host path that is under
-// some run's challenge directory in dataDir. At most maxHeldChallengeFiles.
+// checks each: a clean relative path, a SHA-256, a project directory (Dir)
+// that encloses the path, and a host path that is under some run's challenge
+// directory in dataDir. At most maxHeldChallengeFiles.
 // The copies' content is checked against the hash by the workflow before each
 // mount.
 func loadChallengeHeld(dataDir, path string) ([]run.ChallengeFile, error) {
@@ -94,6 +95,9 @@ func loadChallengeHeld(dataDir, path string) ([]run.ChallengeFile, error) {
 	for _, f := range held {
 		if f.Path == "" || filepath.IsAbs(f.Path) || !cleanHeldPath(f.Path) || !challengeSHA256.MatchString(f.SHA256) {
 			return nil, fmt.Errorf("file %q is not a clean relative path with a SHA-256", f.Path)
+		}
+		if f.Dir != "" && f.Dir != "." && (!cleanHeldPath(f.Dir) || !strings.HasPrefix(f.Path, f.Dir+"/")) {
+			return nil, fmt.Errorf("file %q: its project directory %q does not enclose it", f.Path, f.Dir)
 		}
 		rel, err := filepath.Rel(runs, f.HostPath)
 		parts := strings.Split(filepath.ToSlash(rel), "/")

@@ -38,6 +38,7 @@ test("a red challenge decodes its files, failures and notes", () => {
         refused: "",
         notRun: "",
         failures: [{ test: "TestOne", assertion: "want 1, got 2" }],
+        group: false,
       },
       {
         path: "tests/x_test.go",
@@ -46,6 +47,7 @@ test("a red challenge decodes its files, failures and notes", () => {
         refused: "outside the test directory",
         notRun: "",
         failures: [],
+        group: false,
       },
     ],
     notes: ["one file refused"],

@@ -28,6 +28,12 @@ export interface ChallengeFile {
   /** Why a held file was not run; "" otherwise. */
   readonly notRun: string;
   readonly failures: readonly ChallengeFailure[];
+  /**
+   * True for a file no runner covers, which ran together with the other such
+   * files under the repository's verify command: its verdict and failures
+   * are that one run's, never a verdict on this file alone.
+   */
+  readonly group: boolean;
 }
 
 /**
@@ -57,6 +63,7 @@ function decodeChallengeFile(o: JsonObject, at: string): ChallengeFile {
     refused: optString(o, "refused", at),
     notRun: optString(o, "not_run", at),
     failures: objectList(o, "failures", at, decodeChallengeFailure),
+    group: optBoolean(o, "group", at),
   };
 }
 

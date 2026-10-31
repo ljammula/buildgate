@@ -15,9 +15,9 @@ import (
 type Runner interface {
 	// ID names the runner on the run record.
 	ID() string
-	// Applies reports whether the runner takes the path in a repository
-	// whose root holds root.
-	Applies(p string, root RootFacts) bool
+	// Applies reports whether the runner takes the path p, relative to a
+	// project directory whose marker files are m.
+	Applies(p string, m Markers) bool
 	// Tests parses the file's own tests from its content, on the host: each
 	// test ID, the ones Classify keys its result by, with the lines (from 1,
 	// inclusive) its block spans. It is the one parse of a runner's test IDs.
@@ -25,23 +25,49 @@ type Runner interface {
 	// Command is the factory's command for one launch.
 	Command(inv Invocation) Command
 	// Classify reads one launch's report (nil when there is none) and exit
-	// status into a kind per ID of the reproduction at p and the launch's
-	// outcome.
+	// status into a kind per ID of the reproduction at p, its path relative
+	// to the invocation's directory (Rel), and the launch's outcome.
 	Classify(p string, report []byte, exit int, ids []string) (map[string]Kind, Outcome)
 }
 
 // Invocation is one launch of a held reproduction.
 type Invocation struct {
-	Path       string   // the reproduction's repository-relative path, from the worktree root
+	Path string // the reproduction's repository-relative path, from the worktree root
+	// Dir is the project directory the command runs in, repository-relative
+	// ("." or "" the root): the one For chose. The command's paths and
+	// packages are relative to it.
+	Dir        string
 	TestIDs    []string // its IDs, from TestIDs
-	ReportPath string   // where in the sandbox the command writes its report
-	HelperDir  string   // where in the sandbox Command.Helpers are mounted read-only
+	ReportPath string   // where in the sandbox the command writes its report: an absolute path
+	HelperDir  string   // where in the sandbox Command.Helpers are mounted read-only: an absolute path
+}
+
+// rel is the reproduction's path relative to the invocation's directory.
+func (inv Invocation) rel() string { return Rel(inv.Dir, inv.Path) }
+
+// inDir is script run in the invocation's directory: a cd first, outside
+// the root, which ends the launch when it fails.
+func (inv Invocation) inDir(script string) string {
+	if inv.Dir == "" || inv.Dir == "." {
+		return script
+	}
+	return "cd " + shellQuote(inv.Dir) + " || exit 125; " + script
+}
+
+// Rel is the repository path p relative to the project directory dir ("."
+// or "" the root), which encloses it.
+func Rel(dir, p string) string {
+	if dir == "" || dir == "." {
+		return p
+	}
+	return strings.TrimPrefix(p, dir+"/")
 }
 
 // Command is the factory's command for one launch.
 type Command struct {
 	// Script is the shell command, run with sh -c from the worktree root
-	// after the repository's setup commands.
+	// after the repository's setup commands; it changes to the invocation's
+	// directory itself.
 	Script string
 	// ReportPath is the report the command writes, which the caller reads.
 	ReportPath string
@@ -57,20 +83,35 @@ var runners = []Runner{goTest{}, pytestJUnit{}, vitestJSON{}, surefireXML{}, min
 // Runners returns the registry.
 func Runners() []Runner { return append([]Runner(nil), runners...) }
 
-// For returns the one runner that applies to the path. None, or more than
-// one, is no runner: the reproduction is advice.
-func For(p string, root RootFacts) (Runner, bool) {
-	var found Runner
-	for _, r := range runners {
-		if !r.Applies(p, root) {
+// For returns the one runner that applies to the path and the project
+// directory it runs in: the path's nearest enclosing directory (the
+// repository root included) whose marker files some runner accepts for it.
+// None there, or more than one, is no runner: the reproduction is advice.
+// A directory nearer the path whose markers no runner accepts is passed
+// over.
+func For(p string, facts Facts) (Runner, string, bool) {
+	for _, dir := range Ancestors(p) {
+		m := facts[dir]
+		if len(m) == 0 {
 			continue
 		}
-		if found != nil {
-			return nil, false
+		rel := Rel(dir, p)
+		var found Runner
+		n := 0
+		for _, r := range runners {
+			if r.Applies(rel, m) {
+				found, n = r, n+1
+			}
 		}
-		found = r
+		switch n {
+		case 0:
+			continue
+		case 1:
+			return found, dir, true
+		}
+		return nil, "", false
 	}
-	return found, found != nil
+	return nil, "", false
 }
 
 // ByID returns the registry's runner whose ID is id: the runner a held
@@ -84,24 +125,49 @@ func ByID(id string) (Runner, bool) {
 	return nil, false
 }
 
-// RootFacts holds the root files of the judged commit that select a runner,
-// by name, with their content: the caller reads each of MarkerFiles that the
-// commit holds at its root.
-type RootFacts map[string][]byte
+// Markers holds one directory's marker files of the judged commit (each of
+// MarkerFiles the directory holds), by name, with their content.
+type Markers map[string][]byte
 
-// MarkerFiles are the root files RootFacts may hold.
-func MarkerFiles() []string {
-	return []string{
-		"go.mod",
-		"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini", "tox.ini",
+// Facts holds the marker files of the judged commit by directory,
+// repository-relative ("." the root): the caller reads, for each path a
+// runner is chosen for, each of MarkerFiles(dir) in each of its Ancestors that
+// the commit holds. A directory with none may be absent or empty.
+type Facts map[string]Markers
+
+// MarkerFiles are the file names Markers may hold for the directory dir
+// (repository-relative, "." the root). A requirements.txt marks a Python
+// project only at the root: below it one is a tool's or a docs build's list
+// (docs/, tests/), and choosing that directory would run its tests away from
+// the project's own root, interpreter and import path.
+func MarkerFiles(dir string) []string {
+	python := []string{"pyproject.toml", "setup.py", "setup.cfg", "pytest.ini", "tox.ini"}
+	if dir == "." {
+		python = append(python, "requirements.txt")
+	}
+	return append(append([]string{"go.mod"}, python...),
 		"package.json", "vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs",
 		"pom.xml",
-		"Gemfile",
+		"Gemfile")
+}
+
+// Ancestors are the directories that enclose the repository path p, the
+// nearest first and the root (".") last.
+func Ancestors(p string) []string {
+	var out []string
+	for d := path.Dir(p); ; d = path.Dir(d) {
+		if d == "/" || d == "" {
+			return append(out, ".")
+		}
+		out = append(out, d)
+		if d == "." {
+			return out
+		}
 	}
 }
 
-// Has reports whether the root holds any of names.
-func (f RootFacts) Has(names ...string) bool {
+// Has reports whether the directory holds any of names.
+func (f Markers) Has(names ...string) bool {
 	for _, n := range names {
 		if _, ok := f[n]; ok {
 			return true
@@ -110,9 +176,9 @@ func (f RootFacts) Has(names ...string) bool {
 	return false
 }
 
-// hasVitest: a vitest config at the root, or vitest among the root
+// hasVitest: a vitest config in the directory, or vitest among its
 // package.json's dependencies.
-func (f RootFacts) hasVitest() bool {
+func (f Markers) hasVitest() bool {
 	if f.Has("vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs") {
 		return true
 	}

@@ -340,7 +340,7 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 | Follow a run, read its log | `factoryd watch <id>`, `factoryd logs [-f] <id\|queue-run\|serve>`; the prompts its launches saved: `factoryd logs -list <id>`, `-prompt <name>` |
 | Drop a request | `factoryd cancel <request-id>` |
 | Stop what factoryd started | `factoryd stop [-all] [-force]` |
-| Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; refused while a request is building) |
+| Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; with a step in flight it drains the worker first: the step finishes, no new one starts, then it restarts) |
 | Switch session-config profile | `factoryd use [<name>]` |
 | Upgrade to the newest release tag | `factoryd upgrade` |
 | Keep the worker and console alive across reboots (launchd on macOS, systemd user units on Linux) | `factoryd install-service` |

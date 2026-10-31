@@ -192,6 +192,25 @@ func TestChallengeHeaderRules(t *testing.T) {
 	}
 }
 
+// A header citing a criterion of a later ticket is held and not run; an
+// answer, a covered criterion and an empty covered list stay in scope.
+func TestChallengeInScope(t *testing.T) {
+	for name, tc := range map[string]struct {
+		header  string
+		covered []int
+		want    bool
+	}{
+		"covered":    {"AC-2", []int{1, 2}, true},
+		"later":      {"AC-3", []int{1, 2}, false},
+		"answer":     {"answer-9", []int{1, 2}, true},
+		"empty list": {"AC-3", nil, true},
+	} {
+		if got := challengeInScope(tc.header, tc.covered); got != tc.want {
+			t.Errorf("%s: in scope = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 // A first build's green challenge commits the held files as the run's result.
 func TestChallengeGreenCommitsTheHeldFiles(t *testing.T) {
 	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("p/edge_test.go", "AC-1", "go-test-json")}}
@@ -278,6 +297,31 @@ func TestChallengeFilesWithoutARunnerRunTogetherUnderTheVerifyCommand(t *testing
 	}
 	if !found {
 		t.Errorf("notes = %v, want collection not proven", p.result.Challenge.Notes)
+	}
+}
+
+// A red group is the group's verdict: each of its files is red, so the run's
+// challenge is red, and each is marked as having run in the group, never as
+// failing on its own; a file a runner judged keeps its own verdict.
+func TestARedGroupIsMarkedAsTheGroupsVerdict(t *testing.T) {
+	job := ChallengerJobResult{Files: []run.ChallengeFile{challengeFile("a_test.rb", "AC-1", ""), challengeFile("b_test.rb", "AC-2", ""), challengeFile("p/edge_test.go", "AC-3", "go-test-json")}}
+	launch := func(in ReproductionRunInput) ReproductionRunResult {
+		if len(in.Group) > 0 {
+			return failAll(in)
+		}
+		return passAll(in)
+	}
+	p := runChallengePhase(t, challengeInput(), job, launch, 1)
+	c := p.result.Challenge
+	if p.err != nil || c == nil || c.Verdict != run.ChallengeRed {
+		t.Fatalf("err %v, challenge %+v; want red", p.err, c)
+	}
+	for _, f := range c.Files {
+		wantGroup := f.Runner == ""
+		wantVerdict := map[bool]string{true: run.ChallengeRed, false: run.ChallengeGreen}[wantGroup]
+		if f.Group != wantGroup || f.Verdict != wantVerdict {
+			t.Errorf("%s: group %v verdict %q; want group %v verdict %q", f.Path, f.Group, f.Verdict, wantGroup, wantVerdict)
+		}
 	}
 }
 

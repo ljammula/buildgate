@@ -2,6 +2,7 @@ package reproduction
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -19,9 +20,9 @@ const pytestTimeoutPlugin = "bg_repro_timeout.py"
 
 func (pytestJUnit) ID() string { return "pytest-junitxml" }
 
-func (pytestJUnit) Applies(p string, root RootFacts) bool {
+func (pytestJUnit) Applies(p string, m Markers) bool {
 	return baseMatches(p, "test_*.py", "*_test.py") &&
-		root.Has("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini", "tox.ini")
+		m.Has("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini", "tox.ini")
 }
 
 var (
@@ -113,13 +114,30 @@ func methodIndent(line string) bool {
 
 // pytestInterpreter picks the repository's own Python, which is where its
 // setup commands installed pytest: an active $VIRTUAL_ENV, then a `.venv` or
-// `venv` directory at the worktree root, else python3 on PATH. It tests
-// paths only; it reads no file.
-const pytestInterpreter = `BG_PY=python3; if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then BG_PY="$VIRTUAL_ENV/bin/python"; elif [ -x .venv/bin/python ]; then BG_PY=.venv/bin/python; elif [ -x venv/bin/python ]; then BG_PY=venv/bin/python; fi; `
+// `venv` directory in the project directory the command runs in (For) or in
+// a directory above it up to the repository root, nearest first, else python3
+// on PATH. It tests paths only; it reads no file.
+func pytestInterpreter(dir string) string {
+	var b strings.Builder
+	b.WriteString(`BG_PY=python3; if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then BG_PY="$VIRTUAL_ENV/bin/python"`)
+	up := ""
+	for d := path.Clean(dir); ; d = path.Dir(d) {
+		for _, venv := range []string{".venv", "venv"} {
+			py := up + venv + "/bin/python"
+			fmt.Fprintf(&b, "; elif [ -x %s ]; then BG_PY=%s", py, py)
+		}
+		if d == "." || d == "/" {
+			break
+		}
+		up += "../"
+	}
+	b.WriteString("; fi; ")
+	return b.String()
+}
 
 func (pytestJUnit) Command(inv Invocation) Command {
-	script := pytestInterpreter + fmt.Sprintf(`PYTHONPATH=%s"${PYTHONPATH:+:$PYTHONPATH}" BG_REPRO_TEST_TIMEOUT=%d "$BG_PY" -m pytest -p no:cacheprovider -o addopts= -p bg_repro_timeout --junitxml=%s -q %s`,
-		shellQuote(inv.HelperDir), int(PerTestTimeout.Seconds()), shellQuote(inv.ReportPath), pytestNodeIDs(inv))
+	script := inv.inDir(pytestInterpreter(inv.Dir) + fmt.Sprintf(`PYTHONPATH=%s"${PYTHONPATH:+:$PYTHONPATH}" BG_REPRO_TEST_TIMEOUT=%d "$BG_PY" -m pytest -p no:cacheprovider -o addopts= -p bg_repro_timeout --junitxml=%s -q %s`,
+		shellQuote(inv.HelperDir), int(PerTestTimeout.Seconds()), shellQuote(inv.ReportPath), pytestNodeIDs(inv)))
 	return Command{Script: script, ReportPath: inv.ReportPath, Helpers: helper(pytestTimeoutPlugin), Timeout: launchTimeout(inv.TestIDs)}
 }
 
@@ -127,11 +145,11 @@ func (pytestJUnit) Command(inv Invocation) Command {
 // runs those tests and not the rest of the file; with none, the file.
 func pytestNodeIDs(inv Invocation) string {
 	if len(inv.TestIDs) == 0 {
-		return shellQuote(inv.Path)
+		return shellQuote(inv.rel())
 	}
 	words := make([]string, len(inv.TestIDs))
 	for i, id := range inv.TestIDs {
-		words[i] = shellQuote(inv.Path + "::" + id)
+		words[i] = shellQuote(inv.rel() + "::" + id)
 	}
 	return strings.Join(words, " ")
 }

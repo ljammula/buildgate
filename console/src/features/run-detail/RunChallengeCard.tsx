@@ -65,6 +65,12 @@ export function RunChallengeCard({ run }: RunChallengeCardProps) {
                       <EscapedText text={`Refused: ${file.refused}`} />
                     </p>
                   )}
+                  {file.group ? (
+                    <p className="text-xs text-fg-muted">
+                      Ran together with the other files no runner covers under the repository&apos;s
+                      verify command: that run&apos;s result, not a verdict on this file alone.
+                    </p>
+                  ) : null}
                   {file.notRun === "" ? null : (
                     <p className="text-xs text-fg-muted">
                       <EscapedText text={`Not run: ${file.notRun}`} />

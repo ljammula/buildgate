@@ -14,6 +14,6 @@ Write at most {max_files} new test files, in this repository's own test framewor
 
 Run your tests. Keep only the tests that compile and run; delete the rest, and fix a test that fails because the test itself is wrong. A test that fails because the change is wrong is the point: keep it.
 
-The first lines of every test file carry exactly one comment line, in the file's own comment syntax, naming the criterion or answer the file derives from, for example `buildgate-challenge: AC-2` or `buildgate-challenge: answer-1`. The number must exist in the specification above. A file with no such line, or a number that does not exist, is not run.
+The first lines of every test file carry exactly one comment line, in the file's own comment syntax, naming the criterion or answer the file derives from, for example `buildgate-challenge: AC-2` or `buildgate-challenge: answer-1`. The number must exist in the specification above; when the specification ends with a block naming the criteria this ticket covers, it must be one of those. A file with no such line, or a number that does not exist or is not allowed, is not run.
 
 When you are done, answer with one short line saying how many files you left.

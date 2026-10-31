@@ -28,19 +28,19 @@ var (
 // ChangedTest is one test file of a change: its path, its content at the
 // result commit and at the base commit (Base is nil when the base commit lacks
 // the file), the lines the change touched in it (Changes, from the diff of the
-// two), and the root files of the result commit that select a runner.
+// two), and the marker files of the result commit that select a runner.
 type ChangedTest struct {
 	Path    string
 	Result  []byte
 	Base    []byte
 	Changes LineChanges
-	Root    RootFacts
+	Facts   Facts
 }
 
 // JudgeChangedTest decides which tests of one test file a change added or
 // changed the tests_red_on_base proof can run and judge: a clean relative path
 // outside .factory/ and .git, a non-empty text file, one runner that applies to
-// it in a repository whose root holds Root. The path is already a test file of
+// it (For, over Facts). The path is already a test file of
 // the change, so the reviewer-only rules (spec citation, tracked path,
 // protected path) do not apply.
 //
@@ -65,7 +65,7 @@ func JudgeChangedTest(c ChangedTest) (Accepted, error) {
 	case len(c.Result) > MaxHeldBytes:
 		return Accepted{}, errHeldTooLarge
 	}
-	r, ok := For(c.Path, c.Root)
+	r, dir, ok := For(c.Path, c.Facts)
 	if !ok {
 		return Accepted{}, errNoRunner
 	}
@@ -97,7 +97,7 @@ func JudgeChangedTest(c ChangedTest) (Accepted, error) {
 	case added && len(judged) > MaxTestIDs:
 		return Accepted{}, errAddedTooMany
 	}
-	return Accepted{Path: c.Path, Runner: r.ID(), TestIDs: judged}, nil
+	return Accepted{Path: c.Path, Runner: r.ID(), Dir: dir, TestIDs: judged}, nil
 }
 
 // spanIDs are the IDs of spans, in order.

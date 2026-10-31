@@ -131,6 +131,9 @@ and rebuilds the install, so give the command (`factoryd upgrade`, with `-wait`
 if a request is building) and never run it. So is `factoryd restart`, which
 stops and starts the operator's worker and console with the installed binary:
 when `factoryd doctor` warns `worker runs this factoryd`, relay its fix line.
+With a step in flight it asks the worker to drain (finish the step, start no
+new one), waits, then restarts; `factoryd status` shows `worker draining`, and
+Ctrl-C abandons the wait and clears the drain.
 
 ## Gates belong to the operator
 

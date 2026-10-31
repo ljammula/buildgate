@@ -205,10 +205,12 @@ func mixedChallengeNotes(source *run.Run) []string {
 	var notes []string
 	for _, f := range source.Challenge.Files {
 		var what string
-		switch f.Verdict {
-		case run.ChallengeRed:
+		switch {
+		case f.Verdict == run.ChallengeRed && f.Group:
+			what = handoff.GroupFailedNote
+		case f.Verdict == run.ChallengeRed:
 			what = "fails on the mixed change"
-		case "broken":
+		case f.Verdict == "broken":
 			what = "is broken (a compile or collection error, or no report)"
 		default:
 			continue

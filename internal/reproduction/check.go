@@ -15,13 +15,13 @@ type Judged struct {
 	TestPatterns []string // .factory.yml test_patterns; empty means policy.DefaultTestPatterns
 	Tracked      []string // every path tracked in the judged commit
 	Protected    []string // the run's release protected paths
-	Root         RootFacts
 }
 
 // Accepted is a test file that passed every shape rule.
 type Accepted struct {
 	Path     string
 	Runner   string
+	Dir      string // the project directory the runner runs in (For)
 	TestIDs  []string
 	SpecLine int
 	SpecText string // the cited line, trimmed

@@ -2,6 +2,7 @@ package daemonheartbeat
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -358,5 +359,40 @@ func TestWorkerActiveRequestsIgnoresAStaleHeartbeat(t *testing.T) {
 	write(now.Add(-2 * WorkerStaleAfter))
 	if ids, slots := WorkerActiveRequests(dir, now); len(ids) != 0 || slots != 1 {
 		t.Errorf("stale heartbeat: got %v, %d, want none, 1", ids, slots)
+	}
+}
+
+func TestDrainMarkerOfADeadOwnerDoesNotDrain(t *testing.T) {
+	dir := t.TempDir()
+	if err := RequestDrain(dir); err != nil {
+		t.Fatal(err)
+	}
+	if !Draining(dir) {
+		t.Fatal("a marker of this live process must drain")
+	}
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := requestDrainAs(dir, cmd.Process.Pid); err != nil { // exited and reaped
+		t.Fatal(err)
+	}
+	if Draining(dir) {
+		t.Error("a marker whose owner is gone still drains")
+	}
+	if _, err := os.Stat(DrainPath(dir)); !os.IsNotExist(err) {
+		t.Errorf("the stale marker was not removed: %v", err)
+	}
+}
+
+func TestWorkerBusyRequestsIncludesPRReviewSlots(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	hb := Heartbeat{PID: 1, UpdatedAt: now.Format(time.RFC3339Nano), ActiveRequests: []string{"a"}, SlotRequests: []string{"a", "pr"}, TemporalAddress: "x"}
+	if err := Write(WorkerPath(dir), hb); err != nil {
+		t.Fatal(err)
+	}
+	if got := WorkerBusyRequests(dir, now); len(got) != 2 || got[0] != "a" || got[1] != "pr" {
+		t.Errorf("busy = %v, want [a pr]", got)
 	}
 }

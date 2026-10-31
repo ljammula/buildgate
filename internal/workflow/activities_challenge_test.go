@@ -325,6 +325,33 @@ func TestHoldChallengeFilesChecksAnswerNumbersAgainstTheAnsweredSet(t *testing.T
 	}
 }
 
+// A file citing a criterion of a later ticket is held and not run, with a note.
+func TestHoldChallengeFilesDoesNotRunACriterionOfALaterTicket(t *testing.T) {
+	f, in := holdFixture(t)
+	in.ChallengeCriteria, in.ChallengeCovered = 3, []int{1, 2}
+	writeFile(t, filepath.Join(f.repo, "p", "ok_test.go"), strings.Replace(edgeTest, "AC-1", "AC-2", 1))
+	writeFile(t, filepath.Join(f.repo, "p", "later_test.go"), strings.Replace(edgeTest, "AC-1", "AC-3", 1))
+	files, notes, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		switch file.Path {
+		case "p/ok_test.go":
+			if file.NotRun != "" {
+				t.Errorf("covered criterion = %+v, want held to run", file)
+			}
+		case "p/later_test.go":
+			if file.NotRun != "cites a criterion outside the ticket's and earlier tickets' coverage" {
+				t.Errorf("later criterion = %+v, want not run", file)
+			}
+		}
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "outside the ticket's and earlier tickets' coverage") {
+		t.Errorf("notes = %v, want one naming the later ticket", notes)
+	}
+}
+
 // The challenger is given the spec only when its approved prefix still has
 // the hash spec_review approved: the snapshot's own hash is not enough.
 func TestChallengerJobComparesTheSpecWithTheApprovedHash(t *testing.T) {

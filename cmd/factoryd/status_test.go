@@ -854,3 +854,40 @@ func liveWaits(t *testing.T, requests []*request.Request, holders []string, slot
 	c := &request.WaitContext{DataDir: t.TempDir(), Live: true, Holders: holders, Slots: slots, RepositoryWaits: repositoryWaits}
 	return c.Number(requests)
 }
+
+func TestTicketSummaryMarksWhenAStackedPRIsSafeToMerge(t *testing.T) {
+	r := &request.Request{
+		State: request.StateBuilding, TicketCount: 3, TicketIndex: 2,
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: "https://github.com/acme/app/pull/1", PRState: "ready"},
+			{Index: 2, PRURL: "https://github.com/acme/app/pull/2", PRState: "stacked"},
+			{Index: 3},
+		},
+	}
+	if got, want := requestTicketPRSummary(r), "1:ready,safe-to-merge 2:stacked,draft"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	r.State = request.StatePRReview
+	if got, want := requestTicketPRSummary(r), "1:ready 2:stacked"; got != want {
+		t.Errorf("outside building, summary = %q, want %q", got, want)
+	}
+}
+
+func TestTicketSummaryMarksOnlyTheLowestUnmergedEarlierTicketSafeToMerge(t *testing.T) {
+	r := &request.Request{
+		State: request.StateBuilding, TicketCount: 4, TicketIndex: 3,
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: "https://github.com/acme/app/pull/1", PRState: "ready"},
+			{Index: 2, PRURL: "https://github.com/acme/app/pull/2", PRState: "stacked"},
+			{Index: 3, PRURL: "https://github.com/acme/app/pull/3", PRState: "stacked"},
+			{Index: 4},
+		},
+	}
+	if got, want := requestTicketPRSummary(r), "1:ready,safe-to-merge 2:stacked 3:stacked,draft"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	r.Tickets[0].PRState = "merged"
+	if got, want := requestTicketPRSummary(r), "1:merged 2:stacked,safe-to-merge 3:stacked,draft"; got != want {
+		t.Errorf("after ticket 1 merged, summary = %q, want %q", got, want)
+	}
+}

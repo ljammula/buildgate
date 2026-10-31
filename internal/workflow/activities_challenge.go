@@ -112,6 +112,18 @@ func challengeHeaderOf(content []byte, criteria int, answers []int) string {
 	return found
 }
 
+// challengeInScope reports whether header (as challengeHeaderOf returns it)
+// cites a criterion the ticket or an earlier one covers. An answer-<n>, and
+// any header when covered is empty, is in scope.
+func challengeInScope(header string, covered []int) bool {
+	n, ok := strings.CutPrefix(header, "AC-")
+	if !ok || len(covered) == 0 {
+		return true
+	}
+	v, err := strconv.Atoi(n)
+	return err == nil && slices.Contains(covered, v)
+}
+
 // RunChallengerJobActivity runs the challenger job once and holds its files.
 // Every failure to run it is a Cause on the result, never an error: a
 // challenge never halts a run (SC-022). Only a stopped worker or a lost lease
@@ -383,11 +395,11 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 	if err != nil {
 		return nil, nil, err
 	}
-	root, err := rootFactsAt(ctx, in.WorkspacePath, in.Commit, tracked)
+	facts, err := markerFactsAt(ctx, in.WorkspacePath, in.Commit, tracked, untracked)
 	if err != nil {
 		return nil, nil, err
 	}
-	judged := reproduction.Judged{TestPatterns: in.TestPatterns, Tracked: tracked, Protected: in.ReleaseProtectedPaths, Root: root}
+	judged := reproduction.Judged{TestPatterns: in.TestPatterns, Tracked: tracked, Protected: in.ReleaseProtectedPaths}
 	dir := filepath.Join(a.logDirFor(in.RunWorkflowInput), run.ChallengeDirName)
 	var files []run.ChallengeFile
 	var notes []string
@@ -422,7 +434,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 			continue
 		}
 		acc := reproduction.Accepted{Path: p}
-		if r, ok := reproduction.For(p, root); ok {
+		if r, runDir, ok := reproduction.For(p, facts); ok {
 			if spans, err := r.Tests(p, content); err == nil {
 				for _, s := range spans {
 					acc.TestIDs = append(acc.TestIDs, s.ID)
@@ -431,7 +443,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 					acc.TestIDs = nil
 				}
 				if len(acc.TestIDs) > 0 {
-					acc.Runner = r.ID()
+					acc.Runner, acc.Dir = r.ID(), runDir
 				}
 			}
 		}
@@ -439,7 +451,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 		if err != nil {
 			return files, notes, err
 		}
-		file.SHA256, file.HostPath, file.Runner, file.TestIDs = h.SHA256, h.HostPath, h.Runner, h.TestIDs
+		file.SHA256, file.HostPath, file.Runner, file.Dir, file.TestIDs = h.SHA256, h.HostPath, h.Runner, h.Dir, h.TestIDs
 		if file.Criterion = challengeHeaderOf(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
 			file.NotRun = "no valid derivation header"
 			notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(p))
@@ -447,6 +459,10 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 				noCriteriaNoted = true
 				notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
 			}
+		}
+		if file.NotRun == "" && !challengeInScope(file.Criterion, in.ChallengeCovered) {
+			file.NotRun = "cites a criterion outside the ticket's and earlier tickets' coverage"
+			notes = append(notes, fmt.Sprintf("a challenge file citing %s, a criterion outside the ticket's and earlier tickets' coverage, was held and not run: %s", file.Criterion, cleanNoteName(p)))
 		}
 		files = append(files, file)
 		held++

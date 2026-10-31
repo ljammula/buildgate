@@ -258,7 +258,19 @@ type ChallengeFile struct {
 	Path      string   `json:"path"`
 	Criterion string   `json:"criterion,omitempty"`
 	Failures  []string `json:"failures,omitempty"`
+	// Group marks a file that ran together with the other Group files under
+	// the repository's verify command (run.ChallengeFile.Group): Failures
+	// are that run's, not this file's own.
+	Group bool `json:"group,omitempty"`
 }
+
+// GroupFailedLead introduces the held challenge files that ran together under
+// the repository's verify command, which failed: the group's verdict, never a
+// verdict on any one of them.
+const GroupFailedLead = "These held tests ran together under the repository's verify command, because no test runner covers them, and that run failed; it does not say which of them failed"
+
+// GroupFailedNote is GroupFailedLead for one file of such a group.
+const GroupFailedNote = "ran together with the other held tests no runner covers under the repository's verify command, which failed: not a verdict on this file alone"
 
 // maxChallengeFailureLines bounds the failing tests listed per challenge file.
 const maxChallengeFailureLines = 20
@@ -280,7 +292,7 @@ func Challenge(r *run.Run) Document {
 		if f.Verdict != run.ChallengeRed || len(doc.ChallengeFiles) == maxAdviceFindings {
 			continue
 		}
-		cf := ChallengeFile{Path: clean(f.Path, maxNameLen), Criterion: clean(f.Criterion, maxWordLen)}
+		cf := ChallengeFile{Path: clean(f.Path, maxNameLen), Criterion: clean(f.Criterion, maxWordLen), Group: f.Group}
 		for _, fl := range f.Failures {
 			if len(cf.Failures) == maxChallengeFailureLines {
 				break
@@ -314,6 +326,32 @@ func (f ChallengeFile) line() string {
 		failures = ": failing " + strings.Join(quoted, "; ")
 	}
 	return fmt.Sprintf("- `%s`%s%s\n", f.Path, cited, failures)
+}
+
+// writeChallengeFiles writes the failing files, each on its own list line,
+// then the files that ran together under the verify command after
+// GroupFailedLead and that run's failure, one list for the group.
+func writeChallengeFiles(b *strings.Builder, files []ChallengeFile) {
+	var group []ChallengeFile
+	for _, f := range files {
+		if f.Group {
+			group = append(group, f)
+			continue
+		}
+		b.WriteString(f.line())
+	}
+	if len(group) == 0 {
+		return
+	}
+	failure := ""
+	if len(group[0].Failures) > 0 {
+		failure = " (" + quote(group[0].Failures[0]) + ")"
+	}
+	fmt.Fprintf(b, "\n%s%s:\n\n", GroupFailedLead, failure)
+	for _, f := range group {
+		f.Failures = nil
+		b.WriteString(f.line())
+	}
 }
 
 // adviceIntro opens the advice section: what the findings are and what the
@@ -612,9 +650,7 @@ func (d Document) Markdown() string {
 	if len(d.ChallengeFiles) > 0 {
 		b.WriteString("## Tests written against the accepted change that fail\n\n")
 		b.WriteString(challengeIntro)
-		for _, f := range d.ChallengeFiles {
-			b.WriteString(f.line())
-		}
+		writeChallengeFiles(&b, d.ChallengeFiles)
 		b.WriteString("\n")
 	}
 	if len(d.AdviceFindings) > 0 {
