@@ -139,6 +139,128 @@ func escapeGitignoreComponent(s string) string {
 	return b.String()
 }
 
+// infoExcludePath is the info/exclude file dir's repository reads, absolute.
+func infoExcludePath(dir string) (string, error) {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-path", "info/exclude").Output()
+	if err != nil {
+		return "", fmt.Errorf("locate info/exclude for %s: %w", dir, err)
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	return path, nil
+}
+
+const (
+	excludeBlockBegin = "# factoryd-run-begin "
+	excludeBlockEnd   = "# factoryd-run-end "
+)
+
+// ExcludeForRun lists patterns in the repository's info/exclude for as long as
+// the returned release func has not run, as one block owned by token (unique
+// to the caller). Both the add and the release take the git metadata lock
+// (SC-011) and change only the block of token: another run's block, and any
+// line another writer added meanwhile, is left byte for byte, so a release
+// never writes back a snapshot taken before them. Two blocks listing the same
+// pattern are independent: releasing one keeps the other's line. A call whose
+// token already has a block replaces that block (a retried activity adds no
+// second one). Git's own readers (host and sandbox alike) see the file, so no
+// git call needs to be told about it. release is safe to call more than once.
+func ExcludeForRun(dir, token string, patterns []string) (release func() error, err error) {
+	if token == "" || strings.ContainsAny(token, "\r\n") {
+		return nil, fmt.Errorf("exclude block token %q is not a single line", token)
+	}
+	for _, p := range patterns {
+		if strings.ContainsAny(p, "\r\n") {
+			return nil, fmt.Errorf("exclude pattern %q is not a single line", p)
+		}
+	}
+	path, err := infoExcludePath(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := rewriteExclude(dir, path, func(cur string) string {
+		cur = dropExcludeBlock(cur, token)
+		if len(cur) > 0 && !strings.HasSuffix(cur, "\n") {
+			cur += "\n"
+		}
+		return cur + excludeBlockBegin + token + "\n" + strings.Join(patterns, "\n") + "\n" + excludeBlockEnd + token + "\n"
+	}); err != nil {
+		return nil, err
+	}
+	return func() error {
+		return rewriteExclude(dir, path, func(cur string) string { return dropExcludeBlock(cur, token) })
+	}, nil
+}
+
+// dropExcludeBlock removes the block of token from the file text cur.
+func dropExcludeBlock(cur, token string) string {
+	lines := strings.SplitAfter(cur, "\n")
+	var out []string
+	in := false
+	for _, l := range lines {
+		switch trimmed := strings.TrimRight(l, "\n"); {
+		case trimmed == excludeBlockBegin+token:
+			in = true
+		case in && trimmed == excludeBlockEnd+token:
+			in = false
+		case !in:
+			out = append(out, l)
+		}
+	}
+	if in {
+		// An unterminated block (a torn file): keep the text as it was.
+		return cur
+	}
+	return strings.Join(out, "")
+}
+
+// rewriteExclude replaces the file at path by change(its text) under the git
+// metadata lock, through a rename so a reader never sees half a file. A
+// result with no text removes the file, as no file and an empty one read the same.
+func rewriteExclude(dir, path string, change func(string) string) error {
+	unlock, err := lockGitMetadata(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cur, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	next := change(string(cur))
+	if next == string(cur) {
+		return nil
+	}
+	if next == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".exclude-*")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(next); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
 // excludeNames is ExcludeHarnessArtifacts' and ExcludeWorkspacePlaceholder's
 // shared implementation: append any of names not already present to dir's
 // own info/exclude, idempotently.
@@ -148,13 +270,9 @@ func excludeNames(dir string, names []string) error {
 		return err
 	}
 	defer unlock()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-path", "info/exclude").Output()
+	path, err := infoExcludePath(dir)
 	if err != nil {
-		return fmt.Errorf("locate info/exclude for %s: %w", dir, err)
-	}
-	path := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(dir, path)
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)

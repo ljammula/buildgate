@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -640,7 +641,7 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 		removeMountParents(made)
 		return ctx, func() {}, err
 	}
-	unexclude, err := excludeMountsFromGit(ctx, input.WorkspacePath, masks)
+	unexclude, err := excludeMountsFromGit(input.WorkspacePath, input.RunID, masks)
 	if err != nil {
 		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
 		removeMountParents(made)
@@ -659,38 +660,28 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 // info/exclude, so `git add -A` in the round's worktree never stages the
 // empty stub a held file's mount leaves on the host (the build would commit
 // an empty file where the held content is only visible through the mount).
-// The returned function puts the file back as it was.
-func excludeMountsFromGit(ctx context.Context, workDir string, masks []sandbox.WorkspaceMask) (func(), error) {
-	out, err := exec.CommandContext(ctx, "git", append(hostGitAfterSandbox(workDir), "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")...).Output()
-	if err != nil {
-		return nil, fmt.Errorf("find the git exclude file: %w", err)
-	}
-	path := strings.TrimSpace(string(out))
-	prior, err := os.ReadFile(path)
-	existed := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read the git exclude file: %w", err)
-	}
-	var b strings.Builder
-	b.Write(prior)
-	if len(prior) > 0 && prior[len(prior)-1] != '\n' {
-		b.WriteByte('\n')
-	}
+// The file is the one every git call reads, the sandbox's included, so the
+// entries are written to it: as a block of this round alone, under the git
+// metadata lock (SC-011). The block's token is the run and its worktree, so a
+// retry of the same activity replaces its block rather than adding another.
+// The returned function removes that block and nothing else, so it never
+// writes back a stale copy over lines another run added meanwhile; a removal
+// that fails is logged, and the next attempt of the run replaces the block.
+func excludeMountsFromGit(workDir, runID string, masks []sandbox.WorkspaceMask) (func(), error) {
+	patterns := make([]string, 0, len(masks))
 	for _, m := range masks {
-		b.WriteString("/" + escapeExcludePattern(m.Target) + "\n")
+		patterns = append(patterns, "/"+escapeExcludePattern(m.Target))
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("write the git exclude file: %w", err)
-	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+	sum := sha256.Sum256([]byte(workDir))
+	token := runID + "@" + hex.EncodeToString(sum[:6])
+	release, err := wsisolation.ExcludeForRun(workDir, token, patterns)
+	if err != nil {
 		return nil, fmt.Errorf("write the git exclude file: %w", err)
 	}
 	return func() {
-		if existed {
-			_ = os.WriteFile(path, prior, 0o644)
-			return
+		if err := release(); err != nil {
+			log.Printf("challenge round %s: could not remove its info/exclude block %q: %v", runID, token, err)
 		}
-		_ = os.Remove(path)
 	}, nil
 }
 
