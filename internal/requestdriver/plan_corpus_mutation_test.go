@@ -12,7 +12,6 @@ import (
 	"unicode"
 
 	"buildgate/internal/policy"
-	"buildgate/internal/projectconfig"
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
@@ -220,18 +219,6 @@ func loadMutationPlans(t *testing.T) []mutationPlan {
 		if workspaces[c.project] == "" {
 			workspaces[c.project] = t.TempDir()
 			testfixture.WriteEmptyFiles(t, workspaces[c.project], list)
-			// A plan of seven tickets in one directory makes more
-			// earlier-tests notes than the cap holds, which would crowd out
-			// the criterion's note these tests read (TestBoardApp... reads
-			// the earlier-tests notes). No file matches this pattern, so
-			// none are made here. Only this project pays for the git calls
-			// reading the file makes.
-			if c.project == "board-app" {
-				factoryYML := filepath.Join(workspaces[c.project], projectconfig.FileName)
-				if err := os.WriteFile(factoryYML, []byte("verify_command: \"true\"\ntest_patterns:\n  - \"no-file-matches-this-pattern-*\"\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
 		}
 		p := mutationPlan{name: c.name, workspace: workspaces[c.project], covered: map[int]bool{}, asItStands: map[int][]string{}}
 		var err error
@@ -314,16 +301,7 @@ func (p mutationPlan) notes(n int, text, owned string) []string {
 	if owned != "" {
 		tickets = append(append([]request.PlanTicket{}, tickets...), request.PlanTicket{Name: otherTicket, Content: "a ticket that covers no criterion", Allowed: []string{owned}})
 	}
-	var notes []string
-	for _, note := range request.PlanReviewNotes(criteria, tickets, p.workspace, 0) {
-		// The added ticket is a stand-in for an owner of a file; the
-		// earlier-tests note on it (it may sit beside a ticket's tests) is
-		// not what these tests read.
-		if !strings.HasPrefix(note, "Ticket "+otherTicket+" changes ") {
-			notes = append(notes, note)
-		}
-	}
-	return notes
+	return request.PlanReviewNotes(criteria, tickets, p.workspace, 0)
 }
 
 // mutationStride thins the mutations: of every mutationStride (clause,

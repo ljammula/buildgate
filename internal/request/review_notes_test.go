@@ -356,6 +356,7 @@ func TestPlanReviewNotesSayWhenALaterTicketChangesCodeAnEarlierTicketsTestsCover
 			notesTicket("004.spec.md", []string{"index.html", "web/index.test.ts"}, 1),
 			notesTicket("005.spec.md", []string{"index.html"}, 1)}, ""},
 		{"test of a later ticket", []PlanTicket{notesTicket("005.spec.md", []string{app}, 1), earlier}, ""},
+		{"changed file only the later ticket lists", []PlanTicket{earlier, notesTicket("005.spec.md", []string{"frontend/src/live.tsx"}, 1)}, ""},
 		{"a ticket's own tests", []PlanTicket{notesTicket("004.spec.md", []string{app, auth}, 1)}, ""},
 	}
 	for _, tc := range cases {
@@ -368,7 +369,7 @@ func TestPlanReviewNotesSayWhenALaterTicketChangesCodeAnEarlierTicketsTestsCover
 // TestPlanReviewNotesNameAtMostThreeTestsOfAnEarlierTicket: the note names
 // the first three tests, sorted, and counts the rest.
 func TestPlanReviewNotesNameAtMostThreeTestsOfAnEarlierTicket(t *testing.T) {
-	earlier := notesTicket("001.spec.md", []string{"src/e.test.ts", "src/d.test.ts", "src/c.test.ts", "src/b.test.ts", "src/a.test.ts"}, 1)
+	earlier := notesTicket("001.spec.md", []string{"src/m.ts", "src/e.test.ts", "src/d.test.ts", "src/c.test.ts", "src/b.test.ts", "src/a.test.ts"}, 1)
 	later := notesTicket("002.spec.md", []string{"src/z.ts", "src/m.ts"}, 1)
 	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, "", 0)
 	want := []string{"Ticket 002.spec.md changes src/m.ts; ticket 001.spec.md adds or changes tests under src (src/a.test.ts, src/b.test.ts, src/c.test.ts, and 2 more) that ticket 002.spec.md does not list."}
@@ -384,7 +385,7 @@ func TestPlanReviewNotesReadTheRepositorysTestPatterns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: make test\ntest_patterns:\n  - \"*.check.ts\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	earlier := notesTicket("001.spec.md", []string{"src/a.check.ts", "src/b.test.ts"}, 1)
+	earlier := notesTicket("001.spec.md", []string{"src/z.ts", "src/a.check.ts", "src/b.test.ts"}, 1)
 	later := notesTicket("002.spec.md", []string{"src/z.ts"}, 1)
 	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, workspace, 0)
 	want := "Ticket 002.spec.md changes src/z.ts; ticket 001.spec.md adds or changes tests under src (src/a.check.ts) that ticket 002.spec.md does not list."

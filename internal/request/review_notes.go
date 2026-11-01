@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -199,11 +200,11 @@ func SpecReviewNotes(specContent string) []string {
 //     budget is 0 or the ticket declares no estimate. Numbers and the
 //     ticket's file name only.
 //   - "ticket T changes F; ticket E adds or changes tests under D (...)
-//     that ticket T does not list": T lists a file that is not a test
-//     file, E is an earlier ticket of the plan, and E lists test files
-//     under that file's directory (not the repository root) or its
-//     subdirectories that T does not list. Those tests may break on T's
-//     change, and T cannot edit them. Only Allowed-Files headers and the
+//     that ticket T does not list": E is an earlier ticket of the plan,
+//     both list F, a file that is not a test file and not at the
+//     repository root, and E lists test files under F's directory (or its
+//     subdirectories) that T does not list. Those tests may break on T's
+//     change to F, and T cannot edit them. Only Allowed-Files headers and the
 //     repository's test patterns (.factory.yml test_patterns, else
 //     policy.DefaultTestPatterns) are read, never a ticket's prose.
 //
@@ -231,6 +232,7 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 		}
 	}
 	notes := overBudgetNotes(tickets, budgetLines)
+	notes = append(notes, earlierTestsNotes(tickets, workspaceTestPatterns(workspace))...)
 	for i, text := range criteria {
 		if n := i + 1; listing[n] != nil {
 			notes = append(notes, plan.criterionNotes(n, text, covering[n], listing[n])...)
@@ -239,9 +241,6 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 	if idNotes {
 		notes = append(notes, noTestNotes(criteria, tickets)...)
 	}
-	// Last, so that a plan with many tickets in one directory cannot push
-	// a criterion's note out of the cap.
-	notes = append(notes, earlierTestsNotes(tickets, workspaceTestPatterns(workspace))...)
 	return capReviewNotes(notes)
 }
 
@@ -280,9 +279,10 @@ func workspaceTestPatterns(workspace string) []string {
 const maxNamedTests = 3
 
 // earlierTestsNotes returns, for each ticket N and each earlier ticket M, one
-// note when N lists a file that is not a test, in a directory other than the
-// repository root, under which M lists test files that N does not: N's
-// change can break them and N cannot edit them. It reads Allowed-Files and
+// note when both list a file F that is not a test, in a directory other than
+// the repository root, and M lists test files under that directory that N
+// does not: M changed F and wrote tests beside it, and N's change to F can
+// break them while N cannot edit them. It reads Allowed-Files and
 // patterns (test_patterns; none means policy.DefaultTestPatterns), never
 // prose. A directory entry of either ticket is not a file and is skipped.
 func earlierTestsNotes(tickets []PlanTicket, patterns []string) []string {
@@ -312,7 +312,7 @@ func earlierTestsNotes(tickets []PlanTicket, patterns []string) []string {
 func earlierTestsNote(later, earlier PlanTicket, changed, patterns []string) string {
 	for _, f := range changed {
 		dir := path.Dir(f)
-		if dir == "." || dir == "/" {
+		if dir == "." || dir == "/" || !slices.Contains(earlier.Allowed, f) {
 			continue
 		}
 		var missing []string
