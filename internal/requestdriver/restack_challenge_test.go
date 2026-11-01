@@ -94,3 +94,40 @@ func TestReplayRunOfAnUnchallengedTicketSetsNothingAside(t *testing.T) {
 		t.Errorf("the replay run is given -challenge-set-aside: %v", f.runArgs[0])
 	}
 }
+
+// A carved ticket is never marked challenged, but its branch carries the
+// source run's committed challenge files: its replay sets them aside. When
+// the source's challenge was not committed, nothing is set aside.
+func TestReplayRunOfACarvedTicketSetsAsideTheSourcesCommittedChallenge(t *testing.T) {
+	for _, committed := range []bool{true, false} {
+		f := newRestackFixture(t, 2)
+		hostDir := filepath.Join(f.dataDir, "runs", "src-run", "challenge", "0")
+		if err := os.MkdirAll(hostDir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		rec := &run.Run{ID: "src-run", Challenge: &run.ChallengeRecord{Files: []run.ChallengeFile{
+			{Path: "a_test.go", SHA256: strings.Repeat("a", 64), HostPath: filepath.Join(hostDir, "a_test.go"), Criterion: "AC-1"},
+		}}}
+		if committed {
+			rec.Challenge.CommittedSHA = strings.Repeat("c", 40)
+		}
+		if err := rec.Save(f.dataDir); err != nil {
+			t.Fatal(err)
+		}
+		f.r.Tickets[1].Order = &request.TicketOrder{SourceRunID: "src-run", Group: 1, First: 2}
+		f.save()
+		f.pass()
+		if len(f.runArgs) != 1 {
+			t.Fatalf("committed=%v: replay runs = %d, want 1 (events %v)", committed, len(f.runArgs), f.events)
+		}
+		args := f.runArgs[0]
+		if got := slices.Contains(args, "-challenge-set-aside"); got != committed {
+			t.Errorf("committed=%v: -challenge-set-aside given = %v: %v", committed, got, args)
+		}
+		for _, flag := range []string{"-challenge", "-challenge-held", "-challenge-round"} {
+			if slices.Contains(args, flag) {
+				t.Errorf("committed=%v: the replay run is given %s", committed, flag)
+			}
+		}
+	}
+}
