@@ -64,7 +64,10 @@ func collectTestFuncNames(t *testing.T, root string) map[string]bool {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			// A test in a fixture repository or a vendored package is not
+			// one this module runs, so it proves no claim.
+			switch d.Name() {
+			case ".git", "testdata", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
 			return nil

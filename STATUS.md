@@ -15,7 +15,7 @@ upgrade by tag, not from `main`.
 | Area | | State |
 |---|---|---|
 | Request pipeline: spec review, plan review, sandboxed build, gates, PR | ✅ | Live-proven on several real repos and on the ChatGPT Codex route. Every build runs on Temporal, which starts automatically |
-| Safety contract, containment, evidence | ✅ | `safety-contract.md` SC-001–SC-022 enforced by `CLAIMS.md` tests; no host-execution path |
+| Safety contract, containment, evidence | ✅ | `safety-contract.md` SC-001–SC-022 each mapped to its tests in `CLAIMS.md`'s Invariants table: 16 Enforced, 6 Partial (each says what is untested or live-only); no host-execution path |
 | Sandbox runtime | ✅ | Every worker is launched by the OpenShell 0.1.2 gateway (images pinned by digest). Live-proven with `make live-smoke`, `make live-compose`, a two-ticket request from `submit` to its pull requests, and two builds with compose sidecars at once (their containers peak near 2.2 GB) |
 | GHCR release images | 🟡 | Tagged releases publish multi-architecture worker, meter and registry-proxy images; `IMAGE_SOURCE=ghcr BUILDGATE_IMAGE_TAG=vX.Y.Z make install` resolves them to digests. After the first publish, set each package to Public and rerun the workflow; GitHub does not allow public packages to be made private again |
 | Dependencies started for you | ✅ | `submit`, `worker`, `console`, `quickstart` start whichever of Temporal, the `worker` and `serve` is missing, with a spinner and a one-line reason on failure. `FACTORYD_AUTOSTART=0` opts out (a build then needs `-temporal-address`) |

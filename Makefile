@@ -1,4 +1,4 @@
-.PHONY: checks checks-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test live-challenge live-challenge-test live-oversize live-oversize-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
+.PHONY: checks checks-test test-sharded-test meter-proto with-spinner-test console-walk test vet fmt-check verify verify-live coverage console-test console-build console-build-optional agent-pi-test ci install-prereqs install-prereqs-test live-smoke live-compose live-private-module live-install-cache live-smoke-results live-smoke-test live-round live-round-results live-round-test live-challenge live-challenge-test live-oversize live-oversize-test proving-ground proving-ground-results proving-ground-test baseline baseline-test install temporal-up local-images ghcr-images sandbox-image pifork-image project-sandbox-image meter-image openshell-images registry-proxy-image .local-registry probe-instruction-paths
 
 # source remains the default for development checkouts. Release users can
 # install the published, digest-pinned images with IMAGE_SOURCE=ghcr.
@@ -32,7 +32,7 @@ CONSOLE_NPM_CA = $(if $(BUILD_CA_BUNDLE),NODE_EXTRA_CA_CERTS="$(abspath $(BUILD_
 # minutes serially under -race) split into parallel processes: see
 # scripts/test-sharded.sh.
 test:
-	scripts/test-sharded.sh $(GO_PACKAGES)
+	CLAIMS_RAN_CHECK=1 scripts/test-sharded.sh $(GO_PACKAGES)
 
 vet:
 	go vet $(GO_PACKAGES)
@@ -144,7 +144,7 @@ agent-pi-test:
 # installed, the console's own test suite. Not a Makefile alias for `verify`:
 # it needs Docker and the `temporal` CLI, same prerequisites as verify-live,
 # and takes minutes rather than verify's seconds.
-ci: fmt-check vet verify-live agent-pi-test with-spinner-test install-prereqs-test
+ci: fmt-check vet verify-live agent-pi-test with-spinner-test install-prereqs-test test-sharded-test
 	@if command -v npm >/dev/null 2>&1; then \
 		$(MAKE) console-test; \
 	else \
@@ -211,6 +211,11 @@ checks:
 # checks-test: offline tests of scripts/parallel-jobs.sh.
 checks-test:
 	python3 -m unittest scripts/tests/test_parallel_jobs.py -v
+
+# test-sharded-test: offline tests of scripts/test-json.py, which reads the
+# `go test -json` events `make test` records.
+test-sharded-test:
+	python3 -m unittest scripts/tests/test_test_json.py -v
 
 # live-smoke-test: offline unit test for live-smoke.sh's own result-recording
 # logic (the LIVE_SMOKE_RESULTS_FILE JSONL append, and --results) -- no
