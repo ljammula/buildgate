@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -95,7 +96,7 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		estimate, _ := ticketspec.EstimatedChangedLinesOf(string(content))
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed, Estimate: estimate})
 	}
-	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines)
+	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines, r.TestPatterns)
 }
 
 // planSkippedReview reports whether r is building on a plan the factory
@@ -196,14 +197,27 @@ func SpecReviewNotes(specContent string) []string {
 //     the plan was drafted under (Request.PlanBudgetLines). Nothing when the
 //     budget is 0 or the ticket declares no estimate. Numbers and the
 //     ticket's file name only.
+//   - "ticket T changes F; ticket E lists tests beside it (...) that ticket
+//     T does not list": E is an earlier ticket of the plan, both list F, a
+//     file that is not a test file (testPatterns, else
+//     policy.DefaultTestPatterns) and whose extension is not a stylesheet or
+//     document (.css .scss .sass .less .md .txt: a file-name rule), and E
+//     lists test files that T does not, under F's directory and its
+//     subdirectories, or, for a file at the repository root, in the root
+//     directory only. Those tests may break on T's change to F, and T cannot
+//     edit them. At most one note for each ticket T: the first such F and
+//     "(and N more)", the earlier tickets and up to three tests, then "and N
+//     more". Entries are cleaned (path.Clean) and deduplicated; directory
+//     and glob entries are skipped. Only Allowed-Files headers and the test
+//     patterns are read, never a ticket's prose.
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
-func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, budgetLines int) []string {
-	return planReviewNotes(criteria, tickets, workspace, true, budgetLines)
+func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, budgetLines int, testPatterns []string) []string {
+	return planReviewNotes(criteria, tickets, workspace, true, budgetLines, testPatterns)
 }
 
-func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int) []string {
+func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int, testPatterns []string) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))
@@ -229,6 +243,8 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 	if idNotes {
 		notes = append(notes, noTestNotes(criteria, tickets)...)
 	}
+	// Last, so that they can never push a criterion's note out of the cap.
+	notes = append(notes, earlierTestsNotes(tickets, testPatterns)...)
 	return capReviewNotes(notes)
 }
 
@@ -245,6 +261,122 @@ func overBudgetNotes(tickets []PlanTicket, budgetLines int) []string {
 		}
 	}
 	return notes
+}
+
+// maxNamedItems is how many tests, files or tickets an earlier-tests note
+// names before "and N more".
+const maxNamedItems = 3
+
+// docExtensions are the file-name extensions of stylesheets and documents:
+// a shared file with one is a change no test of another ticket depends on,
+// so the earlier-tests note skips it. A rule over file names, not contents.
+var docExtensions = map[string]bool{".css": true, ".scss": true, ".sass": true, ".less": true, ".md": true, ".txt": true}
+
+// allowedFileSet returns the file entries of allowed, cleaned (path.Clean,
+// so "./a.go" is "a.go") and without repeats. A directory entry (trailing
+// "/") and an entry with a glob character ("*?[") name no file and are left
+// out.
+func allowedFileSet(allowed []string) map[string]bool {
+	files := map[string]bool{}
+	for _, entry := range allowed {
+		if strings.HasSuffix(entry, "/") || strings.ContainsAny(entry, "*?[") {
+			continue
+		}
+		clean := path.Clean(entry)
+		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+			continue
+		}
+		files[clean] = true
+	}
+	return files
+}
+
+// testBesideShared reports whether test is in the scope of the shared file f:
+// under f's directory or its subdirectories, or, for a file at the
+// repository root, in the root directory itself (a root file's "subtree" is
+// the whole repository).
+func testBesideShared(test, f string) bool {
+	dir := path.Dir(f)
+	if dir == "." {
+		return path.Dir(test) == "."
+	}
+	return strings.HasPrefix(test, dir+"/")
+}
+
+// earlierTestsNotes returns, for each ticket N, at most one note when N and
+// an earlier ticket M both list a file F that is not a test and not a
+// stylesheet or document (docExtensions), and M lists test files in F's
+// directory (under it, or for a root file in the root directory itself) that
+// N does not list: M changed F and wrote tests beside it, and N's change to F
+// can break them while N cannot edit them. The note names the first such F
+// (sorted) and how many more, the earlier tickets, and up to three of the
+// tests, then "and N more". It reads Allowed-Files and patterns
+// (test_patterns; none means policy.DefaultTestPatterns), never prose.
+func earlierTestsNotes(tickets []PlanTicket, patterns []string) []string {
+	if len(patterns) == 0 {
+		patterns = policy.DefaultTestPatterns
+	}
+	var notes []string
+	for n, later := range tickets {
+		files := allowedFileSet(later.Allowed)
+		shared, tests := map[string]bool{}, map[string]bool{}
+		var earlierNames []string
+		for _, earlier := range tickets[:n] {
+			found := false
+			earlierFiles := allowedFileSet(earlier.Allowed)
+			for t := range earlierFiles {
+				if !policy.IsTestFile(t, patterns) || files[t] || policy.PathCoveredByAllowed(t, later.Allowed) {
+					continue
+				}
+				for f := range files {
+					if earlierFiles[f] && !policy.IsTestFile(f, patterns) && !docExtensions[strings.ToLower(path.Ext(f))] && testBesideShared(t, f) {
+						shared[f], tests[t], found = true, true, true
+					}
+				}
+			}
+			if found {
+				earlierNames = append(earlierNames, noteName(earlier.Name))
+			}
+		}
+		if len(shared) == 0 {
+			continue
+		}
+		sharedList, testList := sortedKeys(shared), sortedKeys(tests)
+		changed := noteName(sharedList[0])
+		if more := len(sharedList) - 1; more > 0 {
+			changed += fmt.Sprintf(" (and %d more)", more)
+		}
+		for i, t := range testList {
+			testList[i] = noteName(t)
+		}
+		who, verb := "ticket "+nameList(earlierNames), "lists"
+		if len(earlierNames) > 1 {
+			who, verb = "tickets "+nameList(earlierNames), "list"
+		}
+		notes = append(notes, fmt.Sprintf("Ticket %s changes %s; %s %s tests beside it (%s) that ticket %s does not list.",
+			noteName(later.Name), changed, who, verb, nameList(testList), noteName(later.Name)))
+	}
+	return notes
+}
+
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// nameList joins the first maxNamedItems of items with ", ", then "and N
+// more".
+func nameList(items []string) string {
+	shown := items[:min(len(items), maxNamedItems)]
+	out := strings.Join(shown, ", ")
+	if more := len(items) - len(shown); more > 0 {
+		out += fmt.Sprintf(", and %d more", more)
+	}
+	return out
 }
 
 // capReviewNotes returns notes without repeats, the first maxReviewNotes

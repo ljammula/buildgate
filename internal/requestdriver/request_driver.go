@@ -520,10 +520,15 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 	if verifyCommand == "" {
 		return haltPlanningInputs(dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
 	}
-	var testPatterns []string
+	// The patterns recorded at submit are the ones the plan review's notes
+	// read; an older record has none, and takes the config's now.
+	testPatterns := r.TestPatterns
 	planReview := false
 	if cfgFile != nil {
-		testPatterns = cfgFile.TestPatterns
+		if len(testPatterns) == 0 {
+			testPatterns = cfgFile.TestPatterns
+			r.TestPatterns = testPatterns
+		}
 		planReview = cfgFile.PlanReview
 	}
 

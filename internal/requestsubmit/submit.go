@@ -719,7 +719,7 @@ func Submit(p Params) (Result, error) {
 	var discardedFastCheckCommand string
 	discardedGateCommands := map[string]*string{}
 	var discardedProtectedPaths string
-	var discardedTestPatterns []string
+	var testPatterns []string
 	// discardedTokenCeiling/discardedCostCeiling seed as the caller's own
 	// session ceilings when supplied (SessionTokenCeiling/
 	// SessionCostCeilingMicroUSD), so ApplyProjectConfigDefaults' tighten-
@@ -729,7 +729,7 @@ func Submit(p Params) (Result, error) {
 	// Params.SessionTokenCeiling's own doc comment.
 	discardedTokenCeiling := int(p.SessionTokenCeiling)
 	discardedCostCeiling := p.SessionCostCeilingMicroUSD
-	if err := ApplyProjectConfigDefaults(explicit, workspaceAbs, &verifyCommand, &discardedFastCheckCommand, discardedGateCommands, &preflightProfile, &discardedProtectedPaths, &discardedTestPatterns, &discardedTokenCeiling, &discardedCostCeiling, submitDefaultMeterTokenBudget, submitDefaultMeterCostBudget); err != nil {
+	if err := ApplyProjectConfigDefaults(explicit, workspaceAbs, &verifyCommand, &discardedFastCheckCommand, discardedGateCommands, &preflightProfile, &discardedProtectedPaths, &testPatterns, &discardedTokenCeiling, &discardedCostCeiling, submitDefaultMeterTokenBudget, submitDefaultMeterCostBudget); err != nil {
 		return Result{}, err
 	}
 	if verifyCommand == "" {
@@ -777,6 +777,7 @@ func Submit(p Params) (Result, error) {
 		return Result{}, err
 	}
 	req.PreflightProfile = preflightProfile
+	req.TestPatterns = testPatterns
 	req.Harnesses = p.Harnesses
 	req.Models = p.Models
 	if err := req.Save(p.DataDir); err != nil {

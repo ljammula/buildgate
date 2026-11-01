@@ -2,6 +2,7 @@ package requestdriver_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,5 +100,92 @@ func TestAMalformedEstimateIsRefusedAtPlanTime(t *testing.T) {
 				t.Errorf("no refusal names the header: %q", reasons)
 			}
 		})
+	}
+}
+
+// TestBoardAppPlanReviewNotesATicketThatChangesCodeAnEarlierTicketsTestsCover
+// is the 2026-10-31 incident: ticket 005 may change frontend/src/App.tsx but
+// not ticket 004's frontend/src/auth/AuthScreen.test.tsx, which renders App.
+// The plan still reaches plan_review, with the note.
+func TestBoardAppPlanReviewNotesATicketThatChangesCodeAnEarlierTicketsTestsCover(t *testing.T) {
+	c := loadPlanCase(t, filepath.Join(planCorpusDir, "board-app-frontend-20261031"), "board-app-frontend-20261031")
+	loaded := planUnderBudget(t, c, 0)
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("state = %s (error %q), want plan_review", loaded.State, loaded.Error)
+	}
+	const want = "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md lists tests beside it (frontend/src/auth/AuthContext.test.tsx, frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
+	for _, note := range loaded.ReviewNotes {
+		if note == want {
+			return
+		}
+	}
+	t.Errorf("review notes = %q, want one equal to %q", loaded.ReviewNotes, want)
+}
+
+// planWithTestPatterns drives c through planning in a workspace whose
+// .factory.yml declares configPatterns, for a request that recorded
+// recorded at submit (nil: an older record), and returns the saved request.
+func planWithTestPatterns(t *testing.T, c planCorpusCase, recorded []string, configPattern string) *request.Request {
+	t.Helper()
+	dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, c.spec, c.verifyCommand)
+	usePlanningJob(t, dataDir, id)
+	fixture, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testfixture.WriteEmptyFiles(t, fixture.Workspace, filepath.Join(planCorpusDir, planCorpusWorkspaces, c.project+".files"))
+	yml := "verify_command: \"" + c.verifyCommand + "\"\ntest_patterns:\n  - \"" + configPattern + "\"\n"
+	if err := os.WriteFile(filepath.Join(fixture.Workspace, ".factory.yml"), []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixture.TestPatterns = recorded
+	if err := fixture.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := requestdrivertest.StubPlanTicketsRunner(c.tickets, &request.PlanEvidence{}, nil)
+	if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("state = %s (error %q), want plan_review", loaded.State, loaded.Error)
+	}
+	return loaded
+}
+
+func hasEarlierTestsNote(r *request.Request) bool {
+	for _, note := range r.ReviewNotes {
+		if strings.Contains(note, " tests beside it (") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPlanningPrefersTheTestPatternsRecordedAtSubmit: the planning pass and
+// the plan review's notes use the patterns the request recorded; an older
+// record without them takes the config's and keeps them on the saved request.
+func TestPlanningPrefersTheTestPatternsRecordedAtSubmit(t *testing.T) {
+	c := loadPlanCase(t, filepath.Join(planCorpusDir, "board-app-frontend-20261031"), "board-app-frontend-20261031")
+
+	recorded := planWithTestPatterns(t, c, []string{"*.test.tsx", "*.test.ts"}, "*.zz")
+	if got := strings.Join(recorded.TestPatterns, ","); got != "*.test.tsx,*.test.ts" {
+		t.Errorf("recorded patterns replaced: %q", got)
+	}
+	if !hasEarlierTestsNote(recorded) {
+		t.Errorf("the recorded patterns mark the tests, but notes = %q", recorded.ReviewNotes)
+	}
+
+	// Planning ran on the record's patterns: the config's "*.zz" would have
+	// made every ticket's tests infeasible and halted the request.
+	older := planWithTestPatterns(t, c, nil, "*.test.ts*")
+	if got := strings.Join(older.TestPatterns, ","); got != "*.test.ts*" {
+		t.Errorf("an older record took %q from the config, want *.test.ts*", got)
+	}
+	if !hasEarlierTestsNote(older) {
+		t.Errorf("the config's patterns mark the tests, but notes = %q", older.ReviewNotes)
 	}
 }

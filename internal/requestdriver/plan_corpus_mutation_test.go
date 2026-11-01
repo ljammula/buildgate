@@ -301,7 +301,17 @@ func (p mutationPlan) notes(n int, text, owned string) []string {
 	if owned != "" {
 		tickets = append(append([]request.PlanTicket{}, tickets...), request.PlanTicket{Name: otherTicket, Content: "a ticket that covers no criterion", Allowed: []string{owned}})
 	}
-	return request.PlanReviewNotes(criteria, tickets, p.workspace, 0)
+	var notes []string
+	for _, note := range request.PlanReviewNotes(criteria, tickets, p.workspace, 0, nil) {
+		// The earlier-tests notes read ticket headers only, not a
+		// criterion, and come after every criterion note; these tests
+		// compare a criterion's notes in order, so they leave them out for
+		// every plan (TestBoardApp... reads them).
+		if !strings.Contains(note, " tests beside it (") {
+			notes = append(notes, note)
+		}
+	}
+	return notes
 }
 
 // mutationStride thins the mutations: of every mutationStride (clause,
