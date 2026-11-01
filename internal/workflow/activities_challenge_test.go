@@ -4,14 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/testfixture"
+	wsisolation "buildgate/internal/workspace"
 )
 
 const edgeTest = "// buildgate-challenge: AC-1\npackage p\n\nimport \"testing\"\n\nfunc TestEdge(t *testing.T) {\n\tif Add(0, 0) != 0 {\n\t\tt.Fatal(\"zero\")\n\t}\n}\n"
@@ -463,4 +467,118 @@ func TestChallengeFilesAreHeldWhateverTheJobsExitStatus(t *testing.T) {
 			t.Errorf("%s: note %q, want %q", name, note, tc.note)
 		}
 	}
+}
+
+// Two challenge rounds with held files and one isolated run on one
+// repository at once: each round's exclude block is added and removed under
+// the git metadata lock, so info/exclude ends as it began plus the lines its
+// other writers own, no held stub lands in any commit, and the isolated run's
+// own file is committed. (SC-011.)
+func TestConcurrentChallengeRoundsLeaveInfoExcludeAsTheyFoundIt(t *testing.T) {
+	repo := testfixture.NewGitRepo(t)
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	excludePath := git(repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const original = "# operator\n/local-only\n"
+	if err := os.WriteFile(excludePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := git(repo, "rev-parse", "HEAD")
+	wts := map[string]string{}
+	for _, name := range []string{"r1", "r2", "iso"} {
+		wts[name] = filepath.Join(t.TempDir(), name)
+		git(repo, "worktree", "add", "-q", "-b", name, wts[name])
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 3)
+	for _, name := range []string{"r1", "r2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := heldRound(wts[name], name, 15); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 15; i++ {
+			if err := wsisolation.ExcludeHarnessArtifacts(wts["iso"]); err != nil {
+				errs <- err
+				return
+			}
+			if err := os.WriteFile(filepath.Join(wts["iso"], "iso.txt"), []byte(fmt.Sprint(i)), 0o644); err != nil {
+				errs <- err
+				return
+			}
+			git(wts["iso"], "add", "-A")
+			git(wts["iso"], "commit", "-q", "--allow-empty", "-m", "iso")
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(body), original) || strings.Contains(string(body), "held") || strings.Contains(string(body), "factoryd-run") || !strings.Contains(string(body), ".pi-build-session/") {
+		t.Errorf("info/exclude = %q; want the original lines then only the harness entries", body)
+	}
+	for _, name := range []string{"r1", "r2", "iso"} {
+		files := git(wts[name], "log", "--name-only", "--format=", base+".."+name)
+		if strings.Contains(files, "held") {
+			t.Errorf("%s committed a held stub: %q", name, files)
+		}
+		if !strings.Contains(files, map[string]string{"r1": "r1.txt", "r2": "r2.txt", "iso": "iso.txt"}[name]) {
+			t.Errorf("%s did not commit its own file: %q", name, files)
+		}
+	}
+}
+
+// heldRound runs rounds challenge rounds in wt: mount stubs for two held
+// paths, excluded from git, a commit of the round's own file, then the
+// exclusion and the stubs removed.
+func heldRound(wt, name string, rounds int) error {
+	masks := []sandbox.WorkspaceMask{{Target: "p/held_test.go"}, {Target: "p/" + name + "_held[1].go"}}
+	for i := 0; i < rounds; i++ {
+		if err := os.MkdirAll(filepath.Join(wt, "p"), 0o755); err != nil {
+			return err
+		}
+		for _, m := range masks {
+			if err := os.WriteFile(filepath.Join(wt, m.Target), nil, 0o644); err != nil {
+				return err
+			}
+		}
+		unexclude, err := excludeMountsFromGit(context.Background(), wt, masks)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(wt, name+".txt"), []byte(fmt.Sprint("work", i)), 0o644); err != nil {
+			return err
+		}
+		for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", name}} {
+			if out, err := exec.Command("git", append([]string{"-C", wt, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+				return fmt.Errorf("%s git %v: %v\n%s", name, args, err, out)
+			}
+		}
+		unexclude()
+		for _, m := range masks {
+			_ = os.Remove(filepath.Join(wt, m.Target))
+		}
+	}
+	return nil
 }
