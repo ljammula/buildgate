@@ -2829,3 +2829,45 @@ func TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft(t *te
 		t.Errorf("ticket %+v, state %s: want it draft and pushed, still in pr_review", t1, r.State)
 	}
 }
+
+// TestRoundClearsMergeReadinessOnDiskBeforeItsBuildStarts pins what
+// `factoryd status` relies on to withhold safe-to-merge: while a review
+// round's build runs, the saved request has no merge-readiness check.
+func TestRoundClearsMergeReadinessOnDiskBeforeItsBuildStarts(t *testing.T) {
+	dp := newFakeDeps(t)
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 10, Author: "alice", Body: "please rename this", CommentID: 111}}
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+
+	var onDisk *request.MergeReadiness
+	sawBuild := false
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		sawBuild = true
+		saved, err := request.Load(dataDir, r.ID)
+		if err != nil {
+			t.Errorf("load request during the round: %v", err)
+		} else {
+			onDisk = saved.Tickets[0].MergeReadiness
+		}
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
+		return saveAcceptedRoundRun(t, dataDir, accepted)
+	}
+	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error { return nil }
+	dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
+
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	if !sawBuild {
+		t.Fatal("the round's build never ran")
+	}
+	if onDisk != nil {
+		t.Errorf("merge readiness on disk during the round's build = %+v, want nil", onDisk)
+	}
+}

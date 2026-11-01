@@ -708,16 +708,7 @@ func decisionStillAllows(dataDir, runID string) (bool, error) {
 // instead of the real base; retargetOffMergedTicket moves it once the
 // ticket underneath merges, and the next poll flips it as usual.
 func stackedOnAnotherTicket(r *request.Request, ticket *request.Ticket, baseRefName string) bool {
-	if baseRefName == "" {
-		return false
-	}
-	for i := range r.Tickets {
-		other := &r.Tickets[i]
-		if other.Index != ticket.Index && other.Branch == baseRefName {
-			return true
-		}
-	}
-	return false
+	return r.StackedOnAnotherTicket(ticket, baseRefName)
 }
 
 // advancePRReadyOrApproved is the PR-review driver's own "ready for
@@ -1021,6 +1012,11 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 	// An open thread is being acted on: the last readiness check no longer
 	// describes the pull request. The poll after the round checks again.
 	ticket.MergeReadiness = nil
+	// Saved before the round's build starts, so `factoryd status` does not
+	// show a pull request a round is about to push to as safe to merge.
+	if err := r.Save(dataDir); err != nil {
+		return err
+	}
 
 	// The round builds on the ticket's current PR-head run (the commit on
 	// the pull request's branch now), on the branch that run pushed, and

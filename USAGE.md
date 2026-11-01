@@ -223,12 +223,12 @@ so it shows only its own delta rather than repeating ticket N-1's
 already-open commits; it stays draft until ticket N-1 merges, at which
 point it's automatically retargeted onto ticket N-1's own base (by the next
 PR poll, or, while later tickets are still building, before the next
-ticket builds) and can be marked ready. Merge a ticket's PR only once the
-request shows a later ticket building (`factoryd status` marks it
-`safe-to-merge`; until then it is `draft` and its advice rounds may still push
-to it, and a merge drops their result), and check its base first. In
-`pr_review` the mark goes to the lowest open ticket whose PR is `ready` or
-`approved` with no round or restack in flight. Review each PR while it is stacked, and merge bottom-up
+ticket builds) and can be marked ready. Merge a ticket's PR only when `factoryd status` marks it `safe-to-merge`:
+the lowest open ticket, with nothing in flight that could still push to it (a
+building request's current ticket is `draft` and its advice rounds may still
+push, and a merge drops their result; in `pr_review`, a review, CI or restack
+round, or a merge-readiness check that has not passed, withholds the mark).
+Check its base first. Review each PR while it is stacked, and merge bottom-up
 (ticket 1 first). With squash merges, a retargeted PR's Files tab also
 shows ticket N-1's changes (it shares ticket N-1's original commit), but
 merging it lands only ticket N's own change.

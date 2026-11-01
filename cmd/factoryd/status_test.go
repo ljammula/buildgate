@@ -874,7 +874,7 @@ func TestTicketSummaryMarksWhenAStackedPRIsSafeToMerge(t *testing.T) {
 }
 
 func TestTicketSummaryMarksSafeToMergeInPRReview(t *testing.T) {
-	checked := &request.MergeReadiness{}
+	checked := &request.MergeReadiness{Ready: true}
 	url := func(n string) string { return "https://github.com/acme/app/pull/" + n }
 	base := func() *request.Request {
 		return &request.Request{
@@ -891,23 +891,30 @@ func TestTicketSummaryMarksSafeToMergeInPRReview(t *testing.T) {
 		mutate func(r *request.Request)
 		want   string
 	}{
-		{"idle bottom ticket on main", func(r *request.Request) {}, "1:ready,safe-to-merge 2:stacked 3:stacked"},
-		{"approved bottom ticket", func(r *request.Request) { r.Tickets[0].PRState = "approved" }, "1:approved,safe-to-merge 2:stacked 3:stacked"},
-		{"draft bottom ticket", func(r *request.Request) { r.Tickets[0].PRState = "draft" }, "1:draft 2:stacked 3:stacked"},
+		{"idle bottom ticket on main", func(r *request.Request) {}, "1:ready,ready-to-merge,safe-to-merge 2:stacked 3:stacked"},
+		{"readiness check failed", func(r *request.Request) {
+			r.Tickets[0].MergeReadiness = &request.MergeReadiness{Blockers: []string{"its checks are pending or failing"}}
+		}, "1:ready 2:stacked 3:stacked"},
+		{"ticket 2 approved while stacked, ticket 1 merged, base still ticket 1's branch", func(r *request.Request) {
+			r.Tickets[0].PRState, r.Tickets[0].MergeReadiness, r.Tickets[0].Branch = "merged", nil, "factoryd/run-1"
+			r.Tickets[1].PRState, r.Tickets[1].MergeReadiness, r.Tickets[1].PRBase = "approved", checked, "factoryd/run-1"
+		}, "1:merged 2:approved,ready-to-merge 3:stacked"},
+		{"approved bottom ticket", func(r *request.Request) { r.Tickets[0].PRState = "approved" }, "1:approved,ready-to-merge,safe-to-merge 2:stacked 3:stacked"},
+		{"draft bottom ticket, no passing check", func(r *request.Request) { r.Tickets[0].PRState, r.Tickets[0].MergeReadiness = "draft", nil }, "1:draft 2:stacked 3:stacked"},
 		{"round in flight (no readiness check)", func(r *request.Request) { r.Tickets[0].MergeReadiness = nil }, "1:ready 2:stacked 3:stacked"},
-		{"restack in flight", func(r *request.Request) { r.Tickets[1].Restack = &request.TicketRestack{} }, "1:ready 2:stacked 3:stacked"},
-		{"restack held", func(r *request.Request) { r.Tickets[2].RestackHold = &request.TicketRestackHold{} }, "1:ready 2:stacked 3:stacked"},
-		{"advice round in flight", func(r *request.Request) { r.Tickets[0].Advice = &request.TicketAdvice{} }, "1:ready 2:stacked 3:stacked"},
+		{"restack in flight", func(r *request.Request) { r.Tickets[1].Restack = &request.TicketRestack{} }, "1:ready,ready-to-merge 2:stacked 3:stacked"},
+		{"restack held", func(r *request.Request) { r.Tickets[2].RestackHold = &request.TicketRestackHold{} }, "1:ready,ready-to-merge 2:stacked 3:stacked"},
+		{"advice round in flight", func(r *request.Request) { r.Tickets[0].Advice = &request.TicketAdvice{} }, "1:ready,ready-to-merge 2:stacked 3:stacked"},
 		{"bottom merged, next retargeted", func(r *request.Request) {
 			r.Tickets[0].PRState, r.Tickets[0].MergeReadiness = "merged", nil
 			r.Tickets[1].PRState, r.Tickets[1].MergeReadiness = "ready", checked
-		}, "1:merged 2:ready,safe-to-merge 3:stacked"},
+		}, "1:merged 2:ready,ready-to-merge,safe-to-merge 3:stacked"},
 		{"bottom merged, next not yet retargeted", func(r *request.Request) {
 			r.Tickets[0].PRState, r.Tickets[0].MergeReadiness = "merged", nil
 		}, "1:merged 2:stacked 3:stacked"},
 		{"all merged", func(r *request.Request) {
 			for i := range r.Tickets {
-				r.Tickets[i].PRState = "merged"
+				r.Tickets[i].PRState, r.Tickets[i].MergeReadiness = "merged", nil
 			}
 		}, "1:merged 2:merged 3:merged"},
 	}
