@@ -9,6 +9,7 @@ import (
 
 	"buildgate/internal/run"
 	"buildgate/internal/stats"
+	"buildgate/internal/timereport"
 )
 
 func statsPtr(b bool) *bool { return &b }
@@ -248,5 +249,28 @@ func TestStatsRequestRefusesTheOtherSelectors(t *testing.T) {
 		if _, err := runStats(t, args...); err == nil || !strings.Contains(err.Error(), "cannot be combined with "+extra[0]) {
 			t.Errorf("%v: err = %v, want a refusal naming %s", extra, err, extra[0])
 		}
+	}
+}
+
+// A run whose launches overlapped prints its launch count, the launches' summed
+// time and the stage's wall time.
+func TestStatsRequestPrintsReproductionLaunchesSummedAndWall(t *testing.T) {
+	rep := &timereport.Report{RequestID: "r", State: "building", Tickets: []timereport.TicketTime{{Index: 1, Runs: []timereport.RunTime{{
+		RunID: "r-001", Kind: "build", State: "accepted", Seconds: 600,
+		Stages: []timereport.StageTime{
+			{Stage: "verify", Seconds: 60},
+			{Stage: "gate", Seconds: 40},
+			{Stage: "tests_red_on_base", Seconds: 300, Launches: 6, LaunchSeconds: 300, WallSeconds: 120},
+			{Stage: "challenge", Seconds: 400, Launches: 2, LaunchSeconds: 90, WallSeconds: 90},
+		},
+	}}}}}
+	var b strings.Builder
+	printRequestTime(&b, rep)
+	want := "  build reproduction launches: tests_red_on_base 6 launches, 5.0 min summed, 2.0 min wall; challenge 2 launches, 1.5 min summed, 1.5 min wall\n"
+	if strings.Contains(b.String(), "gate 0 launches") || strings.Contains(b.String(), ": gate ") {
+		t.Errorf("a gate stage printed as launches:\n%s", b.String())
+	}
+	if !strings.Contains(b.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, b.String())
 	}
 }

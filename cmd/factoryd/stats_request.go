@@ -37,6 +37,11 @@ func printRequestTime(w io.Writer, rep *timereport.Report) {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", runLabel(r), sanitize.Line(r.State), minutes(r.Seconds), lockCell(r), stageCell(r), sanitize.Line(r.RunID))
 		}
 		tw.Flush()
+		for _, r := range t.Runs {
+			if cell := launchCell(r); cell != "" {
+				fmt.Fprintf(w, "  %s reproduction launches: %s\n", runLabel(r), cell)
+			}
+		}
 	}
 	fmt.Fprintln(w, "\nrepository-busy waits (a step found the repository held by another build):")
 	if len(rep.Waits) == 0 {
@@ -91,6 +96,19 @@ func lockCell(r timereport.RunTime) string {
 		}
 	}
 	return cell
+}
+
+// launchCell is a run's reproduction launches per stage: how many, their
+// summed time, and the stage's first start to last end, so overlapping
+// launches show as a wall time under the sum. "" when the run made none.
+func launchCell(r timereport.RunTime) string {
+	var parts []string
+	for _, s := range r.Stages {
+		if s.Launches > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d launches, %s min summed, %s min wall", s.Stage, s.Launches, minutes(s.LaunchSeconds), minutes(s.WallSeconds)))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func stageCell(r timereport.RunTime) string {

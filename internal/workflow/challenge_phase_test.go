@@ -75,6 +75,15 @@ type challengeFixture struct {
 	verifyErr      error // the verify Activity's error once the files are committed
 	undoErr        error
 	noVerifyChange bool
+	// serialLaunches replays a history recorded before
+	// parallelReproductionLaunchesChange; launchErr fails a launch.
+	serialLaunches bool
+	// retriesV1 replays a history at activity-retries version 1.
+	retriesV1 bool
+	// noSidecars makes the verify result say positively that launches start no
+	// compose sidecars; unset, it is a result without the fact (serial).
+	noSidecars bool
+	launchErr  func(ReproductionRunInput) error
 }
 
 func (f *challengeFixture) record(name string) {
@@ -106,7 +115,7 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 			if fx.gateFails || fx.redOnCommit && committed {
 				exit = 1
 			}
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: exit}}, nil
+			return VerifyActivityResult{NoComposeSidecars: fx.noSidecars, Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: exit}}, nil
 		},
 		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
@@ -118,6 +127,12 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 	}
 	if fx.noVerifyChange {
 		env.OnGetVersion(verifyChallengeCommitChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
+	if fx.retriesV1 {
+		env.OnGetVersion(activityRetriesChange, temporalworkflow.DefaultVersion, 2).Return(temporalworkflow.Version(activityRetriesOn))
+	}
+	if fx.serialLaunches {
+		env.OnGetVersion(parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
 	if fx.legacy {
 		env.OnGetVersion(challengeWithReviewByMemoryChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
@@ -154,6 +169,11 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 		mu.Lock()
 		out.launches = append(out.launches, activity.GetInfo(ctx).ActivityID)
 		mu.Unlock()
+		if fx.launchErr != nil {
+			if err := fx.launchErr(in); err != nil {
+				return ReproductionRunResult{}, err
+			}
+		}
 		return launch(in), nil
 	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.RegisterActivityWithOptions(func(_ context.Context, in CommitChallengeInput) (CommitChallengeResult, error) {

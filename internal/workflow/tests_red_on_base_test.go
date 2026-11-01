@@ -45,13 +45,26 @@ func (r ReproductionRunResult) withTests(id string) ReproductionRunResult {
 
 func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, results map[string]ReproductionRunResult, version bool) *testsRedPhase {
 	t.Helper()
+	return runTestsRedPhaseWith(t, input, held, verifyExit, version, false, true, func(_ context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
+		res := results[in.Pass]
+		res.Run.Pass, res.Run.Commit = in.Pass, in.Commit
+		return res, nil
+	})
+}
+
+// runTestsRedPhaseWith is runTestsRedPhase with the launch Activity's body
+// given, run outside the recorder's lock so launches can overlap, serial, a
+// history recorded before parallelReproductionLaunchesChange, and noSidecars,
+// a verify result that says positively that the run starts no compose sidecars.
+func runTestsRedPhaseWith(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, version, serial, noSidecars bool, launch func(context.Context, ReproductionRunInput) (ReproductionRunResult, error)) *testsRedPhase {
+	t.Helper()
 	p := &testsRedPhase{}
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
 			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
 		},
 		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: verifyExit}}, nil
+			return VerifyActivityResult{NoComposeSidecars: noSidecars, Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: verifyExit}}, nil
 		},
 		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil
@@ -59,6 +72,9 @@ func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldRes
 	)
 	if !version {
 		env.OnGetVersion(testsRedOnBaseChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
+	if serial {
+		env.OnGetVersion(parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
 	env.RegisterActivityWithOptions(func(context.Context, CollectEvidenceInput) (CollectedEvidence, error) {
 		return CollectedEvidence{ResultSHA: "result-sha", ChangedFiles: []string{"pkg/a.go", "pkg/a_test.go"}}, nil
@@ -72,12 +88,10 @@ func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldRes
 	}, activity.RegisterOptions{Name: HoldChangedTestsActivityName})
 	env.RegisterActivityWithOptions(func(ctx context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
 		p.mu.Lock()
-		defer p.mu.Unlock()
 		p.calls = append(p.calls, activity.GetInfo(ctx).ActivityID)
 		p.launches = append(p.launches, in)
-		res := results[in.Pass]
-		res.Run.Pass, res.Run.Commit = in.Pass, in.Commit
-		return res, nil
+		p.mu.Unlock()
+		return launch(ctx, in)
 	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.ExecuteWorkflow(RunWorkflow, input)
 	p.err = env.GetWorkflowError()

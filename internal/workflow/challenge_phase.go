@@ -250,6 +250,54 @@ func runnableChallengeFiles(files []run.ChallengeFile) []int {
 // Sets each file's verdict and the record's.
 func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCtx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, rec *run.ChallengeRecord, commit string) error {
 	rctx := reproductionContext(ctx, buildVerifyCtx)
+	units := challengeUnits(rec)
+	var outcomes []challengeUnitOutcome
+	if launchesInParallel(ctx, ids, result, rec.WithReview) {
+		outcomes = runChallengeUnitsInWaves(ctx, ids, rctx, input, commit, units)
+	} else {
+		for _, u := range units {
+			var o challengeUnitOutcome
+			o.verdict, o.launches = runChallengeLaunches(ctx, ids, rctx, input, result, commit, u.held, u.group, u.classify)
+			outcomes = append(outcomes, o)
+		}
+	}
+	for i, u := range units {
+		result.Attempts = append(result.Attempts, outcomes[i].attempts...)
+		if u.group == nil {
+			recordChallengeFile(rec, u, outcomes[i])
+		} else {
+			recordChallengeGroup(rec, u, outcomes[i])
+		}
+	}
+	rec.Verdict = challengeVerdict(rec.Files)
+	if rec.Verdict == run.ChallengeNoVerdict && rec.Cause == "" {
+		rec.Cause = "no held challenge file gave a green or a red verdict"
+	}
+	return nil
+}
+
+// challengeUnit is one thing a challenge launches: a runner-covered file, or
+// the group of files the repository's verify command runs together (group set,
+// held.Finding -1, files the indexes of the group's members).
+type challengeUnit struct {
+	held     run.HeldReproduction
+	group    []run.HeldReproduction
+	files    []int
+	classify func(run.ReproductionRun) (string, []run.ChallengeFailure)
+}
+
+// challengeUnitOutcome is a unit's decided verdict and the launches it made;
+// attempts are the launches' attempts, which the caller records on the result.
+type challengeUnitOutcome struct {
+	verdict  challengeRunVerdict
+	launches []run.ReproductionRun
+	attempts []run.Attempt
+}
+
+// challengeUnits are the launches a challenge makes, in the order its record is
+// written: the runner-covered files in index order, then the one group.
+func challengeUnits(rec *run.ChallengeRecord) []challengeUnit {
+	var units []challengeUnit
 	var group []run.HeldReproduction
 	var groupIdx []int
 	for _, i := range runnableChallengeFiles(rec.Files) {
@@ -259,48 +307,121 @@ func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 			group, groupIdx = append(group, h), append(groupIdx, i)
 			continue
 		}
-		verdict, launches := runChallengeLaunches(ctx, ids, rctx, input, result, commit, h, nil, func(r run.ReproductionRun) (string, []run.ChallengeFailure) {
-			return classifyChallengeRun(r)
-		})
-		f.Verdict = verdict.verdict
-		f.Failures = verdict.failures
-		rec.Launches = append(rec.Launches, launches...)
-		if verdict.note != "" {
-			rec.Notes = append(rec.Notes, verdict.note+": "+cleanNoteName(f.Path))
-		}
-		if f.Verdict == challengeBroken {
-			rec.Notes = append(rec.Notes, "a challenge file did not compile, was not collected or left no report, so it gave no verdict: "+cleanNoteName(f.Path))
-		}
+		units = append(units, challengeUnit{held: h, files: []int{i}, classify: classifyChallengeRun})
 	}
 	if len(group) > 0 {
-		whole := run.HeldReproduction{Finding: -1}
-		verdict, launches := runChallengeLaunches(ctx, ids, rctx, input, result, commit, whole, group, func(r run.ReproductionRun) (string, []run.ChallengeFailure) {
-			switch reproduction.Outcome(r.Outcome) {
-			case reproduction.OutcomePassed:
-				return run.ChallengeGreen, nil
-			case reproduction.OutcomeUnstaged:
-				// Nothing launched: no verdict, never a red.
-				return challengeBroken, nil
-			}
-			return run.ChallengeRed, []run.ChallengeFailure{{Test: "verify command", Assertion: fmt.Sprintf("exit status %d", r.ExitCode)}}
-		})
-		for _, i := range groupIdx {
-			rec.Files[i].Verdict, rec.Files[i].Failures, rec.Files[i].Group = verdict.verdict, verdict.failures, true
+		units = append(units, challengeUnit{held: run.HeldReproduction{Finding: -1}, group: group, files: groupIdx, classify: classifyChallengeGroupRun})
+	}
+	return units
+}
+
+// classifyChallengeGroupRun is a verify-command launch's verdict: its exit
+// status alone. A launch that staged nothing is broken, never red.
+func classifyChallengeGroupRun(r run.ReproductionRun) (string, []run.ChallengeFailure) {
+	switch reproduction.Outcome(r.Outcome) {
+	case reproduction.OutcomePassed:
+		return run.ChallengeGreen, nil
+	case reproduction.OutcomeUnstaged:
+		// Nothing launched: no verdict, never a red.
+		return challengeBroken, nil
+	}
+	return run.ChallengeRed, []run.ChallengeFailure{{Test: "verify command", Assertion: fmt.Sprintf("exit status %d", r.ExitCode)}}
+}
+
+// recordChallengeFile records a runner-covered file's verdict, launches and notes.
+func recordChallengeFile(rec *run.ChallengeRecord, u challengeUnit, o challengeUnitOutcome) {
+	f := &rec.Files[u.files[0]]
+	f.Verdict = o.verdict.verdict
+	f.Failures = o.verdict.failures
+	rec.Launches = append(rec.Launches, o.launches...)
+	if o.verdict.note != "" {
+		rec.Notes = append(rec.Notes, o.verdict.note+": "+cleanNoteName(f.Path))
+	}
+	if f.Verdict == challengeBroken {
+		rec.Notes = append(rec.Notes, "a challenge file did not compile, was not collected or left no report, so it gave no verdict: "+cleanNoteName(f.Path))
+	}
+}
+
+// recordChallengeGroup records the verify-command group's verdict on each of
+// its files, with its launches and notes.
+func recordChallengeGroup(rec *run.ChallengeRecord, u challengeUnit, o challengeUnitOutcome) {
+	for _, i := range u.files {
+		rec.Files[i].Verdict, rec.Files[i].Failures, rec.Files[i].Group = o.verdict.verdict, o.verdict.failures, true
+	}
+	rec.Launches = append(rec.Launches, o.launches...)
+	if o.verdict.verdict == challengeBroken {
+		rec.Notes = append(rec.Notes, fmt.Sprintf("%d challenge file(s) run under the repository's verify command could not be launched, so they gave no verdict", len(u.group)))
+	}
+	rec.Notes = append(rec.Notes, "collection not proven for "+fmt.Sprintf("%d challenge file(s) run under the repository's verify command", len(u.group)))
+	if o.verdict.note != "" {
+		rec.Notes = append(rec.Notes, o.verdict.note)
+	}
+}
+
+// runChallengeUnitsInWaves launches every unit's first pass together, then the
+// second pass of each unit whose first was red together (up to the run
+// worker's two slots at a time). Each launch is its own
+// Activity; a unit's verdict is decided by the rules of runChallengeLaunches.
+func runChallengeUnitsInWaves(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, commit string, units []challengeUnit) []challengeUnitOutcome {
+	wave := func(pass string, which []int) []waveOutcome {
+		launches := make([]waveLaunch, len(which))
+		for k, i := range which {
+			u := units[i]
+			launches[k] = waveLaunch{id: fmt.Sprintf("challenge-run-%d-%s", u.held.Finding, pass), in: ReproductionRunInput{RunWorkflowInput: input, Held: u.held, Pass: pass, Commit: commit, AttemptKind: challengeAttemptKind, Group: u.group}}
 		}
-		rec.Launches = append(rec.Launches, launches...)
-		if verdict.verdict == challengeBroken {
-			rec.Notes = append(rec.Notes, fmt.Sprintf("%d challenge file(s) run under the repository's verify command could not be launched, so they gave no verdict", len(group)))
+		return runReproductionWave(ctx, ids, rctx, launches)
+	}
+	all := make([]int, len(units))
+	for i := range units {
+		all[i] = i
+	}
+	firsts := wave(challengePass1, all)
+	outcomes := make([]challengeUnitOutcome, len(units))
+	var again []int
+	for i, f := range firsts {
+		if f.err == nil {
+			outcomes[i].launches = []run.ReproductionRun{f.res.Run}
+			outcomes[i].attempts = f.res.Attempts
 		}
-		rec.Notes = append(rec.Notes, "collection not proven for "+fmt.Sprintf("%d challenge file(s) run under the repository's verify command", len(group)))
-		if verdict.note != "" {
-			rec.Notes = append(rec.Notes, verdict.note)
+		if verdict, red := decideFirstChallengeLaunch(f, units[i].classify); red {
+			again = append(again, i)
+		} else {
+			outcomes[i].verdict = verdict
 		}
 	}
-	rec.Verdict = challengeVerdict(rec.Files)
-	if rec.Verdict == run.ChallengeNoVerdict && rec.Cause == "" {
-		rec.Cause = "no held challenge file gave a green or a red verdict"
+	for k, s := range wave(challengePass2, again) {
+		i := again[k]
+		if s.err == nil {
+			outcomes[i].launches = append(outcomes[i].launches, s.res.Run)
+			outcomes[i].attempts = append(outcomes[i].attempts, s.res.Attempts...)
+		}
+		outcomes[i].verdict = decideSecondChallengeLaunch(firsts[i], s, units[i].classify)
 	}
-	return nil
+	return outcomes
+}
+
+// decideFirstChallengeLaunch is a unit's verdict after its first pass, and
+// whether that pass was red, so that a second one follows.
+func decideFirstChallengeLaunch(first waveOutcome, classify func(run.ReproductionRun) (string, []run.ChallengeFailure)) (challengeRunVerdict, bool) {
+	if first.err != nil {
+		return challengeRunVerdict{note: "the factory's run of a challenge file gave no verdict (" + cleanCause(first.err.Error()) + ")"}, false
+	}
+	verdict, _ := classify(first.res.Run)
+	return challengeRunVerdict{verdict: verdict}, verdict == run.ChallengeRed
+}
+
+// decideSecondChallengeLaunch is the verdict of a unit whose first pass was
+// red: red only when the second is too, advice when it is not, no verdict
+// when it could not launch.
+func decideSecondChallengeLaunch(first, second waveOutcome, classify func(run.ReproductionRun) (string, []run.ChallengeFailure)) challengeRunVerdict {
+	if second.err != nil {
+		return challengeRunVerdict{note: "the factory's second run of a red challenge file gave no verdict (" + cleanCause(second.err.Error()) + ")"}
+	}
+	if again, _ := classify(second.res.Run); again != run.ChallengeRed {
+		return challengeRunVerdict{verdict: "advice", note: "a challenge file was red once and then not"}
+	}
+	_, failures := classify(first.res.Run)
+	return challengeRunVerdict{verdict: run.ChallengeRed, failures: failures}
 }
 
 // challengeRunVerdict is the decided result of one file's (or group's) launches.

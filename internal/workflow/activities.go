@@ -377,6 +377,31 @@ func (a *Activities) composeServicesSpecFor(input RunWorkflowInput, phase string
 	return &spec, nil
 }
 
+// noComposeSidecars reports, positively, that no launch of this run starts
+// compose sidecars: compose services are not enabled (spec is nil), or the
+// base commit holds none of the compose file names. BeginComposeServicesLifecycle
+// creates the run's network and writes its reports for any compose file at all,
+// even one with only build services, an empty services list, a file it would
+// reject or one that does not parse, so any file means "no": it is not told
+// from what it holds. A git failure while listing the names is "no" too.
+func (a *Activities) noComposeSidecars(spec *sandbox.ComposeServicesSpec) bool {
+	if spec == nil {
+		return true
+	}
+	if len(spec.ComposeYAML) > 0 {
+		return false
+	}
+	absent, err := sandbox.ComposeFilesAbsentAt(spec.BaseGitDir, spec.BaseSHA)
+	return err == nil && absent
+}
+
+// noComposeSidecarsFor is noComposeSidecars for a phase that has not loaded the
+// spec; a spec that cannot be loaded is "no".
+func (a *Activities) noComposeSidecarsFor(input RunWorkflowInput, phase string) bool {
+	spec, err := a.composeServicesSpecFor(input, phase)
+	return err == nil && a.noComposeSidecars(spec)
+}
+
 // logDirFor returns input.LogDir when set, falling back to the
 // Worker-static a.LogDir otherwise. See RunWorkflowInput.LogDir's doc
 // comment for why the per-execution value must win when present.
