@@ -63,7 +63,7 @@ func TestRenderChallengeMarkdownNamesFilesAndNotesNeverContent(t *testing.T) {
 		{Path: "p/edge_test.go", Criterion: "AC-2", Verdict: run.ChallengeGreen},
 		{Path: "p/other_test.go", Criterion: "AC-3", Verdict: run.ChallengeRed},
 	}, Notes: []string{"collection not proven for 1 challenge file(s) run under the repository's verify command"}}
-	body := renderChallengeMarkdown(green)
+	body := renderChallengeMarkdown(green, "")
 	for _, want := range []string{"## Challenge", "Tests committed on this branch", "- `p/edge_test.go` (AC-2)", "- Note: collection not proven"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("green body lacks %q:\n%s", want, body)
@@ -73,14 +73,23 @@ func TestRenderChallengeMarkdownNamesFilesAndNotesNeverContent(t *testing.T) {
 		t.Errorf("a file that is not green is listed as committed:\n%s", body)
 	}
 	red := &run.ChallengeRecord{Verdict: run.ChallengeRed, Files: []run.ChallengeFile{{Path: "p/other_test.go", Criterion: "AC-3", Verdict: run.ChallengeRed, Failures: []run.ChallengeFailure{{Test: "TestX", Assertion: "SECRET-ASSERTION"}}}}}
-	if body := renderChallengeMarkdown(red); !strings.Contains(body, "Held tests that fail") || !strings.Contains(body, "p/other_test.go") || strings.Contains(body, "SECRET-ASSERTION") {
+	if body := renderChallengeMarkdown(red, "080bfee531ff5d0dd77b64452c16a352c15f8ba5"); !strings.Contains(body, "Held tests that fail") || !strings.Contains(body, "p/other_test.go") || strings.Contains(body, "SECRET-ASSERTION") {
 		t.Errorf("red body:\n%s", body)
 	}
+	if body := renderChallengeMarkdown(red, "080bfee531ff5d0dd77b64452c16a352c15f8ba5"); !strings.Contains(body, "for the build's result `080bfee531ff`") || !strings.Contains(body, "not updated for later commits") {
+		t.Errorf("a red verdict does not say which commit it judges:\n%s", body)
+	}
+	if body := renderChallengeMarkdown(red, ""); strings.Contains(body, "not updated for later commits") {
+		t.Errorf("a red verdict with no commit names one:\n%s", body)
+	}
+	if body := renderChallengeMarkdown(green, "080bfee531ff5d0dd77b64452c16a352c15f8ba5"); strings.Contains(body, "not updated for later commits") {
+		t.Errorf("a green verdict carries the red scope sentence:\n%s", body)
+	}
 	none := &run.ChallengeRecord{Verdict: run.ChallengeNoVerdict, Cause: "no challenger role configured"}
-	if body := renderChallengeMarkdown(none); !strings.Contains(body, "No verdict: no challenger role configured") {
+	if body := renderChallengeMarkdown(none, ""); !strings.Contains(body, "No verdict: no challenger role configured") {
 		t.Errorf("no-verdict body:\n%s", body)
 	}
-	if renderChallengeMarkdown(nil) != "" {
+	if renderChallengeMarkdown(nil, "") != "" {
 		t.Error("a run with no challenge renders a section")
 	}
 }
@@ -94,7 +103,7 @@ func TestRenderChallengeMarkdownNamesARedGroupAsOneRun(t *testing.T) {
 	for _, p := range []string{"web/a.test.js", "web/b.test.js", "web/c.test.js"} {
 		files = append(files, run.ChallengeFile{Path: p, Criterion: "AC-2", Verdict: run.ChallengeRed, Failures: groupFailure, Group: true})
 	}
-	body := renderChallengeMarkdown(&run.ChallengeRecord{Verdict: run.ChallengeRed, Files: files})
+	body := renderChallengeMarkdown(&run.ChallengeRecord{Verdict: run.ChallengeRed, Files: files}, "")
 	own, group, ok := strings.Cut(body, handoff.GroupFailedLead)
 	if !ok {
 		t.Fatalf("body lacks the group's sentence:\n%s", body)
@@ -107,7 +116,7 @@ func TestRenderChallengeMarkdownNamesARedGroupAsOneRun(t *testing.T) {
 			t.Errorf("the group lacks %s:\n%s", p, group)
 		}
 	}
-	onlyGroup := renderChallengeMarkdown(&run.ChallengeRecord{Verdict: run.ChallengeRed, Files: files[1:]})
+	onlyGroup := renderChallengeMarkdown(&run.ChallengeRecord{Verdict: run.ChallengeRed, Files: files[1:]}, "")
 	if strings.Contains(onlyGroup, "Held tests that fail") || !strings.Contains(onlyGroup, handoff.GroupFailedLead) {
 		t.Errorf("a red group alone:\n%s", onlyGroup)
 	}
@@ -192,5 +201,20 @@ func TestChallengeSetAsideFlagConflicts(t *testing.T) {
 		if _, err := check(args...); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// The pull request body names the run's result commit in a red challenge
+// section, and ends the section with one blank line.
+func TestEvidenceMarkdownRedChallengeNamesTheResultCommit(t *testing.T) {
+	r := &run.Run{ID: "r1", ResultSHA: "080bfee531ff5d0dd77b64452c16a352c15f8ba5", Challenge: &run.ChallengeRecord{Verdict: run.ChallengeRed, Files: []run.ChallengeFile{
+		{Path: "p/other_test.go", Criterion: "AC-3", Verdict: run.ChallengeRed},
+	}}}
+	md := renderEvidenceMarkdown(r, nil)
+	if !strings.Contains(md, "for the build's result `080bfee531ff`") || !strings.Contains(md, "not updated for later commits") {
+		t.Errorf("the red section does not name the result commit:\n%s", md)
+	}
+	if strings.Contains(renderChallengeMarkdown(r.Challenge, r.ResultSHA), "\n\n\n") {
+		t.Errorf("a doubled blank line:\n%s", renderChallengeMarkdown(r.Challenge, r.ResultSHA))
 	}
 }
