@@ -282,7 +282,11 @@ func allowedFileSet(allowed []string) map[string]bool {
 		if strings.HasSuffix(entry, "/") || strings.ContainsAny(entry, "*?[") {
 			continue
 		}
-		files[path.Clean(entry)] = true
+		clean := path.Clean(entry)
+		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+			continue
+		}
+		files[clean] = true
 	}
 	return files
 }
@@ -319,12 +323,13 @@ func earlierTestsNotes(tickets []PlanTicket, patterns []string) []string {
 		var earlierNames []string
 		for _, earlier := range tickets[:n] {
 			found := false
-			for t := range allowedFileSet(earlier.Allowed) {
-				if !policy.IsTestFile(t, patterns) || policy.PathCoveredByAllowed(t, later.Allowed) {
+			earlierFiles := allowedFileSet(earlier.Allowed)
+			for t := range earlierFiles {
+				if !policy.IsTestFile(t, patterns) || files[t] || policy.PathCoveredByAllowed(t, later.Allowed) {
 					continue
 				}
 				for f := range files {
-					if files[f] && earlierListed(earlier, f) && !policy.IsTestFile(f, patterns) && !docExtensions[strings.ToLower(path.Ext(f))] && testBesideShared(t, f) {
+					if earlierFiles[f] && !policy.IsTestFile(f, patterns) && !docExtensions[strings.ToLower(path.Ext(f))] && testBesideShared(t, f) {
 						shared[f], tests[t], found = true, true, true
 					}
 				}
@@ -352,11 +357,6 @@ func earlierTestsNotes(tickets []PlanTicket, patterns []string) []string {
 			noteName(later.Name), changed, who, verb, nameList(testList), noteName(later.Name)))
 	}
 	return notes
-}
-
-// earlierListed reports whether earlier lists the file f (cleaned).
-func earlierListed(earlier PlanTicket, f string) bool {
-	return allowedFileSet(earlier.Allowed)[f]
 }
 
 func sortedKeys(set map[string]bool) []string {
