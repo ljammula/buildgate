@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -251,4 +252,80 @@ func TestRetryOnGitLockGivesUpAndIgnoresOtherErrors(t *testing.T) {
 	if err == nil || calls != 1 {
 		t.Fatalf("unrelated error: err=%v calls=%d, want one call", err, calls)
 	}
+}
+
+// Shared holders that keep overlapping with almost no gap must not starve an
+// exclusive waiter: the waiter holds the turnstile, so no new shared holder
+// starts ahead of it. Each holder takes the lock, holds it, releases it and
+// takes it again at once, staggered so the lock is rarely free for long.
+func TestDirectLockExclusiveWaiterIsNotStarvedByOverlappingSharedHolders(t *testing.T) {
+	repoDir := testfixture.NewGitRepo(t)
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(offset time.Duration) {
+			defer wg.Done()
+			time.Sleep(offset)
+			for {
+				lock, err := AcquireDirectLockSharedContext(context.Background(), repoDir)
+				if err != nil {
+					return
+				}
+				select {
+				case <-stop:
+					lock.Close()
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
+				lock.Close()
+			}
+		}(time.Duration(i) * 7 * time.Millisecond)
+	}
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+	time.Sleep(60 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := AcquireDirectLockContext(ctx, repoDir)
+	if err != nil {
+		t.Fatalf("exclusive waiter starved: %v", err)
+	}
+	lock.Close()
+}
+
+func TestDirectLockSharedWaitsBehindAWaitingExclusiveAcquirer(t *testing.T) {
+	repoDir := testfixture.NewGitRepo(t)
+	holder, err := AcquireDirectLockShared(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan *DirectLock, 1)
+	go func() {
+		l, _ := AcquireDirectLockContext(context.Background(), repoDir)
+		got <- l
+	}()
+	// Once the exclusive waiter is queued, a new shared attempt is refused.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		extra, err := AcquireDirectLockShared(repoDir)
+		if errors.Is(err, ErrBusy) {
+			break
+		}
+		if err == nil {
+			extra.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a shared holder was admitted ahead of the waiting exclusive acquirer")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	holder.Close()
+	l := <-got
+	if l == nil || !l.HeldExclusive() {
+		t.Fatalf("exclusive waiter did not get the lock: %v", l)
+	}
+	l.Close()
 }

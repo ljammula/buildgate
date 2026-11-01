@@ -222,3 +222,13 @@ func TestWaitContextTellsAMissingHeartbeatFromAnUnreadableOne(t *testing.T) {
 		t.Errorf("stale heartbeat: %+v, want no_worker since its last beat", w)
 	}
 }
+
+func TestWaitForBranchLockNamesTheBranch(t *testing.T) {
+	w := WaitFor(waitReq("b", StateBuilding, ""), WaitFacts{WorkerLive: true, RunWaitStage: "branch_lock", RunWaitSince: "2026-10-20T10:03:00Z", RunWaitOn: "branch pr-a"})
+	if w == nil || w.Kind != WaitRepository {
+		t.Fatalf("wait = %+v, want repository kind", w)
+	}
+	if got := w.Sentence(time.Now()); !strings.Contains(got, "branch pr-a") || strings.Contains(got, "another build holds it") {
+		t.Errorf("sentence = %q, want it to name branch pr-a", got)
+	}
+}

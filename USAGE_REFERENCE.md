@@ -2093,6 +2093,7 @@ build) are labelled `(attempt N)`.
 | Wait | Where it is recorded | Written |
 |---|---|---|
 | Inside a run, for the repository lock | The run's `progress.jsonl`: stage `repository_lock`, event `waiting` then `acquired` | By the build, once per wait |
+| Inside a run, for its branch (another round on the same `-on-branch` branch holds it) | The run's `progress.jsonl`: stage `branch_lock`, event `waiting` (detail `branch <name>`) then `acquired`; counted with the in-run lock waits, kind `branch_lock` | By the build, once per wait |
 | Before a run, a building step found the repository held by another build and gave its slot back (`RepositoryBusy`) | `<data-dir>/requests/<id>/repository_waits.jsonl`: `{"at":"<RFC 3339>","event":"start"\|"end"}` | By the worker: one `start` line when the first step finds it held, one `end` line when a later step finds it free or the request leaves `building`; not one per 30 s retry |
 
 A wait with no end counts in no total. A repository-busy wait with no `end` line, or a lock wait in a run whose record is `accepted`, `quarantined` or `halted` without `acquired`, is reported as open (the worker writes the `end` line of a wait it began before a restart when the repository is free or the request leaves `building`); a lock wait in a run not yet in one of those states is reported as waiting, not open. The critical path

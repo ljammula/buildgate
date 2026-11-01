@@ -112,3 +112,30 @@ func TestAFailedLockWaitIsClosedInTheFeed(t *testing.T) {
 		t.Errorf("hook calls = %v, want [true false]", hooked)
 	}
 }
+
+// A wait for a branch's lock is its own progress step, naming the branch.
+func TestBranchLockWaitIsReportedAsBranchLock(t *testing.T) {
+	ws := newFixtureRepo(t)
+	dataDir := t.TempDir()
+	ctx := withWaitForRepoLock(context.Background())
+	holder, err := wsisolation.AcquireBranchLock(ws, "pr-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		_ = holder.Close()
+	}()
+	lock, err := acquireBranchRunLock(ctx, ws, "pr-a", repoLockReport{dataDir: dataDir, runID: "run-1"}.forBranch("pr-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	events, err := progress.Read(progress.Path(dataDir, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Stage != "branch_lock" || events[0].Event != "waiting" || events[0].Detail != "branch pr-a" || events[1].Stage != "branch_lock" || events[1].Event != "acquired" {
+		t.Errorf("feed = %+v, want branch_lock waiting (branch pr-a) then acquired", events)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -326,5 +327,99 @@ func TestExclusiveReconcileDropsLeftoverRunBlocks(t *testing.T) {
 	out, err := exec.Command("git", "-C", ws, "check-ignore", "p/held_test.go", "BUILD_REPORT.md").CombinedOutput()
 	if err != nil || strings.Contains(string(out), "held_test.go") || !strings.Contains(string(out), "BUILD_REPORT.md") {
 		t.Fatalf("check-ignore = %q, %v: want only BUILD_REPORT.md ignored", out, err)
+	}
+}
+
+// onBranchRunArgs is the argv of a bare -on-branch run of the fixture that
+// reaches the repository lock; extra flags follow. -pr-closes-issue is
+// checked right after the lock, so a run that gets past it fails there, fast.
+func onBranchRunArgs(t *testing.T, ws string, extra ...string) *exec.Cmd {
+	t.Helper()
+	specPath := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(specPath, []byte("# fixture spec\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
+	if err != nil {
+		t.Fatalf("resolve build script: %v", err)
+	}
+	args := append([]string{
+		"-build-app-interpreter", "/bin/sh",
+		"-build-app-script", scriptPath,
+		"-ticket", "fixture-ticket",
+		"-sandbox-image", fakeSandboxImage,
+		"-workspace", ws,
+		"-spec", specPath,
+		"-verify-command", "true",
+		"-data-dir", t.TempDir(),
+		"-skip-project-check",
+		"-on-branch", "pr-branch",
+		"-pr-closes-issue", "not-an-issue-ref",
+	}, extra...)
+	cmd := factorydCommand(t, args...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	return cmd
+}
+
+func makeBranch(t *testing.T, ws string) {
+	t.Helper()
+	if out, err := exec.Command("git", "-C", ws, "branch", "pr-branch").CombinedOutput(); err != nil {
+		t.Fatalf("create branch: %v: %s", err, out)
+	}
+}
+
+func TestIntegrationOnBranchRunFailsBusyWhileItsBranchIsHeld(t *testing.T) {
+	ws := newFixtureRepo(t)
+	makeBranch(t, ws)
+	held, err := wsisolation.AcquireBranchLock(ws, "pr-branch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	out, err := onBranchRunArgs(t, ws).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "repository is busy") || !strings.Contains(string(out), "branch ownership") {
+		t.Fatalf("run beside a held branch: err=%v output=%q, want the branch busy error", err, out)
+	}
+}
+
+func TestIntegrationOnBranchRunSharesTheRepositoryWithSharedHolders(t *testing.T) {
+	ws := newFixtureRepo(t)
+	makeBranch(t, ws)
+	shared, err := wsisolation.AcquireDirectLockShared(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shared.Close()
+	out, err := onBranchRunArgs(t, ws).CombinedOutput()
+	if err == nil || strings.Contains(string(out), "repository is busy") || !strings.Contains(string(out), "-pr-closes-issue") {
+		t.Fatalf("run beside a shared holder: err=%v output=%q, want it past the lock and stopped by -pr-closes-issue", err, out)
+	}
+}
+
+func TestIntegrationChallengeRoundOnBranchFailsBusyBesideASharedHolder(t *testing.T) {
+	ws := newFixtureRepo(t)
+	makeBranch(t, ws)
+	shared, err := wsisolation.AcquireDirectLockShared(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shared.Close()
+	out, err := onBranchRunArgs(t, ws, "-challenge-round", "-challenge-held", "[]").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "repository is busy") {
+		t.Fatalf("challenge round beside a shared holder: err=%v output=%q, want the repository busy error", err, out)
+	}
+}
+
+func TestIntegrationChallengeRoundWithoutOnBranchFailsBusyBesideASharedHolder(t *testing.T) {
+	ws := newFixtureRepo(t)
+	shared, err := wsisolation.AcquireDirectLockShared(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shared.Close()
+	cmd := onBranchRunArgs(t, ws, "-on-branch=", "-challenge-round", "-challenge-held", "[]")
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "repository is busy") {
+		t.Fatalf("direct challenge round beside a shared holder: err=%v output=%q, want the repository busy error", err, out)
 	}
 }

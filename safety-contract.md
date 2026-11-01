@@ -402,7 +402,7 @@ follow it, and no means to pass a gate.
 | T-04 | Worker reaches arbitrary network services | Network-denied baseline; the run's OpenShell network policy names every admitted destination and calling binary | Terminate the worker and quarantine on an escape or policy violation | partial |
 | T-05 | Agent claims success without implementing the required change | Factory-owned oracle, diff, scope, and evidence checks | Treat prose as evidence only; fail the policy check | enforced in bounded slices |
 | T-06 | A timeout or crash loses the real outcome | Durable attempt, event, artifact, and state records; recovery marks unknown work ambiguous | Halt and quarantine rather than rerun an ambiguous side effect | partial |
-| T-07 | Two workers mutate one workspace concurrently | One worker lease / repository owner at a time; isolated runs and `-on-branch` runs share the repository (an `-on-branch` run also holds its branch's lock exclusively), a challenge round or other shared-checkout run holds it alone | Queue the request or halt on an ownership violation | partial; covered for build execution (shared/exclusive repository flock, `factoryd-git.lock` for shared Git metadata / `RepositoryOwnerWorkflow`), the kill switch, and `factoryd intake` (`-pilot-dir` lock, 2026-09-16) |
+| T-07 | Two workers mutate one workspace concurrently | One worker lease / repository owner at a time; isolated runs and `-on-branch` runs share the repository (an `-on-branch` run also holds its branch's lock exclusively), a run that writes `info/exclude` (a challenge round with held files) or touches the shared checkout holds it alone, and a waiting exclusive acquirer goes ahead of shared holders that start after it | Queue the request or halt on an ownership violation | partial; covered for build execution (shared/exclusive repository flock, `factoryd-git.lock` for shared Git metadata / `RepositoryOwnerWorkflow`), the kill switch, and `factoryd intake` (`-pilot-dir` lock, 2026-09-16) |
 | T-08 | A failure silently waits for a person | Explicit halt → quarantine → asynchronous notification path | Persist the failure and return; never block on a human | partial |
 | T-09 | An override is unauditable or can bypass authentication | Require authenticated operator identity and reason; append durable history | Reject the override and retain the prior state | partial |
 | T-10 | Merge/deploy occurs before safety evidence exists | Release policy checks the complete evidence package and phase prerequisites | Keep the run quarantined; no release side effect | partial; every accepted run gets a fail-closed durable decision (plus the `factoryd kill-switch`), which gates the forge/PR surface. No merge or deploy side effect exists, by design (SC-001) |
@@ -460,8 +460,10 @@ requires a new contract review and an updated machine-checkable test.
   reconciles stranded worktrees only under an exclusive hold it took while the
   repository was idle; an execution that mutates a shared checkout, or writes
   the repository-wide `info/exclude` (a challenge round), holds its repository
-  exclusively, and an exclusive reconcile removes the run blocks a crashed run
-  left in `info/exclude`; factory
+  exclusively, with or without `-on-branch`, and an exclusive reconcile removes
+  the run blocks a crashed run left in `info/exclude`; a waiting exclusive
+  acquirer takes precedence over shared holders that start after it (a
+  turnstile flock beside the repository lock); factory
   mutations of shared Git metadata (worktree, branch, `info/exclude`) are
   serialized.
 - **SC-012 — no oracle mutation:** the job cannot modify its canonical

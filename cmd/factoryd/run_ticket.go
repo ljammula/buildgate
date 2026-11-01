@@ -1661,7 +1661,7 @@ func (tr *ticketRun) lockRepository() error {
 	// would overwrite each other's commits, rounds on other branches do not.
 	// A run that writes the repository-wide info/exclude, which every
 	// worktree reads (writesSharedExclude: a challenge round with held files),
-	// alone holds the repository exclusively. A run that finds the
+	// holds the repository exclusively, on a branch or not. A run that finds the
 	// repository idle takes it exclusively first, to reconcile stranded
 	// worktrees, then releases it and takes it shared (see
 	// acquireIsolatedRunLock).
@@ -1670,8 +1670,7 @@ func (tr *ticketRun) lockRepository() error {
 	// id is minted before it.
 	tr.mintRunID()
 	report := repoLockReport{dataDir: *tr.dataDir, runID: tr.id}
-	isolatedRun := *tr.repository == "" && *tr.onBranch == ""
-	sharedRun := isolatedRun || (*tr.repository == "" && *tr.onBranch != "" && !tr.writesSharedExclude())
+	sharedRun := *tr.repository == "" && !tr.writesSharedExclude()
 	reconcileStranded := func(lock *wsisolation.DirectLock) {
 		reconcileIsolationMarkers(tr.lifecycleCtx, *tr.dataDir, *tr.workspace, *tr.sandboxDocker, lock, nil)
 	}

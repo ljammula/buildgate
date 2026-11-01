@@ -274,7 +274,7 @@ type RunSummary struct {
 	MaxRounds     int
 	WaitingReason string
 	// WaitingStage is the factory stage the run waits in (queued,
-	// model_host_lock, compose_services_lock, repository_lock) and
+	// model_host_lock, compose_services_lock, branch_lock, repository_lock) and
 	// WaitingSince the timestamp of the first line of that wait; both are
 	// empty when WaitingReason is cleared and the run is not waiting.
 	WaitingStage string
@@ -474,7 +474,7 @@ func Summarize(events []Event) RunSummary {
 // waiting and acquired events bracket a wait for a lock or slot.
 func isLockStage(stage string) bool {
 	switch stage {
-	case "model_host_lock", "compose_services_lock", "repository_lock":
+	case "model_host_lock", "compose_services_lock", "branch_lock", "repository_lock":
 		return true
 	}
 	return false

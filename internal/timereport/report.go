@@ -25,6 +25,9 @@ const (
 	// KindRepositoryLock is a wait inside a run, for the lock its build needs
 	// (the run's progress feed: repository_lock waiting, then acquired).
 	KindRepositoryLock = "repository_lock"
+	// KindBranchLock is a wait inside a run, for its branch's lock held by
+	// another round on the same branch (branch_lock waiting, then acquired).
+	KindBranchLock = "branch_lock"
 )
 
 // Wait is one wait for the repository. An open wait has no end recorded:
@@ -236,12 +239,12 @@ func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 		}
 		at := parseTs(e.Ts)
 		switch {
-		case e.Stage == "repository_lock" && e.Event == "waiting":
+		case isRunLockStage(e.Stage) && e.Event == "waiting":
 			if lock == nil {
-				rt.LockWaits = append(rt.LockWaits, Wait{Kind: KindRepositoryLock, Start: e.Ts, Open: true, start: at})
+				rt.LockWaits = append(rt.LockWaits, Wait{Kind: e.Stage, Start: e.Ts, Open: true, start: at})
 				lock = &rt.LockWaits[len(rt.LockWaits)-1]
 			}
-		case e.Stage == "repository_lock" && e.Event == "acquired":
+		case isRunLockStage(e.Stage) && e.Event == "acquired":
 			if lock != nil {
 				lock.End, lock.Open, lock.end = e.Ts, false, at
 				lock.Seconds = max(at.Sub(lock.start), 0).Seconds()
@@ -277,6 +280,12 @@ func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 		all = append(all, spans[name]...)
 	}
 	rt.Other = max(rt.Seconds-unionSeconds(all), 0)
+}
+
+// isRunLockStage reports whether stage brackets an in-run wait for the
+// repository or the run's branch (the stage names are the wait kinds).
+func isRunLockStage(stage string) bool {
+	return stage == KindRepositoryLock || stage == KindBranchLock
 }
 
 func parseTs(s string) time.Time {
