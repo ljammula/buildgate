@@ -93,8 +93,9 @@ type repositoryWaitTracker struct {
 }
 
 // markBusy records that id found its repository busy at now, keeping the
-// earliest time when it already waits.
-func (t *repositoryWaitTracker) markBusy(id string, now time.Time) {
+// earliest time when it already waits. It reports whether this call began the
+// wait.
+func (t *repositoryWaitTracker) markBusy(id string, now time.Time) bool {
 	t.mu.Lock()
 	_, waiting := t.since[id]
 	if !waiting {
@@ -107,10 +108,11 @@ func (t *repositoryWaitTracker) markBusy(id string, now time.Time) {
 	if !waiting {
 		notifyActiveRequestsChanged()
 	}
+	return !waiting
 }
 
-// clear drops id's wait, if any.
-func (t *repositoryWaitTracker) clear(id string) {
+// clear drops id's wait, if any, and reports whether there was one.
+func (t *repositoryWaitTracker) clear(id string) bool {
 	t.mu.Lock()
 	_, waiting := t.since[id]
 	delete(t.since, id)
@@ -118,6 +120,7 @@ func (t *repositoryWaitTracker) clear(id string) {
 	if waiting {
 		notifyActiveRequestsChanged()
 	}
+	return waiting
 }
 
 // reset drops every wait.

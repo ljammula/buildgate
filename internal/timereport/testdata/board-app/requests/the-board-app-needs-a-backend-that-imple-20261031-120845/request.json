@@ -1,0 +1,101 @@
+{
+  "id": "the-board-app-needs-a-backend-that-imple-20261031-120845",
+  "project": "board-app",
+  "state": "pr_review",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_drafting",
+      "at": "2026-10-31T17:08:45.565648Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_drafting",
+      "to": "spec_review",
+      "at": "2026-10-31T17:09:36.718479Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_review",
+      "to": "planning",
+      "at": "2026-10-31T17:09:47.188281Z",
+      "by": "kanna"
+    },
+    {
+      "from": "planning",
+      "to": "plan_review",
+      "at": "2026-10-31T17:09:47.281542Z",
+      "by": "factory"
+    },
+    {
+      "from": "plan_review",
+      "to": "building",
+      "at": "2026-10-31T17:09:56.462269Z",
+      "by": "kanna"
+    },
+    {
+      "from": "building",
+      "to": "pr_review",
+      "at": "2026-11-01T01:46:37.279418Z",
+      "by": "factory"
+    },
+    {
+      "from": "pr_review",
+      "to": "halted",
+      "at": "2026-11-01T01:46:37.328976Z",
+      "by": "factory"
+    },
+    {
+      "from": "halted",
+      "to": "pr_review",
+      "at": "2026-11-01T03:40:18.567665Z",
+      "by": "kanna"
+    }
+  ],
+  "submitted_at": "2026-10-31T17:08:45.481025Z",
+  "updated_at": "2026-11-01T03:40:18.567665Z",
+  "ticket_index": 10,
+  "ticket_count": 10,
+  "tickets": [
+    {
+      "index": 1,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-001-advice1-20261031-123158-52457"
+    },
+    {
+      "index": 2,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-002-20261031-124419-52457"
+    },
+    {
+      "index": 3,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-003-20261031-130846-10851"
+    },
+    {
+      "index": 4,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-004-advice2-20261031-142806-4876"
+    },
+    {
+      "index": 5,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-005-advice1-20261031-145847-4876"
+    },
+    {
+      "index": 6,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-006-advice1-20261031-154409-4876"
+    },
+    {
+      "index": 7,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-007-advice1-20261031-163642-94389"
+    },
+    {
+      "index": 8,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-008-advice1-20261031-174940-94389"
+    },
+    {
+      "index": 9,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-009-advice2-20261031-192837-94389"
+    },
+    {
+      "index": 10,
+      "run_id": "the-board-app-needs-a-backend-that-imple-20261031-120845-010-20261031-194541-94389"
+    }
+  ]
+}

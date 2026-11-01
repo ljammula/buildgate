@@ -27,6 +27,8 @@ another profile:
 - `factoryd cost [-request <id>] [-json]`
 - `factoryd stats [-project <name>] [-since 30d] [-all] [-json]`: whether builds are
   getting better, per repository and per week (read-only; counts, no model call)
+- `factoryd stats -request <id> [-json]`: where one request's time went: minutes
+  per stage and round, lock waits, the critical path (read-only)
 - `factoryd rounds <request-id>`: the round ledger of a request, one line per
   build round that ended in a commit, with its outcome and failed checks
   (read-only)

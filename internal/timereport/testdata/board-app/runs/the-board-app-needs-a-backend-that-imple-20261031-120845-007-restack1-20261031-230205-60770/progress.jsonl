@@ -1,0 +1,3 @@
+{"ts":"2026-11-01T04:02:05.121Z","source":"factory","stage":"image","event":"start"}
+{"ts":"2026-11-01T04:02:05.121Z","source":"factory","stage":"image","event":"end","outcome":"pass","detail":"localhost:5050/buildgate-worker@sha256:a0f3bde2ff0395f87dc47be60149613a2340f90d0"}
+{"ts":"2026-11-01T04:02:05.248Z","source":"factory","stage":"repository_lock","event":"waiting","detail":"another build holds the repository"}

@@ -1,0 +1,107 @@
+{
+  "id": "the-board-app-needs-a-browser-client-for-20261031-130949",
+  "project": "board-app",
+  "state": "pr_review",
+  "history": [
+    {
+      "from": "submitted",
+      "to": "spec_drafting",
+      "at": "2026-10-31T18:09:49.292007Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_drafting",
+      "to": "spec_review",
+      "at": "2026-10-31T18:10:40.389684Z",
+      "by": "factory"
+    },
+    {
+      "from": "spec_review",
+      "to": "planning",
+      "at": "2026-10-31T18:10:57.06279Z",
+      "by": "kanna"
+    },
+    {
+      "from": "planning",
+      "to": "plan_review",
+      "at": "2026-10-31T18:10:57.147127Z",
+      "by": "factory"
+    },
+    {
+      "from": "plan_review",
+      "to": "building",
+      "at": "2026-10-31T18:11:03.206394Z",
+      "by": "kanna"
+    },
+    {
+      "from": "building",
+      "to": "quarantined",
+      "at": "2026-10-31T22:24:50.557679Z",
+      "by": "factory"
+    },
+    {
+      "from": "quarantined",
+      "to": "quarantined",
+      "at": "2026-10-31T22:25:37.238627Z",
+      "by": "kanna"
+    },
+    {
+      "from": "quarantined",
+      "to": "building",
+      "at": "2026-10-31T22:25:47.426902Z",
+      "by": "kanna"
+    },
+    {
+      "from": "building",
+      "to": "pr_review",
+      "at": "2026-11-01T01:30:40.19394Z",
+      "by": "factory"
+    },
+    {
+      "from": "pr_review",
+      "to": "halted",
+      "at": "2026-11-01T01:30:40.248992Z",
+      "by": "factory"
+    },
+    {
+      "from": "halted",
+      "to": "pr_review",
+      "at": "2026-11-01T03:40:18.50914Z",
+      "by": "kanna"
+    }
+  ],
+  "submitted_at": "2026-10-31T18:09:49.134147Z",
+  "updated_at": "2026-11-01T03:40:18.50914Z",
+  "ticket_index": 7,
+  "ticket_count": 7,
+  "tickets": [
+    {
+      "index": 1,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-001-advice2-20261031-134039-10851"
+    },
+    {
+      "index": 2,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-002-advice1-20261031-140415-4876"
+    },
+    {
+      "index": 3,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-003-advice1-20261031-145404-4876"
+    },
+    {
+      "index": 4,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-004-20261031-152230-4876"
+    },
+    {
+      "index": 5,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-005-20261031-172556-94389"
+    },
+    {
+      "index": 6,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-006-20261031-182424-94389"
+    },
+    {
+      "index": 7,
+      "run_id": "the-board-app-needs-a-browser-client-for-20261031-130949-007-advice1-20261031-200654-94389"
+    }
+  ]
+}
