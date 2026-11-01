@@ -496,7 +496,7 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 		// Not retargeted this poll: carry on with comments and approval as
 		// usual (a stall here would silently stop corrective rounds); the
 		// ready flip still skips it, since its base is another ticket's
-		// branch (stackedOnAnotherTicket).
+		// branch (Request.StackedOnAnotherTicket).
 	}
 
 	if len(state.BlocksReadyThreads) > 0 && len(state.ActionableThreads) == 0 {
@@ -701,16 +701,6 @@ func decisionStillAllows(dataDir, runID string) (bool, error) {
 	return decision != nil && !decision.Invalidated && decision.Allowed, nil
 }
 
-// stackedOnAnotherTicket reports whether baseRefName is another ticket's
-// Branch in r: a stacked draft PR (ticketQueueEntry's -pr-base). It stays
-// draft while its base is another ticket's branch, merged or not, so a
-// human can never be offered a PR that would merge into that branch
-// instead of the real base; retargetOffMergedTicket moves it once the
-// ticket underneath merges, and the next poll flips it as usual.
-func stackedOnAnotherTicket(r *request.Request, ticket *request.Ticket, baseRefName string) bool {
-	return r.StackedOnAnotherTicket(ticket, baseRefName)
-}
-
 // advancePRReadyOrApproved is the PR-review driver's own "ready for
 // review, approved" handling, reached only once
 // state.ShouldStopPolling() is false (still OPEN) and there are no new
@@ -723,7 +713,7 @@ func stackedOnAnotherTicket(r *request.Request, ticket *request.Ticket, baseRefN
 // false) does block both.
 func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, state forge.ReviewState, now time.Time) error {
 	checksOK := state.ChecksPassing == nil || *state.ChecksPassing
-	if state.IsDraft && stackedOnAnotherTicket(r, ticket, state.BaseRefName) {
+	if state.IsDraft && r.StackedOnAnotherTicket(ticket, state.BaseRefName) {
 		// A stacked draft stays draft -- reviewers can still approve it
 		// (GitHub allows approving a draft PR, and ReviewDecision below is
 		// unaffected), but flipping it ready-for-review here would put
@@ -731,7 +721,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 		// a second time, under ticket N's PR, before N-1 has even merged.
 		// retargetOffMergedTicket (this PR's own poll) retargets it
 		// once that ticket merges, and the next poll's own
-		// stackedOnAnotherTicket check then sees an ordinary base and
+		// StackedOnAnotherTicket check then sees an ordinary base and
 		// flips it normally.
 		log.Printf("request %s: ticket %d: PR is stacked on another ticket's branch %s; leaving it draft", r.ID, ticket.Index, state.BaseRefName)
 		// Recorded so the console can tell this draft (waiting on a human

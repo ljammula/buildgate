@@ -228,8 +228,8 @@ the lowest open ticket, with nothing in flight that could still push to it (a
 building request's current ticket is `draft` and its advice rounds may still
 push, and a merge drops their result; in `pr_review`, a review, CI or restack
 round, or a merge-readiness check with a blocker other than the draft state,
-withholds the mark; merge it with `gh pr ready` first, then merge).
-Check its base first. Review each PR while it is stacked, and merge bottom-up
+withholds the mark). A draft PR marked this way needs `gh pr ready` first,
+then merge (USAGE_REFERENCE has the rule). Check its base first. Review each PR while it is stacked, and merge bottom-up
 (ticket 1 first). With squash merges, a retargeted PR's Files tab also
 shows ticket N-1's changes (it shares ticket N-1's original commit), but
 merging it lands only ticket N's own change.
