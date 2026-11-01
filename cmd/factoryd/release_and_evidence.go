@@ -943,7 +943,7 @@ func renderEvidenceMarkdown(r *run.Run, policy *release.MergePolicy) string {
 	}
 	writeNotesSection(&b, r.Notes)
 	b.WriteString(renderReviewerAdviceMarkdown(r.CodeReview))
-	b.WriteString(renderChallengeMarkdown(r.Challenge))
+	b.WriteString(renderChallengeMarkdown(r.Challenge, r.ResultSHA))
 	b.WriteString(renderCarvedChallengeMarkdown(r.Replay))
 	writeRepoGatesSection(&b, r)
 	writeChangedFilesAndDependencies(&b, r)
@@ -1337,7 +1337,13 @@ func invalidateStoredReleaseDecision(dataDir, project, runID, reason string) {
 // that each failed), and the notes (no challenger role, no verdict and why,
 // files held and not run, shape refusals, collection not proven). Every value
 // is cleaned like the review's; never a file's content. nil renders nothing.
-func renderChallengeMarkdown(c *run.ChallengeRecord) string {
+//
+// The body is written once, when the pull request opens, from the build's
+// result commit (resultSHA); the factory never edits it afterwards. A red
+// verdict therefore says which commit it judges and that a later commit on the
+// branch is not re-judged here: an advice round's verdict on its own result
+// is a pull request comment (SC-022).
+func renderChallengeMarkdown(c *run.ChallengeRecord, resultSHA string) string {
 	if c == nil {
 		return ""
 	}
@@ -1348,6 +1354,7 @@ func renderChallengeMarkdown(c *run.ChallengeRecord) string {
 		fmt.Fprintf(&b, "No verdict: %s.\n\n", handoff.CleanSentence(c.Cause))
 	case run.ChallengeRed:
 		writeRedChallengeFiles(&b, c.Files)
+		writeRedChallengeScope(&b, resultSHA)
 	default:
 		if c.Rerun {
 			b.WriteString("The held tests of the earlier challenge pass on this change.\n\n")
@@ -1397,6 +1404,19 @@ func writeRedChallengeFiles(b *strings.Builder, files []run.ChallengeFile) {
 			writeChallengeFileLine(b, f)
 		}
 	}
+}
+
+// writeRedChallengeScope writes the sentence that scopes a red verdict to the
+// commit it was reached on.
+func writeRedChallengeScope(b *strings.Builder, resultSHA string) {
+	sha := resultSHA
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	if sha == "" {
+		return
+	}
+	fmt.Fprintf(b, "\nThis verdict is for the build's result `%s`, as the pull request opened. A later commit on the branch is not judged here: a round that followed reports the held tests on its own result in a comment on this pull request.\n\n", sha)
 }
 
 // writeChallengeFileLine writes one challenge file's list line: path and
