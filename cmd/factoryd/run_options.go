@@ -121,7 +121,10 @@ type runOptions struct {
 	ChallengeWithReview   bool
 	ChallengerRelayPolicy *sandbox.RoutePolicy
 	ChallengeHeld         []run.ChallengeFile
-	ChallengeRound        bool
+	// ChallengeSetAside are a replay's committed held files: set aside by
+	// hash, and neither run nor counted in the deadline.
+	ChallengeSetAside []run.ChallengeFile
+	ChallengeRound    bool
 }
 
 // checkpointDir is where the run's Activities checkpoint. Deliberately not

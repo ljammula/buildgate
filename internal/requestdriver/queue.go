@@ -124,6 +124,9 @@ type QueueEntry struct {
 	ChallengeApprovedBytes  int    `json:"challenge_approved_bytes,omitempty"`
 	ChallengeHeld           string `json:"challenge_held,omitempty"`
 	ChallengeRound          bool   `json:"challenge_round,omitempty"`
+	// ChallengeSetAside is a replay run's manifest of the held files its
+	// branch carries (-challenge-set-aside): set aside by hash, never run.
+	ChallengeSetAside string `json:"challenge_set_aside,omitempty"`
 	// ExecutionHarness overrides BuildTicketRunArgs' own -execution-harness
 	// forwarding for this one entry when set: the requester's own per-request
 	// execution-role harness pick (request.Request.Harnesses["execution"],

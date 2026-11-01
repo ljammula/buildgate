@@ -562,6 +562,11 @@ type RunWorkflowInput struct {
 	// commits them and the round's build gets them mounted read-only.
 	ChallengeHeld  []run.ChallengeFile `json:"challenge_held,omitempty"`
 	ChallengeRound bool                `json:"challenge_round,omitempty"`
+	// ChallengeSetAside are the held files a replay run's branch already
+	// carries: diff_scope sets them aside by their pinned hash, as for
+	// ChallengeHeld, and nothing runs them (a restack's replay runs no
+	// challenge).
+	ChallengeSetAside []run.ChallengeFile `json:"challenge_set_aside,omitempty"`
 }
 
 // ReplayInput is RunWorkflowInput.Replay: what a replay run's

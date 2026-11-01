@@ -574,6 +574,11 @@ func runReplay(dp Deps, ctx context.Context, dataDir string, r *request.Request,
 		return "", roundOutcome{}, err
 	}
 	entry.IssueRef, entry.PRBase = "", ""
+	// The replay runs no challenge, but its branch carries the ticket's
+	// committed held files, which diff_scope must set aside as in every build.
+	if err := withChallengeSetAside(entry, dataDir, r, *ticket); err != nil {
+		return "", roundOutcome{}, err
+	}
 	replayCfg := cfg
 	replayCfg.OpenPullRequest = false
 	args := append(BuildTicketRunArgs(dataDir, entry, replayCfg), "-on-branch", rs.Branch, "-diff-base", rs.OntoSHA, "-replay", file)

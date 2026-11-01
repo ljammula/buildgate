@@ -193,23 +193,55 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 		entry.ChallengeApprovedSHA256, entry.ChallengeApprovedBytes = r.ApprovedSHA256[requestSpecFile], approvedBytes
 		return nil
 	}
-	if ticket.ChallengeRunID == "" {
-		return nil
-	}
-	held, err := heldChallengeFiles(dataDir, ticket.ChallengeRunID)
-	if err != nil || len(held) == 0 {
+	path, err := writeHeldManifest(dataDir, r, ticket)
+	if err != nil || path == "" {
 		return err
-	}
-	data, err := json.MarshalIndent(held, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, fmt.Sprintf("t%d-%s", ticket.Index, challengeHeldFile))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write the held challenge files: %w", err)
 	}
 	entry.ChallengeHeld, entry.ChallengeRound = path, round
 	return nil
+}
+
+// withChallengeSetAside sets entry's -challenge-set-aside for a replay run of
+// ticket (SC-022): the manifest of the held files its branch already
+// carries, so diff_scope sets them aside by their pinned hash as it does for
+// every build. A replay runs no challenge, so nothing else is set. A ticket
+// that was not challenged, or is carved, gets nothing.
+func withChallengeSetAside(entry *QueueEntry, dataDir string, r *request.Request, ticket request.Ticket) error {
+	if ticket.Order != nil || !ticket.Challenged {
+		return nil
+	}
+	path, err := writeHeldManifest(dataDir, r, ticket)
+	if err != nil {
+		return err
+	}
+	entry.ChallengeSetAside = path
+	return nil
+}
+
+// writeHeldManifest writes the JSON manifest of the held files of ticket's
+// challenge run into the request's challenge directory and returns its path.
+// It returns "" when the ticket has no challenge run or that run held no files.
+func writeHeldManifest(dataDir string, r *request.Request, ticket request.Ticket) (string, error) {
+	if ticket.ChallengeRunID == "" {
+		return "", nil
+	}
+	held, err := heldChallengeFiles(dataDir, ticket.ChallengeRunID)
+	if err != nil || len(held) == 0 {
+		return "", err
+	}
+	data, err := json.MarshalIndent(held, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(request.Dir(dataDir, r.ID), "challenge")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("t%d-%s", ticket.Index, challengeHeldFile))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write the held challenge files: %w", err)
+	}
+	return path, nil
 }
 
 // answeredNumbers are the numbers of the answered read-back questions, the

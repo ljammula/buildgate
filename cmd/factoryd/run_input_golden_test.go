@@ -61,7 +61,8 @@ func runInputGoldenConfig(t *testing.T) string {
 // shows. Not set, so absent from the golden: -prior-run,
 // -on-branch, -diff-base, -resume-worktree-of and -replay (each needs an
 // earlier run; TestReplayRunWorkflowInputMatchesGolden covers -replay, which
-// also refuses -earlier-attempt),
+// also refuses -earlier-attempt, and -challenge-set-aside, which only a replay
+// takes and which is refused with -challenge-held),
 // -baseline-check (it takes no ticket; TestBaselineCheckReachesTheWorkflow
 // covers it), and the
 // spec's Tests-Required opt-out and the config's skills, test patterns and allowed paths.
@@ -329,6 +330,7 @@ func replayGolden(t *testing.T, golden string, carve *run.Carve) {
 				flags = slices.Delete(flags, i, i+1)
 			}
 		}
+		heldManifest := flags[slices.Index(flags, "-challenge-held")+1]
 		for _, refused := range []string{"-challenge-held", "-challenge-spec", "-challenge-criteria", "-challenge-answers", "-challenge-covered", "-challenge-approved-sha256", "-challenge-approved-bytes"} {
 			if i := slices.Index(flags, refused); i >= 0 {
 				flags = slices.Delete(flags, i, i+2)
@@ -336,6 +338,9 @@ func replayGolden(t *testing.T, golden string, carve *run.Carve) {
 		}
 		dataDir = flags[slices.Index(flags, "-data-dir")+1]
 		replay := writeReplayFile(t, inputs, onto, head)
+		// A replay of a challenged ticket sets its committed held files
+		// aside; the manifest is the one the full set gives -challenge-held.
+		flags = append(flags, "-challenge-set-aside", heldManifest)
 		if carve != nil {
 			record, err := run.ReadReplayFile(replay)
 			if err != nil {

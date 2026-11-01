@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -257,5 +258,32 @@ func TestReplayRunReviewSchedulesNoReproduction(t *testing.T) {
 	}
 	if slices.Contains(f.started, RunHeldTestActivityName) || result.ReviewReproductions != nil {
 		t.Errorf("Activities started = %v, findings %+v; want no reproduction", f.started, result.ReviewReproductions)
+	}
+}
+
+// TestRunWorkflowReplaySetsItsCommittedHeldFilesAside: a replay run of a
+// challenged ticket hands its held files to evidence collection as the files
+// to set aside, and runs no challenge phase (SC-022).
+func TestRunWorkflowReplaySetsItsCommittedHeldFilesAside(t *testing.T) {
+	f := newReplayFixture(t)
+	input := replayFixtureInput()
+	held := []run.ChallengeFile{{Path: "p/edge_test.go", SHA256: strings.Repeat("a", 64), HostPath: "/fixture/runs/r/challenge/0/edge_test.go", Criterion: "AC-1"}}
+	input.ChallengeSetAside = held
+	var setAside []run.ChallengeFile
+	f.env.RegisterActivityWithOptions(func(_ context.Context, in CollectEvidenceInput) (CollectedEvidence, error) {
+		setAside = in.SetAside
+		return CollectedEvidence{}, nil
+	}, activity.RegisterOptions{Name: CollectEvidenceActivityName})
+	result, err := f.run(t, input)
+	if err != nil || result.State != run.StateAccepted {
+		t.Fatalf("replay run: err=%v state=%q, want accepted", err, result.State)
+	}
+	if !reflect.DeepEqual(setAside, held) {
+		t.Errorf("set aside = %+v, want %+v", setAside, held)
+	}
+	for _, name := range []string{RunChallengerJobActivityName, CommitChallengeActivityName, UndoChallengeCommitActivityName} {
+		if slices.Contains(f.started, name) {
+			t.Errorf("%s started for a replay run: %v", name, f.started)
+		}
 	}
 }
