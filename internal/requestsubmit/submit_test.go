@@ -59,6 +59,35 @@ func TestSubmitWritesRequest(t *testing.T) {
 	}
 }
 
+// TestSubmitRecordsTheTestPatternsOfFactoryYML: the plan review reads which
+// files are tests from the request, not from the workspace.
+func TestSubmitRecordsTheTestPatternsOfFactoryYML(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\ntest_patterns:\n  - \"*.check.ts\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	testfixture.CommitAgentsFile(t, workspace)
+	result, err := Submit(Params{
+		WorkspaceArg:             workspace,
+		DataDir:                  dataDir,
+		RequestText:              "Add a thing",
+		Source:                   request.Source{Kind: request.SourceText},
+		PreflightProfile:         "brownfield",
+		PreflightProfileExplicit: true,
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	req, err := request.Load(dataDir, result.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.TestPatterns) != 1 || req.TestPatterns[0] != "*.check.ts" {
+		t.Errorf("req.TestPatterns = %q, want [*.check.ts]", req.TestPatterns)
+	}
+}
+
 // TestSubmitUsesIDTextForRequestIDWhenSet is the regression test at the
 // Submit layer: when a caller (cmd/factoryd's -issue path) sets
 // IDText, the request id is slugged from IDText, not from RequestText --

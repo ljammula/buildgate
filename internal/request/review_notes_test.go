@@ -51,7 +51,7 @@ type notesCase struct {
 func checkNotes(t *testing.T, workspace string, tickets []PlanTicket, cases []notesCase) {
 	t.Helper()
 	for _, tc := range cases {
-		got := PlanReviewNotes([]string{"1. " + tc.criterion}, tickets, workspace, 0)
+		got := PlanReviewNotes([]string{"1. " + tc.criterion}, tickets, workspace, 0, nil)
 		if strings.Join(got, "\n") != strings.Join(tc.notes, "\n") {
 			t.Errorf("criterion %q:\n got  %q\n want %q", tc.criterion, got, tc.notes)
 		}
@@ -175,7 +175,7 @@ func TestPlanReviewNotesAreShortAndCapped(t *testing.T) {
 		owned = append(owned, fmt.Sprintf("pkg/f%02d.go", i))
 		criterion += fmt.Sprintf(" `pkg/f%02d.go` and again `pkg/f%02d.go`,", i, i)
 	}
-	notes := PlanReviewNotes([]string{criterion}, []PlanTicket{notesTicket("001.spec.md", []string{"a.go"}, 1), notesTicket("002.spec.md", owned, 2)}, "", 0)
+	notes := PlanReviewNotes([]string{criterion}, []PlanTicket{notesTicket("001.spec.md", []string{"a.go"}, 1), notesTicket("002.spec.md", owned, 2)}, "", 0, nil)
 	if len(notes) != maxReviewNotes+1 || notes[maxReviewNotes] != "and 4 more" {
 		t.Fatalf("notes = %q, want %d and \"and 4 more\"", notes, maxReviewNotes)
 	}
@@ -203,14 +203,14 @@ func TestPlanReviewNotesHoldOnlyRealNamesCleanedAndBounded(t *testing.T) {
 	})
 
 	dirty := "docs/a\x1b[31m\u202eb'c.md"
-	notes := PlanReviewNotes([]string{"1. `" + dirty + "` is added."}, []PlanTicket{covering, notesTicket("002\x1b[0m\u202e.spec.md", []string{dirty}, 2)}, workspace, 0)
+	notes := PlanReviewNotes([]string{"1. `" + dirty + "` is added."}, []PlanTicket{covering, notesTicket("002\x1b[0m\u202e.spec.md", []string{dirty}, 2)}, workspace, 0, nil)
 	want := "criterion 1 names `docs/ab'c.md`, which ticket 002.spec.md may change, but the tickets covering criterion 1 may not"
 	if len(notes) != 1 || notes[0] != want {
 		t.Errorf("notes = %q, want [%q]", notes, want)
 	}
 
 	huge := "docs/" + strings.Repeat("a", 200_000) + ".md"
-	notes = PlanReviewNotes([]string{"1. `" + huge + "` is added."}, []PlanTicket{covering, notesTicket("002.spec.md", []string{huge}, 2)}, workspace, 0)
+	notes = PlanReviewNotes([]string{"1. `" + huge + "` is added."}, []PlanTicket{covering, notesTicket("002.spec.md", []string{huge}, 2)}, workspace, 0, nil)
 	if len(notes) != 1 || len([]rune(notes[0])) > maxNoteNameLen+150 || !strings.Contains(notes[0], "…`, which ticket 002.spec.md") {
 		t.Errorf("a 200 KB name gave notes of %d bytes: %.300q", len(strings.Join(notes, "")), notes)
 	}
@@ -321,12 +321,12 @@ func TestPlanReviewNotesNameATicketOverTheBudget(t *testing.T) {
 	tickets := []PlanTicket{within, over, undeclared}
 	criteria := []string{"1. It works."}
 
-	got := PlanReviewNotes(criteria, tickets, "", 400)
+	got := PlanReviewNotes(criteria, tickets, "", 400, nil)
 	want := []string{"Ticket 002.spec.md estimates 620 changed lines, over the 400-line budget."}
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("notes = %q, want %q", got, want)
 	}
-	if got := PlanReviewNotes(criteria, tickets, "", 0); len(got) != 0 {
+	if got := PlanReviewNotes(criteria, tickets, "", 0, nil); len(got) != 0 {
 		t.Errorf("no budget: notes = %q, want none", got)
 	}
 }
@@ -340,55 +340,69 @@ func TestPlanReviewNotesSayWhenALaterTicketChangesCodeAnEarlierTicketsTestsCover
 		auth = "frontend/src/auth/AuthScreen.test.tsx"
 	)
 	earlier := notesTicket("004.spec.md", []string{"frontend/src/auth/AuthScreen.tsx", auth, app}, 1)
-	notes := func(tickets ...PlanTicket) string {
-		return strings.Join(PlanReviewNotes([]string{"1. Something."}, tickets, "", 0), "\n")
+	later := func(files ...string) PlanTicket { return notesTicket("005.spec.md", files, 1) }
+	pair := func(a, b []string) []PlanTicket {
+		return []PlanTicket{notesTicket("004.spec.md", a, 1), notesTicket("005.spec.md", b, 1)}
 	}
-	incident := "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md adds or changes tests under frontend/src (frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
+	incident := "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md lists tests beside it (frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
 	cases := []struct {
 		name    string
 		tickets []PlanTicket
 		want    string
 	}{
-		{"incident", []PlanTicket{earlier, notesTicket("005.spec.md", []string{app, "frontend/src/live.tsx"}, 1)}, incident},
-		{"later ticket lists the test", []PlanTicket{earlier, notesTicket("005.spec.md", []string{app, auth}, 1)}, ""},
-		{"test outside the subtree", []PlanTicket{earlier, notesTicket("005.spec.md", []string{"backend/main.go"}, 1)}, ""},
-		{"root-level changed file", []PlanTicket{
-			notesTicket("004.spec.md", []string{"index.html", "web/index.test.ts"}, 1),
-			notesTicket("005.spec.md", []string{"index.html"}, 1)}, ""},
-		{"test of a later ticket", []PlanTicket{notesTicket("005.spec.md", []string{app}, 1), earlier}, ""},
-		{"changed file only the later ticket lists", []PlanTicket{earlier, notesTicket("005.spec.md", []string{"frontend/src/live.tsx"}, 1)}, ""},
+		{"incident", []PlanTicket{earlier, later(app, "frontend/src/live.tsx")}, incident},
+		{"later ticket lists the test", []PlanTicket{earlier, later(app, auth)}, ""},
+		{"later ticket lists the test's directory", []PlanTicket{earlier, later(app, "frontend/src/auth/")}, ""},
+		{"test outside the subtree", []PlanTicket{earlier, later("backend/main.go")}, ""},
+		{"test of a later ticket", []PlanTicket{later(app), earlier}, ""},
+		{"changed file only the later ticket lists", []PlanTicket{earlier, later("frontend/src/live.tsx")}, ""},
 		{"a ticket's own tests", []PlanTicket{notesTicket("004.spec.md", []string{app, auth}, 1)}, ""},
+		{"tests only in a sibling directory", pair([]string{"web/a/x.ts", "web/b/x.test.ts"}, []string{"web/a/x.ts"}), ""},
+		{"src/a is not src/ab", pair([]string{"src/a/x.ts", "src/ab/x.test.ts"}, []string{"src/a/x.ts"}), ""},
+		{"root Go file with a root test", pair([]string{"lib.go", "lib_test.go"}, []string{"lib.go"}),
+			"Ticket 005.spec.md changes lib.go; ticket 004.spec.md lists tests beside it (lib_test.go) that ticket 005.spec.md does not list."},
+		{"root file with a test in a subdirectory", pair([]string{"lib.go", "sub/lib_test.go"}, []string{"lib.go"}), ""},
+		{"shared stylesheet", pair([]string{"src/a.css", "src/a.test.ts"}, []string{"src/a.css"}), ""},
+		{"shared doc", pair([]string{"src/NOTES.MD", "src/a.test.ts"}, []string{"src/NOTES.MD"}), ""},
+		{"glob entries are ignored", pair([]string{"src/*.ts", "src/a.test.ts"}, []string{"src/*.ts"}), ""},
+		{"a leading ./ is cleaned", pair([]string{"./src/a.ts", "src/a.test.ts"}, []string{"src/a.ts"}),
+			"Ticket 005.spec.md changes src/a.ts; ticket 004.spec.md lists tests beside it (src/a.test.ts) that ticket 005.spec.md does not list."},
+		{"a duplicate test counts once", pair([]string{"src/a.ts", "src/a.test.ts", "./src/a.test.ts"}, []string{"src/a.ts"}),
+			"Ticket 005.spec.md changes src/a.ts; ticket 004.spec.md lists tests beside it (src/a.test.ts) that ticket 005.spec.md does not list."},
 	}
 	for _, tc := range cases {
-		if got := notes(tc.tickets...); got != tc.want {
+		got := strings.Join(PlanReviewNotes([]string{"1. Something."}, tc.tickets, "", 0, nil), "\n")
+		if got != tc.want {
 			t.Errorf("%s:\n got  %q\n want %q", tc.name, got, tc.want)
 		}
 	}
 }
 
-// TestPlanReviewNotesNameAtMostThreeTestsOfAnEarlierTicket: the note names
-// the first three tests, sorted, and counts the rest.
-func TestPlanReviewNotesNameAtMostThreeTestsOfAnEarlierTicket(t *testing.T) {
-	earlier := notesTicket("001.spec.md", []string{"src/m.ts", "src/e.test.ts", "src/d.test.ts", "src/c.test.ts", "src/b.test.ts", "src/a.test.ts"}, 1)
-	later := notesTicket("002.spec.md", []string{"src/z.ts", "src/m.ts"}, 1)
-	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, "", 0)
-	want := []string{"Ticket 002.spec.md changes src/m.ts; ticket 001.spec.md adds or changes tests under src (src/a.test.ts, src/b.test.ts, src/c.test.ts, and 2 more) that ticket 002.spec.md does not list."}
+// TestPlanReviewNotesGiveOneEarlierTestsNotePerTicketAndNameAtMostThree: a
+// later ticket sharing several files with several earlier tickets gets one
+// note: the first file and a count, the tickets, three tests and a count.
+func TestPlanReviewNotesGiveOneEarlierTestsNotePerTicketAndNameAtMostThree(t *testing.T) {
+	one := notesTicket("001.spec.md", []string{"src/m.ts", "src/n.ts", "src/e.test.ts", "src/d.test.ts", "src/c.test.ts"}, 1)
+	two := notesTicket("002.spec.md", []string{"src/m.ts", "src/b.test.ts", "src/a.test.ts"}, 1)
+	three := notesTicket("003.spec.md", []string{"src/m.ts", "src/n.ts"}, 1)
+	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{one, two, three}, "", 0, nil)
+	want := []string{
+		"Ticket 002.spec.md changes src/m.ts; ticket 001.spec.md lists tests beside it (src/c.test.ts, src/d.test.ts, src/e.test.ts) that ticket 002.spec.md does not list.",
+		"Ticket 003.spec.md changes src/m.ts (and 1 more); tickets 001.spec.md, 002.spec.md list tests beside it (src/a.test.ts, src/b.test.ts, src/c.test.ts, and 2 more) that ticket 003.spec.md does not list.",
+	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("got %q\nwant %q", got, want)
 	}
 }
 
 // TestPlanReviewNotesReadTheRepositorysTestPatterns: a file is a test by the
-// workspace's .factory.yml test_patterns, not only by the defaults.
+// patterns passed in (the request's recorded test_patterns), not only by the
+// defaults.
 func TestPlanReviewNotesReadTheRepositorysTestPatterns(t *testing.T) {
-	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: make test\ntest_patterns:\n  - \"*.check.ts\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	earlier := notesTicket("001.spec.md", []string{"src/z.ts", "src/a.check.ts", "src/b.test.ts"}, 1)
 	later := notesTicket("002.spec.md", []string{"src/z.ts"}, 1)
-	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, workspace, 0)
-	want := "Ticket 002.spec.md changes src/z.ts; ticket 001.spec.md adds or changes tests under src (src/a.check.ts) that ticket 002.spec.md does not list."
+	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, "", 0, []string{"*.check.ts"})
+	want := "Ticket 002.spec.md changes src/z.ts; ticket 001.spec.md lists tests beside it (src/a.check.ts) that ticket 002.spec.md does not list."
 	if strings.Join(got, "\n") != want {
 		t.Errorf("got %q\nwant %q", got, want)
 	}

@@ -112,7 +112,7 @@ func TestBoardAppPlanReviewNotesATicketThatChangesCodeAnEarlierTicketsTestsCover
 	if loaded.State != request.StatePlanReview {
 		t.Fatalf("state = %s (error %q), want plan_review", loaded.State, loaded.Error)
 	}
-	const want = "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md adds or changes tests under frontend/src (frontend/src/auth/AuthContext.test.tsx, frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
+	const want = "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md lists tests beside it (frontend/src/auth/AuthContext.test.tsx, frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
 	for _, note := range loaded.ReviewNotes {
 		if note == want {
 			return

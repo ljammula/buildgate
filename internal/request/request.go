@@ -592,6 +592,11 @@ type Request struct {
 	// eventual `factoryd run` invocation resolves on its own.
 	PreflightProfile string `json:"preflight_profile,omitempty"`
 
+	// TestPatterns are the workspace .factory.yml's test_patterns as they
+	// were at submit: which files count as tests when the plan review reads
+	// the tickets (PlanReviewNotes). Empty means policy.DefaultTestPatterns.
+	TestPatterns []string `json:"test_patterns,omitempty"`
+
 	// Rejections is this request's structured reject history, one entry
 	// per Reject call (approve.go), appended in addition to the existing
 	// human-readable note Reject also appends to request.md -- that note
