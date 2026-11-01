@@ -10,8 +10,8 @@ watches the pull request itself until every comment is answered or the
 request stops.
 
 A run that stops before its pull request posts no comment and adds none to
-the share; it is still recorded, as a fail. A comment is RESOLVED when its thread holds the factory's "Addressed in
-<sha>." reply and <sha> is a commit of the pull request. The run PASSES
+the share; it is still recorded, as a fail. A comment is RESOLVED when its thread holds the factory's reply ("Addressed in
+<sha>.", or the builder's words ending "Pushed in <sha>.") and <sha> is a commit of the pull request. The run PASSES
 when every comment is resolved, which the factory can only do within
 max_review_rounds. Each run appends one line to the results file, and
 --results prints the share of comments resolved over the recorded runs.
@@ -91,7 +91,7 @@ import sys
 import time
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "live-round"
-ADDRESSED = re.compile(r"^Addressed in ([0-9a-f]{7,40})\.$")
+ADDRESSED = re.compile(r"(?:^|\n)(?:Addressed|Pushed) in ([0-9a-f]{7,40})\.$")
 NOT_PUSHED = re.compile(r"^Attempted in corrective round (\d+) of (\d+)")
 STOPPED = {"halted", "quarantined", "cancelled", "done", "closed", "resume_review"}
 
@@ -185,7 +185,7 @@ def thread_outcomes(comments, roots, pr_commits, replays=None):
 			if c.get("in_reply_to_id") != root:
 				continue
 			body = (c.get("body") or "").strip()
-			addressed = ADDRESSED.match(body)
+			addressed = ADDRESSED.search(body)
 			if addressed:
 				named = [o for o in moved if o.startswith(addressed.group(1))]
 				candidates = [addressed.group(1)] + [moved[o] for o in named]

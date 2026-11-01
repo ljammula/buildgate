@@ -1735,6 +1735,24 @@ class WriteEvidenceJSONTests(unittest.TestCase):
 			{"blockers": [], "changed_files": [], "failure_signature": "", "failure_log": "", "agent_notes": ""},
 		)
 
+	def test_final_message_is_written_with_its_tail_kept(self):
+		# A review round's builder ends its message with its replies to the
+		# reviewer; the host reads the last round's final_message.
+		with tempfile.TemporaryDirectory() as directory:
+			workspace = Path(directory)
+			message = "x" * 9000 + "\nReply (a.go:1):\nDone."
+			rnd = build_app.Round(
+				index=1, agent="pi", command=["pi"], agent_returncode=0, agent_timed_out=False, usage=None,
+				traces=[], reviewer=build_app.ReviewSignal("unavailable", ""), verify_command="make test",
+				verify_passed=True, verify_timed_out=False, verify_output_tail="", duration_s=1.0,
+				final_message=build_app.redact(message, build_app.FINAL_MESSAGE_LIMIT),
+			)
+			result = build_app.BuildResult(workspace=workspace, spec_path=workspace / "spec.md", rounds=[rnd])
+			payload = json.loads(build_app.write_evidence_json(result).read_text())
+		got = payload["rounds"][0]["final_message"]
+		self.assertEqual(len(got), build_app.FINAL_MESSAGE_LIMIT)
+		self.assertTrue(got.endswith("Reply (a.go:1):\nDone."))
+
 	def test_empty_rounds_writes_an_empty_list_not_an_error(self):
 		with tempfile.TemporaryDirectory() as directory:
 			workspace = Path(directory)

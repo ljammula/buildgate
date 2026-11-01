@@ -43,7 +43,8 @@
       ],
       "failure_signature": "5f2c9d0a71e4b386",
       "failure_log": ".pi-build-session/feedback/verify.log",
-      "agent_notes": ""
+      "agent_notes": "",
+      "final_message": ""
     },
     {
       "index": 2,
@@ -69,7 +70,8 @@
       "changed_files": [],
       "failure_signature": "",
       "failure_log": "",
-      "agent_notes": ""
+      "agent_notes": "",
+      "final_message": ""
     }
   ]
 }

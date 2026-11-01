@@ -1403,3 +1403,14 @@ func TestPreP2RunRecordStillDecodes(t *testing.T) {
 		}
 	}
 }
+
+// TestCleanRoundFeedbackKeepsTheTailOfTheFinalMessage: the builder's replies
+// end its final message, so a cut keeps the end.
+func TestCleanRoundFeedbackKeepsTheTailOfTheFinalMessage(t *testing.T) {
+	ev := AgentEvidence{Rounds: []AgentEvidenceRound{{FinalMessage: strings.Repeat("x", 9000) + "\nReply (a.go:1):\nDone."}}}
+	ev.CleanRoundFeedback()
+	got := ev.Rounds[0].FinalMessage
+	if len([]rune(got)) != maxRoundFinalMessageLen || !strings.HasSuffix(got, "Reply (a.go:1):\nDone.") {
+		t.Errorf("final message = %d runes, tail %q", len([]rune(got)), got[len(got)-30:])
+	}
+}

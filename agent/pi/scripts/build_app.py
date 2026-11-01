@@ -247,6 +247,10 @@ def compose_services_sentence(environ: dict[str, str]) -> str | None:
 	)
 
 
+# Bytes of the agent's final message a round record keeps (the tail).
+FINAL_MESSAGE_LIMIT = 4000
+
+
 def redact(output: str, limit: int = 3000) -> str:
 	import re
 
@@ -511,6 +515,10 @@ class Round:
 	failure_signature: str = ""
 	failure_log: str = ""
 	agent_notes: str = ""
+	# The agent's final message this round, redacted, its tail kept (a
+	# review round's per-comment replies end the message); recorded for every
+	# round, clean ones included. Written as `final_message`.
+	final_message: str = ""
 	# run_autofix's record of this round's autofix commands (None when the
 	# repository lists none); written as `autofix` in BUILD_EVIDENCE.json.
 	autofix: dict | None = None
@@ -2161,6 +2169,7 @@ def round_from_state(item: dict, position: int) -> Round:
 		failure_signature=_typed(item, "failure_signature", (str,), "", cap=64),
 		failure_log=_typed(item, "failure_log", (str,), "", cap=400),
 		agent_notes=_typed(item, "agent_notes", (str,), "", cap=text),
+		final_message=_typed(item, "final_message", (str,), "", cap=FINAL_MESSAGE_LIMIT),
 		autofix=_typed(item, "autofix", (dict, type(None)), None),
 		verify_rerun=_verify_rerun_from_state(_typed(item, "verify_rerun", (dict, type(None)), None)),
 	)
@@ -3002,6 +3011,7 @@ def _run_build(
 			failure_log=round_failure_log(feedback_dir, workspace, setup_failed is not None) if blockers else "",
 			autofix=autofix_record,
 			verify_rerun=verify_rerun,
+			final_message=redact(parsed.final_text, FINAL_MESSAGE_LIMIT),
 			agent_notes=round_feedback.agent_notes(
 				no_changes=no_changes, timed_out=timed_out, timeout_minutes=timeout_minutes,
 				returncode=agent_returncode, stderr_tail=redact(parsed.last_turn_error, 1500),
@@ -3285,6 +3295,7 @@ def write_evidence_json(result: BuildResult) -> Path:
 				"failure_signature": rnd.failure_signature,
 				"failure_log": rnd.failure_log,
 				"agent_notes": rnd.agent_notes,
+				"final_message": rnd.final_message,
 				# Additive, present only for a round that ran autofix commands.
 				**({"autofix": rnd.autofix} if rnd.autofix is not None else {}),
 				# Additive, present only for a round whose verify failed and

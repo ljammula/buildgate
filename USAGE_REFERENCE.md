@@ -458,7 +458,7 @@ per `-pr-poll-interval` (`5m` default, min `1m`):
   account and `[bot]` logins are always excluded; `-pr-ignore-authors`
   wins over trusted) becomes a corrective round against the ticket's
   existing branch (never a fresh worktree). Accepted: pushes the branch,
-  replies "Addressed in <sha>." on each thread. Quarantined/halted: pushes
+  replies on each thread with the builder's own words for that comment (what it changed, what it did not do and why) followed by "Pushed in <sha>.", or "Addressed in <sha>." when the builder wrote none; replies for no thread go in one pull request comment. Quarantined/halted: pushes
   nothing, stays in `pr_review`, one notification, and replies on each
   thread: the round's number, that nothing was pushed, the gates that
   failed, what the review flagged, and whether another round follows.

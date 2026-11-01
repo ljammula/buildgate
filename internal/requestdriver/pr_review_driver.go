@@ -271,7 +271,7 @@ func RealListReviewComments(ctx context.Context, prURL string) ([]ReviewComment,
 // body in the thread containing commentID. GitHub files every reply under
 // the thread's root comment, so the match is on that root, not on commentID
 // itself; matching the thread as well as the body keeps one round's
-// identical "Addressed in <sha>." replies on different threads apart.
+// identical replies ("Addressed in <sha>.") on different threads apart.
 func ReplyLanded(comments []ReviewComment, commentID int64, body string) bool {
 	root := commentID
 	for _, c := range comments {
@@ -1324,16 +1324,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	}
 	afterRoundPushed(dp, ctx, r, ticket, roundSliceIndex, roundRun)
 
-	replyCtx, cancelReply := context.WithTimeout(ctx, 30*time.Second)
-	for _, t := range includedThreads {
-		body := fmt.Sprintf("Addressed in %s.", roundRun.ResultSHA)
-		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, body); err != nil {
-			log.Printf("request %s: ticket %d: reply on thread %s: %v", r.ID, ticket.Index, t.ID, err)
-			continue
-		}
-		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
-	}
-	cancelReply()
+	postReviewReplies(dp, ctx, r, ticket, roundRun, includedThreads)
 	return r.Save(dataDir)
 }
 
@@ -1625,6 +1616,7 @@ func writeRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 	section, includedCounts := renderBoundedAddendumSectionsWithCounts(sections, MaxTicketBuildInputBytes-len([]byte(b.String())))
 	if section != "" {
 		b.WriteString(section)
+		b.WriteString(reviewReplyInstruction)
 	}
 	includedThreads := threads
 	if len(threads) > 0 && len(includedCounts) > 0 {
