@@ -1659,9 +1659,9 @@ func (tr *ticketRun) lockRepository() error {
 	// the repository shared like an isolated run, plus its branch's lock
 	// exclusively (taken first): two corrective rounds on one existing branch
 	// would overwrite each other's commits, rounds on other branches do not.
-	// A run that writes the repository-wide info/exclude, which every
-	// worktree reads (writesSharedExclude: a challenge round with held files),
-	// holds the repository exclusively, on a branch or not. A run that finds the
+	// A challenge round with held files lists them only in its own build
+	// sandbox's git ignore file, never the repository's info/exclude, so it
+	// shares the repository like any -on-branch run. A run that finds the
 	// repository idle takes it exclusively first, to reconcile stranded
 	// worktrees, then releases it and takes it shared (see
 	// acquireIsolatedRunLock).
@@ -1670,13 +1670,13 @@ func (tr *ticketRun) lockRepository() error {
 	// id is minted before it.
 	tr.mintRunID()
 	report := repoLockReport{dataDir: *tr.dataDir, runID: tr.id}
-	sharedRun := *tr.repository == "" && !tr.writesSharedExclude()
+	sharedRun := *tr.repository == ""
 	reconcileStranded := func(lock *wsisolation.DirectLock) {
 		reconcileIsolationMarkers(tr.lifecycleCtx, *tr.dataDir, *tr.workspace, *tr.sandboxDocker, lock, nil)
 	}
 	if *tr.repository == "" {
 		var branchLock *wsisolation.DirectLock
-		branchLock, directLock, err = acquireWorkspaceLocks(tr.lifecycleCtx, *tr.workspace, *tr.onBranch, tr.writesSharedExclude(), report, reconcileStranded)
+		branchLock, directLock, err = acquireWorkspaceLocks(tr.lifecycleCtx, *tr.workspace, *tr.onBranch, report, reconcileStranded)
 		if branchLock != nil {
 			tr.atExit(func() {
 				if closeErr := branchLock.Close(); closeErr != nil {

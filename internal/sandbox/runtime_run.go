@@ -22,10 +22,11 @@ var ErrSandboxRerun = errors.New("the sandbox runtime started the worker command
 // ErrSandboxNotStarted reports a launch that ended before the worker's
 // command was released: the route credential could not be stored, the
 // sandbox could not be created, it showed no worker container, or the
-// guard's "go" file could not be written. Nothing
+// guard's "go" file could not be written, or the wrapper exited
+// WorkerExitNoGitIgnore before the command. Nothing
 // ran, so the worktree is as it was and the step said nothing about the
-// work. An error after the release (a timeout, an output over the limit, a
-// lost wait) never wraps it: the command ran.
+// work. An error after the command began (a timeout, an output over the
+// limit, a lost wait) never wraps it: the command ran.
 var ErrSandboxNotStarted = errors.New("the sandbox did not start the worker command")
 
 // ErrCommandStarted is in the chain of every error RunThroughRuntime
@@ -170,6 +171,9 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 		return result, ref, err
 	}
 	result.ExitCode = exit.ExitCode
+	if exit.ExitCode == WorkerExitNoGitIgnore {
+		return result, ref, fmt.Errorf("sandbox %s: %w: the wrapper could not install the per-user git ignore file (exit code %d)", name, ErrSandboxNotStarted, exit.ExitCode)
+	}
 	// Read after the exit and before the delete: the container, its scratch
 	// volume and what they wrote still exist.
 	result.Resources.DiskFree1, result.Resources.DiskKnown = readDiskFree(runCtx, rt)

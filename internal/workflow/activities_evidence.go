@@ -74,6 +74,11 @@ func (a *Activities) CollectEvidenceActivity(ctx context.Context, input CollectE
 		)
 	}
 
+	// A review or challenge stub a dead worker left would show as a changed
+	// file below and be committed by the safety-net commit.
+	if err := a.sweepReviewStubs(ctx, RunWorkflowInput{WorkspacePath: input.WorkspacePath, DataDir: input.DataDir}); err != nil {
+		return CollectedEvidence{}, err
+	}
 	result, activityErr := a.runCollectEvidence(ctx, checkpointDir, input)
 	checkpoint.Result = result
 	if activityErr != nil {

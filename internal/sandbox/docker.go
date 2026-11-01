@@ -166,6 +166,11 @@ type LaunchSpec struct {
 	// wrapper restore the image's install tree into /workspace before the
 	// command (installRestorePrelude). The Docker path does not restore.
 	RestoreInstall bool
+	// UserGitIgnore, when set, is a file below /inputs (a path inside one of
+	// Inputs) that the worker copies to git's per-user ignore file before the
+	// command, so paths the round holds stay out of the sandbox's git status
+	// without touching the repository's own info/exclude.
+	UserGitIgnore string
 	// ProgressPath, when non-empty, is the run's progress.jsonl sidecar
 	// (progress.Path/PathInDir) that the stdout-scanning loop below
 	// appends to whenever a line matches the FACTORY_PROGRESS worker
@@ -332,6 +337,7 @@ func (s LaunchSpec) Validate() error {
 		s.validateGitCommonDir,
 		s.validateInputDir,
 		s.validateInputMounts,
+		s.validateUserGitIgnore,
 		s.validateIdentityAndLimits,
 		s.validateNetworks,
 		s.validateEnvironment,
@@ -402,6 +408,19 @@ func (s LaunchSpec) validateInputMounts() error {
 		}
 	}
 	return nil
+}
+
+// validateUserGitIgnore checks UserGitIgnore is a file inside a declared input mount.
+func (s LaunchSpec) validateUserGitIgnore() error {
+	if s.UserGitIgnore == "" {
+		return nil
+	}
+	for _, mount := range s.Inputs {
+		if strings.HasPrefix(s.UserGitIgnore, "/inputs/"+mount.Target+"/") && filepath.Clean(s.UserGitIgnore) == s.UserGitIgnore {
+			return nil
+		}
+	}
+	return fmt.Errorf("sandbox git ignore file %q is not inside a declared input mount", s.UserGitIgnore)
 }
 
 // validateIdentityAndLimits checks the log path, the container name, the run id, the data
@@ -738,8 +757,16 @@ func (s LaunchSpec) dockerCommand(dockerBinary, verb string) []string {
 			// it -- harmless, and otherwise a noisy line in every run log.
 			reclaim += "; chmod -R g+rwX -- " + shSingleQuote(WorkerScratchMount) + " 2>/dev/null || true"
 		}
+		install := ""
+		if s.UserGitIgnore != "" {
+			install = gitIgnoreInstall(s.UserGitIgnore, workerHome) + "; "
+		}
 		command = append([]string{"/bin/sh", "-c",
-			"umask " + s.WorkerUmask + `; "$@"; ec=$?; ` + reclaim + `; exit $ec`,
+			"umask " + s.WorkerUmask + "; " + install + `"$@"; ec=$?; ` + reclaim + `; exit $ec`,
+			"--"}, s.Command...)
+	} else if s.UserGitIgnore != "" {
+		command = append([]string{"/bin/sh", "-c",
+			gitIgnoreInstall(s.UserGitIgnore, workerHome) + `; exec "$@"`,
 			"--"}, s.Command...)
 	}
 	args = append(args, command...)

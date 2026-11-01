@@ -173,11 +173,6 @@ func reconcileIsolationMarkers(ctx context.Context, dataDir, repoDir, sandboxDoc
 		log.Printf("isolation recovery: refusing reconciliation without held repository ownership")
 		return nil
 	}
-	// No run is live under the exclusive hold, so a run block left in
-	// info/exclude belongs to a crashed challenge round.
-	if err := wsisolation.DropAllRunBlocks(repoDir); err != nil {
-		log.Printf("isolation recovery: could not drop leftover exclude blocks: %v", err)
-	}
 	return reconcileIsolationMarkersWith(ctx, dataDir, repoDir, sandboxDocker, lock, func(ctx context.Context, workflowID string) bool {
 		return temporalWorkflowRunning(ctx, temporalClient, workflowID)
 	})

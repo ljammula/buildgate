@@ -641,48 +641,60 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 		removeMountParents(made)
 		return ctx, func() {}, err
 	}
-	unexclude, err := excludeMountsFromGit(input.WorkspacePath, input.RunID, masks)
-	if err != nil {
+	ignoreDir := filepath.Join(root, challengeIgnoreDirName)
+	if err := writeChallengeIgnore(ignoreDir, masks); err != nil {
 		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
 		removeMountParents(made)
 		return ctx, func() {}, err
 	}
+	warnIfRepositoryOverridesExcludesFile(input)
 	cleanup := func() {
-		unexclude()
 		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
 		removeMountParents(made)
 		_ = os.RemoveAll(root)
 	}
+	ctx = withInputMounts(ctx, sandbox.InputMount{Source: ignoreDir, Target: challengeIgnoreDirName})
+	ctx = withUserGitIgnore(ctx, "/inputs/"+challengeIgnoreDirName+"/"+challengeIgnoreFile)
 	return withWorkspaceMasks(ctx, masks), cleanup, nil
 }
 
-// excludeMountsFromGit lists each mountpoint in the repository's
-// info/exclude, so `git add -A` in the round's worktree never stages the
-// empty stub a held file's mount leaves on the host (the build would commit
-// an empty file where the held content is only visible through the mount).
-// The file is the one every git call reads, the sandbox's included, so the
-// entries are written to it: as a block of this round alone, under the git
-// metadata lock (SC-011). The block's token is the run and its worktree, so a
-// retry of the same activity replaces its block rather than adding another.
-// The returned function removes that block and nothing else, so it never
-// writes back a stale copy over lines another run added meanwhile; a removal
-// that fails is logged, and the next attempt of the run replaces the block.
-func excludeMountsFromGit(workDir, runID string, masks []sandbox.WorkspaceMask) (func(), error) {
-	patterns := make([]string, 0, len(masks))
+// challengeIgnoreDirName and challengeIgnoreFile name the directory, mounted
+// at /inputs/<dir>, and the file in it that become the build sandbox's
+// per-user git ignore file.
+const (
+	challengeIgnoreDirName = "gitignore"
+	challengeIgnoreFile    = "ignore"
+)
+
+// writeChallengeIgnore lists each mountpoint, anchored and escaped, in
+// dir/ignore. The sandbox installs it as git's per-user ignore file, so a git
+// read there (status, `add -A`) never sees the empty stub a held file's mount
+// leaves in the worktree. It is not the repository's info/exclude, which every
+// worktree of the repository reads: another run's untracked file at the same
+// path must still be committed. The host-side commits run after the mounts'
+// cleanup removed the stubs.
+func writeChallengeIgnore(dir string, masks []sandbox.WorkspaceMask) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("stage the git ignore file: %w", err)
+	}
+	var b strings.Builder
 	for _, m := range masks {
-		patterns = append(patterns, "/"+escapeExcludePattern(m.Target))
+		b.WriteString("/" + escapeExcludePattern(m.Target) + "\n")
 	}
-	sum := sha256.Sum256([]byte(workDir))
-	token := runID + "@" + hex.EncodeToString(sum[:6])
-	release, err := wsisolation.ExcludeForRun(workDir, token, patterns)
-	if err != nil {
-		return nil, fmt.Errorf("write the git exclude file: %w", err)
+	if err := os.WriteFile(filepath.Join(dir, challengeIgnoreFile), []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("stage the git ignore file: %w", err)
 	}
-	return func() {
-		if err := release(); err != nil {
-			log.Printf("challenge round %s: could not remove its info/exclude block %q: %v", runID, token, err)
-		}
-	}, nil
+	return nil
+}
+
+// warnIfRepositoryOverridesExcludesFile logs when the repository's own config
+// sets core.excludesFile: it replaces the per-user ignore file for reads in
+// the sandbox, so the stubs may show in the build's git status. No commit is
+// affected, since the host commits after the stubs are gone.
+func warnIfRepositoryOverridesExcludesFile(input RunWorkflowInput) {
+	if out, err := runner.GitConfigGet(input.WorkspacePath, "core.excludesFile"); err == nil && strings.TrimSpace(out) != "" {
+		log.Printf("challenge round %s: the repository sets core.excludesFile (%s), which overrides the sandbox's per-user git ignore file: held-file stubs may show in the build's git status", input.RunID, strings.TrimSpace(out))
+	}
 }
 
 // escapeExcludePattern escapes the characters a gitignore pattern reads as

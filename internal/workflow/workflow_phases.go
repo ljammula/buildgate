@@ -252,6 +252,7 @@ func buildAndVerify(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		CheckpointDir: input.CheckpointDir,
 		LogDir:        input.LogDir,
 		SpecPath:      input.SpecPath,
+		DataDir:       input.DataDir,
 	}
 	current.Stage, current.StartedAt = "post_build", temporalworkflow.Now(ctx)
 	if err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "post-build"), PostBuildActivityName, postBuildInput).Get(ctx, &postBuild); err != nil {
@@ -416,6 +417,7 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		RepoGatesFailed:   gates.repoGatesFailed,
 		CheckpointDir:     input.CheckpointDir,
 		LogDir:            input.LogDir,
+		DataDir:           input.DataDir,
 		SetAside:          slices.Concat(input.ChallengeHeld, input.ChallengeSetAside),
 	}
 	current.Stage, current.StartedAt = "evidence", temporalworkflow.Now(ctx)

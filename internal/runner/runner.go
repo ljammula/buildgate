@@ -411,6 +411,23 @@ func GitRevParseHEAD(dir string) (string, error) {
 	return sha, nil
 }
 
+// GitConfigGet returns the value of key in dir's repository configuration
+// (its config file, included files and worktree config, but not the user's or
+// the system's), or "" when it is unset.
+func GitConfigGet(dir, key string) (string, error) {
+	cmd := exec.Command("git", "-C", dir, "config", "--get", key)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.Output()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("git config --get %s: %w", key, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // GitRevParseRef returns the commit SHA ref currently resolves to in dir --
 // GitRevParseHEAD's own generalization for a caller that needs some other
 // ref's tip (e.g. an existing branch's own current commit, for -on-branch's

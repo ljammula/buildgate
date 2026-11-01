@@ -239,6 +239,8 @@ RUN set -eu; \
     git -C "$sha256" init -q --object-format=sha256; \
     test "$(git -C "$sha256" rev-parse --show-object-format)" = sha256; \
     rm -rf "$smoke" "$sha256"; \
+    test -z "$(git config --system --get core.excludesFile || true)"; \
+    test -z "$(git config --global --get core.excludesFile || true)"; \
     ssh -V 2>&1 && command -v ssh-keygen && test ! -e /usr/sbin/sshd \
     && for key in /etc/ssh/ssh_host_*; do test ! -e "$key"; done \
     && pi --version && codex --version && copilot --version && git --version && go version && node --version && npm --version && npx --version && pnpm --version \

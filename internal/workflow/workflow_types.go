@@ -862,6 +862,10 @@ type PostBuildInput struct {
 	// task queue's dispatch makes safe to use.
 	CheckpointDir string `json:"checkpoint_dir,omitempty"`
 	LogDir        string `json:"log_dir,omitempty"`
+	// DataDir is RunWorkflowInput.DataDir: where the run's review and
+	// challenge stub manifest is, so the activity can sweep a dead worker's
+	// stubs before it commits.
+	DataDir string `json:"data_dir,omitempty"`
 }
 
 // PostBuildResult is PostBuildActivity's output.
@@ -914,6 +918,8 @@ type CollectEvidenceInput struct {
 	// same reasoning, for this Activity's own safety-net commit.
 	CheckpointDir string `json:"checkpoint_dir,omitempty"`
 	LogDir        string `json:"log_dir,omitempty"`
+	// DataDir: see PostBuildInput's.
+	DataDir string `json:"data_dir,omitempty"`
 }
 
 // CollectedEvidence is CollectEvidenceActivity's output: the real git
