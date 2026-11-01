@@ -226,7 +226,9 @@ PR poll, or, while later tickets are still building, before the next
 ticket builds) and can be marked ready. Merge a ticket's PR only once the
 request shows a later ticket building (`factoryd status` marks it
 `safe-to-merge`; until then it is `draft` and its advice rounds may still push
-to it, and a merge drops their result), and check its base first. Review each PR while it is stacked, and merge bottom-up
+to it, and a merge drops their result), and check its base first. In
+`pr_review` the mark goes to the lowest open ticket whose PR is `ready` or
+`approved` with no round or restack in flight. Review each PR while it is stacked, and merge bottom-up
 (ticket 1 first). With squash merges, a retargeted PR's Files tab also
 shows ticket N-1's changes (it shares ticket N-1's original commit), but
 merging it lands only ticket N's own change.
