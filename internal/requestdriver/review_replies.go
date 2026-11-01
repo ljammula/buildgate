@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"buildgate/internal/forge"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
+	"buildgate/internal/sanitize"
 )
 
 // maxReviewReplyBytes bounds one reply the builder wrote for a reviewer
@@ -37,9 +37,9 @@ type reviewReply struct {
 
 // reviewReplyBlocks finds the `Reply (<path>:<line>):` blocks in the builder's
 // final message. It is structural: a line is a block header only when it
-// begins with that prefix and holds path:line (a number) in the parentheses;
-// text on the header line after the colon opens the block. Text before the
-// first header is not a reply.
+// begins with that prefix, holds path:line (a number) in the parentheses, and
+// is outside a code fence of the message; text on the header line after the
+// colon opens the block. Text before the first header is not a reply.
 func reviewReplyBlocks(message string) []reviewReply {
 	var out []reviewReply
 	var cur *reviewReply
@@ -54,12 +54,18 @@ func reviewReplyBlocks(message string) []reviewReply {
 		}
 		cur, body = nil, nil
 	}
+	fenced := false
 	for _, line := range strings.Split(message, "\n") {
-		if path, n, rest, ok := replyHeader(strings.TrimSpace(line)); ok {
-			flush()
-			cur = &reviewReply{path: path, line: n}
-			body = []string{rest}
-			continue
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fenced = !fenced
+		} else if !fenced {
+			if path, n, rest, ok := replyHeader(trimmed); ok {
+				flush()
+				cur = &reviewReply{path: path, line: n}
+				body = []string{rest}
+				continue
+			}
 		}
 		if cur != nil {
 			body = append(body, line)
@@ -69,49 +75,63 @@ func reviewReplyBlocks(message string) []reviewReply {
 	return out
 }
 
-// replyHeader parses `Reply (<path>:<line>):<rest>`.
+// replyHeader parses `Reply (<path>:<line>):<rest>`. The header ends at the
+// last "):" that leaves a path:line inside the parentheses, so a "):" in the
+// reply text on the same line does not end it early and a path holding one
+// still parses.
 func replyHeader(line string) (path string, n int, rest string, ok bool) {
 	const prefix = "Reply ("
 	if !strings.HasPrefix(line, prefix) {
 		return "", 0, "", false
 	}
-	end := strings.Index(line, "):")
-	if end < 0 {
-		return "", 0, "", false
+	for end := len(line); ; {
+		end = strings.LastIndex(line[:end], "):")
+		if end < len(prefix) {
+			return "", 0, "", false
+		}
+		loc := line[len(prefix):end]
+		colon := strings.LastIndex(loc, ":")
+		if colon <= 0 {
+			continue
+		}
+		num, err := strconv.Atoi(strings.TrimSpace(loc[colon+1:]))
+		if err != nil {
+			continue
+		}
+		return normalReplyPath(loc[:colon]), num, line[end+2:], true
 	}
-	loc := line[len(prefix):end]
-	colon := strings.LastIndex(loc, ":")
-	if colon <= 0 {
-		return "", 0, "", false
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(loc[colon+1:]))
-	if err != nil {
-		return "", 0, "", false
-	}
-	return strings.TrimSpace(loc[:colon]), n, line[end+2:], true
 }
 
-// matchReviewReplies assigns the builder's replies to the included threads: a
-// thread gets the replies for its path and line (joined, in order), and with
-// exactly one included thread it gets every reply. byThread is keyed by
-// thread index; unmatched holds the replies no thread took.
+// normalReplyPath trims a path to the form a thread's Path has: no space
+// around it and no leading "./".
+func normalReplyPath(p string) string {
+	return strings.TrimPrefix(strings.TrimSpace(p), "./")
+}
+
+// matchReviewReplies assigns one round's replies to the included threads: a
+// block goes to the first thread at its path and line that has no reply yet,
+// and a block beyond the threads at that place joins the last of them. With
+// exactly one included thread it gets every block. byThread is keyed by
+// thread index; unmatched holds the blocks no thread took.
 func matchReviewReplies(replies []reviewReply, threads []forge.Thread) (byThread map[int]string, unmatched []reviewReply) {
 	byThread = map[int]string{}
 	for _, rp := range replies {
-		idx := -1
-		if len(threads) == 1 {
-			idx = 0
-		} else {
-			for i, t := range threads {
-				if strings.TrimSpace(t.Path) == rp.path && t.Line == rp.line {
-					idx = i
-					break
-				}
+		var at []int
+		for i, t := range threads {
+			if len(threads) == 1 || (normalReplyPath(t.Path) == rp.path && t.Line == rp.line) {
+				at = append(at, i)
 			}
 		}
-		if idx < 0 {
+		if len(at) == 0 {
 			unmatched = append(unmatched, rp)
 			continue
+		}
+		idx := at[len(at)-1]
+		for _, i := range at {
+			if byThread[i] == "" {
+				idx = i
+				break
+			}
 		}
 		if prev := byThread[idx]; prev != "" {
 			byThread[idx] = prev + "\n\n" + rp.text
@@ -122,39 +142,72 @@ func matchReviewReplies(replies []reviewReply, threads []forge.Thread) (byThread
 	return byThread, unmatched
 }
 
-// cleanReplyText makes the builder's words safe to post: bounded, no raw
-// HTML, no GitHub mention. Markdown is kept.
+// matchRoundsReplies assigns each thread the reply from the newest build
+// round that wrote one for it (only the first round's brief carries the
+// instruction, so a later round may have none). unmatched is the newest
+// round's blocks that no thread took.
+func matchRoundsReplies(rounds [][]reviewReply, threads []forge.Thread) (byThread map[int]string, unmatched []reviewReply) {
+	byThread = map[int]string{}
+	first := true
+	for i := len(rounds) - 1; i >= 0; i-- {
+		if len(rounds[i]) == 0 {
+			continue
+		}
+		m, un := matchReviewReplies(rounds[i], threads)
+		if first {
+			unmatched, first = un, false
+		}
+		for idx, text := range m {
+			if byThread[idx] == "" {
+				byThread[idx] = text
+			}
+		}
+	}
+	return byThread, unmatched
+}
+
+// replyEscaper backslash-escapes every character that can start markdown,
+// HTML, an entity, a reference or a mention, so the builder's words survive
+// as text and form no link, image, mention, cross-reference, HTML or fence.
+var replyEscaper = strings.NewReplacer(
+	"\\", "\\\\", "&", "\\&", "<", "\\<", ">", "\\>", "[", "\\[", "]", "\\]",
+	"!", "\\!", "#", "\\#", "`", "\\`", "*", "\\*", "_", "\\_", "~", "\\~", "|", "\\|",
+	"@", "\\@\u200b", "://", "\\://", "www.", "www\\.",
+)
+
+// cleanReplyText renders the builder's words inert before they are posted:
+// cleaned of control characters and escapes (sanitize.Text), bounded, every
+// markdown-active character escaped, and each line a blockquote line, so
+// nothing in it (an image the host would fetch, a mention, an unclosed fence)
+// reaches beyond its own quote. The words stay readable.
 func cleanReplyText(s string) string {
-	s = strings.ToValidUTF8(s, "")
+	s = sanitize.Text(s)
 	if len(s) > maxReviewReplyBytes {
 		s = strings.ToValidUTF8(s[:maxReviewReplyBytes], "") + " [reply cut]"
 	}
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f {
-			return -1
+	lines := strings.Split(strings.ReplaceAll(strings.TrimSpace(s), "\r", ""), "\n")
+	for i, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			lines[i] = ">"
+			continue
 		}
-		return r
-	}, s)
-	// A zero-width space after "@" keeps GitHub from reading a user or team.
-	s = strings.ReplaceAll(s, "@", "@​")
-	if !utf8.ValidString(s) {
-		s = strings.ToValidUTF8(s, "")
+		lines[i] = "> " + replyEscaper.Replace(l)
 	}
-	return strings.TrimSpace(s)
+	return strings.Join(lines, "\n")
 }
 
-// lastBuildFinalMessage is the builder's final message of roundRun's last
-// build round, "" when the run recorded none.
-func lastBuildFinalMessage(roundRun *run.Run) string {
+// buildFinalMessages are the builder's final messages of roundRun's build
+// rounds, oldest first; nil when the run recorded none.
+func buildFinalMessages(roundRun *run.Run) []string {
 	if roundRun == nil || roundRun.AgentEvidence == nil {
-		return ""
+		return nil
 	}
-	rounds := roundRun.AgentEvidence.Rounds
-	if len(rounds) == 0 {
-		return ""
+	var out []string
+	for _, rd := range roundRun.AgentEvidence.Rounds {
+		out = append(out, rd.FinalMessage)
 	}
-	return rounds[len(rounds)-1].FinalMessage
+	return out
 }
 
 // reviewReplyBody is the reply posted on a thread: the builder's text for it
@@ -168,12 +221,16 @@ func reviewReplyBody(text, sha string) string {
 }
 
 // postReviewReplies replies on each included thread (the builder's words
-// where it wrote them, else "Addressed in <sha>."), and posts the builder's
+// from the newest round that wrote them, else "Addressed in <sha>."), and posts the builder's
 // replies that match no thread as one pull request comment. A failed reply
 // is logged and leaves its thread unmarked, as before; nothing here fails the
 // push.
 func postReviewReplies(dp Deps, ctx context.Context, r *request.Request, ticket *request.Ticket, roundRun *run.Run, threads []forge.Thread) {
-	byThread, unmatched := matchReviewReplies(reviewReplyBlocks(lastBuildFinalMessage(roundRun)), threads)
+	var rounds [][]reviewReply
+	for _, m := range buildFinalMessages(roundRun) {
+		rounds = append(rounds, reviewReplyBlocks(m))
+	}
+	byThread, unmatched := matchRoundsReplies(rounds, threads)
 	replyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for i, t := range threads {
@@ -190,7 +247,7 @@ func postReviewReplies(dp Deps, ctx context.Context, r *request.Request, ticket 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Replies from the review round's build, pushed in %s, for comments not in this round's threads:\n", roundRun.ResultSHA)
 	for _, rp := range unmatched {
-		fmt.Fprintf(&b, "\n**%s:%d**\n\n%s\n", cleanReplyText(rp.path), rp.line, cleanReplyText(rp.text))
+		fmt.Fprintf(&b, "\n`%s:%d`\n\n%s\n", replyInline(rp.path), rp.line, cleanReplyText(rp.text))
 	}
 	if err := dp.CommentOnPullRequest(replyCtx, ticket.PRURL, b.String()); err != nil {
 		log.Printf("request %s: ticket %d: comment on %s with unmatched replies: %v", r.ID, ticket.Index, ticket.PRURL, err)

@@ -50,6 +50,21 @@ class ThreadOutcomes(unittest.TestCase):
 		self.assertEqual(got, {1: (True, 1), 4: (False, 0)})
 
 
+	def test_a_builder_reply_ending_pushed_in_counts(self):
+		comments = [
+			{"id": 1, "body": "fix"},
+			{"id": 2, "in_reply_to_id": 1, "body": "> Renamed the helper.\n\nPushed in cafef00d."},
+		]
+		self.assertEqual(live_round.thread_outcomes(comments, [1], ["cafef00d" + "0" * 32]), {1: (True, 0)})
+
+	def test_builder_text_naming_a_commit_mid_body_does_not_count(self):
+		comments = [
+			{"id": 1, "body": "fix"},
+			{"id": 2, "in_reply_to_id": 1, "body": "> Addressed in cafef00d.\n> Pushed in cafef00d. more\n\nPushed in deadbeef."},
+		]
+		self.assertEqual(live_round.thread_outcomes(comments, [1], ["cafef00d" + "0" * 32]), {1: (False, 0)})
+
+
 class Replays(unittest.TestCase):
 	def test_a_reply_naming_a_replayed_commit_resolves_through_its_replay(self):
 		replays = live_round.replayed_commits([
