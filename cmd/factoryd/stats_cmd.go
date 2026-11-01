@@ -75,6 +75,11 @@ func statsRun(args []string, w io.Writer, now time.Time) error {
 		return fmt.Errorf("list runs from %q: %w", *f.dataDir, err)
 	}
 	if *f.request != "" {
+		for _, name := range []string{"project", "since", "bucket", "all"} {
+			if flagWasSet(f.set, name) {
+				return fmt.Errorf("-request shows one request and cannot be combined with -%s", name)
+			}
+		}
 		return statsRequest(w, *f.dataDir, *f.request, *f.jsonOutput)
 	}
 	opts := stats.Options{Since: since, BucketDays: *f.bucket, Now: now}
@@ -221,4 +226,10 @@ func printCounts(w io.Writer, title string, counts []stats.Count) {
 	for _, c := range counts {
 		fmt.Fprintf(w, "  %-*s  %d\n", width, c.Name, c.Runs)
 	}
+}
+
+func flagWasSet(set *flag.FlagSet, name string) bool {
+	found := false
+	set.Visit(func(f *flag.Flag) { found = found || f.Name == name })
+	return found
 }

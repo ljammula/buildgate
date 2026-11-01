@@ -232,13 +232,59 @@ func TestRecordWaitPairsStartAndEnd(t *testing.T) {
 	}
 }
 
-func TestLockWaitOfAFinishedRunWithoutAcquiredIsOpen(t *testing.T) {
+func TestLockWaitOfAnEndedRunWithoutAcquiredIsOpen(t *testing.T) {
 	var rt RunTime
 	fillFromFeed(&rt, []progress.Event{
 		{Ts: "2026-10-01T10:00:00.000Z", Source: "factory", Stage: "repository_lock", Event: "waiting"},
-		{Ts: "2026-10-01T10:05:00.000Z", Source: "factory", Stage: "finished", Event: "end", Outcome: "halted"},
-	})
+		{Ts: "2026-10-01T10:05:00.000Z", Source: "factory", Stage: "build", Event: "start"},
+	}, true)
 	if len(rt.LockWaits) != 1 || !rt.LockWaits[0].Open || rt.LockWaits[0].Ongoing || rt.LockSeconds != 0 {
 		t.Errorf("lock waits = %+v, want one open, not ongoing", rt.LockWaits)
+	}
+}
+
+func TestLockWaitOfARunInProgressIsOngoing(t *testing.T) {
+	var rt RunTime
+	fillFromFeed(&rt, []progress.Event{
+		{Ts: "2026-10-01T10:00:00.000Z", Source: "factory", Stage: "repository_lock", Event: "waiting"},
+		{Ts: "2026-10-01T10:05:00.000Z", Source: "factory", Stage: "build", Event: "start"},
+	}, false)
+	if len(rt.LockWaits) != 1 || rt.LockWaits[0].Open || !rt.LockWaits[0].Ongoing {
+		t.Errorf("lock waits = %+v, want one ongoing", rt.LockWaits)
+	}
+}
+
+func TestParallelStagesAreMarkedAndOtherUsesTheirUnion(t *testing.T) {
+	rep, err := Compute("testdata/board-app", backendID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Feed shape: review (17:21:45 to 17:22:40) runs inside the first challenge
+	// stage (17:21:45 to 17:28:35).
+	r := runByID(t, rep, backendID+"-001-20261031-120957-52457")
+	parallel := map[string]bool{}
+	var sum float64
+	for _, s := range r.Stages {
+		parallel[s.Stage] = s.Parallel
+		sum += s.Seconds
+	}
+	if !parallel["review"] || !parallel["challenge"] || parallel["build"] || parallel["verify"] {
+		t.Errorf("parallel = %v, want only review and challenge", parallel)
+	}
+	if sum+r.Other <= r.Seconds {
+		t.Errorf("stages %.0f + other %.0f should exceed wall %.0f: review overlaps challenge", sum, r.Other, r.Seconds)
+	}
+	// Everything but the image/workspace gaps is covered: other is small, not
+	// clamped to zero by the overlap.
+	if r.Other > 10 {
+		t.Errorf("other = %.1f s, want a few seconds", r.Other)
+	}
+}
+
+func TestRetriedBuildsAreNumbered(t *testing.T) {
+	runs := []RunTime{{Kind: "build"}, {Kind: "build"}, {Kind: "advice", Round: 1}}
+	numberAttempts(runs)
+	if runs[0].Attempt != 1 || runs[1].Attempt != 2 || runs[2].Attempt != 0 {
+		t.Errorf("attempts = %d %d %d, want 1 2 0", runs[0].Attempt, runs[1].Attempt, runs[2].Attempt)
 	}
 }

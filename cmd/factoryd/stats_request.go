@@ -67,10 +67,14 @@ func printRequestTime(w io.Writer, rep *timereport.Report) {
 }
 
 func runLabel(r timereport.RunTime) string {
+	label := r.Kind
 	if r.Round > 0 {
-		return fmt.Sprintf("%s %d", r.Kind, r.Round)
+		label = fmt.Sprintf("%s %d", r.Kind, r.Round)
 	}
-	return r.Kind
+	if r.Attempt > 0 {
+		label += fmt.Sprintf(" (attempt %d)", r.Attempt)
+	}
+	return label
 }
 
 func lockCell(r timereport.RunTime) string {
@@ -95,7 +99,11 @@ func stageCell(r timereport.RunTime) string {
 		if s.Seconds < 3 {
 			continue // under 0.1 minute: in the JSON, not the table
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", s.Stage, minutes(s.Seconds)))
+		part := fmt.Sprintf("%s %s", s.Stage, minutes(s.Seconds))
+		if s.Parallel {
+			part += " (parallel)"
+		}
+		parts = append(parts, part)
 	}
 	if r.Other >= 1 {
 		parts = append(parts, "other "+minutes(r.Other))

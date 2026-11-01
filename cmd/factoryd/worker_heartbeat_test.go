@@ -287,6 +287,16 @@ func TestBusyRepositoryWaitIsLoggedOncePerWait(t *testing.T) {
 	if got := events(); !slices.Equal(got, []string{"start"}) {
 		t.Fatalf("wait log after three busy steps = %v, want one start", got)
 	}
+	// A worker restart empties the tracker, not the log: the next busy step
+	// does not start the wait again, and a free repository ends it.
+	repositoryWaits.reset()
+	if _, err := acts.AdvanceRequest(context.Background(), "req-1"); err == nil {
+		t.Fatal("a step on a busy repository returned no error")
+	}
+	if got := events(); !slices.Equal(got, []string{"start"}) {
+		t.Fatalf("wait log after a restart and another busy step = %v, want one start", got)
+	}
+	repositoryWaits.reset()
 	acts.endRepositoryWait("req-1")
 	acts.endRepositoryWait("req-1") // no wait left: nothing more is written
 	if got := events(); !slices.Equal(got, []string{"start", "end"}) {

@@ -2071,6 +2071,7 @@ oldest first, empty ones kept, at most 26 (the newest).
 | `-since 30d` or `-since 2026-09-01` | Tickets whose first run began on or after that moment |
 | `-bucket <days>` | Days per bucket (1 to 365; default 7) |
 | `-all` | Count `live-smoke-` tickets too |
+| `-request <id>` | One request's time instead: per ticket and round, minutes per stage and waiting for the repository lock, the repository-busy waits, the critical path. Refused with `-project`, `-since`, `-bucket` or `-all` |
 | `-json` | The report as JSON: with `-project` the route's body; without it `{"overall": ..., "projects": [...]}` |
 | `-data-dir`, `-config` | As for `factoryd cost` |
 
@@ -2084,16 +2085,17 @@ the request's wait log. It prints, per ticket and in order, each run (build,
 advice, corrective, conformity, review or restack, with its round number): its
 wall minutes (first to last feed line), the minutes in each stage that has a
 start and an end line (`challenge` and `tests_red_on_base` are summed over
-their findings), `other` (the gaps between stages), and the minutes the run
+their findings), `other` (wall time that no stage or closed lock wait covers; a stage that ran at the same time as another, as review and challenge do, is marked `(parallel)`, so stage minutes can sum to more than the wall minutes), and the minutes the run
 waited for the repository lock. A run with a feed and no `run.json` yet is
-listed as `in_progress`.
+listed as `in_progress`; two runs of one ticket, kind and round (a retried
+build) are labelled `(attempt N)`.
 
 | Wait | Where it is recorded | Written |
 |---|---|---|
 | Inside a run, for the repository lock | The run's `progress.jsonl`: stage `repository_lock`, event `waiting` then `acquired` | By the build, once per wait |
 | Before a run, a building step found the repository held by another build and gave its slot back (`RepositoryBusy`) | `<data-dir>/requests/<id>/repository_waits.jsonl`: `{"at":"<RFC 3339>","event":"start"\|"end"}` | By the worker: one `start` line when the first step finds it held, one `end` line when a later step finds it free or the request leaves `building`; not one per 30 s retry |
 
-A wait with no end counts in no total. A repository-busy wait with no `end` line, or a lock wait in a run that finished without `acquired`, is reported as open (a worker that stopped while a request waited leaves its wait open); a lock wait in a run still in progress is reported as waiting, not open. The critical path
+A wait with no end counts in no total. A repository-busy wait with no `end` line, or a lock wait in a run whose record is `accepted`, `quarantined` or `halted` without `acquired`, is reported as open (the worker writes the `end` line of a wait it began before a restart when the repository is free or the request leaves `building`); a lock wait in a run not yet in one of those states is reported as waiting, not open. The critical path
 gives the request's span (from entering `building` to the last run or wait end),
 the sum of run time, the in-run lock waits (part of the run time), the
 repository-busy waits, and the idle time: the span less the union of the runs

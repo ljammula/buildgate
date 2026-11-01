@@ -34,8 +34,9 @@ type Wait struct {
 	Start string `json:"start"`
 	End   string `json:"end,omitempty"`
 	Open  bool   `json:"open,omitempty"`
-	// Ongoing is a wait with no end in a run that has not finished: it may
-	// still be waiting, so it is not called open. Seconds is 0 either way.
+	// Ongoing is a wait with no end in a run whose record is not in an end
+	// state (accepted, quarantined or halted): it may still be waiting, so it
+	// is not called open. Seconds is 0 either way.
 	Ongoing bool    `json:"ongoing,omitempty"`
 	Seconds float64 `json:"seconds"`
 
@@ -48,6 +49,9 @@ type Wait struct {
 type StageTime struct {
 	Stage   string  `json:"stage"`
 	Seconds float64 `json:"seconds"`
+	// Parallel marks a stage that ran at the same time as another (review and
+	// challenge do): stage minutes then sum to more than the run's wall time.
+	Parallel bool `json:"parallel,omitempty"`
 }
 
 // RunTime is one run of a ticket.
@@ -57,15 +61,19 @@ type RunTime struct {
 	// from the run's ticket name; Round is the number in it (0 for a build).
 	Kind  string `json:"kind"`
 	Round int    `json:"round,omitempty"`
-	State string `json:"state"`
+	// Attempt numbers the runs of one ticket, kind and round from 1 when
+	// there is more than one (a retried build); 0 otherwise.
+	Attempt int    `json:"attempt,omitempty"`
+	State   string `json:"state"`
 	// Start and End are the feed's first and last line. A run whose feed has
 	// one line, or none, has no times.
 	Start   string  `json:"start,omitempty"`
 	End     string  `json:"end,omitempty"`
 	Seconds float64 `json:"seconds"`
 	// Stages are the stages that recorded a start and an end, in the order
-	// they first appeared. Other is Seconds less the stages and the closed
-	// lock waits: the gaps between stages (image pull, workspace setup).
+	// they first appeared. Other is Seconds less the union of the stage
+	// intervals and the closed lock waits: time no stage or wait covers
+	// (image pull, workspace setup).
 	Stages    []StageTime `json:"stages,omitempty"`
 	Other     float64     `json:"other_seconds"`
 	LockWaits []Wait      `json:"lock_waits,omitempty"`
@@ -157,6 +165,7 @@ func Compute(dataDir, id string) (*Report, error) {
 	}
 	for idx, runs := range byTicket {
 		sort.SliceStable(runs, func(i, j int) bool { return runs[i].start.Before(runs[j].start) })
+		numberAttempts(runs)
 		rep.Tickets = append(rep.Tickets, TicketTime{Index: idx, Runs: runs})
 	}
 	sort.Slice(rep.Tickets, func(i, j int) bool { return rep.Tickets[i].Index < rep.Tickets[j].Index })
@@ -195,16 +204,17 @@ func runTime(dataDir string, r *run.Run) (RunTime, int, error) {
 			rt.Round, _ = strconv.Atoi(m[3])
 		}
 	}
+	ended := r.State == run.StateAccepted || r.State == run.StateQuarantined || r.State == run.StateHalted
 	events, err := progress.Read(progress.PathInDir(run.Dir(dataDir, r.ID)))
 	if err != nil {
 		return rt, idx, fmt.Errorf("read progress of %s: %w", r.ID, err)
 	}
-	fillFromFeed(&rt, events)
+	fillFromFeed(&rt, events, ended)
 	return rt, idx, nil
 }
 
-// fillFromFeed sets rt's times, stages and lock waits from a run's feed.
-func fillFromFeed(rt *RunTime, events []progress.Event) {
+// fillFromFeed sets rt's times, stages and lock waits from a run's feed. ended is whether the run's record is in an end state.
+func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 	if len(events) < 2 {
 		return
 	}
@@ -218,14 +228,11 @@ func fillFromFeed(rt *RunTime, events []progress.Event) {
 	opened := map[string]time.Time{}
 	var order []string
 	sums := map[string]float64{}
+	spans := map[string][]interval{}
 	var lock *Wait
-	finished := false
 	for _, e := range events {
 		if e.Source != "factory" {
 			continue
-		}
-		if e.Stage == "finished" {
-			finished = true
 		}
 		at := parseTs(e.Ts)
 		switch {
@@ -250,19 +257,26 @@ func fillFromFeed(rt *RunTime, events []progress.Event) {
 					order = append(order, e.Stage)
 				}
 				sums[e.Stage] += max(at.Sub(from).Seconds(), 0)
+				spans[e.Stage] = append(spans[e.Stage], interval{from, at})
 				delete(opened, e.Stage)
 			}
 		}
 	}
-	if lock != nil && !finished {
+	if lock != nil && !ended {
 		lock.Open, lock.Ongoing = false, true
 	}
-	covered := rt.LockSeconds
-	for _, s := range order {
-		rt.Stages = append(rt.Stages, StageTime{Stage: s, Seconds: sums[s]})
-		covered += sums[s]
+	var all []interval
+	for _, w := range rt.LockWaits {
+		if !w.Open && !w.Ongoing {
+			all = append(all, interval{w.start, w.end})
+		}
 	}
-	rt.Other = max(rt.Seconds-covered, 0)
+	for _, name := range order {
+		st := StageTime{Stage: name, Seconds: sums[name], Parallel: overlapsOther(name, spans)}
+		rt.Stages = append(rt.Stages, st)
+		all = append(all, spans[name]...)
+	}
+	rt.Other = max(rt.Seconds-unionSeconds(all), 0)
 }
 
 func parseTs(s string) time.Time {
@@ -358,4 +372,43 @@ func unionSeconds(spans []interval) float64 {
 		total += cur.to.Sub(cur.from).Seconds()
 	}
 	return total
+}
+
+// overlapsOther reports whether any interval of stage overlaps one of another
+// stage.
+func overlapsOther(stage string, spans map[string][]interval) bool {
+	for other, theirs := range spans {
+		if other == stage {
+			continue
+		}
+		for _, a := range spans[stage] {
+			for _, b := range theirs {
+				if a.from.Before(b.to) && b.from.Before(a.to) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// numberAttempts sets Attempt on runs (oldest first) that share a kind and
+// round with another run of the ticket.
+func numberAttempts(runs []RunTime) {
+	type key struct {
+		kind  string
+		round int
+	}
+	total := map[key]int{}
+	for _, r := range runs {
+		total[key{r.Kind, r.Round}]++
+	}
+	seen := map[key]int{}
+	for i, r := range runs {
+		k := key{r.Kind, r.Round}
+		seen[k]++
+		if total[k] > 1 {
+			runs[i].Attempt = seen[k]
+		}
+	}
 }

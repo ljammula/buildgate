@@ -103,3 +103,11 @@ func readWaits(dataDir, id string) ([]Wait, error) {
 	}
 	return waits, sc.Err()
 }
+
+// WaitIsOpen reports whether request id's wait log ends in a start: a wait a
+// worker began and did not end (it stopped, or lost its in-memory state, while
+// the request waited).
+func WaitIsOpen(dataDir, id string) bool {
+	waits, err := readWaits(dataDir, id)
+	return err == nil && len(waits) > 0 && waits[len(waits)-1].Open
+}

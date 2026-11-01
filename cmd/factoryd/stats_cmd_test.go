@@ -241,3 +241,12 @@ func TestStatsRequestUnknownIDIsAnError(t *testing.T) {
 		t.Error("an unknown request id returned no error")
 	}
 }
+
+func TestStatsRequestRefusesTheOtherSelectors(t *testing.T) {
+	for _, extra := range [][]string{{"-project", "app"}, {"-since", "30d"}, {"-bucket", "3"}, {"-all"}} {
+		args := append([]string{"-data-dir", boardAppDataDir, "-request", boardAppBackend}, extra...)
+		if _, err := runStats(t, args...); err == nil || !strings.Contains(err.Error(), "cannot be combined with "+extra[0]) {
+			t.Errorf("%v: err = %v, want a refusal naming %s", extra, err, extra[0])
+		}
+	}
+}

@@ -19,7 +19,7 @@
       "from": "spec_review",
       "to": "planning",
       "at": "2026-10-31T17:09:47.188281Z",
-      "by": "kanna"
+      "by": "operator"
     },
     {
       "from": "planning",
@@ -31,7 +31,7 @@
       "from": "plan_review",
       "to": "building",
       "at": "2026-10-31T17:09:56.462269Z",
-      "by": "kanna"
+      "by": "operator"
     },
     {
       "from": "building",
@@ -49,7 +49,7 @@
       "from": "halted",
       "to": "pr_review",
       "at": "2026-11-01T03:40:18.567665Z",
-      "by": "kanna"
+      "by": "operator"
     }
   ],
   "submitted_at": "2026-10-31T17:08:45.481025Z",

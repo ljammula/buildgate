@@ -311,7 +311,9 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			if repoBusy(r.Workspace, a.dataDir) {
 				// status says the request waits for the repository, from the
 				// first time it was found busy.
-				if now := time.Now(); repositoryWaits.markBusy(id, now) {
+				// After a worker restart the tracker is empty but the wait
+				// log may still hold the wait's start: it is not started twice.
+				if now := time.Now(); repositoryWaits.markBusy(id, now) && !timereport.WaitIsOpen(a.dataDir, id) {
 					recordRepositoryWait(a.dataDir, id, timereport.WaitStart, now)
 				}
 				return "", temporal.NewApplicationError("repository busy: another build holds it", repositoryBusyErrorType)
@@ -509,11 +511,13 @@ func countOf(ids []string, id string) int {
 }
 
 // endRepositoryWait drops id's wait for the repository and, when a
-// RepositoryBusy wait was open, writes its end to the request's wait log. A
+// RepositoryBusy wait was open (in the tracker, or only in the log after a worker restart), writes its end to the request's wait log. A
 // wait inside a step's slot (withRepoLockWaitHook) is cleared by the step's
 // own deferred clear instead: its run's progress feed records it.
 func (a *requestActivities) endRepositoryWait(id string) {
-	if repositoryWaits.clear(id) {
+	// The log is asked too: a worker restarted mid-wait has no tracker entry
+	// for a wait whose start it logged.
+	if repositoryWaits.clear(id) || timereport.WaitIsOpen(a.dataDir, id) {
 		recordRepositoryWait(a.dataDir, id, timereport.WaitEnd, time.Now())
 	}
 }

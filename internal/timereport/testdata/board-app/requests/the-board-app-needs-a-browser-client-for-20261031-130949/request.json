@@ -19,7 +19,7 @@
       "from": "spec_review",
       "to": "planning",
       "at": "2026-10-31T18:10:57.06279Z",
-      "by": "kanna"
+      "by": "operator"
     },
     {
       "from": "planning",
@@ -31,7 +31,7 @@
       "from": "plan_review",
       "to": "building",
       "at": "2026-10-31T18:11:03.206394Z",
-      "by": "kanna"
+      "by": "operator"
     },
     {
       "from": "building",
@@ -43,13 +43,13 @@
       "from": "quarantined",
       "to": "quarantined",
       "at": "2026-10-31T22:25:37.238627Z",
-      "by": "kanna"
+      "by": "operator"
     },
     {
       "from": "quarantined",
       "to": "building",
       "at": "2026-10-31T22:25:47.426902Z",
-      "by": "kanna"
+      "by": "operator"
     },
     {
       "from": "building",
@@ -67,7 +67,7 @@
       "from": "halted",
       "to": "pr_review",
       "at": "2026-11-01T03:40:18.50914Z",
-      "by": "kanna"
+      "by": "operator"
     }
   ],
   "submitted_at": "2026-10-31T18:09:49.134147Z",
