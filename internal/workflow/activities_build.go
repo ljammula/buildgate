@@ -481,7 +481,7 @@ func (a *Activities) PostBuildActivity(ctx context.Context, input PostBuildInput
 	}
 	// A review or challenge stub a dead worker left must never reach the
 	// safety-net commit below.
-	if err := a.sweepReviewStubs(ctx, RunWorkflowInput{WorkspacePath: input.WorkspacePath}); err != nil {
+	if err := a.sweepReviewStubs(ctx, RunWorkflowInput{WorkspacePath: input.WorkspacePath, DataDir: input.DataDir}); err != nil {
 		return PostBuildResult{}, err
 	}
 	checkpoint, path, found, err := loadActivityCheckpoint[PostBuildResult](ctx, checkpointDir)

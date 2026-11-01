@@ -459,8 +459,7 @@ requires a new contract review and an updated machine-checkable test.
   run holds its branch's lock exclusively and the repository shared, and
   reconciles stranded worktrees only under an exclusive hold it took while the
   repository was idle; an execution that mutates a shared checkout holds its
-  repository exclusively, and an exclusive reconcile removes the run blocks an
-  earlier version left in `info/exclude`; a challenge round's held-path
+  repository exclusively; a challenge round's held-path
   exclusions are written only into its own build sandbox's per-user git ignore
   file, never the repository's `info/exclude`, so the round holds the
   repository shared like any `-on-branch` run; a waiting exclusive

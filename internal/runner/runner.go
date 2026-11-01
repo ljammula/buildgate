@@ -411,10 +411,13 @@ func GitRevParseHEAD(dir string) (string, error) {
 	return sha, nil
 }
 
-// GitConfigGet returns the value of key in dir's repository-local git config
-// (not the user's or the system's), or "" when it is unset.
+// GitConfigGet returns the value of key in dir's repository configuration
+// (its config file, included files and worktree config, but not the user's or
+// the system's), or "" when it is unset.
 func GitConfigGet(dir, key string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "config", "--local", "--get", key).Output()
+	cmd := exec.Command("git", "-C", dir, "config", "--get", key)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.Output()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		return "", nil

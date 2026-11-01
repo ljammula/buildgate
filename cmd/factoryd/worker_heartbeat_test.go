@@ -153,58 +153,6 @@ func TestClearActiveRequests(t *testing.T) {
 	}
 }
 
-// TestAcquireDirectRunLockWaitsOnlyWhenMarked: with the wait mark a busy lock
-// is waited on and taken once released, and cancel ends the wait with the
-// context error; without it the lock fails at once with ErrBusy.
-func TestAcquireDirectRunLockWaitsOnlyWhenMarked(t *testing.T) {
-	repo := testfixture.NewGitRepo(t)
-	owner, err := wsisolation.AcquireDirectLock(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer owner.Close()
-
-	if _, err := acquireDirectRunLock(context.Background(), repo, repoLockReport{}); !errors.Is(err, wsisolation.ErrBusy) {
-		t.Fatalf("unmarked ctx: err = %v, want ErrBusy", err)
-	}
-
-	cancelCtx, cancel := context.WithCancel(withWaitForRepoLock(context.Background()))
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
-	if _, err := acquireDirectRunLock(cancelCtx, repo, repoLockReport{}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled wait: err = %v, want context.Canceled", err)
-	}
-
-	type result struct {
-		lock *wsisolation.DirectLock
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		lock, err := acquireDirectRunLock(withWaitForRepoLock(context.Background()), repo, repoLockReport{})
-		done <- result{lock, err}
-	}()
-	select {
-	case r := <-done:
-		t.Fatalf("returned while the lock was held: %+v", r)
-	case <-time.After(150 * time.Millisecond):
-	}
-	if err := owner.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case r := <-done:
-		if r.err != nil {
-			t.Fatalf("after release: %v", r.err)
-		}
-		_ = r.lock.Close()
-	case <-time.After(5 * time.Second):
-		t.Fatal("did not take the lock after it was released")
-	}
-}
-
 func TestStepWaitsForRepoLockOnlyForJobsQueueBuildsAndPRReview(t *testing.T) {
 	for _, tc := range []struct {
 		state  request.State

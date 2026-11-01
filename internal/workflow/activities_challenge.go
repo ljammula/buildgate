@@ -674,14 +674,14 @@ const (
 // path must still be committed. The host-side commits run after the mounts'
 // cleanup removed the stubs.
 func writeChallengeIgnore(dir string, masks []sandbox.WorkspaceMask) error {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("stage the git ignore file: %w", err)
 	}
 	var b strings.Builder
 	for _, m := range masks {
 		b.WriteString("/" + escapeExcludePattern(m.Target) + "\n")
 	}
-	if err := os.WriteFile(filepath.Join(dir, challengeIgnoreFile), []byte(b.String()), 0o444); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, challengeIgnoreFile), []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("stage the git ignore file: %w", err)
 	}
 	return nil

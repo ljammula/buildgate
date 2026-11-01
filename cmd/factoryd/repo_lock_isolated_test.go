@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/run"
 	wsisolation "buildgate/internal/workspace"
 )
 
@@ -264,11 +266,11 @@ func TestOnBranchRunReconcilesOnlyWhenTheRepositoryIsIdle(t *testing.T) {
 	}
 }
 
-// A challenge round on a branch lists its held paths only in its own sandbox,
-// so it holds the repository shared like any -on-branch run: an isolated run
-// and a round on another branch proceed beside it, and only its own branch is
-// exclusive.
-func TestChallengeRoundOnBranchSharesTheRepository(t *testing.T) {
+// An -on-branch run (a challenge round is one; the integration tests below
+// run one as `-challenge-round` with held files) holds the repository shared
+// and its own branch exclusively: an isolated run and a round on another
+// branch proceed beside it.
+func TestOnBranchRoundSharesTheRepositoryAndOwnsItsBranch(t *testing.T) {
 	shortLockWait(t)
 	ws := newFixtureRepo(t)
 	b, r, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", repoLockReport{}, noReconcile)
@@ -278,7 +280,7 @@ func TestChallengeRoundOnBranchSharesTheRepository(t *testing.T) {
 	defer b.Close()
 	defer r.Close()
 	if r.HeldExclusive() {
-		t.Fatal("a challenge round holds the repository exclusively")
+		t.Fatal("an -on-branch round holds the repository exclusively")
 	}
 	if err := takeLocks(t, ws, ""); err != nil {
 		t.Fatalf("isolated run beside a challenge round: %v", err)
@@ -305,35 +307,6 @@ func TestFailedRepositoryLockReleasesTheBranch(t *testing.T) {
 	holder.Close()
 	if err := takeLocks(t, ws, "pr-a"); err != nil {
 		t.Fatalf("branch still locked after the failed round: %v", err)
-	}
-}
-
-// An exclusive reconcile sweeps the run blocks an earlier version left in the
-// shared info/exclude, and keeps every other line.
-func TestExclusiveReconcileDropsLeftoverRunBlocks(t *testing.T) {
-	ws := newFixtureRepo(t)
-	// A block an earlier version left behind.
-	excludePath := filepath.Join(ws, ".git", "info", "exclude")
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(excludePath, []byte("# factoryd-run-begin crashed\n/p/held_test.go\n# factoryd-run-end crashed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := wsisolation.ExcludeHarnessArtifacts(ws); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := wsisolation.AcquireDirectLock(ws)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	if err := reconcileIsolationMarkers(context.Background(), t.TempDir(), ws, "", lock, nil); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command("git", "-C", ws, "check-ignore", "p/held_test.go", "BUILD_REPORT.md").CombinedOutput()
-	if err != nil || strings.Contains(string(out), "held_test.go") || !strings.Contains(string(out), "BUILD_REPORT.md") {
-		t.Fatalf("check-ignore = %q, %v: want only BUILD_REPORT.md ignored", out, err)
 	}
 }
 
@@ -403,6 +376,22 @@ func TestIntegrationOnBranchRunSharesTheRepositoryWithSharedHolders(t *testing.T
 	}
 }
 
+// challengeRoundArgs are the flags of a challenge round with one held file,
+// whose manifest is valid for dataDir.
+func challengeRoundArgs(t *testing.T, dataDir string) []string {
+	t.Helper()
+	copyPath := filepath.Join(dataDir, "runs", "r1", run.ChallengeDirName, "0", "x_test.go")
+	manifest, err := json.Marshal([]run.ChallengeFile{{Path: "p/x_test.go", SHA256: strings.Repeat("a", 64), HostPath: copyPath}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "held.json")
+	if err := os.WriteFile(manifestPath, manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return []string{"-data-dir", dataDir, "-challenge-round", "-challenge-held", manifestPath}
+}
+
 func TestIntegrationChallengeRoundOnBranchSharesTheRepositoryWithSharedHolders(t *testing.T) {
 	ws := newFixtureRepo(t)
 	makeBranch(t, ws)
@@ -411,9 +400,9 @@ func TestIntegrationChallengeRoundOnBranchSharesTheRepositoryWithSharedHolders(t
 		t.Fatal(err)
 	}
 	defer shared.Close()
-	out, err := onBranchRunArgs(t, ws, "-challenge-round", "-challenge-held", "[]").CombinedOutput()
-	if err == nil || strings.Contains(string(out), "repository is busy") {
-		t.Fatalf("challenge round beside a shared holder: err=%v output=%q, want it past the lock", err, out)
+	out, err := onBranchRunArgs(t, ws, challengeRoundArgs(t, t.TempDir())...).CombinedOutput()
+	if err == nil || strings.Contains(string(out), "repository is busy") || !strings.Contains(string(out), "-pr-closes-issue") {
+		t.Fatalf("challenge round beside a shared holder: err=%v output=%q, want it past the lock and stopped by -pr-closes-issue", err, out)
 	}
 }
 
@@ -424,9 +413,9 @@ func TestIntegrationChallengeRoundWithoutOnBranchSharesTheRepositoryWithSharedHo
 		t.Fatal(err)
 	}
 	defer shared.Close()
-	cmd := onBranchRunArgs(t, ws, "-on-branch=", "-challenge-round", "-challenge-held", "[]")
+	cmd := onBranchRunArgs(t, ws, append([]string{"-on-branch="}, challengeRoundArgs(t, t.TempDir())...)...)
 	out, err := cmd.CombinedOutput()
-	if err == nil || strings.Contains(string(out), "repository is busy") {
-		t.Fatalf("direct challenge round beside a shared holder: err=%v output=%q, want it past the lock", err, out)
+	if err == nil || strings.Contains(string(out), "repository is busy") || !strings.Contains(string(out), "-pr-closes-issue") {
+		t.Fatalf("direct challenge round beside a shared holder: err=%v output=%q, want it past the lock and stopped by -pr-closes-issue", err, out)
 	}
 }

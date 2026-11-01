@@ -231,6 +231,17 @@ func TestRunThroughRuntimeReportsARerunByTheGuardsExitCode(t *testing.T) {
 	}
 }
 
+// A wrapper that could not install the git ignore file never ran the command:
+// the launch is one whose sandbox did not start it.
+func TestRunThroughRuntimeReportsAFailedGitIgnoreInstallAsNotStarted(t *testing.T) {
+	spec := runtimeSpec(t)
+	rt := &workerRuntime{lines: []string{"x"}, exitCode: WorkerExitNoGitIgnore, startedAt: "2026-10-04T10:00:00Z"}
+	result, _, err := RunThroughRuntime(context.Background(), rt, spec, fastLaunch())
+	if !errors.Is(err, ErrSandboxNotStarted) || result.ExitCode != WorkerExitNoGitIgnore {
+		t.Fatalf("result %+v, err = %v; want ErrSandboxNotStarted", result, err)
+	}
+}
+
 func TestRunThroughRuntimeFailsWhenTheSandboxCannotBeRemoved(t *testing.T) {
 	spec := runtimeSpec(t)
 	rt := &workerRuntime{lines: []string{"x"}, startedAt: "t", deleteErr: ErrCleanupUnconfirmed}

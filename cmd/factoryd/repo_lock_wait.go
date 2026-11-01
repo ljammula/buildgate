@@ -123,26 +123,6 @@ func repoBusy(workspace, dataDir string) bool {
 	return false
 }
 
-// acquireDirectRunLock takes workspace's direct-run lock exclusively, for a
-// run that owns the whole repository. A ctx marked by
-// withWaitForRepoLock waits (logging once) until the holder releases it or
-// ctx ends; any other ctx fails at once with wsisolation.ErrBusy.
-func acquireDirectRunLock(ctx context.Context, workspace string, report repoLockReport) (*wsisolation.DirectLock, error) {
-	lock, err := wsisolation.AcquireDirectLock(workspace)
-	if err == nil || !waitsForRepoLock(ctx) || !errors.Is(err, wsisolation.ErrBusy) {
-		return lock, err
-	}
-	log.Printf("waiting for the repository lock held by another build: %s", workspace)
-	report.waiting(ctx)
-	lock, err = wsisolation.AcquireDirectLockContext(ctx, workspace)
-	if err != nil {
-		report.failed(ctx, err)
-		return lock, err
-	}
-	report.acquired(ctx)
-	return lock, err
-}
-
 // acquireWorkspaceLocks takes the locks of a run in workspace itself (no
 // -repository). An -on-branch run (branch != "") takes its branch's lock
 // first. The repository is then held shared (an isolated run or an -on-branch
