@@ -529,7 +529,14 @@ has merged.
 
 `factoryd status` appends each `pr_review` request's per-ticket PR state
 (`tickets: 1:approved 2:open`; `1:ready,ready-to-merge` once the bar is
-met). The request's next step, in the console's
+met). The lowest open ticket gets `,safe-to-merge` when its last merge-readiness
+check passed or its only blocker is the draft state (the PR stays a
+draft when the factory has not marked it ready: its release decision did not
+allow it, or `gh pr ready` failed; the operator then marks it ready and
+merges), its base is not another ticket's branch, and no ticket of the request
+has a restack or advice round in flight. The check is cleared and saved
+before a review or CI round's build starts. Anything since the last poll (a
+new thread, a push, a check result) is not visible to `status`. The request's next step, in the console's
 "Next" line and in `GET /requests`' `next_action`, says what each open pull
 request waits on:
 

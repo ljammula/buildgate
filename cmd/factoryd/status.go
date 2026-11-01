@@ -163,7 +163,7 @@ type requestStatusEntry struct {
 	// one entry per ticket that has an open pull request -- the
 	// PR-review driver's own per-ticket PR status (Ticket.PRState: "open"
 	// -- the default, shown when PRState is still "" -- "ready", "approved",
-	// "merged", or "closed"), followed by ",draft" (the current ticket of a building request) or ",safe-to-merge" (an earlier ticket of one: its advice rounds are done), then ",ready-to-merge" when the poll's last
+	// "merged", or "closed"), followed by ",draft" (the current ticket of a building request) or ",safe-to-merge" (the lowest open ticket of a building request once a later one builds, its advice rounds done; in pr_review, the lowest open ticket whose last merge-readiness check passed (a draft being its only blocker is fine), whose base is not another ticket's branch, with no restack or advice round in flight on the request), then ",ready-to-merge" when the poll's last
 	// ready-to-merge check passed (Ticket.MergeReadiness). Empty when this request has no ticket with a PR yet
 	// (every state before building/pr_review, or a ticket not yet
 	// opened).
@@ -185,6 +185,9 @@ type requestStatusEntry struct {
 func requestTicketPRSummary(r *request.Request) string {
 	var parts []string
 	lowest := lowestUnmergedBelowCurrent(r)
+	if r.State == request.StatePRReview {
+		lowest = lowestOpenTicket(r, r.TicketCount+1)
+	}
 	for _, t := range r.Tickets {
 		if t.PRURL == "" {
 			continue
@@ -197,7 +200,7 @@ func requestTicketPRSummary(r *request.Request) string {
 		if t.MergeReadiness != nil && t.MergeReadiness.Ready {
 			state += ",ready-to-merge"
 		}
-		state += buildingTicketMark(r, t, lowest)
+		state += ticketMergeMark(r, t, lowest)
 		parts = append(parts, fmt.Sprintf("%d:%s", t.Index, state))
 	}
 	return strings.Join(parts, " ")
@@ -208,22 +211,29 @@ func requestTicketPRSummary(r *request.Request) string {
 // ticket's branch, so it is the only one that is safe to merge now. A higher
 // one is stacked on a ticket that has not merged. 0 when there is none.
 func lowestUnmergedBelowCurrent(r *request.Request) int {
+	return lowestOpenTicket(r, r.TicketIndex)
+}
+
+// lowestOpenTicket is the index of the lowest ticket below limit whose PR is
+// open (not merged or closed); 0 when there is none.
+func lowestOpenTicket(r *request.Request, limit int) int {
 	for _, t := range r.Tickets {
-		if t.Index < r.TicketIndex && t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
+		if t.Index < limit && t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
 			return t.Index
 		}
 	}
 	return 0
 }
 
-// buildingTicketMark is what a building request's ticket PR adds to its
-// state in the summary: ",draft" while it is the request's current ticket
-// (its advice rounds may still push to it, so merging it now drops them), and
-// ",safe-to-merge" for the lowest unmerged earlier ticket once a later one has
-// started building, which happens only after its advice rounds are done. The PR's base still has to be main
-// (it is retargeted once the earlier ticket merges). Nothing for a merged or
-// closed PR or outside building.
-func buildingTicketMark(r *request.Request, t request.Ticket, lowest int) string {
+// ticketMergeMark is what a ticket PR adds to its state in the summary of a
+// building or pr_review request: ",draft" for the current ticket of a building
+// request (its advice rounds may still push to it), ",safe-to-merge" for the
+// lowest open ticket when merging it drops nothing (see the two functions
+// below), and nothing for a merged or closed PR or in any other state.
+func ticketMergeMark(r *request.Request, t request.Ticket, lowest int) string {
+	if r.State == request.StatePRReview {
+		return prReviewTicketMark(r, t, lowest)
+	}
 	if r.State != request.StateBuilding || t.PRState == "merged" || t.PRState == "closed" {
 		return ""
 	}
@@ -234,6 +244,28 @@ func buildingTicketMark(r *request.Request, t request.Ticket, lowest int) string
 		return ",safe-to-merge"
 	}
 	return ""
+}
+
+// prReviewTicketMark is the ",safe-to-merge" mark of a pr_review request's
+// ticket, or "". It marks only the lowest ticket whose PR is open (lowest),
+// and only when the record shows nothing that could still push to it or hold
+// it: the last merge-readiness check passed, or its only blocker is the draft state (the operator marks it ready before merging; USAGE_REFERENCE has the rule) (it is cleared and saved before a
+// review or CI round's build starts, and every other blocker, such as a stacked PR, open
+// threads or failing checks, fails it), its base is not another ticket's
+// branch (a PR approved while stacked has PR state "approved" but is not yet
+// retargeted), and no ticket of the request has a restack, a held restack or
+// an advice round in flight. Anything since the last poll (a new thread, a push,
+// a check result) is not in the record, so it is not reflected.
+func prReviewTicketMark(r *request.Request, t request.Ticket, lowest int) string {
+	if t.Index != lowest || t.MergeReadiness == nil || !(t.MergeReadiness.Ready || t.MergeReadiness.OnlyDraftBlocks()) || r.StackedOnAnotherTicket(&t, t.PRBase) {
+		return ""
+	}
+	for _, other := range r.Tickets {
+		if other.Restack != nil || other.RestackHold != nil || other.Advice != nil {
+			return ""
+		}
+	}
+	return ",safe-to-merge"
 }
 
 // requestRowSuffix is what follows a request's row in the table: its

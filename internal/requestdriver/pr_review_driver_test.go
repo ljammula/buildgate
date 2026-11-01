@@ -2111,7 +2111,7 @@ func TestAdvancePRReadyOrApprovedRevertsReadyWhenDecisionInvalidatedDuringTheFli
 // ordinary default branch, flips ready exactly as before this mechanism
 // existed -- both tickets are driven through the SAME advancePRReview call
 // (both due for a poll, both returning the identical stubbed
-// forge.ReviewState) specifically to prove stackedOnAnotherTicket's own
+// forge.ReviewState) specifically to prove Request.StackedOnAnotherTicket's own
 // per-ticket check, not just a blanket "no PR ever flips" regression.
 func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 	dp := newFakeDeps(t)
@@ -2150,6 +2150,9 @@ func TestAdvancePRReadyOrApprovedStaysDraftWhileStacked(t *testing.T) {
 	}
 	if r.Tickets[1].PRState != "stacked" {
 		t.Errorf("ticket 2 PRState = %q, want %q: left draft while stacked on ticket 1's still-open branch, recorded so the console shows it waiting on a human merge", r.Tickets[1].PRState, "stacked")
+	}
+	if mr := r.Tickets[1].MergeReadiness; mr == nil || mr.Draft || mr.OnlyDraftBlocks() {
+		t.Errorf("stacked ticket 2 MergeReadiness = %+v, want a check with Draft false (the stacked blocker is not the draft one)", mr)
 	}
 }
 
@@ -2827,5 +2830,67 @@ func TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft(t *te
 	}
 	if t1 := r.Tickets[0]; t1.PRState != "draft" || !t1.Rounds[0].Pushed || r.State != request.StatePRReview {
 		t.Errorf("ticket %+v, state %s: want it draft and pushed, still in pr_review", t1, r.State)
+	}
+}
+
+// TestRoundClearsMergeReadinessOnDiskBeforeItsBuildStarts pins what
+// `factoryd status` relies on to withhold safe-to-merge: while a review
+// round's build runs, the saved request has no merge-readiness check.
+func TestRoundClearsMergeReadinessOnDiskBeforeItsBuildStarts(t *testing.T) {
+	dp := newFakeDeps(t)
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 10, Author: "alice", Body: "please rename this", CommentID: 111}}
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+
+	var onDisk *request.MergeReadiness
+	sawBuild := false
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		sawBuild = true
+		saved, err := request.Load(dataDir, r.ID)
+		if err != nil {
+			t.Errorf("load request during the round: %v", err)
+		} else {
+			onDisk = saved.Tickets[0].MergeReadiness
+		}
+		runID := requestdrivertest.ArgValue(args, "-ticket")
+		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
+		return saveAcceptedRoundRun(t, dataDir, accepted)
+	}
+	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error { return nil }
+	dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
+
+	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	if !sawBuild {
+		t.Fatal("the round's build never ran")
+	}
+	if onDisk != nil {
+		t.Errorf("merge readiness on disk during the round's build = %+v, want nil", onDisk)
+	}
+}
+
+// TestPollOfADraftPullRequestRecordsTheDraftBlocker: a draft the factory
+// could not mark ready (gh pr ready failed), not stacked and with nothing
+// else wrong, is checked with the draft as its only blocker.
+func TestPollOfADraftPullRequestRecordsTheDraftBlocker(t *testing.T) {
+	dp := newFakeDeps(t)
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	requestdrivertest.AcceptAndReview(t, dataDir, 1, run.GateResult{Check: "code_review", Passed: true})
+	trueVal := true
+	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", IsDraft: true, ChecksPassing: &trueVal, HeadSHA: requestdrivertest.TicketRunResultSHA(1)}, nil)
+	dp.markPullRequestReadyFn = func(context.Context, string) error { return errors.New("gh pr ready failed") }
+
+	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
+		t.Fatalf("advancePRReview: %v", err)
+	}
+	mr := r.Tickets[0].MergeReadiness
+	if r.Tickets[0].PRState == "ready" || mr == nil || !mr.Draft || !mr.OnlyDraftBlocks() {
+		t.Errorf("PRState %q, MergeReadiness %+v, want a draft PR whose only blocker is the draft", r.Tickets[0].PRState, mr)
 	}
 }

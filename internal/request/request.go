@@ -252,6 +252,11 @@ type MergeReadiness struct {
 	// Blockers says, one sentence each, what the bar still lacks. Empty
 	// exactly when Ready.
 	Blockers []string `json:"blockers,omitempty"`
+	// Draft is true when the pull request still being a draft is one of the
+	// Blockers: the factory has not marked it ready (see USAGE_REFERENCE's
+	// safe-to-merge rule). A check whose only blocker is the draft
+	// (OnlyDraftBlocks) is merge-safe once a person marks it ready.
+	Draft bool `json:"draft,omitempty"`
 	// Notes are facts that do not block: a check that is not required and
 	// failed.
 	Notes []string `json:"notes,omitempty"`
