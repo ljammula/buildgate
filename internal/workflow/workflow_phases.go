@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	temporalworkflow "go.temporal.io/sdk/workflow"
@@ -414,7 +415,7 @@ func collectRunEvidence(ctx temporalworkflow.Context, ids *activityIDs, input Ru
 		RepoGatesFailed:   gates.repoGatesFailed,
 		CheckpointDir:     input.CheckpointDir,
 		LogDir:            input.LogDir,
-		SetAside:          input.ChallengeHeld,
+		SetAside:          slices.Concat(input.ChallengeHeld, input.ChallengeSetAside),
 	}
 	current.Stage, current.StartedAt = "evidence", temporalworkflow.Now(ctx)
 	if err := temporalworkflow.ExecuteActivity(ids.with(temporalworkflow.WithActivityOptions(ctx, hostGitActivityOptions()), "collect-evidence"), CollectEvidenceActivityName, collectInput).Get(ctx, &evidenceResult); err != nil {

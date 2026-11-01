@@ -41,6 +41,9 @@ func (tr *ticketRun) snapshotChallengeInputs() error {
 	if *tr.rf.challengeRound && *tr.rf.challengeHeld == "" {
 		return errors.New("-challenge-round needs -challenge-held")
 	}
+	if err := tr.loadChallengeSetAside(); err != nil {
+		return err
+	}
 	if *tr.rf.challenge && *tr.rf.challengeSpec == "" {
 		return errors.New("-challenge needs -challenge-spec")
 	}
@@ -67,6 +70,31 @@ func (tr *ticketRun) snapshotChallengeInputs() error {
 		return fmt.Errorf("-challenge-held: %w", err)
 	}
 	tr.challengeHeld = held
+	return nil
+}
+
+// loadChallengeSetAside checks and loads -challenge-set-aside, the held files a
+// replay run's branch carries. Only a replay takes it, and a run that
+// challenges or runs held files refuses it: the flag sets files aside and
+// nothing else.
+func (tr *ticketRun) loadChallengeSetAside() error {
+	path := *tr.rf.challengeSetAside
+	if path == "" {
+		return nil
+	}
+	switch {
+	case *tr.rf.replay == "":
+		return errors.New("-challenge-set-aside needs -replay")
+	case *tr.rf.challenge:
+		return errors.New("-challenge-set-aside is refused with -challenge")
+	case *tr.rf.challengeHeld != "" || *tr.rf.challengeRound:
+		return errors.New("-challenge-set-aside is refused with -challenge-held and -challenge-round")
+	}
+	files, err := loadChallengeHeld(*tr.dataDir, path)
+	if err != nil {
+		return fmt.Errorf("-challenge-set-aside: %w", err)
+	}
+	tr.challengeSetAside = files
 	return nil
 }
 

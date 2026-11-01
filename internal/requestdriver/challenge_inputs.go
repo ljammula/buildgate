@@ -193,23 +193,78 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 		entry.ChallengeApprovedSHA256, entry.ChallengeApprovedBytes = r.ApprovedSHA256[requestSpecFile], approvedBytes
 		return nil
 	}
-	if ticket.ChallengeRunID == "" {
-		return nil
-	}
-	held, err := heldChallengeFiles(dataDir, ticket.ChallengeRunID)
-	if err != nil || len(held) == 0 {
+	path, err := writeHeldManifest(dataDir, r, ticket, ticket.ChallengeRunID)
+	if err != nil || path == "" {
 		return err
-	}
-	data, err := json.MarshalIndent(held, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, fmt.Sprintf("t%d-%s", ticket.Index, challengeHeldFile))
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write the held challenge files: %w", err)
 	}
 	entry.ChallengeHeld, entry.ChallengeRound = path, round
 	return nil
+}
+
+// withChallengeSetAside sets entry's -challenge-set-aside for a replay run of
+// ticket (SC-022): the manifest of the held files its branch already
+// carries, so diff_scope sets them aside by their pinned hash as it does for
+// every build. A replay runs no challenge, so nothing else is set.
+func withChallengeSetAside(entry *QueueEntry, dataDir string, r *request.Request, ticket request.Ticket) error {
+	id, err := committedChallengeRunID(dataDir, ticket)
+	if err != nil || id == "" {
+		return err
+	}
+	path, err := writeHeldManifest(dataDir, r, ticket, id)
+	if err != nil {
+		return err
+	}
+	entry.ChallengeSetAside = path
+	return nil
+}
+
+// committedChallengeRunID is the run whose held files ticket's branch may
+// carry: the run that challenged an ordinary ticket, or the run a carved
+// ticket was carved from when its challenge was committed to the result that
+// was carved (a carved ticket is never marked challenged itself). "" when
+// there is none. Setting a file aside is by hash, so a file the branch does
+// not hold at its pinned hash is judged as usual.
+func committedChallengeRunID(dataDir string, ticket request.Ticket) (string, error) {
+	if ticket.Order == nil {
+		if ticket.Challenged {
+			return ticket.ChallengeRunID, nil
+		}
+		return "", nil
+	}
+	source, err := run.Load(dataDir, ticket.Order.SourceRunID)
+	if err != nil {
+		return "", fmt.Errorf("load run %s that ticket %d was carved from: %w", ticket.Order.SourceRunID, ticket.Index, err)
+	}
+	if source.Challenge == nil || source.Challenge.CommittedSHA == "" {
+		return "", nil
+	}
+	return source.ID, nil
+}
+
+// writeHeldManifest writes the JSON manifest of the held files of run runID
+// for ticket into the request's challenge directory and returns its path.
+// It returns "" when the ticket has no challenge run or that run held no files.
+func writeHeldManifest(dataDir string, r *request.Request, ticket request.Ticket, runID string) (string, error) {
+	if runID == "" {
+		return "", nil
+	}
+	held, err := heldChallengeFiles(dataDir, runID)
+	if err != nil || len(held) == 0 {
+		return "", err
+	}
+	data, err := json.MarshalIndent(held, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(request.Dir(dataDir, r.ID), "challenge")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("t%d-%s", ticket.Index, challengeHeldFile))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write the held challenge files: %w", err)
+	}
+	return path, nil
 }
 
 // answeredNumbers are the numbers of the answered read-back questions, the

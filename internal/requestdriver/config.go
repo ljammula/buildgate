@@ -273,17 +273,7 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.InstructionBase != "" {
 		args = append(args, "-instruction-base", entry.InstructionBase)
 	}
-	if entry.Challenge {
-		args = append(args, "-challenge", "-challenge-spec", entry.ChallengeSpecPath,
-			"-challenge-criteria", strconv.Itoa(entry.ChallengeCriteria), "-challenge-answers", joinInts(entry.ChallengeAnswers), "-challenge-covered", joinInts(entry.ChallengeCovered),
-			"-challenge-approved-sha256", entry.ChallengeApprovedSHA256, "-challenge-approved-bytes", strconv.Itoa(entry.ChallengeApprovedBytes))
-	}
-	if entry.ChallengeHeld != "" {
-		args = append(args, "-challenge-held", entry.ChallengeHeld)
-		if entry.ChallengeRound {
-			args = append(args, "-challenge-round")
-		}
-	}
+	args = append(args, challengeArgs(entry)...)
 	if cfg.OpenPullRequest {
 		args = append(args, "-open-pull-request")
 	}
@@ -328,4 +318,26 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 
 func ResolveFullSuiteCommand(configured, verifyCommand string) (command, source string) {
 	return requestsubmit.ResolveFullSuiteCommand(configured, verifyCommand)
+}
+
+// challengeArgs are the -challenge flags of entry (SC-022): the challenger
+// job's inputs for a ticket's first reviewed build, the held files to run
+// again for a later one, the files a replay run only sets aside.
+func challengeArgs(entry *QueueEntry) []string {
+	var args []string
+	if entry.Challenge {
+		args = append(args, "-challenge", "-challenge-spec", entry.ChallengeSpecPath,
+			"-challenge-criteria", strconv.Itoa(entry.ChallengeCriteria), "-challenge-answers", joinInts(entry.ChallengeAnswers), "-challenge-covered", joinInts(entry.ChallengeCovered),
+			"-challenge-approved-sha256", entry.ChallengeApprovedSHA256, "-challenge-approved-bytes", strconv.Itoa(entry.ChallengeApprovedBytes))
+	}
+	if entry.ChallengeHeld != "" {
+		args = append(args, "-challenge-held", entry.ChallengeHeld)
+		if entry.ChallengeRound {
+			args = append(args, "-challenge-round")
+		}
+	}
+	if entry.ChallengeSetAside != "" {
+		args = append(args, "-challenge-set-aside", entry.ChallengeSetAside)
+	}
+	return args
 }

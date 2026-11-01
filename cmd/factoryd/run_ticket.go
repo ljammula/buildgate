@@ -314,6 +314,7 @@ type runFlags struct {
 	challengeApprovedBytes       *int
 	challengeHeld                *string
 	challengeRound               *bool
+	challengeSetAside            *string
 }
 
 // newRunFlags builds `factoryd <run>`'s FlagSet in isolation from parsing,
@@ -361,6 +362,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.challengeApprovedSHA256 = flags.String("challenge-approved-sha256", "", "internal: the SHA-256 spec_review approved for the request's spec.md, which the first -challenge-approved-bytes bytes of -challenge-spec must match")
 	f.challengeApprovedBytes = flags.Int("challenge-approved-bytes", 0, "internal: how many leading bytes of -challenge-spec are the approved spec.md; the rest is the read-back answers")
 	f.challengeHeld = flags.String("challenge-held", "", "internal: JSON list of the held challenge files of this ticket that the build runs again on its result")
+	f.challengeSetAside = flags.String("challenge-set-aside", "", "internal: JSON list of the held challenge files the replayed branch already carries; diff_scope sets them aside by hash and nothing runs them")
 	f.challengeRound = flags.Bool("challenge-round", false, "internal: this build is the ticket's challenge round: the held files are mounted read-only, and a green result commits them")
 	f.priorRun = flags.String("prior-run", "", "id of an accepted run that this run follows in a multi-slice chain")
 	f.skipProjectCheck = flags.Bool("skip-project-check", false, "skip the project-bootstrap preflight")
@@ -478,6 +480,7 @@ type ticketRun struct {
 	challengeSpecSnapshot                 string
 	challengeSpecSHA256                   string
 	challengeHeld                         []run.ChallengeFile
+	challengeSetAside                     []run.ChallengeFile
 	sandboxDocker                         *string
 	sandboxUser                           *string
 	sandboxWorkerUID                      *int
@@ -2711,6 +2714,7 @@ func (tr *ticketRun) dispatch() error {
 			ChallengerHarness:       tr.challengerHarnessName,
 			ChallengeWithReview:     tr.challengeWithReview,
 			ChallengeHeld:           tr.challengeHeld,
+			ChallengeSetAside:       tr.challengeSetAside,
 			ChallengeRound:          *tr.rf.challengeRound,
 		}
 		if tr.challengerSelection != nil {

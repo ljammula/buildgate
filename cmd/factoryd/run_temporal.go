@@ -426,6 +426,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 		ChallengeWithReview:              o.ChallengeWithReview,
 		ChallengerRelayPolicy:            o.ChallengerRelayPolicy,
 		ChallengeHeld:                    o.ChallengeHeld,
+		ChallengeSetAside:                o.ChallengeSetAside,
 		ChallengeRound:                   o.ChallengeRound,
 		ReviewRelayPolicy:                o.ReviewRelayPolicy,
 	}

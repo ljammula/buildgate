@@ -10,6 +10,14 @@
   "build_app_interpreter": "/bin/sh",
   "build_app_script": "<TESTDATA>/fake_build_app.sh",
   "build_max_attempts": 3,
+  "challenge_set_aside": [
+    {
+      "criterion": "AC-1",
+      "host_path": "<DATA_DIR>/runs/golden-quarantined/challenge/0/edge_test.go",
+      "path": "edge_test.go",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
   "checkpoint_dir": "<DATA_DIR>/temporal-checkpoints/<RUN_ID>",
   "code_review_policy": "advisory",
   "compose_services_allowed_registries": [

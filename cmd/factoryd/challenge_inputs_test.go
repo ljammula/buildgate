@@ -153,3 +153,44 @@ func TestRenderCarvedChallengeMarkdown(t *testing.T) {
 		}
 	}
 }
+
+// -challenge-set-aside is a replay run's flag: it needs -replay, is refused
+// with -challenge, -challenge-held and -challenge-round, and its manifest is
+// checked as -challenge-held's is.
+func TestChallengeSetAsideFlagConflicts(t *testing.T) {
+	dataDir := t.TempDir()
+	good := filepath.Join(dataDir, "runs", "r1", run.ChallengeDirName, "0", "edge_test.go")
+	if err := os.MkdirAll(filepath.Dir(good), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("a", 64)
+	manifest := writeHeldManifest(t, dataDir, good, "edge_test.go", sha)
+	bad := writeHeldManifest(t, dataDir, filepath.Join(t.TempDir(), "edge_test.go"), "edge_test.go", sha)
+	check := func(args ...string) ([]run.ChallengeFile, error) {
+		t.Helper()
+		flags, rf := newRunFlags()
+		if err := flags.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		tr := &ticketRun{rf: rf, dataDir: &dataDir}
+		err := tr.loadChallengeSetAside()
+		return tr.challengeSetAside, err
+	}
+	if got, err := check("-challenge-set-aside", manifest, "-replay", "r.json"); err != nil || len(got) != 1 {
+		t.Fatalf("a replay with a well-formed manifest: %v, %v", got, err)
+	}
+	if got, err := check(); err != nil || got != nil {
+		t.Fatalf("no flag: %v, %v", got, err)
+	}
+	for name, args := range map[string][]string{
+		"no -replay":                   {"-challenge-set-aside", manifest},
+		"-challenge":                   {"-challenge-set-aside", manifest, "-replay", "r.json", "-challenge"},
+		"-challenge-held":              {"-challenge-set-aside", manifest, "-replay", "r.json", "-challenge-held", manifest},
+		"-challenge-round":             {"-challenge-set-aside", manifest, "-replay", "r.json", "-challenge-round"},
+		"a host copy outside the runs": {"-challenge-set-aside", bad, "-replay", "r.json"},
+	} {
+		if _, err := check(args...); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
