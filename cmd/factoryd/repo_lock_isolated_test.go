@@ -174,9 +174,9 @@ func shortLockWait(t *testing.T) {
 func noReconcile(*wsisolation.DirectLock) {}
 
 // takeLocks acquires a run's workspace locks and releases them at cleanup.
-func takeLocks(t *testing.T, ws, branch string, challenge bool) error {
+func takeLocks(t *testing.T, ws, branch string) error {
 	t.Helper()
-	b, r, err := acquireWorkspaceLocks(context.Background(), ws, branch, challenge, repoLockReport{}, noReconcile)
+	b, r, err := acquireWorkspaceLocks(context.Background(), ws, branch, repoLockReport{}, noReconcile)
 	if err == nil {
 		t.Cleanup(func() {
 			r.Close()
@@ -191,16 +191,16 @@ func takeLocks(t *testing.T, ws, branch string, challenge bool) error {
 func TestOnBranchRunsOnOneBranchSerialise(t *testing.T) {
 	shortLockWait(t)
 	ws := newFixtureRepo(t)
-	b, r, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", false, repoLockReport{}, noReconcile)
+	b, r, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", repoLockReport{}, noReconcile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := takeLocks(t, ws, "pr-a", false); !errors.Is(err, wsisolation.ErrBusy) {
+	if err := takeLocks(t, ws, "pr-a"); !errors.Is(err, wsisolation.ErrBusy) {
 		t.Fatalf("second round on pr-a: %v, want ErrBusy", err)
 	}
 	r.Close()
 	b.Close()
-	if err := takeLocks(t, ws, "pr-a", false); err != nil {
+	if err := takeLocks(t, ws, "pr-a"); err != nil {
 		t.Fatalf("round on pr-a after release: %v", err)
 	}
 }
@@ -216,7 +216,7 @@ func TestOnBranchRunWaitsForTheBranchWhenAskedTo(t *testing.T) {
 		holder.Close()
 	}()
 	ctx := withWaitForRepoLock(context.Background())
-	b, r, err := acquireWorkspaceLocks(ctx, ws, "pr-a", false, repoLockReport{}, noReconcile)
+	b, r, err := acquireWorkspaceLocks(ctx, ws, "pr-a", repoLockReport{}, noReconcile)
 	if err != nil {
 		t.Fatalf("waiting round: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestOnBranchRunsOnDifferentBranchesAndIsolatedRunsOverlap(t *testing.T) {
 	shortLockWait(t)
 	ws := newFixtureRepo(t)
 	for _, branch := range []string{"pr-a", "pr-b", ""} {
-		if err := takeLocks(t, ws, branch, false); err != nil {
+		if err := takeLocks(t, ws, branch); err != nil {
 			t.Fatalf("branch %q beside the others: %v", branch, err)
 		}
 	}
@@ -248,11 +248,11 @@ func TestOnBranchRunReconcilesOnlyWhenTheRepositoryIsIdle(t *testing.T) {
 		}
 		count++
 	}
-	b1, r1, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", false, repoLockReport{}, reconcile)
+	b1, r1, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", repoLockReport{}, reconcile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, r2, err := acquireWorkspaceLocks(context.Background(), ws, "pr-b", false, repoLockReport{}, reconcile)
+	b2, r2, err := acquireWorkspaceLocks(context.Background(), ws, "pr-b", repoLockReport{}, reconcile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,28 +264,30 @@ func TestOnBranchRunReconcilesOnlyWhenTheRepositoryIsIdle(t *testing.T) {
 	}
 }
 
-// A challenge round writes held paths into the repository-wide info/exclude,
-// so it holds the repository exclusively.
-func TestChallengeRoundOnBranchHoldsRepositoryExclusively(t *testing.T) {
+// A challenge round on a branch lists its held paths only in its own sandbox,
+// so it holds the repository shared like any -on-branch run: an isolated run
+// and a round on another branch proceed beside it, and only its own branch is
+// exclusive.
+func TestChallengeRoundOnBranchSharesTheRepository(t *testing.T) {
 	shortLockWait(t)
 	ws := newFixtureRepo(t)
-	b, r, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", true, repoLockReport{}, noReconcile)
+	b, r, err := acquireWorkspaceLocks(context.Background(), ws, "pr-a", repoLockReport{}, noReconcile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.HeldExclusive() {
-		t.Fatal("challenge round does not hold the repository exclusively")
+	defer b.Close()
+	defer r.Close()
+	if r.HeldExclusive() {
+		t.Fatal("a challenge round holds the repository exclusively")
 	}
-	if err := takeLocks(t, ws, "", false); !errors.Is(err, wsisolation.ErrBusy) {
-		t.Fatalf("isolated run beside a challenge round: %v, want ErrBusy", err)
+	if err := takeLocks(t, ws, ""); err != nil {
+		t.Fatalf("isolated run beside a challenge round: %v", err)
 	}
-	if err := takeLocks(t, ws, "pr-b", false); !errors.Is(err, wsisolation.ErrBusy) {
-		t.Fatalf("other-branch round beside a challenge round: %v, want ErrBusy", err)
+	if err := takeLocks(t, ws, "pr-b"); err != nil {
+		t.Fatalf("other-branch round beside a challenge round: %v", err)
 	}
-	r.Close()
-	b.Close()
-	if err := takeLocks(t, ws, "pr-b", false); err != nil {
-		t.Fatalf("other-branch round after the challenge round: %v", err)
+	if err := takeLocks(t, ws, "pr-a"); !errors.Is(err, wsisolation.ErrBusy) {
+		t.Fatalf("second round on the same branch: %v, want ErrBusy", err)
 	}
 }
 
@@ -297,20 +299,25 @@ func TestFailedRepositoryLockReleasesTheBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := takeLocks(t, ws, "pr-a", false); !errors.Is(err, wsisolation.ErrBusy) {
+	if err := takeLocks(t, ws, "pr-a"); !errors.Is(err, wsisolation.ErrBusy) {
 		t.Fatalf("round beside an exclusive holder: %v, want ErrBusy", err)
 	}
 	holder.Close()
-	if err := takeLocks(t, ws, "pr-a", false); err != nil {
+	if err := takeLocks(t, ws, "pr-a"); err != nil {
 		t.Fatalf("branch still locked after the failed round: %v", err)
 	}
 }
 
-// An exclusive reconcile sweeps the run blocks a crashed challenge round left
-// in the shared info/exclude, and keeps every other line.
+// An exclusive reconcile sweeps the run blocks an earlier version left in the
+// shared info/exclude, and keeps every other line.
 func TestExclusiveReconcileDropsLeftoverRunBlocks(t *testing.T) {
 	ws := newFixtureRepo(t)
-	if _, err := wsisolation.ExcludeForRun(ws, "crashed", []string{"/p/held_test.go"}); err != nil {
+	// A block an earlier version left behind.
+	excludePath := filepath.Join(ws, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(excludePath, []byte("# factoryd-run-begin crashed\n/p/held_test.go\n# factoryd-run-end crashed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := wsisolation.ExcludeHarnessArtifacts(ws); err != nil {
@@ -396,7 +403,7 @@ func TestIntegrationOnBranchRunSharesTheRepositoryWithSharedHolders(t *testing.T
 	}
 }
 
-func TestIntegrationChallengeRoundOnBranchFailsBusyBesideASharedHolder(t *testing.T) {
+func TestIntegrationChallengeRoundOnBranchSharesTheRepositoryWithSharedHolders(t *testing.T) {
 	ws := newFixtureRepo(t)
 	makeBranch(t, ws)
 	shared, err := wsisolation.AcquireDirectLockShared(ws)
@@ -405,12 +412,12 @@ func TestIntegrationChallengeRoundOnBranchFailsBusyBesideASharedHolder(t *testin
 	}
 	defer shared.Close()
 	out, err := onBranchRunArgs(t, ws, "-challenge-round", "-challenge-held", "[]").CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "repository is busy") {
-		t.Fatalf("challenge round beside a shared holder: err=%v output=%q, want the repository busy error", err, out)
+	if err == nil || strings.Contains(string(out), "repository is busy") {
+		t.Fatalf("challenge round beside a shared holder: err=%v output=%q, want it past the lock", err, out)
 	}
 }
 
-func TestIntegrationChallengeRoundWithoutOnBranchFailsBusyBesideASharedHolder(t *testing.T) {
+func TestIntegrationChallengeRoundWithoutOnBranchSharesTheRepositoryWithSharedHolders(t *testing.T) {
 	ws := newFixtureRepo(t)
 	shared, err := wsisolation.AcquireDirectLockShared(ws)
 	if err != nil {
@@ -419,7 +426,7 @@ func TestIntegrationChallengeRoundWithoutOnBranchFailsBusyBesideASharedHolder(t 
 	defer shared.Close()
 	cmd := onBranchRunArgs(t, ws, "-on-branch=", "-challenge-round", "-challenge-held", "[]")
 	out, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "repository is busy") {
-		t.Fatalf("direct challenge round beside a shared holder: err=%v output=%q, want the repository busy error", err, out)
+	if err == nil || strings.Contains(string(out), "repository is busy") {
+		t.Fatalf("direct challenge round beside a shared holder: err=%v output=%q, want it past the lock", err, out)
 	}
 }

@@ -33,15 +33,6 @@ const (
 
 var challengeSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// writesSharedExclude reports whether this run lists held challenge files in
-// the repository's info/exclude (the workflow's withChallengeMounts: a
-// challenge round with held files). That file is shared by every worktree of
-// the repository, so such a run must hold the repository exclusively: another
-// run's untracked file at a held path would otherwise be missed by `git add -A`.
-func (tr *ticketRun) writesSharedExclude() bool {
-	return *tr.rf.challengeRound && *tr.rf.challengeHeld != ""
-}
-
 // snapshotChallengeInputs snapshots -challenge-spec into the run's directory
 // and records its hash (the Activity checks it again before the challenger is
 // given the file), and checks -challenge-held (loadChallengeHeld), before

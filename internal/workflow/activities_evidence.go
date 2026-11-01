@@ -129,7 +129,7 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 	// FullSuiteExitCode when FullSuiteRan (found via a later review
 	// round, same class of bug): see FullSuiteRan's own doc comment.
 	if input.BuildExitCode == 0 && input.VerifyExitCode == 0 && (!input.FullSuiteRan || input.FullSuiteExitCode == 0) && !input.RepoGatesFailed {
-		verifyClean, err := runner.GitIsClean(input.WorkspacePath)
+		verifyClean, err := a.cleanAfterStubSweep(ctx, input.WorkspacePath)
 		if err != nil {
 			return CollectedEvidence{}, temporal.NewApplicationErrorWithCause("check workspace cleanliness after verification", InfrastructureFailureType, err)
 		}
@@ -269,4 +269,14 @@ func setAsideChallengeFiles(dir, resultSHA string, changed []string, set []run.C
 		kept = append(kept, p)
 	}
 	return kept
+}
+
+// cleanAfterStubSweep is runner.GitIsClean after removing any review or
+// challenge stub a dead worker left, so the safety-net commit that follows a
+// dirty result can never commit an empty stub.
+func (a *Activities) cleanAfterStubSweep(ctx context.Context, workspace string) (bool, error) {
+	if err := a.sweepReviewStubs(ctx, RunWorkflowInput{WorkspacePath: workspace}); err != nil {
+		return false, err
+	}
+	return runner.GitIsClean(workspace)
 }

@@ -157,69 +157,10 @@ const (
 	excludeBlockEnd   = "# factoryd-run-end "
 )
 
-// ExcludeForRun lists patterns in the repository's info/exclude for as long as
-// the returned release func has not run, as one block owned by token (unique
-// to the caller). Both the add and the release take the git metadata lock
-// (SC-011) and change only the block of token: another run's block, and any
-// line another writer added meanwhile, is left byte for byte, so a release
-// never writes back a snapshot taken before them. Two blocks listing the same
-// pattern are independent: releasing one keeps the other's line. A call whose
-// token already has a block replaces that block (a retried activity adds no
-// second one). Git's own readers (host and sandbox alike) see the file, so no
-// git call needs to be told about it. release is safe to call more than once.
-func ExcludeForRun(dir, token string, patterns []string) (release func() error, err error) {
-	if token == "" || strings.ContainsAny(token, "\r\n") {
-		return nil, fmt.Errorf("exclude block token %q is not a single line", token)
-	}
-	for _, p := range patterns {
-		if strings.ContainsAny(p, "\r\n") {
-			return nil, fmt.Errorf("exclude pattern %q is not a single line", p)
-		}
-	}
-	path, err := infoExcludePath(dir)
-	if err != nil {
-		return nil, err
-	}
-	if err := rewriteExclude(dir, path, func(cur string) string {
-		cur = dropExcludeBlock(cur, token)
-		if len(cur) > 0 && !strings.HasSuffix(cur, "\n") {
-			cur += "\n"
-		}
-		return cur + excludeBlockBegin + token + "\n" + strings.Join(patterns, "\n") + "\n" + excludeBlockEnd + token + "\n"
-	}); err != nil {
-		return nil, err
-	}
-	return func() error {
-		return rewriteExclude(dir, path, func(cur string) string { return dropExcludeBlock(cur, token) })
-	}, nil
-}
-
-// dropExcludeBlock removes the block of token from the file text cur.
-func dropExcludeBlock(cur, token string) string {
-	lines := strings.SplitAfter(cur, "\n")
-	var out []string
-	in := false
-	for _, l := range lines {
-		switch trimmed := strings.TrimRight(l, "\n"); {
-		case trimmed == excludeBlockBegin+token:
-			in = true
-		case in && trimmed == excludeBlockEnd+token:
-			in = false
-		case !in:
-			out = append(out, l)
-		}
-	}
-	if in {
-		// An unterminated block (a torn file): keep the text as it was.
-		return cur
-	}
-	return strings.Join(out, "")
-}
-
-// DropAllRunBlocks removes every run block (ExcludeForRun's) from dir's
-// info/exclude. Only a holder of the repository lock exclusively may call it:
-// run blocks are written only by exclusive challenge rounds, so none is live
-// then and any left is a crashed run's. Every other line stays byte for byte,
+// DropAllRunBlocks removes every run block ("# factoryd-run-begin <token>" to
+// "# factoryd-run-end <token>") from dir's info/exclude. An earlier version
+// wrote one per challenge round and a crash could leave it; none is written
+// now. Only a holder of the repository lock exclusively may call it. Every other line stays byte for byte,
 // and an unterminated block (a torn file) is kept as it was.
 func DropAllRunBlocks(dir string) error {
 	path, err := infoExcludePath(dir)

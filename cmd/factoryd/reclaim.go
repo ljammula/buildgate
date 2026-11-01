@@ -174,7 +174,8 @@ func reconcileIsolationMarkers(ctx context.Context, dataDir, repoDir, sandboxDoc
 		return nil
 	}
 	// No run is live under the exclusive hold, so a run block left in
-	// info/exclude belongs to a crashed challenge round.
+	// info/exclude is one an earlier version left; the current one never
+	// writes it.
 	if err := wsisolation.DropAllRunBlocks(repoDir); err != nil {
 		log.Printf("isolation recovery: could not drop leftover exclude blocks: %v", err)
 	}

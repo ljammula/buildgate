@@ -673,3 +673,17 @@ func inputMountsFrom(ctx context.Context) []sandbox.InputMount {
 	mounts, _ := ctx.Value(inputMountsKey{}).([]sandbox.InputMount)
 	return append([]sandbox.InputMount(nil), mounts...)
 }
+
+type userGitIgnoreKey struct{}
+
+// withUserGitIgnore marks ctx so the launch it reaches installs path, a file
+// below one of the launch's input mounts, as the sandbox's per-user git
+// ignore file (sandbox.LaunchSpec.UserGitIgnore).
+func withUserGitIgnore(ctx context.Context, path string) context.Context {
+	return context.WithValue(ctx, userGitIgnoreKey{}, path)
+}
+
+func userGitIgnoreFrom(ctx context.Context) string {
+	path, _ := ctx.Value(userGitIgnoreKey{}).(string)
+	return path
+}

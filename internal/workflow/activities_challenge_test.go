@@ -4,18 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"buildgate/internal/run"
+	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
-	"buildgate/internal/testfixture"
-	wsisolation "buildgate/internal/workspace"
 )
 
 const edgeTest = "// buildgate-challenge: AC-1\npackage p\n\nimport \"testing\"\n\nfunc TestEdge(t *testing.T) {\n\tif Add(0, 0) != 0 {\n\t\tt.Fatal(\"zero\")\n\t}\n}\n"
@@ -287,8 +284,10 @@ func TestChallengeRoundBuildMountsAFileInANewDirectory(t *testing.T) {
 	}
 }
 
-// A mount's empty stub is excluded from git while the round builds, so
-// `git add -A` never stages it, and the exclude file is put back after.
+// A mount's empty stub is listed in a git ignore file staged outside the
+// worktree, which the sandbox installs as its per-user ignore file: with it,
+// `git add -A` never stages the stub. The repository's own info/exclude is not
+// touched.
 func TestChallengeRoundMountStubIsExcludedFromGit(t *testing.T) {
 	f, in := holdFixture(t)
 	writeFile(t, filepath.Join(f.repo, "p", "edge", "edge_test.go"), edgeTest)
@@ -299,13 +298,19 @@ func TestChallengeRoundMountStubIsExcludedFromGit(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(f.repo, "p", "edge")); err != nil {
 		t.Fatal(err)
 	}
+	excludePath := challengeExcludePath(t, f.repo)
+	before, _ := os.ReadFile(excludePath)
 	input := f.input
 	input.ChallengeHeld, input.ChallengeRound = files, true
-	_, cleanup, err := f.acts.withChallengeMounts(context.Background(), input)
+	ctx, cleanup, err := f.acts.withChallengeMounts(context.Background(), input)
 	if err != nil {
 		t.Fatalf("mount: %v", err)
 	}
-	add := exec.Command("git", "-C", f.repo, "add", "-A")
+	ignore := stagedUserGitIgnore(t, ctx)
+	if body, err := os.ReadFile(ignore); err != nil || string(body) != "/p/edge/edge_test.go\n" {
+		t.Fatalf("ignore file = %q, %v; want the anchored pattern", body, err)
+	}
+	add := exec.Command("git", "-C", f.repo, "-c", "core.excludesFile="+ignore, "add", "-A")
 	if out, err := add.CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v\n%s", err, out)
 	}
@@ -317,10 +322,79 @@ func TestChallengeRoundMountStubIsExcludedFromGit(t *testing.T) {
 		t.Errorf("the mount stub was staged: %q", staged)
 	}
 	cleanup()
-	exclude, _ := exec.Command("git", "-C", f.repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").Output()
-	if body, _ := os.ReadFile(strings.TrimSpace(string(exclude))); strings.Contains(string(body), "edge_test.go") {
-		t.Errorf("the exclude file kept the held path: %q", body)
+	if _, err := os.Stat(ignore); !os.IsNotExist(err) {
+		t.Errorf("the staged ignore file outlived the round: %v", err)
 	}
+	if after, _ := os.ReadFile(excludePath); string(after) != string(before) {
+		t.Errorf("info/exclude changed: %q -> %q", before, after)
+	}
+}
+
+// A round's held path is hidden from git only in its own sandbox: another
+// worktree of the repository, with an untracked file at the same path, still
+// has it committed by the host's `git add -A` while the round's mounts are
+// live, and info/exclude is byte for byte what it was.
+func TestChallengeRoundDoesNotHideAnotherWorktreesFile(t *testing.T) {
+	f, in := holdFixture(t)
+	writeFile(t, filepath.Join(f.repo, "p", "x_test.go"), edgeTest)
+	files, _, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil || len(files) != 1 || files[0].Refused != "" {
+		t.Fatalf("hold: %+v, %v", files, err)
+	}
+	if err := os.Remove(filepath.Join(f.repo, "p", "x_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(t.TempDir(), "other")
+	if out, err := exec.Command("git", "-C", f.repo, "worktree", "add", "-q", "-b", "other", other).CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	excludePath := challengeExcludePath(t, f.repo)
+	before, _ := os.ReadFile(excludePath)
+	input := f.input
+	input.ChallengeHeld, input.ChallengeRound = files, true
+	_, cleanup, err := f.acts.withChallengeMounts(context.Background(), input)
+	if err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	defer cleanup()
+	writeFile(t, filepath.Join(other, "p", "x_test.go"), "package p\n")
+	if err := runner.GitCommitAll(other, "other run's file"); err != nil {
+		t.Fatalf("commit in the other worktree: %v", err)
+	}
+	committed, err := exec.Command("git", "-C", other, "show", "--name-only", "--format=", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(committed), "p/x_test.go") {
+		t.Errorf("the other worktree's file was hidden from its commit: %q", committed)
+	}
+	if after, _ := os.ReadFile(excludePath); string(after) != string(before) {
+		t.Errorf("info/exclude changed: %q -> %q", before, after)
+	}
+}
+
+// challengeExcludePath is the repository-wide info/exclude of repo.
+func challengeExcludePath(t *testing.T, repo string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// stagedUserGitIgnore is the host path of the file ctx's launch installs as
+// the sandbox's per-user git ignore file.
+func stagedUserGitIgnore(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	target := userGitIgnoreFrom(ctx)
+	for _, m := range inputMountsFrom(ctx) {
+		if prefix := "/inputs/" + m.Target + "/"; strings.HasPrefix(target, prefix) {
+			return filepath.Join(m.Source, strings.TrimPrefix(target, prefix))
+		}
+	}
+	t.Fatalf("user git ignore %q is in no input mount", target)
+	return ""
 }
 
 // A spec with no numbered criteria under the exact heading makes every AC-n
@@ -467,122 +541,4 @@ func TestChallengeFilesAreHeldWhateverTheJobsExitStatus(t *testing.T) {
 			t.Errorf("%s: note %q, want %q", name, note, tc.note)
 		}
 	}
-}
-
-// Two challenge rounds with held files and one isolated run on one
-// repository at once: each round's exclude block is added and removed under
-// the git metadata lock, so info/exclude ends as it began plus the lines its
-// other writers own, no held stub lands in any commit, and the isolated run's
-// own file is committed. (SC-011.)
-func TestConcurrentChallengeRoundsLeaveInfoExcludeAsTheyFoundIt(t *testing.T) {
-	repo := testfixture.NewGitRepo(t)
-	git := func(dir string, args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	excludePath := git(repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	const original = "# operator\n/local-only\n"
-	if err := os.WriteFile(excludePath, []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	base := git(repo, "rev-parse", "HEAD")
-	wts := map[string]string{}
-	for _, name := range []string{"r1", "r2", "iso"} {
-		wts[name] = filepath.Join(t.TempDir(), name)
-		git(repo, "worktree", "add", "-q", "-b", name, wts[name])
-	}
-	var wg sync.WaitGroup
-	errs := make(chan error, 3)
-	for _, name := range []string{"r1", "r2"} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := heldRound(wts[name], name, 15); err != nil {
-				errs <- err
-			}
-		}()
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 15; i++ {
-			if err := wsisolation.ExcludeHarnessArtifacts(wts["iso"]); err != nil {
-				errs <- err
-				return
-			}
-			if err := os.WriteFile(filepath.Join(wts["iso"], "iso.txt"), []byte(fmt.Sprint(i)), 0o644); err != nil {
-				errs <- err
-				return
-			}
-			for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "--allow-empty", "-m", "iso"}} {
-				if out, err := exec.Command("git", append([]string{"-C", wts["iso"], "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-					errs <- fmt.Errorf("iso git %v: %v\n%s", args, err, out)
-					return
-				}
-			}
-		}
-	}()
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Fatal(err)
-	}
-	body, err := os.ReadFile(excludePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(string(body), original) || strings.Contains(string(body), "held") || strings.Contains(string(body), "factoryd-run") || !strings.Contains(string(body), ".pi-build-session/") {
-		t.Errorf("info/exclude = %q; want the original lines then only the harness entries", body)
-	}
-	for _, name := range []string{"r1", "r2", "iso"} {
-		files := git(wts[name], "log", "--name-only", "--format=", base+".."+name)
-		if strings.Contains(files, "held") {
-			t.Errorf("%s committed a held stub: %q", name, files)
-		}
-		if !strings.Contains(files, map[string]string{"r1": "r1.txt", "r2": "r2.txt", "iso": "iso.txt"}[name]) {
-			t.Errorf("%s did not commit its own file: %q", name, files)
-		}
-	}
-}
-
-// heldRound runs rounds challenge rounds in wt: mount stubs for two held
-// paths, excluded from git, a commit of the round's own file, then the
-// exclusion and the stubs removed.
-func heldRound(wt, name string, rounds int) error {
-	masks := []sandbox.WorkspaceMask{{Target: "p/held_test.go"}, {Target: "p/" + name + "_held[1].go"}}
-	for i := 0; i < rounds; i++ {
-		if err := os.MkdirAll(filepath.Join(wt, "p"), 0o755); err != nil {
-			return err
-		}
-		for _, m := range masks {
-			if err := os.WriteFile(filepath.Join(wt, m.Target), nil, 0o644); err != nil {
-				return err
-			}
-		}
-		unexclude, err := excludeMountsFromGit(wt, name, masks)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(wt, name+".txt"), []byte(fmt.Sprint("work", i)), 0o644); err != nil {
-			return err
-		}
-		for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", name}} {
-			if out, err := exec.Command("git", append([]string{"-C", wt, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
-				return fmt.Errorf("%s git %v: %v\n%s", name, args, err, out)
-			}
-		}
-		unexclude()
-		for _, m := range masks {
-			_ = os.Remove(filepath.Join(wt, m.Target))
-		}
-	}
-	return nil
 }
