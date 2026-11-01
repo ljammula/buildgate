@@ -899,6 +899,18 @@ func TestTicketSummaryMarksSafeToMergeInPRReview(t *testing.T) {
 			r.Tickets[0].PRState, r.Tickets[0].MergeReadiness, r.Tickets[0].Branch = "merged", nil, "factoryd/run-1"
 			r.Tickets[1].PRState, r.Tickets[1].MergeReadiness, r.Tickets[1].PRBase = "approved", checked, "factoryd/run-1"
 		}, "1:merged 2:approved,ready-to-merge 3:stacked"},
+		{"draft ticket on main, only blocker is the draft", func(r *request.Request) {
+			r.Tickets[0].PRState = "draft"
+			r.Tickets[0].MergeReadiness = &request.MergeReadiness{Draft: true, Blockers: []string{"it is still a draft"}}
+		}, "1:draft,safe-to-merge 2:stacked 3:stacked"},
+		{"draft ticket with failing checks", func(r *request.Request) {
+			r.Tickets[0].PRState = "draft"
+			r.Tickets[0].MergeReadiness = &request.MergeReadiness{Draft: true, Blockers: []string{"it is still a draft", "its checks are pending or failing"}}
+		}, "1:draft 2:stacked 3:stacked"},
+		{"stacked ticket on main with a stacked blocker", func(r *request.Request) {
+			r.Tickets[0].PRState = "stacked"
+			r.Tickets[0].MergeReadiness = &request.MergeReadiness{Blockers: []string{"it is stacked on an earlier ticket's pull request, which must merge first"}}
+		}, "1:stacked 2:stacked 3:stacked"},
 		{"approved bottom ticket", func(r *request.Request) { r.Tickets[0].PRState = "approved" }, "1:approved,ready-to-merge,safe-to-merge 2:stacked 3:stacked"},
 		{"draft bottom ticket, no passing check", func(r *request.Request) { r.Tickets[0].PRState, r.Tickets[0].MergeReadiness = "draft", nil }, "1:draft 2:stacked 3:stacked"},
 		{"round in flight (no readiness check)", func(r *request.Request) { r.Tickets[0].MergeReadiness = nil }, "1:ready 2:stacked 3:stacked"},

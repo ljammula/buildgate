@@ -880,11 +880,13 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 // passes. A repository with no checks configured has none failing.
 func checkMergeReadiness(dataDir string, ticket *request.Ticket, state forge.ReviewState, now time.Time) *request.MergeReadiness {
 	var blockers []string
+	draft := false
 	switch {
 	case ticket.PRState == "stacked":
 		blockers = append(blockers, "it is stacked on an earlier ticket's pull request, which must merge first")
 	case state.IsDraft && ticket.PRState != "ready":
 		blockers = append(blockers, "it is still a draft")
+		draft = true
 	}
 	if state.ChecksPassing != nil && !*state.ChecksPassing {
 		blockers = append(blockers, "its checks are pending or failing")
@@ -901,6 +903,7 @@ func checkMergeReadiness(dataDir string, ticket *request.Ticket, state forge.Rev
 	return &request.MergeReadiness{
 		Notes:     notes,
 		Ready:     len(blockers) == 0,
+		Draft:     draft,
 		CheckedAt: now.UTC().Format(time.RFC3339Nano),
 		HeadSHA:   state.HeadSHA,
 		Blockers:  blockers,

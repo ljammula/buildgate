@@ -270,6 +270,12 @@ func (r *Request) RestackInFlight() *Ticket {
 	return nil
 }
 
+// OnlyDraftBlocks reports whether the check passed apart from the pull
+// request still being a draft.
+func (m *MergeReadiness) OnlyDraftBlocks() bool {
+	return m != nil && m.Draft && len(m.Blockers) == 1
+}
+
 // StackedOnAnotherTicket reports whether baseRefName is another ticket's
 // Branch in r: a pull request whose base is a ticket's branch, not the
 // repository's default branch.

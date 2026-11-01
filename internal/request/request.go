@@ -252,6 +252,11 @@ type MergeReadiness struct {
 	// Blockers says, one sentence each, what the bar still lacks. Empty
 	// exactly when Ready.
 	Blockers []string `json:"blockers,omitempty"`
+	// Draft is true when the pull request still being a draft is one of the
+	// Blockers. Under the default release policy the factory never marks a
+	// ticket ready, so a person runs `gh pr ready` before merging: a check
+	// whose only blocker is the draft (OnlyDraftBlocks) is merge-safe.
+	Draft bool `json:"draft,omitempty"`
 	// Notes are facts that do not block: a check that is not required and
 	// failed.
 	Notes []string `json:"notes,omitempty"`

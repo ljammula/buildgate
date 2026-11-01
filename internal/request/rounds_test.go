@@ -95,3 +95,21 @@ func TestRetryFromRoundRefusesARequestThatRebuildsNothing(t *testing.T) {
 		t.Fatalf("RetryFromRound on an accepted-no-PR halt = %v, want a refusal", err)
 	}
 }
+
+func TestMergeReadinessOnlyDraftBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		m    *MergeReadiness
+		want bool
+	}{
+		{"nil", nil, false},
+		{"ready", &MergeReadiness{Ready: true}, false},
+		{"only the draft", &MergeReadiness{Draft: true, Blockers: []string{"it is still a draft"}}, true},
+		{"draft and failing checks", &MergeReadiness{Draft: true, Blockers: []string{"it is still a draft", "its checks are pending or failing"}}, false},
+		{"another blocker, not a draft", &MergeReadiness{Blockers: []string{"it is stacked"}}, false},
+	} {
+		if got := tc.m.OnlyDraftBlocks(); got != tc.want {
+			t.Errorf("%s: OnlyDraftBlocks = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

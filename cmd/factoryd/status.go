@@ -163,7 +163,7 @@ type requestStatusEntry struct {
 	// one entry per ticket that has an open pull request -- the
 	// PR-review driver's own per-ticket PR status (Ticket.PRState: "open"
 	// -- the default, shown when PRState is still "" -- "ready", "approved",
-	// "merged", or "closed"), followed by ",draft" (the current ticket of a building request) or ",safe-to-merge" (the lowest open ticket of a building request once a later one builds, its advice rounds done; in pr_review, the lowest open ticket whose last merge-readiness check passed, whose base is not another ticket's branch, with no restack or advice round in flight on the request), then ",ready-to-merge" when the poll's last
+	// "merged", or "closed"), followed by ",draft" (the current ticket of a building request) or ",safe-to-merge" (the lowest open ticket of a building request once a later one builds, its advice rounds done; in pr_review, the lowest open ticket whose last merge-readiness check passed (a draft being its only blocker is fine), whose base is not another ticket's branch, with no restack or advice round in flight on the request), then ",ready-to-merge" when the poll's last
 	// ready-to-merge check passed (Ticket.MergeReadiness). Empty when this request has no ticket with a PR yet
 	// (every state before building/pr_review, or a ticket not yet
 	// opened).
@@ -249,15 +249,15 @@ func ticketMergeMark(r *request.Request, t request.Ticket, lowest int) string {
 // prReviewTicketMark is the ",safe-to-merge" mark of a pr_review request's
 // ticket, or "". It marks only the lowest ticket whose PR is open (lowest),
 // and only when the record shows nothing that could still push to it or hold
-// it: the last merge-readiness check passed (it is cleared and saved before a
-// review or CI round's build starts, and every blocker such as a draft, open
-// threads or failing checks fails it), its base is not another ticket's
+// it: the last merge-readiness check passed, or its only blocker is the draft state (the factory never flips a PR to ready under the default release policy; the operator runs `gh pr ready` before merging) (it is cleared and saved before a
+// review or CI round's build starts, and every other blocker, such as a stacked PR, open
+// threads or failing checks, fails it), its base is not another ticket's
 // branch (a PR approved while stacked has PR state "approved" but is not yet
 // retargeted), and no ticket of the request has a restack, a held restack or
 // an advice round in flight. A review thread raised since the last poll is
 // not in the record, so it is not reflected.
 func prReviewTicketMark(r *request.Request, t request.Ticket, lowest int) string {
-	if t.Index != lowest || t.MergeReadiness == nil || !t.MergeReadiness.Ready || r.StackedOnAnotherTicket(&t, t.PRBase) {
+	if t.Index != lowest || t.MergeReadiness == nil || !(t.MergeReadiness.Ready || t.MergeReadiness.OnlyDraftBlocks()) || r.StackedOnAnotherTicket(&t, t.PRBase) {
 		return ""
 	}
 	for _, other := range r.Tickets {
