@@ -254,44 +254,69 @@ func TestRetryOnGitLockGivesUpAndIgnoresOtherErrors(t *testing.T) {
 	}
 }
 
-// Shared holders that keep overlapping with almost no gap must not starve an
-// exclusive waiter: the waiter holds the turnstile, so no new shared holder
-// starts ahead of it. Each holder takes the lock, holds it, releases it and
-// takes it again at once, staggered so the lock is rarely free for long.
+// Two shared holders hand the lock to each other so that it is never free:
+// each re-acquires while the other still holds, and only then does the other
+// let go. Without precedence for a waiting exclusive acquirer it would wait
+// forever; with it, the holder that is blocked behind the waiter's turnstile
+// cannot signal, so its peer lets go on its own after a short hold.
 func TestDirectLockExclusiveWaiterIsNotStarvedByOverlappingSharedHolders(t *testing.T) {
 	repoDir := testfixture.NewGitRepo(t)
-	stop := make(chan struct{})
+	ctx, stop := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func(offset time.Duration) {
-			defer wg.Done()
-			time.Sleep(offset)
-			for {
-				lock, err := AcquireDirectLockSharedContext(context.Background(), repoDir)
-				if err != nil {
-					return
-				}
-				select {
-				case <-stop:
-					lock.Close()
-					return
-				case <-time.After(20 * time.Millisecond):
-				}
-				lock.Close()
-			}
-		}(time.Duration(i) * 7 * time.Millisecond)
+	toA, toB := make(chan struct{}, 1), make(chan struct{}, 1)
+	signal := func(c chan<- struct{}) {
+		select {
+		case c <- struct{}{}:
+		default:
+		}
 	}
+	// holdUntilPeerHolds keeps lock until the peer says it holds the lock too.
+	holdUntilPeerHolds := func(lock *DirectLock, peer <-chan struct{}) {
+		select {
+		case <-peer:
+		case <-time.After(300 * time.Millisecond):
+		case <-ctx.Done():
+		}
+		lock.Close()
+	}
+	first, err := AcquireDirectLockShared(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg.Add(2)
+	go func() { // A
+		defer wg.Done()
+		holdUntilPeerHolds(first, toA)
+		for ctx.Err() == nil {
+			lock, err := AcquireDirectLockSharedContext(ctx, repoDir)
+			if err != nil {
+				return
+			}
+			signal(toB)
+			holdUntilPeerHolds(lock, toA)
+		}
+	}()
+	go func() { // B
+		defer wg.Done()
+		for ctx.Err() == nil {
+			lock, err := AcquireDirectLockSharedContext(ctx, repoDir)
+			if err != nil {
+				return
+			}
+			signal(toA)
+			holdUntilPeerHolds(lock, toB)
+		}
+	}()
 	defer func() {
-		close(stop)
+		stop()
 		wg.Wait()
 	}()
-	time.Sleep(60 * time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	time.Sleep(200 * time.Millisecond)
+	waitCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	lock, err := AcquireDirectLockContext(ctx, repoDir)
+	lock, err := AcquireDirectLockContext(waitCtx, repoDir)
 	if err != nil {
-		t.Fatalf("exclusive waiter starved: %v", err)
+		t.Fatalf("exclusive waiter starved by holders that hand the lock over: %v", err)
 	}
 	lock.Close()
 }

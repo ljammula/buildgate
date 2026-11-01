@@ -2096,6 +2096,8 @@ build) are labelled `(attempt N)`.
 | Inside a run, for its branch (another round on the same `-on-branch` branch holds it) | The run's `progress.jsonl`: stage `branch_lock`, event `waiting` (detail `branch <name>`) then `acquired`; counted with the in-run lock waits, kind `branch_lock` | By the build, once per wait |
 | Before a run, a building step found the repository held by another build and gave its slot back (`RepositoryBusy`) | `<data-dir>/requests/<id>/repository_waits.jsonl`: `{"at":"<RFC 3339>","event":"start"\|"end"}` | By the worker: one `start` line when the first step finds it held, one `end` line when a later step finds it free or the request leaves `building`; not one per 30 s retry |
 
+A direct `factoryd run` (no worker) waits up to 2 minutes for the repository, including behind an exclusive build that is queued for it (a challenge round, `reconcile`), then fails with "repository is busy"; a worker's runs wait instead, without that bound.
+
 A wait with no end counts in no total. A repository-busy wait with no `end` line, or a lock wait in a run whose record is `accepted`, `quarantined` or `halted` without `acquired`, is reported as open (the worker writes the `end` line of a wait it began before a restart when the repository is free or the request leaves `building`); a lock wait in a run not yet in one of those states is reported as waiting, not open. The critical path
 gives the request's span (from entering `building` to the last run or wait end),
 the sum of run time, the in-run lock waits (part of the run time), the

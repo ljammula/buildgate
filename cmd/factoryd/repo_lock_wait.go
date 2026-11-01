@@ -237,7 +237,7 @@ func acquireIsolatedRunLock(ctx context.Context, workspace string, reconcile fun
 		}
 	}
 	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
-		return nil, fmt.Errorf("%w: %s (an exclusive holder kept it for %s)", wsisolation.ErrBusy, workspace, isolatedRunLockWait)
+		return nil, fmt.Errorf("%w: %s (another build holds it exclusively or is queued for it exclusively; waited %s)", wsisolation.ErrBusy, workspace, isolatedRunLockWait)
 	}
 	return lock, err
 }
