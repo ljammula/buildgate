@@ -2,11 +2,11 @@ package workflow
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -641,7 +641,7 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 		removeMountParents(made)
 		return ctx, func() {}, err
 	}
-	unexclude, err := excludeMountsFromGit(ctx, input.WorkspacePath, masks)
+	unexclude, err := excludeMountsFromGit(input.WorkspacePath, input.RunID, masks)
 	if err != nil {
 		_, _ = removeReviewStubs(input.WorkspacePath, manifest)
 		removeMountParents(made)
@@ -662,23 +662,27 @@ func (a *Activities) withChallengeMounts(ctx context.Context, input RunWorkflowI
 // an empty file where the held content is only visible through the mount).
 // The file is the one every git call reads, the sandbox's included, so the
 // entries are written to it: as a block of this round alone, under the git
-// metadata lock (SC-011). The returned function removes that block and
-// nothing else, so it never writes back a stale copy over lines another run
-// added meanwhile.
-func excludeMountsFromGit(ctx context.Context, workDir string, masks []sandbox.WorkspaceMask) (func(), error) {
-	var token [8]byte
-	if _, err := rand.Read(token[:]); err != nil {
-		return nil, fmt.Errorf("name the exclude block: %w", err)
-	}
+// metadata lock (SC-011). The block's token is the run and its worktree, so a
+// retry of the same activity replaces its block rather than adding another.
+// The returned function removes that block and nothing else, so it never
+// writes back a stale copy over lines another run added meanwhile; a removal
+// that fails is logged, and the next attempt of the run replaces the block.
+func excludeMountsFromGit(workDir, runID string, masks []sandbox.WorkspaceMask) (func(), error) {
 	patterns := make([]string, 0, len(masks))
 	for _, m := range masks {
 		patterns = append(patterns, "/"+escapeExcludePattern(m.Target))
 	}
-	release, err := wsisolation.ExcludeForRun(workDir, hex.EncodeToString(token[:]), patterns)
+	sum := sha256.Sum256([]byte(workDir))
+	token := runID + "@" + hex.EncodeToString(sum[:6])
+	release, err := wsisolation.ExcludeForRun(workDir, token, patterns)
 	if err != nil {
 		return nil, fmt.Errorf("write the git exclude file: %w", err)
 	}
-	return release, nil
+	return func() {
+		if err := release(); err != nil {
+			log.Printf("challenge round %s: could not remove its info/exclude block %q: %v", runID, token, err)
+		}
+	}, nil
 }
 
 // escapeExcludePattern escapes the characters a gitignore pattern reads as

@@ -522,8 +522,12 @@ func TestConcurrentChallengeRoundsLeaveInfoExcludeAsTheyFoundIt(t *testing.T) {
 				errs <- err
 				return
 			}
-			git(wts["iso"], "add", "-A")
-			git(wts["iso"], "commit", "-q", "--allow-empty", "-m", "iso")
+			for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "--allow-empty", "-m", "iso"}} {
+				if out, err := exec.Command("git", append([]string{"-C", wts["iso"], "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...).CombinedOutput(); err != nil {
+					errs <- fmt.Errorf("iso git %v: %v\n%s", args, err, out)
+					return
+				}
+			}
 		}
 	}()
 	wg.Wait()
@@ -563,7 +567,7 @@ func heldRound(wt, name string, rounds int) error {
 				return err
 			}
 		}
-		unexclude, err := excludeMountsFromGit(context.Background(), wt, masks)
+		unexclude, err := excludeMountsFromGit(wt, name, masks)
 		if err != nil {
 			return err
 		}

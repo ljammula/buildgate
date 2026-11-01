@@ -163,12 +163,18 @@ const (
 // (SC-011) and change only the block of token: another run's block, and any
 // line another writer added meanwhile, is left byte for byte, so a release
 // never writes back a snapshot taken before them. Two blocks listing the same
-// pattern are independent: releasing one keeps the other's line. Git's
-// own readers (host and sandbox alike) see the file, so no git call needs to
-// be told about it. release is safe to call more than once.
-func ExcludeForRun(dir, token string, patterns []string) (release func(), err error) {
+// pattern are independent: releasing one keeps the other's line. A call whose
+// token already has a block replaces that block (a retried activity adds no
+// second one). Git's own readers (host and sandbox alike) see the file, so no
+// git call needs to be told about it. release is safe to call more than once.
+func ExcludeForRun(dir, token string, patterns []string) (release func() error, err error) {
 	if token == "" || strings.ContainsAny(token, "\r\n") {
 		return nil, fmt.Errorf("exclude block token %q is not a single line", token)
+	}
+	for _, p := range patterns {
+		if strings.ContainsAny(p, "\r\n") {
+			return nil, fmt.Errorf("exclude pattern %q is not a single line", p)
+		}
 	}
 	path, err := infoExcludePath(dir)
 	if err != nil {
@@ -183,8 +189,8 @@ func ExcludeForRun(dir, token string, patterns []string) (release func(), err er
 	}); err != nil {
 		return nil, err
 	}
-	return func() {
-		_ = rewriteExclude(dir, path, func(cur string) string { return dropExcludeBlock(cur, token) })
+	return func() error {
+		return rewriteExclude(dir, path, func(cur string) string { return dropExcludeBlock(cur, token) })
 	}, nil
 }
 

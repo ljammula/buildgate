@@ -56,3 +56,38 @@ func TestExcludeForRunRefusesAMultiLineToken(t *testing.T) {
 		t.Error("a token with a newline was accepted")
 	}
 }
+
+// A retried add with the same token (a retried activity) replaces its block:
+// one block, the newest patterns, and one release leaves nothing.
+func TestExcludeForRunRetryWithTheSameTokenLeavesOneBlock(t *testing.T) {
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	before := excludeText(t, repo)
+	if _, err := ExcludeForRun(repo, "run-1@abc", []string{"/old_test.go"}); err != nil {
+		t.Fatal(err)
+	}
+	release, err := ExcludeForRun(repo, "run-1@abc", []string{"/new_test.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := excludeText(t, repo)
+	if strings.Count(got, excludeBlockBegin) != 1 || strings.Contains(got, "old_test.go") || !strings.Contains(got, "/new_test.go") {
+		t.Fatalf("after the retry: %q", got)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	if got := excludeText(t, repo); got != before {
+		t.Errorf("after the release: %q", got)
+	}
+}
+
+func TestExcludeForRunRefusesAMultiLinePattern(t *testing.T) {
+	for _, p := range []string{"/a\n/b", "/a\r/b"} {
+		if _, err := ExcludeForRun(t.TempDir(), "t", []string{p}); err == nil {
+			t.Errorf("pattern %q was accepted", p)
+		}
+	}
+}
