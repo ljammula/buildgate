@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/testfixture"
 )
@@ -156,5 +157,71 @@ func TestGitCommonDirIsSharedByWorktree(t *testing.T) {
 	}
 	if err := lock.Close(); err != nil {
 		t.Fatalf("release worktree lock: %v", err)
+	}
+}
+
+func TestBranchLockIsExclusivePerBranchAndIndependentAcrossBranches(t *testing.T) {
+	repoDir := testfixture.NewGitRepo(t)
+	first, err := AcquireBranchLock(repoDir, "pr-a")
+	if err != nil {
+		t.Fatalf("AcquireBranchLock(pr-a): %v", err)
+	}
+	if lock, err := AcquireBranchLock(repoDir, "pr-a"); !errors.Is(err, ErrBusy) || lock != nil {
+		t.Fatalf("second lock of pr-a = %v, %v, want ErrBusy", lock, err)
+	}
+	if lock, err := AcquireBranchLock(repoDir, "refs/heads/pr-a"); !errors.Is(err, ErrBusy) || lock != nil {
+		t.Fatalf("full ref name of pr-a = %v, %v, want ErrBusy", lock, err)
+	}
+	other, err := AcquireBranchLock(repoDir, "pr-b")
+	if err != nil {
+		t.Fatalf("AcquireBranchLock(pr-b) beside pr-a: %v", err)
+	}
+	other.Close()
+	// A branch lock leaves the repository lock free.
+	repo, err := AcquireDirectLock(repoDir)
+	if err != nil {
+		t.Fatalf("repository lock beside a branch lock: %v", err)
+	}
+	repo.Close()
+	first.Close()
+	again, err := AcquireBranchLock(repoDir, "pr-a")
+	if err != nil {
+		t.Fatalf("AcquireBranchLock after release: %v", err)
+	}
+	again.Close()
+}
+
+func TestBranchLockContextWaitsForReleaseAndStopsOnCancel(t *testing.T) {
+	repoDir := testfixture.NewGitRepo(t)
+	owner, err := AcquireBranchLock(repoDir, "pr-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if lock, err := AcquireBranchLockContext(ctx, repoDir, "pr-a"); !errors.Is(err, context.Canceled) || lock != nil {
+		t.Fatalf("canceled wait = %v, %v, want context.Canceled", lock, err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		lock, err := AcquireBranchLockContext(context.Background(), repoDir, "pr-a")
+		if err == nil {
+			lock.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("waiter returned %v while the branch was held", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	owner.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("waiter after release: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waiter did not get the branch after release")
 	}
 }

@@ -117,6 +117,64 @@ func acquireDirectRunLock(ctx context.Context, workspace string, report repoLock
 	return lock, err
 }
 
+// acquireWorkspaceLocks takes the locks of a run in workspace itself (no
+// -repository). An isolated run (branch "") holds the repository shared. An
+// -on-branch run takes its branch's lock first, then holds the repository
+// shared like an isolated run, except a run that writes the repository-wide info/exclude
+// (ticketRun.writesSharedExclude), which holds it exclusively. Both
+// reconcile stranded worktrees only under an exclusive hold: the shared modes
+// through acquireIsolatedRunLock when the repository is idle, the exclusive
+// one by the caller, so reconcile here is only for the shared modes. The
+// branch lock is nil when there is none.
+func acquireWorkspaceLocks(ctx context.Context, workspace, branch string, writesExclude bool, report repoLockReport, reconcile func(*wsisolation.DirectLock)) (branchLock, repoLock *wsisolation.DirectLock, err error) {
+	if branch != "" {
+		if branchLock, err = acquireBranchRunLock(ctx, workspace, branch, report); err != nil {
+			return nil, nil, fmt.Errorf("acquire branch ownership: %w", err)
+		}
+	}
+	if branch == "" || !writesExclude {
+		repoLock, err = acquireIsolatedRunLock(ctx, workspace, reconcile, report)
+	} else {
+		repoLock, err = acquireDirectRunLock(ctx, workspace, report)
+	}
+	if err != nil && branchLock != nil {
+		_ = branchLock.Close()
+		branchLock = nil
+	}
+	return branchLock, repoLock, err
+}
+
+// acquireBranchRunLock takes the exclusive lock of branch in workspace's
+// repository, for an -on-branch run. Waiting follows acquireIsolatedRunLock's
+// rule: unbounded under withWaitForRepoLock, otherwise up to
+// isolatedRunLockWait and then wsisolation.ErrBusy.
+func acquireBranchRunLock(ctx context.Context, workspace, branch string, report repoLockReport) (*wsisolation.DirectLock, error) {
+	lock, err := wsisolation.AcquireBranchLock(workspace, branch)
+	if err == nil || !errors.Is(err, wsisolation.ErrBusy) {
+		return lock, err
+	}
+	var waitCtx context.Context
+	var cancel context.CancelFunc
+	if waitsForRepoLock(ctx) {
+		waitCtx, cancel = context.WithCancel(ctx)
+	} else {
+		waitCtx, cancel = context.WithTimeout(ctx, isolatedRunLockWait)
+	}
+	defer cancel()
+	log.Printf("waiting for branch %s, held by another build: %s", branch, workspace)
+	report.waiting(ctx)
+	lock, err = wsisolation.AcquireBranchLockContext(waitCtx, workspace, branch)
+	if err != nil {
+		report.failed(ctx, err)
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: branch %s of %s (another build kept it for %s)", wsisolation.ErrBusy, branch, workspace, isolatedRunLockWait)
+		}
+		return nil, err
+	}
+	report.acquired(ctx)
+	return lock, nil
+}
+
 // isolatedRunLockWait bounds how long an isolated run waits for the shared
 // lock while another process holds it exclusively (a run reconciling stranded
 // worktrees, a non-isolated build, a reclaim). A variable for tests.
@@ -132,9 +190,9 @@ var isolatedRunLockWait = 2 * time.Minute
 // Past the bound it returns wsisolation.ErrBusy. A ctx marked by
 // withWaitForRepoLock has no bound: a worker's ticket waits until the holder
 // releases the lock or ctx ends, because the holder may be another request's
-// whole build on its pull request's branch (an advice or review round holds
-// the lock exclusively for its run), and the ticket must queue behind it,
-// not halt its request.
+// whole build holding the lock exclusively (a challenge round, a
+// non-isolated build), and the ticket must queue behind it, not halt its
+// request.
 func acquireIsolatedRunLock(ctx context.Context, workspace string, reconcile func(*wsisolation.DirectLock), report repoLockReport) (*wsisolation.DirectLock, error) {
 	exclusive, err := wsisolation.AcquireDirectLock(workspace)
 	switch {

@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -119,6 +121,53 @@ func acquireDirectLock(ctx context.Context, repoDir string, wait bool, how int) 
 		return nil, err
 	}
 	return &DirectLock{file: file, exclusive: how == syscall.LOCK_EX}, nil
+}
+
+// branchLockPath is the lock file of branch in commonDir: named by a hash of
+// the full ref name, so no branch name can escape the directory or collide
+// with another's.
+func branchLockPath(commonDir, branch string) string {
+	sum := sha256.Sum256([]byte("refs/heads/" + strings.TrimPrefix(branch, "refs/heads/")))
+	return filepath.Join(commonDir, "factoryd-branch-"+hex.EncodeToString(sum[:])[:16]+".lock")
+}
+
+// AcquireBranchLock takes the exclusive lock of one branch of repoDir's
+// repository without waiting. An on-branch run holds it for its whole run, so
+// two rounds on one branch never overlap while rounds on other branches do
+// (they hold the repository lock shared). It fails with ErrBusy while another
+// process holds it. Always take it before the repository lock.
+func AcquireBranchLock(repoDir, branch string) (*DirectLock, error) {
+	return acquireBranchLock(context.Background(), repoDir, branch, false)
+}
+
+// AcquireBranchLockContext is AcquireBranchLock that waits, polling, until the
+// holder releases or ctx ends.
+func AcquireBranchLockContext(ctx context.Context, repoDir, branch string) (*DirectLock, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return acquireBranchLock(ctx, repoDir, branch, true)
+}
+
+func acquireBranchLock(ctx context.Context, repoDir, branch string, wait bool) (*DirectLock, error) {
+	if branch == "" {
+		return nil, errors.New("branch lock needs a branch name")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	commonDir, err := GitCommonDir(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	file, err := flockFile(ctx, branchLockPath(commonDir, branch), syscall.LOCK_EX, wait, "branch lock")
+	if err != nil {
+		if errors.Is(err, errLockHeld) {
+			return nil, fmt.Errorf("%w: branch %s of %s", ErrBusy, branch, repoDir)
+		}
+		return nil, err
+	}
+	return &DirectLock{file: file, exclusive: false}, nil
 }
 
 // errLockHeld is flockFile's non-waiting "someone else holds it" outcome.

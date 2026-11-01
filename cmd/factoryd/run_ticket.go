@@ -1655,24 +1655,36 @@ func (tr *ticketRun) lockRepository() error {
 	// An isolated run (own fresh worktree and branch, -data-dir outside the
 	// checkout) holds the lock shared, so isolated runs of one repository
 	// overlap; every run that can touch the shared checkout holds it
-	// exclusively. An -on-branch run is exclusive too: two corrective rounds
-	// on one existing branch would overwrite each other's commits. An
-	// isolated run that finds the repository idle takes it exclusively
-	// first, to reconcile stranded worktrees, then releases it and takes it
-	// shared (see acquireIsolatedRunLock).
+	// exclusively. An -on-branch run works in its own worktree too, so it holds
+	// the repository shared like an isolated run, plus its branch's lock
+	// exclusively (taken first): two corrective rounds on one existing branch
+	// would overwrite each other's commits, rounds on other branches do not.
+	// A run that writes the repository-wide info/exclude, which every
+	// worktree reads (writesSharedExclude: a challenge round with held files),
+	// alone holds the repository exclusively. A run that finds the
+	// repository idle takes it exclusively first, to reconcile stranded
+	// worktrees, then releases it and takes it shared (see
+	// acquireIsolatedRunLock).
 	var directLock *wsisolation.DirectLock
 	// A wait for the lock is written to this run's progress feed, so the run
 	// id is minted before it.
 	tr.mintRunID()
 	report := repoLockReport{dataDir: *tr.dataDir, runID: tr.id}
 	isolatedRun := *tr.repository == "" && *tr.onBranch == ""
+	sharedRun := isolatedRun || (*tr.repository == "" && *tr.onBranch != "" && !tr.writesSharedExclude())
 	reconcileStranded := func(lock *wsisolation.DirectLock) {
 		reconcileIsolationMarkers(tr.lifecycleCtx, *tr.dataDir, *tr.workspace, *tr.sandboxDocker, lock, nil)
 	}
-	if isolatedRun {
-		directLock, err = acquireIsolatedRunLock(tr.lifecycleCtx, *tr.workspace, reconcileStranded, report)
-	} else if *tr.repository == "" {
-		directLock, err = acquireDirectRunLock(tr.lifecycleCtx, *tr.workspace, report)
+	if *tr.repository == "" {
+		var branchLock *wsisolation.DirectLock
+		branchLock, directLock, err = acquireWorkspaceLocks(tr.lifecycleCtx, *tr.workspace, *tr.onBranch, tr.writesSharedExclude(), report, reconcileStranded)
+		if branchLock != nil {
+			tr.atExit(func() {
+				if closeErr := branchLock.Close(); closeErr != nil {
+					log.Printf("release branch ownership: %v", closeErr)
+				}
+			})
+		}
 	} else {
 		// Repository-owner submissions retain the same Git-common-dir
 		// ownership boundary as bare runs, but wait only within this run's
@@ -1704,7 +1716,7 @@ func (tr *ticketRun) lockRepository() error {
 	// an exclusive holder may: an isolated run reconciled inside
 	// acquireIsolatedRunLock while the repository was idle, and leaves
 	// stranded worktrees alone when other runs held it.
-	if !isolatedRun {
+	if !sharedRun {
 		reconcileStranded(directLock)
 	}
 	removeScratchDirs(tr.lifecycleCtx, *tr.sandboxDocker, tr.sandboxDataDir)
