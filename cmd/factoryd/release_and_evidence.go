@@ -1340,9 +1340,8 @@ func invalidateStoredReleaseDecision(dataDir, project, runID, reason string) {
 //
 // The body is written once, when the pull request opens, from the build's
 // result commit (resultSHA); the factory never edits it afterwards. A red
-// verdict therefore says which commit it judges and that a later commit on the
-// branch is not re-judged here: an advice round's verdict on its own result
-// is a pull request comment (SC-022).
+// verdict therefore says which commit it judges and that it is not updated
+// for later commits on the branch (SC-022).
 func renderChallengeMarkdown(c *run.ChallengeRecord, resultSHA string) string {
 	if c == nil {
 		return ""
@@ -1416,7 +1415,7 @@ func writeRedChallengeScope(b *strings.Builder, resultSHA string) {
 	if sha == "" {
 		return
 	}
-	fmt.Fprintf(b, "\nThis verdict is for the build's result `%s`, as the pull request opened. A later commit on the branch is not judged here: a round that followed reports the held tests on its own result in a comment on this pull request.\n\n", sha)
+	fmt.Fprintf(b, "\nThis verdict is for the build's result `%s`, as the pull request opened. This section is not updated for later commits on the branch.\n", sha)
 }
 
 // writeChallengeFileLine writes one challenge file's list line: path and

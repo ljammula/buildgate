@@ -423,13 +423,16 @@ func challengeComment(reds []run.ChallengeFile, current, roundRun *run.Run) stri
 			verdict[f.Path] = f.Verdict
 		}
 	}
-	var fixed, still strings.Builder
+	var fixed, still, unseen strings.Builder
 	for _, f := range reds {
 		line := fmt.Sprintf("\n- `%s` (%s)", handoff.CleanSentence(f.Path), handoff.CleanWord(f.Criterion))
-		if verdict[f.Path] == run.ChallengeGreen {
+		switch verdict[f.Path] {
+		case run.ChallengeGreen:
 			fixed.WriteString(line)
-		} else {
+		case run.ChallengeRed:
 			still.WriteString(line + groupNote(f))
+		default:
+			unseen.WriteString(line)
 		}
 	}
 	var b strings.Builder
@@ -444,6 +447,12 @@ func challengeComment(reds []run.ChallengeFile, current, roundRun *run.Run) stri
 			b.WriteString("\n\n")
 		}
 		fmt.Fprintf(&b, "These held challenge tests still fail on it, and a person decides whether the code or the test is wrong:\n%s", still.String())
+	}
+	if unseen.Len() > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "The round gave no verdict on these held challenge tests:\n%s", unseen.String())
 	}
 	return b.String()
 }
