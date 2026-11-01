@@ -628,10 +628,16 @@ type BuildActivityResult struct {
 // VerifyActivityResult is RunVerifyActivity's output. Attempts is
 // BuildActivityResult.Attempts' counterpart for the verify subprocess.
 type VerifyActivityResult struct {
-	Result     runner.Result `json:"result"`
-	DurationMs int64         `json:"duration_ms"`
-	LogSHA256  string        `json:"log_sha256"`
-	Attempts   []run.Attempt `json:"attempts"`
+	// ComposeServices is whether a launch of this run starts compose sidecars:
+	// the repository has a compose file at the base commit with a service the
+	// factory would launch, or one that cannot be told apart from that (a
+	// rejected file, an unreadable spec). RunVerifyActivity sets it; the
+	// reproduction launches read it (launchesInParallel).
+	ComposeServices bool          `json:"compose_services,omitempty"`
+	Result          runner.Result `json:"result"`
+	DurationMs      int64         `json:"duration_ms"`
+	LogSHA256       string        `json:"log_sha256"`
+	Attempts        []run.Attempt `json:"attempts"`
 	// BaseCheck is a failed named or repository gate's rerun on the base
 	// commit (run.GateBaseCheck), made inside the gate's own Activity; nil
 	// for a gate that passed and for every other
@@ -967,6 +973,10 @@ type RunProgress struct {
 
 type RunWorkflowResult struct {
 	State run.State `json:"state"`
+	// composeSidecars is whether the run's launches start compose sidecars
+	// (VerifyActivityResult.ComposeServices), set after verification. Not
+	// serialised: a replay sets it again from the same recorded result.
+	composeSidecars bool
 	// BaselineChecked reports a BaselineCheck run whose baseline passed: its
 	// State is empty and its worktree is rolled back.
 	BaselineChecked bool `json:"baseline_checked,omitempty"`

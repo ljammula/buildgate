@@ -377,6 +377,22 @@ func (a *Activities) composeServicesSpecFor(input RunWorkflowInput, phase string
 	return &spec, nil
 }
 
+// launchesComposeSidecars reports whether a launch of this run starts compose
+// sidecars: the repository has a compose file at the base commit that holds a
+// service the factory would launch. A file it would reject, or a spec it cannot
+// read, counts as yes, so the caller errs towards launching one at a time.
+func (a *Activities) launchesComposeSidecars(input RunWorkflowInput, phase string) bool {
+	spec, err := a.composeServicesSpecFor(input, phase)
+	if err != nil {
+		return true
+	}
+	if spec == nil || len(spec.ComposeYAML) == 0 {
+		return false
+	}
+	verdict, err := sandbox.ValidateComposeServices(*spec)
+	return err != nil || verdict.Reason != "" || len(verdict.Services) > 0
+}
+
 // logDirFor returns input.LogDir when set, falling back to the
 // Worker-static a.LogDir otherwise. See RunWorkflowInput.LogDir's doc
 // comment for why the per-execution value must win when present.

@@ -83,7 +83,7 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	proof := &run.TestsRedOnBase{SkippedFiles: held.Skipped}
 	launch := launchTestsRedSerially
-	if launchesInParallel(ctx, ids, input, false) {
+	if launchesInParallel(ctx, ids, result, false) {
 		launch = launchTestsRedInWaves
 	}
 	files, runs, err := launch(ctx, ids, rctx, input, result, held.Held, base, worktreePath, branch)

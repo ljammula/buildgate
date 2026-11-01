@@ -17,8 +17,13 @@ const parallelReproductionLaunchesChange = "parallel-reproduction-launches"
 
 // launchesInParallel asks parallelReproductionLaunchesChange. Even in the new
 // version a run launches one at a time when:
-//   - it has compose services: the services' project and network are named by
-//     the run, so two launches would share and tear down each other's sidecars;
+//   - its launches start compose sidecars (result.composeSidecars, from
+//     VerifyActivityResult.ComposeServices, set in runVerifyCommand,
+//     activities_verify.go, where RunVerifyActivity loads the compose spec): the
+//     sidecars' project and network are named by the run, so two launches
+//     would share and tear down each other's sidecars. A run with compose
+//     services enabled but no compose file, which is nearly every run,
+//     launches together;
 //   - its Activities retry (ids.retries): a retried attempt reaps the run's
 //     containers (fenceEarlierAttempts), which would kill a sibling launch;
 //   - besideReview: the challenge runs beside the code review, and the run's
@@ -27,9 +32,9 @@ const parallelReproductionLaunchesChange = "parallel-reproduction-launches"
 //
 // Where it does launch together, a wave is scheduled whole and the run worker
 // runs up to two of it at a time.
-func launchesInParallel(ctx temporalworkflow.Context, ids *activityIDs, input RunWorkflowInput, besideReview bool) bool {
+func launchesInParallel(ctx temporalworkflow.Context, ids *activityIDs, result *RunWorkflowResult, besideReview bool) bool {
 	v := temporalworkflow.GetVersion(ctx, parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1)
-	return v == 1 && !input.ComposeServicesEnabled && !ids.retries && !besideReview
+	return v == 1 && !result.composeSidecars && !ids.retries && !besideReview
 }
 
 // waveLaunch is one launch of a wave: its Activity ID and input.

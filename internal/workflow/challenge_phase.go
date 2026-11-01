@@ -252,7 +252,7 @@ func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	units := challengeUnits(rec)
 	var outcomes []challengeUnitOutcome
-	if launchesInParallel(ctx, ids, input, rec.WithReview) {
+	if launchesInParallel(ctx, ids, result, rec.WithReview) {
 		outcomes = runChallengeUnitsInWaves(ctx, ids, rctx, input, commit, units)
 	} else {
 		for _, u := range units {
