@@ -21,8 +21,17 @@
 #   3. start one test Temporal dev server for the whole run (see below)
 #   4. run every shard from its binary, concurrently with `go test -race`
 #      over every other package
-#   5. print each failed shard's (and the other packages') output in full;
-#      exit 1 if anything failed
+#   5. print what each failed shard (and the other packages) needs read: the
+#      output of every test that did not pass or skip, and every line outside
+#      a test; exit 1 if anything failed
+#   6. with CLAIMS_RAN_CHECK=1 (`make test` sets it), every job green, on a
+#      non-root Mac with the temporal CLI: fail unless every test an Enforced
+#      row of CLAIMS.md names passed in this run, not skipped and not left out
+#      (internal/claims, TestEnforcedClaimsPassedInThisRun)
+#
+# Every job prints `go test -json` events (the shards through go tool
+# test2json), so which tests passed is read from the events, never from text a
+# test's own subprocess prints; scripts/test-json.py turns them back into text.
 #
 # Every end-to-end ticket test runs through that one Temporal dev server,
 # exported as FACTORYD_TEST_TEMPORAL_ADDRESS. It is started by
@@ -50,10 +59,11 @@
 # heaviest-first to whichever shard has the least so far. A name in the file
 # that no longer exists is ignored.
 #
-# TEST_SHARDS_RECORD=1 runs the shards with -test.v and rewrites the timings
+# TEST_SHARDS_RECORD=1 rewrites the timings
 # file from what it measured, for the packages that ran as shards. Do that
 # when the per-shard times printed at the end drift well apart.
-# TEST_SHARDS_LOGS=<dir> keeps every job's output there.
+# TEST_SHARDS_LOGS=<dir> keeps every job's output there, as text (.log) and as
+# events (.json).
 #
 # Usage: scripts/test-sharded.sh <package>...   (the Makefile passes GO_PACKAGES)
 set -euo pipefail
@@ -225,12 +235,8 @@ while read -r dir count; do
 	sharded+=("$dir $count")
 done < "$tmp/plan.txt"
 
-# TEST_SHARDS_RECORD=1: verbose output, so each test's time can be read back.
+# TEST_SHARDS_RECORD=1: rewrite the timings file from this run's output.
 record="${TEST_SHARDS_RECORD:-0}"
-verbose_flag=()
-if [ "$record" = 1 ]; then
-	verbose_flag=(-test.v)
-fi
 
 # start_test_temporal launches the shared test Temporal server and exports
 # its address; it returns quietly (tests skip) when the temporal CLI is
@@ -261,17 +267,19 @@ start_test_temporal() {
 }
 start_test_temporal
 
-# run_timed <name> <cmd>...: runs cmd with its output in $tmp/<name>.log and
-# records "<exit status> <wall seconds>" in $tmp/<name>.result.
+# run_timed <name> <cmd>...: runs cmd, a test job printing `go test -json`
+# events, with its output in $tmp/<name>.json and as text in $tmp/<name>.log,
+# and records "<exit status> <wall seconds>" in $tmp/<name>.result.
 run_timed() {
 	local name="$1" start rc
 	shift
 	start="$(date +%s)"
 	set +e
-	"$@" 9>&- > "$tmp/$name.log" 2>&1
+	"$@" 9>&- > "$tmp/$name.json" 2>&1
 	rc=$?
 	set -e
 	echo "$rc $(($(date +%s) - start))" > "$tmp/$name.result"
+	python3 "$repo_root/scripts/test-json.py" text "$tmp/$name.json" > "$tmp/$name.log" || cp "$tmp/$name.json" "$tmp/$name.log"
 }
 
 # TEST_SHARDS_SEQUENTIAL=1 runs the shards and then the other packages one
@@ -309,12 +317,12 @@ for entry in ${sharded[@]+"${sharded[@]}"}; do
 	dir="${entry% *}"
 	name="$(basename "$dir")"
 	for shard in $(seq 1 "${entry#* }"); do
-		launch run_shard "$dir" "$name-shard-$shard" "$tmp/$name/$name.test" -test.paniconexit0 ${verbose_flag[@]+"${verbose_flag[@]}"} -test.timeout "$TIMEOUT" -test.run "$(cat "$tmp/$name/regex.$shard")"
+		launch run_shard "$dir" "$name-shard-$shard" go tool test2json -p "$MODULE/$dir" "$tmp/$name/$name.test" -test.v=test2json -test.paniconexit0 -test.timeout "$TIMEOUT" -test.run "$(cat "$tmp/$name/regex.$shard")"
 		names+=("$name-shard-$shard")
 	done
 done
 if [ "${#other_packages[@]}" -gt 0 ]; then
-	launch run_timed other-packages go test -race ${other_flags[@]+"${other_flags[@]}"} -timeout "$TIMEOUT" "${other_packages[@]}"
+	launch run_timed other-packages go test -race -json ${other_flags[@]+"${other_flags[@]}"} -timeout "$TIMEOUT" "${other_packages[@]}"
 	names+=(other-packages)
 fi
 # Only the test jobs: a bare `wait` would also wait for the test Temporal
@@ -330,19 +338,19 @@ for name in "${names[@]}"; do
 		echo "test-sharded: $name ok (${seconds}s)"
 	else
 		failed=1
-		echo "test-sharded: $name FAILED (exit $rc, ${seconds}s); full output:"
-		cat "$tmp/$name.log"
+		echo "test-sharded: $name FAILED (exit $rc, ${seconds}s); every test that did not pass or skip, and every line outside a test:"
+		python3 "$repo_root/scripts/test-json.py" failures "$tmp/$name.json"
 		echo "test-sharded: end of $name output"
 	fi
 done
 if [ -n "${TEST_SHARDS_LOGS:-}" ]; then
 	mkdir -p "$TEST_SHARDS_LOGS"
 	for name in "${names[@]}"; do
-		cp "$tmp/$name.log" "$TEST_SHARDS_LOGS/"
+		cp "$tmp/$name.log" "$tmp/$name.json" "$TEST_SHARDS_LOGS/"
 	done
 fi
 
-# record_timings rewrites the timings file from the verbose shard logs: the
+# record_timings rewrites the timings file from the shard logs: the
 # lines of every package that ran as shards (another package keeps the lines
 # it had), counting only the tests the binary lists: a fixture's own go test
 # prints result lines too. A test that paused for t.Parallel shared its shard with the others
@@ -383,5 +391,39 @@ record_timings() {
 }
 if [ "$record" = 1 ] && [ "$failed" -eq 0 ]; then
 	record_timings
+fi
+
+# check_claims_ran fails the run unless every test an Enforced row of
+# CLAIMS.md names passed in it. Only a whole run can say that, so `make test`
+# asks for it (CLAIMS_RAN_CHECK=1) and a run over some packages does not.
+# Some tests skip for the machine, not for a missing live environment: with
+# no temporal CLI, on Linux (plutil), as root (permission tests). The check is
+# made where every Enforced test can run, a non-root Mac with the temporal
+# CLI, and anywhere else says why it was not made instead of failing.
+check_claims_ran() {
+	local why=""
+	if [ -z "${FACTORYD_TEST_TEMPORAL_ADDRESS:-}" ]; then
+		why="with no temporal CLI the Temporal-backed tests skipped"
+	elif [ "$(uname -s)" != Darwin ]; then
+		why="macOS-only tests skip on $(uname -s)"
+	elif [ "$(id -u)" = 0 ]; then
+		why="permission tests skip as root"
+	fi
+	if [ -n "$why" ]; then
+		echo "test-sharded: claims check not run: $why"
+		return 0
+	fi
+	local passed="$tmp/passed.txt"
+	python3 "$repo_root/scripts/test-json.py" passed "$tmp"/*.json > "$passed"
+	if CLAIMS_PASSED_TESTS="$passed" go test -count=1 -run '^TestEnforcedClaimsPassedInThisRun$' ./internal/claims 9>&- > "$tmp/claims-ran.log" 2>&1; then
+		echo "test-sharded: claims check ok: every test an Enforced claim names passed in this run"
+		return 0
+	fi
+	echo "test-sharded: claims check FAILED:"
+	cat "$tmp/claims-ran.log"
+	return 1
+}
+if [ "${CLAIMS_RAN_CHECK:-0}" = 1 ] && [ "$failed" -eq 0 ]; then
+	check_claims_ran || failed=1
 fi
 exit "$failed"

@@ -44,7 +44,10 @@ This repo enforces its own safety properties on itself. Two files are
 section headers, exact `SC-NNN —` invariant lines, exact `` `draft ->
 product_policy_check` `` -style transition bullets in the first, every
 backtick-wrapped `` `TestXxx` `` name resolving to a real Go test in the
-second). If you edit either doc, keep those exact tokens intact — add
+second, every row's status one of Enforced/Partial/Pending, one Invariants
+row per `SC-NNN`). `make test` then fails unless every test an Enforced row
+names passed in that run: a live-only or skipped test belongs in a Partial
+row. If you edit either doc, keep those exact tokens intact — add
 prose or diagrams around them, don't reformat the checked lines/rows
 themselves. Same story for `containment-matrix.md`
 (`internal/claims/containment_matrix_test.go` requires exact
