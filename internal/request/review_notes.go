@@ -7,11 +7,13 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"buildgate/internal/policy"
+	"buildgate/internal/projectconfig"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/ticketspec"
 )
@@ -196,6 +198,14 @@ func SpecReviewNotes(specContent string) []string {
 //     the plan was drafted under (Request.PlanBudgetLines). Nothing when the
 //     budget is 0 or the ticket declares no estimate. Numbers and the
 //     ticket's file name only.
+//   - "ticket T changes F; ticket E adds or changes tests under D (...)
+//     that ticket T does not list": T lists a file that is not a test
+//     file, E is an earlier ticket of the plan, and E lists test files
+//     under that file's directory (not the repository root) or its
+//     subdirectories that T does not list. Those tests may break on T's
+//     change, and T cannot edit them. Only Allowed-Files headers and the
+//     repository's test patterns (.factory.yml test_patterns, else
+//     policy.DefaultTestPatterns) are read, never a ticket's prose.
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
@@ -229,6 +239,9 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 	if idNotes {
 		notes = append(notes, noTestNotes(criteria, tickets)...)
 	}
+	// Last, so that a plan with many tickets in one directory cannot push
+	// a criterion's note out of the cap.
+	notes = append(notes, earlierTestsNotes(tickets, workspaceTestPatterns(workspace))...)
 	return capReviewNotes(notes)
 }
 
@@ -245,6 +258,87 @@ func overBudgetNotes(tickets []PlanTicket, budgetLines int) []string {
 		}
 	}
 	return notes
+}
+
+// workspaceTestPatterns returns the test_patterns of the workspace's
+// .factory.yml, or nil (the defaults) when there is none to read.
+func workspaceTestPatterns(workspace string) []string {
+	if workspace == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(workspace, projectconfig.FileName)); err != nil {
+		return nil // no file to read: skips the git calls Load makes.
+	}
+	cfg, _, err := projectconfig.Load(workspace)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return cfg.TestPatterns
+}
+
+// maxNamedTests is how many test files an earlier-tests note names.
+const maxNamedTests = 3
+
+// earlierTestsNotes returns, for each ticket N and each earlier ticket M, one
+// note when N lists a file that is not a test, in a directory other than the
+// repository root, under which M lists test files that N does not: N's
+// change can break them and N cannot edit them. It reads Allowed-Files and
+// patterns (test_patterns; none means policy.DefaultTestPatterns), never
+// prose. A directory entry of either ticket is not a file and is skipped.
+func earlierTestsNotes(tickets []PlanTicket, patterns []string) []string {
+	if len(patterns) == 0 {
+		patterns = policy.DefaultTestPatterns
+	}
+	var notes []string
+	for n, later := range tickets {
+		var changed []string
+		for _, f := range later.Allowed {
+			if !strings.HasSuffix(f, "/") && !policy.IsTestFile(f, patterns) {
+				changed = append(changed, f)
+			}
+		}
+		sort.Strings(changed)
+		for _, earlier := range tickets[:n] {
+			if note := earlierTestsNote(later, earlier, changed, patterns); note != "" {
+				notes = append(notes, note)
+			}
+		}
+	}
+	return notes
+}
+
+// earlierTestsNote is the note on later against earlier, whose changed
+// files are the sorted non-test files later lists; "" when there is none.
+func earlierTestsNote(later, earlier PlanTicket, changed, patterns []string) string {
+	for _, f := range changed {
+		dir := path.Dir(f)
+		if dir == "." || dir == "/" {
+			continue
+		}
+		var missing []string
+		for _, t := range earlier.Allowed {
+			if strings.HasSuffix(t, "/") || !policy.IsTestFile(t, patterns) || !strings.HasPrefix(t, dir+"/") {
+				continue
+			}
+			if !policy.PathCoveredByAllowed(t, later.Allowed) {
+				missing = append(missing, t)
+			}
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		sort.Strings(missing)
+		named := make([]string, 0, maxNamedTests+1)
+		for _, t := range missing[:min(len(missing), maxNamedTests)] {
+			named = append(named, noteName(t))
+		}
+		if more := len(missing) - len(named); more > 0 {
+			named = append(named, fmt.Sprintf("and %d more", more))
+		}
+		return fmt.Sprintf("Ticket %s changes %s; ticket %s adds or changes tests under %s (%s) that ticket %s does not list.",
+			noteName(later.Name), noteName(f), noteName(earlier.Name), noteName(dir), strings.Join(named, ", "), noteName(later.Name))
+	}
+	return ""
 }
 
 // capReviewNotes returns notes without repeats, the first maxReviewNotes

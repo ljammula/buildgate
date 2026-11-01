@@ -1,0 +1,5 @@
+{
+ "verify_command": "make verify",
+ "project": "board-app",
+ "tickets": 7
+}

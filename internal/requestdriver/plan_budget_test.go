@@ -101,3 +101,22 @@ func TestAMalformedEstimateIsRefusedAtPlanTime(t *testing.T) {
 		})
 	}
 }
+
+// TestBoardAppPlanReviewNotesATicketThatChangesCodeAnEarlierTicketsTestsCover
+// is the 2026-10-31 incident: ticket 005 may change frontend/src/App.tsx but
+// not ticket 004's frontend/src/auth/AuthScreen.test.tsx, which renders App.
+// The plan still reaches plan_review, with the note.
+func TestBoardAppPlanReviewNotesATicketThatChangesCodeAnEarlierTicketsTestsCover(t *testing.T) {
+	c := loadPlanCase(t, filepath.Join(planCorpusDir, "board-app-frontend-20261031"), "board-app-frontend-20261031")
+	loaded := planUnderBudget(t, c, 0)
+	if loaded.State != request.StatePlanReview {
+		t.Fatalf("state = %s (error %q), want plan_review", loaded.State, loaded.Error)
+	}
+	const want = "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md adds or changes tests under frontend/src (frontend/src/auth/AuthContext.test.tsx, frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
+	for _, note := range loaded.ReviewNotes {
+		if note == want {
+			return
+		}
+	}
+	t.Errorf("review notes = %q, want one equal to %q", loaded.ReviewNotes, want)
+}

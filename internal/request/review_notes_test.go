@@ -330,3 +330,65 @@ func TestPlanReviewNotesNameATicketOverTheBudget(t *testing.T) {
 		t.Errorf("no budget: notes = %q, want none", got)
 	}
 }
+
+// TestPlanReviewNotesSayWhenALaterTicketChangesCodeAnEarlierTicketsTestsCover
+// is the board-app incident: ticket 5 changed App.tsx, which the strict
+// AuthScreen test of ticket 4 renders, and could not edit that test.
+func TestPlanReviewNotesSayWhenALaterTicketChangesCodeAnEarlierTicketsTestsCover(t *testing.T) {
+	const (
+		app  = "frontend/src/App.tsx"
+		auth = "frontend/src/auth/AuthScreen.test.tsx"
+	)
+	earlier := notesTicket("004.spec.md", []string{"frontend/src/auth/AuthScreen.tsx", auth, app}, 1)
+	notes := func(tickets ...PlanTicket) string {
+		return strings.Join(PlanReviewNotes([]string{"1. Something."}, tickets, "", 0), "\n")
+	}
+	incident := "Ticket 005.spec.md changes frontend/src/App.tsx; ticket 004.spec.md adds or changes tests under frontend/src (frontend/src/auth/AuthScreen.test.tsx) that ticket 005.spec.md does not list."
+	cases := []struct {
+		name    string
+		tickets []PlanTicket
+		want    string
+	}{
+		{"incident", []PlanTicket{earlier, notesTicket("005.spec.md", []string{app, "frontend/src/live.tsx"}, 1)}, incident},
+		{"later ticket lists the test", []PlanTicket{earlier, notesTicket("005.spec.md", []string{app, auth}, 1)}, ""},
+		{"test outside the subtree", []PlanTicket{earlier, notesTicket("005.spec.md", []string{"backend/main.go"}, 1)}, ""},
+		{"root-level changed file", []PlanTicket{
+			notesTicket("004.spec.md", []string{"index.html", "web/index.test.ts"}, 1),
+			notesTicket("005.spec.md", []string{"index.html"}, 1)}, ""},
+		{"test of a later ticket", []PlanTicket{notesTicket("005.spec.md", []string{app}, 1), earlier}, ""},
+		{"a ticket's own tests", []PlanTicket{notesTicket("004.spec.md", []string{app, auth}, 1)}, ""},
+	}
+	for _, tc := range cases {
+		if got := notes(tc.tickets...); got != tc.want {
+			t.Errorf("%s:\n got  %q\n want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestPlanReviewNotesNameAtMostThreeTestsOfAnEarlierTicket: the note names
+// the first three tests, sorted, and counts the rest.
+func TestPlanReviewNotesNameAtMostThreeTestsOfAnEarlierTicket(t *testing.T) {
+	earlier := notesTicket("001.spec.md", []string{"src/e.test.ts", "src/d.test.ts", "src/c.test.ts", "src/b.test.ts", "src/a.test.ts"}, 1)
+	later := notesTicket("002.spec.md", []string{"src/z.ts", "src/m.ts"}, 1)
+	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, "", 0)
+	want := []string{"Ticket 002.spec.md changes src/m.ts; ticket 001.spec.md adds or changes tests under src (src/a.test.ts, src/b.test.ts, src/c.test.ts, and 2 more) that ticket 002.spec.md does not list."}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestPlanReviewNotesReadTheRepositorysTestPatterns: a file is a test by the
+// workspace's .factory.yml test_patterns, not only by the defaults.
+func TestPlanReviewNotesReadTheRepositorysTestPatterns(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: make test\ntest_patterns:\n  - \"*.check.ts\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	earlier := notesTicket("001.spec.md", []string{"src/a.check.ts", "src/b.test.ts"}, 1)
+	later := notesTicket("002.spec.md", []string{"src/z.ts"}, 1)
+	got := PlanReviewNotes([]string{"1. Something."}, []PlanTicket{earlier, later}, workspace, 0)
+	want := "Ticket 002.spec.md changes src/z.ts; ticket 001.spec.md adds or changes tests under src (src/a.check.ts) that ticket 002.spec.md does not list."
+	if strings.Join(got, "\n") != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
