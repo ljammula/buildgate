@@ -45,6 +45,18 @@ func (r ReproductionRunResult) withTests(id string) ReproductionRunResult {
 
 func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, results map[string]ReproductionRunResult, version bool) *testsRedPhase {
 	t.Helper()
+	return runTestsRedPhaseWith(t, input, held, verifyExit, version, false, func(_ context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
+		res := results[in.Pass]
+		res.Run.Pass, res.Run.Commit = in.Pass, in.Commit
+		return res, nil
+	})
+}
+
+// runTestsRedPhaseWith is runTestsRedPhase with the launch Activity's body
+// given, run outside the recorder's lock so launches can overlap, and serial,
+// a history recorded before parallelReproductionLaunchesChange.
+func runTestsRedPhaseWith(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, version, serial bool, launch func(context.Context, ReproductionRunInput) (ReproductionRunResult, error)) *testsRedPhase {
+	t.Helper()
 	p := &testsRedPhase{}
 	env := newWorkflowEnvironment(t,
 		func(context.Context, RunWorkflowInput) (BuildActivityResult, error) {
@@ -60,6 +72,9 @@ func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldRes
 	if !version {
 		env.OnGetVersion(testsRedOnBaseChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
+	if serial {
+		env.OnGetVersion(parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
 	env.RegisterActivityWithOptions(func(context.Context, CollectEvidenceInput) (CollectedEvidence, error) {
 		return CollectedEvidence{ResultSHA: "result-sha", ChangedFiles: []string{"pkg/a.go", "pkg/a_test.go"}}, nil
 	}, activity.RegisterOptions{Name: CollectEvidenceActivityName})
@@ -72,12 +87,10 @@ func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldRes
 	}, activity.RegisterOptions{Name: HoldChangedTestsActivityName})
 	env.RegisterActivityWithOptions(func(ctx context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
 		p.mu.Lock()
-		defer p.mu.Unlock()
 		p.calls = append(p.calls, activity.GetInfo(ctx).ActivityID)
 		p.launches = append(p.launches, in)
-		res := results[in.Pass]
-		res.Run.Pass, res.Run.Commit = in.Pass, in.Commit
-		return res, nil
+		p.mu.Unlock()
+		return launch(ctx, in)
 	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.ExecuteWorkflow(RunWorkflow, input)
 	p.err = env.GetWorkflowError()

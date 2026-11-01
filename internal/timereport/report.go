@@ -52,6 +52,13 @@ type Wait struct {
 type StageTime struct {
 	Stage   string  `json:"stage"`
 	Seconds float64 `json:"seconds"`
+	// Launches counts the reproduction launches of the stage (a start with a
+	// detail: the held-file launches of challenge and tests_red_on_base, not the
+	// challenger job); WallSeconds is the stage's first start to its last end,
+	// which is less than Seconds when launches overlapped. Both are 0 for a
+	// stage with no launch.
+	Launches    int     `json:"launches,omitempty"`
+	WallSeconds float64 `json:"wall_seconds,omitempty"`
 	// Parallel marks a stage that ran at the same time as another (review and
 	// challenge do): stage minutes then sum to more than the run's wall time.
 	Parallel bool `json:"parallel,omitempty"`
@@ -228,10 +235,7 @@ func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 	}
 	rt.Start, rt.End = events[0].Ts, events[len(events)-1].Ts
 	rt.Seconds = max(rt.end.Sub(rt.start), 0).Seconds()
-	opened := map[string]time.Time{}
-	var order []string
-	sums := map[string]float64{}
-	spans := map[string][]interval{}
+	st := newStageTracker()
 	var lock *Wait
 	for _, e := range events {
 		if e.Source != "factory" {
@@ -253,16 +257,9 @@ func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 			}
 		case e.Stage == "finished" || at.IsZero():
 		case e.Event == "start":
-			opened[e.Stage] = at
+			st.start(e.Stage, e.Detail, at)
 		case e.Event == "end":
-			if from, ok := opened[e.Stage]; ok {
-				if !slices.Contains(order, e.Stage) {
-					order = append(order, e.Stage)
-				}
-				sums[e.Stage] += max(at.Sub(from).Seconds(), 0)
-				spans[e.Stage] = append(spans[e.Stage], interval{from, at})
-				delete(opened, e.Stage)
-			}
+			st.end(e.Stage, e.Detail, at)
 		}
 	}
 	if lock != nil && !ended {
@@ -274,12 +271,64 @@ func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 			all = append(all, interval{w.start, w.end})
 		}
 	}
-	for _, name := range order {
-		st := StageTime{Stage: name, Seconds: sums[name], Parallel: overlapsOther(name, spans)}
-		rt.Stages = append(rt.Stages, st)
-		all = append(all, spans[name]...)
+	for _, name := range st.order {
+		rt.Stages = append(rt.Stages, st.stageTime(name))
+		all = append(all, st.spans[name]...)
 	}
 	rt.Other = max(rt.Seconds-unionSeconds(all), 0)
+}
+
+// stageTracker pairs a feed's stage starts with their ends.
+type stageTracker struct {
+	opened   map[string]time.Time
+	latest   map[string]string
+	order    []string
+	sums     map[string]float64
+	spans    map[string][]interval
+	launches map[string][]interval
+}
+
+func newStageTracker() *stageTracker {
+	return &stageTracker{opened: map[string]time.Time{}, latest: map[string]string{}, sums: map[string]float64{}, spans: map[string][]interval{}, launches: map[string][]interval{}}
+}
+
+// start opens a stage. Launches of one stage may overlap, so a start is keyed
+// by its detail (the case and pass) as well as its stage.
+func (t *stageTracker) start(stage, detail string, at time.Time) {
+	key := stage + "\x00" + detail
+	t.opened[key], t.latest[stage] = at, key
+}
+
+// end closes the start with the same detail; an end that names no open start
+// closes the stage's latest one.
+func (t *stageTracker) end(stage, detail string, at time.Time) {
+	key := stage + "\x00" + detail
+	if _, ok := t.opened[key]; !ok {
+		key = t.latest[stage]
+	}
+	from, ok := t.opened[key]
+	if !ok {
+		return
+	}
+	if !slices.Contains(t.order, stage) {
+		t.order = append(t.order, stage)
+	}
+	t.sums[stage] += max(at.Sub(from).Seconds(), 0)
+	t.spans[stage] = append(t.spans[stage], interval{from, at})
+	if !strings.HasSuffix(key, "\x00") {
+		t.launches[stage] = append(t.launches[stage], interval{from, at})
+	}
+	delete(t.opened, key)
+}
+
+// stageTime is the stage's summed time, its launches and whether it ran at the
+// same time as another stage.
+func (t *stageTracker) stageTime(name string) StageTime {
+	st := StageTime{Stage: name, Seconds: t.sums[name], Parallel: overlapsOther(name, t.spans)}
+	if l := t.launches[name]; len(l) > 0 {
+		st.Launches, st.WallSeconds = len(l), wallSeconds(l)
+	}
+	return st
 }
 
 // isRunLockStage reports whether stage brackets an in-run wait for the
@@ -357,6 +406,20 @@ func criticalPath(req *request.Request, rep *Report) CriticalPath {
 	cp.SpanSeconds = last.Sub(start).Seconds()
 	cp.IdleSeconds = max(cp.SpanSeconds-unionSeconds(spans), 0)
 	return cp
+}
+
+// wallSeconds is the time from the earliest start to the latest end.
+func wallSeconds(spans []interval) float64 {
+	first, last := spans[0].from, spans[0].to
+	for _, s := range spans[1:] {
+		if s.from.Before(first) {
+			first = s.from
+		}
+		if s.to.After(last) {
+			last = s.to
+		}
+	}
+	return max(last.Sub(first).Seconds(), 0)
 }
 
 // unionSeconds is the total length of the intervals' union.

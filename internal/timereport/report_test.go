@@ -301,3 +301,39 @@ func TestBranchLockWaitCountsAsAnInRunLockWaitOfItsOwnKind(t *testing.T) {
 		t.Errorf("lock waits = %+v (total %v), want a 60 s branch_lock then a 30 s repository_lock", rt.LockWaits, rt.LockSeconds)
 	}
 }
+
+// Launches that overlap are paired by their detail: the stage's summed time
+// counts each, its wall time runs from the first start to the last end.
+func TestOverlappingLaunchesAreSummedAndTheirWallTimeIsShorter(t *testing.T) {
+	at := func(sec int) string { return time.Date(2026, 11, 1, 10, 0, sec, 0, time.UTC).Format(time.RFC3339Nano) }
+	ev := func(sec int, stage, event, detail string) progress.Event {
+		return progress.Event{Ts: at(sec), Source: "factory", Stage: stage, Event: event, Detail: detail}
+	}
+	events := []progress.Event{
+		ev(0, "build", "start", ""), ev(10, "build", "end", ""),
+		ev(10, "tests_red_on_base", "start", "case 0 result"),
+		ev(10, "tests_red_on_base", "start", "case 1 result"),
+		ev(10, "tests_red_on_base", "start", "case 2 result"),
+		ev(40, "tests_red_on_base", "end", "case 1 result"),
+		ev(50, "tests_red_on_base", "end", "case 0 result"),
+		ev(60, "tests_red_on_base", "end", "case 2 result"),
+		ev(60, "challenge", "start", ""), ev(70, "challenge", "end", ""),
+		ev(70, "challenge", "start", "case 0 challenge1"), ev(75, "challenge", "end", "case 0 challenge1"),
+		ev(80, "finished", "end", ""),
+	}
+	var rt RunTime
+	fillFromFeed(&rt, events, true)
+	got := map[string]StageTime{}
+	for _, s := range rt.Stages {
+		got[s.Stage] = s
+	}
+	if s := got["tests_red_on_base"]; s.Seconds != 30+40+50 || s.Launches != 3 || s.WallSeconds != 50 {
+		t.Errorf("tests_red_on_base = %+v, want 120 s summed, 3 launches, 50 s wall", s)
+	}
+	if s := got["challenge"]; s.Seconds != 10+5 || s.Launches != 1 || s.WallSeconds != 5 {
+		t.Errorf("challenge = %+v, want 15 s summed, 1 launch (the job is not one), 5 s wall", s)
+	}
+	if s := got["build"]; s.Launches != 0 || s.Seconds != 10 {
+		t.Errorf("build = %+v, want 10 s and no launches", s)
+	}
+}

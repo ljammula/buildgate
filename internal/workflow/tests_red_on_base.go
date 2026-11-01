@@ -82,8 +82,27 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 	}
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	proof := &run.TestsRedOnBase{SkippedFiles: held.Skipped}
+	launch := launchTestsRedSerially
+	if launchesInParallel(ctx, input) {
+		launch = launchTestsRedInWaves
+	}
+	files, runs, err := launch(ctx, ids, rctx, input, result, held.Held, base, worktreePath, branch)
+	if err != nil {
+		return testsRedOutcome{}, err
+	}
+	proof.Files = files
+	d := reproduction.DecideRedOnBase(runs)
+	proof.Verdict, proof.Reason = d.Verdict, d.Reason
+	return testsRedOutcome{proof: proof}, nil
+}
+
+// launchTestsRedSerially is the launch order of a history recorded before
+// parallelReproductionLaunchesChange: per held file, the result launch and,
+// unless it failed, the base launch, one launch at a time.
+func launchTestsRedSerially(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, held []run.HeldReproduction, base, worktreePath, branch string) ([]run.TestsRedFile, []reproduction.FileRuns, error) {
+	var files []run.TestsRedFile
 	var runs []reproduction.FileRuns
-	for _, h := range held.Held {
+	for _, h := range held {
 		file := run.TestsRedFile{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs}
 		fr := reproduction.FileRuns{IDs: h.TestIDs}
 		launch := func(pass, commit string) (*reproduction.RunResult, error) {
@@ -96,17 +115,70 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 		}
 		var err error
 		if fr.Result, err = launch(run.TestsRedPassResult, result.ResultSHA); err != nil {
-			return testsRedOutcome{}, err
+			return nil, nil, err
 		}
 		if fr.Result.Outcome != reproduction.OutcomeFailed {
 			if fr.Base, err = launch(run.TestsRedPassBase, base); err != nil {
-				return testsRedOutcome{}, err
+				return nil, nil, err
 			}
 		}
-		proof.Files = append(proof.Files, file)
+		files = append(files, file)
 		runs = append(runs, fr)
 	}
-	d := reproduction.DecideRedOnBase(runs)
-	proof.Verdict, proof.Reason = d.Verdict, d.Reason
-	return testsRedOutcome{proof: proof}, nil
+	return files, runs, nil
+}
+
+// launchTestsRedInWaves runs the same launches in two waves: every held
+// file's result launch at once, then, at once, the base launch of each file
+// whose result did not fail. Each launch is its own Activity and verdict; the
+// files, runs and attempts are recorded in the serial order (file order,
+// result before base).
+func launchTestsRedInWaves(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, result *RunWorkflowResult, held []run.HeldReproduction, base, worktreePath, branch string) ([]run.TestsRedFile, []reproduction.FileRuns, error) {
+	wave := func(pass, commit string, which []int) []waveOutcome {
+		launches := make([]waveLaunch, len(which))
+		for k, i := range which {
+			launches[k] = waveLaunch{id: fmt.Sprintf("tests-red-%d-%s", held[i].Finding, pass), in: ReproductionRunInput{RunWorkflowInput: input, Held: held[i], Pass: pass, Commit: commit, AttemptKind: testsRedAttemptKind}}
+		}
+		return runReproductionWave(ctx, ids, rctx, launches)
+	}
+	all := make([]int, len(held))
+	for i := range held {
+		all[i] = i
+	}
+	results := wave(run.TestsRedPassResult, result.ResultSHA, all)
+	if err := failWave(result, results, worktreePath, branch); err != nil {
+		return nil, nil, err
+	}
+	var needBase []int
+	for i, o := range results {
+		if reproduction.Outcome(o.res.Run.Outcome) != reproduction.OutcomeFailed {
+			needBase = append(needBase, i)
+		}
+	}
+	bases := wave(run.TestsRedPassBase, base, needBase)
+	if waveFailed(bases) {
+		appendWaveAttempts(result, results)
+		return nil, nil, failWave(result, bases, worktreePath, branch)
+	}
+	baseOf := map[int]ReproductionRunResult{}
+	for k, i := range needBase {
+		baseOf[i] = bases[k].res
+	}
+	var files []run.TestsRedFile
+	var runs []reproduction.FileRuns
+	for i, h := range held {
+		file := run.TestsRedFile{Path: h.Path, SHA256: h.SHA256, Runner: h.Runner, TestIDs: h.TestIDs}
+		fr := reproduction.FileRuns{IDs: h.TestIDs}
+		file.Runs = append(file.Runs, results[i].res.Run)
+		result.Attempts = append(result.Attempts, results[i].res.Attempts...)
+		fr.Result = runResultOf(results[i].res.Run)
+		if b, ok := baseOf[i]; ok {
+			file.Runs = append(file.Runs, b.Run)
+			result.Attempts = append(result.Attempts, b.Attempts...)
+			fr.Base = runResultOf(b.Run)
+		}
+		files = append(files, file)
+		runs = append(runs, fr)
+	}
+	return files, runs, nil
 }

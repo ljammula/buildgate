@@ -75,6 +75,10 @@ type challengeFixture struct {
 	verifyErr      error // the verify Activity's error once the files are committed
 	undoErr        error
 	noVerifyChange bool
+	// serialLaunches replays a history recorded before
+	// parallelReproductionLaunchesChange; launchErr fails a launch.
+	serialLaunches bool
+	launchErr      func(ReproductionRunInput) error
 }
 
 func (f *challengeFixture) record(name string) {
@@ -119,6 +123,9 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 	if fx.noVerifyChange {
 		env.OnGetVersion(verifyChallengeCommitChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
+	if fx.serialLaunches {
+		env.OnGetVersion(parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
 	if fx.legacy {
 		env.OnGetVersion(challengeWithReviewByMemoryChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
 	}
@@ -154,6 +161,11 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 		mu.Lock()
 		out.launches = append(out.launches, activity.GetInfo(ctx).ActivityID)
 		mu.Unlock()
+		if fx.launchErr != nil {
+			if err := fx.launchErr(in); err != nil {
+				return ReproductionRunResult{}, err
+			}
+		}
 		return launch(in), nil
 	}, activity.RegisterOptions{Name: RunHeldTestActivityName})
 	env.RegisterActivityWithOptions(func(_ context.Context, in CommitChallengeInput) (CommitChallengeResult, error) {
