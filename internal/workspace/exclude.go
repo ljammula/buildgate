@@ -216,6 +216,39 @@ func dropExcludeBlock(cur, token string) string {
 	return strings.Join(out, "")
 }
 
+// DropAllRunBlocks removes every run block (ExcludeForRun's) from dir's
+// info/exclude. Only a holder of the repository lock exclusively may call it:
+// run blocks are written only by exclusive challenge rounds, so none is live
+// then and any left is a crashed run's. Every other line stays byte for byte,
+// and an unterminated block (a torn file) is kept as it was.
+func DropAllRunBlocks(dir string) error {
+	path, err := infoExcludePath(dir)
+	if err != nil {
+		return err
+	}
+	return rewriteExclude(dir, path, dropAllExcludeBlocks)
+}
+
+func dropAllExcludeBlocks(cur string) string {
+	var out []string
+	in := false
+	for _, l := range strings.SplitAfter(cur, "\n") {
+		trimmed := strings.TrimRight(l, "\n")
+		switch {
+		case !in && strings.HasPrefix(trimmed, excludeBlockBegin):
+			in = true
+		case in && strings.HasPrefix(trimmed, excludeBlockEnd):
+			in = false
+		case !in:
+			out = append(out, l)
+		}
+	}
+	if in {
+		return cur
+	}
+	return strings.Join(out, "")
+}
+
 // rewriteExclude replaces the file at path by change(its text) under the git
 // metadata lock, through a rename so a reader never sees half a file. A
 // result with no text removes the file, as no file and an empty one read the same.

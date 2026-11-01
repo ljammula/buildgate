@@ -2,6 +2,7 @@ package request
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -107,6 +108,10 @@ func WaitFor(r *Request, f WaitFacts) *Wait {
 	return nil
 }
 
+// BranchWaitPrefix begins the detail of a branch_lock wait ("branch <name>"):
+// a round waits for its branch, not for the repository.
+const BranchWaitPrefix = "branch "
+
 // WaitKindForStage maps a progress stage a wait is recorded under to its kind.
 func WaitKindForStage(stage string) (WaitKind, bool) {
 	switch stage {
@@ -116,7 +121,7 @@ func WaitKindForStage(stage string) (WaitKind, bool) {
 		return WaitComposeSlot, true
 	case "queued":
 		return WaitRepositoryQueue, true
-	case "repository_lock":
+	case "repository_lock", "branch_lock":
 		return WaitRepository, true
 	}
 	return "", false
@@ -146,6 +151,9 @@ func (w Wait) Sentence(now time.Time) string {
 		text = "waiting in the repository queue" + onSuffix(w.On)
 	case WaitRepository:
 		text = "waiting for the repository (another build holds it)"
+		if strings.HasPrefix(w.On, BranchWaitPrefix) {
+			text = "waiting for " + w.On + " (another round on it is running)"
+		}
 	case WaitJobSlot:
 		if w.Slots <= 1 {
 			return "queued behind " + w.On

@@ -97,6 +97,10 @@ Two factory `note` lines exist:
   `compose_services_concurrency`), and `acquired` whenever it takes the
   slot, waited or not; written by `cmd/factoryd/run_ticket.go` before the
   run starts, and by the daemon when it reclaims a crashed run.
+- `branch_lock` — event `waiting` (`detail` = `branch <name>`) while an
+  `-on-branch` run waits for another round on the same branch, and
+  `acquired` once it holds the branch; written before `repository_lock`.
+  Readers treat it as a lock stage and as a repository wait.
 - `repository_lock` — event `waiting` (`detail` = `another build holds the
   repository`) while a run waits for the repository lock, and `acquired`
   once it holds it; written by `cmd/factoryd/repo_lock_wait.go` when a

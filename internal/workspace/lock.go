@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -26,7 +28,11 @@ var ErrBusy = errors.New("repository is busy")
 // execution in the repository: it may mutate the shared checkout and run the
 // stranded-worktree reconcile. Shared holders are isolated runs, each mutating
 // only its own worktree and branch, so any number of them coexist; an
-// exclusive attempt waits for all of them to finish.
+// exclusive attempt waits for all of them to finish. A waiting exclusive
+// acquirer holds a turnstile flock beside the lock, and every shared acquirer
+// passes through it before taking its hold, so a stream of overlapping shared
+// holders cannot starve the exclusive waiter: it takes precedence over shared
+// holders that start after it began waiting.
 type DirectLock struct {
 	file      *os.File
 	exclusive bool
@@ -111,18 +117,90 @@ func acquireDirectLock(ctx context.Context, repoDir string, wait bool, how int) 
 	if err != nil {
 		return nil, err
 	}
-	file, err := flockFile(ctx, filepath.Join(commonDir, "factoryd-direct.lock"), how, wait, "direct-run lock")
-	if err != nil {
-		if errors.Is(err, errLockHeld) {
-			return nil, fmt.Errorf("%w: %s", ErrBusy, repoDir)
+	path := filepath.Join(commonDir, "factoryd-direct.lock")
+	turnstile := filepath.Join(commonDir, "factoryd-direct.turnstile.lock")
+	switch {
+	case how == syscall.LOCK_SH:
+		// Wait behind an exclusive acquirer that is already waiting, so
+		// overlapping shared holders cannot starve it.
+		gate, err := flockFile(ctx, turnstile, syscall.LOCK_SH, wait, "direct-run turnstile")
+		if err != nil {
+			return nil, busyError(err, repoDir)
 		}
-		return nil, err
+		_ = gate.Close()
+	case wait:
+		// A waiting exclusive acquirer holds the turnstile until it has the
+		// lock or gives up, which stops new shared holders from queuing ahead.
+		gate, err := flockFile(ctx, turnstile, syscall.LOCK_EX, true, "direct-run turnstile")
+		if err != nil {
+			return nil, err
+		}
+		defer gate.Close()
+	}
+	file, err := flockFile(ctx, path, how, wait, "direct-run lock")
+	if err != nil {
+		return nil, busyError(err, repoDir)
 	}
 	return &DirectLock{file: file, exclusive: how == syscall.LOCK_EX}, nil
 }
 
-// errLockHeld is flockFile's non-waiting "someone else holds it" outcome.
+// busyError turns flockFile's non-waiting "held" outcome into ErrBusy.
+func busyError(err error, repoDir string) error {
+	if errors.Is(err, errLockHeld) {
+		return fmt.Errorf("%w: %s", ErrBusy, repoDir)
+	}
+	return err
+}
+
+// errLockHeld is flockFile's "someone else holds it" outcome without waiting.
 var errLockHeld = errors.New("lock is held")
+
+// branchLockPath is the lock file of branch in commonDir: named by a hash of
+// the full ref name, so no branch name can escape the directory or collide
+// with another's.
+func branchLockPath(commonDir, branch string) string {
+	sum := sha256.Sum256([]byte("refs/heads/" + strings.TrimPrefix(branch, "refs/heads/")))
+	return filepath.Join(commonDir, "factoryd-branch-"+hex.EncodeToString(sum[:])[:16]+".lock")
+}
+
+// AcquireBranchLock takes the exclusive lock of one branch of repoDir's
+// repository without waiting. An on-branch run holds it for its whole run, so
+// two rounds on one branch never overlap while rounds on other branches do
+// (they hold the repository lock shared). It fails with ErrBusy while another
+// process holds it. Always take it before the repository lock.
+func AcquireBranchLock(repoDir, branch string) (*DirectLock, error) {
+	return acquireBranchLock(context.Background(), repoDir, branch, false)
+}
+
+// AcquireBranchLockContext is AcquireBranchLock that waits, polling, until the
+// holder releases or ctx ends.
+func AcquireBranchLockContext(ctx context.Context, repoDir, branch string) (*DirectLock, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return acquireBranchLock(ctx, repoDir, branch, true)
+}
+
+func acquireBranchLock(ctx context.Context, repoDir, branch string, wait bool) (*DirectLock, error) {
+	if branch == "" {
+		return nil, errors.New("branch lock needs a branch name")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	commonDir, err := GitCommonDir(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	file, err := flockFile(ctx, branchLockPath(commonDir, branch), syscall.LOCK_EX, wait, "branch lock")
+	if err != nil {
+		if errors.Is(err, errLockHeld) {
+			return nil, fmt.Errorf("%w: branch %s of %s", ErrBusy, branch, repoDir)
+		}
+		return nil, err
+	}
+	return &DirectLock{file: file, exclusive: false}, nil
+}
 
 // flockFile opens path (creating it) and takes a flock of mode how
 // (LOCK_SH or LOCK_EX) on it. Without wait it fails at once with errLockHeld

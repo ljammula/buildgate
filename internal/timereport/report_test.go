@@ -288,3 +288,16 @@ func TestRetriedBuildsAreNumbered(t *testing.T) {
 		t.Errorf("attempts = %d %d %d, want 1 2 0", runs[0].Attempt, runs[1].Attempt, runs[2].Attempt)
 	}
 }
+
+func TestBranchLockWaitCountsAsAnInRunLockWaitOfItsOwnKind(t *testing.T) {
+	var rt RunTime
+	fillFromFeed(&rt, []progress.Event{
+		{Ts: "2026-10-01T10:00:00.000Z", Source: "factory", Stage: "branch_lock", Event: "waiting"},
+		{Ts: "2026-10-01T10:01:00.000Z", Source: "factory", Stage: "branch_lock", Event: "acquired"},
+		{Ts: "2026-10-01T10:01:00.000Z", Source: "factory", Stage: "repository_lock", Event: "waiting"},
+		{Ts: "2026-10-01T10:01:30.000Z", Source: "factory", Stage: "repository_lock", Event: "acquired"},
+	}, true)
+	if len(rt.LockWaits) != 2 || rt.LockWaits[0].Kind != KindBranchLock || rt.LockWaits[0].Seconds != 60 || rt.LockWaits[1].Kind != KindRepositoryLock || rt.LockSeconds != 90 {
+		t.Errorf("lock waits = %+v (total %v), want a 60 s branch_lock then a 30 s repository_lock", rt.LockWaits, rt.LockSeconds)
+	}
+}
