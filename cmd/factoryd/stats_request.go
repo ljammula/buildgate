@@ -105,7 +105,7 @@ func launchCell(r timereport.RunTime) string {
 	var parts []string
 	for _, s := range r.Stages {
 		if s.Launches > 0 {
-			parts = append(parts, fmt.Sprintf("%s %d launches, %s min summed, %s min wall", s.Stage, s.Launches, minutes(s.Seconds), minutes(s.WallSeconds)))
+			parts = append(parts, fmt.Sprintf("%s %d launches, %s min summed, %s min wall", s.Stage, s.Launches, minutes(s.LaunchSeconds), minutes(s.WallSeconds)))
 		}
 	}
 	return strings.Join(parts, "; ")

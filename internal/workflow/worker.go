@@ -17,11 +17,14 @@ const (
 	// bounded independently.
 	DefaultMaxConcurrentWorkflowTaskExecutionSize = 4
 	// RunMaxConcurrentActivityExecutionSize is the cap of a worker whose task
-	// queue serves one run only (RunWorkerOptions): two, which only the code
-	// review and the challenger job use at once (reviewWithChallenge). They
+	// queue serves one run only (RunWorkerOptions): two. The code
+	// review and the challenger job use both at once (reviewWithChallenge); they
 	// share no worktree: the challenger works on a scratch worktree of the
-	// result commit, and its files are committed after both have finished.
-	// Every other Activity of RunWorkflow starts alone.
+	// result commit, and its files are committed after both have finished. The
+	// tests_red_on_base proof and a challenge that runs after the review launch
+	// up to two reproductions at a time (parallelReproductionLaunchesChange); a
+	// challenge beside the review launches one at a time, so the review keeps a
+	// slot. Every other Activity of RunWorkflow starts alone.
 	RunMaxConcurrentActivityExecutionSize = 2
 )
 

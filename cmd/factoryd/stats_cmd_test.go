@@ -259,13 +259,17 @@ func TestStatsRequestPrintsReproductionLaunchesSummedAndWall(t *testing.T) {
 		RunID: "r-001", Kind: "build", State: "accepted", Seconds: 600,
 		Stages: []timereport.StageTime{
 			{Stage: "verify", Seconds: 60},
-			{Stage: "tests_red_on_base", Seconds: 300, Launches: 6, WallSeconds: 120},
-			{Stage: "challenge", Seconds: 90, Launches: 2, WallSeconds: 90},
+			{Stage: "gate", Seconds: 40},
+			{Stage: "tests_red_on_base", Seconds: 300, Launches: 6, LaunchSeconds: 300, WallSeconds: 120},
+			{Stage: "challenge", Seconds: 400, Launches: 2, LaunchSeconds: 90, WallSeconds: 90},
 		},
 	}}}}}
 	var b strings.Builder
 	printRequestTime(&b, rep)
 	want := "  build reproduction launches: tests_red_on_base 6 launches, 5.0 min summed, 2.0 min wall; challenge 2 launches, 1.5 min summed, 1.5 min wall\n"
+	if strings.Contains(b.String(), "gate 0 launches") || strings.Contains(b.String(), ": gate ") {
+		t.Errorf("a gate stage printed as launches:\n%s", b.String())
+	}
 	if !strings.Contains(b.String(), want) {
 		t.Errorf("output lacks %q:\n%s", want, b.String())
 	}

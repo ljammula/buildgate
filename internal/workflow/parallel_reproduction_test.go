@@ -332,7 +332,7 @@ func TestChallengeLaunchesRunInWavesWithTheSerialRecord(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gate := newLaunchGate()
-			fx := &challengeFixture{launchErr: tc.launchErr}
+			fx := &challengeFixture{inTurn: true, launchErr: tc.launchErr}
 			p := runChallengePhaseWith(t, challengeInput(), challengeJobFiles(), challengeLaunch(gate, tc.waves, tc.red), 1, nil, fx)
 			c := p.result.Challenge
 			if p.err != nil || c == nil || p.result.State != run.StateAccepted {
@@ -374,7 +374,7 @@ func TestChallengeLaunchesRunInWavesWithTheSerialRecord(t *testing.T) {
 			if !slices.Equal(gotIDs, wantIDs) {
 				t.Errorf("Activities launched %v, want %v", gotIDs, wantIDs)
 			}
-			serial := runChallengePhaseWith(t, challengeInput(), challengeJobFiles(), challengeLaunch(newLaunchGate(), nil, tc.red), 1, nil, &challengeFixture{launchErr: tc.launchErr, serialLaunches: true})
+			serial := runChallengePhaseWith(t, challengeInput(), challengeJobFiles(), challengeLaunch(newLaunchGate(), nil, tc.red), 1, nil, &challengeFixture{inTurn: true, launchErr: tc.launchErr, serialLaunches: true})
 			if serial.err != nil || !reflect.DeepEqual(serial.result.Challenge, c) || !slices.Equal(challengeAttemptCommands(serial.result), tc.wantAttempts) {
 				t.Errorf("serial record %+v (err %v) differs from the waves' %+v", serial.result.Challenge, serial.err, c)
 			}
@@ -400,7 +400,32 @@ func TestComposeServicesRunsLaunchOneAtATime(t *testing.T) {
 	gate := newLaunchGate()
 	input := challengeInput()
 	input.ComposeServicesEnabled = true
-	p := runChallengePhaseWith(t, input, challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{})
+	p := runChallengePhaseWith(t, input, challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{inTurn: true})
+	if p.err != nil || len(p.launches) != 4 || gate.maxInFlight != 1 {
+		t.Errorf("err %v, launches %v, most at once %d; want four launches one at a time", p.err, p.launches, gate.maxInFlight)
+	}
+}
+
+// A challenge that runs beside the code review launches one at a time, so the
+// run worker's second slot stays with the review.
+func TestChallengeBesideTheReviewLaunchesOneAtATime(t *testing.T) {
+	red := map[string]bool{"0-challenge1": true, "0-challenge2": true, "1-challenge1": true}
+	gate := newLaunchGate()
+	p := runChallengePhaseWith(t, challengeInput(), challengeJobFiles(), challengeLaunch(gate, nil, red), 1, nil, &challengeFixture{})
+	if p.err != nil || p.result.Challenge == nil || !p.result.Challenge.WithReview || len(p.launches) != 6 || gate.maxInFlight != 1 {
+		t.Fatalf("err %v, challenge %+v, launches %v, most at once %d; want a with-review challenge of six launches one at a time", p.err, p.result.Challenge, p.launches, gate.maxInFlight)
+	}
+	want := []string{"challenge-run-0-challenge1", "challenge-run-0-challenge2", "challenge-run-1-challenge1", "challenge-run-1-challenge2", "challenge-run-2-challenge1", "challenge-run--1-challenge1"}
+	if !slices.Equal(p.launches, want) {
+		t.Errorf("launches %v, want %v", p.launches, want)
+	}
+}
+
+// A history at activity-retries version 1 launches one at a time: a retried
+// attempt reaps the run's containers, which would kill a sibling launch.
+func TestRunWithRetriedActivitiesLaunchesOneAtATime(t *testing.T) {
+	gate := newLaunchGate()
+	p := runChallengePhaseWith(t, challengeInput(), challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{inTurn: true, retriesV1: true})
 	if p.err != nil || len(p.launches) != 4 || gate.maxInFlight != 1 {
 		t.Errorf("err %v, launches %v, most at once %d; want four launches one at a time", p.err, p.launches, gate.maxInFlight)
 	}

@@ -83,7 +83,7 @@ func proveTestsRed(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyCt
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	proof := &run.TestsRedOnBase{SkippedFiles: held.Skipped}
 	launch := launchTestsRedSerially
-	if launchesInParallel(ctx, input) {
+	if launchesInParallel(ctx, ids, input, false) {
 		launch = launchTestsRedInWaves
 	}
 	files, runs, err := launch(ctx, ids, rctx, input, result, held.Held, base, worktreePath, branch)
@@ -129,7 +129,7 @@ func launchTestsRedSerially(ctx temporalworkflow.Context, ids *activityIDs, rctx
 }
 
 // launchTestsRedInWaves runs the same launches in two waves: every held
-// file's result launch at once, then, at once, the base launch of each file
+// file's result launch together, then, together, the base launch of each file
 // whose result did not fail. Each launch is its own Activity and verdict; the
 // files, runs and attempts are recorded in the serial order (file order,
 // result before base).

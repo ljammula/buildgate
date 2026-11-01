@@ -319,6 +319,7 @@ func TestOverlappingLaunchesAreSummedAndTheirWallTimeIsShorter(t *testing.T) {
 		ev(60, "tests_red_on_base", "end", "case 2 result"),
 		ev(60, "challenge", "start", ""), ev(70, "challenge", "end", ""),
 		ev(70, "challenge", "start", "case 0 challenge1"), ev(75, "challenge", "end", "case 0 challenge1"),
+		ev(75, "gate", "start", "canonical_verify"), ev(78, "gate", "end", "canonical_verify"),
 		ev(80, "finished", "end", ""),
 	}
 	var rt RunTime
@@ -327,11 +328,14 @@ func TestOverlappingLaunchesAreSummedAndTheirWallTimeIsShorter(t *testing.T) {
 	for _, s := range rt.Stages {
 		got[s.Stage] = s
 	}
-	if s := got["tests_red_on_base"]; s.Seconds != 30+40+50 || s.Launches != 3 || s.WallSeconds != 50 {
+	if s := got["tests_red_on_base"]; s.Seconds != 30+40+50 || s.LaunchSeconds != 120 || s.Launches != 3 || s.WallSeconds != 50 {
 		t.Errorf("tests_red_on_base = %+v, want 120 s summed, 3 launches, 50 s wall", s)
 	}
-	if s := got["challenge"]; s.Seconds != 10+5 || s.Launches != 1 || s.WallSeconds != 5 {
-		t.Errorf("challenge = %+v, want 15 s summed, 1 launch (the job is not one), 5 s wall", s)
+	if s := got["challenge"]; s.Seconds != 10+5 || s.LaunchSeconds != 5 || s.Launches != 1 || s.WallSeconds != 5 {
+		t.Errorf("challenge = %+v, want 15 s stage time, 1 launch of 5 s (the job is not one), 5 s wall", s)
+	}
+	if s := got["gate"]; s.Launches != 0 || s.LaunchSeconds != 0 || s.Seconds != 3 {
+		t.Errorf("gate = %+v, want 3 s and no launches: a gate's detail is its check", s)
 	}
 	if s := got["build"]; s.Launches != 0 || s.Seconds != 10 {
 		t.Errorf("build = %+v, want 10 s and no launches", s)

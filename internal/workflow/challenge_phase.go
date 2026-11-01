@@ -252,7 +252,7 @@ func runHeldChallenge(ctx temporalworkflow.Context, ids *activityIDs, buildVerif
 	rctx := reproductionContext(ctx, buildVerifyCtx)
 	units := challengeUnits(rec)
 	var outcomes []challengeUnitOutcome
-	if launchesInParallel(ctx, input) {
+	if launchesInParallel(ctx, ids, input, rec.WithReview) {
 		outcomes = runChallengeUnitsInWaves(ctx, ids, rctx, input, commit, units)
 	} else {
 		for _, u := range units {
@@ -358,8 +358,9 @@ func recordChallengeGroup(rec *run.ChallengeRecord, u challengeUnit, o challenge
 	}
 }
 
-// runChallengeUnitsInWaves launches every unit's first pass at once, then the
-// second pass of each unit whose first was red at once. Each launch is its own
+// runChallengeUnitsInWaves launches every unit's first pass together, then the
+// second pass of each unit whose first was red together (up to the run
+// worker's two slots at a time). Each launch is its own
 // Activity; a unit's verdict is decided by the rules of runChallengeLaunches.
 func runChallengeUnitsInWaves(ctx temporalworkflow.Context, ids *activityIDs, rctx temporalworkflow.Context, input RunWorkflowInput, commit string, units []challengeUnit) []challengeUnitOutcome {
 	wave := func(pass string, which []int) []waveOutcome {

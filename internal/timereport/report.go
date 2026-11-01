@@ -52,13 +52,15 @@ type Wait struct {
 type StageTime struct {
 	Stage   string  `json:"stage"`
 	Seconds float64 `json:"seconds"`
-	// Launches counts the reproduction launches of the stage (a start with a
-	// detail: the held-file launches of challenge and tests_red_on_base, not the
-	// challenger job); WallSeconds is the stage's first start to its last end,
-	// which is less than Seconds when launches overlapped. Both are 0 for a
-	// stage with no launch.
-	Launches    int     `json:"launches,omitempty"`
-	WallSeconds float64 `json:"wall_seconds,omitempty"`
+	// Launches counts the held-file reproduction launches of a
+	// reproductionStages stage (a start with a detail; not the challenger job,
+	// nor a repository gate, whose start carries a detail too); LaunchSeconds is
+	// their summed time, apart from Seconds, which also holds the challenger
+	// job; WallSeconds is the launches' first start to last end, less than
+	// LaunchSeconds when they overlapped. All are 0 for a stage with no launch.
+	Launches      int     `json:"launches,omitempty"`
+	LaunchSeconds float64 `json:"launch_seconds,omitempty"`
+	WallSeconds   float64 `json:"wall_seconds,omitempty"`
 	// Parallel marks a stage that ran at the same time as another (review and
 	// challenge do): stage minutes then sum to more than the run's wall time.
 	Parallel bool `json:"parallel,omitempty"`
@@ -278,6 +280,12 @@ func fillFromFeed(rt *RunTime, events []progress.Event, ended bool) {
 	rt.Other = max(rt.Seconds-unionSeconds(all), 0)
 }
 
+// reproductionStages are the stages whose detailed starts are held-file
+// reproduction launches (the workflow's tests_red_on_base, challenge and
+// review_reproduction attempt kinds); other stages with a detail, such as a
+// repository gate named by its check, are not.
+var reproductionStages = map[string]bool{"tests_red_on_base": true, "challenge": true, "review_reproduction": true}
+
 // stageTracker pairs a feed's stage starts with their ends.
 type stageTracker struct {
 	opened   map[string]time.Time
@@ -315,7 +323,7 @@ func (t *stageTracker) end(stage, detail string, at time.Time) {
 	}
 	t.sums[stage] += max(at.Sub(from).Seconds(), 0)
 	t.spans[stage] = append(t.spans[stage], interval{from, at})
-	if !strings.HasSuffix(key, "\x00") {
+	if reproductionStages[stage] && !strings.HasSuffix(key, "\x00") {
 		t.launches[stage] = append(t.launches[stage], interval{from, at})
 	}
 	delete(t.opened, key)
@@ -327,6 +335,9 @@ func (t *stageTracker) stageTime(name string) StageTime {
 	st := StageTime{Stage: name, Seconds: t.sums[name], Parallel: overlapsOther(name, t.spans)}
 	if l := t.launches[name]; len(l) > 0 {
 		st.Launches, st.WallSeconds = len(l), wallSeconds(l)
+		for _, s := range l {
+			st.LaunchSeconds += max(s.to.Sub(s.from).Seconds(), 0)
+		}
 	}
 	return st
 }

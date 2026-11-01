@@ -78,7 +78,9 @@ type challengeFixture struct {
 	// serialLaunches replays a history recorded before
 	// parallelReproductionLaunchesChange; launchErr fails a launch.
 	serialLaunches bool
-	launchErr      func(ReproductionRunInput) error
+	// retriesV1 replays a history at activity-retries version 1.
+	retriesV1 bool
+	launchErr func(ReproductionRunInput) error
 }
 
 func (f *challengeFixture) record(name string) {
@@ -122,6 +124,9 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 	}
 	if fx.noVerifyChange {
 		env.OnGetVersion(verifyChallengeCommitChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
+	}
+	if fx.retriesV1 {
+		env.OnGetVersion(activityRetriesChange, temporalworkflow.DefaultVersion, 2).Return(temporalworkflow.Version(activityRetriesOn))
 	}
 	if fx.serialLaunches {
 		env.OnGetVersion(parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1).Return(temporalworkflow.DefaultVersion)
