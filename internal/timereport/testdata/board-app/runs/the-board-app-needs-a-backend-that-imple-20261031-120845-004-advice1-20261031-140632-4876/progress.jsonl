@@ -1,0 +1,38 @@
+{"ts":"2026-10-31T19:06:32.560Z","source":"factory","stage":"image","event":"start"}
+{"ts":"2026-10-31T19:06:32.561Z","source":"factory","stage":"image","event":"end","outcome":"pass","detail":"localhost:5050/buildgate-worker@sha256:a0f3bde2ff0395f87dc47be60149613a2340f90d0"}
+{"ts":"2026-10-31T19:06:32.687Z","source":"factory","stage":"repository_lock","event":"waiting","detail":"another build holds the repository"}
+{"ts":"2026-10-31T19:14:21.408Z","source":"factory","stage":"repository_lock","event":"acquired"}
+{"ts":"2026-10-31T19:14:23.025Z","source":"factory","stage":"preflight","event":"start"}
+{"ts":"2026-10-31T19:14:23.025Z","source":"factory","stage":"preflight","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:14:23.246Z","source":"factory","stage":"prepare_workspace","event":"start"}
+{"ts":"2026-10-31T19:14:23.317Z","source":"factory","stage":"prepare_workspace","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:14:23.328Z","source":"factory","stage":"preflight","event":"start"}
+{"ts":"2026-10-31T19:14:23.329Z","source":"factory","stage":"preflight","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:14:23.436Z","source":"factory","stage":"build","event":"start"}
+{"ts":"2026-10-31T19:21:43.395Z","source":"factory","stage":"build","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:21:43.407Z","source":"factory","stage":"post_build","event":"start"}
+{"ts":"2026-10-31T19:21:43.479Z","source":"factory","stage":"post_build","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:21:43.490Z","source":"factory","stage":"verify","event":"start"}
+{"ts":"2026-10-31T19:22:45.356Z","source":"factory","stage":"verify","event":"end","outcome":"pass","log":"57dfffef991d64e34c3750f479bea4f946181eecc2a21ff2c13f953d0e7a0ef2.attempt-1-verify.log"}
+{"ts":"2026-10-31T19:22:45.368Z","source":"factory","stage":"full_suite","event":"start"}
+{"ts":"2026-10-31T19:23:49.290Z","source":"factory","stage":"full_suite","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:23:49.302Z","source":"factory","stage":"evidence","event":"start"}
+{"ts":"2026-10-31T19:23:49.409Z","source":"factory","stage":"evidence","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:23:49.520Z","source":"factory","stage":"tests_red_on_base","event":"start","detail":"case 0 result"}
+{"ts":"2026-10-31T19:24:15.839Z","source":"factory","stage":"tests_red_on_base","event":"end","outcome":"pass","detail":"case 0 result"}
+{"ts":"2026-10-31T19:24:15.852Z","source":"factory","stage":"tests_red_on_base","event":"start","detail":"case 0 base"}
+{"ts":"2026-10-31T19:24:42.237Z","source":"factory","stage":"tests_red_on_base","event":"end","outcome":"fail","detail":"case 0 base"}
+{"ts":"2026-10-31T19:24:42.326Z","source":"factory","stage":"review","event":"start"}
+{"ts":"2026-10-31T19:25:31.628Z","source":"factory","stage":"review","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:25:31.641Z","source":"factory","stage":"challenge","event":"start","detail":"case 0 challenge1"}
+{"ts":"2026-10-31T19:25:59.910Z","source":"factory","stage":"challenge","event":"end","outcome":"pass","detail":"case 0 challenge1"}
+{"ts":"2026-10-31T19:25:59.921Z","source":"factory","stage":"challenge","event":"start","detail":"case 1 challenge1"}
+{"ts":"2026-10-31T19:26:26.156Z","source":"factory","stage":"challenge","event":"end","outcome":"pass","detail":"case 1 challenge1"}
+{"ts":"2026-10-31T19:26:26.169Z","source":"factory","stage":"challenge","event":"start","detail":"case 2 challenge1"}
+{"ts":"2026-10-31T19:26:54.703Z","source":"factory","stage":"challenge","event":"end","outcome":"pass","detail":"case 2 challenge1"}
+{"ts":"2026-10-31T19:26:54.920Z","source":"factory","stage":"verify","event":"start"}
+{"ts":"2026-10-31T19:27:58.867Z","source":"factory","stage":"verify","event":"end","outcome":"pass","log":"69316dd36e338e0e996b81bd23671909eec775ad4c8b1e04191bd8a060f85d54.attempt-1-verify.log"}
+{"ts":"2026-10-31T19:27:58.879Z","source":"factory","stage":"evaluate","event":"start"}
+{"ts":"2026-10-31T19:27:58.879Z","source":"factory","stage":"evaluate","event":"end","outcome":"pass"}
+{"ts":"2026-10-31T19:27:59.102Z","source":"factory","stage":"build","event":"note","detail":"1 round \u00b7 r1 pass \u00b7 2.2M tokens \u00b7 $0.05 (API-price est.; billed to your subscrip"}
+{"ts":"2026-10-31T19:27:59.105Z","source":"factory","stage":"finished","event":"end","outcome":"accepted"}

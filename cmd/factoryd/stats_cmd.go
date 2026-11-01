@@ -25,6 +25,7 @@ type statsFlags struct {
 	since      *string
 	bucket     *int
 	all        *bool
+	request    *string
 	jsonOutput *bool
 	configPath *string
 }
@@ -37,6 +38,7 @@ func newStatsFlags() statsFlags {
 	f.since = flags.String("since", "", "count tickets whose first run began on/after this: a number of days such as 30d, or a date such as 2026-09-01; empty counts every ticket")
 	f.bucket = flags.Int("bucket", stats.DefaultBucketDays, "days in one row of the trend table")
 	f.all = flags.Bool("all", false, "also count the live-smoke tickets, which are built to prove the pipeline and some to fail")
+	f.request = flags.String("request", "", "show where this one request's time went: per ticket and round the minutes in each stage and waiting for the repository lock, the request's repository-busy waits, and the time no run covers")
 	f.jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of tables")
 	f.configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
@@ -71,6 +73,14 @@ func statsRun(args []string, w io.Writer, now time.Time) error {
 	runs, err := run.LoadAll(*f.dataDir)
 	if err != nil {
 		return fmt.Errorf("list runs from %q: %w", *f.dataDir, err)
+	}
+	if *f.request != "" {
+		for _, name := range []string{"project", "since", "bucket", "all"} {
+			if flagWasSet(f.set, name) {
+				return fmt.Errorf("-request shows one request and cannot be combined with -%s", name)
+			}
+		}
+		return statsRequest(w, *f.dataDir, *f.request, *f.jsonOutput)
 	}
 	opts := stats.Options{Since: since, BucketDays: *f.bucket, Now: now}
 	if !*f.all {
@@ -216,4 +226,10 @@ func printCounts(w io.Writer, title string, counts []stats.Count) {
 	for _, c := range counts {
 		fmt.Fprintf(w, "  %-*s  %d\n", width, c.Name, c.Runs)
 	}
+}
+
+func flagWasSet(set *flag.FlagSet, name string) bool {
+	found := false
+	set.Visit(func(f *flag.Flag) { found = found || f.Name == name })
+	return found
 }

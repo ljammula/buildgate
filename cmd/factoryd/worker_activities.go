@@ -2,6 +2,7 @@ package main
 
 import (
 	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/timereport"
 	"cmp"
 	"context"
 	"errors"
@@ -254,7 +255,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 		return "", fmt.Errorf("load request %s: %w", id, err)
 	}
 	if r.State != request.StateBuilding {
-		repositoryWaits.clear(id)
+		a.endRepositoryWait(id)
 	}
 	if requestdriver.RequestDriverOwnsState(r.State) {
 		onJobs := a.runsOnJobsQueue(ctx)
@@ -289,7 +290,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// would be refused at release: it is halted before a build is
 			// spent on it.
 			if reason := staleMemoryRequest(ctx, a.dp, a.dataDir, r); reason != "" {
-				repositoryWaits.clear(id)
+				a.endRepositoryWait(id)
 				if err := requestdriver.HaltRequest(a.dataDir, r, reason, time.Now()); err != nil {
 					return "", err
 				}
@@ -303,17 +304,21 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// run beside the first.
 			if live, why := a.ticketRunStillLive(r, ownSteps); live {
 				// Its own run, not another build, holds it.
-				repositoryWaits.clear(id)
+				a.endRepositoryWait(id)
 				log.Printf("request %s: not starting another build step: %s", r.ID, why)
 				return "", temporal.NewApplicationError("the ticket's run is still being built by a live process", repositoryBusyErrorType)
 			}
 			if repoBusy(r.Workspace, a.dataDir) {
 				// status says the request waits for the repository, from the
 				// first time it was found busy.
-				repositoryWaits.markBusy(id, time.Now())
+				// After a worker restart the tracker is empty but the wait
+				// log may still hold the wait's start: it is not started twice.
+				if now := time.Now(); repositoryWaits.markBusy(id, now) && !timereport.WaitIsOpen(a.dataDir, id) {
+					recordRepositoryWait(a.dataDir, id, timereport.WaitStart, now)
+				}
 				return "", temporal.NewApplicationError("repository busy: another build holds it", repositoryBusyErrorType)
 			}
-			repositoryWaits.clear(id)
+			a.endRepositoryWait(id)
 		}
 		if stepWaitsForRepoLock(r.State, onJobs) {
 			ctx = withWaitForRepoLock(ctx)
@@ -503,4 +508,24 @@ func countOf(ids []string, id string) int {
 		}
 	}
 	return n
+}
+
+// endRepositoryWait drops id's wait for the repository and, when a
+// RepositoryBusy wait was open (in the tracker, or only in the log after a worker restart), writes its end to the request's wait log. A
+// wait inside a step's slot (withRepoLockWaitHook) is cleared by the step's
+// own deferred clear instead: its run's progress feed records it.
+func (a *requestActivities) endRepositoryWait(id string) {
+	// The log is asked too: a worker restarted mid-wait has no tracker entry
+	// for a wait whose start it logged.
+	if repositoryWaits.clear(id) || timereport.WaitIsOpen(a.dataDir, id) {
+		recordRepositoryWait(a.dataDir, id, timereport.WaitEnd, time.Now())
+	}
+}
+
+// recordRepositoryWait writes one line of id's wait log. A failed write is
+// logged: the wait log is a report, and a build must not stop for it.
+func recordRepositoryWait(dataDir, id, event string, at time.Time) {
+	if err := timereport.RecordWait(dataDir, id, event, at); err != nil {
+		log.Printf("request %s: record repository wait %s: %v", id, event, err)
+	}
 }

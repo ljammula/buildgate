@@ -189,3 +189,64 @@ func TestShare(t *testing.T) {
 		}
 	}
 }
+
+const boardAppDataDir = "../../internal/timereport/testdata/board-app"
+const boardAppBackend = "the-board-app-needs-a-backend-that-imple-20261031-120845"
+
+func TestStatsRequestPrintsTimePerTicketAndWaits(t *testing.T) {
+	got, err := runStats(t, "-data-dir", boardAppDataDir, "-request", boardAppBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"request " + boardAppBackend + " (pr_review)",
+		"ticket 4",
+		"review 3",
+		"11.5",                              // the review round's lock wait, minutes
+		"waiting since 2026-11-01T04:02:05", // the running restack's lock wait
+		"open (no end recorded)",            // the request's repository-busy wait
+		"12.5 min",                          // the closed one
+		"critical path:",
+		"1 wait(s) have no end recorded",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestStatsRequestJSON(t *testing.T) {
+	got, err := runStats(t, "-data-dir", boardAppDataDir, "-request", boardAppBackend, "-json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep struct {
+		RequestID string `json:"request_id"`
+		Tickets   []struct{ Index int }
+		Critical  struct {
+			OpenWaits    int `json:"open_waits"`
+			OngoingWaits int `json:"ongoing_waits"`
+		} `json:"critical_path"`
+	}
+	if err := json.Unmarshal([]byte(got), &rep); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, got)
+	}
+	if rep.RequestID != boardAppBackend || len(rep.Tickets) != 3 || rep.Critical.OpenWaits != 1 || rep.Critical.OngoingWaits != 1 {
+		t.Errorf("report = %+v", rep)
+	}
+}
+
+func TestStatsRequestUnknownIDIsAnError(t *testing.T) {
+	if _, err := runStats(t, "-data-dir", boardAppDataDir, "-request", "nope"); err == nil {
+		t.Error("an unknown request id returned no error")
+	}
+}
+
+func TestStatsRequestRefusesTheOtherSelectors(t *testing.T) {
+	for _, extra := range [][]string{{"-project", "app"}, {"-since", "30d"}, {"-bucket", "3"}, {"-all"}} {
+		args := append([]string{"-data-dir", boardAppDataDir, "-request", boardAppBackend}, extra...)
+		if _, err := runStats(t, args...); err == nil || !strings.Contains(err.Error(), "cannot be combined with "+extra[0]) {
+			t.Errorf("%v: err = %v, want a refusal naming %s", extra, err, extra[0])
+		}
+	}
+}

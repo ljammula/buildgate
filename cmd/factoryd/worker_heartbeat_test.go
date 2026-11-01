@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
 	"buildgate/internal/testfixture"
+	"buildgate/internal/timereport"
 	wsisolation "buildgate/internal/workspace"
 )
 
@@ -238,4 +242,64 @@ func workerRepositoryWaits(dataDir string, now time.Time) map[string]string {
 		return nil
 	}
 	return hb.RepositoryWaits
+}
+
+// TestBusyRepositoryWaitIsLoggedOncePerWait: a building step that finds the
+// repository held writes one start line however often the workflow retries it,
+// and the step that finds it free writes the end line.
+func TestBusyRepositoryWaitIsLoggedOncePerWait(t *testing.T) {
+	repositoryWaits.reset()
+	t.Cleanup(repositoryWaits.reset)
+	dp := newTestDeps(t)
+	repo := testfixture.NewGitRepo(t)
+	dataDir := t.TempDir()
+	r := request.New("req-1", repo, "app", request.Source{Kind: request.SourceText}, time.Now())
+	r.State = request.StateBuilding
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := wsisolation.AcquireDirectLock(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	acts := &requestActivities{dp: dp, dataDir: dataDir}
+	for range 3 {
+		if _, err := acts.AdvanceRequest(context.Background(), "req-1"); err == nil {
+			t.Fatal("a step on a busy repository returned no error")
+		}
+	}
+	events := func() []string {
+		b, err := os.ReadFile(timereport.WaitsPath(dataDir, "req-1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var l struct{ Event string }
+			if err := json.Unmarshal([]byte(line), &l); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, l.Event)
+		}
+		return got
+	}
+	if got := events(); !slices.Equal(got, []string{"start"}) {
+		t.Fatalf("wait log after three busy steps = %v, want one start", got)
+	}
+	// A worker restart empties the tracker, not the log: the next busy step
+	// does not start the wait again, and a free repository ends it.
+	repositoryWaits.reset()
+	if _, err := acts.AdvanceRequest(context.Background(), "req-1"); err == nil {
+		t.Fatal("a step on a busy repository returned no error")
+	}
+	if got := events(); !slices.Equal(got, []string{"start"}) {
+		t.Fatalf("wait log after a restart and another busy step = %v, want one start", got)
+	}
+	repositoryWaits.reset()
+	acts.endRepositoryWait("req-1")
+	acts.endRepositoryWait("req-1") // no wait left: nothing more is written
+	if got := events(); !slices.Equal(got, []string{"start", "end"}) {
+		t.Errorf("wait log after the wait ended = %v, want start then end", got)
+	}
 }
