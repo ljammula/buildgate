@@ -75,7 +75,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 			}
 			return checkpoint.Result, temporal.NewApplicationError(checkpoint.Error, errType, checkpoint.Result.Attempts)
 		}
-		checkpoint.Result.ComposeServices = a.launchesComposeSidecars(input, v.kind)
+		checkpoint.Result.NoComposeSidecars = a.noComposeSidecarsFor(input, v.kind)
 		return checkpoint.Result, nil
 	}
 	progressStarted = true
@@ -202,7 +202,7 @@ func (a *Activities) runVerifyCommand(ctx context.Context, input RunWorkflowInpu
 	if rerunErr != nil {
 		return rerunResult, temporal.NewApplicationErrorWithCause(v.label+" rerun subprocess infrastructure failure", launchErrorType(rerunErr), rerunErr, rerunResult.Attempts)
 	}
-	rerunResult.ComposeServices = composeSpec != nil && a.launchesComposeSidecars(input, v.kind)
+	rerunResult.NoComposeSidecars = a.noComposeSidecars(composeSpec)
 	return rerunResult, nil
 }
 

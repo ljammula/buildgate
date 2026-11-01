@@ -45,7 +45,7 @@ func (r ReproductionRunResult) withTests(id string) ReproductionRunResult {
 
 func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, results map[string]ReproductionRunResult, version bool) *testsRedPhase {
 	t.Helper()
-	return runTestsRedPhaseWith(t, input, held, verifyExit, version, false, false, func(_ context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
+	return runTestsRedPhaseWith(t, input, held, verifyExit, version, false, true, func(_ context.Context, in ReproductionRunInput) (ReproductionRunResult, error) {
 		res := results[in.Pass]
 		res.Run.Pass, res.Run.Commit = in.Pass, in.Commit
 		return res, nil
@@ -54,9 +54,9 @@ func runTestsRedPhase(t *testing.T, input RunWorkflowInput, held TestsRedHoldRes
 
 // runTestsRedPhaseWith is runTestsRedPhase with the launch Activity's body
 // given, run outside the recorder's lock so launches can overlap, serial, a
-// history recorded before parallelReproductionLaunchesChange, and sidecars,
-// a verify result that says the run's launches start compose sidecars.
-func runTestsRedPhaseWith(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, version, serial, sidecars bool, launch func(context.Context, ReproductionRunInput) (ReproductionRunResult, error)) *testsRedPhase {
+// history recorded before parallelReproductionLaunchesChange, and noSidecars,
+// a verify result that says positively that the run starts no compose sidecars.
+func runTestsRedPhaseWith(t *testing.T, input RunWorkflowInput, held TestsRedHoldResult, verifyExit int, version, serial, noSidecars bool, launch func(context.Context, ReproductionRunInput) (ReproductionRunResult, error)) *testsRedPhase {
 	t.Helper()
 	p := &testsRedPhase{}
 	env := newWorkflowEnvironment(t,
@@ -64,7 +64,7 @@ func runTestsRedPhaseWith(t *testing.T, input RunWorkflowInput, held TestsRedHol
 			return BuildActivityResult{Result: runner.Result{ExitCode: 0}}, nil
 		},
 		func(context.Context, RunWorkflowInput) (VerifyActivityResult, error) {
-			return VerifyActivityResult{ComposeServices: sidecars, Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: verifyExit}}, nil
+			return VerifyActivityResult{NoComposeSidecars: noSidecars, Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: verifyExit}}, nil
 		},
 		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil

@@ -17,13 +17,14 @@ const parallelReproductionLaunchesChange = "parallel-reproduction-launches"
 
 // launchesInParallel asks parallelReproductionLaunchesChange. Even in the new
 // version a run launches one at a time when:
-//   - its launches start compose sidecars (result.composeSidecars, from
-//     VerifyActivityResult.ComposeServices, set in runVerifyCommand,
-//     activities_verify.go, where RunVerifyActivity loads the compose spec): the
-//     sidecars' project and network are named by the run, so two launches
-//     would share and tear down each other's sidecars. A run with compose
-//     services enabled but no compose file, which is nearly every run,
-//     launches together;
+//   - its launches may start compose sidecars (not result.noComposeSidecars,
+//     from VerifyActivityResult.NoComposeSidecars, set in runVerifyCommand,
+//     activities_verify.go, from the compose spec RunVerifyActivity loaded): a
+//     compose file of any content makes BeginComposeServicesLifecycle create
+//     the run's network and write its reports, named by the run, so two launches
+//     would collide. The fact is true only when the base commit positively
+//     holds no compose file, or compose services are off, which is nearly every
+//     run; a git error, or a result recorded without the field, is serial;
 //   - its Activities retry (ids.retries): a retried attempt reaps the run's
 //     containers (fenceEarlierAttempts), which would kill a sibling launch;
 //   - besideReview: the challenge runs beside the code review, and the run's
@@ -34,7 +35,7 @@ const parallelReproductionLaunchesChange = "parallel-reproduction-launches"
 // runs up to two of it at a time.
 func launchesInParallel(ctx temporalworkflow.Context, ids *activityIDs, result *RunWorkflowResult, besideReview bool) bool {
 	v := temporalworkflow.GetVersion(ctx, parallelReproductionLaunchesChange, temporalworkflow.DefaultVersion, 1)
-	return v == 1 && !result.composeSidecars && !ids.retries && !besideReview
+	return v == 1 && result.noComposeSidecars && !ids.retries && !besideReview
 }
 
 // waveLaunch is one launch of a wave: its Activity ID and input.

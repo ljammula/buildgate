@@ -80,9 +80,10 @@ type challengeFixture struct {
 	serialLaunches bool
 	// retriesV1 replays a history at activity-retries version 1.
 	retriesV1 bool
-	// sidecars makes the verify result say launches start compose sidecars.
-	sidecars  bool
-	launchErr func(ReproductionRunInput) error
+	// noSidecars makes the verify result say positively that launches start no
+	// compose sidecars; unset, it is a result without the fact (serial).
+	noSidecars bool
+	launchErr  func(ReproductionRunInput) error
 }
 
 func (f *challengeFixture) record(name string) {
@@ -114,7 +115,7 @@ func runChallengePhaseWith(t *testing.T, input RunWorkflowInput, job ChallengerJ
 			if fx.gateFails || fx.redOnCommit && committed {
 				exit = 1
 			}
-			return VerifyActivityResult{ComposeServices: fx.sidecars, Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: exit}}, nil
+			return VerifyActivityResult{NoComposeSidecars: fx.noSidecars, Result: runner.Result{Command: []string{"sh", "-c", "make verify"}, ExitCode: exit}}, nil
 		},
 		func(context.Context, EvaluateGateInput) (run.GateResult, error) {
 			return run.GateResult{Check: "canonical_verify", Passed: true}, nil

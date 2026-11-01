@@ -162,7 +162,7 @@ func TestTestsRedLaunchesRunInWavesWithTheSerialVerdicts(t *testing.T) {
 				}
 				return len(tc.wantBases)
 			}
-			p := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, false, testsRedLaunch(gate, wave, tc.verdicts, ""))
+			p := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, true, testsRedLaunch(gate, wave, tc.verdicts, ""))
 			if p.err != nil {
 				t.Fatalf("workflow error: %v", p.err)
 			}
@@ -181,7 +181,7 @@ func TestTestsRedLaunchesRunInWavesWithTheSerialVerdicts(t *testing.T) {
 			}
 			checkTestsRedProof(t, p, tc.wantVerdict, tc.wantRuns, tc.wantAttempt)
 			proof := p.result.TestsRedOnBase
-			serial := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, true, false, testsRedLaunch(newLaunchGate(), func(string) int { return 0 }, tc.verdicts, ""))
+			serial := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, true, true, testsRedLaunch(newLaunchGate(), func(string) int { return 0 }, tc.verdicts, ""))
 			if serial.err != nil || !reflect.DeepEqual(serial.result.TestsRedOnBase, proof) || !slices.Equal(testsRedAttemptCommands(serial.result), tc.wantAttempt) {
 				t.Errorf("serial proof %+v (err %v) differs from the waves' %+v", serial.result.TestsRedOnBase, serial.err, proof)
 			}
@@ -196,7 +196,7 @@ func TestHistoryRecordedBeforeParallelReproductionLaunchesRunsTestsRedSerially(t
 	fail := testsRedKinds(reproduction.OutcomeFailed, reproduction.KindFail)
 	verdicts := map[string]ReproductionRunResult{"0-result": pass, "1-result": pass, "2-result": fail, "0-base": fail, "1-base": fail}
 	gate := newLaunchGate()
-	p := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, true, false, testsRedLaunch(gate, func(string) int { return 0 }, verdicts, ""))
+	p := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, true, true, testsRedLaunch(gate, func(string) int { return 0 }, verdicts, ""))
 	want := []string{"tests-red-hold", "tests-red-0-result", "tests-red-0-base", "tests-red-1-result", "tests-red-1-base", "tests-red-2-result"}
 	if p.err != nil || !slices.Equal(p.calls, want) || gate.maxInFlight != 1 {
 		t.Errorf("err %v, calls %v, most at once %d; want %v one at a time", p.err, p.calls, gate.maxInFlight, want)
@@ -215,7 +215,7 @@ func TestTestsRedWaveWaitsForEveryLaunchBeforeItsFirstErrorEndsTheRun(t *testing
 		}
 		return 0
 	}
-	p := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, false, testsRedLaunch(gate, wave, verdicts, "1-result"))
+	p := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, true, testsRedLaunch(gate, wave, verdicts, "1-result"))
 	if p.err == nil || !strings.Contains(p.err.Error(), "the sandbox is gone") {
 		t.Fatalf("workflow error = %v, want the launch's error", p.err)
 	}
@@ -332,7 +332,7 @@ func TestChallengeLaunchesRunInWavesWithTheSerialRecord(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gate := newLaunchGate()
-			fx := &challengeFixture{inTurn: true, launchErr: tc.launchErr}
+			fx := &challengeFixture{inTurn: true, noSidecars: true, launchErr: tc.launchErr}
 			p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, tc.waves, tc.red), 1, nil, fx)
 			c := p.result.Challenge
 			if p.err != nil || c == nil || p.result.State != run.StateAccepted {
@@ -374,7 +374,7 @@ func TestChallengeLaunchesRunInWavesWithTheSerialRecord(t *testing.T) {
 			if !slices.Equal(gotIDs, wantIDs) {
 				t.Errorf("Activities launched %v, want %v", gotIDs, wantIDs)
 			}
-			serial := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(newLaunchGate(), nil, tc.red), 1, nil, &challengeFixture{inTurn: true, launchErr: tc.launchErr, serialLaunches: true})
+			serial := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(newLaunchGate(), nil, tc.red), 1, nil, &challengeFixture{inTurn: true, noSidecars: true, launchErr: tc.launchErr, serialLaunches: true})
 			if serial.err != nil || !reflect.DeepEqual(serial.result.Challenge, c) || !slices.Equal(challengeAttemptCommands(serial.result), tc.wantAttempts) {
 				t.Errorf("serial record %+v (err %v) differs from the waves' %+v", serial.result.Challenge, serial.err, c)
 			}
@@ -387,7 +387,7 @@ func TestChallengeLaunchesRunInWavesWithTheSerialRecord(t *testing.T) {
 func TestHistoryRecordedBeforeParallelReproductionLaunchesRunsTheChallengeSerially(t *testing.T) {
 	gate := newLaunchGate()
 	red := map[string]bool{"0-challenge1": true, "0-challenge2": true, "1-challenge1": true}
-	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, red), 1, nil, &challengeFixture{serialLaunches: true})
+	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, red), 1, nil, &challengeFixture{noSidecars: true, serialLaunches: true})
 	want := []string{"challenge-run-0-challenge1", "challenge-run-0-challenge2", "challenge-run-1-challenge1", "challenge-run-1-challenge2", "challenge-run-2-challenge1", "challenge-run--1-challenge1"}
 	if p.err != nil || !slices.Equal(p.launches, want) || gate.maxInFlight != 1 {
 		t.Errorf("err %v, launches %v, most at once %d; want %v one at a time", p.err, p.launches, gate.maxInFlight, want)
@@ -405,7 +405,7 @@ func realRunInput(in RunWorkflowInput) RunWorkflowInput {
 // launch in waves.
 func TestComposeServicesEnabledWithoutSidecarsLaunchesInWaves(t *testing.T) {
 	gate := newLaunchGate()
-	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, map[string]int{challengePass1: 4}, nil), 1, nil, &challengeFixture{inTurn: true})
+	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, map[string]int{challengePass1: 4}, nil), 1, nil, &challengeFixture{inTurn: true, noSidecars: true})
 	if p.err != nil || len(p.launches) != 4 || gate.maxInFlight != 4 || len(gate.timedOut) != 0 {
 		t.Errorf("challenge: err %v, launches %v, most at once %d, timed out %v; want four launches together", p.err, p.launches, gate.maxInFlight, gate.timedOut)
 	}
@@ -414,17 +414,18 @@ func TestComposeServicesEnabledWithoutSidecarsLaunchesInWaves(t *testing.T) {
 	fail := testsRedKinds(reproduction.OutcomeFailed, reproduction.KindFail)
 	verdicts := map[string]ReproductionRunResult{"0-result": pass, "1-result": pass, "2-result": pass, "0-base": fail, "1-base": fail, "2-base": fail}
 	wave := func(string) int { return 3 }
-	tp := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, false, testsRedLaunch(tg, wave, verdicts, ""))
+	tp := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, true, testsRedLaunch(tg, wave, verdicts, ""))
 	if tp.err != nil || tg.maxInFlight != 3 || len(tg.timedOut) != 0 {
 		t.Errorf("tests red: err %v, most at once %d, timed out %v; want three launches together", tp.err, tg.maxInFlight, tg.timedOut)
 	}
 }
 
-// A run whose launches start compose sidecars keeps one launch at a time: the
-// sidecars' project and network are the run's, not the launch's.
-func TestComposeSidecarsLaunchOneAtATime(t *testing.T) {
+// A verify result without NoComposeSidecars (compose sidecars, or a result an
+// older worker recorded) keeps one launch at a time: the sidecars' project and
+// network are the run's, not the launch's, and a missing fact is not a "no".
+func TestMissingNoComposeSidecarsFactLaunchesOneAtATime(t *testing.T) {
 	gate := newLaunchGate()
-	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{inTurn: true, sidecars: true})
+	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{inTurn: true})
 	if p.err != nil || len(p.launches) != 4 || gate.maxInFlight != 1 {
 		t.Errorf("challenge: err %v, launches %v, most at once %d; want four launches one at a time", p.err, p.launches, gate.maxInFlight)
 	}
@@ -432,7 +433,7 @@ func TestComposeSidecarsLaunchOneAtATime(t *testing.T) {
 	pass := testsRedKinds(reproduction.OutcomePassed, reproduction.KindPass)
 	fail := testsRedKinds(reproduction.OutcomeFailed, reproduction.KindFail)
 	verdicts := map[string]ReproductionRunResult{"0-result": pass, "1-result": pass, "2-result": pass, "0-base": fail, "1-base": fail, "2-base": fail}
-	tp := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, true, testsRedLaunch(tg, func(string) int { return 0 }, verdicts, ""))
+	tp := runTestsRedPhaseWith(t, realRunInput(testsRedInput()), threeTestsRedFiles(), 0, true, false, false, testsRedLaunch(tg, func(string) int { return 0 }, verdicts, ""))
 	if tp.err != nil || len(tp.calls) != 7 || tg.maxInFlight != 1 {
 		t.Errorf("tests red: err %v, calls %v, most at once %d; want the hold and six launches one at a time", tp.err, tp.calls, tg.maxInFlight)
 	}
@@ -443,7 +444,7 @@ func TestComposeSidecarsLaunchOneAtATime(t *testing.T) {
 func TestChallengeBesideTheReviewLaunchesOneAtATime(t *testing.T) {
 	red := map[string]bool{"0-challenge1": true, "0-challenge2": true, "1-challenge1": true}
 	gate := newLaunchGate()
-	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, red), 1, nil, &challengeFixture{})
+	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, red), 1, nil, &challengeFixture{noSidecars: true})
 	if p.err != nil || p.result.Challenge == nil || !p.result.Challenge.WithReview || len(p.launches) != 6 || gate.maxInFlight != 1 {
 		t.Fatalf("err %v, challenge %+v, launches %v, most at once %d; want a with-review challenge of six launches one at a time", p.err, p.result.Challenge, p.launches, gate.maxInFlight)
 	}
@@ -457,7 +458,7 @@ func TestChallengeBesideTheReviewLaunchesOneAtATime(t *testing.T) {
 // attempt reaps the run's containers, which would kill a sibling launch.
 func TestRunWithRetriedActivitiesLaunchesOneAtATime(t *testing.T) {
 	gate := newLaunchGate()
-	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{inTurn: true, retriesV1: true})
+	p := runChallengePhaseWith(t, realRunInput(challengeInput()), challengeJobFiles(), challengeLaunch(gate, nil, nil), 1, nil, &challengeFixture{inTurn: true, noSidecars: true, retriesV1: true})
 	if p.err != nil || len(p.launches) != 4 || gate.maxInFlight != 1 {
 		t.Errorf("err %v, launches %v, most at once %d; want four launches one at a time", p.err, p.launches, gate.maxInFlight)
 	}

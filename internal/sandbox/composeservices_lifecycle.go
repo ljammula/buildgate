@@ -107,6 +107,25 @@ func LoadComposeServicesSpecFromGit(gitDir, baseSHA string, parseOptions compose
 	return spec, nil
 }
 
+// ComposeFilesAbsentAt reports whether commit in the repository at gitDir holds
+// none of ComposeServicesFileNames, positively: it lists the tree for those
+// names, so a path that is not in the commit is told apart from any other git
+// failure (an unknown commit, an unreadable repository), which is an error.
+// LoadComposeServicesSpecFromGit reads absence and failure alike as "no
+// compose file"; a caller that must not mistake the second for the first asks
+// this. BeginComposeServicesLifecycle acts on any compose file.
+func ComposeFilesAbsentAt(gitDir, commit string) (bool, error) {
+	if commit == "" {
+		return false, errors.New("no commit to look for compose files in")
+	}
+	args := append([]string{"-C", gitDir, "ls-tree", "--name-only", commit, "--"}, ComposeServicesFileNames...)
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return false, fmt.Errorf("list compose files at %s: %w", commit, err)
+	}
+	return len(strings.TrimSpace(string(out))) == 0, nil
+}
+
 // gitShowBlobAtCommit returns path's content at commit in the repository
 // rooted at gitDir, or a non-nil error whenever git itself reports the
 // path absent at that commit (an ordinary, expected outcome the caller

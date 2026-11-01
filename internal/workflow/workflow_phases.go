@@ -281,7 +281,7 @@ func buildAndVerify(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 		return VerifyActivityResult{}, wrapActivityFailure("run verify activity", err, result.Attempts, result.BaseSHA, result.CommittedByWorker, worktreePath, branch)
 	}
 	result.Verify = verify.Result
-	result.composeSidecars = verify.ComposeServices
+	result.noComposeSidecars = verify.NoComposeSidecars
 	result.Attempts = append(result.Attempts, verify.Attempts...)
 	return verify, nil
 }
