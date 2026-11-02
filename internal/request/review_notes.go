@@ -290,16 +290,11 @@ func lockfileNotes(tickets []PlanTicket) []string {
 	var notes []string
 	for _, ticket := range tickets {
 		var found []string
-		for _, entry := range ticket.Allowed {
-			if strings.HasSuffix(entry, "/") || strings.ContainsAny(entry, "*?[") {
-				continue
-			}
-			clean := path.Clean(entry)
-			if !path.IsAbs(clean) && clean != ".." && !strings.HasPrefix(clean, "../") && known[path.Base(clean)] {
-				found = append(found, clean)
+		for _, file := range allowedFiles(ticket.Allowed) {
+			if known[path.Base(file)] {
+				found = append(found, file)
 			}
 		}
-		found = uniqueStrings(found)
 		if len(found) == 0 {
 			continue
 		}
@@ -312,19 +307,6 @@ func lockfileNotes(tickets []PlanTicket) []string {
 	return notes
 }
 
-// uniqueStrings returns s without repeats, in first-seen order.
-func uniqueStrings(s []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, v := range s {
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 // maxNamedItems is how many tests, files or tickets an earlier-tests note
 // names before "and N more".
 const maxNamedItems = 3
@@ -334,21 +316,32 @@ const maxNamedItems = 3
 // so the earlier-tests note skips it. A rule over file names, not contents.
 var docExtensions = map[string]bool{".css": true, ".scss": true, ".sass": true, ".less": true, ".md": true, ".txt": true}
 
-// allowedFileSet returns the file entries of allowed, cleaned (path.Clean,
-// so "./a.go" is "a.go") and without repeats. A directory entry (trailing
-// "/") and an entry with a glob character ("*?[") name no file and are left
-// out.
-func allowedFileSet(allowed []string) map[string]bool {
-	files := map[string]bool{}
+// allowedFiles returns the file entries of allowed in their order, cleaned
+// (path.Clean, so "./a.go" is "a.go") and without repeats. A directory entry
+// (trailing "/"), an entry with a glob character ("*?[") and a path outside
+// the repository name no file of it and are left out.
+func allowedFiles(allowed []string) []string {
+	seen := map[string]bool{}
+	var files []string
 	for _, entry := range allowed {
 		if strings.HasSuffix(entry, "/") || strings.ContainsAny(entry, "*?[") {
 			continue
 		}
 		clean := path.Clean(entry)
-		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+		if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") || seen[clean] {
 			continue
 		}
-		files[clean] = true
+		seen[clean] = true
+		files = append(files, clean)
+	}
+	return files
+}
+
+// allowedFileSet returns allowedFiles(allowed) as a set.
+func allowedFileSet(allowed []string) map[string]bool {
+	files := map[string]bool{}
+	for _, file := range allowedFiles(allowed) {
+		files[file] = true
 	}
 	return files
 }
