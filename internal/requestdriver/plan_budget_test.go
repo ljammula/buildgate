@@ -2,6 +2,7 @@ package requestdriver_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -187,5 +188,44 @@ func TestPlanningPrefersTheTestPatternsRecordedAtSubmit(t *testing.T) {
 	}
 	if !hasEarlierTestsNote(older) {
 		t.Errorf("the config's patterns mark the tests, but notes = %q", older.ReviewNotes)
+	}
+}
+
+// TestPlanningRecordsTheReleasePolicyForTheLockfileNote: planning records
+// whether the worker's release policy denies dependency-lockfile changes, and
+// the review's notes name a ticket that allows a lockfile only when it does.
+func TestPlanningRecordsTheReleasePolicyForTheLockfileNote(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allow=%v", allow), func(t *testing.T) {
+			c := loadPlanCase(t, filepath.Join(planBudgetDir, "small"), "small")
+			c.tickets[0].Content = strings.Replace(c.tickets[0].Content, "Allowed-Files: ", "Allowed-Files: backend/go.sum, ", 1)
+			dataDir, id := requestdrivertest.ApprovedPlanningFixtureNoFactoryYML(t, c.spec, c.verifyCommand)
+			usePlanningJob(t, dataDir, id)
+			fixture, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			testfixture.WriteEmptyFiles(t, fixture.Workspace, filepath.Join(planCorpusDir, planCorpusWorkspaces, c.project+".files"))
+			runner, _ := requestdrivertest.StubPlanTicketsRunner(c.tickets, &request.PlanEvidence{}, nil)
+			cfg := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
+			cfg.Settings.ReleaseAllowDependencyLockfileChanges = allow
+			if err := requestdrivertest.DriveRequests(newFakeDeps(t), context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), runner, requestdrivertest.FailingBuildRunner(t)); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := request.Load(dataDir, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.State != request.StatePlanReview {
+				t.Fatalf("state = %s (error %q), want plan_review", loaded.State, loaded.Error)
+			}
+			if loaded.PlanLockfilesDenied == allow {
+				t.Errorf("PlanLockfilesDenied = %v with allow = %v", loaded.PlanLockfilesDenied, allow)
+			}
+			found := strings.Contains(strings.Join(loaded.ReviewNotes, "\n"), "backend/go.sum, a dependency lockfile")
+			if found == allow {
+				t.Errorf("lockfile note present = %v with allow = %v: %q", found, allow, loaded.ReviewNotes)
+			}
+		})
 	}
 }

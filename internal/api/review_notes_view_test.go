@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -52,5 +54,39 @@ func TestRequestDetailViewReadsItsNotesFromTheFilesAsTheyAre(t *testing.T) {
 	}
 	if notes := notesFor("The handler rejects an empty body."); len(notes) != 0 {
 		t.Errorf("review_notes = %q after the criterion was edited on disk, want none", notes)
+	}
+}
+
+// TestUpdateRequestTicketRefreshesTheLockfileNote: editing a ticket in place
+// at plan_review recomputes the notes with the release policy the request
+// recorded at planning.
+func TestUpdateRequestTicketRefreshesTheLockfileNote(t *testing.T) {
+	dataDir := t.TempDir()
+	seedPlanReviewRequestWithTicket(t, dataDir, "req-1")
+	writeSeedSpec(t, dataDir, "req-1")
+	r, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.PlanLockfilesDenied = true
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(validTicketMD, "Allowed-Files: internal/payments/refunds.go", "Allowed-Files: internal/payments/refunds.go, backend/go.sum", 1)
+	body, err := json.Marshal(updateRequestContentBody{Content: edited})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(recorder, requestActionFor(t, http.MethodPut, "/requests/req-1/tickets/1", "test-token", string(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	loaded, err := request.Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(loaded.ReviewNotes, "\n"), "Ticket 001.spec.md allows backend/go.sum, a dependency lockfile") {
+		t.Errorf("review notes after the edit = %q, want the lockfile note", loaded.ReviewNotes)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"buildgate/internal/evidence"
 	"buildgate/internal/policy"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/ticketspec"
@@ -96,7 +97,7 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		estimate, _ := ticketspec.EstimatedChangedLinesOf(string(content))
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed, Estimate: estimate})
 	}
-	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines, r.TestPatterns)
+	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines, r.TestPatterns, r.PlanLockfilesDenied)
 }
 
 // planSkippedReview reports whether r is building on a plan the factory
@@ -210,14 +211,22 @@ func SpecReviewNotes(specContent string) []string {
 //     more". Entries are cleaned (path.Clean) and deduplicated; directory
 //     and glob entries are skipped. Only Allowed-Files headers and the test
 //     patterns are read, never a ticket's prose.
+//   - "Ticket T allows F, a dependency lockfile; the release policy denies
+//     lockfile changes (release_allow_dependency_lockfile_changes: false),
+//     so a run that changes it is accepted with no pull request": only when
+//     lockfilesDenied (Request.PlanLockfilesDenied, the session config's
+//     release policy when planning started), and T's Allowed-Files has a
+//     file entry whose basename is in evidence.KnownLockfileNames. At most
+//     one note for each ticket: the first such entry and "(and N more)".
+//     Directory and glob entries are skipped. Allowed-Files headers only.
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
-func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, budgetLines int, testPatterns []string) []string {
-	return planReviewNotes(criteria, tickets, workspace, true, budgetLines, testPatterns)
+func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, budgetLines int, testPatterns []string, lockfilesDenied bool) []string {
+	return planReviewNotes(criteria, tickets, workspace, true, budgetLines, testPatterns, lockfilesDenied)
 }
 
-func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int, testPatterns []string) []string {
+func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int, testPatterns []string, lockfilesDenied bool) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))
@@ -245,6 +254,9 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 	}
 	// Last, so that they can never push a criterion's note out of the cap.
 	notes = append(notes, earlierTestsNotes(tickets, testPatterns)...)
+	if lockfilesDenied {
+		notes = append(notes, lockfileNotes(tickets)...)
+	}
 	return capReviewNotes(notes)
 }
 
@@ -261,6 +273,56 @@ func overBudgetNotes(tickets []PlanTicket, budgetLines int) []string {
 		}
 	}
 	return notes
+}
+
+// lockfileNotes returns one note for each ticket whose Allowed-Files names a
+// dependency lockfile (a file entry whose exact basename is in
+// evidence.KnownLockfileNames), for a plan reviewed under a release policy
+// that denies lockfile changes: a run that changes one is accepted with no
+// pull request. The note names the first such entry (cleaned) and "(and N
+// more)". Directory and glob entries are skipped. Only Allowed-Files
+// headers are read, never a ticket's prose.
+func lockfileNotes(tickets []PlanTicket) []string {
+	known := map[string]bool{}
+	for _, name := range evidence.KnownLockfileNames {
+		known[name] = true
+	}
+	var notes []string
+	for _, ticket := range tickets {
+		var found []string
+		for _, entry := range ticket.Allowed {
+			if strings.HasSuffix(entry, "/") || strings.ContainsAny(entry, "*?[") {
+				continue
+			}
+			clean := path.Clean(entry)
+			if !path.IsAbs(clean) && clean != ".." && !strings.HasPrefix(clean, "../") && known[path.Base(clean)] {
+				found = append(found, clean)
+			}
+		}
+		found = uniqueStrings(found)
+		if len(found) == 0 {
+			continue
+		}
+		more := ""
+		if len(found) > 1 {
+			more = fmt.Sprintf(" (and %d more)", len(found)-1)
+		}
+		notes = append(notes, fmt.Sprintf("Ticket %s allows %s%s, a dependency lockfile; the release policy denies lockfile changes (release_allow_dependency_lockfile_changes: false), so a run that changes it is accepted with no pull request.", noteName(ticket.Name), noteName(found[0]), more))
+	}
+	return notes
+}
+
+// uniqueStrings returns s without repeats, in first-seen order.
+func uniqueStrings(s []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range s {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // maxNamedItems is how many tests, files or tickets an earlier-tests note
