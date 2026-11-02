@@ -705,6 +705,11 @@ type Request struct {
 	// budget), recorded when planning starts so the review's notes and display
 	// stay the same if the session config changes afterwards. Advice only.
 	PlanBudgetLines int `json:"plan_budget_lines,omitempty"`
+	// PlanLockfilesDenied records that the release policy in force when
+	// planning started did not allow dependency-lockfile changes
+	// (release_allow_dependency_lockfile_changes false), so the review's
+	// notes can say when a ticket allows a lockfile. Advice only.
+	PlanLockfilesDenied bool `json:"plan_lockfiles_denied,omitempty"`
 	// PlanVerifyCommand is the effective verify command when the plan was
 	// prepared, for the spec ticket that has no Verify-Command header.
 	PlanVerifyCommand string `json:"plan_verify_command,omitempty"`

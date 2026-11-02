@@ -612,6 +612,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 	// The budget the planner is told is the one the review's notes read.
 	r.PlanBudgetLines = cfg.Settings.PRBudgetLines
+	r.PlanLockfilesDenied = !cfg.Settings.ReleaseAllowDependencyLockfileChanges
 	r.PlanVerifyCommand = verifyCommand
 	if !r.PlanImported && request.PlanFeedback(r) == "" && r.SizeReplan == nil {
 		return planApprovedSpec(dp, dataDir, r, inputs, ticketsDir, now)

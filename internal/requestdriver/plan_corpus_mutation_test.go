@@ -302,7 +302,7 @@ func (p mutationPlan) notes(n int, text, owned string) []string {
 		tickets = append(append([]request.PlanTicket{}, tickets...), request.PlanTicket{Name: otherTicket, Content: "a ticket that covers no criterion", Allowed: []string{owned}})
 	}
 	var notes []string
-	for _, note := range request.PlanReviewNotes(criteria, tickets, p.workspace, 0, nil) {
+	for _, note := range request.PlanReviewNotes(criteria, tickets, p.workspace, 0, nil, false) {
 		// The earlier-tests notes read ticket headers only, not a
 		// criterion, and come after every criterion note; these tests
 		// compare a criterion's notes in order, so they leave them out for
