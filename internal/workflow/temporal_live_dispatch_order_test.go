@@ -34,11 +34,16 @@ func TestTemporalLiveOneSlotQueueServesWaitingStepsInOrder(t *testing.T) {
 
 	var mu sync.Mutex
 	var started []string
+	// busy0 holds the one slot until every waiting step is queued, however
+	// slow the machine.
+	release := make(chan struct{})
 	step := func(_ context.Context, name string) error {
 		mu.Lock()
 		started = append(started, name)
 		mu.Unlock()
-		time.Sleep(time.Second)
+		if name == "busy0" {
+			<-release
+		}
 		return nil
 	}
 	stepOptions := func(ctx temporalworkflow.Context) temporalworkflow.Context {
@@ -94,8 +99,13 @@ func TestTemporalLiveOneSlotQueueServesWaitingStepsInOrder(t *testing.T) {
 	for i := range 8 {
 		name := fmt.Sprintf("waiting%d", i)
 		want = append(want, name)
-		runs = append(runs, start("Waiting", name))
+		run := start("Waiting", name)
+		runs = append(runs, run)
+		// The next one starts only once this one's step is queued, so the
+		// order they were queued in is the order they were started in.
+		waitForQueuedStep(t, ctx, temporalClient, run)
 	}
+	close(release)
 	for _, run := range runs {
 		if err := run.Get(ctx, nil); err != nil {
 			t.Fatalf("workflow %s: %v", run.GetID(), err)
@@ -111,11 +121,28 @@ func TestTemporalLiveOneSlotQueueServesWaitingStepsInOrder(t *testing.T) {
 		}
 	}
 	if !slices.Equal(got, want) {
-		t.Errorf("waiting steps started in order %v, want %v (all steps: %v)", got, want, started)
+		t.Errorf("waiting steps started in order %v, want %v (all steps: %v); a server with more than one write partition per task queue serves them in random order", got, want, started)
 	}
-	// busy0 held the slot while all eight were queued; busy1 was scheduled
+	// busy0 held the slot while all eight were queued; busy1 was queued
 	// after them, so it starts only once they have all started.
 	if i := slices.Index(started, "busy1"); i != len(want)+1 {
 		t.Errorf("busy1 started at position %d, want %d, after every waiting step (all steps: %v)", i, len(want)+1, started)
+	}
+}
+
+// waitForQueuedStep waits until run's workflow has its activity scheduled.
+func waitForQueuedStep(t *testing.T, ctx context.Context, temporalClient client.Client, run client.WorkflowRun) {
+	t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		desc, err := temporalClient.DescribeWorkflowExecution(ctx, run.GetID(), run.GetRunID())
+		if err != nil {
+			t.Fatalf("describe %s: %v", run.GetID(), err)
+		}
+		if len(desc.GetPendingActivities()) > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workflow %s never queued its step", run.GetID())
+		}
 	}
 }

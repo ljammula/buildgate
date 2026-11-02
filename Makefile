@@ -341,8 +341,9 @@ baseline-test:
 # as console-build-optional above, so `make install` keeps working on a
 # machine that never installed Docker (builds there need a Temporal server of
 # its own). Idempotent: `up -d`
-# against containers already running from a previous `make install` is a
-# no-op.
+# against containers already running from the same compose file is a no-op;
+# after a change to the file (such as its Temporal dynamic config) it
+# recreates the changed container, restarting Temporal.
 temporal-up:
 	@if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then \
 		echo "Starting Temporal (docker compose -f docker-compose.temporal.yml up -d)..."; \

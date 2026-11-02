@@ -286,7 +286,7 @@ trailing request text `factoryd submit` takes; each must precede
 **Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
 that are missing, starts colima and runs `gh auth login`. On Linux it installs
 nothing and runs no `sudo`: it names each missing tool and stops, with the
-docker CLI, buildx and Compose v2 from Docker's own apt repository
+docker CLI, buildx and Compose v2 (2.23.1 or later) from Docker's own apt repository
 (`docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
 distribution's `docker.io` or the snap, and colima, whose VM runs Docker as on
 a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (colima: `colima

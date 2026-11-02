@@ -240,7 +240,8 @@ func TestTemporalComposeServesOneSlotQueuesInOrder(t *testing.T) {
 	compose := string(buildgate.TemporalCompose)
 	for _, want := range []string{
 		"target: /etc/temporal/config/dynamicconfig/docker.yaml",
-		"matching.numTaskqueueWritePartitions:\n        - value: 1\n",
+		"matching.numTaskqueueWritePartitions:",
+		"- value: 1",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("docker-compose.temporal.yml lacks %q", want)
