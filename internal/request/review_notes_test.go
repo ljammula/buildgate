@@ -495,6 +495,22 @@ func TestPlanReviewNotesNameALockfileTheReleasePolicyDenies(t *testing.T) {
 	}
 }
 
+// TestPlanReviewNotesKeepTheLockfileNoteInACappedList: a denied lockfile
+// stops the build at release, so its note comes before the criterion notes
+// that the cap folds into a count.
+func TestPlanReviewNotesKeepTheLockfileNoteInACappedList(t *testing.T) {
+	owned := []string{"go.sum"}
+	criterion := "1. Changes:"
+	for i := 0; i < 14; i++ {
+		owned = append(owned, fmt.Sprintf("pkg/f%02d.go", i))
+		criterion += fmt.Sprintf(" `pkg/f%02d.go`,", i)
+	}
+	notes := PlanReviewNotes([]string{criterion}, []PlanTicket{notesTicket("001.spec.md", []string{"a.go"}, 1), notesTicket("002.spec.md", owned, 2)}, "", 0, nil, true)
+	if len(notes) != maxReviewNotes+1 || !strings.HasPrefix(notes[0], "Ticket 002.spec.md allows go.sum") {
+		t.Fatalf("notes = %q, want the lockfile note first in a capped list", notes)
+	}
+}
+
 // TestRefreshReviewNotesPassesTheRecordedLockfilePolicy: the notes of a
 // request read the policy it recorded at planning, so every place that
 // refreshes them (the API's view and ticket edit, watch) shows the note.

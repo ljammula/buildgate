@@ -244,6 +244,11 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 		}
 	}
 	notes := overBudgetNotes(tickets, budgetLines)
+	// First with the budget: a denied lockfile stops the build at release, so
+	// the cap must never fold its note away.
+	if lockfilesDenied {
+		notes = append(notes, lockfileNotes(tickets)...)
+	}
 	for i, text := range criteria {
 		if n := i + 1; listing[n] != nil {
 			notes = append(notes, plan.criterionNotes(n, text, covering[n], listing[n])...)
@@ -254,9 +259,6 @@ func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, 
 	}
 	// Last, so that they can never push a criterion's note out of the cap.
 	notes = append(notes, earlierTestsNotes(tickets, testPatterns)...)
-	if lockfilesDenied {
-		notes = append(notes, lockfileNotes(tickets)...)
-	}
 	return capReviewNotes(notes)
 }
 

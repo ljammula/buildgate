@@ -66,6 +66,7 @@ unless the request, the session config or the repository's `.factory.yml` opts i
 | `read_back`, `approved_read_back_sha256`, `read_back_answer_log` | Absent, and no read-back is drafted for it, its redrafts included: its answers would never reach a build. Approval needs none and its hashes verify at build |
 | `imported_plan_criteria`, `plan_import_ended` | Absent: a plan handed over before the upgrade is taken without the criteria comparison, so a changed spec does not stop planning |
 | `plan_budget_lines`, a ticket's `Estimated-Changed-Lines:` | Absent at `plan_review`: no budget and no note. Planning that runs after the upgrade reads `pr_budget_lines` from the session config then in force |
+| `plan_lockfiles_denied` | Absent at `plan_review`: no dependency-lockfile note. Planning that runs after the upgrade reads `release_allow_dependency_lockfile_changes` from the session config then in force |
 
 To move a request to the new shape, `factoryd cancel <id>` and submit it again.
 
