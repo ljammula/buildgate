@@ -57,6 +57,13 @@ class ThreadOutcomes(unittest.TestCase):
 		]
 		self.assertEqual(live_round.thread_outcomes(comments, [1], ["cafef00d" + "0" * 32]), {1: (True, 0)})
 
+	def test_a_commit_line_with_file_counts_counts(self):
+		comments = [
+			{"id": 1, "body": "fix"},
+			{"id": 2, "in_reply_to_id": 1, "body": "> ok\n\nPushed in cafef00d: `a.go` +3 \u22121, `b.go` +1 \u22120."},
+		]
+		self.assertEqual(live_round.thread_outcomes(comments, [1], ["cafef00d" + "0" * 32]), {1: (True, 0)})
+
 	def test_builder_text_naming_a_commit_mid_body_does_not_count(self):
 		comments = [
 			{"id": 1, "body": "fix"},

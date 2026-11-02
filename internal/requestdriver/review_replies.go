@@ -22,7 +22,7 @@ const maxReviewReplyBytes = 1500
 // builder to answer each reviewer comment in its final message, in the shape
 // reviewReplyBlocks finds.
 const reviewReplyInstruction = "\n## Replying to the reviewer\n\n" +
-	"End your final message with one reply per reviewer comment above, written to the reviewer in plain words: " +
+	"End your final message with one reply per comment under \"Reviewer comments to address\" (not the already-addressed ones), written to the reviewer in plain words: " +
 	"what you changed for that comment, and anything you did not do and why. " +
 	"Start each reply with a line `Reply (<path>:<line>):` (the path and line shown for that comment), " +
 	"then the reply text; it runs to the next `Reply (` line or the end of the message.\n"
@@ -210,14 +210,40 @@ func buildFinalMessages(roundRun *run.Run) []string {
 	return out
 }
 
-// reviewReplyBody is the reply posted on a thread: the builder's text for it
-// followed by the commit the factory pushed, or the fixed line when the
-// builder wrote none.
-func reviewReplyBody(text, sha string) string {
-	if text == "" {
-		return fmt.Sprintf("Addressed in %s.", sha)
+// maxReplyStatFiles bounds the files a reply's commit line names.
+const maxReplyStatFiles = 10
+
+// commitLine is the factory's own line of a reply: "<lead> in <sha>" and, from
+// host git, the files the round changed with their line counts, so a change
+// the builder did not mention (a revert of an earlier request) is visible to
+// the reviewer. With no stats it is the bare "<lead> in <sha>.".
+func commitLine(lead, sha string, stats []FileStat) string {
+	if len(stats) == 0 {
+		return fmt.Sprintf("%s in %s.", lead, sha)
 	}
-	return fmt.Sprintf("%s\n\nPushed in %s.", cleanReplyText(text), sha)
+	var parts []string
+	for i, s := range stats {
+		if i == maxReplyStatFiles {
+			parts = append(parts, fmt.Sprintf("and %d more", len(stats)-maxReplyStatFiles))
+			break
+		}
+		if s.Binary {
+			parts = append(parts, fmt.Sprintf("`%s` (binary)", replyInline(s.Path)))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("`%s` +%d \u2212%d", replyInline(s.Path), s.Added, s.Deleted))
+	}
+	return fmt.Sprintf("%s in %s: %s.", lead, sha, strings.Join(parts, ", "))
+}
+
+// reviewReplyBody is the reply posted on a thread: the builder's text for it
+// followed by the commit line, or the commit line alone ("Addressed in")
+// when the builder wrote none.
+func reviewReplyBody(text, sha string, stats []FileStat) string {
+	if text == "" {
+		return commitLine("Addressed", sha, stats)
+	}
+	return cleanReplyText(text) + "\n\n" + commitLine("Pushed", sha, stats)
 }
 
 // postReviewReplies replies on each included thread (the builder's words
@@ -225,7 +251,7 @@ func reviewReplyBody(text, sha string) string {
 // replies that match no thread as one pull request comment. A failed reply
 // is logged and leaves its thread unmarked, as before; nothing here fails the
 // push.
-func postReviewReplies(dp Deps, ctx context.Context, r *request.Request, ticket *request.Ticket, roundRun *run.Run, threads []forge.Thread) {
+func postReviewReplies(dp Deps, ctx context.Context, r *request.Request, ticket *request.Ticket, roundRun *run.Run, baseSHA string, threads []forge.Thread) {
 	var rounds [][]reviewReply
 	for _, m := range buildFinalMessages(roundRun) {
 		rounds = append(rounds, reviewReplyBlocks(m))
@@ -233,13 +259,22 @@ func postReviewReplies(dp Deps, ctx context.Context, r *request.Request, ticket 
 	byThread, unmatched := matchRoundsReplies(rounds, threads)
 	replyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	var stats []FileStat
+	if baseSHA != "" {
+		var err error
+		if stats, err = dp.ChangedFileStats(r.Workspace, baseSHA, roundRun.ResultSHA); err != nil {
+			log.Printf("request %s: ticket %d: files changed by the round, for its replies: %v", r.ID, ticket.Index, err)
+			stats = nil
+		}
+	}
 	for i, t := range threads {
-		body := reviewReplyBody(byThread[i], roundRun.ResultSHA)
+		body := reviewReplyBody(byThread[i], roundRun.ResultSHA, stats)
 		if err := PostReviewReply(dp, replyCtx, ticket.PRURL, t.CommentID, body); err != nil {
 			log.Printf("request %s: ticket %d: reply on thread %s: %v", r.ID, ticket.Index, t.ID, err)
 			continue
 		}
 		ticket.SeenThreadIDs = append(ticket.SeenThreadIDs, forge.ThreadSeenKey(t))
+		ticket.RecordAddressed(request.AddressedComment{ThreadID: t.ID, Path: t.Path, Line: t.Line, Author: t.Author, Body: t.Body})
 	}
 	if len(unmatched) == 0 {
 		return

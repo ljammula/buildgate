@@ -83,3 +83,6 @@ func WriteRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 func RestackCarvedOntoPredecessor(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) (bool, error) {
 	return restackCarvedOntoPredecessor(dp, ctx, dataDir, r, ticket, now)
 }
+
+// ParseNumstatZ is parseNumstatZ for the external test package.
+func ParseNumstatZ(out string) []FileStat { return parseNumstatZ(out) }

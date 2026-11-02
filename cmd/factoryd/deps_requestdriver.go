@@ -34,6 +34,9 @@ func (dp *deps) RetargetPullRequestBase(ctx context.Context, prURL string, base 
 func (dp *deps) RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error) {
 	return dp.forge.roundResultDescendsFromHead(dir, ancestor, descendant)
 }
+func (dp *deps) ChangedFileStats(dir string, base string, head string) ([]requestdriver.FileStat, error) {
+	return dp.forge.changedFileStats(dir, base, head)
+}
 func (dp *deps) CreateRef(dir string, ref string, sha string) error {
 	return dp.forge.createRef(dir, ref, sha)
 }
@@ -118,6 +121,9 @@ func (impl realForge) remoteBranchHeadSHA(ctx context.Context, workspaceDir, bra
 }
 func (impl realForge) roundResultDescendsFromHead(dir, ancestor, descendant string) (bool, error) {
 	return requestdriver.RealRoundResultDescendsFromHead(dir, ancestor, descendant)
+}
+func (impl realForge) changedFileStats(dir, base, head string) ([]requestdriver.FileStat, error) {
+	return requestdriver.RealChangedFileStats(dir, base, head)
 }
 func (impl realForge) commentOnPullRequest(ctx context.Context, prURL string, body string) error {
 	return requestdriver.RealCommentOnPullRequest(ctx, prURL, body)

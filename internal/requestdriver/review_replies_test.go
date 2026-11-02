@@ -2,8 +2,10 @@ package requestdriver_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -38,6 +40,18 @@ func runReplyRound(t *testing.T, threads []forge.Thread, final string, withEvide
 // oldest first (none: the run recorded no evidence).
 func runReplyRounds(t *testing.T, threads []forge.Thread, finals []string) ([]postedReply, []string) {
 	t.Helper()
+	replies, comments, _ := runReplyRoundsOn(t, threads, finals)
+	return replies, comments
+}
+
+// replyStatsFn, when a test sets it, is the round's numstat; the default
+// fake refuses, as a failed git does.
+var replyStatsFn func(dir, base, head string) ([]requestdriver.FileStat, error)
+
+// runReplyRoundsOn is runReplyRounds that also returns the request after the round.
+func runReplyRoundsOn(t *testing.T, threads []forge.Thread, finals []string) ([]postedReply, []string, *request.Request) {
+	t.Helper()
+	t.Cleanup(func() { replyStatsFn = nil })
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
@@ -56,6 +70,9 @@ func runReplyRounds(t *testing.T, threads []forge.Thread, finals []string) ([]po
 		requestdrivertest.LastPushedSHA[branch] = sha
 		return nil
 	}
+	if replyStatsFn != nil {
+		dp.changedFileStatsFn = replyStatsFn
+	}
 	var replies []postedReply
 	dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error {
 		replies = append(replies, postedReply{commentID, body})
@@ -72,7 +89,7 @@ func runReplyRounds(t *testing.T, threads []forge.Thread, finals []string) ([]po
 	if r.State == request.StateHalted {
 		t.Fatalf("halted: %s", r.Error)
 	}
-	return replies, comments
+	return replies, comments, r
 }
 
 // escapedChar matches a backslash escape and the character it protects.
@@ -296,5 +313,111 @@ func TestRoundBriefAsksForPerCommentReplies(t *testing.T) {
 	content, _ := os.ReadFile(path)
 	if !strings.Contains(string(content), "`Reply (<path>:<line>):`") {
 		t.Fatalf("brief lacks the reply instruction:\n%s", content)
+	}
+}
+
+func addressedFixture(n int, marker string) []request.AddressedComment {
+	var out []request.AddressedComment
+	for i := 0; i < n; i++ {
+		out = append(out, request.AddressedComment{ThreadID: fmt.Sprintf("old%d", i), Path: "old.go", Line: i + 1, Author: "alice", Body: fmt.Sprintf("%s-%d ", marker, i) + strings.Repeat("x", 1500)})
+	}
+	return out
+}
+
+func TestPushedRoundRecordsItsCommentsAndTheNextBriefListsThemAsAddressed(t *testing.T) {
+	first := []forge.Thread{{ID: "tA", Path: "a.go", Line: 3, Author: "alice", Body: "set Cache-Control: no-store", CommentID: 11}}
+	_, _, r := runReplyRoundsOn(t, first, nil)
+	ticket := &r.Tickets[0]
+	if len(ticket.Addressed) != 1 || ticket.Addressed[0].Body != "set Cache-Control: no-store" {
+		t.Fatalf("addressed = %+v", ticket.Addressed)
+	}
+	second := []forge.Thread{{ID: "tB", Path: "b.go", Line: 9, Author: "alice", Body: "rename the module", CommentID: 12}}
+	path, err := requestdriver.WriteRoundAddendum(filepath.Dir(ticket.SpecPath), r.ID, ticket, second, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	brief := string(raw)
+	todo, done, ok := strings.Cut(brief, "## Review comments already addressed")
+	if !ok || !strings.Contains(todo, "rename the module") || strings.Contains(todo, "no-store") || !strings.Contains(done, "no-store") || strings.Contains(done, "rename the module") {
+		t.Fatalf("brief sections wrong:\n%s", brief)
+	}
+	if !strings.Contains(done, "keep these changes unless a new comment asks otherwise") {
+		t.Errorf("heading lacks the instruction:\n%s", done)
+	}
+}
+
+func TestBriefDropsAddressedCommentsBeforeNewOnes(t *testing.T) {
+	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
+	ticket := &r.Tickets[0]
+	filler := "Verify-Command: make verify\n\n## Goal\n\n" + strings.Repeat("0123456789abcdef\n", 148000/17)
+	if err := os.WriteFile(ticket.SpecPath, []byte(filler), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ticket.Addressed = addressedFixture(6, "OLDBODY")
+	var fresh []forge.Thread
+	for i := 0; i < 15; i++ {
+		fresh = append(fresh, forge.Thread{ID: fmt.Sprintf("n%d", i), Path: "n.go", Line: i + 1, Author: "bob", Body: fmt.Sprintf("NEWBODY-%d ", i) + strings.Repeat("y", 1500), CommentID: int64(i + 1)})
+	}
+	path, err := requestdriver.WriteRoundAddendum(dataDir, r.ID, ticket, fresh, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	brief := string(raw)
+	for i := 0; i < 15; i++ {
+		if !strings.Contains(brief, fmt.Sprintf("NEWBODY-%d ", i)) {
+			t.Errorf("new comment %d was dropped", i)
+		}
+	}
+	if got := strings.Count(brief, "OLDBODY-"); got >= 6 || !strings.Contains(brief, "earlier review comments omitted") {
+		t.Errorf("already-addressed entries kept = %d, want some dropped with a note", got)
+	}
+}
+
+func TestReviewReplyCommitLineNamesFilesWithCounts(t *testing.T) {
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 3, Author: "alice", Body: "fix", CommentID: 11}}
+	replyStatsFn = func(dir, base, head string) ([]requestdriver.FileStat, error) {
+		if base == "" || head != replySHA {
+			t.Errorf("base %q head %q", base, head)
+		}
+		return []requestdriver.FileStat{{Path: "a.go", Added: 3, Deleted: 1}, {Path: "img.png", Binary: true}, {Path: "we`ird\nname.go", Added: 1}}, nil
+	}
+	replies, _ := runReplyRound(t, threads, "Reply (a.go:3):\nDone.", true)
+	want := "> Done.\n\nPushed in " + replySHA + ": `a.go` +3 \u22121, `img.png` (binary), `we'ird name.go` +1 \u22120."
+	if len(replies) != 1 || replies[0].body != want {
+		t.Fatalf("replies = %+v\nwant %q", replies, want)
+	}
+	replies, _ = runReplyRound(t, threads, "nothing", true)
+	if !strings.HasPrefix(replies[0].body, "Addressed in "+replySHA+": `a.go` +3") {
+		t.Errorf("no-reply body = %q", replies[0].body)
+	}
+}
+
+func TestReviewReplyCommitLineCapsFilesAndFallsBackWhenGitFails(t *testing.T) {
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 3, Author: "alice", Body: "fix", CommentID: 11}}
+	replyStatsFn = func(string, string, string) ([]requestdriver.FileStat, error) {
+		var st []requestdriver.FileStat
+		for i := 0; i < 13; i++ {
+			st = append(st, requestdriver.FileStat{Path: fmt.Sprintf("f%d.go", i), Added: 1})
+		}
+		return st, nil
+	}
+	replies, _ := runReplyRound(t, threads, "x", false)
+	if !strings.HasSuffix(replies[0].body, "`f9.go` +1 \u22120, and 3 more.") || strings.Contains(replies[0].body, "f10.go") {
+		t.Errorf("body = %q", replies[0].body)
+	}
+	replyStatsFn = func(string, string, string) ([]requestdriver.FileStat, error) { return nil, errors.New("git failed") }
+	replies, _ = runReplyRound(t, threads, "Reply (a.go:3):\nok", true)
+	if replies[0].body != "> ok\n\nPushed in "+replySHA+"." {
+		t.Errorf("body = %q, want the bare line", replies[0].body)
+	}
+}
+
+func TestParseNumstatZ(t *testing.T) {
+	got := requestdriver.ParseNumstatZ("3\t1\ta.go\x00-\t-\timg.png\x00")
+	want := []requestdriver.FileStat{{Path: "a.go", Added: 3, Deleted: 1}, {Path: "img.png", Binary: true}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("got %+v", got)
 	}
 }

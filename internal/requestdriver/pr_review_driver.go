@@ -169,6 +169,47 @@ func RealRoundResultDescendsFromHead(dir, ancestor, descendant string) (bool, er
 	return runner.GitIsAncestor(dir, ancestor, descendant)
 }
 
+// FileStat is one file's line counts between two commits (git numstat).
+// Binary is set for a file git counts no lines of.
+type FileStat struct {
+	Path    string
+	Added   int
+	Deleted int
+	Binary  bool
+}
+
+// RealChangedFileStats runs `git diff --numstat` between base and head in
+// dir, renames reported as a delete and an add.
+func RealChangedFileStats(dir, base, head string) ([]FileStat, error) {
+	out, err := exec.Command("git", "-C", dir, "diff", "--numstat", "-z", "--no-renames", base, head).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git diff --numstat %s %s: %w", base, head, err)
+	}
+	return parseNumstatZ(string(out)), nil
+}
+
+// parseNumstatZ reads `git diff --numstat -z --no-renames`: records of
+// "<added>\t<deleted>\t<path>" ended by NUL, "-" for a binary file's counts.
+func parseNumstatZ(out string) []FileStat {
+	var stats []FileStat
+	for _, rec := range strings.Split(out, "\x00") {
+		parts := strings.SplitN(rec, "\t", 3)
+		if len(parts) != 3 || parts[2] == "" {
+			continue
+		}
+		fs := FileStat{Path: parts[2]}
+		a, errA := strconv.Atoi(parts[0])
+		d, errD := strconv.Atoi(parts[1])
+		if errA != nil || errD != nil {
+			fs.Binary = true
+		} else {
+			fs.Added, fs.Deleted = a, d
+		}
+		stats = append(stats, fs)
+	}
+	return stats
+}
+
 // pullRequestOwnerRepoPattern extracts owner/repo from a GitHub PR URL --
 // mirrors internal/forge's own unexported pullRequestURLPattern (that
 // package's parsePullRequestURL is unexported too, so this is a small,
@@ -1104,7 +1145,7 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 	// sequence number used for naming (roundIndex above), but the slice
 	// position of the entry just appended is what pushAcceptedRoundAndReply
 	// needs to mark Pushed on the correct element.
-	return pushAcceptedRoundAndReply(dp, ctx, dataDir, r, ticket, len(ticket.Rounds)-1, loadID, branch, includedThreads, now)
+	return pushAcceptedRoundAndReply(dp, ctx, dataDir, r, ticket, len(ticket.Rounds)-1, loadID, branch, head.Run.ResultSHA, includedThreads, now)
 }
 
 // roundAttempt is how one build of a PR-review round ended: the run that
@@ -1314,7 +1355,7 @@ func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, 
 // the push, the push and its read-back are pushRoundResult's; a check that
 // refuses the push, and a push or read-back that fails, halt the request
 // with the reason, so a human reconciles the branch.
-func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, roundSliceIndex int, roundRunID, branch string, includedThreads []forge.Thread, now time.Time) error {
+func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, roundSliceIndex int, roundRunID, branch, baseSHA string, includedThreads []forge.Thread, now time.Time) error {
 	roundRun, err := run.Load(dataDir, roundRunID)
 	if err != nil {
 		return fmt.Errorf("request %s: ticket %d: load accepted round run %q: %w", r.ID, ticket.Index, roundRunID, err)
@@ -1324,7 +1365,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	}
 	afterRoundPushed(dp, ctx, r, ticket, roundSliceIndex, roundRun)
 
-	postReviewReplies(dp, ctx, r, ticket, roundRun, includedThreads)
+	postReviewReplies(dp, ctx, r, ticket, roundRun, baseSHA, includedThreads)
 	return r.Save(dataDir)
 }
 
@@ -1575,6 +1616,37 @@ func replyInline(s string) string {
 	return strings.ReplaceAll(flattenAddendumLine(s, MaxAddendumLabelBytes), "`", "'")
 }
 
+// MaxAddendumAddressedThreads bounds the already-addressed comments a round's
+// brief carries; the newest are kept.
+const MaxAddendumAddressedThreads = 10
+
+// addressedThreadsSection lists the earlier comments of this ticket's pull
+// request that a pushed round already answered, newest first, so a builder
+// asked to bring the code to the spec does not undo them. A thread raised
+// again in this round (it is in current) is not listed twice. They are the
+// reviewer's untrusted text, fenced and bounded as the new comments are.
+func addressedThreadsSection(addressed []request.AddressedComment, current []forge.Thread) boundedAddendumSection {
+	now := map[string]bool{}
+	for _, t := range current {
+		now[t.ID] = true
+	}
+	var entries []string
+	for i := len(addressed) - 1; i >= 0; i-- {
+		a := addressed[i]
+		if now[a.ThreadID] {
+			continue
+		}
+		path := flattenAddendumLine(a.Path, MaxAddendumLabelBytes)
+		author := flattenAddendumLine(a.Author, MaxAddendumLabelBytes)
+		body := capAddendumDetail(a.Body, MaxAddendumDetailBytes)
+		entries = append(entries, fmt.Sprintf("- **%s:%d** (%s):\n\n%s\n", path, a.Line, author, ticketspec.FenceVerbatim(body)))
+	}
+	return boundedAddendumSection{
+		heading: "\n## Review comments already addressed (keep these changes unless a new comment asks otherwise)", entries: entries,
+		omittedLabel: "earlier review comments", maxEntries: MaxAddendumAddressedThreads,
+	}
+}
+
 func reviewThreadsSection(threads []forge.Thread) boundedAddendumSection {
 	entries := make([]string, 0, len(threads))
 	for _, t := range threads {
@@ -1612,6 +1684,8 @@ func writeRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 	var sections []boundedAddendumSection
 	if len(threads) > 0 {
 		sections = append(sections, reviewThreadsSection(threads))
+		// After the new comments, which take the byte budget first.
+		sections = append(sections, addressedThreadsSection(ticket.Addressed, threads))
 	}
 	section, includedCounts := renderBoundedAddendumSectionsWithCounts(sections, MaxTicketBuildInputBytes-len([]byte(b.String())))
 	if section != "" {

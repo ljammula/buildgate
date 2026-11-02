@@ -177,6 +177,9 @@ type Ticket struct {
 	// ticket's PR -- forge.NewUnresolvedThreads' own "seen" filter, so a
 	// later poll only surfaces genuinely new unresolved threads.
 	SeenThreadIDs []string `json:"seen_thread_ids,omitempty"`
+	// Addressed are the review comments a pushed round answered, newest
+	// last, kept so a later round's brief can name them (AddressedComment).
+	Addressed []AddressedComment `json:"addressed,omitempty"`
 	// LastPolledAt is when this ticket's PR was last read via
 	// forge.ReadReviewState (the PR-review poll), so pr_poll_interval is
 	// honored per ticket rather than once per worker poll tick.
@@ -310,6 +313,43 @@ const ChallengeRoundKind = "challenge"
 // PR-review budget on a pre-PR round or the other way round.
 //
 // Counted is the one rule for which rounds use up either budget.
+// AddressedComment is a reviewer's comment that an accepted, pushed
+// PR-review round answered: what the next round's builder must not undo.
+// Path, Line, Author and Body are the reviewer's, untrusted text.
+type AddressedComment struct {
+	ThreadID string `json:"thread_id"`
+	Path     string `json:"path"`
+	Line     int    `json:"line"`
+	Author   string `json:"author"`
+	Body     string `json:"body"`
+}
+
+// MaxAddressedComments bounds Ticket.Addressed; the oldest are dropped.
+const MaxAddressedComments = 20
+
+// MaxAddressedBodyBytes bounds one recorded comment's body.
+const MaxAddressedBodyBytes = 2048
+
+// RecordAddressed appends c to the ticket's addressed comments, replacing an
+// earlier entry for the same thread, and drops the oldest beyond
+// MaxAddressedComments.
+func (t *Ticket) RecordAddressed(c AddressedComment) {
+	if len(c.Body) > MaxAddressedBodyBytes {
+		c.Body = strings.ToValidUTF8(c.Body[:MaxAddressedBodyBytes], "")
+	}
+	kept := t.Addressed[:0:0]
+	for _, old := range t.Addressed {
+		if old.ThreadID != c.ThreadID {
+			kept = append(kept, old)
+		}
+	}
+	kept = append(kept, c)
+	if len(kept) > MaxAddressedComments {
+		kept = kept[len(kept)-MaxAddressedComments:]
+	}
+	t.Addressed = kept
+}
+
 type Round struct {
 	Index int `json:"index"`
 	// Kind is "" (the zero value, so every round recorded before this

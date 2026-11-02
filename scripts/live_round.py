@@ -91,7 +91,7 @@ import sys
 import time
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "live-round"
-ADDRESSED = re.compile(r"(?:^|\n)(?:Addressed|Pushed) in ([0-9a-f]{7,40})\.$")
+ADDRESSED = re.compile(r"(?:^|\n)(?:Addressed|Pushed) in ([0-9a-f]{7,40})(?:\.|: [^\n]*\.)$")
 NOT_PUSHED = re.compile(r"^Attempted in corrective round (\d+) of (\d+)")
 STOPPED = {"halted", "quarantined", "cancelled", "done", "closed", "resume_review"}
 
