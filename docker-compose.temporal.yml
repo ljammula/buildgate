@@ -49,6 +49,16 @@ services:
       - SQL_MAX_IDLE_CONNS=6
       - SQL_VIS_MAX_CONNS=2
       - SQL_VIS_MAX_IDLE_CONNS=2
+    # One write partition per task queue (the dynamic config below), so the
+    # worker's jobs queue hands its slots out first come, first served.
+    # With the default four, a step waiting in one partition loses each free
+    # slot to a step scheduled moments later into another: a request's
+    # pr_review pass waited hours behind another request's ticket builds.
+    # Read partitions keep their default, so a server that already queued
+    # steps in the other partitions still serves them.
+    configs:
+      - source: temporal-dynamic-config
+        target: /etc/temporal/config/dynamicconfig/docker.yaml
     # Loopback only, both ports: the frontend takes workflow signals with no
     # authentication, so no other machine may reach it.
     ports:
@@ -97,3 +107,9 @@ services:
 
 volumes:
   temporal-postgres-data:
+
+configs:
+  temporal-dynamic-config:
+    content: |
+      matching.numTaskqueueWritePartitions:
+        - value: 1
