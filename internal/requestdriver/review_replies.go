@@ -262,7 +262,7 @@ func postReviewReplies(dp Deps, ctx context.Context, r *request.Request, ticket 
 	var stats []FileStat
 	if baseSHA != "" {
 		var err error
-		if stats, err = dp.ChangedFileStats(r.Workspace, baseSHA, roundRun.ResultSHA); err != nil {
+		if stats, err = dp.ChangedFileStats(replyCtx, r.Workspace, baseSHA, roundRun.ResultSHA); err != nil {
 			log.Printf("request %s: ticket %d: files changed by the round, for its replies: %v", r.ID, ticket.Index, err)
 			stats = nil
 		}

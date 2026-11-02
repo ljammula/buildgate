@@ -45,7 +45,7 @@ type Deps interface {
 	RetargetPullRequestBase(ctx context.Context, prURL string, base string) error
 	RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error)
 	// ChangedFileStats is git's numstat between two commits of dir.
-	ChangedFileStats(dir string, base string, head string) ([]FileStat, error)
+	ChangedFileStats(ctx context.Context, dir string, base string, head string) ([]FileStat, error)
 	UndoMarkPullRequestReady(ctx context.Context, prURL string) error
 	// CreateRef points a full ref at a commit in the target repository's local
 	// .git (the round refs; nothing is pushed). CreateBranchAt creates a local
@@ -2768,6 +2768,7 @@ func writeTicketBuildInput(dataDir string, r *request.Request, ticket request.Ti
 	if err != nil {
 		return "", err
 	}
+	content = withAddressedComments(content, ticket)
 	path := strings.TrimSuffix(ticket.SpecPath, ".spec.md") + ".build.md"
 	if err := writeTicketBuildSpecFile(path, content); err != nil {
 		return "", err

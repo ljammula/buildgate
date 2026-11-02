@@ -103,7 +103,7 @@ type fakeForge struct {
 	replyToReviewCommentFn        func(ctx context.Context, prURL string, commentID int64, body string) error
 	retargetPullRequestBaseFn     func(ctx context.Context, prURL string, base string) error
 	roundResultDescendsFromHeadFn func(dir string, ancestor string, descendant string) (bool, error)
-	changedFileStatsFn            func(dir string, base string, head string) ([]requestdriver.FileStat, error)
+	changedFileStatsFn            func(ctx context.Context, dir string, base string, head string) ([]requestdriver.FileStat, error)
 	undoMarkPullRequestReadyFn    func(ctx context.Context, prURL string) error
 	createRefFn                   func(dir string, ref string, sha string) error
 	createBranchAtFn              func(dir string, branch string, sha string) error
@@ -158,8 +158,8 @@ func (f *fakeForge) retargetPullRequestBase(ctx context.Context, prURL string, b
 func (f *fakeForge) roundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error) {
 	return f.roundResultDescendsFromHeadFn(dir, ancestor, descendant)
 }
-func (f *fakeForge) changedFileStats(dir string, base string, head string) ([]requestdriver.FileStat, error) {
-	return f.changedFileStatsFn(dir, base, head)
+func (f *fakeForge) changedFileStats(ctx context.Context, dir string, base string, head string) ([]requestdriver.FileStat, error) {
+	return f.changedFileStatsFn(ctx, dir, base, head)
 }
 func (f *fakeForge) undoMarkPullRequestReady(ctx context.Context, prURL string) error {
 	return f.undoMarkPullRequestReadyFn(ctx, prURL)
@@ -412,7 +412,7 @@ func newTestDeps(t testing.TB) *deps {
 		replyToReviewCommentFn:        realForge.replyToReviewComment,
 		retargetPullRequestBaseFn:     realForge.retargetPullRequestBase,
 		roundResultDescendsFromHeadFn: realForge.roundResultDescendsFromHead,
-		changedFileStatsFn: func(string, string, string) ([]requestdriver.FileStat, error) {
+		changedFileStatsFn: func(context.Context, string, string, string) ([]requestdriver.FileStat, error) {
 			return nil, errors.New("test deps: changedFileStats is not set by this test")
 		},
 		undoMarkPullRequestReadyFn: realForge.undoMarkPullRequestReady,

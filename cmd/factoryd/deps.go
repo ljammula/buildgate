@@ -108,7 +108,7 @@ type forgeBoundary interface {
 	replyToReviewComment(ctx context.Context, prURL string, commentID int64, body string) error
 	retargetPullRequestBase(ctx context.Context, prURL string, base string) error
 	roundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error)
-	changedFileStats(dir string, base string, head string) ([]requestdriver.FileStat, error)
+	changedFileStats(ctx context.Context, dir string, base string, head string) ([]requestdriver.FileStat, error)
 	undoMarkPullRequestReady(ctx context.Context, prURL string) error
 	// createRef points a full ref at a commit in the local .git of dir, and
 	// createBranchAt creates a local branch there: the round refs and the
