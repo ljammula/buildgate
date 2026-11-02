@@ -48,6 +48,7 @@ type fakeDeps struct {
 	replyToReviewCommentFn        func(ctx context.Context, prURL string, commentID int64, body string) error
 	retargetPullRequestBaseFn     func(ctx context.Context, prURL string, base string) error
 	roundResultDescendsFromHeadFn func(dir string, ancestor string, descendant string) (bool, error)
+	changedFileStatsFn            func(ctx context.Context, dir string, base string, head string) ([]requestdriver.FileStat, error)
 	undoMarkPullRequestReadyFn    func(ctx context.Context, prURL string) error
 	createRefFn                   func(dir string, ref string, sha string) error
 	createBranchAtFn              func(dir string, branch string, sha string) error
@@ -93,6 +94,9 @@ func (f *fakeDeps) RetargetPullRequestBase(ctx context.Context, prURL string, ba
 }
 func (f *fakeDeps) RoundResultDescendsFromHead(dir string, ancestor string, descendant string) (bool, error) {
 	return f.roundResultDescendsFromHeadFn(dir, ancestor, descendant)
+}
+func (f *fakeDeps) ChangedFileStats(ctx context.Context, dir string, base string, head string) ([]requestdriver.FileStat, error) {
+	return f.changedFileStatsFn(ctx, dir, base, head)
 }
 func (f *fakeDeps) UndoMarkPullRequestReady(ctx context.Context, prURL string) error {
 	return f.undoMarkPullRequestReadyFn(ctx, prURL)
@@ -186,6 +190,9 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		},
 		roundResultDescendsFromHeadFn: func(string, string, string) (bool, error) {
 			return false, refused("RoundResultDescendsFromHead")
+		},
+		changedFileStatsFn: func(context.Context, string, string, string) ([]requestdriver.FileStat, error) {
+			return nil, refused("ChangedFileStats")
 		},
 		undoMarkPullRequestReadyFn: func(context.Context, string) error { return refused("UndoMarkPullRequestReady") },
 		createRefFn:                func(string, string, string) error { return refused("CreateRef") },

@@ -950,6 +950,11 @@ type AgentEvidenceRound struct {
 	FailureSignature string   `json:"failure_signature,omitempty"`
 	FailureLog       string   `json:"failure_log,omitempty"`
 	AgentNotes       string   `json:"agent_notes,omitempty"`
+	// FinalMessage is the tail of the agent's final message this round
+	// (redacted by build_app.py, cleaned and bounded by CleanRoundFeedback).
+	// A review round's builder ends it with its replies to the reviewer
+	// (requestdriver.reviewReplyBlocks); nothing decides on it.
+	FinalMessage string `json:"final_message,omitempty"`
 }
 
 // Outcome classifies the round as "pass" or "fail (<reason>)" using
@@ -1015,6 +1020,7 @@ const (
 	maxRoundPathLen          = 400
 	maxRoundFailureSignature = 64
 	maxRoundAgentNotesLen    = 8000
+	maxRoundFinalMessageLen  = 4000
 )
 
 // CleanRoundFeedback bounds every round's feedback fields and strips
@@ -1034,6 +1040,7 @@ func (e *AgentEvidence) CleanRoundFeedback() {
 		rd.FailureSignature = clipRunes(sanitize.Line(rd.FailureSignature), maxRoundFailureSignature)
 		rd.FailureLog = clipRunes(sanitize.Line(rd.FailureLog), maxRoundPathLen)
 		rd.AgentNotes = clipRunes(sanitize.Text(rd.AgentNotes), maxRoundAgentNotesLen)
+		rd.FinalMessage = tailRunes(sanitize.Text(rd.FinalMessage), maxRoundFinalMessageLen)
 	}
 }
 
@@ -1061,6 +1068,15 @@ func clipRunes(s string, n int) string {
 		return s
 	}
 	return string([]rune(s)[:n])
+}
+
+// tailRunes keeps the last n runes of s, never cutting inside one.
+func tailRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[len(r)-n:])
 }
 
 // HarnessEval is a purely descriptive summary of which harness/model

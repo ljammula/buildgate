@@ -330,7 +330,7 @@ func concludeRound(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 		log.Printf("request %s: ticket %d/%d: %s %s accepted but a held test green on run %s fails on it; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, current.ID, current.ID)
 		return notPushed(roundRun, "the round was accepted but a held test that passed on the run it followed fails on it")
 	}
-	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, adviceRoundName)
+	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, adviceRoundName, nil)
 	switch {
 	case failed != "":
 		return nil, true, HaltRequest(dataDir, r, failed, now)

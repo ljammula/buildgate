@@ -277,6 +277,15 @@
         "seen_thread_ids": [
           "every-field seen_thread_ids"
         ],
+        "addressed": [
+          {
+            "thread_id": "every-field thread_id",
+            "path": "every-field path",
+            "line": 3,
+            "author": "every-field author",
+            "body": "every-field body"
+          }
+        ],
         "last_polled_at": "2026-09-10T09:00:00Z",
         "pr_base": "every-field pr_base",
         "rounds": [

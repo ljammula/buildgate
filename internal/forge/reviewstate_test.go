@@ -288,6 +288,20 @@ func TestParseReviewThreadsAReviewersReplyAfterTheFactorysIsTheLatest(t *testing
 	}
 }
 
+// TestParseReviewThreadsRecognisesTheFactorysOwnReplyByAuthor: the factory's
+// reply is told apart by its author, not its text, so a builder-written reply
+// (even one that itself says "Addressed in") never reads as a new comment.
+func TestParseReviewThreadsRecognisesTheFactorysOwnReplyByAuthor(t *testing.T) {
+	data := threadsJSON([2]string{"alice", "set an Allow header"}, [2]string{"factory", "Done as asked; Addressed in the header.\n\nPushed in abc1234."})
+	_, actionable, err := parseReviewThreads(data, AuthorPolicy{Trusted: []string{"alice"}}, "factory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actionable) != 1 || actionable[0].Body != "set an Allow header" {
+		t.Fatalf("actionable = %+v, want alice's comment as the thread's latest non-factory comment", actionable)
+	}
+}
+
 func TestParseReviewThreadsExcludesResolved(t *testing.T) {
 	blocksReady, actionable, err := parseReviewThreads(readTestdata(t, "reviewthreads_resolved.json"), AuthorPolicy{}, "")
 	if err != nil {
