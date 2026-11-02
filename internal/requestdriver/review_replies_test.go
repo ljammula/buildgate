@@ -90,6 +90,9 @@ func runReplyRoundsOn(t *testing.T, threads []forge.Thread, finals []string, sta
 	return replies, comments, r
 }
 
+// codeSpan matches a balanced inline code span; its content is not scanned.
+var codeSpan = regexp.MustCompile("`[^`]{1,200}`")
+
 // escapedChar matches a backslash escape and the character it protects.
 var escapedChar = regexp.MustCompile(`\\.`)
 
@@ -183,6 +186,10 @@ func TestReviewReplyIsInertMarkdown(t *testing.T) {
 		"unclosed":  "```\nstill code",
 		"tilde":     "~~~\nstill code",
 		"backslash": "a \\ b",
+		"span":      "`@octocat <img src=x> [a](http://x) https://x`",
+		"unmatched": "`foo",
+		"double":    "``a`b``",
+		"longspan":  "`" + strings.Repeat("a", 201) + "`",
 	} {
 		replies, _ := runReplyRound(t, threads, "Reply (a.go:3):\n"+in, true)
 		if len(replies) != 1 {
@@ -200,11 +207,32 @@ func TestReviewReplyIsInertMarkdown(t *testing.T) {
 		}
 		// What a markdown renderer sees: every backslash-escaped character
 		// is plain text, so only an unescaped one can start anything.
-		active := escapedChar.ReplaceAllString(quoted, "")
+		active := codeSpan.ReplaceAllString(escapedChar.ReplaceAllString(quoted, ""), "")
 		for _, bad := range []string{"@", "[", "]", "!", "<", ">", "&", "`", "~", "#", "://", "www."} {
 			if strings.Contains(strings.TrimPrefix(strings.ReplaceAll(active, "\n>", "\n"), ">"), bad) {
 				t.Errorf("%s: %q holds an unescaped %q", name, quoted, bad)
 			}
+		}
+	}
+}
+
+func TestReviewReplyCodeSpansRender(t *testing.T) {
+	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 3, Author: "alice", Body: "fix", CommentID: 11}}
+	replies, _ := runReplyRound(t, threads, "Reply (a.go:3):\nRenamed `fooBar` to `baz`", true)
+	if len(replies) != 1 || !strings.HasPrefix(replies[0].body, "> Renamed `fooBar` to `baz`\n\nPushed in ") {
+		t.Fatalf("replies = %+v", replies)
+	}
+	long := "`" + strings.Repeat("a", 201) + "`"
+	for in, want := range map[string]string{
+		"`foo":          "> \\`foo",
+		"``a`b``":       "> \\`\\`a\\`b\\`\\`",
+		long:            "> \\`" + strings.Repeat("a", 201) + "\\`",
+		"`@o <b>` x @y": "> `@o <b>` x \\@\u200by",
+		"`a` and `b":    "> `a` and \\`b",
+	} {
+		replies, _ := runReplyRound(t, threads, "Reply (a.go:3):\n"+in, true)
+		if len(replies) != 1 || !strings.HasPrefix(replies[0].body, want+"\n\nPushed in ") {
+			t.Errorf("%q: replies = %+v, want prefix %q", in, replies, want)
 		}
 	}
 }
