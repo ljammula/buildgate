@@ -1463,8 +1463,9 @@ docker compose -f docker-compose.temporal.yml down -v   # stop, wipe data
 - One write partition per task queue (`matching.numTaskqueueWritePartitions: 1`,
   the stack's dynamic config), so steps waiting for a job slot start in the
   order they were queued. A stack started without it gets it on its next
-  `make temporal-up`, which recreates the Temporal container: run that with no
-  build in flight. A Temporal server of your own needs the same value.
+  `make temporal-up` (or `make install`, which runs it), which recreates the
+  Temporal container: run either with no build in flight. A Temporal server of
+  your own needs the same value.
 - Web UI: http://localhost:8233. gRPC: `localhost:7233`.
 - Set `TEMPORAL_POSTGRES_PASSWORD` (env or `.env`) before the first `up`
   anywhere shared. The default, `temporal`, is for local use only.

@@ -57,7 +57,7 @@ services:
     # Read partitions keep their default, so a server that already queued
     # steps in the other partitions still serves them.
     configs:
-      - source: temporal-dynamic-config
+      - source: temporal-dynamic-config-v1
         target: /etc/temporal/config/dynamicconfig/docker.yaml
     # Loopback only, both ports: the frontend takes workflow signals with no
     # authentication, so no other machine may reach it.
@@ -109,7 +109,10 @@ volumes:
   temporal-postgres-data:
 
 configs:
-  temporal-dynamic-config:
+  # Compose recreates the temporal container on `up -d` when the service's
+  # config name changes, not when only this content does: bump the -vN suffix
+  # (here and in the service's configs:) with every change to the content.
+  temporal-dynamic-config-v1:
     content: |
       matching.numTaskqueueWritePartitions:
         - value: 1

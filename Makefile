@@ -342,8 +342,9 @@ baseline-test:
 # machine that never installed Docker (builds there need a Temporal server of
 # its own). Idempotent: `up -d`
 # against containers already running from the same compose file is a no-op;
-# after a change to the file (such as its Temporal dynamic config) it
-# recreates the changed container, restarting Temporal.
+# after a change to a service's definition (a new name for its dynamic
+# config included, but not new content under the same name) it recreates
+# that container, restarting Temporal under any build in flight.
 temporal-up:
 	@if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then \
 		echo "Starting Temporal (docker compose -f docker-compose.temporal.yml up -d)..."; \
