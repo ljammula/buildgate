@@ -537,7 +537,10 @@ allow it, or `gh pr ready` failed; the operator then marks it ready and
 merges), its base is not another ticket's branch, and no ticket of the request
 has a restack or advice round in flight. The check is cleared and saved
 before a review or CI round's build starts. Anything since the last poll (a
-new thread, a push, a check result) is not visible to `status`. The request's next step, in the console's
+new thread, a push, a check result) is not visible to `status`. While a later
+ticket builds, `status` shows an earlier ticket's merge or close within one PR
+poll interval; the worker records it at its next step. A building request's lowest open ticket gets no
+`,safe-to-merge` while its base is another ticket's branch. The request's next step, in the console's
 "Next" line and in `GET /requests`' `next_action`, says what each open pull
 request waits on:
 

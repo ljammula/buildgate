@@ -91,3 +91,16 @@ func ParseNumstatZ(out string) []FileStat { return parseNumstatZ(out) }
 func WriteTicketBuildInput(dataDir string, r *request.Request, ticket *request.Ticket) (string, error) {
 	return writeTicketBuildInput(dataDir, r, *ticket)
 }
+
+// CheckEarlierTicketForTest runs the check before ticket idx builds, with the
+// default worker configuration.
+func CheckEarlierTicketForTest(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int) (bool, error) {
+	hold, err := checkEarlierTicket(dp, ctx, dataDir, r, idx, WorkerConfig{})
+	return hold.park != "" || hold.wait != "", err
+}
+
+// SaveObservationForTest records an observation the way the building watch
+// does, for a test of its save.
+func SaveObservationForTest(dataDir string, r *request.Request, earlier *request.Ticket, state forge.ReviewState, now time.Time) {
+	saveObservation(dataDir, r, earlier, state, now)
+}
