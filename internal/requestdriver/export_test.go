@@ -97,4 +97,5 @@ func WriteTicketBuildInput(dataDir string, r *request.Request, ticket *request.T
 var (
 	ChallengeScopeBlocksForTest    = challengeScopeBlocks
 	RecordSubjectOutOfScopeForTest = recordSubjectOutOfScope
+	RecordRoundOutOfScopeForTest   = recordRoundOutOfScope
 )

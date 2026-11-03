@@ -729,6 +729,7 @@ func planApprovedSpec(dp Deps, dataDir string, r *request.Request, inputs planni
 // either has the factory approve the plan itself or sends it to plan_review.
 func finishPlanning(dp Deps, dataDir string, r *request.Request, inputs planningInputs, requestTickets []request.Ticket, evidence *request.PlanEvidence, now time.Time) error {
 	r.Tickets = requestTickets
+	r.ChallengeOutOfScope = nil
 	r.TicketCount = len(requestTickets)
 	recordPlanEvidence(r, evidence)
 	if r.PlanReviewReason(inputs.planReview) == "" {

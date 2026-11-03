@@ -36,6 +36,14 @@ func TestSendBackQuarantinedToPlanningPrunesTicketPinsKeepsSpecPin(t *testing.T)
 	dataDir := t.TempDir()
 	newQuarantinedRequestWithPlan(t, dataDir, "req-1", StateQuarantined, true, true)
 
+	pre, err := Load(dataDir, "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre.ChallengeOutOfScope = []ChallengeRaised{{Ticket: 1, Path: "a_test.go", Files: []string{"x.go"}}}
+	if err := pre.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
 	got, err := SendBack(dataDir, "req-1", "alice", "diff_scope: allow contract_matrix_phase2_test.go", SendBackToPlan, fixedNow)
 	if err != nil {
 		t.Fatalf("SendBack: %v", err)
@@ -50,6 +58,9 @@ func TestSendBackQuarantinedToPlanningPrunesTicketPinsKeepsSpecPin(t *testing.T)
 		if strings.HasPrefix(relPath, "tickets/") {
 			t.Errorf("ApprovedSHA256 still has %q, want ticket pins pruned", relPath)
 		}
+	}
+	if got.ChallengeOutOfScope != nil {
+		t.Errorf("ChallengeOutOfScope = %+v, want it cleared with the ticket list", got.ChallengeOutOfScope)
 	}
 	if got.Tickets != nil || got.TicketIndex != 0 || got.TicketCount != 0 {
 		t.Errorf("Tickets/TicketIndex/TicketCount = %v/%d/%d, want all reset", got.Tickets, got.TicketIndex, got.TicketCount)

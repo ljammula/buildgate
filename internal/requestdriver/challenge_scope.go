@@ -80,7 +80,7 @@ func recordSubjectOutOfScope(r *request.Request, ticket *request.Ticket, runReco
 	allowed := approvedAllowedFiles(r, *ticket)
 	added := false
 	for _, f := range runRecord.Challenge.Files {
-		if !strings.HasSuffix(f.NotRun, run.ChallengeSubjectOutside) || len(f.Subject) == 0 || r.ChallengeRaisedFor(ticket.Index, f.Path) {
+		if !f.OutOfScope || len(f.Subject) == 0 || r.ChallengeRaisedFor(ticket.Index, f.Path) {
 			continue
 		}
 		files := outsideAllowed(f.Subject, allowed)
@@ -127,11 +127,13 @@ func roundOutsideScope(r *request.Request, ticket request.Ticket, roundRun *run.
 	return outsideAllowed(slices.DeleteFunc(slices.Clone(roundRun.ChangedFiles), func(p string) bool { return slices.Contains(held, p) }), allowed)
 }
 
-// recordRoundOutOfScope records on r, for ticket, each of reds as needing
-// files (the round's changes outside Allowed-Files), so no further round is
-// started for it (heldReds).
+// recordRoundOutOfScope records on r, for ticket, the one red file the round
+// was handed as needing files (the round's changes outside Allowed-Files), so
+// no further round is started for it (heldReds). With several reds nothing is
+// recorded: the files may serve only one of them, and the subject rule is the
+// primary gate.
 func recordRoundOutOfScope(r *request.Request, ticket *request.Ticket, reds []run.ChallengeFile, files []string) {
-	if len(files) == 0 {
+	if len(files) == 0 || len(reds) != 1 {
 		return
 	}
 	for _, f := range reds {

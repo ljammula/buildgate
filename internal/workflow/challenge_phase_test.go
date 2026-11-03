@@ -648,17 +648,23 @@ func TestChallengeHeaderSubject(t *testing.T) {
 		content string
 		label   string
 		subject []string
+		bad     bool
 	}{
-		"none":     {"// buildgate-challenge: AC-2\n", "AC-2", nil},
-		"one":      {"// buildgate-challenge: AC-2 subject: p/add.go\n", "AC-2", []string{"p/add.go"}},
-		"three":    {"# buildgate-challenge: answer-2 subject: a.py, b.py,c.py\n", "answer-2", []string{"a.py", "b.py", "c.py"}},
-		"four":     {"// buildgate-challenge: AC-2 subject: a, b, c, d\n", "", nil},
-		"empty":    {"// buildgate-challenge: AC-2 subject:\n", "", nil},
-		"trailing": {"// buildgate-challenge: AC-2 subject: a.go and more\n", "", nil},
+		"none":      {"// buildgate-challenge: AC-2\n", "AC-2", nil, false},
+		"one":       {"// buildgate-challenge: AC-2 subject: p/add.go\n", "AC-2", []string{"p/add.go"}, false},
+		"three":     {"# buildgate-challenge: answer-2 subject: a.py, b.py,c.py\n", "answer-2", []string{"a.py", "b.py", "c.py"}, false},
+		"cleaned":   {"// buildgate-challenge: AC-2 subject: ./p//add.go\n", "AC-2", []string{"p/add.go"}, false},
+		"four":      {"// buildgate-challenge: AC-2 subject: a, b, c, d\n", "AC-2", nil, true},
+		"empty":     {"// buildgate-challenge: AC-2 subject:\n", "AC-2", nil, true},
+		"spaces":    {"// buildgate-challenge: AC-2 subject: a.go and more\n", "AC-2", nil, true},
+		"before ,":  {"// buildgate-challenge: AC-2 subject: a.go , b.go\n", "AC-2", nil, true},
+		"absolute":  {"// buildgate-challenge: AC-2 subject: /etc/passwd\n", "AC-2", nil, true},
+		"parent":    {"// buildgate-challenge: AC-2 subject: p/../../x.go\n", "AC-2", nil, true},
+		"bad label": {"// buildgate-challenge: AC-9 subject: a.go\n", "", nil, false},
 	} {
-		label, subject := challengeHeaderParts([]byte(tc.content), 3, []int{2})
-		if label != tc.label || !slices.Equal(subject, tc.subject) {
-			t.Errorf("%s: got %q %v, want %q %v", name, label, subject, tc.label, tc.subject)
+		label, subject, bad := challengeHeaderParts([]byte(tc.content), 3, []int{2})
+		if label != tc.label || !slices.Equal(subject, tc.subject) || bad != tc.bad {
+			t.Errorf("%s: got %q %v %v, want %q %v %v", name, label, subject, bad, tc.label, tc.subject, tc.bad)
 		}
 	}
 }
@@ -668,19 +674,21 @@ func TestChallengeSubjectReason(t *testing.T) {
 	allowed := []string{"p/"}
 	for name, tc := range map[string]struct {
 		subject    []string
+		malformed  bool
 		allowed    []string
 		unapproved bool
 		want       string
 	}{
-		"inside":       {[]string{"p/add.go"}, allowed, false, ""},
-		"missing":      {nil, allowed, false, "names no subject"},
-		"untracked":    {[]string{"p/new.go"}, allowed, false, "not a tracked file"},
-		"outside":      {[]string{"q/other.go"}, allowed, false, run.ChallengeSubjectOutside},
-		"unapproved":   {nil, allowed, true, ""},
-		"no list":      {nil, nil, false, ""},
-		"second paths": {[]string{"p/add.go", "q/other.go"}, allowed, false, run.ChallengeSubjectOutside},
+		"inside":       {[]string{"p/add.go"}, false, allowed, false, ""},
+		"missing":      {nil, false, allowed, false, "names no subject"},
+		"malformed":    {nil, true, allowed, false, "not one to three comma-separated repo-relative paths"},
+		"untracked":    {[]string{"p/new.go"}, false, allowed, false, "not a tracked file"},
+		"outside":      {[]string{"q/other.go"}, false, allowed, false, "is outside this ticket's Allowed-Files"},
+		"unapproved":   {nil, true, allowed, true, ""},
+		"no list":      {nil, true, nil, false, ""},
+		"second paths": {[]string{"p/add.go", "q/other.go"}, false, allowed, false, "is outside this ticket's Allowed-Files"},
 	} {
-		got := challengeSubjectReason("AC-1", tc.subject, tracked, tc.allowed, tc.unapproved)
+		got, _ := challengeSubjectReason("AC-1", tc.subject, tc.malformed, tracked, tc.allowed, tc.unapproved)
 		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
 			t.Errorf("%s: reason = %q, want it to contain %q", name, got, tc.want)
 		}

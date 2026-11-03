@@ -72,8 +72,8 @@ func TestSubjectOutsideScopeIsRecordedOnce(t *testing.T) {
 	f := newAdviceFixture(t, nil)
 	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
 	rec := &run.Run{Challenge: &run.ChallengeRecord{Files: []run.ChallengeFile{
-		{Path: "a_test.go", Criterion: "AC-1", Subject: []string{"internal/payments/refunds.go", "internal/x/y.go"}, NotRun: "subject internal/x/y.go" + run.ChallengeSubjectOutside},
-		{Path: "b_test.go", Criterion: "AC-2", NotRun: "no valid derivation header"},
+		{Path: "a_test.go", Criterion: "AC-1", Subject: []string{"internal/payments/refunds.go", "internal/x/y.go"}, NotRun: "subject internal/x/y.go is outside this ticket's Allowed-Files", OutOfScope: true},
+		{Path: "b_test.go", Criterion: "AC-2", Subject: []string{"internal/x/z.go"}, NotRun: "subject internal/x/z.go is not a tracked file of the result"},
 		{Path: "c_test.go", Criterion: "AC-3", Subject: []string{"internal/payments/refunds.go"}},
 	}}}
 	if !requestdriver.RecordSubjectOutOfScopeForTest(r, &r.Tickets[0], rec) || requestdriver.RecordSubjectOutOfScopeForTest(r, &r.Tickets[0], rec) {
@@ -81,5 +81,23 @@ func TestSubjectOutsideScopeIsRecordedOnce(t *testing.T) {
 	}
 	if len(r.ChallengeOutOfScope) != 1 || r.ChallengeOutOfScope[0].Path != "a_test.go" || strings.Join(r.ChallengeOutOfScope[0].Files, ",") != "internal/x/y.go" || r.ChallengeOutOfScope[0].Source != request.ChallengeRaisedSubject {
 		t.Errorf("ChallengeOutOfScope = %+v", r.ChallengeOutOfScope)
+	}
+}
+
+// A diff_scope round handed several reds records none of them: the files may
+// serve only one, and the subject rule is the primary gate.
+func TestDiffScopeRoundWithSeveralRedsRecordsNone(t *testing.T) {
+	f := newAdviceFixture(t, nil)
+	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
+	files := []string{"internal/other/handler.go"}
+	one := []run.ChallengeFile{{Path: "a_test.go", Criterion: "AC-1"}}
+	two := append(one, run.ChallengeFile{Path: "b_test.go", Criterion: "AC-2"})
+	requestdriver.RecordRoundOutOfScopeForTest(r, &r.Tickets[0], two, files)
+	if len(r.ChallengeOutOfScope) != 0 {
+		t.Fatalf("recorded %+v for two reds", r.ChallengeOutOfScope)
+	}
+	requestdriver.RecordRoundOutOfScopeForTest(r, &r.Tickets[0], one, files)
+	if len(r.ChallengeOutOfScope) != 1 {
+		t.Fatalf("recorded %+v for one red, want one entry", r.ChallengeOutOfScope)
 	}
 }

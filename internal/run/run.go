@@ -2349,6 +2349,9 @@ type ChallengeFile struct {
 	// why a held file was not run (no valid header).
 	Refused string `json:"refused,omitempty"`
 	NotRun  string `json:"not_run,omitempty"`
+	// OutOfScope marks a file not run because its subject lies outside the
+	// ticket's Allowed-Files.
+	OutOfScope bool `json:"out_of_scope,omitempty"`
 	// Verdict is "green", "red", "broken" (a compile or collection error, or
 	// no report) or "advice" (red once, then green); "" for a file not run.
 	Verdict  string             `json:"verdict,omitempty"`
@@ -2359,10 +2362,6 @@ type ChallengeFile struct {
 	// alone.
 	Group bool `json:"group,omitempty"`
 }
-
-// ChallengeSubjectOutside ends the NotRun reason of a held file whose subject
-// lies outside the ticket's Allowed-Files.
-const ChallengeSubjectOutside = " is outside this ticket's Allowed-Files"
 
 // ChallengeFailure is one failing test of a red challenge file: its name and
 // its assertion, each one cleaned line.

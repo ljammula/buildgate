@@ -554,6 +554,7 @@ func TestHoldChallengeFilesRefusesASubjectOutsideAllowedFiles(t *testing.T) {
 	writeFile(t, filepath.Join(f.repo, "p", "none_test.go"), edgeTest)
 	writeFile(t, filepath.Join(f.repo, "p", "ghost_test.go"), hdr("p/ghost.go"))
 	writeFile(t, filepath.Join(f.repo, "p", "out_test.go"), hdr("go.mod"))
+	writeFile(t, filepath.Join(f.repo, "p", "bad_test.go"), hdr("p/add.go and more"))
 	files, notes, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
 	if err != nil {
 		t.Fatal(err)
@@ -565,12 +566,15 @@ func TestHoldChallengeFilesRefusesASubjectOutsideAllowedFiles(t *testing.T) {
 	if got := by["p/in_test.go"]; got.NotRun != "" || len(got.Subject) != 1 {
 		t.Errorf("inside = %+v, want it to run with its subject recorded", got)
 	}
-	for name, want := range map[string]string{"p/none_test.go": "no subject", "p/ghost_test.go": "not a tracked file", "p/out_test.go": run.ChallengeSubjectOutside} {
+	if !by["p/out_test.go"].OutOfScope || by["p/ghost_test.go"].OutOfScope || by["p/bad_test.go"].OutOfScope {
+		t.Errorf("OutOfScope = %v %v %v, want only the file whose subject is outside", by["p/out_test.go"].OutOfScope, by["p/ghost_test.go"].OutOfScope, by["p/bad_test.go"].OutOfScope)
+	}
+	for name, want := range map[string]string{"p/none_test.go": "no subject", "p/ghost_test.go": "not a tracked file", "p/bad_test.go": "not one to three comma-separated repo-relative paths", "p/out_test.go": "is outside this ticket's Allowed-Files"} {
 		if !strings.Contains(by[name].NotRun, want) || by[name].HostPath == "" {
 			t.Errorf("%s = %+v, want held and not run: %q", name, by[name], want)
 		}
 	}
-	if len(notes) != 3 || !strings.Contains(strings.Join(notes, "\n"), "challenge p/out_test.go (AC-1) not run: subject go.mod is outside this ticket's Allowed-Files") {
+	if len(notes) != 4 || !strings.Contains(strings.Join(notes, "\n"), "challenge p/out_test.go (AC-1) not run: subject go.mod is outside this ticket's Allowed-Files") {
 		t.Errorf("notes = %q", notes)
 	}
 	in.ScopeUnapproved = true
