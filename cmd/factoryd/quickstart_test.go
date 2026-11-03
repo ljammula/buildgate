@@ -2587,8 +2587,10 @@ func TestQuickstartEnsureConfigReuseSignalsRestartNeeded(t *testing.T) {
 		if !restartNeeded {
 			t.Error("restartNeeded = false, want true: an explicit -credential was supplied alongside the reused config")
 		}
-		if len(credentialEnv) != 1 || credentialEnv[0] != "ANTHROPIC_API_KEY=new-secret" {
-			t.Errorf("credentialEnv = %v", credentialEnv)
+		// The reused route is allow_no_credential with no credential_env: it
+		// names no variable, so the supplied key is carried by none.
+		if len(credentialEnv) != 0 {
+			t.Errorf("credentialEnv = %v, want none for a route that names no credential_env", credentialEnv)
 		}
 	})
 

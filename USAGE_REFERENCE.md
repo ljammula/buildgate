@@ -1299,7 +1299,7 @@ routes: entry:
 quickstart -route  routes: credential_mode  credential
 -----------------  -----------------------  ----------------------------
 openai             static                   none (allow_no_credential)
-                                            or ANTHROPIC_API_KEY as
+                                            or OPENAI_API_KEY as
                                             Authorization header
 anthropic          static                   ANTHROPIC_API_KEY,
                                             X-Api-Key (native Messages
@@ -1344,8 +1344,9 @@ token value.
 Point the route's own `upstream` at the bare API root (no `/v1`; the
 worker's base URL is the upstream plus `worker_base_path`). `quickstart -route openai` takes `-model-host`,
 `-model-id`, `-context-window`, and asks whether the endpoint needs a
-credential (`-credential` or `ANTHROPIC_API_KEY`, sent as
-`Authorization`).
+credential (`-credential` or `OPENAI_API_KEY`, sent as
+`Authorization`); an inherited `ANTHROPIC_API_KEY` is never used for it, and
+under `-non-interactive` no `-credential` means no credential.
 
 ### Anthropic (`static`)
 
@@ -1573,7 +1574,11 @@ roles:
 
 - Each `routes:` entry is validated on its own: `credential_mode` must be
   `static` (the default), `github-copilot`, or `chatgpt-codex`; a static
-  route needs `upstream` unless `allow_no_credential: true`;
+  route needs `upstream` unless `allow_no_credential: true`, and names the
+  environment variable holding its key in `credential_env` unless
+  `allow_no_credential: true` (there is no default name: a route reads only
+  the variable it names, so a key set for one provider never reaches another
+  route's upstream);
   `credential_env`/`credential_header` only apply to a static route,
   `github_token_file`/`github_token_key` only to a github-copilot route,
   and `codex_auth_file` only to a chatgpt-codex route -- each refused

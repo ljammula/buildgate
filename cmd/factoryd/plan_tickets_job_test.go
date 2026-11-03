@@ -105,7 +105,7 @@ func TestPlanTicketsArgsIncludesThinkingWhenGiven(t *testing.T) {
 func TestResolveRequestJobRelaySpecAppliesRoleOverride(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
-	route := sessionconfig.Route{Upstream: "https://api.anthropic.com", AllowedPathPrefix: "/v1/messages", CredentialHeader: meter.CredentialHeaderXAPIKey}
+	route := sessionconfig.Route{Upstream: "https://api.anthropic.com", AllowedPathPrefix: "/v1/messages", CredentialHeader: meter.CredentialHeaderXAPIKey, CredentialEnv: "ANTHROPIC_API_KEY"}
 	sel := modelrole.Selection{
 		RouteName: "primary",
 		Route:     route,

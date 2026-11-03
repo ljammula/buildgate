@@ -1048,8 +1048,8 @@ routes:
     allow_no_credential: true
     # Default is x-api-key; a credentialed OpenAI-compatible endpoint usually wants Authorization instead (sent as "Bearer <key>").
     # credential_header: Authorization
-    # credential_env defaults to ANTHROPIC_API_KEY; set only to have the daemon read a different env var for this route's credential.
-    # credential_env: ANTHROPIC_API_KEY
+    # A route that needs a key names the env var holding it (there is no default) and drops allow_no_credential.
+    # credential_env: OPENAI_API_KEY
   # Route the relay through GitHub Copilot instead of a static credential -- see USAGE.md §11.
   # copilot:
   #   credential_mode: github-copilot

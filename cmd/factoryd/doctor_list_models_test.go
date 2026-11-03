@@ -245,7 +245,7 @@ func TestDoctorListModelsOpenAISendsConfiguredCredentialHeader(t *testing.T) {
 
 	var out bytes.Buffer
 	basePath := "/v1"
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialHeader: "Authorization"}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialHeader: "Authorization", CredentialEnv: "ANTHROPIC_API_KEY"}, "model-a")
 	in.egressCABundle = caBundle
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
@@ -447,7 +447,7 @@ func TestRedactUserinfoStripsCredentials(t *testing.T) {
 func TestDoctorListModelsExplicitAnthropicUpstreamAlsoSkipsListing(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
 	var out bytes.Buffer
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: "https://api.anthropic.com"}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: "https://api.anthropic.com", CredentialEnv: "ANTHROPIC_API_KEY"}, "model-a")
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
 	}

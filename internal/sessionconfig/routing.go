@@ -40,16 +40,22 @@ type Route struct {
 	// github-copilot route defaults to meter.CopilotAPIBase and is pinned
 	// to a *.githubcopilot.com host (meter.ValidateGitHubCopilotRoute) --
 	// see defaultedRoute/validateRoute.
-	Upstream               string  `yaml:"upstream,omitempty"`
-	AllowedPathPrefix      string  `yaml:"allowed_path_prefix,omitempty"`
-	WorkerBasePath         *string `yaml:"worker_base_path,omitempty"`
-	CredentialHeader       string  `yaml:"credential_header,omitempty"` // static only
-	CredentialEnv          string  `yaml:"credential_env,omitempty"`    // static only; default ANTHROPIC_API_KEY
-	GitHubTokenFile        string  `yaml:"github_token_file,omitempty"` // github-copilot only
-	GitHubTokenKey         string  `yaml:"github_token_key,omitempty"`  // github-copilot only
-	CodexAuthFile          string  `yaml:"codex_auth_file,omitempty"`   // chatgpt-codex only
-	AllowPlaintextUpstream bool    `yaml:"allow_plaintext_upstream,omitempty"`
-	AllowNoCredential      bool    `yaml:"allow_no_credential,omitempty"`
+	Upstream          string  `yaml:"upstream,omitempty"`
+	AllowedPathPrefix string  `yaml:"allowed_path_prefix,omitempty"`
+	WorkerBasePath    *string `yaml:"worker_base_path,omitempty"`
+	CredentialHeader  string  `yaml:"credential_header,omitempty"` // static only
+	// CredentialEnv (static only) names the one environment variable this
+	// route's key is read from. There is no default: a static route that
+	// needs a credential must name it, and a route with AllowNoCredential
+	// and no CredentialEnv reads none. A default name would hand one
+	// provider's key (an inherited ANTHROPIC_API_KEY) to any other static
+	// route that left the field empty.
+	CredentialEnv          string `yaml:"credential_env,omitempty"`
+	GitHubTokenFile        string `yaml:"github_token_file,omitempty"` // github-copilot only
+	GitHubTokenKey         string `yaml:"github_token_key,omitempty"`  // github-copilot only
+	CodexAuthFile          string `yaml:"codex_auth_file,omitempty"`   // chatgpt-codex only
+	AllowPlaintextUpstream bool   `yaml:"allow_plaintext_upstream,omitempty"`
+	AllowNoCredential      bool   `yaml:"allow_no_credential,omitempty"`
 	// Billing labels spend for display only (run.BillingSubscription or
 	// run.BillingMetered) -- it never changes enforcement. Empty means
 	// "derive from CredentialMode" (see defaultedRoute).
@@ -79,9 +85,8 @@ func (r Route) effectiveCredentialMode() string {
 // applyGitHubCopilotRelayDefaults's own upstream default -- its path-
 // prefix default depends on which model/API reaches it, which a Route
 // alone doesn't know, so that half is left to a later change that
-// resolves a specific model against it), CredentialEnv defaults to
-// ANTHROPIC_API_KEY for a static route, and Billing defaults from the
-// effective credential mode.
+// resolves a specific model against it), and Billing defaults from the
+// effective credential mode. CredentialEnv has no default (see its field).
 func defaultedRoute(r Route) Route {
 	mode := r.effectiveCredentialMode()
 	switch mode {
@@ -100,9 +105,6 @@ func defaultedRoute(r Route) Route {
 		if r.Upstream == "" {
 			r.Upstream = meter.CopilotAPIBase
 		}
-	}
-	if mode == meter.CredentialModeStatic && r.CredentialEnv == "" {
-		r.CredentialEnv = "ANTHROPIC_API_KEY"
 	}
 	if r.Billing == "" {
 		switch mode {
@@ -162,6 +164,9 @@ func validateRoute(name string, r Route) error {
 	default: // static
 		if r.Upstream == "" && !r.AllowNoCredential {
 			return fmt.Errorf("routes.%s: upstream is required for a static route (or set allow_no_credential: true)", name)
+		}
+		if r.CredentialEnv == "" && !r.AllowNoCredential {
+			return fmt.Errorf("routes.%s: credential_env is required for a static route: name the environment variable that holds this route's key (or set allow_no_credential: true for an endpoint with no credential)", name)
 		}
 	}
 
