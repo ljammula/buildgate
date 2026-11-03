@@ -71,7 +71,15 @@ func resolveRouteCredentials(r sessionconfig.Route) (routeCredentials, error) {
 	default: // static
 		env := r.CredentialEnv
 		if env == "" {
-			env = "ANTHROPIC_API_KEY"
+			// A route reads only the variable it names (sessionconfig.Route.
+			// CredentialEnv): never a default, which would hand another
+			// provider's key to this route's upstream.
+			if r.AllowNoCredential {
+				return routeCredentials{}, nil
+			}
+			// A configuration fault (ValidateRouting refuses it first), not a
+			// missing credential: no RouteCredentialError.
+			return routeCredentials{}, fmt.Errorf("route: a static route needs credential_env naming the environment variable that holds its key, unless allow_no_credential: true is set for a model endpoint with no real credential to protect")
 		}
 		value := os.Getenv(env)
 		if value == "" && !r.AllowNoCredential {

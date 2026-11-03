@@ -12,14 +12,14 @@ import (
 
 // TestRoutingAppliesRouteDefaults confirms Settings.Routing() applies
 // defaultedRoute uniformly across every routes: entry: a static route
-// defaults CredentialEnv to ANTHROPIC_API_KEY and Billing to metered; a
+// keeps the CredentialEnv it names (no default) and defaults Billing to metered; a
 // chatgpt-codex route defaults Billing to subscription and never
 // defaults CredentialEnv (credential_env only applies to a static
 // route). Routing only defaults Routes, never Models.
 func TestRoutingAppliesRouteDefaults(t *testing.T) {
 	s := DefaultSettings()
 	s.Routes = map[string]Route{
-		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid"},
+		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ANTHROPIC_API_KEY"},
 		"codex":   {CredentialMode: "chatgpt-codex"},
 	}
 	s.Models = map[string]Model{"luna": {ID: "gpt-5.6-luna", Routes: []string{"litellm", "codex"}}}
@@ -28,7 +28,7 @@ func TestRoutingAppliesRouteDefaults(t *testing.T) {
 		t.Fatalf("Routing: %v", err)
 	}
 	if routes["litellm"].CredentialEnv != "ANTHROPIC_API_KEY" {
-		t.Errorf(`routes["litellm"].CredentialEnv = %q, want ANTHROPIC_API_KEY (static default)`, routes["litellm"].CredentialEnv)
+		t.Errorf(`routes["litellm"].CredentialEnv = %q, want ANTHROPIC_API_KEY (as declared; no default)`, routes["litellm"].CredentialEnv)
 	}
 	if routes["litellm"].Billing != run.BillingMetered {
 		t.Errorf(`routes["litellm"].Billing = %q, want %q`, routes["litellm"].Billing, run.BillingMetered)

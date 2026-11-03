@@ -12,7 +12,7 @@ import (
 func routesModeSettings() Settings {
 	return Settings{
 		Routes: map[string]Route{
-			"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid"},
+			"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ANTHROPIC_API_KEY"},
 		},
 		Models: map[string]Model{
 			"luna": {ID: "gpt-5.6-luna", Routes: []string{"litellm"}},
@@ -187,7 +187,7 @@ func TestValidateRoutingRejectsCredentialEnvOnNonStaticRoute(t *testing.T) {
 // route.
 func TestValidateRoutingRejectsGitHubTokenFieldsOnNonCopilotRoute(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", GitHubTokenFile: "~/.pi/agent/auth.json"}
+	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CredentialEnv: "ANTHROPIC_API_KEY", GitHubTokenFile: "~/.pi/agent/auth.json"}
 	err := ValidateRouting(s)
 	if err == nil || !strings.Contains(err.Error(), "github_token_file") {
 		t.Errorf("ValidateRouting = %v, want a refusal naming github_token_file", err)
@@ -198,7 +198,7 @@ func TestValidateRoutingRejectsGitHubTokenFieldsOnNonCopilotRoute(t *testing.T) 
 // codex_auth_file is refused outside a chatgpt-codex route.
 func TestValidateRoutingRejectsCodexAuthFileOnNonCodexRoute(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CodexAuthFile: "~/.codex/auth.json"}
+	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CredentialEnv: "ANTHROPIC_API_KEY", CodexAuthFile: "~/.codex/auth.json"}
 	err := ValidateRouting(s)
 	if err == nil || !strings.Contains(err.Error(), "codex_auth_file") {
 		t.Errorf("ValidateRouting = %v, want a refusal naming codex_auth_file", err)
@@ -394,7 +394,7 @@ func TestValidateRolesIndependenceOverWholeReviewAllowedSet(t *testing.T) {
 // same backend two different route names.
 func TestValidateRolesIndependenceComparesByBackendNotRouteName(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm-b"] = Route{CredentialMode: "static", Upstream: "https://litellm.example.invalid"} // same upstream as "litellm", different name
+	s.Routes["litellm-b"] = Route{CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ANTHROPIC_API_KEY"} // same upstream as "litellm", different name
 	s.Models["luna"] = Model{ID: "gpt-5.6-luna", Routes: []string{"litellm"}}
 	s.Models["luna-via-b"] = Model{ID: "gpt-5.6-luna", Routes: []string{"litellm-b"}}
 	s.Roles.Execution.Allowed = []string{"luna"}

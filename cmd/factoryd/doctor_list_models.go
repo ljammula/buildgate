@@ -258,8 +258,8 @@ func doctorListModels(ctx context.Context, w io.Writer, in doctorInputs) error {
 			if headerName == "" {
 				headerName = meter.CredentialHeaderXAPIKey
 			}
-			// sel.Route is Routing()'s defaulted copy, so CredentialEnv is
-			// already filled in for a static route (defaultedRoute).
+			// The resolver read sel.Route.CredentialEnv, so it names the
+			// variable that holds the key.
 			headerValue = meter.CredentialHeaderValue(headerName, os.Getenv(sel.Route.CredentialEnv))
 		}
 

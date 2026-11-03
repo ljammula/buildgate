@@ -333,7 +333,7 @@ func newQuickstartFlags() (flags *flag.FlagSet, f quickstartFlags) {
 	f.modelHost = flags.String("model-host", "", "bare API root (no /v1) of an OpenAI-compatible model endpoint; only used with -route openai")
 	f.modelID = flags.String("model-id", "", "model id to configure, without a slash; required under -non-interactive for -route openai and -route copilot")
 	f.contextWindow = flags.Int("context-window", 0, "the model's context window in tokens; needed when the route cannot supply it, as with -route openai")
-	f.credential = flags.String("credential", "", "API key or OAuth token for the route, kept in the worker's environment and never written to config; empty reads $ANTHROPIC_API_KEY (openai, anthropic) or $GITHUB_COPILOT_TOKEN (copilot)")
+	f.credential = flags.String("credential", "", "API key or token for the route, kept in the worker's environment, never in config; empty reads the route's own: $ANTHROPIC_API_KEY, $OPENAI_API_KEY (openai) or $GITHUB_COPILOT_TOKEN")
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file trusted, besides the system store, for quickstart's own outbound TLS calls and written to the config as egress_ca_bundle so builds trust it too")
 	f.pollInterval = flags.Duration("poll-interval", 3*time.Second, "how often to re-check the submitted request's state")
 	f.pollTimeout = flags.Duration("poll-timeout", 5*time.Minute, "how long to watch the request before printing how to keep watching; reaching it is not a failure")
@@ -1247,6 +1247,12 @@ func quickstartFirstExistingDefaultPath() (string, bool) {
 	return p, err == nil && found
 }
 
+// openAIRouteCredentialEnv is the variable quickstart's OpenAI-compatible
+// route reads its key from: its own name, never ANTHROPIC_API_KEY, so a
+// shell that holds an Anthropic key for another route never sends it to
+// this route's upstream (a route reads only the variable it names).
+const openAIRouteCredentialEnv = "OPENAI_API_KEY"
+
 // quickstartCredentialEnvForReusedConfig derives the credential
 // environment variable a reused config's own relay_credential_mode
 // implies (see quickstartBuildConfig's own copilot/openai/anthropic
@@ -1268,7 +1274,8 @@ func quickstartCredentialEnvForReusedConfig(opts *quickstartOptions, existing *s
 	// var name to use, not whether the route's credential already
 	// resolves) and read that one route's own credential_env. A
 	// resolution failure (unusable settings, no routes: at all, ...)
-	// falls through to the static ANTHROPIC_API_KEY default below.
+	// falls through to ANTHROPIC_API_KEY below, the name quickstart's own
+	// static routes are written with.
 	if settings, err := existing.ApplySettings(sessionconfig.DefaultSettings()); err == nil {
 		probe := func(string, sessionconfig.Route) error { return nil }
 		if sel, err := modelrole.SelectRoute(settings, modelrole.RoleExecution, "", "", "", probe); err == nil {
@@ -1282,11 +1289,12 @@ func quickstartCredentialEnvForReusedConfig(opts *quickstartOptions, existing *s
 				// own "chatgpt-codex" case).
 				return nil
 			default:
-				env := sel.Route.CredentialEnv
-				if env == "" {
-					env = "ANTHROPIC_API_KEY"
+				// A static route reads only the variable it names; a
+				// no-credential route names none, so nothing carries the key.
+				if sel.Route.CredentialEnv == "" {
+					return nil
 				}
-				return []string{env + "=" + opts.Credential}
+				return []string{sel.Route.CredentialEnv + "=" + opts.Credential}
 			}
 		}
 	}
@@ -2041,31 +2049,15 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 		return nil, nil, fmt.Errorf("-context-window must be a positive integer, got %d", contextWindow)
 	}
 
-	// Deliberately does NOT let ANTHROPIC_API_KEY's mere presence in
-	// the environment decide needsCredential on its own when
-	// interactive: that env var is routine for anyone who also uses
-	// Claude Code, has nothing to do with whether THIS
-	// OpenAI-compatible endpoint needs a credential, and silently
-	// skipping the confirmation below on its account previously meant
-	// a real Anthropic key could be configured (and later sent) to an
-	// entirely unrelated host without the operator ever being asked
-	// (a Codex review on this PR, round 3). Under -non-interactive,
-	// where there is no prompt to ask, presence still resolves the
-	// question -- consistent with -credential's own documented
-	// ANTHROPIC_API_KEY fallback for this route.
+	// Only -credential, or the operator's answer, decides that this endpoint
+	// needs a credential: never an inherited ANTHROPIC_API_KEY, which is
+	// routine for anyone who also uses Claude Code and belongs to another
+	// provider. Under -non-interactive, no -credential means no credential.
 	needsCredential := b.opts.CredentialProvided
-	if !needsCredential {
-		if b.opts.NonInteractive {
-			needsCredential = os.Getenv("ANTHROPIC_API_KEY") != ""
-		} else {
-			prompt := "Does this endpoint require a credential? [y/N] "
-			if os.Getenv("ANTHROPIC_API_KEY") != "" {
-				prompt = "Does this endpoint require a credential? (ANTHROPIC_API_KEY is set in your environment, but that alone doesn't mean this endpoint needs it -- confirm explicitly.) [y/N] "
-			}
-			needsCredential, err = b.p.confirm(b.w, prompt, false)
-			if err != nil {
-				return nil, nil, err
-			}
+	if !needsCredential && !b.opts.NonInteractive {
+		needsCredential, err = b.p.confirm(b.w, "Does this endpoint require a credential? [y/N] ", false)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 	allowNoCredential := true
@@ -2077,11 +2069,11 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 		allowNoCredential = false
 		key := b.opts.Credential
 		if key == "" {
-			key = os.Getenv("ANTHROPIC_API_KEY")
+			key = os.Getenv(openAIRouteCredentialEnv)
 		}
 		if key == "" {
 			if b.opts.NonInteractive {
-				return nil, nil, fmt.Errorf("a credential is required for this route: pass -credential, or set ANTHROPIC_API_KEY")
+				return nil, nil, fmt.Errorf("a credential is required for this route: pass -credential, or set %s", openAIRouteCredentialEnv)
 			}
 			key, err = b.p.askSecret(b.w, "Credential (kept only in the daemon process's own environment, never written to config): ")
 			if err != nil {
@@ -2091,7 +2083,7 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 				return nil, nil, fmt.Errorf("a credential is required for this route")
 			}
 		}
-		b.credentialEnv = append(b.credentialEnv, "ANTHROPIC_API_KEY="+key)
+		b.credentialEnv = append(b.credentialEnv, openAIRouteCredentialEnv+"="+key)
 	} else {
 		header = meter.CredentialHeaderXAPIKey
 	}
@@ -2109,7 +2101,7 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 		AllowNoCredential:      allowNoCredential,
 	}
 	if needsCredential {
-		localRoute.CredentialEnv = "ANTHROPIC_API_KEY"
+		localRoute.CredentialEnv = openAIRouteCredentialEnv
 	}
 	b.cfg.Routes = map[string]sessionconfig.Route{routeName: localRoute}
 	b.cfg.Models = map[string]sessionconfig.Model{
