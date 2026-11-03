@@ -229,3 +229,22 @@ func TestShellCredentialEnvKeepsWhatTheShellHas(t *testing.T) {
 		t.Errorf("child GITHUB_COPILOT_TOKEN entries = %v, want exactly the shell's (empty) value", copilot)
 	}
 }
+
+// TestTemporalComposeServesOneSlotQueuesInOrder keeps the dynamic config the
+// embedded stack mounts: one write partition per task queue, so the worker's
+// jobs queue serves waiting steps first come, first served
+// (TestTemporalLiveOneSlotQueueServesWaitingStepsInOrder proves the effect
+// on the test server, which scripts/temporal-test-server.sh starts with the
+// same value).
+func TestTemporalComposeServesOneSlotQueuesInOrder(t *testing.T) {
+	compose := string(buildgate.TemporalCompose)
+	for _, want := range []string{
+		"target: /etc/temporal/config/dynamicconfig/docker.yaml",
+		"matching.numTaskqueueWritePartitions:",
+		"- value: 1",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("docker-compose.temporal.yml lacks %q", want)
+		}
+	}
+}

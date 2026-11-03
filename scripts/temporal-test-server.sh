@@ -14,7 +14,7 @@
 marker="$1"
 port="$2"
 log="${3:-/dev/null}"
-temporal server start-dev --headless --ip 127.0.0.1 --port "$port" --ui-port 0 --namespace "$marker" >"$log" 2>&1 </dev/null &
+temporal server start-dev --headless --ip 127.0.0.1 --port "$port" --ui-port 0 --namespace "$marker" --dynamic-config-value matching.numTaskqueueWritePartitions=1 >"$log" 2>&1 </dev/null &
 server=$!
 trap 'kill $server 2>/dev/null; exit 0' INT TERM
 cat >/dev/null

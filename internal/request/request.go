@@ -188,6 +188,12 @@ type Ticket struct {
 	// poll read it (gh's baseRefName). A stacked PR above this ticket is
 	// retargeted onto it once this ticket merges.
 	PRBase string `json:"pr_base,omitempty"`
+	// ObservedPR is what the building watch last read of this ticket's pull
+	// request while a later ticket builds. It is written only by that watch
+	// and read only for display (ShownPRState, `factoryd status`); the driver
+	// never reads it. The real state is recorded by checkEarlierPR and
+	// pollTicketPR, which clear this.
+	ObservedPR *ObservedPR `json:"observed_pr,omitempty"`
 	// Rounds is this ticket's corrective-build history: one entry
 	// per batch of newly-surfaced unresolved review threads turned into a
 	// build against the ticket's existing PR branch.
@@ -741,6 +747,11 @@ type Request struct {
 	// budget), recorded when planning starts so the review's notes and display
 	// stay the same if the session config changes afterwards. Advice only.
 	PlanBudgetLines int `json:"plan_budget_lines,omitempty"`
+	// PlanLockfilesDenied records that the release policy in force when
+	// planning started did not allow dependency-lockfile changes
+	// (release_allow_dependency_lockfile_changes false), so the review's
+	// notes can say when a ticket allows a lockfile. Advice only.
+	PlanLockfilesDenied bool `json:"plan_lockfiles_denied,omitempty"`
 	// PlanVerifyCommand is the effective verify command when the plan was
 	// prepared, for the spec ticket that has no Verify-Command header.
 	PlanVerifyCommand string `json:"plan_verify_command,omitempty"`
@@ -2030,4 +2041,32 @@ func (ticket *Ticket) PRHeadRunID() string {
 		}
 	}
 	return ticket.RunID
+}
+
+// ObservedPR is a pull request's state as the building watch read it: State
+// is "open", "merged" or "closed", Base the base branch GitHub reports ("" when
+// it reported none), At when it was read (RFC 3339).
+type ObservedPR struct {
+	State string `json:"state"`
+	Base  string `json:"base,omitempty"`
+	At    string `json:"at"`
+}
+
+// ShownPRState is the pull-request state to display for t: the watch's
+// observation when it saw the pull request merged or closed, else the recorded
+// PRState (which says more than "open"). Display only.
+func (t Ticket) ShownPRState() string {
+	if t.ObservedPR != nil && (t.ObservedPR.State == "merged" || t.ObservedPR.State == "closed") {
+		return t.ObservedPR.State
+	}
+	return t.PRState
+}
+
+// ShownPRBase is the base branch to display for t: the observed one when set,
+// else the recorded PRBase. Display only.
+func (t Ticket) ShownPRBase() string {
+	if t.ObservedPR != nil && t.ObservedPR.Base != "" {
+		return t.ObservedPR.Base
+	}
+	return t.PRBase
 }

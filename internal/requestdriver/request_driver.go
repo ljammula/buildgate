@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -612,6 +613,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	ticketsDir := filepath.Join(request.Dir(dataDir, r.ID), "tickets")
 	// The budget the planner is told is the one the review's notes read.
 	r.PlanBudgetLines = cfg.Settings.PRBudgetLines
+	r.PlanLockfilesDenied = !cfg.Settings.ReleaseAllowDependencyLockfileChanges
 	r.PlanVerifyCommand = verifyCommand
 	if !r.PlanImported && request.PlanFeedback(r) == "" && r.SizeReplan == nil {
 		return planApprovedSpec(dp, dataDir, r, inputs, ticketsDir, now)
@@ -981,7 +983,14 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// and the runErr != nil branch below would load and replay that old
 	// outcome instead of reporting the new start failure.
 	var started bool
+	// While the build runs, r is shared with the watch of the earlier
+	// tickets' pull requests: every touch of r in the callback takes mu.
+	var mu sync.Mutex
+	stopWatch := watchEarlierPRs(dp, ctx, dataDir, r, idx, cfg, &mu)
+	defer stopWatch()
 	runErr := runner(ctx, args, func(startedRun *run.Run) {
+		mu.Lock()
+		defer mu.Unlock()
 		// Recorded (and saved) the moment the run itself exists, before it
 		// has necessarily finished -- a crash mid-build still leaves
 		// TicketIndex and this run id on disk for the next worker to
@@ -1015,6 +1024,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			log.Printf("request %s: ticket %d: save run id %s: %v", r.ID, ticket.Index, startedRun.ID, err)
 		}
 	})
+	stopWatch()
 	// Re-stamp after the build, the same way AdvanceSpecDrafting does:
 	// found live, now was the poll's own start time, so the "ticket 1/1
 	// accepted" History entry read
