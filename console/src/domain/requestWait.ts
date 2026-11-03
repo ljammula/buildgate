@@ -33,6 +33,8 @@ export function waitLine(wait: RequestWait | null): string | null {
       return joinParts(["Waiting for a sidecar slot", wait.on]);
     case "stacked_ticket":
       return joinParts(["Waiting on the earlier ticket's branch", wait.on]);
+    case "route":
+      return joinParts(["Waiting for its model route", wait.on]);
     case "no_worker":
       return "No worker is running";
     default:
@@ -55,6 +57,8 @@ export function waitChipLabel(wait: RequestWait): string {
       return "Waiting for sidecars";
     case "stacked_ticket":
       return "Waiting on earlier ticket";
+    case "route":
+      return "Waiting for model route";
     case "no_worker":
       return "No worker";
     default:

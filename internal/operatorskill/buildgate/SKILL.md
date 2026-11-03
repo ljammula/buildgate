@@ -254,7 +254,10 @@ request sits in a queue nobody drains.
   branch, that branch), the model host, a sidecar slot, or the earlier
   ticket's branch not at the commit the next ticket builds on
   (`stacked_ticket`, whose sentence names what the operator does: relay
-  it); `-json` has it as `wait.kind`.
+  it), or a model route whose credential is missing or expires too soon
+  (`route`: the sentence names the role, the route and the fix, such as
+  `codex login`, or setting the key's variable and `factoryd restart`;
+  relay it); `-json` has it as `wait.kind`.
 - Spend: `factoryd cost [-request <id>]`, by role and model.
   On a subscription route (ChatGPT, Copilot) the dollars are an API-price
   estimate, not a bill.

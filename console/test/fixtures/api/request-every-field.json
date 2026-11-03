@@ -26,6 +26,10 @@
     "since": "every-field since",
     "on": "every-field on"
   },
+  "route_wait": {
+    "since": "every-field since",
+    "on": "every-field on"
+  },
   "last_ask": "every-field last_ask",
   "ticket_index": 1,
   "ticket_count": 1,

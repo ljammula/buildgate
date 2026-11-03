@@ -38,6 +38,17 @@ describe("waitLine", () => {
     expect(waitChipLabel(waitOf({ kind: "stacked_ticket", on: "x" })!)).toBe(
       "Waiting on earlier ticket",
     );
+    expect(
+      waitLine(
+        waitOf({
+          kind: "route",
+          on: "waiting for roles.planning's model route: route codex: token expired",
+        }),
+      ),
+    ).toBe(
+      "Waiting for its model route · waiting for roles.planning's model route: route codex: token expired",
+    );
+    expect(waitChipLabel(waitOf({ kind: "route", on: "x" })!)).toBe("Waiting for model route");
     expect(waitLine(waitOf({ kind: "no_worker" }))).toBe("No worker is running");
   });
 

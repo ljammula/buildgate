@@ -715,7 +715,18 @@ requires a new contract review and an updated machine-checkable test.
   round refused before its run existed (uncounted, as any unresolved
   round), and a spec-drafting, read-back or planning job
   wait in `resume_review` with the cause instead of halting, quarantining
-  or starting again on the next poll. A refused resume of a kept build
+  or starting again on the next poll. Before that can happen, the request
+  driver checks the routes on the host immediately before the first launch
+  of a spec-drafting job, of a planning job (not a handed-over plan) and of
+  a ticket build (before its starting point is made), each role's route
+  chosen as the launch chooses it (`Deps.RouteWait`, no model request): a
+  role none of whose routes has a usable credential (the resolver's
+  refusals above) does not launch, and the request keeps its state with a
+  route wait (`route_wait`) naming the role, each route and its cause,
+  checked again every 30 s, and launches by itself once a credential is
+  usable. What reaches `resume_review` with the cause is what that check
+  does not see: a credential that fails between the check and the launch,
+  the sandbox runtime's budget check, a read-back, and the rounds above. A refused resume of a kept build
   keeps that build as the one `resume` continues. The read-back otherwise
   never stops its request, and a resume after it reruns the whole spec
   drafting pass.

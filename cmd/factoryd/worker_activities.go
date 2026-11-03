@@ -101,6 +101,9 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 	if r.State == request.StateBuilding && r.StackedWait != nil {
 		step.Wait = stackedWaitRecheck(a.cfg)
 	}
+	if step.Advance != "" && r.RouteWait != nil {
+		step.Wait = routeWaitRecheck
+	}
 	if step.Remind {
 		step.Wait = reviewWait(r, a.cfg.HitlReminderInterval, a.cfg.Settings.ReviewGateExpiry, time.Now())
 	}

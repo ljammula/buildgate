@@ -58,6 +58,12 @@ type Deps interface {
 	PruneRoundRefs(dir string, id string, keepPrefixes []string) error
 	// RunTicket builds one ticket: the command's single-ticket run.
 	RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error
+	// RouteWait says why a model job on need cannot launch yet because no
+	// route of its role has a credential that can be used (a missing key, a
+	// token that expires too soon): the role, each route's cause and the fix.
+	// "" when a route is usable, or when the role fails for any other reason
+	// (the launch reports that as it does today). It calls no model.
+	RouteWait(s sessionconfig.Settings, need RouteNeed) string
 	// SaveReviewEntry saves r, which has just entered a review state; the real
 	// body is r.Save. The reminder of that review is not sent until it
 	// returns, the moment an operator's decision can land between the two
@@ -236,6 +242,14 @@ func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r 
 	if importsSpec(r) {
 		specMD, jobErr = readImportedSpec(dataDir, r.ID)
 	} else {
+		// Only before the pass's first launch: a redraft in the same pass
+		// runs on the route that just served the first, and a wait there
+		// would lose the pass's attempt count.
+		if attempt == 1 {
+			if held, err := holdForRoutes(dp, dataDir, r, cfg, draftingNeeds(r), now); held {
+				return false, err
+			}
+		}
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 			return false, err
 		} else if check != "" {
@@ -639,6 +653,13 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			return err
 		}
 
+		// Only before the pass's first launch, and never for a handed-over
+		// plan, which reads its tickets and launches no model.
+		if attempt == 1 && !importsPlan(r) {
+			if held, err := holdForRoutes(dp, dataDir, r, cfg, draftingNeeds(r), now); held {
+				return err
+			}
+		}
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 			return err
 		} else if check != "" {
@@ -955,13 +976,10 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	if moved || err != nil {
 		return err
 	}
-	if held, err := holdForEarlierTicket(dp, ctx, dataDir, r, idx, cfg, now); held || err != nil {
-		return err
-	}
-	if parked, err := restackCarvedOntoPredecessor(dp, ctx, dataDir, r, ticket, now); parked || err != nil {
-		return err
-	}
 	escalated := replacesEscalatedBuild(dataDir, r, ticket, resumeRunID, cfg)
+	if held, err := holdBeforeBuild(dp, ctx, dataDir, r, idx, ticket, cfg, escalated, now); held || err != nil {
+		return err
+	}
 	args, recordOf, onBranch, escalated, err := ticketBuildStart(dp, dataDir, r, ticket, cfg, resumeRunID, escalated)
 	if err != nil {
 		return HaltRequest(dataDir, r, err.Error(), now)
@@ -1331,7 +1349,7 @@ func startFailedReason(idx, count int, runErr error, onBranch bool) string {
 // commit (carvedBuildArgs, never escalated); any other is the ordinary
 // build on its starting point (startingPoint).
 func ticketBuildStart(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, resumeRunID string, escalated bool) (args []string, recordOf string, onBranch, escalatedOut bool, err error) {
-	if ticket.Order != nil && !ticket.Pushed() {
+	if carvedBuild(ticket) {
 		args, err = carvedBuildArgs(dataDir, r, *ticket, cfg)
 		return args, "", false, false, err
 	}
@@ -1340,6 +1358,28 @@ func ticketBuildStart(dp Deps, dataDir string, r *request.Request, ticket *reque
 	}
 	args, recordOf, onBranch, err = startingPoint(dp, dataDir, r, ticket, args, resumeRunID)
 	return args, recordOf, onBranch, escalated, err
+}
+
+// holdBeforeBuild reports held when ticket's build must not start on this
+// pass, having recorded why: it waits on the earlier ticket's pull request
+// (holdForEarlierTicket), it was parked to be restacked onto its predecessor
+// (restackCarvedOntoPredecessor), or a role it launches on has no usable
+// route (holdForRoutes). All of them run before the build's starting point is
+// made (a retry-from branch), so a pass that waits for a route makes none.
+func holdBeforeBuild(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, ticket *request.Ticket, cfg WorkerConfig, escalated bool, now time.Time) (held bool, err error) {
+	if held, err := holdForEarlierTicket(dp, ctx, dataDir, r, idx, cfg, now); held || err != nil {
+		return true, err
+	}
+	if parked, err := restackCarvedOntoPredecessor(dp, ctx, dataDir, r, ticket, now); parked || err != nil {
+		return true, err
+	}
+	return holdForRoutes(dp, dataDir, r, cfg, buildNeeds(r, cfg, escalated && !carvedBuild(ticket)), now)
+}
+
+// carvedBuild reports whether ticket's next build is the replay run of its
+// carved commit (pr_order), which is never escalated.
+func carvedBuild(ticket *request.Ticket) bool {
+	return ticket.Order != nil && !ticket.Pushed()
 }
 
 // withEarlierTicketsWork adds the argument that puts the earlier tickets'

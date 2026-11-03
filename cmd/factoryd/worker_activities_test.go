@@ -184,7 +184,7 @@ func TestLoadRequestStepPacesAStackedTicketWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.StackedWait = &request.StackedWait{Since: time.Now().UTC().Format(time.RFC3339Nano), On: "ticket 2/2 waits"}
+	r.StackedWait = &request.StepWait{Since: time.Now().UTC().Format(time.RFC3339Nano), On: "ticket 2/2 waits"}
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}

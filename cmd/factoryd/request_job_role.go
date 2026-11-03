@@ -60,12 +60,8 @@ type requestJobRoleOverride struct {
 // ticket build's own model resolves to -- never refuse the job outright
 // just because this one role was left unset.
 func resolveRequestJobRole(cfg requestdriver.WorkerConfig, stage modelrole.Stage, jobName, modelChoice, harnessChoice string) (requestJobRoleOverride, error) {
-	role := modelrole.ForStage(stage)
 	settings := cfg.Settings
-	effectiveRole := role
-	if role != modelrole.RoleExecution && !modelrole.RoleConfigured(settings, role) {
-		effectiveRole = modelrole.RoleExecution
-	}
+	effectiveRole := requestJobEffectiveRole(settings, stage)
 	choice, hChoice := "", ""
 	if effectiveRole == modelrole.RolePlanning {
 		choice, hChoice = modelChoice, harnessChoice
@@ -87,6 +83,16 @@ func resolveRequestJobRole(cfg requestdriver.WorkerConfig, stage modelrole.Stage
 	}
 	logRouteSkips(string(effectiveRole), &sel)
 	return requestJobRoleOverride{Thinking: sel.Thinking, Harness: sel.Harness, WorkerEnv: harnessDescriptor.WorkerEnv, RouteSelection: &sel, Role: effectiveRole, Skills: skills}, nil
+}
+
+// requestJobEffectiveRole is the role a drafting job of stage runs as: the
+// stage's own role, or execution when that role is unset.
+func requestJobEffectiveRole(s sessionconfig.Settings, stage modelrole.Stage) modelrole.Role {
+	role := modelrole.ForStage(stage)
+	if role != modelrole.RoleExecution && !modelrole.RoleConfigured(s, role) {
+		return modelrole.RoleExecution
+	}
+	return role
 }
 
 // jobSpendFromResult builds the request.JobSpend a drafting job (spec/plan) records from its own runner.Result, or nil per JobSpend's own

@@ -610,7 +610,7 @@ export interface RequestBuild {
  * `waitChipLabel` word the kinds they know and fall back for the rest.
  */
 export interface RequestWait {
-  /** job_slot, repository, repository_queue, model_host, compose_slot, stacked_ticket or no_worker. */
+  /** job_slot, repository, repository_queue, model_host, compose_slot, stacked_ticket, route or no_worker. */
   readonly kind: string;
   /** RFC3339 time the wait began; empty when the server did not know. */
   readonly since: string;
