@@ -339,6 +339,11 @@ func TestRestackCascadesInTicketOrder(t *testing.T) {
 	f.r.Tickets[1].LastPolledAt = ""
 	f.save()
 	f.pass()
+	// Ticket 3 is not next in line while ticket 1 is open (it waits for
+	// ticket 2 to be the lowest open ticket), so ticket 2's restack is the
+	// pass's only one.
+	f.mergeTicket1()
+	f.pass()
 	var replays []string
 	for _, e := range f.events {
 		if strings.HasPrefix(e, "replay ") {
@@ -347,6 +352,161 @@ func TestRestackCascadesInTicketOrder(t *testing.T) {
 	}
 	if len(replays) != 2 || !strings.HasSuffix(replays[0], "t2-restack1") || !strings.Contains(replays[1], "onto "+r2+" on buildgate/req-1/t3-restack1") {
 		t.Fatalf("replays %v: want ticket 2, then ticket 3 onto ticket 2's restacked head", replays)
+	}
+}
+
+// mergeTicket1 makes ticket 1's pull request merged into main (a merge that
+// leaves ticket 2's restacked head under main's tip), so ticket 2 is the
+// lowest open ticket.
+func (f *restackFixture) mergeTicket1() {
+	f.t.Helper()
+	f.remote["main"] = mainTip
+	f.under[[2]string{newTip, mainTip}] = true
+	t1 := f.r.Tickets[0]
+	f.prs[t1.PRURL] = forge.ReviewState{State: forge.PRStateMerged, BaseRefName: "main", HeadSHA: newTip}
+	f.r.Tickets[0].LastPolledAt = ""
+	f.save()
+}
+
+// newStackOf3 is restackFixture with a third ticket stacked on ticket 2 (built
+// on ticket 2's old head), so ticket 1's pushed round moves ticket 2 and,
+// after ticket 2's restack, ticket 3.
+func newStackOf3(t *testing.T) (*restackFixture, *request.Ticket) {
+	t.Helper()
+	f := newRestackFixture(t, 3)
+	h3 := hexSHA('4')
+	f.saveRun(&run.Run{ID: "run-3", BaseSHA: head, StackBaseSHA: head, ResultSHA: h3, Branch: "factoryd/run-3"})
+	t3 := &f.r.Tickets[2]
+	t3.Branch, t3.PRState = "factoryd/run-3", "stacked"
+	f.remote["factoryd/run-3"] = h3
+	f.prs[t3.PRURL] = forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, BaseRefName: "factoryd/run-2", HeadSHA: h3}
+	f.ranges[[2]string{head, h3}] = []string{h3}
+	f.save()
+	return f, t3
+}
+
+func (f *restackFixture) replays() []string {
+	var out []string
+	for _, e := range f.events {
+		if strings.HasPrefix(e, "replay ") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// touched reports whether an event moved prURL's pull request (a retarget or
+// a ready flip) or a replay named its restack branch.
+func (f *restackFixture) touched(prURL string, branch string) bool {
+	return f.did("ready "+prURL) || f.did("retarget "+prURL) || slices.ContainsFunc(f.events, func(e string) bool { return strings.HasSuffix(e, "on "+branch) })
+}
+
+// TestRestackDefersATicketAboveTheNextToMerge: a round pushed on ticket 1
+// (open, the lowest) restacks ticket 2, the next to merge, and not ticket 3,
+// which is not retargeted, not marked ready and not recorded as held.
+func TestRestackDefersATicketAboveTheNextToMerge(t *testing.T) {
+	f, t3 := newStackOf3(t)
+	for i := 0; i < 4; i++ {
+		f.pass()
+	}
+	if got := f.replays(); len(got) != 1 || !strings.HasSuffix(got[0], "t2-restack1") {
+		t.Fatalf("replays %v: want ticket 2's alone", got)
+	}
+	if f.touched(t3.PRURL, "buildgate/req-1/t3-restack1") {
+		t.Fatalf("events %v: ticket 3 was restacked, retargeted or flipped ready above the next to merge", f.events)
+	}
+	if f.r.Tickets[2].RestackHold != nil {
+		t.Fatalf("ticket 3 has a RestackHold %+v: a deferral must not set one", f.r.Tickets[2].RestackHold)
+	}
+}
+
+// TestADeferredRestackRunsOnceWhenItsTicketIsNext: ticket 3 waits through
+// passes while ticket 1 is open, then gets exactly one replay onto ticket 2's
+// head once ticket 1 merged and ticket 2 is the lowest open ticket.
+func TestADeferredRestackRunsOnceWhenItsTicketIsNext(t *testing.T) {
+	f, _ := newStackOf3(t)
+	for i := 0; i < 3; i++ {
+		f.pass()
+	}
+	if got := f.replays(); len(got) != 1 || !strings.HasSuffix(got[0], "t2-restack1") {
+		t.Fatalf("replays %v before ticket 1 merged: want ticket 2's alone, none of ticket 3", got)
+	}
+	f.mergeTicket1()
+	for i := 0; i < 4; i++ {
+		f.pass()
+	}
+	got := f.replays()
+	if len(got) != 2 || !strings.HasSuffix(got[0], "t2-restack1") || !strings.Contains(got[1], "onto "+r2+" on buildgate/req-1/t3-restack1") {
+		t.Fatalf("replays %v: want ticket 2's, then exactly one of ticket 3 onto ticket 2's final head", got)
+	}
+}
+
+// TestAPassRunsAtMostOneRestack: with ticket 1 merged, tickets 2 and 3 both
+// need a restack, ticket 3 onto the head ticket 2's restack makes; one pass
+// restacks ticket 2 only and the next ticket 3.
+func TestAPassRunsAtMostOneRestack(t *testing.T) {
+	f, _ := newStackOf3(t)
+	f.mergeTicket1()
+	delete(f.under, [2]string{newTip, mainTip})
+	f.prs[f.r.Tickets[1].PRURL] = forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, BaseRefName: "factoryd/run-1", HeadSHA: head}
+	f.pass()
+	if got := f.replays(); len(got) != 1 || !strings.Contains(got[0], "onto "+mainTip) {
+		t.Fatalf("replays %v after one pass: want ticket 2's alone", got)
+	}
+	for i := 0; i < 3; i++ {
+		f.pass()
+	}
+	if got := f.replays(); len(got) != 2 || !strings.Contains(got[1], "t3-restack1") {
+		t.Fatalf("replays %v after later passes: want ticket 3's next", got)
+	}
+}
+
+// TestARestackWaitsForAnEarlierTicketsPendingRestack: ticket 1 merged, so
+// ticket 2 is the lowest open ticket and needs a restack, but its poll is not
+// due. Ticket 3 is due by restackDue (ticket 2 is the lowest) and must still
+// not replay onto ticket 2's stale head: only the earlier-restack check holds
+// it.
+func TestARestackWaitsForAnEarlierTicketsPendingRestack(t *testing.T) {
+	f, t3 := newStackOf3(t)
+	f.mergeTicket1()
+	delete(f.under, [2]string{newTip, mainTip})
+	f.r.Tickets[1].LastPolledAt = f.now.Add(10 * time.Minute).UTC().Format(time.RFC3339Nano)
+	f.save()
+	f.pass()
+	if got := f.replays(); len(got) != 0 || f.touched(t3.PRURL, "buildgate/req-1/t3-restack1") {
+		t.Fatalf("replays %v, events %v: ticket 3 moved before ticket 2's pending restack", got, f.events)
+	}
+}
+
+// TestACorrectiveRoundRunsOnADeferredTicket: review threads on a ticket whose
+// restack is deferred still start their round, on its current branch; the
+// ticket is neither retargeted nor marked ready.
+func TestACorrectiveRoundRunsOnADeferredTicket(t *testing.T) {
+	f, t3 := newStackOf3(t)
+	for i := 0; i < 3; i++ {
+		f.pass()
+	}
+	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 9}}
+	st := f.prs[t3.PRURL]
+	st.BlocksReadyThreads, st.ActionableThreads = threads, threads
+	f.prs[t3.PRURL] = st
+	old := requestdriver.PrReviewCorrectiveRunner
+	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = old })
+	builds := 0
+	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		builds++
+		return reviewFlaggedRoundRun(t, f.dataDir, requestdrivertest.ArgValue(args, "-ticket"), "x").Save(f.dataDir)
+	}
+	f.dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
+	f.dp.listReviewCommentsFn = func(context.Context, string) ([]requestdriver.ReviewComment, error) { return nil, nil }
+	for i := 0; i < 3; i++ {
+		f.pass()
+	}
+	if builds == 0 || len(f.r.Tickets[2].Rounds) == 0 {
+		t.Fatalf("builds %d, rounds %d: the deferred ticket's review thread started no round", builds, len(f.r.Tickets[2].Rounds))
+	}
+	if f.touched(t3.PRURL, "buildgate/req-1/t3-restack1") {
+		t.Fatalf("events %v: the deferred ticket was restacked, retargeted or marked ready", f.events)
 	}
 }
 

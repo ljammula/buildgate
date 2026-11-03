@@ -916,6 +916,9 @@ func TestTicketSummaryMarksSafeToMergeInPRReview(t *testing.T) {
 		{"round in flight (no readiness check)", func(r *request.Request) { r.Tickets[0].MergeReadiness = nil }, "1:ready 2:stacked 3:stacked"},
 		{"restack in flight", func(r *request.Request) { r.Tickets[1].Restack = &request.TicketRestack{} }, "1:ready,ready-to-merge 2:stacked 3:stacked"},
 		{"restack held", func(r *request.Request) { r.Tickets[2].RestackHold = &request.TicketRestackHold{} }, "1:ready,ready-to-merge 2:stacked 3:stacked"},
+		{"restack deferred above the next to merge (no hold recorded)", func(r *request.Request) {
+			r.Tickets[2].PRBase, r.Tickets[2].MergeReadiness = "factoryd/run-2", nil
+		}, "1:ready,ready-to-merge,safe-to-merge 2:stacked 3:stacked"},
 		{"advice round in flight", func(r *request.Request) { r.Tickets[0].Advice = &request.TicketAdvice{} }, "1:ready,ready-to-merge 2:stacked 3:stacked"},
 		{"bottom merged, next retargeted", func(r *request.Request) {
 			r.Tickets[0].PRState, r.Tickets[0].MergeReadiness = "merged", nil

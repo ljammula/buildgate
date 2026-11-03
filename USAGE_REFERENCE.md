@@ -254,7 +254,12 @@ tip on origin is not under ticket N+1's PR head, or, after ticket N merged,
 when ticket N+1's `stack_base_sha` is not under the tip of the branch
 ticket N merged into (a squash or rebase merge; a merge commit needs none).
 Tickets are restacked in order, each after every earlier ticket's restack is
-pushed and confirmed. The factory checks that origin's branch is at the
+pushed and confirmed. Only the ticket next in line is restacked: ticket N+1 when
+ticket N is merged or is the lowest open ticket, and the lowest open ticket
+itself. A ticket above that waits (no retarget, no ready flip, no hold
+recorded; its review rounds still run) and is restacked once, onto its final
+base, when it becomes next. A PR poll runs at most one restack, so a long
+stack takes one poll per ticket. The factory checks that origin's branch is at the
 PR-head run's commit and that every commit since the stack base is the work
 of one of the ticket's own runs and no merge commit, replays those commits
 with `git cherry-pick` onto the new tip on the local branch

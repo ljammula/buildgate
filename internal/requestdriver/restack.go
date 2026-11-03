@@ -138,7 +138,7 @@ func earlierRestackPending(dp Deps, ctx context.Context, dataDir string, r *requ
 // ended, recorded a landed push, or restacked it), and the poll of this
 // ticket is over. held
 // is true when the ticket needs a restack that cannot run yet (an earlier
-// ticket's comes first), or whether it needs one cannot be told: its pull request
+// ticket's comes first, or the ticket is not yet next in line: restackDue), or whether it needs one cannot be told: its pull request
 // is then neither retargeted nor marked ready this poll. A need that cannot
 // be told is recorded on the ticket (Ticket.RestackHold), shown in the
 // request's next action and watch, and reminded at the reminder interval,
@@ -171,7 +171,29 @@ func restackIfNeeded(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		log.Printf("request %s: ticket %d needs a restack onto %s, after an earlier ticket's restack (%v)", r.ID, ticket.Index, shortSHA(need.onto), err)
 		return false, true, nil
 	}
+	if !restackDue(r, ticket) {
+		log.Printf("request %s: ticket %d needs a restack onto %s, deferred until the ticket under it is merged or is the lowest open ticket", r.ID, ticket.Index, shortSHA(need.onto))
+		return false, true, nil
+	}
 	return true, false, restackTicket(dp, ctx, dataDir, r, ticket, need, cfg, now)
+}
+
+// restackDue reports whether a ticket that needs a restack is restacked now:
+// only the ticket next in line is, so a push to ticket N does not restack
+// every ticket above it. A ticket is due when it is the lowest open ticket,
+// when the ticket directly under it is the lowest open ticket (it is the next
+// to merge) or when that ticket is merged or closed. Any other ticket waits,
+// held as for a pending earlier restack but without a RestackHold, and is
+// restacked when it becomes due. The ticket next to merge is restacked after
+// every pushed round of the lowest open ticket, and again after a squash or
+// rebase merge; the tickets above it skip those intermediate restacks.
+func restackDue(r *request.Request, ticket *request.Ticket) bool {
+	lowest := r.LowestOpenTicket()
+	if lowest == 0 || lowest >= ticket.Index-1 {
+		return true
+	}
+	under, err := TicketAt(r, ticket.Index-1)
+	return err != nil || under.PRState == "merged" || under.PRState == "closed"
 }
 
 // restackHoldSentence is the operator sentence of a ticket whose restack

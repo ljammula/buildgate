@@ -113,3 +113,18 @@ func TestMergeReadinessOnlyDraftBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestLowestOpenTicketSkipsMergedClosedAndNoPR(t *testing.T) {
+	r := &Request{TicketCount: 4, Tickets: []Ticket{
+		{Index: 1, PRURL: "u1", PRState: "merged"},
+		{Index: 2, PRURL: "u2", PRState: "closed"},
+		{Index: 3},
+		{Index: 4, PRURL: "u4", PRState: "stacked"},
+	}}
+	if got := r.LowestOpenTicket(); got != 4 {
+		t.Fatalf("LowestOpenTicket = %d, want 4", got)
+	}
+	if got := r.LowestOpenTicketBelow(4); got != 0 {
+		t.Fatalf("LowestOpenTicketBelow(4) = %d, want 0", got)
+	}
+}

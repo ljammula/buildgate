@@ -215,7 +215,10 @@ func lowestUnmergedBelowCurrent(r *request.Request) int {
 }
 
 // lowestOpenTicket is the index of the lowest ticket below limit whose PR is
-// open (not merged or closed); 0 when there is none.
+// open (not merged or closed); 0 when there is none. It reads the state status
+// shows (Ticket.ShownPRState, an observation made while a later ticket builds
+// included), so it is status's own: the driver decides on the recorded state
+// (request.Request.LowestOpenTicket) and never on an observation.
 func lowestOpenTicket(r *request.Request, limit int) int {
 	for _, t := range r.Tickets {
 		if t.Index < limit && t.PRURL != "" && t.ShownPRState() != "merged" && t.ShownPRState() != "closed" {
