@@ -38,6 +38,17 @@ class ChallengeProblems(unittest.TestCase):
 		self.assertTrue(live_challenge.challenge_problems({"challenge": {"verdict": "maybe"}}))
 
 
+class SubjectAndRounds(unittest.TestCase):
+	def test_a_held_file_without_a_subject_is_a_problem(self):
+		run = {"challenge": {"verdict": "green", "files": [{"path": "a_test.go"}, {"path": "b_test.go", "subject": ["x.go"]}, {"path": "c.go", "refused": "no"}]}}
+		self.assertEqual(len(live_challenge.challenge_problems(run)), 1)
+
+	def test_an_advice_round_quarantined_on_diff_scope_is_a_problem(self):
+		request = {"tickets": [{"rounds": [{"kind": "advice", "run_id": "r1"}, {"kind": "advice", "run_id": "r2"}]}]}
+		runs = {"r1": {"gate_results": [{"check": "diff_scope", "passed": False}]}, "r2": {"gate_results": [{"check": "diff_scope", "passed": True}]}}
+		self.assertEqual(len(live_challenge.round_problems(request, runs.get)), 1)
+
+
 class FailsWhenNoChallengerRan(unittest.TestCase):
 	"""The whole script against a stub factoryd whose accepted run has no
 	challenge record: exit status 1 and a recorded fail."""

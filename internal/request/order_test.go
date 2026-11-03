@@ -91,3 +91,29 @@ func TestReplaceWithCarvedAfterACrashRefusesAndDestroysNothing(t *testing.T) {
 		t.Errorf("the record changed: %d tickets", len(r.Tickets))
 	}
 }
+
+// A carve drops what the replaced ticket raised and renumbers what later
+// tickets raised.
+func TestReplaceWithCarvedRenumbersChallengeOutOfScope(t *testing.T) {
+	dataDir, id := t.TempDir(), "req-1"
+	r := newAmendScopeFixture(t, dataDir, id, "first ticket\n")
+	r.State = StateBuilding
+	second := filepath.Join(Dir(dataDir, id), "tickets", "002.spec.md")
+	if err := os.WriteFile(second, []byte("second ticket\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := HashFile(dataDir, id, "tickets/002.spec.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Tickets = append(r.Tickets, Ticket{Index: 2, SpecPath: second})
+	r.TicketCount = 2
+	r.ApprovedSHA256["tickets/002.spec.md"] = hash
+	r.ChallengeOutOfScope = []ChallengeRaised{{Ticket: 1, Path: "a_test.go"}, {Ticket: 2, Path: "b_test.go"}}
+	if err := r.ReplaceWithCarved(dataDir, 1, "run-1", [][]string{{"db/"}}, []int{1, 2}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ChallengeOutOfScope) != 1 || r.ChallengeOutOfScope[0].Path != "b_test.go" || r.ChallengeOutOfScope[0].Ticket != 3 {
+		t.Errorf("ChallengeOutOfScope = %+v, want b_test.go on ticket 3 only", r.ChallengeOutOfScope)
+	}
+}

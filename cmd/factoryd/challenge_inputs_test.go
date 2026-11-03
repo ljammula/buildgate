@@ -218,3 +218,10 @@ func TestEvidenceMarkdownRedChallengeNamesTheResultCommit(t *testing.T) {
 		t.Errorf("a doubled blank line:\n%s", renderChallengeMarkdown(r.Challenge, r.ResultSHA))
 	}
 }
+
+func TestRenderChallengeMarkdownShowsTheSubjectNotRunNote(t *testing.T) {
+	c := &run.ChallengeRecord{Verdict: run.ChallengeGreen, Rerun: true, Notes: []string{"challenge p/a_test.go (AC-3) not run: subject backend/handler.go is outside this ticket's Allowed-Files"}}
+	if body := renderChallengeMarkdown(c, ""); !strings.Contains(body, "- Note: challenge p/a_test.go (AC-3) not run: subject backend/handler.go is outside this ticket's Allowed-Files") {
+		t.Errorf("the not-run note is missing:\n%s", body)
+	}
+}

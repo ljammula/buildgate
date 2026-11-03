@@ -525,6 +525,7 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 		return false, r.Save(dataDir)
 	}
 
+	ticket.ObservedPR = nil // this read is the real record
 	if state.BaseRefName != "" {
 		ticket.PRBase = state.BaseRefName
 	}

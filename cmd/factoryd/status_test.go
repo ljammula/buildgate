@@ -962,3 +962,39 @@ func TestTicketSummaryMarksOnlyTheLowestUnmergedEarlierTicketSafeToMerge(t *test
 		t.Errorf("after ticket 1 merged, summary = %q, want %q", got, want)
 	}
 }
+
+func TestTicketSummaryNoSafeMarkWhenTheLowestOpenTicketIsStackedOnAnotherTicket(t *testing.T) {
+	r := &request.Request{
+		State: request.StateBuilding, TicketCount: 3, TicketIndex: 3,
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: "https://github.com/acme/app/pull/1", PRState: "merged", Branch: "factoryd/run-1"},
+			{Index: 2, PRURL: "https://github.com/acme/app/pull/2", PRState: "ready", PRBase: "factoryd/run-1"},
+			{Index: 3, PRURL: "https://github.com/acme/app/pull/3", PRState: "stacked"},
+		},
+	}
+	if got, want := requestTicketPRSummary(r), "1:merged 2:ready 3:stacked,draft"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+}
+
+func TestTicketSummaryShowsAnObservedMergeOfAnEarlierTicket(t *testing.T) {
+	url := func(n string) string { return "https://github.com/acme/app/pull/" + n }
+	r := &request.Request{
+		State: request.StateBuilding, TicketCount: 3, TicketIndex: 3,
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: url("1"), PRState: "ready", Branch: "factoryd/run-1", ObservedPR: &request.ObservedPR{State: "merged", Base: "main"}},
+			{Index: 2, PRURL: url("2"), PRState: "ready", PRBase: "factoryd/run-1", Branch: "factoryd/run-2"},
+			{Index: 3, PRURL: url("3"), PRState: "stacked"},
+		},
+	}
+	// Ticket 1 shows merged with no mark; ticket 2 is the lowest open one but
+	// is still based on ticket 1's branch, so it is not safe to merge.
+	if got, want := requestTicketPRSummary(r), "1:merged 2:ready 3:stacked,draft"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	// Once ticket 2's observed base is the default branch, the mark moves to it.
+	r.Tickets[1].ObservedPR = &request.ObservedPR{State: "open", Base: "main"}
+	if got, want := requestTicketPRSummary(r), "1:merged 2:ready,safe-to-merge 3:stacked,draft"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+}

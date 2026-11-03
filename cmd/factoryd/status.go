@@ -186,13 +186,13 @@ func requestTicketPRSummary(r *request.Request) string {
 	var parts []string
 	lowest := lowestUnmergedBelowCurrent(r)
 	if r.State == request.StatePRReview {
-		lowest = r.LowestOpenTicketBelow(r.TicketCount + 1)
+		lowest = lowestOpenTicket(r, r.TicketCount+1)
 	}
 	for _, t := range r.Tickets {
 		if t.PRURL == "" {
 			continue
 		}
-		state := t.PRState
+		state := t.ShownPRState()
 		if state == "" {
 			state = "open"
 		}
@@ -211,25 +211,39 @@ func requestTicketPRSummary(r *request.Request) string {
 // ticket's branch, so it is the only one that is safe to merge now. A higher
 // one is stacked on a ticket that has not merged. 0 when there is none.
 func lowestUnmergedBelowCurrent(r *request.Request) int {
-	return r.LowestOpenTicketBelow(r.TicketIndex)
+	return lowestOpenTicket(r, r.TicketIndex)
+}
+
+// lowestOpenTicket is the index of the lowest ticket below limit whose PR is
+// open (not merged or closed); 0 when there is none. It reads the state status
+// shows (Ticket.ShownPRState, an observation made while a later ticket builds
+// included), so it is status's own: the driver decides on the recorded state
+// (request.Request.LowestOpenTicket) and never on an observation.
+func lowestOpenTicket(r *request.Request, limit int) int {
+	for _, t := range r.Tickets {
+		if t.Index < limit && t.PRURL != "" && t.ShownPRState() != "merged" && t.ShownPRState() != "closed" {
+			return t.Index
+		}
+	}
+	return 0
 }
 
 // ticketMergeMark is what a ticket PR adds to its state in the summary of a
 // building or pr_review request: ",draft" for the current ticket of a building
 // request (its advice rounds may still push to it), ",safe-to-merge" for the
 // lowest open ticket when merging it drops nothing (see the two functions
-// below), and nothing for a merged or closed PR or in any other state.
+// below; a PR whose base is another ticket's branch is not marked), and nothing for a merged or closed PR or in any other state.
 func ticketMergeMark(r *request.Request, t request.Ticket, lowest int) string {
 	if r.State == request.StatePRReview {
 		return prReviewTicketMark(r, t, lowest)
 	}
-	if r.State != request.StateBuilding || t.PRState == "merged" || t.PRState == "closed" {
+	if r.State != request.StateBuilding || t.ShownPRState() == "merged" || t.ShownPRState() == "closed" {
 		return ""
 	}
 	if t.Index == r.TicketIndex {
 		return ",draft"
 	}
-	if t.Index == lowest {
+	if t.Index == lowest && !r.StackedOnAnotherTicket(&t, t.ShownPRBase()) {
 		return ",safe-to-merge"
 	}
 	return ""

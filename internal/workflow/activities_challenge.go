@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"buildgate/internal/codereview"
 	"buildgate/internal/evidence"
 	"buildgate/internal/pincommit"
+	"buildgate/internal/policy"
 	"buildgate/internal/reproduction"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
@@ -61,8 +63,9 @@ const (
 )
 
 // challengeHeader is the one derivation header line a challenge file carries:
-// a label and a number, read as nothing else.
-var challengeHeader = regexp.MustCompile(`buildgate-challenge: (AC|answer)-([1-9][0-9]{0,3})\s*$`)
+// a label and a number, then optionally ` subject:` and its text, which
+// parseChallengeSubject reads, as nothing else.
+var challengeHeader = regexp.MustCompile(`buildgate-challenge: (AC|answer)-([1-9][0-9]{0,3})( subject:.*)?\s*$`)
 
 // ChallengerJobInput is RunChallengerJobActivity's input: the run's input and
 // the result commit the job reads.
@@ -94,6 +97,43 @@ type ChallengerJobResult struct {
 // most criteria (AC) or one of the answered question numbers (answer). "" when there is none or it is not
 // valid.
 func challengeHeaderOf(content []byte, criteria int, answers []int) string {
+	label, _, _ := challengeHeaderParts(content, criteria, answers)
+	return label
+}
+
+// maxChallengeSubjects is the most subject paths a header names.
+const maxChallengeSubjects = 3
+
+// parseChallengeSubject reads the text after `buildgate-challenge: <label>`
+// that begins ` subject:`: one to three comma-separated repo-relative paths,
+// each without a space, cleaned (a leading ./ and path.Clean), none absolute
+// or holding "..". ok is false for any other form.
+func parseChallengeSubject(raw string) (paths []string, ok bool) {
+	rest, found := strings.CutPrefix(strings.TrimSpace(raw), "subject: ")
+	if !found {
+		return nil, false
+	}
+	for i, p := range strings.Split(rest, ",") {
+		if i > 0 {
+			p = strings.TrimPrefix(p, " ")
+		}
+		if p == "" || strings.ContainsAny(p, " \t") || strings.HasPrefix(p, "/") {
+			return nil, false
+		}
+		p = path.Clean(strings.TrimPrefix(p, "./"))
+		if p == "." || p == ".." || strings.HasPrefix(p, "../") {
+			return nil, false
+		}
+		paths = append(paths, p)
+	}
+	return paths, len(paths) <= maxChallengeSubjects
+}
+
+// challengeHeaderParts is challengeHeaderOf's label and the subject paths the
+// header names (nil when it names none, the form of a header written before
+// the field existed). malformed is true when the label is valid but its
+// subject part is not one to three comma-separated repo-relative paths.
+func challengeHeaderParts(content []byte, criteria int, answers []int) (label string, subject []string, malformed bool) {
 	lines := strings.Split(string(content), "\n")
 	if len(lines) > challengeHeaderLines {
 		lines = lines[:challengeHeaderLines]
@@ -105,15 +145,49 @@ func challengeHeaderOf(content []byte, criteria int, answers []int) string {
 			continue
 		}
 		if found != "" {
-			return ""
+			return "", nil, false
 		}
 		n, _ := strconv.Atoi(m[2])
 		if n < 1 || (m[1] == "answer" && !slices.Contains(answers, n)) || (m[1] != "answer" && n > criteria) {
-			return ""
+			return "", nil, false
 		}
 		found = m[1] + "-" + m[2]
+		if m[3] != "" {
+			var ok bool
+			if subject, ok = parseChallengeSubject(m[3]); !ok {
+				subject, malformed = nil, true
+			}
+		}
 	}
-	return found
+	return found, subject, malformed
+}
+
+// challengeSubjectReason is why a held file with header label and subject is
+// not run, "" when it may run (SC-022): the ticket's Allowed-Files are
+// approved, and the subject, the source files the test exercises, is named,
+// tracked in the result commit and covered by them. A failure whose fix lies
+// outside Allowed-Files cannot be fixed by the ticket's own round. Built only
+// from the label and the subject paths. Always "" when the list is absent or
+// not approved, or the header is not valid.
+func challengeSubjectReason(label string, subject []string, malformed bool, tracked, allowed []string, unapproved bool) (reason string, outside bool) {
+	if allowed == nil || unapproved || label == "" {
+		return "", false
+	}
+	if malformed {
+		return "the header's subject is not one to three comma-separated repo-relative paths", false
+	}
+	if len(subject) == 0 {
+		return "the header names no subject file", false
+	}
+	for _, s := range subject {
+		switch {
+		case !slices.Contains(tracked, s):
+			return fmt.Sprintf("subject %s is not a tracked file of the result", cleanNoteName(s)), false
+		case !policy.PathCoveredByAllowed(s, allowed):
+			return fmt.Sprintf("subject %s is outside this ticket's Allowed-Files", cleanNoteName(s)), true
+		}
+	}
+	return "", false
 }
 
 // challengeInScope reports whether header (as challengeHeaderOf returns it)
@@ -456,18 +530,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 			return files, notes, err
 		}
 		file.SHA256, file.HostPath, file.Runner, file.Dir, file.TestIDs = h.SHA256, h.HostPath, h.Runner, h.Dir, h.TestIDs
-		if file.Criterion = challengeHeaderOf(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
-			file.NotRun = "no valid derivation header"
-			notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(p))
-			if in.ChallengeCriteria == 0 && !noCriteriaNoted {
-				noCriteriaNoted = true
-				notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
-			}
-		}
-		if file.NotRun == "" && !challengeInScope(file.Criterion, in.ChallengeCovered) {
-			file.NotRun = "cites a criterion outside the ticket's and earlier tickets' coverage"
-			notes = append(notes, fmt.Sprintf("a challenge file citing %s, a criterion outside the ticket's and earlier tickets' coverage, was held and not run: %s", file.Criterion, cleanNoteName(p)))
-		}
+		notes = append(notes, markChallengeNotRun(&file, content, in, tracked, &noCriteriaNoted)...)
 		files = append(files, file)
 		held++
 	}
@@ -475,6 +538,33 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 		notes = append(notes, fmt.Sprintf("%d more files the challenger wrote were not held", unnoted))
 	}
 	return files, notes, nil
+}
+
+// markChallengeNotRun reads the header of the held file's content into file
+// (criterion, subject) and sets NotRun, with a note each, when the header is
+// not valid, cites a criterion outside the ticket's coverage, or names a
+// subject the ticket's approved Allowed-Files rule out. noCriteriaNoted keeps
+// the no-criteria note to one per job.
+func markChallengeNotRun(file *run.ChallengeFile, content []byte, in ChallengerJobInput, tracked []string, noCriteriaNoted *bool) []string {
+	var notes []string
+	var malformed bool
+	if file.Criterion, file.Subject, malformed = challengeHeaderParts(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
+		file.NotRun = "no valid derivation header"
+		notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(file.Path))
+		if in.ChallengeCriteria == 0 && !*noCriteriaNoted {
+			*noCriteriaNoted = true
+			notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
+		}
+	}
+	if file.NotRun == "" && !challengeInScope(file.Criterion, in.ChallengeCovered) {
+		file.NotRun = "cites a criterion outside the ticket's and earlier tickets' coverage"
+		notes = append(notes, fmt.Sprintf("a challenge file citing %s, a criterion outside the ticket's and earlier tickets' coverage, was held and not run: %s", file.Criterion, cleanNoteName(file.Path)))
+	}
+	if why, outside := challengeSubjectReason(file.Criterion, file.Subject, malformed, tracked, in.AllowedFiles, in.ScopeUnapproved); file.NotRun == "" && why != "" {
+		file.NotRun, file.OutOfScope = why, outside
+		notes = append(notes, fmt.Sprintf("challenge %s (%s) not run: %s", cleanNoteName(file.Path), file.Criterion, why))
+	}
+	return notes
 }
 
 // readScratchFile reads a regular file of the scratch worktree through an
