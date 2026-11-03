@@ -184,7 +184,9 @@ func restackIfNeeded(dp Deps, ctx context.Context, dataDir string, r *request.Re
 // when the ticket directly under it is the lowest open ticket (it is the next
 // to merge) or when that ticket is merged or closed. Any other ticket waits,
 // held as for a pending earlier restack but without a RestackHold, and is
-// restacked once, onto its final base, when it becomes due.
+// restacked when it becomes due. The ticket next to merge is restacked after
+// every pushed round of the lowest open ticket, and again after a squash or
+// rebase merge; the tickets above it skip those intermediate restacks.
 func restackDue(r *request.Request, ticket *request.Ticket) bool {
 	lowest := r.LowestOpenTicket()
 	if lowest == 0 || lowest >= ticket.Index-1 {

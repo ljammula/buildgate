@@ -428,6 +428,9 @@ func TestADeferredRestackRunsOnceWhenItsTicketIsNext(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		f.pass()
 	}
+	if got := f.replays(); len(got) != 1 || !strings.HasSuffix(got[0], "t2-restack1") {
+		t.Fatalf("replays %v before ticket 1 merged: want ticket 2's alone, none of ticket 3", got)
+	}
 	f.mergeTicket1()
 	for i := 0; i < 4; i++ {
 		f.pass()
@@ -455,6 +458,23 @@ func TestAPassRunsAtMostOneRestack(t *testing.T) {
 	}
 	if got := f.replays(); len(got) != 2 || !strings.Contains(got[1], "t3-restack1") {
 		t.Fatalf("replays %v after later passes: want ticket 3's next", got)
+	}
+}
+
+// TestARestackWaitsForAnEarlierTicketsPendingRestack: ticket 1 merged, so
+// ticket 2 is the lowest open ticket and needs a restack, but its poll is not
+// due. Ticket 3 is due by restackDue (ticket 2 is the lowest) and must still
+// not replay onto ticket 2's stale head: only the earlier-restack check holds
+// it.
+func TestARestackWaitsForAnEarlierTicketsPendingRestack(t *testing.T) {
+	f, t3 := newStackOf3(t)
+	f.mergeTicket1()
+	delete(f.under, [2]string{newTip, mainTip})
+	f.r.Tickets[1].LastPolledAt = f.now.Add(10 * time.Minute).UTC().Format(time.RFC3339Nano)
+	f.save()
+	f.pass()
+	if got := f.replays(); len(got) != 0 || f.touched(t3.PRURL, "buildgate/req-1/t3-restack1") {
+		t.Fatalf("replays %v, events %v: ticket 3 moved before ticket 2's pending restack", got, f.events)
 	}
 }
 

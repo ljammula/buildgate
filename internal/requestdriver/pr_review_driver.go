@@ -475,14 +475,14 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			}
 			return haltRequestAcceptedNoPR(dataDir, r, noPullRequestHaltReason(dataDir, r, ticket), now)
 		}
-		restacked, err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now)
+		restackActed, err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now)
 		if err != nil {
 			return err
 		}
 		if r.State != request.StatePRReview {
 			return nil
 		}
-		if restacked {
+		if restackActed {
 			// At most one restack per pass: it holds the job slot for a
 			// replay run, and the ticket above it needs the next pass to
 			// replay onto the head this one moved.
@@ -493,9 +493,10 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 }
 
 // pollTicketPR is AdvancePRReview's per-ticket body: read the PR's review
-// state (at most once per -pr-poll-interval) and react to it. restacked is
-// true when the poll acted on a restack of the ticket (restackIfNeeded).
-func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (restacked bool, err error) {
+// state (at most once per -pr-poll-interval) and react to it. restackActed
+// is true whenever restackIfNeeded acted on the ticket (a restack, a wait on
+// its replay run, a recorded push), which ends the pass.
+func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (restackActed bool, err error) {
 	due, err := prPollDue(ticket.LastPolledAt, cfg.PrPollInterval, now)
 	if err != nil {
 		return false, fmt.Errorf("request %s: ticket %d: %w", r.ID, ticket.Index, err)
