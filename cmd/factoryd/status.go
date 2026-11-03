@@ -186,7 +186,7 @@ func requestTicketPRSummary(r *request.Request) string {
 	var parts []string
 	lowest := lowestUnmergedBelowCurrent(r)
 	if r.State == request.StatePRReview {
-		lowest = lowestOpenTicket(r, r.TicketCount+1)
+		lowest = r.LowestOpenTicketBelow(r.TicketCount + 1)
 	}
 	for _, t := range r.Tickets {
 		if t.PRURL == "" {
@@ -211,18 +211,7 @@ func requestTicketPRSummary(r *request.Request) string {
 // ticket's branch, so it is the only one that is safe to merge now. A higher
 // one is stacked on a ticket that has not merged. 0 when there is none.
 func lowestUnmergedBelowCurrent(r *request.Request) int {
-	return lowestOpenTicket(r, r.TicketIndex)
-}
-
-// lowestOpenTicket is the index of the lowest ticket below limit whose PR is
-// open (not merged or closed); 0 when there is none.
-func lowestOpenTicket(r *request.Request, limit int) int {
-	for _, t := range r.Tickets {
-		if t.Index < limit && t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
-			return t.Index
-		}
-	}
-	return 0
+	return r.LowestOpenTicketBelow(r.TicketIndex)
 }
 
 // ticketMergeMark is what a ticket PR adds to its state in the summary of a

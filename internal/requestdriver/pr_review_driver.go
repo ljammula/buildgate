@@ -475,10 +475,17 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			}
 			return haltRequestAcceptedNoPR(dataDir, r, noPullRequestHaltReason(dataDir, r, ticket), now)
 		}
-		if err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now); err != nil {
+		restacked, err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now)
+		if err != nil {
 			return err
 		}
 		if r.State != request.StatePRReview {
+			return nil
+		}
+		if restacked {
+			// At most one restack per pass: it holds the job slot for a
+			// replay run, and the ticket above it needs the next pass to
+			// replay onto the head this one moved.
 			return nil
 		}
 	}
@@ -486,14 +493,15 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 }
 
 // pollTicketPR is AdvancePRReview's per-ticket body: read the PR's review
-// state (at most once per -pr-poll-interval) and react to it.
-func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) error {
+// state (at most once per -pr-poll-interval) and react to it. restacked is
+// true when the poll acted on a restack of the ticket (restackIfNeeded).
+func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, cfg WorkerConfig, now time.Time) (restacked bool, err error) {
 	due, err := prPollDue(ticket.LastPolledAt, cfg.PrPollInterval, now)
 	if err != nil {
-		return fmt.Errorf("request %s: ticket %d: %w", r.ID, ticket.Index, err)
+		return false, fmt.Errorf("request %s: ticket %d: %w", r.ID, ticket.Index, err)
 	}
 	if !due {
-		return nil
+		return false, nil
 	}
 
 	state, readErr := dp.ReadReviewState(ctx, ticket.PRURL, prAuthorPolicy(cfg))
@@ -502,10 +510,10 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	// result rather than let the r.Save calls below resurrect the request.
 	// See AdvanceSpecDrafting's identical check for the full rationale.
 	if ok, err := stillInState(dataDir, r.ID, request.StatePRReview); err != nil {
-		return err
+		return false, err
 	} else if !ok {
 		log.Printf("request %s: ticket %d: PR poll finished but the request left pr_review while it ran (e.g. cancelled) -- discarding the result", r.ID, ticket.Index)
-		return nil
+		return false, nil
 	}
 	ticket.LastPolledAt = now.UTC().Format(time.RFC3339Nano)
 	if readErr != nil {
@@ -513,26 +521,26 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 		// poll: LastPolledAt above still advances so a broken PR URL
 		// cannot spin this loop every tick.
 		log.Printf("request %s: ticket %d: read PR review state: %v", r.ID, ticket.Index, readErr)
-		return r.Save(dataDir)
+		return false, r.Save(dataDir)
 	}
 
 	if state.BaseRefName != "" {
 		ticket.PRBase = state.BaseRefName
 	}
 	if state.ShouldStopPolling() {
-		return handleClosedOrMergedTicket(dp, dataDir, r, ticket, state, now)
+		return false, handleClosedOrMergedTicket(dp, dataDir, r, ticket, state, now)
 	}
 	noteReopenedPR(ticket, state)
 	// A stacked ticket whose base moved is restacked first (restack.go):
 	// until its restack is pushed and confirmed it is neither retargeted nor
 	// marked ready, whatever its base on GitHub now says.
-	restacked, restackHeld, err := restackIfNeeded(dp, ctx, dataDir, r, ticket, state.HeadSHA, cfg, now)
-	if err != nil || restacked {
-		return err
+	ran, restackHeld, err := restackIfNeeded(dp, ctx, dataDir, r, ticket, state.HeadSHA, cfg, now)
+	if err != nil || ran {
+		return ran, err
 	}
 	if merged := mergedTicketOnBranch(r, ticket, state.BaseRefName); merged != nil && !restackHeld {
 		if retargetOffMergedTicket(dp, ctx, dataDir, r, ticket, merged, state) {
-			return r.Save(dataDir)
+			return false, r.Save(dataDir)
 		}
 		// Not retargeted this poll: carry on with comments and approval as
 		// usual (a stall here would silently stop corrective rounds); the
@@ -552,21 +560,21 @@ func pollTicketPR(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 
 	newThreads := forge.NewUnresolvedThreads(state.ActionableThreads, ticket.SeenThreadIDs)
 	if len(newThreads) > 0 && r.Source.Kind == request.SourceMemory {
-		return answerMemoryRequestThreads(dp, ctx, dataDir, r, ticket, newThreads)
+		return false, answerMemoryRequestThreads(dp, ctx, dataDir, r, ticket, newThreads)
 	}
 	if len(newThreads) > 0 {
-		return RunCorrectiveRound(dp, ctx, dataDir, r, ticket, newThreads, cfg, now)
+		return false, RunCorrectiveRound(dp, ctx, dataDir, r, ticket, newThreads, cfg, now)
 	}
 	if restackHeld {
 		ticket.MergeReadiness = nil
-		return r.Save(dataDir)
+		return false, r.Save(dataDir)
 	}
 
 	if handled, err := handleCIChecks(dp, ctx, dataDir, r, ticket, state, cfg, now); handled {
-		return err
+		return false, err
 	}
 
-	return advancePRReadyOrApproved(dp, ctx, dataDir, r, ticket, state, now)
+	return false, advancePRReadyOrApproved(dp, ctx, dataDir, r, ticket, state, now)
 }
 
 // MemoryRequestReviewReply is what a trusted reviewer's comment on a memory

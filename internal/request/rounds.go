@@ -291,3 +291,20 @@ func (r *Request) StackedOnAnotherTicket(ticket *Ticket, baseRefName string) boo
 	}
 	return false
 }
+
+// LowestOpenTicketBelow is the index of the lowest ticket below limit whose
+// pull request is open (not merged or closed); 0 when there is none.
+func (r *Request) LowestOpenTicketBelow(limit int) int {
+	for _, t := range r.Tickets {
+		if t.Index < limit && t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
+			return t.Index
+		}
+	}
+	return 0
+}
+
+// LowestOpenTicket is the index of the lowest ticket whose pull request is
+// open; 0 when there is none.
+func (r *Request) LowestOpenTicket() int {
+	return r.LowestOpenTicketBelow(r.TicketCount + len(r.Tickets) + 1)
+}
