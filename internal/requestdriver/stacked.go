@@ -133,8 +133,8 @@ func watchEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Re
 // records a merge (recordTicketMerged), a close (PRState "closed"; the next
 // step's checkEarlierPR parks, not this), a reopen (noteReopenedPR) and the
 // base GitHub reports. It only reads GitHub: no retarget, restack, push or
-// branch check. A read that fails changes nothing but the log. The record
-// is saved only when something in it changed.
+// branch check. A read that fails changes nothing but the log; a read that
+// succeeds stamps LastPolledAt and saves the record.
 func refreshEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, cfg WorkerConfig, mu *sync.Mutex, now time.Time) {
 	for i := 1; i < idx && ctx.Err() == nil; i++ {
 		mu.Lock()
