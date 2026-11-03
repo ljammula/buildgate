@@ -175,9 +175,74 @@ var replyEscaper = strings.NewReplacer(
 	"@", "\\@\u200b", "://", "\\://", "www.", "www\\.",
 )
 
+// maxReplyCodeSpanBytes bounds the content of an inline code span a reply
+// lets through unescaped.
+const maxReplyCodeSpanBytes = 200
+
+// backtickRun is the length of the run of backticks starting at s[i].
+func backtickRun(s string, i int) int {
+	n := 0
+	for i+n < len(s) && s[i+n] == '`' {
+		n++
+	}
+	return n
+}
+
+// replyCodeSpanEnd is the index of the closing backtick of the inline code
+// span whose opening single backtick is at s[open], or -1 when there is none:
+// the next run of exactly one backtick, with 1 to maxReplyCodeSpanBytes bytes
+// between.
+func replyCodeSpanEnd(s string, open int) int {
+	for j := open + 1; j < len(s) && j-open-1 <= maxReplyCodeSpanBytes; {
+		if s[j] != '`' {
+			j++
+			continue
+		}
+		n := backtickRun(s, j)
+		if n == 1 {
+			if j-open-1 == 0 {
+				return -1
+			}
+			return j
+		}
+		j += n
+	}
+	return -1
+}
+
+// escapeReplyLine escapes one line of a reply. A balanced single-backtick
+// inline code span is kept as written, because a renderer interprets nothing
+// inside it; every other character, an unmatched backtick and a run of two or
+// more included, is escaped.
+func escapeReplyLine(l string) string {
+	var b strings.Builder
+	start := 0
+	for i := 0; i < len(l); {
+		if l[i] != '`' {
+			i++
+			continue
+		}
+		n := backtickRun(l, i)
+		end := -1
+		if n == 1 {
+			end = replyCodeSpanEnd(l, i)
+		}
+		if end < 0 {
+			i += n
+			continue
+		}
+		b.WriteString(replyEscaper.Replace(l[start:i]))
+		b.WriteString(l[i : end+1])
+		start, i = end+1, end+1
+	}
+	b.WriteString(replyEscaper.Replace(l[start:]))
+	return b.String()
+}
+
 // cleanReplyText renders the builder's words inert before they are posted:
 // cleaned of control characters and escapes (sanitize.Text), bounded, every
-// markdown-active character escaped, and each line a blockquote line, so
+// markdown-active character escaped (but for balanced inline code spans, see
+// escapeReplyLine), and each line a blockquote line, so
 // nothing in it (an image the host would fetch, a mention, an unclosed fence)
 // reaches beyond its own quote. The words stay readable.
 func cleanReplyText(s string) string {
@@ -192,7 +257,7 @@ func cleanReplyText(s string) string {
 			lines[i] = ">"
 			continue
 		}
-		lines[i] = "> " + replyEscaper.Replace(l)
+		lines[i] = "> " + escapeReplyLine(l)
 	}
 	return strings.Join(lines, "\n")
 }
