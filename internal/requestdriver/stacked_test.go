@@ -790,9 +790,10 @@ func stackedRetargetWhileBuildingFixture(dp *fakeDeps, t *testing.T) (*request.R
 
 // watchedBuild builds ticket 2 of a two-ticket request with runner after
 // ticket 1's pull request was opened, polling earlier pull requests every
-// millisecond. read is the review-state read the watch and the pre-build check
-// make; it returns the state of ticket 1's pull request.
-func watchedBuild(t *testing.T, read func() (forge.ReviewState, error), during func(dataDir, id string)) (*request.Request, string, string) {
+// millisecond. read is the review-state read the watch makes; the check
+// before the build starts reads the pull request open. It returns the request
+// after the step, its data dir and id, and ticket 1 as it was before the step.
+func watchedBuild(t *testing.T, read func() (forge.ReviewState, error), during func(dataDir, id string)) (*request.Request, string, string, request.Ticket) {
 	t.Helper()
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
@@ -811,7 +812,6 @@ func watchedBuild(t *testing.T, read func() (forge.ReviewState, error), during f
 		defer mu.Unlock()
 		calls++
 		if calls == 1 {
-			// The check before the build starts: still open.
 			return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, HeadSHA: first.ResultSHA}, nil
 		}
 		return read()
@@ -822,10 +822,12 @@ func watchedBuild(t *testing.T, read func() (forge.ReviewState, error), during f
 		during(dataDir, id)
 		return inner(ctx, args, onReady)
 	}
+	// Taken after the pre-build check has recorded what it records.
+	before := r.Tickets[0]
 	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, cfg, runner, time.Now()); err != nil {
 		t.Fatalf("advance: %v", err)
 	}
-	return r, dataDir, id
+	return r, dataDir, id, before
 }
 
 // waitOnDisk waits for check to hold of the request on disk.
@@ -841,35 +843,59 @@ func waitOnDisk(t *testing.T, dataDir, id string, check func(*request.Request) b
 	t.Fatal("the request on disk never showed the expected state while ticket 2 built")
 }
 
-func TestBuildingRecordsAnEarlierTicketMergeWhileALaterOneBuilds(t *testing.T) {
+// decidesOn is what the driver decides on in ticket t: the watch changes none.
+func decidesOn(t request.Ticket) [4]string {
+	return [4]string{t.PRState, t.PRBase, t.LastPolledAt, fmt.Sprint(t.MergeReadiness)}
+}
+
+func observedOnDisk(state string) func(*request.Request) bool {
+	return func(d *request.Request) bool {
+		return d.Tickets[0].ObservedPR != nil && d.Tickets[0].ObservedPR.State == state
+	}
+}
+
+func TestBuildingObservesAnEarlierTicketMergeWhileALaterOneBuilds(t *testing.T) {
 	merged := time.Now()
-	r, dataDir, id := watchedBuild(t, func() (forge.ReviewState, error) {
+	var stackBase string
+	r, dataDir, id, before := watchedBuild(t, func() (forge.ReviewState, error) {
 		return forge.ReviewState{State: forge.PRStateMerged, MergedAt: &merged, BaseRefName: "main"}, nil
 	}, func(dataDir, id string) {
-		waitOnDisk(t, dataDir, id, func(d *request.Request) bool { return d.Tickets[0].PRState == "merged" })
+		waitOnDisk(t, dataDir, id, observedOnDisk("merged"))
+		d, _ := request.Load(dataDir, id)
+		stackBase = d.StackBase(2)
 	})
+	if stackBase == "" {
+		t.Errorf("StackBase(2) = %q mid-build, want ticket 1's branch: an observed merge must not change the stack base", stackBase)
+	}
 	disk, err := request.Load(dataDir, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, got := range map[string]*request.Request{"memory": r, "disk": disk} {
-		if got.Tickets[0].PRState != "merged" || got.Tickets[0].PRBase != "main" || got.Tickets[0].MergeReadiness != nil {
-			t.Errorf("%s: ticket 1 = %+v, want merged on main after the step's final save", name, got.Tickets[0])
+		tk := got.Tickets[0]
+		if tk.ObservedPR == nil || tk.ObservedPR.State != "merged" || tk.ObservedPR.Base != "main" || tk.ObservedPR.At == "" {
+			t.Errorf("%s: observed = %+v, want merged on main after the step's final save", name, tk.ObservedPR)
+		}
+		if decidesOn(tk) != decidesOn(before) {
+			t.Errorf("%s: decided-on fields %v changed from %v", name, decidesOn(tk), decidesOn(before))
+		}
+		if tk.ShownPRState() != "merged" || got.StackBase(2) != stackBase {
+			t.Errorf("%s: shown=%q stack base=%q", name, tk.ShownPRState(), got.StackBase(2))
 		}
 	}
 }
 
-func TestBuildingRecordsAnEarlierTicketCloseWithoutParking(t *testing.T) {
-	r, _, _ := watchedBuild(t, func() (forge.ReviewState, error) {
+func TestBuildingObservesAnEarlierTicketCloseWithoutParking(t *testing.T) {
+	r, _, _, before := watchedBuild(t, func() (forge.ReviewState, error) {
 		return forge.ReviewState{State: forge.PRStateClosed}, nil
 	}, func(dataDir, id string) {
-		waitOnDisk(t, dataDir, id, func(d *request.Request) bool { return d.Tickets[0].PRState == "closed" })
+		waitOnDisk(t, dataDir, id, observedOnDisk("closed"))
 		if d, _ := request.Load(dataDir, id); d.State != request.StateBuilding {
 			t.Errorf("state mid-build = %q, want building: the next step parks", d.State)
 		}
 	})
-	if r.Tickets[0].PRState != "closed" || r.Tickets[0].MergeReadiness != nil {
-		t.Errorf("ticket 1 = %+v, want closed", r.Tickets[0])
+	if r.Tickets[0].ObservedPR == nil || r.Tickets[0].ObservedPR.State != "closed" || decidesOn(r.Tickets[0]) != decidesOn(before) {
+		t.Errorf("ticket 1 = %+v, want observed closed and the recorded state unchanged", r.Tickets[0])
 	}
 	if r.State == request.StateResumeReview {
 		t.Errorf("state = %q: a close read during the build must not park it", r.State)
@@ -881,7 +907,7 @@ func TestBuildingRecordsAnEarlierTicketCloseWithoutParking(t *testing.T) {
 
 func TestBuildingKeepsTheRecordWhenAnEarlierPRReadFails(t *testing.T) {
 	var reads atomic.Int32
-	r, _, _ := watchedBuild(t, func() (forge.ReviewState, error) {
+	r, _, _, before := watchedBuild(t, func() (forge.ReviewState, error) {
 		reads.Add(1)
 		return forge.ReviewState{}, errors.New("gh: unreachable")
 	}, func(string, string) {
@@ -889,7 +915,51 @@ func TestBuildingKeepsTheRecordWhenAnEarlierPRReadFails(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	})
-	if r.Tickets[0].PRState == "merged" || r.Tickets[0].PRState == "closed" {
-		t.Errorf("ticket 1 = %q after failed reads, want unchanged", r.Tickets[0].PRState)
+	if r.Tickets[0].ObservedPR != nil || decidesOn(r.Tickets[0]) != decidesOn(before) {
+		t.Errorf("ticket 1 = %+v after failed reads, want unchanged", r.Tickets[0])
+	}
+}
+
+func TestTheNextStepsRealReadClearsAnObservation(t *testing.T) {
+	merged := time.Now()
+	r, dataDir, id, _ := watchedBuild(t, func() (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateMerged, MergedAt: &merged}, nil
+	}, func(dataDir, id string) { waitOnDisk(t, dataDir, id, observedOnDisk("merged")) })
+	dp := newFakeDeps(t)
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateMerged, MergedAt: &merged}, nil
+	}
+	_, err := requestdriver.CheckEarlierTicketForTest(dp, context.Background(), dataDir, r, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk := r.Tickets[0]; tk.ObservedPR != nil || tk.PRState != "merged" {
+		t.Errorf("ticket 1 = state %q observed %+v, want merged recorded and the observation cleared", tk.PRState, tk.ObservedPR)
+	}
+	_ = id
+}
+
+func TestAWatchSaveDoesNotOverwriteACancelledRecord(t *testing.T) {
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
+	var built [][]string
+	r := buildFirstTicket(t, dp, dataDir, id, acceptingStackedBuildRunner(t, dataDir, &built))
+	disk, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := disk.Cancel("alice", "test", time.Now()); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if err := disk.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	requestdriver.SaveObservationForTest(dataDir, r, &r.Tickets[0], forge.ReviewState{State: forge.PRStateMerged}, time.Now())
+	after, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != request.StateCancelled || after.Tickets[0].ObservedPR != nil {
+		t.Errorf("on disk: state=%q observed=%+v, want the cancelled record untouched", after.State, after.Tickets[0].ObservedPR)
 	}
 }

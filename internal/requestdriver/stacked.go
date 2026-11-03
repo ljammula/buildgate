@@ -69,6 +69,7 @@ func checkEarlierPR(dp Deps, ctx context.Context, dataDir string, r *request.Req
 	if err != nil {
 		return stackHold{wait: fmt.Sprintf("ticket %d/%d waits: ticket %d's pull request %s could not be read (%v). If gh is not logged in or cannot reach GitHub, fix that (`gh auth status`); the worker reads it again every PR poll", idx, r.TicketCount, earlier.Index, earlier.PRURL, err)}, nil
 	}
+	earlier.ObservedPR = nil // the real record below supersedes the watch's
 	// The base GitHub reports, as the PR poll records it: a later ticket
 	// retargets onto it once this one merges, and a person may have moved it.
 	if state.BaseRefName != "" {
@@ -93,13 +94,14 @@ func checkEarlierPR(dp Deps, ctx context.Context, dataDir string, r *request.Req
 
 // watchEarlierPRs re-reads the pull requests of the tickets below idx at the
 // PR poll interval while ticket idx builds, so a merge or close a person
-// makes meanwhile is on the record (and in `factoryd status`) hours before
-// the build ends. It works on r itself, the record the step saves when the
-// build returns: a second writer would be overwritten by that save. mu
-// guards r for the whole build, so every other touch of r during it takes
-// mu. The returned stop ends the watch and waits for it; r is the step's
-// again once it returns. No watch (stop does nothing) for the first ticket
-// or a zero poll interval.
+// makes meanwhile shows in `factoryd status` hours before the build ends. It
+// records only Ticket.ObservedPR, which the driver never reads: the real state
+// is recorded by the next step's checkEarlierPR or by the PR poll. It works on
+// r itself, the record the step saves when the build returns: a second writer
+// would be overwritten by that save. mu guards r for the whole build, so every
+// other touch of r during it takes mu. The returned stop ends the watch and
+// waits for it; r is the step's again once it returns. No watch (stop does
+// nothing) for the first ticket or a zero poll interval.
 func watchEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, cfg WorkerConfig, mu *sync.Mutex) (stop func()) {
 	if idx <= 1 || cfg.PrPollInterval <= 0 {
 		return func() {}
@@ -115,7 +117,7 @@ func watchEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				refreshEarlierPRs(dp, ctx, dataDir, r, idx, cfg, mu, time.Now())
+				observeEarlierPRs(dp, ctx, dataDir, r, idx, cfg, mu, time.Now())
 			}
 		}
 	}()
@@ -128,23 +130,17 @@ func watchEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	}
 }
 
-// refreshEarlierPRs reads, for each ticket below idx whose pull request is
-// not recorded merged and is due a poll, the pull request's state, and
-// records a merge (recordTicketMerged), a close (PRState "closed"; the next
-// step's checkEarlierPR parks, not this), a reopen (noteReopenedPR) and the
-// base GitHub reports. It only reads GitHub: no retarget, restack, push or
-// branch check. A read that fails changes nothing but the log; a read that
-// succeeds stamps LastPolledAt and saves the record.
-func refreshEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, cfg WorkerConfig, mu *sync.Mutex, now time.Time) {
+// observeEarlierPRs reads the pull request of each ticket below idx that is
+// not recorded merged and records what it reads as the ticket's ObservedPR.
+// It only reads GitHub, and changes no field the driver decides on. A read
+// that fails changes nothing but the log.
+func observeEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, cfg WorkerConfig, mu *sync.Mutex, now time.Time) {
 	for i := 1; i < idx && ctx.Err() == nil; i++ {
 		mu.Lock()
 		earlier, err := TicketAt(r, i)
 		var url string
 		if err == nil && earlier.PRState != "merged" {
 			url = earlier.PRURL
-			if due, derr := prPollDue(earlier.LastPolledAt, cfg.PrPollInterval, now); derr != nil || !due {
-				url = ""
-			}
 		}
 		mu.Unlock()
 		if url == "" {
@@ -158,30 +154,38 @@ func refreshEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.
 			continue
 		}
 		mu.Lock()
-		recordEarlierPRState(r, earlier, state, now)
-		if err := r.Save(dataDir); err != nil {
-			log.Printf("request %s: ticket %d: save the re-read pull request %s: %v", r.ID, i, url, err)
-		}
+		saveObservation(dataDir, r, earlier, state, now)
 		mu.Unlock()
 	}
 }
 
-// recordEarlierPRState records state, read from earlier's pull request, on
-// earlier. The caller holds the lock on r and saves it.
-func recordEarlierPRState(r *request.Request, earlier *request.Ticket, state forge.ReviewState, now time.Time) {
-	earlier.LastPolledAt = now.UTC().Format(time.RFC3339Nano)
-	if state.BaseRefName != "" {
-		earlier.PRBase = state.BaseRefName
-	}
+// saveObservation sets earlier's ObservedPR from state and saves r, holding
+// the request's lock so the check that the record on disk is still building
+// and the write are one step against a cancel. A record no longer building
+// (cancelled, or moved by another process) is not written. The caller holds
+// the lock on r.
+func saveObservation(dataDir string, r *request.Request, earlier *request.Ticket, state forge.ReviewState, now time.Time) {
+	observed := &request.ObservedPR{State: "open", Base: state.BaseRefName, At: now.UTC().Format(time.RFC3339Nano)}
 	switch {
 	case state.MergedAt != nil || state.State == forge.PRStateMerged:
-		recordTicketMerged(earlier)
-		log.Printf("request %s: ticket %d: pull request %s merged while a later ticket builds", r.ID, earlier.Index, earlier.PRURL)
+		observed.State = "merged"
 	case state.State == forge.PRStateClosed:
-		earlier.PRState = "closed"
-		earlier.MergeReadiness = nil
-	default:
-		noteReopenedPR(earlier, state)
+		observed.State = "closed"
+	case state.State != forge.PRStateOpen:
+		return
+	}
+	unlock, err := request.Lock(dataDir, r.ID)
+	if err != nil {
+		log.Printf("request %s: ticket %d: lock to save the re-read pull request: %v", r.ID, earlier.Index, err)
+		return
+	}
+	defer unlock()
+	if cur, err := request.Load(dataDir, r.ID); err != nil || cur.State != request.StateBuilding {
+		return
+	}
+	earlier.ObservedPR = observed
+	if err := r.Save(dataDir); err != nil {
+		log.Printf("request %s: ticket %d: save the re-read pull request %s: %v", r.ID, earlier.Index, earlier.PRURL, err)
 	}
 }
 
@@ -332,6 +336,7 @@ func parkRequest(dp Deps, dataDir string, r *request.Request, reason string, now
 func recordTicketMerged(ticket *request.Ticket) {
 	ticket.PRState = "merged"
 	ticket.MergeReadiness = nil
+	ticket.ObservedPR = nil
 }
 
 // noteReopenedPR clears a closed ticket's recorded state once its pull

@@ -290,6 +290,11 @@
       ],
       "last_polled_at": "2026-09-10T09:00:00Z",
       "pr_base": "every-field pr_base",
+      "observed_pr": {
+        "state": "every-field state",
+        "base": "every-field base",
+        "at": "2026-09-10T09:00:00Z"
+      },
       "rounds": [
         {
           "index": 3,

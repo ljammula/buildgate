@@ -192,7 +192,7 @@ func requestTicketPRSummary(r *request.Request) string {
 		if t.PRURL == "" {
 			continue
 		}
-		state := t.PRState
+		state := t.ShownPRState()
 		if state == "" {
 			state = "open"
 		}
@@ -218,7 +218,7 @@ func lowestUnmergedBelowCurrent(r *request.Request) int {
 // open (not merged or closed); 0 when there is none.
 func lowestOpenTicket(r *request.Request, limit int) int {
 	for _, t := range r.Tickets {
-		if t.Index < limit && t.PRURL != "" && t.PRState != "merged" && t.PRState != "closed" {
+		if t.Index < limit && t.PRURL != "" && t.ShownPRState() != "merged" && t.ShownPRState() != "closed" {
 			return t.Index
 		}
 	}
@@ -234,13 +234,13 @@ func ticketMergeMark(r *request.Request, t request.Ticket, lowest int) string {
 	if r.State == request.StatePRReview {
 		return prReviewTicketMark(r, t, lowest)
 	}
-	if r.State != request.StateBuilding || t.PRState == "merged" || t.PRState == "closed" {
+	if r.State != request.StateBuilding || t.ShownPRState() == "merged" || t.ShownPRState() == "closed" {
 		return ""
 	}
 	if t.Index == r.TicketIndex {
 		return ",draft"
 	}
-	if t.Index == lowest && !r.StackedOnAnotherTicket(&t, t.PRBase) {
+	if t.Index == lowest && !r.StackedOnAnotherTicket(&t, t.ShownPRBase()) {
 		return ",safe-to-merge"
 	}
 	return ""
