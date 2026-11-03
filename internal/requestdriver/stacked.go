@@ -264,54 +264,11 @@ func holdForEarlierTicket(dp Deps, ctx context.Context, dataDir string, r *reque
 	case hold.park != "":
 		return true, parkRequest(dp, dataDir, r, hold.park, now)
 	case hold.wait != "":
-		return true, recordStackedWait(dataDir, r, hold.wait, cfg.HitlReminderInterval, now)
+		return true, recordStepWait(dataDir, r, &r.StackedWait, hold.wait, cfg.HitlReminderInterval, now)
 	}
-	if r.StackedWait != nil {
-		// The wait is over: its reminders end with it.
-		r.StackedWait = nil
-		r.ClearReminderState()
-	}
+	// The wait is over: its reminders end with it.
+	endStepWait(r, &r.StackedWait)
 	return false, nil
-}
-
-// recordStackedWait records why the current ticket's build waits, keeping
-// the time the wait began, and reminds the operator once the wait has lasted
-// the reminder interval since it began or since the last reminder
-// (stackedWaitReminderDue), as at a review gate.
-func recordStackedWait(dataDir string, r *request.Request, reason string, interval time.Duration, now time.Time) error {
-	since := now.UTC().Format(time.RFC3339Nano)
-	if r.StackedWait != nil && r.StackedWait.Since != "" {
-		since = r.StackedWait.Since
-	} else {
-		// A new wait: reminders count from its start, not from a reminder
-		// sent at an earlier gate.
-		r.ClearReminderState()
-	}
-	if r.StackedWait == nil || r.StackedWait.On != reason {
-		log.Printf("request %s: %s", r.ID, reason)
-	}
-	r.StackedWait = &request.StackedWait{Since: since, On: reason}
-	if stackedWaitReminderDue(r, interval, now) {
-		RemindRequest(dataDir, r, now)
-	}
-	return r.Save(dataDir)
-}
-
-// stackedWaitReminderDue reports whether a stacked wait is due a reminder at
-// now: interval has passed since the wait began, and since its last
-// reminder. An interval of 0 or less reminds never.
-func stackedWaitReminderDue(r *request.Request, interval time.Duration, now time.Time) bool {
-	if interval <= 0 || r.StackedWait == nil {
-		return false
-	}
-	from, err := time.Parse(time.RFC3339Nano, r.StackedWait.Since)
-	if err != nil {
-		return false
-	}
-	if last, err := time.Parse(time.RFC3339Nano, r.LastNotifiedAt); err == nil && last.After(from) {
-		from = last
-	}
-	return now.Sub(from) >= interval
 }
 
 // parkRequest moves r to resume_review for an earlier ticket an operator must

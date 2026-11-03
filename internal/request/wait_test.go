@@ -74,7 +74,7 @@ func TestWaitForRepositoryQueue(t *testing.T) {
 
 func TestWaitForStackedTicketTakesPrecedenceOverProgress(t *testing.T) {
 	r := waitReq("b", StateBuilding, "")
-	r.StackedWait = &StackedWait{Since: "2026-10-20T10:00:00Z", On: "ticket 2/2 waits: ticket 1's PR branch is at old; the next pass will check again"}
+	r.StackedWait = &StepWait{Since: "2026-10-20T10:00:00Z", On: "ticket 2/2 waits: ticket 1's PR branch is at old; the next pass will check again"}
 	w := WaitFor(r, WaitFacts{WorkerLive: true, RunWaitStage: "queued", RunWaitOn: "behind another run"})
 	if w == nil || w.Kind != WaitStackedTicket || w.On != r.StackedWait.On || w.Since != r.StackedWait.Since {
 		t.Fatalf("wait = %+v, want stacked_ticket with its explicit reason", w)

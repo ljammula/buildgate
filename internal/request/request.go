@@ -545,7 +545,12 @@ type Request struct {
 	// StackedWait is set while the current ticket's build waits on the
 	// earlier ticket's pull-request branch (see StackedWait). Nil otherwise;
 	// every state transition clears it.
-	StackedWait *StackedWait `json:"stacked_wait,omitempty"`
+	StackedWait *StepWait `json:"stacked_wait,omitempty"`
+	// RouteWait is set while the next step of a job state waits for its
+	// model route: a credential the step's role needs is missing or expires
+	// too soon (see StepWait). Nil otherwise; cleared when the step starts
+	// and on every transition.
+	RouteWait *StepWait `json:"route_wait,omitempty"`
 	// LastAsk is the headline of the last notification sent for this
 	// request, at LastNotifiedAt: what an open console tab shows when it
 	// raises that notification itself.
@@ -1142,6 +1147,7 @@ func advance(r *Request, allowed []State, to State, by, reason string, now time.
 	ts := now.UTC().Format(time.RFC3339Nano)
 	r.State = to
 	r.StackedWait = nil
+	r.RouteWait = nil
 	r.HaltKind = ""
 	// QuarantineCheck names which check quarantined r (set by the request
 	// driver alongside Quarantine itself, e.g. "diff_scope") -- like
@@ -1581,6 +1587,9 @@ func (r *Request) AwaitingPullRequestLabel() string {
 // every state an operator can be waiting on: the three review gates, every
 // halt kind, and quarantined.
 func (r *Request) NextAction() string {
+	if r.State.RunsJob() && r.RouteWait != nil {
+		return r.RouteWait.On
+	}
 	switch r.State {
 	case StateSpecReview:
 		return fmt.Sprintf("review the drafted spec: `factoryd approve %s`, or `factoryd reject -reason ... %s` to redraft", r.ID, r.ID)

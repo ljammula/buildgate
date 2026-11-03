@@ -190,7 +190,7 @@ requests, never from what the worker printed:
 | "the model route served none of the last requests ..." | `model_unavailable` | Check the route (`factoryd doctor`). A review whose model served nothing was already launched once more by the factory |
 | "the review of the ... step gave no verdict the factory could read" | `no_verdict` | Nothing to fix first; if it repeats, lower `roles.review.thinking` or split the ticket |
 | "the factory could not hold or mount a test file it holds for the ... step" | `reproduction_unheld` | Read the run's halt reason: the held copy of a test file under the run's `review-repro/` changed, or its read-only mount was refused; nothing was refused on the work |
-| "the model route's credential was missing or expired too soon for the ... step" | `route_credential` | Refresh the credential: `codex login` on the host for a chatgpt-codex route (`factoryd doctor` warns 8 hours before builds stop taking its token) |
+| "the model route's credential was missing or expired too soon for the ... step" | `route_credential` | Refresh the credential: `codex login` on the host for a chatgpt-codex route (`factoryd doctor` warns 8 hours before builds stop taking its token), then `factoryd resume <id>`. A credential found unusable before a draft, plan or build launches does not reach this state: the request waits in place (`wait.kind` `route`) and launches by itself once it is usable |
 
 `done`, `closed` and `cancelled` are terminal; `cancel` (`factoryd cancel <id>`) refuses the first two. Full mechanics
 (reminders, ticket sequencing, PR review loop): [USAGE_REFERENCE.md § Request lifecycle](USAGE_REFERENCE.md#request-lifecycle).

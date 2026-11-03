@@ -13,6 +13,7 @@ import (
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
+	"buildgate/internal/sessionconfig"
 )
 
 // TestMain keeps this package's tests inside the test process: no desktop
@@ -54,6 +55,7 @@ type fakeDeps struct {
 	createBranchAtFn              func(dir string, branch string, sha string) error
 	pruneRoundRefsFn              func(dir string, id string, keepPrefixes []string) error
 	runTicketFn                   func(ctx context.Context, args []string, onReady func(*run.Run)) error
+	routeWaitFn                   func(s sessionconfig.Settings, need requestdriver.RouteNeed) string
 	saveReviewEntryFn             func(dataDir string, r *request.Request) error
 	fetchBranchCommitFn           func(ctx context.Context, dir, branch, sha string) error
 	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
@@ -112,6 +114,10 @@ func (f *fakeDeps) CreateBranchAt(dir string, branch string, sha string) error {
 }
 func (f *fakeDeps) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {
 	return f.runTicketFn(ctx, args, onReady)
+}
+
+func (f *fakeDeps) RouteWait(s sessionconfig.Settings, need requestdriver.RouteNeed) string {
+	return f.routeWaitFn(s, need)
 }
 
 func (f *fakeDeps) SaveReviewEntry(dataDir string, r *request.Request) error {
@@ -201,6 +207,9 @@ func newFakeDeps(testing.TB) *fakeDeps {
 		runTicketFn: func(context.Context, []string, func(*run.Run)) error {
 			return refused("RunTicket")
 		},
+		// No route wait: a route check that leaves the test process has
+		// nothing to read, and a test of the wait sets its own.
+		routeWaitFn:         func(sessionconfig.Settings, requestdriver.RouteNeed) string { return "" },
 		saveReviewEntryFn:   func(dataDir string, r *request.Request) error { return r.Save(dataDir) },
 		fetchBranchCommitFn: func(context.Context, string, string, string) error { return refused("FetchBranchCommit") },
 		revListRangeFn: func(string, string, string) ([]string, []string, error) {
