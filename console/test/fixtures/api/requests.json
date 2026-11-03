@@ -533,6 +533,7 @@
       "every-field review_notes"
     ],
     "plan_budget_lines": 3,
+    "plan_lockfiles_denied": true,
     "plan_verify_command": "every-field plan_verify_command",
     "size_replan": {
       "run_id": "every-field run_id",
