@@ -106,7 +106,7 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	sandboxImage = flags.String("sandbox-image", "", "Sandbox image to check is present locally. Empty uses the session config's sandbox_image.")
 	registryProxy = flags.Bool("registry-proxy", true, "Check the image named by -registry-proxy-image; with none, nothing is checked. Unset uses the session config's registry_proxy when it is set.")
 	registryProxyImage = flags.String("registry-proxy-image", "", "Registry proxy image to check is present locally. Empty skips the check, and so does -registry-proxy=false unless this flag is passed.")
-	composeServices = flags.Bool("compose-services", true, "Check that the docker compose v2 CLI (2.20 or newer) is available. Unset uses the session config's compose_services when it is set.")
+	composeServices = flags.Bool("compose-services", true, "Check that the docker compose v2 CLI (2.23.1 or newer) is available. Unset uses the session config's compose_services when it is set.")
 	fix = flags.Bool("fix", false, "Fix what doctor can: build an absent image from source, start missing services, reclaim a sandbox whose build is gone, and offer the first-run fixes (see -yes).")
 	repoRoot = flags.String("repo-root", "", "The buildgate checkout whose Makefile -fix builds images from. Empty uses $FACTORYD_REPO_ROOT, then the session config's image_source_root, then the checkout holding the running binary.")
 	workspace = flags.String("workspace", "", "A repository checkout to check: that Docker can see it, that -data-dir lies outside it, its .factory.yml, and its GitHub login. Empty skips these checks.")
@@ -1670,13 +1670,14 @@ func dockerBuildxFix() string {
 
 // doctorCheckComposeVersion confirms `docker compose` (the v2 CLI plugin,
 // not the legacy standalone python `docker-compose`) is present and reports
-// at least 2.20 -- the minimum internal/sandbox.ComposeServicesLifecycle
-// relies on for `up --wait`. A host with only the legacy python tool has no
+// at least 2.23.1 -- the minimum the embedded Temporal and OpenShell compose
+// files need for their inline `configs: content:`, above the 2.20
+// internal/sandbox.ComposeServicesLifecycle relies on for `up --wait`. A host with only the legacy python tool has no
 // `docker compose` subcommand at all, so its own "unknown command" failure
 // already surfaces as this check's own Err, with a fix pointing at the v2
 // plugin rather than at upgrading a binary that was never the right one.
 func doctorCheckComposeVersion(ctx context.Context, dockerBinary string) doctorCheck {
-	name := "docker compose v2 available (>= 2.20)"
+	name := "docker compose v2 available (>= 2.23.1)"
 	cmd := exec.CommandContext(ctx, dockerBinary, "compose", "version", "--short")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1685,10 +1686,10 @@ func doctorCheckComposeVersion(ctx context.Context, dockerBinary string) doctorC
 			Fix: "install the Docker Compose v2 CLI plugin (not the legacy python docker-compose) -- see https://docs.docker.com/compose/install/"}
 	}
 	version := strings.TrimSpace(string(out))
-	if !composeVersionAtLeast(version, 2, 20) {
+	if !composeVersionAtLeast(version, [3]int{2, 23, 1}) {
 		return doctorCheck{Name: name,
-			Err: fmt.Errorf("docker compose version %q is older than the minimum 2.20", version),
-			Fix: "upgrade the Docker Compose v2 CLI plugin to >= 2.20"}
+			Err: fmt.Errorf("docker compose version %q is older than the minimum 2.23.1", version),
+			Fix: "upgrade the Docker Compose v2 CLI plugin to >= 2.23.1"}
 	}
 	return doctorCheck{Name: name}
 }
@@ -1715,26 +1716,28 @@ func doctorHostGitCheck(out string, err error) doctorCheck {
 	return doctorCheck{Name: name}
 }
 
-// composeVersionAtLeast parses a "vMAJOR.MINOR.PATCH" (or "MAJOR.MINOR.PATCH")
+// composeVersionAtLeast parses a "vMAJOR.MINOR.PATCH" (or "MAJOR.MINOR.PATCH",
+// a patch with a suffix such as "1-desktop.1" read by its leading digits)
 // string as `docker compose version --short` reports it; any string it
-// can't parse as at least MAJOR.MINOR is treated as too old, rather than
+// can't parse as at least MAJOR.MINOR.PATCH is treated as too old, rather than
 // erroring out and hiding a possibly-genuine version mismatch behind a
 // parse failure.
-func composeVersionAtLeast(version string, minMajor, minMinor int) bool {
-	version = strings.TrimPrefix(version, "v")
-	parts := strings.SplitN(version, ".", 3)
-	if len(parts) < 2 {
+func composeVersionAtLeast(version string, minimum [3]int) bool {
+	parts := strings.SplitN(strings.TrimPrefix(version, "v"), ".", 3)
+	if len(parts) < 3 {
 		return false
 	}
-	major, majErr := strconv.Atoi(parts[0])
-	minor, minErr := strconv.Atoi(parts[1])
-	if majErr != nil || minErr != nil {
-		return false
+	parts[2] = parts[2][:len(parts[2])-len(strings.TrimLeft(parts[2], "0123456789"))]
+	for i, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return false
+		}
+		if n != minimum[i] {
+			return n > minimum[i]
+		}
 	}
-	if major != minMajor {
-		return major > minMajor
-	}
-	return minor >= minMinor
+	return true
 }
 
 // doctorImagePullTimeout bounds a single doctorCheckImagePresent call,

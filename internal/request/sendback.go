@@ -147,6 +147,7 @@ func SendBackSeen(dataDir, id, by, reason string, target SendBackTarget, seen Se
 	r.Rejections = append(r.Rejections, rejection)
 	r.DraftHalt = nil
 	r.Tickets = nil
+	r.ChallengeOutOfScope = nil
 	r.TicketIndex = 0
 	r.TicketCount = 0
 	if target == SendBackToPlan {

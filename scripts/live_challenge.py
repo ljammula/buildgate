@@ -51,9 +51,34 @@ def results_file():
 
 def challenge_problems(run):
 	"""Why a run's record does not show a challenger job that ran, or [] when
-	it does. A verdict of green or red is the job's own; a no-verdict counts
-	only with the job's instruction-file snapshot, which exists only once the
-	job's step returned, and a cause other than a missing role."""
+	it does, and every held file that names no subject (the header's
+	`subject:` paths). A verdict of green or red is the job's own; a
+	no-verdict counts only with the job's instruction-file snapshot, which
+	exists only once the job's step returned, and a cause other than a
+	missing role."""
+	problems = _verdict_problems(run)
+	files = (run.get("challenge") or {}).get("files") or []
+	for f in files:
+		if not f.get("refused") and not f.get("subject"):
+			problems.append(f"held file {f.get('path', '?')} names no subject")
+	return problems
+
+
+def round_problems(request, load_run):
+	"""Every advice round of the request's tickets that diff_scope
+	quarantined: a round sent outside the ticket's Allowed-Files. load_run
+	maps a run id to its record, or None."""
+	problems = []
+	for t in request.get("tickets") or []:
+		for rnd in t.get("rounds") or []:
+			rec = load_run(rnd.get("run_id", "")) if rnd.get("kind") == "advice" else None
+			for g in (rec or {}).get("gate_results") or []:
+				if g.get("check") == "diff_scope" and not g.get("passed"):
+					problems.append(f"advice round {rnd.get('run_id')} was quarantined on diff_scope")
+	return problems
+
+
+def _verdict_problems(run):
 	c = run.get("challenge")
 	if not c:
 		return ["the run has no challenge record: no challenger job ran"]
@@ -132,6 +157,10 @@ class Challenge:
 		self.request = ids[0]
 		print(f"live-challenge: request {self.request}", flush=True)
 
+	def load_run(self, run_id):
+		path = self.data_dir / "runs" / run_id / "run.json"
+		return json.loads(path.read_text()) if run_id and path.exists() else None
+
 	def to_ended_run(self):
 		"""Approve the two gates, then wait for the ticket's run to end."""
 		def step():
@@ -168,6 +197,7 @@ class Challenge:
 			c = run.get("challenge") or {}
 			record["challenge_verdict"], record["challenge_cause"] = c.get("verdict", ""), c.get("cause", "")
 			problems = challenge_problems(run)
+			problems += round_problems(self.request_record(), lambda rid: self.load_run(rid))
 			if run.get("state") != "accepted":
 				problems.append(f"run state {run.get('state')!r}, want accepted")
 			record["problems"] = problems

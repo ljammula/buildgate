@@ -1243,7 +1243,7 @@ func TestQuickstartImagePullFailuresFiltersToPullChecksOnly(t *testing.T) {
 	checks := []doctorCheck{
 		{Name: "docker daemon reachable"},
 		{Name: "sandbox image present (foo@sha256:x)", Err: errors.New("boom")},
-		{Name: "docker compose v2 available (>= 2.20)", Err: errors.New("too old")},
+		{Name: "docker compose v2 available (>= 2.23.1)", Err: errors.New("too old")},
 		{Name: "monorepo module root", Err: errors.New("guess"), Advisory: true},
 	}
 	got := quickstartImagePullFailures(checks)

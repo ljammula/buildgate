@@ -465,6 +465,9 @@
         "sha256": "every-field sha256",
         "host_path": "every-field host_path",
         "criterion": "every-field criterion",
+        "subject": [
+          "every-field subject"
+        ],
         "runner": "every-field runner",
         "dir": "every-field dir",
         "test_ids": [
@@ -472,6 +475,7 @@
         ],
         "refused": "every-field refused",
         "not_run": "every-field not_run",
+        "out_of_scope": true,
         "verdict": "every-field verdict",
         "failures": [
           {

@@ -2338,7 +2338,10 @@ type ChallengeFile struct {
 	HostPath string `json:"host_path,omitempty"`
 	// Criterion is the header's label, "AC-<n>" or "answer-<n>".
 	Criterion string `json:"criterion,omitempty"`
-	Runner    string `json:"runner,omitempty"`
+	// Subject is the header's `subject:` paths: the source files the test
+	// exercises and a fix would change.
+	Subject []string `json:"subject,omitempty"`
+	Runner  string   `json:"runner,omitempty"`
 	// Dir is the project directory Runner runs in, as on HeldReproduction.
 	Dir     string   `json:"dir,omitempty"`
 	TestIDs []string `json:"test_ids,omitempty"`
@@ -2346,6 +2349,9 @@ type ChallengeFile struct {
 	// why a held file was not run (no valid header).
 	Refused string `json:"refused,omitempty"`
 	NotRun  string `json:"not_run,omitempty"`
+	// OutOfScope marks a file not run because its subject lies outside the
+	// ticket's Allowed-Files.
+	OutOfScope bool `json:"out_of_scope,omitempty"`
 	// Verdict is "green", "red", "broken" (a compile or collection error, or
 	// no report) or "advice" (red once, then green); "" for a file not run.
 	Verdict  string             `json:"verdict,omitempty"`

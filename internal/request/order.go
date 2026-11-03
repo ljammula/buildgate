@@ -126,8 +126,26 @@ func (r *Request) ReplaceWithCarved(dataDir string, idx int, sourceRunID string,
 	tickets := append(append(append([]Ticket{}, r.Tickets[:idx-1]...), carved...), later...)
 	r.Tickets = tickets
 	r.TicketCount = len(tickets)
+	r.shiftChallengeOutOfScope(idx, extra)
 	done = true
 	return nil
+}
+
+// shiftChallengeOutOfScope follows a carve of ticket idx into extra+1: what
+// was raised by the replaced ticket is dropped (its challenge is not repeated
+// for the carved tickets), and later tickets' entries move up by extra.
+func (r *Request) shiftChallengeOutOfScope(idx, extra int) {
+	kept := r.ChallengeOutOfScope[:0:0]
+	for _, e := range r.ChallengeOutOfScope {
+		switch {
+		case e.Ticket == idx:
+			continue
+		case e.Ticket > idx:
+			e.Ticket += extra
+		}
+		kept = append(kept, e)
+	}
+	r.ChallengeOutOfScope = kept
 }
 
 // pinCarved records the hash of a carved ticket's file, equal to the one the

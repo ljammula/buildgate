@@ -29,6 +29,17 @@
   "last_ask": "every-field last_ask",
   "ticket_index": 1,
   "ticket_count": 1,
+  "challenge_out_of_scope": [
+    {
+      "ticket": 3,
+      "path": "every-field path",
+      "criterion": "every-field criterion",
+      "files": [
+        "every-field files"
+      ],
+      "source": "every-field source"
+    }
+  ],
   "error": "every-field error",
   "resume": {
     "from_state": "building",
@@ -208,6 +219,7 @@
     "every-field review_notes"
   ],
   "plan_budget_lines": 3,
+  "plan_lockfiles_denied": true,
   "plan_verify_command": "every-field plan_verify_command",
   "size_replan": {
     "run_id": "every-field run_id",
@@ -290,6 +302,11 @@
       ],
       "last_polled_at": "2026-09-10T09:00:00Z",
       "pr_base": "every-field pr_base",
+      "observed_pr": {
+        "state": "every-field state",
+        "base": "every-field base",
+        "at": "2026-09-10T09:00:00Z"
+      },
       "rounds": [
         {
           "index": 3,
