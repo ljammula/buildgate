@@ -286,7 +286,7 @@ trailing request text `factoryd submit` takes; each must precede
 **Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
 that are missing, starts colima and runs `gh auth login`. On Linux it installs
 nothing and runs no `sudo`: it names each missing tool and stops, with the
-docker CLI, buildx and Compose v2 from Docker's own apt repository
+docker CLI, buildx and Compose v2 (2.23.1 or later) from Docker's own apt repository
 (`docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
 distribution's `docker.io` or the snap, and colima, whose VM runs Docker as on
 a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (colima: `colima
@@ -1460,6 +1460,12 @@ docker compose -f docker-compose.temporal.yml down -v   # stop, wipe data
 
 - `make install` runs `temporal-up` for you (skipped without Docker); `worker` and `quickstart` start it too when it is down (below), sharing this same stack and volume.
 - Postgres-backed; data persists in a named volume.
+- One write partition per task queue (`matching.numTaskqueueWritePartitions: 1`,
+  the stack's dynamic config), so steps waiting for a job slot start in the
+  order they were queued. A stack started without it gets it on its next
+  `make temporal-up` (or `make install`, which runs it), which recreates the
+  Temporal container: run either with no build in flight. A Temporal server of
+  your own needs the same value.
 - Web UI: http://localhost:8233. gRPC: `localhost:7233`.
 - Set `TEMPORAL_POSTGRES_PASSWORD` (env or `.env`) before the first `up`
   anywhere shared. The default, `temporal`, is for local use only.
