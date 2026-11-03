@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -784,4 +786,110 @@ func stackedRetargetWhileBuildingFixture(dp *fakeDeps, t *testing.T) (*request.R
 		return nil
 	}
 	return r, dataDir, edits
+}
+
+// watchedBuild builds ticket 2 of a two-ticket request with runner after
+// ticket 1's pull request was opened, polling earlier pull requests every
+// millisecond. read is the review-state read the watch and the pre-build check
+// make; it returns the state of ticket 1's pull request.
+func watchedBuild(t *testing.T, read func() (forge.ReviewState, error), during func(dataDir, id string)) (*request.Request, string, string) {
+	t.Helper()
+	dp := newFakeDeps(t)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
+	var built [][]string
+	inner := acceptingStackedBuildRunner(t, dataDir, &built)
+	r := buildFirstTicket(t, dp, dataDir, id, inner)
+	first, err := run.Load(dataDir, r.Tickets[0].RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlierPROpenAt(dp, first.ResultSHA)
+	var calls int
+	var mu sync.Mutex
+	dp.readReviewStateFn = func(context.Context, string, forge.AuthorPolicy) (forge.ReviewState, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			// The check before the build starts: still open.
+			return forge.ReviewState{State: forge.PRStateOpen, IsDraft: true, HeadSHA: first.ResultSHA}, nil
+		}
+		return read()
+	}
+	cfg := stackedCfg
+	cfg.PrPollInterval = time.Millisecond
+	runner := func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		during(dataDir, id)
+		return inner(ctx, args, onReady)
+	}
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, cfg, runner, time.Now()); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	return r, dataDir, id
+}
+
+// waitOnDisk waits for check to hold of the request on disk.
+func waitOnDisk(t *testing.T, dataDir, id string, check func(*request.Request) bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if disk, err := request.Load(dataDir, id); err == nil && check(disk) {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("the request on disk never showed the expected state while ticket 2 built")
+}
+
+func TestBuildingRecordsAnEarlierTicketMergeWhileALaterOneBuilds(t *testing.T) {
+	merged := time.Now()
+	r, dataDir, id := watchedBuild(t, func() (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateMerged, MergedAt: &merged, BaseRefName: "main"}, nil
+	}, func(dataDir, id string) {
+		waitOnDisk(t, dataDir, id, func(d *request.Request) bool { return d.Tickets[0].PRState == "merged" })
+	})
+	disk, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]*request.Request{"memory": r, "disk": disk} {
+		if got.Tickets[0].PRState != "merged" || got.Tickets[0].PRBase != "main" || got.Tickets[0].MergeReadiness != nil {
+			t.Errorf("%s: ticket 1 = %+v, want merged on main after the step's final save", name, got.Tickets[0])
+		}
+	}
+}
+
+func TestBuildingRecordsAnEarlierTicketCloseWithoutParking(t *testing.T) {
+	r, _, _ := watchedBuild(t, func() (forge.ReviewState, error) {
+		return forge.ReviewState{State: forge.PRStateClosed}, nil
+	}, func(dataDir, id string) {
+		waitOnDisk(t, dataDir, id, func(d *request.Request) bool { return d.Tickets[0].PRState == "closed" })
+		if d, _ := request.Load(dataDir, id); d.State != request.StateBuilding {
+			t.Errorf("state mid-build = %q, want building: the next step parks", d.State)
+		}
+	})
+	if r.Tickets[0].PRState != "closed" || r.Tickets[0].MergeReadiness != nil {
+		t.Errorf("ticket 1 = %+v, want closed", r.Tickets[0])
+	}
+	if r.State == request.StateResumeReview {
+		t.Errorf("state = %q: a close read during the build must not park it", r.State)
+	}
+	if r.Tickets[1].RunID == "" {
+		t.Errorf("ticket 2 has no run: its build was lost")
+	}
+}
+
+func TestBuildingKeepsTheRecordWhenAnEarlierPRReadFails(t *testing.T) {
+	var reads atomic.Int32
+	r, _, _ := watchedBuild(t, func() (forge.ReviewState, error) {
+		reads.Add(1)
+		return forge.ReviewState{}, errors.New("gh: unreachable")
+	}, func(string, string) {
+		for reads.Load() < 3 {
+			time.Sleep(time.Millisecond)
+		}
+	})
+	if r.Tickets[0].PRState == "merged" || r.Tickets[0].PRState == "closed" {
+		t.Errorf("ticket 1 = %q after failed reads, want unchanged", r.Tickets[0].PRState)
+	}
 }

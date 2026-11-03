@@ -229,7 +229,7 @@ func lowestOpenTicket(r *request.Request, limit int) int {
 // building or pr_review request: ",draft" for the current ticket of a building
 // request (its advice rounds may still push to it), ",safe-to-merge" for the
 // lowest open ticket when merging it drops nothing (see the two functions
-// below), and nothing for a merged or closed PR or in any other state.
+// below; a PR whose base is another ticket's branch is not marked), and nothing for a merged or closed PR or in any other state.
 func ticketMergeMark(r *request.Request, t request.Ticket, lowest int) string {
 	if r.State == request.StatePRReview {
 		return prReviewTicketMark(r, t, lowest)
@@ -240,7 +240,7 @@ func ticketMergeMark(r *request.Request, t request.Ticket, lowest int) string {
 	if t.Index == r.TicketIndex {
 		return ",draft"
 	}
-	if t.Index == lowest {
+	if t.Index == lowest && !r.StackedOnAnotherTicket(&t, t.PRBase) {
 		return ",safe-to-merge"
 	}
 	return ""

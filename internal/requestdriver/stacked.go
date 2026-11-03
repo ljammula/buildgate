@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"buildgate/internal/forge"
@@ -88,6 +89,100 @@ func checkEarlierPR(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		return stackHold{}, err
 	}
 	return checkEarlierTicketBranch(dp, ctx, dataDir, r, idx, earlier)
+}
+
+// watchEarlierPRs re-reads the pull requests of the tickets below idx at the
+// PR poll interval while ticket idx builds, so a merge or close a person
+// makes meanwhile is on the record (and in `factoryd status`) hours before
+// the build ends. It works on r itself, the record the step saves when the
+// build returns: a second writer would be overwritten by that save. mu
+// guards r for the whole build, so every other touch of r during it takes
+// mu. The returned stop ends the watch and waits for it; r is the step's
+// again once it returns. No watch (stop does nothing) for the first ticket
+// or a zero poll interval.
+func watchEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, cfg WorkerConfig, mu *sync.Mutex) (stop func()) {
+	if idx <= 1 || cfg.PrPollInterval <= 0 {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(cfg.PrPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				refreshEarlierPRs(dp, ctx, dataDir, r, idx, cfg, mu, time.Now())
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
+// refreshEarlierPRs reads, for each ticket below idx whose pull request is
+// not recorded merged and is due a poll, the pull request's state, and
+// records a merge (recordTicketMerged), a close (PRState "closed"; the next
+// step's checkEarlierPR parks, not this), a reopen (noteReopenedPR) and the
+// base GitHub reports. It only reads GitHub: no retarget, restack, push or
+// branch check. A read that fails changes nothing but the log. The record
+// is saved only when something in it changed.
+func refreshEarlierPRs(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int, cfg WorkerConfig, mu *sync.Mutex, now time.Time) {
+	for i := 1; i < idx && ctx.Err() == nil; i++ {
+		mu.Lock()
+		earlier, err := TicketAt(r, i)
+		var url string
+		if err == nil && earlier.PRState != "merged" {
+			url = earlier.PRURL
+			if due, derr := prPollDue(earlier.LastPolledAt, cfg.PrPollInterval, now); derr != nil || !due {
+				url = ""
+			}
+		}
+		mu.Unlock()
+		if url == "" {
+			continue
+		}
+		state, err := dp.ReadReviewState(ctx, url, prAuthorPolicy(cfg))
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("request %s: ticket %d: pull request %s could not be re-read while ticket %d builds: %v", r.ID, i, url, idx, err)
+			}
+			continue
+		}
+		mu.Lock()
+		recordEarlierPRState(r, earlier, state, now)
+		if err := r.Save(dataDir); err != nil {
+			log.Printf("request %s: ticket %d: save the re-read pull request %s: %v", r.ID, i, url, err)
+		}
+		mu.Unlock()
+	}
+}
+
+// recordEarlierPRState records state, read from earlier's pull request, on
+// earlier. The caller holds the lock on r and saves it.
+func recordEarlierPRState(r *request.Request, earlier *request.Ticket, state forge.ReviewState, now time.Time) {
+	earlier.LastPolledAt = now.UTC().Format(time.RFC3339Nano)
+	if state.BaseRefName != "" {
+		earlier.PRBase = state.BaseRefName
+	}
+	switch {
+	case state.MergedAt != nil || state.State == forge.PRStateMerged:
+		recordTicketMerged(earlier)
+		log.Printf("request %s: ticket %d: pull request %s merged while a later ticket builds", r.ID, earlier.Index, earlier.PRURL)
+	case state.State == forge.PRStateClosed:
+		earlier.PRState = "closed"
+		earlier.MergeReadiness = nil
+	default:
+		noteReopenedPR(earlier, state)
+	}
 }
 
 // retargetWhileBuilding moves earlier's open pull request off the branch of

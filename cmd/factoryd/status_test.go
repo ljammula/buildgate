@@ -959,3 +959,17 @@ func TestTicketSummaryMarksOnlyTheLowestUnmergedEarlierTicketSafeToMerge(t *test
 		t.Errorf("after ticket 1 merged, summary = %q, want %q", got, want)
 	}
 }
+
+func TestTicketSummaryNoSafeMarkWhenTheLowestOpenTicketIsStackedOnAnotherTicket(t *testing.T) {
+	r := &request.Request{
+		State: request.StateBuilding, TicketCount: 3, TicketIndex: 3,
+		Tickets: []request.Ticket{
+			{Index: 1, PRURL: "https://github.com/acme/app/pull/1", PRState: "merged", Branch: "factoryd/run-1"},
+			{Index: 2, PRURL: "https://github.com/acme/app/pull/2", PRState: "ready", PRBase: "factoryd/run-1"},
+			{Index: 3, PRURL: "https://github.com/acme/app/pull/3", PRState: "stacked"},
+		},
+	}
+	if got, want := requestTicketPRSummary(r), "1:merged 2:ready 3:stacked,draft"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+}
