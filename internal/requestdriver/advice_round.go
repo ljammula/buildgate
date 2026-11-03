@@ -66,14 +66,16 @@ func highFindings(runRecord *run.Run) []run.CodeReviewFinding {
 
 // heldReds are the held challenge files that failed on current, the head of
 // the ticket's pull request (its own challenge record, or the held files'
-// re-run on it); none unless the ticket is challenged.
-func heldReds(ticket *request.Ticket, current *run.Run) []run.ChallengeFile {
+// re-run on it); none unless the ticket is challenged. A file the request
+// records as out of the ticket's scope (r.ChallengeOutOfScope) is not one: its
+// fix needs files the ticket may not change.
+func heldReds(r *request.Request, ticket *request.Ticket, current *run.Run) []run.ChallengeFile {
 	if !ticket.Challenged || current.Challenge == nil || current.Challenge.Verdict != run.ChallengeRed {
 		return nil
 	}
 	var reds []run.ChallengeFile
 	for _, f := range current.Challenge.Files {
-		if f.Verdict == run.ChallengeRed {
+		if f.Verdict == run.ChallengeRed && !r.ChallengeRaisedFor(ticket.Index, f.Path) {
 			reds = append(reds, f)
 		}
 	}
@@ -140,8 +142,8 @@ func roundBudget(ticket *request.Ticket, n int, reds []run.ChallengeFile, cfg Wo
 // items (a red held test, a high-severity finding), fewer rounds than the
 // budget are recorded, the last of them (if any) was pushed, none is in
 // flight, and the ticket's pull request is open on current's branch.
-func roundApplies(ticket *request.Ticket, current *run.Run, cfg WorkerConfig) bool {
-	reds := heldReds(ticket, current)
+func roundApplies(r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig) bool {
+	reds := heldReds(r, ticket, current)
 	if len(reds) == 0 && len(highFindings(current)) == 0 {
 		return false
 	}
@@ -158,7 +160,10 @@ func roundApplies(ticket *request.Ticket, current *run.Run, cfg WorkerConfig) bo
 // request is read from.
 func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, accepted *run.Run, cfg WorkerConfig, now time.Time) error {
 	noteChallenge(ticket, accepted)
-	if roundApplies(ticket, accepted, cfg) && accepted.PullRequestURL != "" {
+	if recordSubjectOutOfScope(r, ticket, accepted) {
+		log.Printf("request %s: ticket %d/%d: held challenge file(s) not run: their subject is outside the ticket's Allowed-Files", r.ID, ticket.Index, r.TicketCount)
+	}
+	if roundApplies(r, ticket, accepted, cfg) && accepted.PullRequestURL != "" {
 		// The rounds push to the run's open pull request: the ticket records
 		// it before the first, as acceptTicketRun would.
 		ticket.Branch, ticket.PRURL = accepted.Branch, accepted.PullRequestURL
@@ -175,12 +180,12 @@ func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.
 // once (runRound). A pushed round that followed a head with no red held test
 // and left no fewer high-severity findings ends the loop (noProgress).
 func runRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, now time.Time) (last *run.Run, stop bool, err error) {
-	for roundApplies(ticket, current, cfg) {
+	for roundApplies(r, ticket, current, cfg) {
 		pushed, stop, err := runRound(dp, ctx, dataDir, r, ticket, current, cfg, now)
 		if stop || pushed == nil {
 			return current, stop, err
 		}
-		if noProgress(ticket, current, pushed) {
+		if noProgress(r, ticket, current, pushed) {
 			return pushed, false, nil
 		}
 		current, now = pushed, time.Now()
@@ -192,8 +197,8 @@ func runRounds(dp Deps, ctx context.Context, dataDir string, r *request.Request,
 // chased review advice without result: head had no red held test and pushed's
 // review left no fewer high-severity findings. A red test is evidence the
 // factory ran, a finding is an opinion.
-func noProgress(ticket *request.Ticket, head, pushed *run.Run) bool {
-	return len(heldReds(ticket, head)) == 0 && len(highFindings(pushed)) >= len(highFindings(head))
+func noProgress(r *request.Request, ticket *request.Ticket, head, pushed *run.Run) bool {
+	return len(heldReds(r, ticket, head)) == 0 && len(highFindings(pushed)) >= len(highFindings(head))
 }
 
 // runRound runs the round that follows current and settles it
@@ -221,7 +226,7 @@ func runRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, 
 	if err := r.Save(dataDir); err != nil {
 		return nil, true, err
 	}
-	log.Printf("request %s: ticket %d/%d: run %s accepted with %d red held test file(s) and %d high-severity review finding(s); %s %d/%d", r.ID, ticket.Index, r.TicketCount, current.ID, len(heldReds(ticket, current)), len(highFindings(current)), adviceRoundName, k, roundBudget(ticket, n, heldReds(ticket, current), cfg))
+	log.Printf("request %s: ticket %d/%d: run %s accepted with %d red held test file(s) and %d high-severity review finding(s); %s %d/%d", r.ID, ticket.Index, r.TicketCount, current.ID, len(heldReds(r, ticket, current)), len(highFindings(current)), adviceRoundName, k, roundBudget(ticket, n, heldReds(r, ticket, current), cfg))
 	launched, stop, err := launchCorrectiveRound(dp, ctx, dataDir, r, ticket, args, roundRunID, adviceRoundName, "", run.StackBase(dataDir, current), false, true)
 	if stop {
 		return nil, true, err
@@ -253,12 +258,15 @@ func adviceBudgetRefusal(dataDir string, r *request.Request, current *run.Run, c
 // read-only with -challenge-round, which commits them once all are green.
 func adviceRoundArgs(dataDir string, r *request.Request, ticket *request.Ticket, current *run.Run, cfg WorkerConfig, roundRunID string, k int) ([]string, error) {
 	roundDir := filepath.Join(request.Dir(dataDir, r.ID), "rounds", fmt.Sprintf("%03d-advice%d", ticket.Index, k))
-	reds := heldReds(ticket, current)
+	reds := heldReds(r, ticket, current)
 	start := adviceStart
 	if len(reds) > 0 {
 		start = challengeStart
 	}
-	recordPath, err := writeRecordFile(roundDir, handoff.Review(current), start)
+	recordPath, err := writeRecordFile(roundDir, handoff.Review(current, handoff.ChallengeView{
+		Skip:          func(f run.ChallengeFile) bool { return r.ChallengeRaisedFor(ticket.Index, f.Path) },
+		CriterionText: criterionTextFor(dataDir, r),
+	}), start)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +319,9 @@ func concludeRound(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 		if note != "" {
 			ticket.Rounds[slice].Error = note
 		}
-		commentDeclined(dp, ctx, dataDir, r, ticket, current, roundRun)
+		outside := roundOutsideScope(r, *ticket, roundRun)
+		commentDeclined(dp, ctx, dataDir, r, ticket, current, roundRun, outside)
+		recordRoundOutOfScope(r, ticket, heldReds(r, ticket, current), outside)
 		stop, err := restoreUnpushed(dp, dataDir, r, ticket, slice, current, now)
 		return nil, stop, err
 	}
@@ -343,7 +353,7 @@ func concludeRound(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 	log.Printf("request %s: ticket %d/%d: %s %s accepted and pushed to %s as %s", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, current.Branch, roundRun.ResultSHA)
 	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, roundComment(ticket, current, roundRun)); err != nil {
+	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, roundComment(r, ticket, current, roundRun)); err != nil {
 		log.Printf("request %s: ticket %d: comment on %s about %s %s: %v", r.ID, ticket.Index, ticket.PRURL, adviceRoundName, roundRun.ID, err)
 	}
 	return roundRun, false, nil
@@ -401,9 +411,9 @@ const maxCommentFindings = 20
 // request, saying what it fixed: the held tests that failed on current and
 // pass on the round (challengeComment) and the high-severity findings current
 // was given (adviceComment), whichever there were.
-func roundComment(ticket *request.Ticket, current, roundRun *run.Run) string {
+func roundComment(r *request.Request, ticket *request.Ticket, current, roundRun *run.Run) string {
 	var parts []string
-	if reds := heldReds(ticket, current); len(reds) > 0 {
+	if reds := heldReds(r, ticket, current); len(reds) > 0 {
 		parts = append(parts, challengeComment(reds, current, roundRun))
 	}
 	if len(highFindings(current)) > 0 {
@@ -461,9 +471,11 @@ func challengeComment(reds []run.ChallengeFile, current, roundRun *run.Run) stri
 // followed as the ticket's while that run had red held tests: each red file's
 // path, the criterion it cites and the build's one-line reason, cleaned;
 // never a file's content.
-func challengeDeclinedComment(dataDir string, reds []run.ChallengeFile, roundRun *run.Run) string {
+func challengeDeclinedComment(dataDir string, reds []run.ChallengeFile, roundRun *run.Run, outside []string) string {
 	reason := "the round gave no reason"
-	if roundRun != nil {
+	if len(outside) > 0 {
+		reason = outOfScopeReason(outside)
+	} else if roundRun != nil {
 		if line := handoff.NoteLine(run.Dir(dataDir, roundRun.ID)); line != "" {
 			reason = line
 		}
@@ -489,14 +501,14 @@ func groupNote(f run.ChallengeFile) string {
 // commentDeclined posts the declined comment on the ticket's pull request
 // when current had red held tests (a round that only followed review advice
 // posts nothing); a failed comment is logged.
-func commentDeclined(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current, roundRun *run.Run) {
-	reds := heldReds(ticket, current)
+func commentDeclined(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, current, roundRun *run.Run, outside []string) {
+	reds := heldReds(r, ticket, current)
 	if len(reds) == 0 {
 		return
 	}
 	commentCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, challengeDeclinedComment(dataDir, reds, roundRun)); err != nil {
+	if err := dp.CommentOnPullRequest(commentCtx, ticket.PRURL, challengeDeclinedComment(dataDir, reds, roundRun, outside)); err != nil {
 		log.Printf("request %s: ticket %d: comment on %s about the %s: %v", r.ID, ticket.Index, ticket.PRURL, adviceRoundName, err)
 	}
 }
@@ -578,7 +590,7 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	}
 	// A round not pushed, an old challenge round's included, ends the rounds.
 	last := current
-	if pushed != nil && !noProgress(ticket, current, pushed) {
+	if pushed != nil && !noProgress(r, ticket, current, pushed) {
 		if last, stop, err = runRounds(dp, ctx, dataDir, r, ticket, pushed, cfg, time.Now()); stop {
 			return err
 		}

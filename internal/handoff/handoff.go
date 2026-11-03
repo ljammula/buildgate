@@ -246,18 +246,33 @@ func Advice(r *run.Run) Document {
 // with open items: its failing held challenge files (Challenge) and its
 // high-severity findings (Advice), each section only when it has entries.
 // Built from the run record alone; never saved as a handoff.
-func Review(r *run.Run) Document {
+// view chooses which red files are told and gives each its criterion's text.
+func Review(r *run.Run, view ChallengeView) Document {
 	doc := Advice(r)
-	doc.ChallengeFiles = Challenge(r).ChallengeFiles
+	doc.ChallengeFiles = challengeDocument(r, view).ChallengeFiles
 	return doc
 }
+
+// ChallengeView adjusts the challenge section of a record. Skip, when set,
+// drops a red file (one already recorded as out of the ticket's scope);
+// CriterionText, when set, is the text of the criterion a label such as AC-3
+// cites, "" when unknown.
+type ChallengeView struct {
+	Skip          func(f run.ChallengeFile) bool
+	CriterionText func(label string) string
+}
+
+// maxCriterionTextLen bounds the criterion text told with a challenge file.
+const maxCriterionTextLen = 240
 
 // ChallengeFile is one failing challenge file as the challenge round's build
 // is told it. Every string is cleaned.
 type ChallengeFile struct {
-	Path      string   `json:"path"`
-	Criterion string   `json:"criterion,omitempty"`
-	Failures  []string `json:"failures,omitempty"`
+	Path      string `json:"path"`
+	Criterion string `json:"criterion,omitempty"`
+	// CriterionText is the cited criterion's text, one cleaned line.
+	CriterionText string   `json:"criterion_text,omitempty"`
+	Failures      []string `json:"failures,omitempty"`
 	// Group marks a file that ran together with the other Group files under
 	// the repository's verify command (run.ChallengeFile.Group): Failures
 	// are that run's, not this file's own.
@@ -280,6 +295,11 @@ const maxChallengeFailureLines = 20
 // criterion it cites and each failing test with its assertion, one cleaned
 // line each. Built from the run record alone; never saved as a handoff.
 func Challenge(r *run.Run) Document {
+	return challengeDocument(r, ChallengeView{})
+}
+
+// challengeDocument is Challenge with view applied.
+func challengeDocument(r *run.Run, view ChallengeView) Document {
 	doc := Document{
 		SchemaVersion: SchemaVersion, RunID: r.ID, Ticket: r.Ticket, State: string(r.State),
 		BaseSHA: clean(r.BaseSHA, maxNameLen), ResultSHA: clean(r.ResultSHA, maxNameLen),
@@ -289,10 +309,13 @@ func Challenge(r *run.Run) Document {
 		return doc
 	}
 	for _, f := range r.Challenge.Files {
-		if f.Verdict != run.ChallengeRed || len(doc.ChallengeFiles) == maxAdviceFindings {
+		if f.Verdict != run.ChallengeRed || len(doc.ChallengeFiles) == maxAdviceFindings || (view.Skip != nil && view.Skip(f)) {
 			continue
 		}
 		cf := ChallengeFile{Path: clean(f.Path, maxNameLen), Criterion: clean(f.Criterion, maxWordLen), Group: f.Group}
+		if view.CriterionText != nil {
+			cf.CriterionText = clean(view.CriterionText(f.Criterion), maxCriterionTextLen)
+		}
 		for _, fl := range f.Failures {
 			if len(cf.Failures) == maxChallengeFailureLines {
 				break
@@ -309,7 +332,7 @@ func Challenge(r *run.Run) Document {
 }
 
 // challengeIntro opens the challenge section.
-const challengeIntro = "That attempt passed every check and was accepted. The factory then ran the tests below, which another model wrote from the approved specification alone, and they failed on it. Each file is mounted read-only in your workspace at its path: read it, never edit it. Decide for each failure whether the code is wrong or the test is: fix the code where it is wrong; where the test is wrong, leave the code as it is and say why in one line in your notes. Every check, and a fresh review, runs again on what this build commits, and the tests run again on it.\n\n"
+const challengeIntro = "That attempt passed every check and was accepted. The factory then ran the tests below, which another model wrote from the approved specification alone, and they failed on it. Each file is mounted read-only in your workspace at its path: read it, never edit it. Decide for each failure whether the code is wrong or the test is: fix the code where it is wrong; where the test is wrong, leave the code as it is and say why in one line in your notes. Every check, and a fresh review, runs again on what this build commits, and the tests run again on it.\n\nA test that asserts behaviour its cited criterion does not state is wrong: decline it in one line in your notes, and add no lock, retry or other machinery the specification does not ask for. A fix that would need a file outside your Allowed-Files is also a decline: say which file in one line.\n\n"
 
 // line is the challenge file's one list line.
 func (f ChallengeFile) line() string {
@@ -325,7 +348,11 @@ func (f ChallengeFile) line() string {
 		}
 		failures = ": failing " + strings.Join(quoted, "; ")
 	}
-	return fmt.Sprintf("- `%s`%s%s\n", f.Path, cited, failures)
+	text := ""
+	if f.CriterionText != "" {
+		text = "; the criterion says " + quote(f.CriterionText)
+	}
+	return fmt.Sprintf("- `%s`%s%s%s\n", f.Path, cited, text, failures)
 }
 
 // writeChallengeFiles writes the failing files, each on its own list line,

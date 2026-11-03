@@ -29,6 +29,17 @@
   "last_ask": "every-field last_ask",
   "ticket_index": 1,
   "ticket_count": 1,
+  "challenge_out_of_scope": [
+    {
+      "ticket": 3,
+      "path": "every-field path",
+      "criterion": "every-field criterion",
+      "files": [
+        "every-field files"
+      ],
+      "source": "every-field source"
+    }
+  ],
   "error": "every-field error",
   "resume": {
     "from_state": "building",

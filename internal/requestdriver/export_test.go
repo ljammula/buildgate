@@ -92,6 +92,14 @@ func WriteTicketBuildInput(dataDir string, r *request.Request, ticket *request.T
 	return writeTicketBuildInput(dataDir, r, *ticket)
 }
 
+// ChallengeScopeBlocksForTest and RecordSubjectOutOfScopeForTest expose the
+// challenge scope helpers to the external test package.
+var (
+	ChallengeScopeBlocksForTest    = challengeScopeBlocks
+	RecordSubjectOutOfScopeForTest = recordSubjectOutOfScope
+	RecordRoundOutOfScopeForTest   = recordRoundOutOfScope
+)
+
 // CheckEarlierTicketForTest runs the check before ticket idx builds, with the
 // default worker configuration.
 func CheckEarlierTicketForTest(dp Deps, ctx context.Context, dataDir string, r *request.Request, idx int) (bool, error) {
