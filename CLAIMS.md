@@ -337,6 +337,7 @@ the most direct tests; the finer claims behind each are in [Claims](#claims).
 | A resume of a stacked ticket's kept build, or a retry that would continue on an attempt's branch, whose stack base is not the earlier ticket's current PR head is refused (pointing at `resume -from scratch`) or rebuilt from that head with `-prior-run` | Enforced | `TestAStaleKeptBuildOfAStackedTicketIsNotResumed`, `TestARetryOfAStackedTicketOnTheOldHeadChainsFromTheCurrentHead` |
 
 | An operator-cited memory evidence run is stored separately from a run whose agent notes said the candidate; only a confirmed terminal run from the same repository is accepted, and cited runs do not change the agent-run count or the evidence sent to a model. Each citation list is capped at 20, and schema 1 stores migrate without losing their existing provenance | Enforced | `TestMemoryAddCitesFinishedRunsSeparatelyFromAgentNotes`, `TestMemoryAddRejectsCitedRunsOutsideRepositoryOrBeforeCompletion`, `TestStoreMigratesSchemaOneWithoutChangingLessonProvenance`, `TestStoreBounds` |
+| A review reply posted to GitHub is inert markdown (no mention, link, image, autolink, HTML, entity or reference, every line in a blockquote) except balanced single-backtick inline code spans of 1 to 200 bytes on one line, whose content is posted raw because a code span interprets nothing; unmatched backticks and runs of two or more are escaped | Enforced | `TestReviewReplyIsInertMarkdown`, `TestReviewReplyCodeSpansRender` |
 
 ## Remaining gaps
 
