@@ -22,6 +22,7 @@ import (
 	"buildgate/internal/codereview"
 	"buildgate/internal/evidence"
 	"buildgate/internal/pincommit"
+	"buildgate/internal/policy"
 	"buildgate/internal/reproduction"
 	"buildgate/internal/run"
 	"buildgate/internal/runner"
@@ -61,8 +62,9 @@ const (
 )
 
 // challengeHeader is the one derivation header line a challenge file carries:
-// a label and a number, read as nothing else.
-var challengeHeader = regexp.MustCompile(`buildgate-challenge: (AC|answer)-([1-9][0-9]{0,3})\s*$`)
+// a label and a number, then optionally `subject:` and one to three
+// comma-separated repo-relative paths, read as nothing else.
+var challengeHeader = regexp.MustCompile(`buildgate-challenge: (AC|answer)-([1-9][0-9]{0,3})(?: subject: ([^\s,]+(?:, ?[^\s,]+){0,2}))?\s*$`)
 
 // ChallengerJobInput is RunChallengerJobActivity's input: the run's input and
 // the result commit the job reads.
@@ -94,26 +96,65 @@ type ChallengerJobResult struct {
 // most criteria (AC) or one of the answered question numbers (answer). "" when there is none or it is not
 // valid.
 func challengeHeaderOf(content []byte, criteria int, answers []int) string {
+	label, _ := challengeHeaderParts(content, criteria, answers)
+	return label
+}
+
+// challengeHeaderParts is challengeHeaderOf's label and the subject paths the
+// header names (nil when it names none, the form of a header written before
+// the field existed).
+func challengeHeaderParts(content []byte, criteria int, answers []int) (string, []string) {
 	lines := strings.Split(string(content), "\n")
 	if len(lines) > challengeHeaderLines {
 		lines = lines[:challengeHeaderLines]
 	}
 	found := ""
+	var subject []string
 	for _, line := range lines {
 		m := challengeHeader.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
 		if found != "" {
-			return ""
+			return "", nil
 		}
 		n, _ := strconv.Atoi(m[2])
 		if n < 1 || (m[1] == "answer" && !slices.Contains(answers, n)) || (m[1] != "answer" && n > criteria) {
-			return ""
+			return "", nil
 		}
 		found = m[1] + "-" + m[2]
+		for _, p := range strings.Split(m[3], ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				subject = append(subject, p)
+			}
+		}
 	}
-	return found
+	return found, subject
+}
+
+// challengeSubjectReason is why a held file with header label and subject is
+// not run, "" when it may run (SC-022): the ticket's Allowed-Files are
+// approved, and the subject, the source files the test exercises, is named,
+// tracked in the result commit and covered by them. A failure whose fix lies
+// outside Allowed-Files cannot be fixed by the ticket's own round. Built only
+// from the label and the subject paths. Always "" when the list is absent or
+// not approved, or the header is not valid.
+func challengeSubjectReason(label string, subject, tracked, allowed []string, unapproved bool) string {
+	if allowed == nil || unapproved || label == "" {
+		return ""
+	}
+	if len(subject) == 0 {
+		return "the header names no subject file"
+	}
+	for _, s := range subject {
+		switch {
+		case !slices.Contains(tracked, s):
+			return fmt.Sprintf("subject %s is not a tracked file of the result", cleanNoteName(s))
+		case !policy.PathCoveredByAllowed(s, allowed):
+			return "subject " + cleanNoteName(s) + run.ChallengeSubjectOutside
+		}
+	}
+	return ""
 }
 
 // challengeInScope reports whether header (as challengeHeaderOf returns it)
@@ -456,18 +497,7 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 			return files, notes, err
 		}
 		file.SHA256, file.HostPath, file.Runner, file.Dir, file.TestIDs = h.SHA256, h.HostPath, h.Runner, h.Dir, h.TestIDs
-		if file.Criterion = challengeHeaderOf(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
-			file.NotRun = "no valid derivation header"
-			notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(p))
-			if in.ChallengeCriteria == 0 && !noCriteriaNoted {
-				noCriteriaNoted = true
-				notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
-			}
-		}
-		if file.NotRun == "" && !challengeInScope(file.Criterion, in.ChallengeCovered) {
-			file.NotRun = "cites a criterion outside the ticket's and earlier tickets' coverage"
-			notes = append(notes, fmt.Sprintf("a challenge file citing %s, a criterion outside the ticket's and earlier tickets' coverage, was held and not run: %s", file.Criterion, cleanNoteName(p)))
-		}
+		notes = append(notes, markChallengeNotRun(&file, content, in, tracked, &noCriteriaNoted)...)
 		files = append(files, file)
 		held++
 	}
@@ -475,6 +505,32 @@ func (a *Activities) holdChallengeFiles(ctx context.Context, in ChallengerJobInp
 		notes = append(notes, fmt.Sprintf("%d more files the challenger wrote were not held", unnoted))
 	}
 	return files, notes, nil
+}
+
+// markChallengeNotRun reads the header of the held file's content into file
+// (criterion, subject) and sets NotRun, with a note each, when the header is
+// not valid, cites a criterion outside the ticket's coverage, or names a
+// subject the ticket's approved Allowed-Files rule out. noCriteriaNoted keeps
+// the no-criteria note to one per job.
+func markChallengeNotRun(file *run.ChallengeFile, content []byte, in ChallengerJobInput, tracked []string, noCriteriaNoted *bool) []string {
+	var notes []string
+	if file.Criterion, file.Subject = challengeHeaderParts(content, in.ChallengeCriteria, in.ChallengeAnswers); file.Criterion == "" {
+		file.NotRun = "no valid derivation header"
+		notes = append(notes, "a challenge file with no valid derivation header was held and not run: "+cleanNoteName(file.Path))
+		if in.ChallengeCriteria == 0 && !*noCriteriaNoted {
+			*noCriteriaNoted = true
+			notes = append(notes, "the approved spec lists no numbered criteria under an exact `## Acceptance criteria` heading, so no AC-n header is valid")
+		}
+	}
+	if file.NotRun == "" && !challengeInScope(file.Criterion, in.ChallengeCovered) {
+		file.NotRun = "cites a criterion outside the ticket's and earlier tickets' coverage"
+		notes = append(notes, fmt.Sprintf("a challenge file citing %s, a criterion outside the ticket's and earlier tickets' coverage, was held and not run: %s", file.Criterion, cleanNoteName(file.Path)))
+	}
+	if why := challengeSubjectReason(file.Criterion, file.Subject, tracked, in.AllowedFiles, in.ScopeUnapproved); file.NotRun == "" && why != "" {
+		file.NotRun = why
+		notes = append(notes, fmt.Sprintf("challenge %s (%s) not run: %s", cleanNoteName(file.Path), file.Criterion, why))
+	}
+	return notes
 }
 
 // readScratchFile reads a regular file of the scratch worktree through an

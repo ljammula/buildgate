@@ -2338,7 +2338,10 @@ type ChallengeFile struct {
 	HostPath string `json:"host_path,omitempty"`
 	// Criterion is the header's label, "AC-<n>" or "answer-<n>".
 	Criterion string `json:"criterion,omitempty"`
-	Runner    string `json:"runner,omitempty"`
+	// Subject is the header's `subject:` paths: the source files the test
+	// exercises and a fix would change.
+	Subject []string `json:"subject,omitempty"`
+	Runner  string   `json:"runner,omitempty"`
 	// Dir is the project directory Runner runs in, as on HeldReproduction.
 	Dir     string   `json:"dir,omitempty"`
 	TestIDs []string `json:"test_ids,omitempty"`
@@ -2356,6 +2359,10 @@ type ChallengeFile struct {
 	// alone.
 	Group bool `json:"group,omitempty"`
 }
+
+// ChallengeSubjectOutside ends the NotRun reason of a held file whose subject
+// lies outside the ticket's Allowed-Files.
+const ChallengeSubjectOutside = " is outside this ticket's Allowed-Files"
 
 // ChallengeFailure is one failing test of a red challenge file: its name and
 // its assertion, each one cleaned line.

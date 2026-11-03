@@ -295,6 +295,38 @@ const RestackRoundKind = "restack"
 // neither round budget.
 const AdviceRoundKind = "advice"
 
+// Sources of a ChallengeRaised entry.
+const (
+	// ChallengeRaisedSubject: the held file's subject lay outside the
+	// ticket's Allowed-Files, so it was held and not run.
+	ChallengeRaisedSubject = "subject"
+	// ChallengeRaisedDiffScope: an advice round for the file's red was
+	// quarantined by diff_scope.
+	ChallengeRaisedDiffScope = "diff_scope"
+)
+
+// ChallengeRaised is one held challenge file whose fix lay outside its
+// ticket's Allowed-Files: the ticket, the file's path and cited criterion,
+// the files the fix needs and which of the two checks found it. Never a
+// test's content.
+type ChallengeRaised struct {
+	Ticket    int      `json:"ticket"`
+	Path      string   `json:"path"`
+	Criterion string   `json:"criterion,omitempty"`
+	Files     []string `json:"files"`
+	Source    string   `json:"source"`
+}
+
+// ChallengeRaisedFor reports whether r records path as raised by ticket.
+func (r *Request) ChallengeRaisedFor(ticket int, path string) bool {
+	for _, e := range r.ChallengeOutOfScope {
+		if e.Ticket == ticket && e.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
 // ChallengeRoundKind marks a Round of a record written before the challenge
 // round was one of the advice rounds (AdviceRoundKind): a build on the run's
 // branch, given the held challenge files that failed on the accepted result.
@@ -519,6 +551,10 @@ type Request struct {
 	TicketIndex int      `json:"ticket_index,omitempty"`
 	TicketCount int      `json:"ticket_count,omitempty"`
 	Tickets     []Ticket `json:"tickets,omitempty"`
+	// ChallengeOutOfScope is what the challenger's tests raised that a ticket
+	// could not fix inside its Allowed-Files (SC-022); a later ticket whose
+	// Allowed-Files cover the files is told of it.
+	ChallengeOutOfScope []ChallengeRaised `json:"challenge_out_of_scope,omitempty"`
 
 	// Error is the reason recorded by Quarantine or Halt. Empty
 	// otherwise.

@@ -91,3 +91,10 @@ func ParseNumstatZ(out string) []FileStat { return parseNumstatZ(out) }
 func WriteTicketBuildInput(dataDir string, r *request.Request, ticket *request.Ticket) (string, error) {
 	return writeTicketBuildInput(dataDir, r, *ticket)
 }
+
+// ChallengeScopeBlocksForTest and RecordSubjectOutOfScopeForTest expose the
+// challenge scope helpers to the external test package.
+var (
+	ChallengeScopeBlocksForTest    = challengeScopeBlocks
+	RecordSubjectOutOfScopeForTest = recordSubjectOutOfScope
+)

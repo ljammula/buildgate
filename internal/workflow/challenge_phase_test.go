@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -637,6 +638,51 @@ func TestNoChallengerJobWhenGatesFailedOrOverTheSizeCap(t *testing.T) {
 		p := runChallengePhaseWith(t, input, edgeJob(), passAll, 1, nil, fx)
 		if p.err != nil || p.jobs != 0 || len(p.launches) != 0 || len(p.commits) != 0 || p.result.Challenge != nil {
 			t.Errorf("%s: err %v, jobs %d, launches %v, challenge %+v; want no challenge", name, p.err, p.jobs, p.launches, p.result.Challenge)
+		}
+	}
+}
+
+// A header may name one to three subject paths; one without is the older form.
+func TestChallengeHeaderSubject(t *testing.T) {
+	for name, tc := range map[string]struct {
+		content string
+		label   string
+		subject []string
+	}{
+		"none":     {"// buildgate-challenge: AC-2\n", "AC-2", nil},
+		"one":      {"// buildgate-challenge: AC-2 subject: p/add.go\n", "AC-2", []string{"p/add.go"}},
+		"three":    {"# buildgate-challenge: answer-2 subject: a.py, b.py,c.py\n", "answer-2", []string{"a.py", "b.py", "c.py"}},
+		"four":     {"// buildgate-challenge: AC-2 subject: a, b, c, d\n", "", nil},
+		"empty":    {"// buildgate-challenge: AC-2 subject:\n", "", nil},
+		"trailing": {"// buildgate-challenge: AC-2 subject: a.go and more\n", "", nil},
+	} {
+		label, subject := challengeHeaderParts([]byte(tc.content), 3, []int{2})
+		if label != tc.label || !slices.Equal(subject, tc.subject) {
+			t.Errorf("%s: got %q %v, want %q %v", name, label, subject, tc.label, tc.subject)
+		}
+	}
+}
+
+func TestChallengeSubjectReason(t *testing.T) {
+	tracked := []string{"p/add.go", "q/other.go"}
+	allowed := []string{"p/"}
+	for name, tc := range map[string]struct {
+		subject    []string
+		allowed    []string
+		unapproved bool
+		want       string
+	}{
+		"inside":       {[]string{"p/add.go"}, allowed, false, ""},
+		"missing":      {nil, allowed, false, "names no subject"},
+		"untracked":    {[]string{"p/new.go"}, allowed, false, "not a tracked file"},
+		"outside":      {[]string{"q/other.go"}, allowed, false, run.ChallengeSubjectOutside},
+		"unapproved":   {nil, allowed, true, ""},
+		"no list":      {nil, nil, false, ""},
+		"second paths": {[]string{"p/add.go", "q/other.go"}, allowed, false, run.ChallengeSubjectOutside},
+	} {
+		got := challengeSubjectReason("AC-1", tc.subject, tracked, tc.allowed, tc.unapproved)
+		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: reason = %q, want it to contain %q", name, got, tc.want)
 		}
 	}
 }

@@ -184,6 +184,9 @@ func withChallenge(entry *QueueEntry, dataDir string, r *request.Request, ticket
 		if block := challengeCoveredBlock(covered); block != "" {
 			input += "\n\n" + block
 		}
+		if block := challengeScopeBlocks(r, ticket); block != "" {
+			input += "\n\n" + block
+		}
 		path := filepath.Join(dir, challengeInputFile)
 		if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
 			return fmt.Errorf("write the challenge input: %w", err)

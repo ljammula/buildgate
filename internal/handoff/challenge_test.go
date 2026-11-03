@@ -70,12 +70,34 @@ func TestReviewRecordHasBothSectionsAndOneIntro(t *testing.T) {
 	r := &run.Run{ID: "run-a", Ticket: "t", State: run.StateAccepted,
 		Challenge:  &run.ChallengeRecord{Verdict: run.ChallengeRed, Files: []run.ChallengeFile{{Path: "sum_edge_test.go", Criterion: "AC-2", Verdict: run.ChallengeRed}}},
 		CodeReview: &run.CodeReviewResult{Findings: []run.CodeReviewFinding{{Severity: "high", Summary: "a leak"}}}}
-	md := Review(r).Markdown()
+	md := Review(r, ChallengeView{}).Markdown()
 	tests, concerns := strings.Index(md, "## Tests written against"), strings.Index(md, "## A reviewer's concerns")
 	if tests < 0 || concerns < tests || !strings.Contains(md, "a leak") {
 		t.Errorf("the record lacks both sections in order:\n%s", md)
 	}
 	if n := strings.Count(md, "That attempt passed every check and was accepted."); n != 1 {
 		t.Errorf("the intro appears %d times, want 1:\n%s", n, md)
+	}
+}
+
+// The brief carries each red file's criterion text and the decline rule, and
+// leaves out a file the view skips.
+func TestReviewBriefCarriesTheCriterionText(t *testing.T) {
+	r := &run.Run{ID: "run-a", Ticket: "t", State: run.StateAccepted,
+		Challenge: &run.ChallengeRecord{Verdict: run.ChallengeRed, Files: []run.ChallengeFile{
+			{Path: "a_test.go", Criterion: "AC-2", Verdict: run.ChallengeRed},
+			{Path: "b_test.go", Criterion: "AC-3", Verdict: run.ChallengeRed},
+		}}}
+	md := Review(r, ChallengeView{
+		Skip:          func(f run.ChallengeFile) bool { return f.Path == "b_test.go" },
+		CriterionText: func(label string) string { return "Add returns the sum of " + label },
+	}).Markdown()
+	for _, want := range []string{"`a_test.go` (AC-2); the criterion says \"Add returns the sum of AC-2\"", "asserts behaviour its cited criterion does not state is wrong", "outside your Allowed-Files"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("the brief lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "b_test.go") {
+		t.Errorf("the brief names a skipped file:\n%s", md)
 	}
 }

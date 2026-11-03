@@ -542,3 +542,45 @@ func TestChallengeFilesAreHeldWhateverTheJobsExitStatus(t *testing.T) {
 		}
 	}
 }
+
+// With approved Allowed-Files, a file whose subject is missing, untracked or
+// outside them is held and not run, with a note; one inside runs; an
+// unapproved list skips the rule.
+func TestHoldChallengeFilesRefusesASubjectOutsideAllowedFiles(t *testing.T) {
+	f, in := holdFixture(t)
+	in.AllowedFiles = []string{"p/add.go"}
+	hdr := func(subject string) string { return strings.Replace(edgeTest, "AC-1", "AC-1 subject: "+subject, 1) }
+	writeFile(t, filepath.Join(f.repo, "p", "in_test.go"), hdr("p/add.go"))
+	writeFile(t, filepath.Join(f.repo, "p", "none_test.go"), edgeTest)
+	writeFile(t, filepath.Join(f.repo, "p", "ghost_test.go"), hdr("p/ghost.go"))
+	writeFile(t, filepath.Join(f.repo, "p", "out_test.go"), hdr("go.mod"))
+	files, notes, err := f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]run.ChallengeFile{}
+	for _, file := range files {
+		by[file.Path] = file
+	}
+	if got := by["p/in_test.go"]; got.NotRun != "" || len(got.Subject) != 1 {
+		t.Errorf("inside = %+v, want it to run with its subject recorded", got)
+	}
+	for name, want := range map[string]string{"p/none_test.go": "no subject", "p/ghost_test.go": "not a tracked file", "p/out_test.go": run.ChallengeSubjectOutside} {
+		if !strings.Contains(by[name].NotRun, want) || by[name].HostPath == "" {
+			t.Errorf("%s = %+v, want held and not run: %q", name, by[name], want)
+		}
+	}
+	if len(notes) != 3 || !strings.Contains(strings.Join(notes, "\n"), "challenge p/out_test.go (AC-1) not run: subject go.mod is outside this ticket's Allowed-Files") {
+		t.Errorf("notes = %q", notes)
+	}
+	in.ScopeUnapproved = true
+	files, _, err = f.acts.holdChallengeFiles(context.Background(), in, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.NotRun != "" {
+			t.Errorf("%s not run with an unapproved list: %q", file.Path, file.NotRun)
+		}
+	}
+}
