@@ -73,6 +73,9 @@ func lostStepOf(dataDir string, runRecord *run.Run, cause unresolved.Cause, kept
 		step.RunID = runRecord.ID
 	}
 	if cause == unresolved.ProviderQuota {
+		// The routes it refused hold every other launch on them while this
+		// request waits (request.RouteHolder).
+		step.Routes = run.QuotaRefusedRoutes(runRecord)
 		step.RetryAt = run.ProviderRetryAt(runRecord)
 		if step.RetryAt == "" {
 			step.RetryAt = providerResetTimeInEvidence(dataDir, runRecord.ID)

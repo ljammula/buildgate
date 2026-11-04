@@ -724,7 +724,19 @@ requires a new contract review and an updated machine-checkable test.
   refusals above) does not launch, and the request keeps its state with a
   route wait (`route_wait`) naming the role, each route and its cause,
   checked again every 30 s, and launches by itself once a credential is
-  usable. What reaches `resume_review` with the cause is what that check
+  usable. The same check holds a launch whose chosen route a request of the
+  data dir was refused on by the provider's own limit: that request records
+  the routes of its refused launches (`Resume.Routes`, from the meter's
+  record of each launch's route), and while it waits in `resume_review` with
+  cause `provider_quota` (not parked or refused a resume since), and the
+  meter's RFC 3339 retry time, when the provider sent one, has not passed,
+  each launch the check above covers whose chosen route is one of them
+  waits with a sentence naming it; a request the operator resumed after such
+  a refusal is not held by a refusal at or before that resume. The hold is
+  by route name within one data dir and is derived from that record alone:
+  the holder's resume, cancel or rebuild releases it, and a time a worker
+  printed ends nothing. Rounds, a read-back and the challenger are not held
+  and meet the limit as before. What reaches `resume_review` with the cause is what that check
   does not see: a credential that fails between the check and the launch,
   the sandbox runtime's budget check, a read-back, and the rounds above. A refused resume of a kept build
   keeps that build as the one `resume` continues. The read-back otherwise

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/unresolved"
 )
 
 // routeGateSettings is one static route whose key is the variable env, one
@@ -39,14 +41,14 @@ func TestRouteWaitReasonNamesTheRouteItsCauseAndTheRestart(t *testing.T) {
 	for _, role := range []string{"planning", "execution", "review"} {
 		need := requestdriver.RouteNeed{Role: role}
 		t.Setenv("RG_TEST_KEY", "")
-		got := routeWaitReason(s, need)
+		got := routeWaitReason(t.TempDir(), s, need, time.Now())
 		for _, want := range []string{"roles." + role, "route keyed", "RG_TEST_KEY", "factoryd restart"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s with no key: reason = %q, want %q in it", role, got, want)
 			}
 		}
 		t.Setenv("RG_TEST_KEY", "sk-test")
-		if got := routeWaitReason(s, need); got != "" {
+		if got := routeWaitReason(t.TempDir(), s, need, time.Now()); got != "" {
 			t.Fatalf("%s with a key: reason = %q, want none", role, got)
 		}
 	}
@@ -58,7 +60,7 @@ func TestRouteWaitReasonFallsBackFromAnUnsetPlanningRole(t *testing.T) {
 	t.Setenv("RG_FALLBACK_KEY", "")
 	s := routeGateSettings("RG_FALLBACK_KEY", false)
 	s.Roles.Planning = nil
-	if got := routeWaitReason(s, requestdriver.RouteNeed{Role: "planning", Model: "not-a-model"}); !strings.Contains(got, "roles.execution") {
+	if got := routeWaitReason(t.TempDir(), s, requestdriver.RouteNeed{Role: "planning", Model: "not-a-model"}, time.Now()); !strings.Contains(got, "roles.execution") {
 		t.Fatalf("reason = %q, want roles.execution checked with the planning pick dropped", got)
 	}
 }
@@ -66,7 +68,7 @@ func TestRouteWaitReasonFallsBackFromAnUnsetPlanningRole(t *testing.T) {
 // TestRouteWaitReasonIsSilentWithoutRoutes proves an offline config (no
 // routes:) never waits.
 func TestRouteWaitReasonIsSilentWithoutRoutes(t *testing.T) {
-	if got := routeWaitReason(sessionconfig.DefaultSettings(), requestdriver.RouteNeed{Role: "execution"}); got != "" {
+	if got := routeWaitReason(t.TempDir(), sessionconfig.DefaultSettings(), requestdriver.RouteNeed{Role: "execution"}, time.Now()); got != "" {
 		t.Fatalf("reason = %q, want none without routes:", got)
 	}
 }
@@ -145,5 +147,43 @@ func TestAdvanceRequestWaitsForARouteThenRunsTheStep(t *testing.T) {
 	}
 	if r, _ = request.Load(dataDir, "req-route"); r.RouteWait != nil {
 		t.Fatalf("RouteWait = %+v after the step started, want it cleared", r.RouteWait)
+	}
+}
+
+// TestRouteWaitReasonWaitsWhileAQuotaRefusalHoldsTheRoute proves a launch on a
+// route a request of the data dir was refused on by the provider's limit
+// waits, naming that request and its resume, and launches once the holder
+// leaves resume_review.
+func TestRouteWaitReasonWaitsWhileAQuotaRefusalHoldsTheRoute(t *testing.T) {
+	t.Setenv("RG_HOLD_KEY", "sk-test")
+	s := routeGateSettings("RG_HOLD_KEY", false)
+	dataDir := t.TempDir()
+	holder := request.New("req-refused", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())
+	holder.State = request.StateBuilding
+	if err := holder.EnterResumeReview(request.StateBuilding, request.LostStep{Cause: unresolved.ProviderQuota, Routes: []string{"keyed"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	need := requestdriver.RouteNeed{Role: "execution"}
+	got := routeWaitReason(dataDir, s, need, time.Now())
+	for _, want := range []string{"route keyed", "req-refused", "`factoryd resume req-refused`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("reason = %q, want %q in it", got, want)
+		}
+	}
+	resumed := requestdriver.RouteNeed{Role: "execution", ResumedAt: time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)}
+	if got := routeWaitReason(dataDir, s, resumed, time.Now()); got != "" {
+		t.Fatalf("reason for a request resumed after the refusal = %q, want none: its resume says the limit has reset", got)
+	}
+	if err := holder.Cancel("alice", "done with it", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := routeWaitReason(dataDir, s, need, time.Now()); got != "" {
+		t.Fatalf("reason after the holder was cancelled = %q, want none", got)
 	}
 }

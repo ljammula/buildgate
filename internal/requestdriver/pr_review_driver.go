@@ -1133,7 +1133,7 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 		// (an outage would repeat without end). A human decides; the
 		// reviewer is told nothing, since nothing was judged.
 		log.Printf("request %s: ticket %d: round %d gave no verdict (%s): %s", r.ID, ticket.Index, roundIndex, attempt.unresolved, errText)
-		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: attempt.unresolved, RetryAt: attempt.retryAt}, now)
+		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: attempt.unresolved, RetryAt: attempt.retryAt, Routes: attempt.routes}, now)
 	}
 	if outcome != request.RoundAccepted {
 		// Quarantined or halted: never push, request stays in pr_review,
@@ -1176,9 +1176,11 @@ type roundOutcome struct {
 	startFailure bool
 	// unresolved: the run ended with no verdict on the work (it halted for
 	// such a cause, or its review did not answer); retryAt is the time the
-	// provider then said to try again, when it gave one.
+	// provider then said to try again, when it gave one, and routes the
+	// routes it refused with its own limit (request.LostStep.Routes).
 	unresolved unresolved.Cause
 	retryAt    string
+	routes     []string
 }
 
 // runRoundAttempt runs one build of a PR-review round on the pull request's
@@ -1354,9 +1356,9 @@ func correctiveRoundOutcome(dataDir, runID string, runErr error) (roundOutcome, 
 	cause := unresolvedCauseOf(loaded)
 	step := lostStepOf(dataDir, loaded, cause, false)
 	if loaded.State == run.StateQuarantined {
-		return roundOutcome{outcome: request.RoundQuarantined, errText: errText, unresolved: cause, retryAt: step.RetryAt}, nil
+		return roundOutcome{outcome: request.RoundQuarantined, errText: errText, unresolved: cause, retryAt: step.RetryAt, routes: step.Routes}, nil
 	}
-	return roundOutcome{outcome: request.RoundHalted, errText: errText, startFailure: len(loaded.Attempts) == 0, unresolved: cause, retryAt: step.RetryAt}, nil
+	return roundOutcome{outcome: request.RoundHalted, errText: errText, startFailure: len(loaded.Attempts) == 0, unresolved: cause, retryAt: step.RetryAt, routes: step.Routes}, nil
 }
 
 // pushAcceptedRoundAndReply pushes an accepted corrective round's branch

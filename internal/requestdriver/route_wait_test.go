@@ -11,13 +11,14 @@ import (
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
+	"buildgate/internal/unresolved"
 )
 
 // routeWaitDeps is a fake whose RouteWait answers reason for every need and
 // records the needs it was asked about.
 func routeWaitDeps(t *testing.T, reason *string, asked *[]requestdriver.RouteNeed) *fakeDeps {
 	dp := newFakeDeps(t)
-	dp.routeWaitFn = func(_ sessionconfig.Settings, need requestdriver.RouteNeed) string {
+	dp.routeWaitFn = func(_ string, _ sessionconfig.Settings, need requestdriver.RouteNeed) string {
 		*asked = append(*asked, need)
 		return *reason
 	}
@@ -199,5 +200,25 @@ func TestASpecRedraftInTheSamePassIsNotHeld(t *testing.T) {
 	}
 	if len(seen) != 2 || len(asked) != 1 {
 		t.Fatalf("launches %d, route checks %d; want both drafts launched and one check", len(seen), len(asked))
+	}
+}
+
+// A build the operator resumed after the provider refused it with its own
+// limit tells the route check when it was resumed, so a refusal at or before
+// that resume does not hold it.
+func TestAResumedQuotaBuildTellsTheRouteCheckWhenItWasResumed(t *testing.T) {
+	reason, asked := "", []requestdriver.RouteNeed{}
+	dp := routeWaitDeps(t, &reason, &asked)
+	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	r.Resume = &request.ResumeInfo{FromState: request.StateBuilding, Cause: unresolved.ProviderQuota, Routes: []string{"codex"}, Generation: 1, At: at}
+	r.ResumeDecision = &request.ResumeDecision{Verb: request.ResumeScratch, Generation: 1, By: "alice", At: at}
+	reason, asked = "held", nil
+	if err := requestdriver.AdvanceBuilding(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{}, requestdrivertest.FailingBuildRunner(t), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) == 0 || asked[0].ResumedAt != at {
+		t.Fatalf("asked %+v, want the resume's time %s passed to the route check", asked, at)
 	}
 }

@@ -50,6 +50,9 @@
     "lost_run_id": "every-field lost_run_id",
     "reason": "every-field reason",
     "retry_at": "2026-09-10T09:00:00Z",
+    "routes": [
+      "every-field routes"
+    ],
     "generation": 3,
     "at": "2026-09-10T09:00:00Z",
     "refused": [
