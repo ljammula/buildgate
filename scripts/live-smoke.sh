@@ -93,7 +93,7 @@ fi
 # visibility probe correctly catches and reports as an infrastructure
 # failure rather than silently producing an empty workspace.
 # Each fixture: "<source repo>:<ticket spec file>:<ticket id prefix>".
-# Kept deliberately small (2 fixtures, no project-specific sandbox image,
+# Kept deliberately small (3 fixtures, no project-specific sandbox image,
 # no docker-compose dependency services) so this is cheap enough to run
 # on every relevant PR, not just periodically -- see AGENTS.md's own
 # reasoning for why "fast enough to actually get run" mattered more than
@@ -108,6 +108,7 @@ fi
 FIXTURES="${LIVE_SMOKE_FIXTURES:-"
 $REPO_ROOT/testdata/fixtures/json-merge-patch-rfc7396:$REPO_ROOT/data/tickets/json-merge-patch-rfc7396.spec.md:live-smoke-jsonmerge
 $REPO_ROOT/testdata/fixtures/math_ops:$REPO_ROOT/data/tickets/math-ops-multiply.spec.md:live-smoke-mathops
+$REPO_ROOT/testdata/fixtures/perl_floor:$REPO_ROOT/data/tickets/perl-floor-subtract.spec.md:live-smoke-perlfloor
 "}"
 
 if [ "${1:-}" = "--list" ]; then

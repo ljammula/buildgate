@@ -2643,6 +2643,13 @@ The .NET restore, build, and test commands also passed in the configured
 worker image, but that request did not reach an accepted PR: the target
 repository's release policy denied its change to protected `.factory.yml`.
 
+A language with no profile, no reproduction runner and no derived
+toolchain works on the floor: its committed `verify_command`'s exit status
+is the verdict, and its committed `test_patterns` tell `tests_red_on_base`
+which files are tests (a changed test there gives no verdict and passes with
+a note). `make live-smoke`'s `perl_floor` fixture proves it on every run:
+plain Perl test scripts, no test framework, `perl` from the worker image.
+
 | Language / platform | Toolchain used | Project dependency manifests baked by `project-sandbox-image` |
 |---|---|---|
 | Go | Go from the configured image, or derived from `go.mod` when needed | `go.mod`, `go.sum` |
@@ -2650,6 +2657,7 @@ repository's release policy denied its change to protected `.factory.yml`.
 | Java / Maven | Java and Maven from the configured image, or derived from `pom.xml` / `.java-version` / `.sdkmanrc` when needed | `pom.xml` |
 | Ruby / Bundler | Ruby and Bundler from the configured image, or derived from `Gemfile` / `.ruby-version` when needed | `Gemfile`, `Gemfile.lock` |
 | React Native / TypeScript | Node, npm, npx and pnpm in the configured worker image | `package.json`, `package-lock.json` |
+| Any other language (live-proven: plain Perl) | What the configured worker image has; `required_binaries` checks it | Not baked; the floor is `verify_command` and `test_patterns` |
 | C# / .NET | .NET in an operator-configured worker image | Not baked by `project-sandbox-image`; install it in the image |
 
 A project image keeps npm's and Maven's caches under `/scratch`
