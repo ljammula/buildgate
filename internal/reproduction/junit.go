@@ -56,3 +56,21 @@ func readJUnit(report []byte) (cases []junitCase, ok bool) {
 		cases = append(cases, c)
 	}
 }
+
+// junitCaseKind maps one JUnit test case onto a Kind: JUnit's four outcomes
+// (a failure, an error, skipped, passed), a failure or an error read by the
+// runner's own problemKind, given the Kind the outcome means when the
+// problem says nothing more (KindFail, KindError). A runner whose tool writes
+// JUnit needs only problemKind (its timeout and assertion signals) and its
+// own test-ID convention.
+func junitCaseKind(c junitCase, problemKind func(p *junitProblem, outcome Kind) Kind) Kind {
+	switch {
+	case c.Failure != nil:
+		return problemKind(c.Failure, KindFail)
+	case c.Error != nil:
+		return problemKind(c.Error, KindError)
+	case c.Skipped != nil:
+		return KindSkipped
+	}
+	return KindPass
+}

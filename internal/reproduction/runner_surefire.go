@@ -168,25 +168,18 @@ func (surefireXML) Classify(_ string, report []byte, exit int, ids []string) (ma
 	for _, c := range cases {
 		name, _, _ := strings.Cut(c.Name, "(")
 		name, _, _ = strings.Cut(name, "[")
-		merge(kinds, strings.TrimSpace(name), surefireKind(c))
+		merge(kinds, strings.TrimSpace(name), junitCaseKind(c, surefireProblemKind))
 	}
 	return fromKinds(kinds, ids)
 }
 
-func surefireKind(c junitCase) Kind {
-	switch {
-	case c.Failure != nil && isJavaTimeout(c.Failure):
+// surefireProblemKind: a Java timeout exception in a failure or an error is
+// a timeout; otherwise the outcome stands.
+func surefireProblemKind(p *junitProblem, outcome Kind) Kind {
+	if isJavaTimeout(p) {
 		return KindTimeout
-	case c.Failure != nil:
-		return KindFail
-	case c.Error != nil && isJavaTimeout(c.Error):
-		return KindTimeout
-	case c.Error != nil:
-		return KindError
-	case c.Skipped != nil:
-		return KindSkipped
 	}
-	return KindPass
+	return outcome
 }
 
 func isJavaTimeout(p *junitProblem) bool {
