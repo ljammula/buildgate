@@ -35,7 +35,7 @@ func unansweredReviewRun(id string, calls *meter.Calls) *run.Run {
 	// the review did not answer.
 	r.Attempts = []run.Attempt{{Kind: "build", Role: run.AttemptRoleExecution, RelayCalls: &meter.Calls{Answered: 9}}}
 	if calls != nil {
-		r.Attempts = append(r.Attempts, run.Attempt{Kind: "review", Role: run.AttemptRoleReview, RelayCalls: calls})
+		r.Attempts = append(r.Attempts, run.Attempt{Kind: "review", Role: run.AttemptRoleReview, RelayCalls: calls, RelayRoute: "codex"})
 	}
 	return r
 }
@@ -169,6 +169,10 @@ func TestAnUnjudgedTicketRunWaitsInResumeReviewWithItsBuildKept(t *testing.T) {
 			}
 			if wantTime := cause == unresolved.ProviderQuota; (r.Resume.RetryAt == "2026-10-11T03:11:00Z") != wantTime || strings.Contains(r.Error, "try again after 2026-10-11T03:11:00Z") != wantTime {
 				t.Errorf("RetryAt %q, Error %q: the meter's time is shown for the provider's limit only", r.Resume.RetryAt, r.Error)
+			}
+			// Only the provider's limit holds the route the refused launch used.
+			if wantRoutes := cause == unresolved.ProviderQuota; (len(r.Resume.Routes) == 1 && r.Resume.Routes[0] == "codex") != wantRoutes {
+				t.Errorf("Routes = %v, want [codex] for the provider's limit only", r.Resume.Routes)
 			}
 		})
 	}

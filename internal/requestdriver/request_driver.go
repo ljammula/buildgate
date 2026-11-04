@@ -58,12 +58,15 @@ type Deps interface {
 	PruneRoundRefs(dir string, id string, keepPrefixes []string) error
 	// RunTicket builds one ticket: the command's single-ticket run.
 	RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error
-	// RouteWait says why a model job on need cannot launch yet because no
-	// route of its role has a credential that can be used (a missing key, a
-	// token that expires too soon): the role, each route's cause and the fix.
-	// "" when a route is usable, or when the role fails for any other reason
-	// (the launch reports that as it does today). It calls no model.
-	RouteWait(s sessionconfig.Settings, need RouteNeed) string
+	// RouteWait says why a model job on need cannot launch yet: no route of
+	// its role has a credential that can be used (a missing key, a token
+	// that expires too soon), or the route it would launch on is held by a
+	// request of dataDir the provider refused with its own limit
+	// (request.RouteHolder). The sentence names the role, the route, the
+	// cause and the fix. "" when the route is usable, or when the role fails
+	// for any other reason (the launch reports that as it does today). It
+	// calls no model.
+	RouteWait(dataDir string, s sessionconfig.Settings, need RouteNeed) string
 	// SaveReviewEntry saves r, which has just entered a review state; the real
 	// body is r.Save. The reminder of that review is not sent until it
 	// returns, the moment an operator's decision can land between the two
@@ -1805,7 +1808,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if launched.unresolved != "" {
 			// No verdict on the round's work, so no quarantine: a human
 			// decides what runs next, and the round used none of the budget.
-			return true, EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt}, now)
+			return true, EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt, Routes: launched.routes}, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by

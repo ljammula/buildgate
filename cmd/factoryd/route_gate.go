@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"time"
 
 	"buildgate/internal/meter"
 	"buildgate/internal/modelrole"
+	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
@@ -19,8 +21,8 @@ import (
 const routeWaitRecheck = 30 * time.Second
 
 // RouteWait is requestdriver.Deps' RouteWait: routeWaitReason.
-func (dp *deps) RouteWait(s sessionconfig.Settings, need requestdriver.RouteNeed) string {
-	return routeWaitReason(s, need)
+func (dp *deps) RouteWait(dataDir string, s sessionconfig.Settings, need requestdriver.RouteNeed) string {
+	return routeWaitReason(dataDir, s, need, time.Now())
 }
 
 // routeWaitReason says why a model job on need cannot launch because no route
@@ -32,7 +34,7 @@ func (dp *deps) RouteWait(s sessionconfig.Settings, need requestdriver.RouteNeed
 // resolveRouteCredentials, a drafting job's planning role falling back to
 // execution as resolveRequestJobRole does), so the check and the launch
 // agree; no model is called.
-func routeWaitReason(s sessionconfig.Settings, need requestdriver.RouteNeed) string {
+func routeWaitReason(dataDir string, s sessionconfig.Settings, need requestdriver.RouteNeed, now time.Time) string {
 	if len(s.Routes) == 0 {
 		return ""
 	}
@@ -50,10 +52,34 @@ func routeWaitReason(s sessionconfig.Settings, need requestdriver.RouteNeed) str
 		}
 		return err
 	}
-	if _, err := modelrole.SelectRoute(s, role, model, harness, "", probe); err != nil && errors.Is(err, sandbox.ErrRouteCredential) {
+	sel, err := modelrole.SelectRoute(s, role, model, harness, "", probe)
+	switch {
+	case err != nil && errors.Is(err, sandbox.ErrRouteCredential):
 		return routeWaitSentence(s, role, failed)
+	case err != nil:
+		return ""
 	}
-	return ""
+	return routeHoldReason(dataDir, role, sel.RouteName, need.ResumedAt, now)
+}
+
+// routeHoldReason says why a launch on route waits for the request whose
+// provider-quota refusal holds it (request.RouteHolder), "" when none does.
+// The launch would choose this route whatever the hold, so the wait and the
+// launch agree; the holder's resume or cancel releases every launch waiting
+// on it.
+func routeHoldReason(dataDir string, role modelrole.Role, route, resumedAt string, now time.Time) string {
+	holder, err := request.RouteHolder(dataDir, route, resumedAt, now)
+	if err != nil {
+		log.Printf("route %s: no quota hold could be read, so none holds the launch: %v", route, err)
+	}
+	if holder == nil {
+		return ""
+	}
+	until := ""
+	if at, err := time.Parse(time.RFC3339, holder.Resume.RetryAt); err == nil {
+		until = ", or at " + at.Local().Format("15:04 MST")
+	}
+	return fmt.Sprintf("waiting for roles.%s's model route: route %s: the model provider refused request %s with its own usage limit, and that request waits in resume_review. The step has not started; it starts once that request is resumed (`factoryd resume %s`, after the limit resets) or cancelled%s", role, route, holder.ID, holder.ID, until)
 }
 
 // routeWaitSentence is the operator's line for a role none of whose routes

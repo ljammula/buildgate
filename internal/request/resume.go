@@ -47,8 +47,14 @@ type ResumeInfo struct {
 	// refused with its own limit; "" when it gave no time. It is the meter's
 	// record (RFC 3339 UTC), or, when the provider sent the meter none, the
 	// time of day its message gave, said with the clock it is on. Shown as
-	// text only.
+	// text; only the meter's RFC 3339 form also ends a route hold
+	// (RouteHolder), never the text a worker printed.
 	RetryAt string `json:"retry_at,omitempty"`
+	// Routes are the model routes the provider refused with its own limit
+	// (Cause provider_quota), as the meter recorded each launch's route.
+	// While r waits here, a launch of any request on one of them waits too
+	// (RouteHolder): one resume or cancel releases them all.
+	Routes []string `json:"routes,omitempty"`
 	// Generation counts the times the request has entered resume_review. A
 	// decision applies only to the Generation it was made for.
 	Generation int `json:"generation"`
@@ -140,6 +146,8 @@ type LostStep struct {
 	Reason string
 	// RetryAt is ResumeInfo.RetryAt.
 	RetryAt string
+	// Routes is ResumeInfo.Routes.
+	Routes []string
 	// Detail, when set, is what the step's job reported, one sanitised line;
 	// it follows the prompt in the request's Error.
 	Detail string
@@ -164,6 +172,7 @@ func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) er
 		Cause:      step.Cause,
 		Reason:     step.Reason,
 		RetryAt:    step.RetryAt,
+		Routes:     step.Routes,
 		Generation: r.nextResumeGeneration(),
 		At:         r.UpdatedAt,
 	}

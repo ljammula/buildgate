@@ -1,6 +1,8 @@
 package run
 
 import (
+	"slices"
+
 	"buildgate/internal/meter"
 	"buildgate/internal/unresolved"
 )
@@ -66,6 +68,20 @@ func LastReviewCalls(r *Run) *meter.Calls {
 		}
 	}
 	return nil
+}
+
+// QuotaRefusedRoutes are the routes of r's launches that the model provider
+// refused with its own limit (ModelRouteCause provider_quota), each as the
+// meter's launch recorded it (Attempt.RelayRoute), sorted, without repeats.
+func QuotaRefusedRoutes(r *Run) []string {
+	var routes []string
+	for _, a := range r.Attempts {
+		if a.RelayRoute != "" && ModelRouteCause(a.RelayCalls) == unresolved.ProviderQuota && !slices.Contains(routes, a.RelayRoute) {
+			routes = append(routes, a.RelayRoute)
+		}
+	}
+	slices.Sort(routes)
+	return routes
 }
 
 // ProviderRetryAt is the time the model provider asked r's most recent
