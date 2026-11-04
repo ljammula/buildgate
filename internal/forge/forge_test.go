@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeFakeExecutable writes a shell script at dir/name and returns its
@@ -141,7 +143,7 @@ exit 1
 echo "https://github.com/acme/widgets/pull/42"
 `)
 
-	opener := GHPullRequestOpener{GitBinary: gitBinary, GHBinary: ghBinary}
+	opener := GHPullRequestOpener{GitBinary: gitBinary, GHBinary: ghBinary, PushRetryWaits: []time.Duration{0, 0}}
 	_, err := opener.OpenDraftPullRequest(context.Background(), dir, "factoryd/run-1", "", "", "title", "body")
 	if err == nil {
 		t.Fatal("OpenDraftPullRequest succeeded despite a failed push, want an error")
@@ -307,5 +309,95 @@ exit 0
 	}
 	if strings.Contains(string(calls), "ls-remote") {
 		t.Errorf("git calls = %q, want no ls-remote call for an empty base", string(calls))
+	}
+}
+
+// pushCountingGit is a fake git whose push fails until it has been called
+// failures times, counting every push in dir/push-count.
+func pushCountingGit(t *testing.T, dir string, failures int) string {
+	t.Helper()
+	count := filepath.Join(dir, "push-count")
+	return writeFakeExecutable(t, dir, "fake-git", `if [ "$1" = "push" ]; then
+n=$(cat `+count+` 2>/dev/null || echo 0)
+n=$((n+1))
+echo $n > `+count+`
+if [ $n -le `+strconv.Itoa(failures)+` ]; then
+echo "remote: fatal error in commit_refs" >&2
+exit 1
+fi
+fi
+exit 0
+`)
+}
+
+func pushCount(t *testing.T, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "push-count"))
+	if err != nil {
+		t.Fatalf("read push count: %v", err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// TestOpenDraftPullRequestRetriesAFailedPush proves a push that fails and then
+// succeeds (a forge's transient server error) still opens the pull request.
+func TestOpenDraftPullRequestRetriesAFailedPush(t *testing.T) {
+	dir := t.TempDir()
+	gitBinary := pushCountingGit(t, dir, 2)
+	ghBinary := writeFakeExecutable(t, dir, "fake-gh", `echo "https://github.com/acme/widgets/pull/42"
+`)
+	opener := GHPullRequestOpener{GitBinary: gitBinary, GHBinary: ghBinary, PushRetryWaits: []time.Duration{0, 0}}
+	url, err := opener.OpenDraftPullRequest(context.Background(), dir, "factoryd/run-1", "", "deadbeef", "title", "body")
+	if err != nil {
+		t.Fatalf("OpenDraftPullRequest: %v, want the third push to succeed", err)
+	}
+	if url != "https://github.com/acme/widgets/pull/42" {
+		t.Errorf("url = %q", url)
+	}
+	if got := pushCount(t, dir); got != "3" {
+		t.Errorf("pushes = %s, want 3", got)
+	}
+}
+
+// TestOpenDraftPullRequestGivesUpAfterTheLastRetry proves the retries are
+// bounded: one push plus one per wait, then the last failure is returned and
+// no pull request is created.
+func TestOpenDraftPullRequestGivesUpAfterTheLastRetry(t *testing.T) {
+	dir := t.TempDir()
+	ghCalledMarker := filepath.Join(dir, "gh-was-called")
+	gitBinary := pushCountingGit(t, dir, 100)
+	ghBinary := writeFakeExecutable(t, dir, "fake-gh", `touch `+ghCalledMarker+`
+`)
+	opener := GHPullRequestOpener{GitBinary: gitBinary, GHBinary: ghBinary, PushRetryWaits: []time.Duration{0, 0}}
+	_, err := opener.OpenDraftPullRequest(context.Background(), dir, "factoryd/run-1", "", "deadbeef", "title", "body")
+	if err == nil || !strings.Contains(err.Error(), "commit_refs") {
+		t.Fatalf("err = %v, want the push failure", err)
+	}
+	if got := pushCount(t, dir); got != "3" {
+		t.Errorf("pushes = %s, want 3", got)
+	}
+	if _, statErr := os.Stat(ghCalledMarker); statErr == nil {
+		t.Error("gh pr create ran although every push failed")
+	}
+}
+
+// TestOpenDraftPullRequestStopsRetryingWhenContextEnds proves a wait does not
+// outlive the caller's deadline.
+func TestOpenDraftPullRequestStopsRetryingWhenContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	gitBinary := pushCountingGit(t, dir, 100)
+	ghBinary := writeFakeExecutable(t, dir, "fake-gh", "")
+	opener := GHPullRequestOpener{GitBinary: gitBinary, GHBinary: ghBinary, PushRetryWaits: []time.Duration{time.Hour}}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	if _, err := opener.OpenDraftPullRequest(ctx, dir, "factoryd/run-1", "", "deadbeef", "title", "body"); err == nil {
+		t.Fatal("OpenDraftPullRequest succeeded, want the push failure")
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Errorf("returned after %s, want soon after the context ended", elapsed)
+	}
+	if got := pushCount(t, dir); got != "1" {
+		t.Errorf("pushes = %s, want 1", got)
 	}
 }

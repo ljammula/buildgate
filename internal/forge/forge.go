@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // PullRequestOpener pushes headSHA (already committed, inside
@@ -100,15 +101,53 @@ type GHPullRequestOpener struct {
 	// GitBinary/GHBinary default to "git"/"gh" when empty.
 	GitBinary string
 	GHBinary  string
+	// PushRetryWaits are the pauses before each further push attempt after a
+	// failed one; nil means defaultPushRetryWaits.
+	PushRetryWaits []time.Duration
+}
+
+// defaultPushRetryWaits is how long OpenDraftPullRequest waits before each
+// retry of a failed push: a forge's own server error (GitHub's "fatal error in
+// commit_refs" during an outage) usually clears within a minute, and the build
+// behind the push is already accepted. A push is idempotent: the same commit
+// to the same branch.
+func defaultPushRetryWaits() []time.Duration {
+	return []time.Duration{15 * time.Second, 45 * time.Second}
+}
+
+// push runs `git push origin refspec` in dir, once and then once after each of
+// waits while it keeps failing, and returns the last failure. Every failure is
+// retried, a permanent refusal too: telling them apart would mean reading the
+// remote's prose, and a refusal costs only the waits. It stops early when ctx
+// ends.
+func push(ctx context.Context, gitBinary, dir, refspec string, waits []time.Duration) error {
+	for attempt := 0; ; attempt++ {
+		cmd := exec.CommandContext(ctx, gitBinary, "push", "origin", refspec)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		failure := fmt.Errorf("git push %s: %w: %s", refspec, err, strings.TrimSpace(string(out)))
+		if attempt >= len(waits) {
+			return failure
+		}
+		log.Printf("%v; retrying in %s (attempt %d of %d)", failure, waits[attempt], attempt+2, len(waits)+1)
+		select {
+		case <-ctx.Done():
+			return failure
+		case <-time.After(waits[attempt]):
+		}
+	}
 }
 
 // OpenDraftPullRequest pushes headSHA (or, when empty, whatever branch
 // currently points at in workspaceDir) to branch on "origin" (the one
 // remote name every git-hosting convention this project targets uses),
-// then runs `gh pr create --draft`. gh's own stdout on success is
-// exactly the new PR's URL as its last line -- this is gh's own
-// documented, stable output shape for `pr create`, not a fragile
-// screen-scrape of prose meant for a human.
+// retrying a failed push (PushRetryWaits), then runs `gh pr create
+// --draft`. gh's own stdout on success is exactly the new PR's URL as its
+// last line -- gh's documented, stable output shape for `pr create`, not a
+// fragile screen-scrape of prose meant for a human.
 func (o GHPullRequestOpener) OpenDraftPullRequest(ctx context.Context, workspaceDir, branch, base, headSHA, title, body string) (string, error) {
 	gitBinary := o.GitBinary
 	if gitBinary == "" {
@@ -128,10 +167,12 @@ func (o GHPullRequestOpener) OpenDraftPullRequest(ctx context.Context, workspace
 	if headSHA != "" {
 		refspec = headSHA + ":refs/heads/" + branch
 	}
-	push := exec.CommandContext(ctx, gitBinary, "push", "origin", refspec)
-	push.Dir = workspaceDir
-	if out, err := push.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git push %s: %w: %s", refspec, err, strings.TrimSpace(string(out)))
+	waits := o.PushRetryWaits
+	if waits == nil {
+		waits = defaultPushRetryWaits()
+	}
+	if err := push(ctx, gitBinary, workspaceDir, refspec, waits); err != nil {
+		return "", err
 	}
 	repository, err := originRepository(ctx, gitBinary, workspaceDir)
 	if err != nil {
