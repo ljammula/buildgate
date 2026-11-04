@@ -40,7 +40,7 @@ const surefireSourceRoot = "src/test/java/"
 func (surefireXML) Applies(p string, m Markers) bool {
 	return strings.Contains("/"+p, "/"+surefireSourceRoot) &&
 		baseMatches(p, "Test*.java", "*Test.java", "*Tests.java", "*TestCase.java") &&
-		m.Has("pom.xml")
+		m.HasProfile("java-maven")
 }
 
 var (

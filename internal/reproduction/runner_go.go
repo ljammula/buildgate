@@ -28,7 +28,7 @@ type goTest struct{}
 func (goTest) ID() string { return "go-test-json" }
 
 func (goTest) Applies(p string, m Markers) bool {
-	return strings.HasSuffix(p, "_test.go") && m.Has("go.mod")
+	return strings.HasSuffix(p, "_test.go") && m.HasProfile("go")
 }
 
 // Tests are the file's top-level func TestXxx(t *testing.T), TestMain

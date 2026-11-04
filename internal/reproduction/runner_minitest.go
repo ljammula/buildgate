@@ -23,7 +23,7 @@ const minitestReporter = "bg_repro_reporter.rb"
 func (minitestJSON) ID() string { return "minitest-json" }
 
 func (minitestJSON) Applies(p string, m Markers) bool {
-	return baseMatches(p, "*_test.rb", "test_*.rb") && m.Has("Gemfile")
+	return baseMatches(p, "*_test.rb", "test_*.rb") && m.HasProfile("ruby")
 }
 
 var (

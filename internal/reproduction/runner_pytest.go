@@ -1,6 +1,7 @@
 package reproduction
 
 import (
+	"buildgate/internal/languageprofile"
 	"fmt"
 	"path"
 	"regexp"
@@ -16,13 +17,17 @@ import (
 // launch's cap, which reads as a timeout of every test (CapExceeded).
 type pytestJUnit struct{}
 
+// pythonTestPatterns are the Python profile's test-file patterns, the names
+// pytest collects by default.
+var pythonTestPatterns = languageprofile.MustByID("python").TestPatterns
+
 const pytestTimeoutPlugin = "bg_repro_timeout.py"
 
 func (pytestJUnit) ID() string { return "pytest-junitxml" }
 
 func (pytestJUnit) Applies(p string, m Markers) bool {
-	return baseMatches(p, "test_*.py", "*_test.py") &&
-		m.Has("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini", "tox.ini")
+	return baseMatches(p, pythonTestPatterns...) &&
+		(m.HasProfile("python") || m.Has(pytestConfigMarkers...))
 }
 
 var (
@@ -204,7 +209,7 @@ func pyCaseID(c junitCase) string {
 	name, _, _ := strings.Cut(c.Name, "[")
 	parts := strings.Split(c.ClassName, ".")
 	for i := len(parts) - 1; i >= 0; i-- {
-		if baseMatches(parts[i]+".py", "test_*.py", "*_test.py") {
+		if baseMatches(parts[i]+".py", pythonTestPatterns...) {
 			if classes := parts[i+1:]; len(classes) > 0 {
 				return strings.Join(classes, "::") + "::" + name
 			}
