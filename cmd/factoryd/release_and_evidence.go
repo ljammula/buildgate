@@ -414,7 +414,9 @@ func openEvidencePullRequest(dataDir, execDir, id string, r *run.Run, policy *re
 		return ""
 	}
 	body := renderEvidenceMarkdown(r, policy) + memoryChangesMarkdown(dataDir, r)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// Room for the opener's push retries (a minute of waits) on top of the
+	// base check, the pushes and gh pr create.
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	if msg := uncheckedBaseCommitsRefusal(ctx, opener, execDir, r); msg != "" {
 		log.Printf("run %s: -open-pull-request: %s (run remains accepted)", id, msg)
