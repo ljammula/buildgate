@@ -1,15 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
+	"buildgate/internal/languageprofile"
 	"buildgate/internal/projectconfig"
 )
 
@@ -280,42 +279,10 @@ func scaffoldArchitecture(title string) string {
 `, title)
 }
 
-// makefileVerifyTarget matches a Makefile "verify:" target line.
-var makefileVerifyTarget = regexp.MustCompile(`(?m)^verify:`)
-
-// detectInitVerifyCommand inspects -root's own build tooling for a real
-// verify command to pre-fill into a freshly written .factory.yml, checked
-// in this order: a Makefile's own declared "verify" target is the most
-// specific, deliberate signal a repo can give; go.mod, package.json, and
-// pyproject.toml/requirements.txt follow as generic per-ecosystem
-// fallbacks. Returns "" when none of these are present.
+// detectInitVerifyCommand is the verify command `init` pre-fills into a
+// freshly written .factory.yml: languageprofile.DetectVerifyCommand, "" when
+// it finds none.
 func detectInitVerifyCommand(root string) string {
-	if b, err := os.ReadFile(filepath.Join(root, "Makefile")); err == nil && makefileVerifyTarget.Match(b) {
-		return "make verify"
-	}
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-		return "go build ./... && go test ./..."
-	}
-	if b, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
-		// Same guard onboard.go's own detectVerifyCommand uses: a
-		// package.json without a "test" script makes `npm test` exit
-		// nonzero ("Missing script"), so this must confirm the script
-		// exists rather than assume every package.json has one.
-		var pkg struct {
-			Scripts map[string]string `json:"scripts"`
-		}
-		if json.Unmarshal(b, &pkg) == nil {
-			if _, ok := pkg.Scripts["test"]; ok {
-				return "npm test"
-			}
-		}
-	}
-	if _, err := os.Stat(filepath.Join(root, "pyproject.toml")); err == nil {
-		return "pytest"
-	}
-	if _, err := os.Stat(filepath.Join(root, "requirements.txt")); err == nil {
-		return "pytest"
-	}
-	command, _ := suggestedProfileVerifyCommand(root)
+	command, _ := languageprofile.DetectVerifyCommand(root)
 	return command
 }

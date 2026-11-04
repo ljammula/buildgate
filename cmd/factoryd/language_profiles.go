@@ -73,21 +73,6 @@ func deriveTestPatterns(root string, profilePatterns, testDirs []string) []strin
 	return result
 }
 
-// suggestedProfileVerifyCommand is used only by onboarding/scaffolding when
-// creating a new .factory.yml. An ambiguous or malformed project receives no
-// suggestion; no language profile is consulted by the run acceptance path.
-func suggestedProfileVerifyCommand(root string) (command, source string) {
-	matches, err := languageprofile.Detect(root)
-	if err != nil || len(matches) != 1 {
-		return "", ""
-	}
-	profile := matches[0].Profile
-	if profile.VerifyCommand == "" {
-		return "", ""
-	}
-	return profile.VerifyCommand, "profile " + profile.ID
-}
-
 // doctorCheckLanguageProfile reports the best matching root-level profile
 // and a candidate .factory.yml block. The profile is advisory: it neither
 // writes the repository nor changes the commands or gates a run uses.
@@ -123,6 +108,7 @@ func doctorCheckLanguageProfile(root string) doctorCheck {
 		config = *loadedConfig
 	}
 	profile.TestPatterns = deriveTestPatterns(root, profile.TestPatterns, profile.TestDirectories)
+	profile.VerifyCommand = profile.VerifyCommandFor(root)
 	name := "language profile " + profile.Name + " for " + root
 	detail := profileDoctorDetail(profile, matches[0].Markers, config)
 	if profile.VerifyCommand != "" && config.VerifyCommand == "" {

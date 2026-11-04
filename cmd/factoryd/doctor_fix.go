@@ -29,8 +29,8 @@ func doctorRegisterYesFlag(flags *flag.FlagSet) *bool {
 // checkout, whose Makefile builds images -- never a stand-in for the
 // target repo). Advisory, not fail-closed: plenty of repos run fine
 // today with verify_command/preflight_profile resolved some other way
-// (an explicit -verify-command, or detectVerifyCommand's own Makefile/
-// go.mod/package.json fallback) -- a missing .factory.yml is a usability
+// (an explicit -verify-command, or detectVerifyCommand's own Makefile or
+// language-profile fallback) -- a missing .factory.yml is a usability
 // gap (`factoryd doctor -fix -yes` or `factoryd onboard -write-factory-yml`
 // closes it), not a broken configuration.
 func doctorCheckFactoryYML(workspace string) doctorCheck {

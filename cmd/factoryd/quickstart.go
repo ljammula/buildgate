@@ -2768,7 +2768,7 @@ func quickstartEnsureRepoReady(dp *deps, opts *quickstartOptions, p *quickstartP
 	source := "flag"
 	// Precedence, matching applyProjectConfigDefaults' own "explicit flag
 	// wins, otherwise .factory.yml": only fall through to the committed
-	// config, then to Makefile/go.mod/package.json detection, when the
+	// config, then to Makefile or language-profile detection, when the
 	// operator did not actually pass -verify-command. verifyExplicit
 	// itself must stay false here (it tracks whether the *flag* was
 	// explicit, not whether a value was found) so that whichever value we

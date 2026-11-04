@@ -8,12 +8,6 @@ cmd/factoryd/doctor.go package.json
 cmd/factoryd/doctor.go pyproject.toml
 cmd/factoryd/doctor.go requirements.txt
 cmd/factoryd/go_modules.go go.sum
-cmd/factoryd/init.go go.mod
-cmd/factoryd/init.go package.json
-cmd/factoryd/init.go pyproject.toml
-cmd/factoryd/init.go requirements.txt
-cmd/factoryd/onboard.go go.mod
-cmd/factoryd/onboard.go package.json
 cmd/factoryd/upgrade_cmd.go go.mod
 internal/evidence/dependency_extra.go Cargo.lock
 internal/evidence/dependency_extra.go poetry.lock
