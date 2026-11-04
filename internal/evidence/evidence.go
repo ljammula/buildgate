@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"sort"
 	"syscall"
+
+	"buildgate/internal/languageprofile"
 )
 
 // maxRetainFileSize bounds RetainFile's copy. src is agent-controlled
@@ -28,24 +30,17 @@ import (
 // KB — with headroom for one written unusually verbosely.
 const maxRetainFileSize = 10 << 20
 
-// KnownLockfileNames lists dependency-lockfile basenames recognized by
-// filename alone, without parsing their contents. It is intentionally not
-// exhaustive; add ecosystems when a real need arises.
-var KnownLockfileNames = []string{
-	"package-lock.json",
-	"yarn.lock",
-	"pnpm-lock.yaml",
-	"pubspec.lock",
-	"go.sum",
-	"Gemfile.lock",
-	"poetry.lock",
-	"Cargo.lock",
-	"composer.lock",
-}
+// KnownLockfileNames lists the dependency-lockfile basenames recognized by
+// filename alone, without parsing their contents: every language profile's
+// lockfiles (languageprofile.Lockfiles). A new ecosystem's lockfile goes in
+// its profile.
+var KnownLockfileNames = languageprofile.Lockfiles()
 
 // DependencyLockfilesTouched returns changed paths whose exact basename is a
-// known dependency lockfile. This is filename-based evidence only: it does not
-// inspect the diff, claim what changed inside, or affect a run's outcome.
+// known dependency lockfile. It reads names only: it does not inspect the diff
+// or claim what changed inside. The release policy's dependency-lockfile rule
+// refuses a release on it (release_allow_dependency_lockfile_changes), and
+// pinned-commit refusals and the change-size count read it too.
 func DependencyLockfilesTouched(changedFiles []string) []string {
 	known := make(map[string]bool, len(KnownLockfileNames))
 	for _, name := range KnownLockfileNames {
