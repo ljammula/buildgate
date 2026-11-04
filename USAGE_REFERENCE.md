@@ -1071,8 +1071,13 @@ A single-ticket `factoryd run` ignores `pr_order`.
 test files a run changed: a changed file that matches one of these globs (full
 path or basename) or sits under a test directory (an entry ending in `/`, like
 `__tests__/`, matches any file under a directory of that name). Unset falls
-back to `policy.DefaultTestPatterns` (Go/Python/JS/TS/Ruby/Java/C#/Rust, plus
-`__tests__/`). The factory then runs those files, in the gate sandbox, on a
+back to every language profile's test patterns (`languageprofile.DefaultTestPatterns`:
+Go, Python, JS/TS, Rust, Ruby, PHP, Java, C#, Dart, plus `__tests__/`;
+`factoryd content -show language-profile:<id>` lists each), whatever the
+repository's language. A production file whose name matches one (`SpeedTest.cs`)
+counts as a test; set `test_patterns` to narrow them. In an ecosystem with no
+reproduction runner (PHP, C#, Dart) a changed test file gives the gate no
+verdict and it passes with a note. The factory then runs those files, in the gate sandbox, on a
 scratch checkout of the base commit and one of the result commit, each with the
 result commit's copy of the file mounted read-only over its path (the toolchain
 runner picks the command, SC-022). Only the change's
