@@ -66,10 +66,10 @@ const (
 // depth. A repository adds a file its install
 // reads (a postinstall script) with the block's `inputs:`.
 var installKeyExtraNames = []string{
-	"yarn.lock", "pnpm-lock.yaml", "requirements*.txt",
-	".npmrc", ".yarnrc.yml", "pnpm-workspace.yaml", ".nvmrc", ".node-version",
+	"requirements*.txt",
+	".npmrc", ".yarnrc.yml", "pnpm-workspace.yaml",
 	"go.work", "go.work.sum",
-	"Pipfile", "Pipfile.lock", "setup.py", "setup.cfg", "pyproject.toml", ".python-version",
+	"Pipfile", "Pipfile.lock", "setup.py", "setup.cfg",
 	"settings.gradle", "settings.gradle.kts", "gradle/wrapper/gradle-wrapper.properties",
 	".tool-versions",
 	".yarnrc", ".pnpmfile.cjs", "bun.lock", "bun.lockb", ".yarn/releases/*",

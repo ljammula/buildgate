@@ -20,13 +20,19 @@ import (
 // Commands are suggestions for a human-authored .factory.yml, never run by
 // the profile resolver.
 type Profile struct {
-	ID                      string
-	Name                    string
-	Markers                 []string
-	RequiredBinaries        []string
-	VersionSources          []string
-	ToolchainProvisioning   string
-	DependencyManifests     []string
+	ID                    string
+	Name                  string
+	Markers               []string
+	RequiredBinaries      []string
+	VersionSources        []string
+	ToolchainProvisioning string
+	DependencyManifests   []string
+	// Lockfiles are the DependencyManifests a package manager writes to pin
+	// resolved versions. Together (Lockfiles) they are what the factory
+	// recognises as a dependency lockfile by name: the release policy's
+	// dependency-lockfile rule, pinned-commit refusals, the change-size count
+	// and the plan review notes read them (evidence.KnownLockfileNames).
+	Lockfiles               []string
 	ProjectImageManifests   []string
 	RegistryProxyEcosystems []string
 	VerifyCommand           string
@@ -67,16 +73,16 @@ type Match struct {
 }
 
 var profiles = []Profile{
-	{ID: "go", Name: "Go", Markers: []string{"go.mod"}, RequiredBinaries: []string{"go"}, VersionSources: []string{"go.mod"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"go.mod", "go.sum"}, ProjectImageManifests: []string{"go.mod", "go.sum"}, RegistryProxyEcosystems: []string{"Go modules"}, VerifyCommand: "go build ./... && go test -run '^$' ./...", FullSuiteCommand: "go test ./...", TestCommand: "go test ./...", TestPatterns: []string{"*_test.go"}, BaselineFailureFormat: BaselineGoTest},
-	{ID: "python", Name: "Python", Markers: []string{"pyproject.toml", "requirements.txt", "setup.py"}, RequiredBinaries: []string{"python3"}, VersionSources: []string{".python-version", "pyproject.toml"}, ToolchainProvisioning: ToolchainAutomatic, InstallCommand: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt", CachePaths: []string{".venv"}, InstallRequires: "requirements.txt", DependencyManifests: []string{"pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock"}, ProjectImageManifests: []string{"requirements.txt"}, RegistryProxyEcosystems: []string{"PyPI"}, TestPatterns: []string{"test_*.py", "*_test.py"}, BaselineFailureFormat: BaselinePytest},
-	{ID: "node", Name: "Node.js", Markers: []string{"package.json"}, RequiredBinaries: []string{"node", "npm"}, VersionSources: []string{".nvmrc", ".node-version", "package.json"}, ToolchainProvisioning: ToolchainConfiguredImage, InstallCommand: "npm ci", CachePaths: []string{"node_modules"}, InstallRequires: "package-lock.json", DependencyManifests: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json"}, ProjectImageManifests: []string{"package.json", "package-lock.json"}, RegistryProxyEcosystems: []string{"npm"}, TestPatterns: []string{"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx", "__tests__/"}, TestDirectories: []string{"__tests__", "test", "tests", "spec"}, BaselineFailureFormat: BaselineUnparsed},
-	{ID: "rust", Name: "Rust", Markers: []string{"Cargo.toml"}, RequiredBinaries: []string{"cargo", "rustc"}, VersionSources: []string{"rust-toolchain", "rust-toolchain.toml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"Cargo.toml", "Cargo.lock"}, VerifyCommand: "cargo test --workspace", FullSuiteCommand: "cargo test --workspace", TestCommand: "cargo test --workspace", LintCommand: "cargo clippy --workspace --all-targets -- -D warnings", TestPatterns: []string{"*_test.rs"}, BaselineFailureFormat: BaselineUnparsed},
-	{ID: "ruby", Name: "Ruby", Markers: []string{"Gemfile"}, RequiredBinaries: []string{"ruby", "bundle"}, VersionSources: []string{".ruby-version", "Gemfile"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"Gemfile", "Gemfile.lock"}, ProjectImageManifests: []string{"Gemfile", "Gemfile.lock"}, RegistryProxyEcosystems: []string{"RubyGems"}, TestPatterns: []string{"*_spec.rb", "*_test.rb"}, TestDirectories: []string{"test", "spec"}, BaselineFailureFormat: BaselineUnparsed},
-	{ID: "php-composer", Name: "PHP / Composer", Markers: []string{"composer.json"}, RequiredBinaries: []string{"php", "composer"}, VersionSources: []string{".php-version", "composer.json"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"composer.json", "composer.lock"}, TestPatterns: []string{"test_*.php", "*Test.php"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "go", Name: "Go", Markers: []string{"go.mod"}, RequiredBinaries: []string{"go"}, VersionSources: []string{"go.mod"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"go.mod", "go.sum"}, Lockfiles: []string{"go.sum"}, ProjectImageManifests: []string{"go.mod", "go.sum"}, RegistryProxyEcosystems: []string{"Go modules"}, VerifyCommand: "go build ./... && go test -run '^$' ./...", FullSuiteCommand: "go test ./...", TestCommand: "go test ./...", TestPatterns: []string{"*_test.go"}, BaselineFailureFormat: BaselineGoTest},
+	{ID: "python", Name: "Python", Markers: []string{"pyproject.toml", "requirements.txt", "setup.py"}, RequiredBinaries: []string{"python3"}, VersionSources: []string{".python-version", "pyproject.toml"}, ToolchainProvisioning: ToolchainAutomatic, InstallCommand: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt", CachePaths: []string{".venv"}, InstallRequires: "requirements.txt", DependencyManifests: []string{"pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock"}, Lockfiles: []string{"poetry.lock", "uv.lock"}, ProjectImageManifests: []string{"requirements.txt"}, RegistryProxyEcosystems: []string{"PyPI"}, TestPatterns: []string{"test_*.py", "*_test.py"}, BaselineFailureFormat: BaselinePytest},
+	{ID: "node", Name: "Node.js", Markers: []string{"package.json"}, RequiredBinaries: []string{"node", "npm"}, VersionSources: []string{".nvmrc", ".node-version", "package.json"}, ToolchainProvisioning: ToolchainConfiguredImage, InstallCommand: "npm ci", CachePaths: []string{"node_modules"}, InstallRequires: "package-lock.json", DependencyManifests: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"}, Lockfiles: []string{"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"}, ProjectImageManifests: []string{"package.json", "package-lock.json"}, RegistryProxyEcosystems: []string{"npm"}, TestPatterns: []string{"*.test.js", "*.test.ts", "*.test.tsx", "*.spec.js", "*.spec.ts", "*.spec.tsx", "__tests__/"}, TestDirectories: []string{"__tests__", "test", "tests", "spec"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "rust", Name: "Rust", Markers: []string{"Cargo.toml"}, RequiredBinaries: []string{"cargo", "rustc"}, VersionSources: []string{"rust-toolchain", "rust-toolchain.toml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"Cargo.toml", "Cargo.lock"}, Lockfiles: []string{"Cargo.lock"}, VerifyCommand: "cargo test --workspace", FullSuiteCommand: "cargo test --workspace", TestCommand: "cargo test --workspace", LintCommand: "cargo clippy --workspace --all-targets -- -D warnings", TestPatterns: []string{"*_test.rs"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "ruby", Name: "Ruby", Markers: []string{"Gemfile"}, RequiredBinaries: []string{"ruby", "bundle"}, VersionSources: []string{".ruby-version", "Gemfile"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"Gemfile", "Gemfile.lock"}, Lockfiles: []string{"Gemfile.lock"}, ProjectImageManifests: []string{"Gemfile", "Gemfile.lock"}, RegistryProxyEcosystems: []string{"RubyGems"}, TestPatterns: []string{"*_spec.rb", "*_test.rb"}, TestDirectories: []string{"test", "spec"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "php-composer", Name: "PHP / Composer", Markers: []string{"composer.json"}, RequiredBinaries: []string{"php", "composer"}, VersionSources: []string{".php-version", "composer.json"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"composer.json", "composer.lock"}, Lockfiles: []string{"composer.lock"}, TestPatterns: []string{"test_*.php", "*Test.php"}, BaselineFailureFormat: BaselineUnparsed},
 	{ID: "java-maven", Name: "Java / Maven", Markers: []string{"pom.xml"}, RequiredBinaries: []string{"java", "mvn"}, VersionSources: []string{".java-version", ".sdkmanrc", "pom.xml"}, ToolchainProvisioning: ToolchainAutomatic, DependencyManifests: []string{"pom.xml"}, ProjectImageManifests: []string{"pom.xml"}, RegistryProxyEcosystems: []string{"Maven Central"}, VerifyCommand: "mvn test", FullSuiteCommand: "mvn test", TestCommand: "mvn test", TestPatterns: []string{"*Test.java"}, BaselineFailureFormat: BaselineUnparsed},
-	{ID: "java-gradle", Name: "Java / Gradle", Markers: []string{"build.gradle", "build.gradle.kts"}, RequiredBinaries: []string{"java", "gradle"}, VersionSources: []string{"gradle/wrapper/gradle-wrapper.properties", "build.gradle", "build.gradle.kts", ".java-version"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"build.gradle", "build.gradle.kts", "gradle.lockfile"}, TestPatterns: []string{"*Test.java"}, BaselineFailureFormat: BaselineUnparsed},
-	{ID: "dotnet", Name: ".NET", Markers: []string{"*.sln", "*.csproj", "*.fsproj"}, RequiredBinaries: []string{"dotnet"}, VersionSources: []string{"global.json", "*.csproj", "*.fsproj"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"*.csproj", "*.fsproj", "packages.lock.json"}, TestPatterns: []string{"*Test.cs", "*Tests.cs"}, BaselineFailureFormat: BaselineUnparsed},
-	{ID: "dart", Name: "Dart", Markers: []string{"pubspec.yaml"}, RequiredBinaries: []string{"dart"}, VersionSources: []string{".tool-versions", "pubspec.yaml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"pubspec.yaml", "pubspec.lock"}, TestPatterns: []string{"*_test.dart"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "java-gradle", Name: "Java / Gradle", Markers: []string{"build.gradle", "build.gradle.kts"}, RequiredBinaries: []string{"java", "gradle"}, VersionSources: []string{"gradle/wrapper/gradle-wrapper.properties", "build.gradle", "build.gradle.kts", ".java-version"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"build.gradle", "build.gradle.kts", "gradle.lockfile"}, Lockfiles: []string{"gradle.lockfile"}, TestPatterns: []string{"*Test.java"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "dotnet", Name: ".NET", Markers: []string{"*.sln", "*.csproj", "*.fsproj"}, RequiredBinaries: []string{"dotnet"}, VersionSources: []string{"global.json", "*.csproj", "*.fsproj"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"*.csproj", "*.fsproj", "packages.lock.json"}, Lockfiles: []string{"packages.lock.json"}, TestPatterns: []string{"*Test.cs", "*Tests.cs"}, BaselineFailureFormat: BaselineUnparsed},
+	{ID: "dart", Name: "Dart", Markers: []string{"pubspec.yaml"}, RequiredBinaries: []string{"dart"}, VersionSources: []string{".tool-versions", "pubspec.yaml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"pubspec.yaml", "pubspec.lock"}, Lockfiles: []string{"pubspec.lock"}, TestPatterns: []string{"*_test.dart"}, BaselineFailureFormat: BaselineUnparsed},
 }
 
 // DefaultTestPatterns is every profile's TestPatterns, each once, in profile
@@ -94,6 +100,23 @@ func DefaultTestPatterns() []string {
 			if !seen[pattern] {
 				seen[pattern] = true
 				out = append(out, pattern)
+			}
+		}
+	}
+	return out
+}
+
+// Lockfiles is every profile's Lockfiles, each once, in profile order: the
+// dependency-lockfile basenames the factory recognises by name alone
+// (evidence.KnownLockfileNames).
+func Lockfiles() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, profile := range profiles {
+		for _, name := range profile.Lockfiles {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
 			}
 		}
 	}
@@ -139,6 +162,7 @@ func Catalog() []Profile {
 		profile.RequiredBinaries = append([]string(nil), profile.RequiredBinaries...)
 		profile.VersionSources = append([]string(nil), profile.VersionSources...)
 		profile.DependencyManifests = append([]string(nil), profile.DependencyManifests...)
+		profile.Lockfiles = append([]string(nil), profile.Lockfiles...)
 		profile.ProjectImageManifests = append([]string(nil), profile.ProjectImageManifests...)
 		profile.RegistryProxyEcosystems = append([]string(nil), profile.RegistryProxyEcosystems...)
 		profile.CachePaths = append([]string(nil), profile.CachePaths...)

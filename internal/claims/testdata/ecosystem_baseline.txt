@@ -17,13 +17,6 @@ cmd/factoryd/onboard.go package.json
 cmd/factoryd/upgrade_cmd.go go.mod
 internal/evidence/dependency_extra.go Cargo.lock
 internal/evidence/dependency_extra.go poetry.lock
-internal/evidence/evidence.go Cargo.lock
-internal/evidence/evidence.go Gemfile.lock
-internal/evidence/evidence.go composer.lock
-internal/evidence/evidence.go go.sum
-internal/evidence/evidence.go package-lock.json
-internal/evidence/evidence.go poetry.lock
-internal/evidence/evidence.go pubspec.lock
 internal/imageinputs/imageinputs.go go.mod
 internal/imageinputs/imageinputs.go go.sum
 internal/reproduction/runner.go Gemfile
@@ -48,8 +41,10 @@ internal/runner/runner.go Gemfile.lock
 internal/runner/runner.go composer.lock
 internal/runner/runner.go go.sum
 internal/runner/runner.go package-lock.json
+internal/runner/runner.go pnpm-lock.yaml
 internal/runner/runner.go poetry.lock
 internal/runner/runner.go pubspec.lock
+internal/runner/runner.go yarn.lock
 internal/ticketspec/ticketspec.go go.mod
 internal/ticketspec/ticketspec.go package.json
 internal/ticketspec/ticketspec.go pyproject.toml
@@ -64,10 +59,6 @@ internal/toolchain/toolchain.go .nvmrc
 internal/toolchain/toolchain.go .python-version
 internal/toolchain/toolchain.go go.mod
 internal/toolchain/toolchain.go pyproject.toml
-internal/workflow/activities_install.go .node-version
-internal/workflow/activities_install.go .nvmrc
-internal/workflow/activities_install.go .python-version
 internal/workflow/activities_install.go .tool-versions
 internal/workflow/activities_install.go gradle/wrapper/gradle-wrapper.properties
-internal/workflow/activities_install.go pyproject.toml
 internal/workflow/activities_install.go setup.py

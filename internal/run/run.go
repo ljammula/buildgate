@@ -1609,8 +1609,9 @@ type Run struct {
 	// touched no AGENTS.md and has no proposal (nothing was read), and in a
 	// record written before the field existed.
 	MemoryEdit *MemoryEdit `json:"memory_edit,omitempty"`
-	// DependencyLockfilesTouched is filename-based evidence only and never
-	// affects run state or a gate. Like ChangedFiles, it deliberately has no
+	// DependencyLockfilesTouched is filename-based evidence (names only),
+	// which the release policy's dependency-lockfile rule reads to refuse a
+	// release. Like ChangedFiles, it deliberately has no
 	// `omitempty`: a genuinely computed empty result must serialize as `[]`,
 	// distinguishable from `null`, which means ChangedFiles was never collected
 	// and this evidence was therefore never computed.

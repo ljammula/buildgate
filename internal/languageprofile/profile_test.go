@@ -3,6 +3,7 @@ package languageprofile
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -103,5 +104,18 @@ func TestCatalogDescribesAgentSetupContract(t *testing.T) {
 	}
 	if byID["go"].BaselineFailureFormat != BaselineGoTest || byID["python"].BaselineFailureFormat != BaselinePytest || byID["java-maven"].BaselineFailureFormat != BaselineUnparsed {
 		t.Error("catalog does not match implemented baseline failure parsers")
+	}
+}
+
+// TestEveryLockfileIsADependencyManifest keeps each profile's Lockfiles among
+// its DependencyManifests, which Facts and the install key read: a lockfile
+// listed only as a lockfile would escape both.
+func TestEveryLockfileIsADependencyManifest(t *testing.T) {
+	for _, p := range Catalog() {
+		for _, lock := range p.Lockfiles {
+			if !slices.Contains(p.DependencyManifests, lock) {
+				t.Errorf("profile %s lists lockfile %q that is not one of its DependencyManifests %v", p.ID, lock, p.DependencyManifests)
+			}
+		}
 	}
 }
