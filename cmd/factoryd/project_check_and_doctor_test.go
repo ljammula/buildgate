@@ -1099,8 +1099,8 @@ func TestDetectVerifyCommand(t *testing.T) {
 		dir := t.TempDir()
 		write(t, dir, "go.mod", "module example.com/x\n\ngo 1.22\n")
 		command, source := detectVerifyCommand(dir)
-		if command != "go test ./..." || source != "go.mod" {
-			t.Errorf("command, source = %q, %q, want %q, %q", command, source, "go test ./...", "go.mod")
+		if command != "go test ./..." || source != "profile go" {
+			t.Errorf("command, source = %q, %q, want %q, %q", command, source, "go test ./...", "profile go")
 		}
 	})
 
@@ -1142,7 +1142,7 @@ func TestDetectVerifyCommand(t *testing.T) {
 	t.Run("ambiguous compiled profiles do not choose a command", func(t *testing.T) {
 		dir := t.TempDir()
 		write(t, dir, "Cargo.toml", "")
-		write(t, dir, "Gemfile", "")
+		write(t, dir, "pom.xml", "")
 		command, source := detectVerifyCommand(dir)
 		if command != "" || source != "" {
 			t.Errorf("command, source = %q, %q, want empty for ambiguous profiles", command, source)

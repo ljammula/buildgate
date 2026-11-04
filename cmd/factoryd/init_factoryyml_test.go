@@ -13,7 +13,7 @@ func TestDetectInitVerifyCommandGoMod(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := detectInitVerifyCommand(root), "go build ./... && go test ./..."; got != want {
+	if got, want := detectInitVerifyCommand(root), "go test ./..."; got != want {
 		t.Errorf("detectInitVerifyCommand = %q, want %q", got, want)
 	}
 }
@@ -72,25 +72,29 @@ func TestDetectInitVerifyCommandPackageJSONWithoutTestScript(t *testing.T) {
 	}
 }
 
-func TestDetectInitVerifyCommandPyprojectTOML(t *testing.T) {
+func TestDetectInitVerifyCommandSuggestsNoRunnerForPyprojectTOML(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "pyproject.toml"), []byte("[project]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := detectInitVerifyCommand(root), "pytest"; got != want {
-		t.Errorf("detectInitVerifyCommand = %q, want %q", got, want)
+	// A Python manifest names no test runner (pytest, unittest, tox, nox),
+	// so no command is suggested, as onboard and quickstart do.
+	if got := detectInitVerifyCommand(root); got != "" {
+		t.Errorf("detectInitVerifyCommand = %q, want none", got)
 	}
 }
 
-func TestDetectInitVerifyCommandRequirementsTxt(t *testing.T) {
+func TestDetectInitVerifyCommandSuggestsNoRunnerForRequirementsTxt(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "requirements.txt"), []byte("pytest\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := detectInitVerifyCommand(root), "pytest"; got != want {
-		t.Errorf("detectInitVerifyCommand = %q, want %q", got, want)
+	// A Python manifest names no test runner (pytest, unittest, tox, nox),
+	// so no command is suggested, as onboard and quickstart do.
+	if got := detectInitVerifyCommand(root); got != "" {
+		t.Errorf("detectInitVerifyCommand = %q, want none", got)
 	}
 }
 
@@ -116,7 +120,7 @@ func TestDetectInitVerifyCommandSuggestsBuiltInLanguageProfile(t *testing.T) {
 func TestDetectInitVerifyCommandDoesNotGuessForAmbiguousProfiles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	for _, name := range []string{"Cargo.toml", "Gemfile"} {
+	for _, name := range []string{"Cargo.toml", "pom.xml"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(""), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +156,7 @@ func TestInitWithWriteFactoryYMLWritesFile(t *testing.T) {
 		t.Fatalf("read .factory.yml: %v", err)
 	}
 	content := string(b)
-	if !strings.Contains(content, `verify_command: "go build ./... && go test ./..."`) {
+	if !strings.Contains(content, `verify_command: "go test ./..."`) {
 		t.Errorf(".factory.yml missing detected verify_command:\n%s", content)
 	}
 	if !strings.Contains(content, "preflight_profile: brownfield") {

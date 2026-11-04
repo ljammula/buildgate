@@ -1,15 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
+	"buildgate/internal/languageprofile"
 	"buildgate/internal/projectconfig"
 	wsisolation "buildgate/internal/workspace"
 )
@@ -33,8 +32,9 @@ import (
 //
 // Either way, the one real difference from init: ARCHITECTURE.md's own
 // Verification section is pre-filled with a real, detected verify
-// command (a Makefile verify/test target, a package.json test script, or
-// go.mod -- see detectVerifyCommand, run against the repo root) instead
+// command (a Makefile verify/test target, or the one matching language
+// profile's test command -- see detectVerifyCommand, run against the repo
+// root) instead
 // of generic placeholder prose, closing the specific "drafts the docs
 // from the repo" gap: an operator onboarding a real,
 // already-populated repo gets one real, load-bearing fact filled in for
@@ -385,42 +385,11 @@ func onboardGuardFileStatus(root string, includeFactoryYml bool) ([]string, erro
 	return existing, nil
 }
 
-// detectVerifyCommand inspects an existing repo's own real build tooling
-// for its canonical check command, so onboardMain can pre-fill a real
-// fact instead of placeholder prose. repoRoot is the actual repo -- for
-// onboardMain that is -workspace's own parent, not -workspace itself,
-// which is an empty placeholder subdirectory (see onboardMain's own doc
-// comment). Checked in this order because a Makefile's own declared
-// target is the most specific, deliberate signal a repo can give (it
-// might wrap far more than a bare `go test`); go.mod is checked before
-// package.json only because a Makefile-less Go repo is this codebase's
-// own most common brownfield shape on record (the Flutter + Go app live-validation
-// run) -- neither ordering choice
-// is normative, both are just as valid a repo's own real canonical
-// command.
+// detectVerifyCommand is the verify command onboarding, quickstart and
+// `doctor -fix` suggest for repoRoot, and its source:
+// languageprofile.DetectVerifyCommand.
 func detectVerifyCommand(repoRoot string) (command, source string) {
-	if b, err := os.ReadFile(filepath.Join(repoRoot, "Makefile")); err == nil {
-		content := string(b)
-		for _, target := range []string{"verify", "test"} {
-			if regexp.MustCompile(`(?m)^` + target + `:`).MatchString(content) {
-				return "make " + target, "Makefile"
-			}
-		}
-	}
-	if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
-		return "go test ./...", "go.mod"
-	}
-	if b, err := os.ReadFile(filepath.Join(repoRoot, "package.json")); err == nil {
-		var pkg struct {
-			Scripts map[string]string `json:"scripts"`
-		}
-		if json.Unmarshal(b, &pkg) == nil {
-			if _, ok := pkg.Scripts["test"]; ok {
-				return "npm test", "package.json"
-			}
-		}
-	}
-	return suggestedProfileVerifyCommand(repoRoot)
+	return languageprofile.DetectVerifyCommand(repoRoot)
 }
 
 // scaffoldArchitectureForOnboarding is scaffoldArchitecture with one
