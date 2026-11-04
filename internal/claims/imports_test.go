@@ -145,6 +145,28 @@ func findForbiddenImportChain(g importGraph, pkg string, forbidden map[string]bo
 	return dfs(pkg, []string{pkg})
 }
 
+// policyBuildgateImports are the buildgate packages policy may import
+// directly: run, and languageprofile, a leaf read for its data only.
+var policyBuildgateImports = map[string]bool{
+	"buildgate/internal/run":             true,
+	"buildgate/internal/languageprofile": true,
+}
+
+// TestLanguageProfileIsALeaf keeps the one home of ecosystem facts a leaf:
+// every package that needs a fact, policy included, may import it without
+// pulling anything else in.
+func TestLanguageProfileIsALeaf(t *testing.T) {
+	t.Parallel()
+	g := buildModuleImportGraph(t, findRepoRoot(t))
+	const pkg = "buildgate/internal/languageprofile"
+	requirePackage(t, g, pkg)
+	for imp := range g[pkg] {
+		if strings.HasPrefix(imp, modulePath) {
+			t.Errorf("languageprofile imports no buildgate package: it imports %s", imp)
+		}
+	}
+}
+
 // TestPackageBoundaryRules asserts the module's package-boundary rules
 // directly against the repo's real import graph. Each rule is one table
 // row with its own reason string, so a failing rule's message names both
@@ -175,10 +197,12 @@ func TestPackageBoundaryRules(t *testing.T) {
 		requirePackage(t, g, pkg)
 	}
 
-	t.Run("policy directly imports only its stdlib allow-list and run", func(t *testing.T) {
+	t.Run("policy directly imports only its stdlib allow-list, run and languageprofile", func(t *testing.T) {
 		// buildgate/internal/policy may directly import only stdlib
 		// packages from this allow-list (measured: exactly fmt, path,
-		// regexp, strings today) plus buildgate/internal/run — never a
+		// regexp, strings today) plus buildgate/internal/run and
+		// buildgate/internal/languageprofile (a leaf, below, read here only
+		// for its data: the default test patterns) — never a
 		// package that touches the OS, the filesystem beyond stdlib
 		// string handling, or the network (os, os/exec, net, net/http,
 		// syscall, io/fs) directly. This is a direct-import rule only:
@@ -187,15 +211,15 @@ func TestPackageBoundaryRules(t *testing.T) {
 		allowedStdlib := map[string]bool{"fmt": true, "path": true, "regexp": true, "strings": true}
 		const pkg = "buildgate/internal/policy"
 		for imp := range g[pkg] {
-			if imp == "buildgate/internal/run" {
+			if policyBuildgateImports[imp] {
 				continue
 			}
 			if strings.HasPrefix(imp, modulePath) {
-				t.Errorf("policy directly imports only its stdlib allow-list and run: %s imports %s, only buildgate/internal/run is allowed among buildgate/... packages", pkg, imp)
+				t.Errorf("policy directly imports only its stdlib allow-list, run and languageprofile: %s imports %s, only buildgate/internal/run and buildgate/internal/languageprofile are allowed among buildgate/... packages", pkg, imp)
 				continue
 			}
 			if !allowedStdlib[imp] {
-				t.Errorf("policy directly imports only its stdlib allow-list and run: %s imports %q, which is outside its stdlib allow-list %v", pkg, imp, sortedKeys(allowedStdlib))
+				t.Errorf("policy directly imports only its stdlib allow-list, run and languageprofile: %s imports %q, which is outside its stdlib allow-list %v", pkg, imp, sortedKeys(allowedStdlib))
 			}
 		}
 	})

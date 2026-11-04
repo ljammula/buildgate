@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"buildgate/internal/languageprofile"
 	"buildgate/internal/run"
 )
 
@@ -175,25 +176,12 @@ func stringSet(list []string) map[string]bool {
 }
 
 // DefaultTestPatterns is used when the project's .factory.yml doesn't
-// declare test_patterns. Multi-language on purpose: buildgate
-// itself only ever produces Go changes, but a ticket's own workspace
-// (hermes-config, in particular) can be any language its own tooling
-// targets -- a Python repo's tests/test_foo.py change failed this gate
-// outright when the default covered only *_test.go (found live). Covers
-// the common per-ecosystem test-file naming conventions: Go, Python
-// (both prefix and suffix forms), JavaScript/TypeScript (plain and React
-// .test./.spec. forms), Ruby, Java, C#, and Rust.
-var DefaultTestPatterns = []string{
-	"*_test.go",
-	"test_*.py", "*_test.py",
-	"*.test.js", "*.test.ts", "*.test.tsx",
-	"*.spec.js", "*.spec.ts",
-	"*_spec.rb", "*_test.rb",
-	"*Test.java",
-	"*Tests.cs",
-	"*_test.rs",
-	"__tests__/",
-}
+// declare test_patterns: every language profile's test-file patterns
+// (languageprofile.DefaultTestPatterns), so a repository in any ecosystem the
+// factory knows has its tests recognised without configuring them. A Python
+// repo's tests/test_foo.py change failed the gate outright when the default
+// covered only *_test.go (found live).
+var DefaultTestPatterns = languageprofile.DefaultTestPatterns()
 
 // IsTestFile reports whether the repo-relative file counts as a test file
 // under patterns: the single matcher behind the tests_red_on_base gate and the

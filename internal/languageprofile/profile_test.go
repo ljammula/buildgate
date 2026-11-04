@@ -94,8 +94,12 @@ func TestCatalogDescribesAgentSetupContract(t *testing.T) {
 	if len(byID["python"].VerifyCommand) != 0 || len(byID["python"].FullSuiteCommand) != 0 {
 		t.Errorf("Python command candidates = %q / %q, want no runner assumed from manifest markers", byID["python"].VerifyCommand, byID["python"].FullSuiteCommand)
 	}
-	if len(byID["rust"].TestPatterns) != 0 {
-		t.Errorf("Rust TestPatterns = %v, want no potentially incomplete pattern suggestion", byID["rust"].TestPatterns)
+	// Rust's one pattern is what the global default has always treated as a
+	// Rust test file. It is incomplete (inline #[test] functions and files
+	// under tests/ are not covered), as the design doc says; nothing broader
+	// is safe as a default for every repository.
+	if got := byID["rust"].TestPatterns; len(got) != 1 || got[0] != "*_test.rs" {
+		t.Errorf("Rust TestPatterns = %v, want exactly [*_test.rs]", got)
 	}
 	if byID["go"].BaselineFailureFormat != BaselineGoTest || byID["python"].BaselineFailureFormat != BaselinePytest || byID["java-maven"].BaselineFailureFormat != BaselineUnparsed {
 		t.Error("catalog does not match implemented baseline failure parsers")
