@@ -184,7 +184,7 @@ func (pytestJUnit) Classify(p string, report []byte, exit int, ids []string) (ma
 	}
 	kinds := map[string]Kind{}
 	for _, c := range cases {
-		merge(kinds, pyCaseID(c), pyCaseKind(c))
+		merge(kinds, pyCaseID(c), junitCaseKind(c, pyProblemKind))
 	}
 	return fromKinds(kinds, ids)
 }
@@ -217,18 +217,6 @@ func pyCaseID(c junitCase) string {
 		}
 	}
 	return name
-}
-
-func pyCaseKind(c junitCase) Kind {
-	switch {
-	case c.Failure != nil:
-		return pyProblemKind(c.Failure, KindFail)
-	case c.Error != nil:
-		return pyProblemKind(c.Error, KindError)
-	case c.Skipped != nil:
-		return KindSkipped
-	}
-	return KindPass
 }
 
 // pyProblemKind: the plugin's timeout; for a failure, an assertion is a fail
