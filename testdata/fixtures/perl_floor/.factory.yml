@@ -1,0 +1,8 @@
+# A project in a language buildgate has no profile, runner or toolchain for:
+# the verify command's exit status is the verdict, and test_patterns tells
+# the tests_red_on_base gate which files are tests.
+verify_command: for f in t/*.t; do perl -Ilib "$f" || exit 1; done
+test_patterns:
+  - "*.t"
+required_binaries:
+  - perl

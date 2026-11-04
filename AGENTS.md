@@ -350,7 +350,7 @@ has the settings.
 Track the goal here as **a live one-shot acceptance rate**, not
 "spotless": what fraction of real tickets submitted through `factoryd`
 reach an accepted, human-reviewable PR with zero manual intervention.
-Record dated runs of the broader (not just the fast standing pair)
+Record dated runs of the broader (not just the fast standing set)
 validation set as dated write-ups kept outside this repo — a rising number over
 successive runs is the signal this repository's pipeline is improving.
 
