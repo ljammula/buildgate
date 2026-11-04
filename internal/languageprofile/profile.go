@@ -89,6 +89,27 @@ var profiles = []Profile{
 	{ID: "dart", Name: "Dart", Markers: []string{"pubspec.yaml"}, RequiredBinaries: []string{"dart"}, VersionSources: []string{".tool-versions", "pubspec.yaml"}, ToolchainProvisioning: ToolchainImageOnly, DependencyManifests: []string{"pubspec.yaml", "pubspec.lock"}, Lockfiles: []string{"pubspec.lock"}, TestPatterns: []string{"*_test.dart"}, BaselineFailureFormat: BaselineUnparsed},
 }
 
+// ByID returns a copy of the profile whose ID is id.
+func ByID(id string) (Profile, bool) {
+	for _, p := range profiles {
+		if p.ID == id {
+			return p.clone(), true
+		}
+	}
+	return Profile{}, false
+}
+
+// MustByID is ByID for a compiled-in caller that names a profile this
+// package defines: an unknown id is a programming error, caught by that
+// caller's tests.
+func MustByID(id string) Profile {
+	p, ok := ByID(id)
+	if !ok {
+		panic("languageprofile: no profile " + id)
+	}
+	return p
+}
+
 // DefaultTestPatterns is every profile's TestPatterns, each once, in profile
 // order: the test_patterns a repository gets when its .factory.yml sets none
 // (policy.DefaultTestPatterns), which the tests_red_on_base gate, the
@@ -162,20 +183,20 @@ func Facts() []string {
 func Catalog() []Profile {
 	out := make([]Profile, 0, len(profiles))
 	for _, profile := range profiles {
-		profile.Markers = append([]string(nil), profile.Markers...)
-		profile.RequiredBinaries = append([]string(nil), profile.RequiredBinaries...)
-		profile.VersionSources = append([]string(nil), profile.VersionSources...)
-		profile.DependencyManifests = append([]string(nil), profile.DependencyManifests...)
-		profile.Lockfiles = append([]string(nil), profile.Lockfiles...)
-		profile.ProjectImageManifests = append([]string(nil), profile.ProjectImageManifests...)
-		profile.RegistryProxyEcosystems = append([]string(nil), profile.RegistryProxyEcosystems...)
-		profile.CachePaths = append([]string(nil), profile.CachePaths...)
-		profile.TestPatterns = append([]string(nil), profile.TestPatterns...)
-		profile.TestDirectories = append([]string(nil), profile.TestDirectories...)
-		out = append(out, profile)
+		out = append(out, profile.clone())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// clone is p with every slice copied, so a caller cannot change the
+// compiled-in profile.
+func (p Profile) clone() Profile {
+	for _, s := range []*[]string{&p.Markers, &p.RequiredBinaries, &p.VersionSources, &p.DependencyManifests, &p.Lockfiles,
+		&p.ProjectImageManifests, &p.RegistryProxyEcosystems, &p.CachePaths, &p.TestPatterns, &p.TestDirectories} {
+		*s = append([]string(nil), (*s)...)
+	}
+	return p
 }
 
 // Detect returns every compiled profile whose root marker is present. It

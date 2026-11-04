@@ -1,6 +1,7 @@
 package reproduction
 
 import (
+	"buildgate/internal/languageprofile"
 	"embed"
 	"encoding/json"
 	"path"
@@ -135,20 +136,53 @@ type Markers map[string][]byte
 // the commit holds. A directory with none may be absent or empty.
 type Facts map[string]Markers
 
-// MarkerFiles are the file names Markers may hold for the directory dir
-// (repository-relative, "." the root). A requirements.txt marks a Python
-// project only at the root: below it one is a tool's or a docs build's list
-// (docs/, tests/), and choosing that directory would run its tests away from
-// the project's own root, interpreter and import path.
-func MarkerFiles(dir string) []string {
-	python := []string{"pyproject.toml", "setup.py", "setup.cfg", "pytest.ini", "tox.ini"}
-	if dir == "." {
-		python = append(python, "requirements.txt")
+// runnerProfiles are the language profiles whose root markers the runners
+// read (languageprofile), each runner naming its own.
+var runnerProfiles = []string{"go", "python", "node", "java-maven", "ruby"}
+
+// runnerConfigMarkers are files a runner reads that no profile names: a test
+// runner's own configuration.
+var (
+	pytestConfigMarkers = []string{"setup.cfg", "pytest.ini", "tox.ini"}
+	vitestConfigMarkers = []string{"vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs"}
+)
+
+// rootOnlyMarker is the one profile marker that marks a project only at the
+// repository root: below it a requirements.txt is a tool's or a docs build's
+// list (docs/, tests/), and choosing that directory would run its tests away
+// from the project's own root, interpreter and import path.
+const rootOnlyMarker = "requirements.txt"
+
+// profileMarkers are profile id's root markers that name one file, those that
+// can mark dir (rootOnlyMarker only at the root).
+func profileMarkers(id, dir string) []string {
+	var out []string
+	for _, m := range languageprofile.MustByID(id).Markers {
+		if strings.HasPrefix(m, "*") || (m == rootOnlyMarker && dir != ".") {
+			continue
+		}
+		out = append(out, m)
 	}
-	return append(append([]string{"go.mod"}, python...),
-		"package.json", "vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs",
-		"pom.xml",
-		"Gemfile")
+	return out
+}
+
+// MarkerFiles are the file names Markers may hold for the directory dir
+// (repository-relative, "." the root): every runner's profile markers
+// (profileMarkers) and the runners' own configuration files.
+func MarkerFiles(dir string) []string {
+	var out []string
+	for _, id := range runnerProfiles {
+		out = append(out, profileMarkers(id, dir)...)
+	}
+	out = append(out, pytestConfigMarkers...)
+	return append(out, vitestConfigMarkers...)
+}
+
+// HasProfile reports whether the directory holds a root marker of profile id.
+// A marker the directory may not hold for it (rootOnlyMarker below the root)
+// is never in Markers, since MarkerFiles did not ask for it.
+func (f Markers) HasProfile(id string) bool {
+	return f.Has(profileMarkers(id, ".")...)
 }
 
 // Ancestors are the directories that enclose the repository path p, the
@@ -179,7 +213,7 @@ func (f Markers) Has(names ...string) bool {
 // hasVitest: a vitest config in the directory, or vitest among its
 // package.json's dependencies.
 func (f Markers) hasVitest() bool {
-	if f.Has("vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs") {
+	if f.Has(vitestConfigMarkers...) {
 		return true
 	}
 	var pkg struct {
