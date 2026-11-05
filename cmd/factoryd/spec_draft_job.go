@@ -82,9 +82,7 @@ type draftSpecEvidencePayload struct {
 // buildAppArgs' own "pulled out as a pure function so it's unit-testable
 // independent of any subprocess" shape. requestPath and workspace must be
 // exactly the same values passed as runSandboxWithRetries' own specPath/
-// workspace parameters (or, for an unsandboxed invocation, the same real
-// host paths runner.RunWithRetries runs against) -- see this file's own
-// doc comment on the two execution modes. feedbackPath may be "" (no
+// workspace parameters. feedbackPath may be "" (no
 // spec_review rejection to feed back -- see draftInputFiles' own doc
 // comment), in which case
 // --feedback-file is omitted entirely, matching draft_spec.py's own

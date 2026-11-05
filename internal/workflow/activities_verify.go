@@ -22,8 +22,8 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
-// RunVerifyActivity invokes the canonical verification command through
-// runner.RunWithRetries. Verification can rewrite files, so redispatch also
+// RunVerifyActivity runs the canonical verification command in a sandboxed
+// worker. Verification can rewrite files, so redispatch also
 // returns its completed durable checkpoint instead of running it again.
 func (a *Activities) RunVerifyActivity(ctx context.Context, input RunWorkflowInput) (VerifyActivityResult, error) {
 	return a.runVerifyCommand(ctx, input, verifyRun{kind: "verify", label: "verify", rerun: verifyRerunOfChange})

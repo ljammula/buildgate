@@ -22,13 +22,13 @@ var hostExecutionFuncs = map[string]bool{
 
 // TestNoProductionCodeRunsAJobOnTheHost fails when a non-test Go file outside
 // internal/runner names one of internal/runner's host-execution functions,
-// as a call or as a value. Structural: it reads selector expressions on the
+// as a call or as a value, or dot-imports the package. Structural: it reads selector expressions on the
 // file's own import name for the package.
 func TestNoProductionCodeRunsAJobOnTheHost(t *testing.T) {
 	t.Parallel()
 	root := findRepoRoot(t)
 	for _, rel := range trackedGoFiles(t, root) {
-		if strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, "internal/runner/") {
+		if strings.HasSuffix(rel, "_test.go") || filepath.Dir(rel) == "internal/runner" {
 			continue
 		}
 		for _, use := range hostExecutionUses(t, filepath.Join(root, rel)) {
@@ -60,6 +60,9 @@ func hostExecutionUses(t *testing.T, path string) []hostExecutionUse {
 	}
 	if local == "" || local == "_" {
 		return nil
+	}
+	if local == "." {
+		return []hostExecutionUse{{name: "* (dot import)", line: 1}}
 	}
 	var uses []hostExecutionUse
 	ast.Inspect(file, func(n ast.Node) bool {
