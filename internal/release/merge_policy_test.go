@@ -139,7 +139,7 @@ func TestMergePolicyCheckAllowsOverrideWithOptIn(t *testing.T) {
 
 // TestMergePolicyCheckRejectsUnsandboxedRunByDefault is the regression
 // test for a real Opus review finding, 2026-09-04: before
-// AllowUnsandboxed existed, this exact scenario -- an accepted
+// the check existed, this exact scenario -- an accepted
 // run whose build attempt carries no image digest -- passed
 // MergePolicyCheck cleanly, indistinguishable from a genuinely sandboxed
 // run. Same restrictive-by-default shape as the override/
@@ -174,18 +174,6 @@ func TestMergePolicyDeniesARunWithNoBuildAttempt(t *testing.T) {
 	r.Attempts = append(r.Attempts, run.Attempt{Kind: "build", ImageDigest: "sha256:" + strings.Repeat("b", 64), ReplayOf: "req-1-002"})
 	if passed, reasons := MergePolicyCheck(r, cleanPolicy()); !passed {
 		t.Errorf("replay run with its carried build attempt: denied (%v), want allowed", reasons)
-	}
-}
-
-func TestMergePolicyCheckAllowsUnsandboxedWithOptIn(t *testing.T) {
-	r := cleanRun()
-	r.Attempts = []run.Attempt{{Kind: "build"}}
-	cfg := cleanPolicy()
-	cfg.AllowUnsandboxed = true
-
-	passed, reasons := MergePolicyCheck(r, cfg)
-	if !passed || len(reasons) != 0 {
-		t.Errorf("MergePolicyCheck() = %v, %v, want true with unsandboxed opt-in", passed, reasons)
 	}
 }
 
@@ -391,7 +379,7 @@ func cleanRun() run.Run {
 		},
 		// Sandboxed build attempt, so cleanRun() represents the encouraged
 		// shape (a genuinely contained run) rather than needing every
-		// derived test to separately opt AllowUnsandboxed back in just to
+		// derived test to separately build a digest just to
 		// exercise something unrelated to sandboxing.
 		Attempts: []run.Attempt{
 			{Kind: "build", ImageDigest: "sha256:deadbeef"},

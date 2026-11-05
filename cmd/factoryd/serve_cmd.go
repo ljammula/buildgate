@@ -194,7 +194,6 @@ type serveFlags struct {
 	releaseRollbackPlan                   *string
 	releaseAllowOverrides                 *bool
 	releaseAllowDependencyLockfileChanges *bool
-	releaseAllowUnsandboxed               *bool
 	releaseAllowSkippedProjectCheck       *bool
 	apiAllowedSandboxImages               *string
 	apiDefaultSandboxImage                *string
@@ -278,7 +277,6 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	f.releaseRollbackPlan = flags.String("release-rollback-plan", "", "rollback plan named in the release evidence, such as \"git revert the merge commit on main\"; empty denies every release. Unset uses the session config's release_rollback_plan.")
 	f.releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "let a run with a human override in its history pass the release decision. Unset uses the session config's release_allow_overrides.")
 	f.releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "let a run that changed a dependency lockfile pass the release decision. Unset uses the session config's release_allow_dependency_lockfile_changes.")
-	f.releaseAllowUnsandboxed = flags.Bool("release-allow-unsandboxed", false, "let a run whose build recorded no sandbox image digest pass the release decision. Unset uses the session config's release_allow_unsandboxed.")
 	f.releaseAllowSkippedProjectCheck = flags.Bool("release-allow-skipped-project-check", false, "let a run started with -skip-project-check pass the release decision. Unset uses the session config's release_allow_skipped_project_check.")
 	// apiAllowedSandboxImages narrows the API surface:
 	// an authenticated POST /runs caller is untrusted the same way
@@ -1053,15 +1051,11 @@ func resolveServeReleasePolicy(flags *flag.FlagSet, base sessionconfig.Settings,
 	if !flagsWasVisited(flags, "release-allow-dependency-lockfile-changes") {
 		allowDependencyLockfileChanges = base.ReleaseAllowDependencyLockfileChanges
 	}
-	allowUnsandboxed := *sf.releaseAllowUnsandboxed
-	if !flagsWasVisited(flags, "release-allow-unsandboxed") {
-		allowUnsandboxed = base.ReleaseAllowUnsandboxed
-	}
 	allowSkippedProjectCheck := *sf.releaseAllowSkippedProjectCheck
 	if !flagsWasVisited(flags, "release-allow-skipped-project-check") {
 		allowSkippedProjectCheck = base.ReleaseAllowSkippedProjectCheck
 	}
-	return releasePolicyFromFlags(protectedPaths, maxFilesChanged, maxChangedLines, rollbackPlan, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck)
+	return releasePolicyFromFlags(protectedPaths, maxFilesChanged, maxChangedLines, rollbackPlan, allowOverrides, allowDependencyLockfileChanges, allowSkippedProjectCheck)
 }
 
 // apiStartTier2Settings folds the on-disk session config (the same
@@ -1091,7 +1085,6 @@ func apiStartTier2Settings(base sessionconfig.Settings, releasePolicy release.Me
 	settings.ReleaseRollbackPlan = releasePolicy.RollbackPlan
 	settings.ReleaseAllowOverrides = releasePolicy.AllowOverrides
 	settings.ReleaseAllowDependencyLockfileChanges = releasePolicy.AllowDependencyLockfileChanges
-	settings.ReleaseAllowUnsandboxed = releasePolicy.AllowUnsandboxed
 	settings.ReleaseAllowSkippedProjectCheck = releasePolicy.AllowSkippedProjectCheck
 	settings.SandboxMemory = sandboxLimits.memory
 	settings.SandboxCPUs = sandboxLimits.cpus

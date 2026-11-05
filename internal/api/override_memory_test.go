@@ -13,7 +13,7 @@ import (
 )
 
 func memoryOverridePolicy() release.MergePolicy {
-	return release.MergePolicy{RollbackPlan: "revert the commit", MaxFilesChanged: 10, MaxChangedLines: 1000, AllowUnsandboxed: true, AllowOverrides: true}
+	return release.MergePolicy{RollbackPlan: "revert the commit", MaxFilesChanged: 10, MaxChangedLines: 1000, AllowOverrides: true}
 }
 
 // quarantinedForOverride is a run the policy above releases once overridden.
@@ -22,6 +22,7 @@ func quarantinedForOverride(changed ...string) run.Run {
 		BaseSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), ChangedFiles: changed,
 		DiffStat: &run.DiffStat{FilesChanged: 1, Insertions: 1}, ChangeSize: &run.ChangeSize{SourceFiles: 1, SourceLines: 1},
 		GateResults:                []run.GateResult{{Check: "verify", Passed: true}},
+		Attempts:                   []run.Attempt{{Kind: "build", ImageDigest: "sha256:" + strings.Repeat("c", 64)}},
 		DependencyLockfilesTouched: []string{}}
 }
 

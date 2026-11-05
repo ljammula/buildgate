@@ -18,7 +18,7 @@ import (
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newOverrideFlags() (flags *flag.FlagSet, runID, dataDir, by, reason, state, releaseProtectedPaths *string, releaseMaxFilesChanged, releaseMaxChangedLines *int, releaseRollbackPlan *string, releaseAllowOverrides, releaseAllowDependencyLockfileChanges, releaseAllowUnsandboxed, releaseAllowSkippedProjectCheck *bool) {
+func newOverrideFlags() (flags *flag.FlagSet, runID, dataDir, by, reason, state, releaseProtectedPaths *string, releaseMaxFilesChanged, releaseMaxChangedLines *int, releaseRollbackPlan *string, releaseAllowOverrides, releaseAllowDependencyLockfileChanges, releaseAllowSkippedProjectCheck *bool) {
 	flags = flag.NewFlagSet("override", flag.ContinueOnError)
 	runID = flags.String("run", "", "run identifier (required)")
 	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
@@ -31,14 +31,13 @@ func newOverrideFlags() (flags *flag.FlagSet, runID, dataDir, by, reason, state,
 	releaseRollbackPlan = flags.String("release-rollback-plan", "", "rollback plan named in the release evidence, such as \"git revert the merge commit on main\"; empty denies every release, for the decision recorded after the override")
 	releaseAllowOverrides = flags.Bool("release-allow-overrides", false, "let a run with a human override in its history pass the release decision, for the decision recorded after the override")
 	releaseAllowDependencyLockfileChanges = flags.Bool("release-allow-dependency-lockfile-changes", false, "let a run that changed a dependency lockfile pass the release decision, for the decision recorded after the override")
-	releaseAllowUnsandboxed = flags.Bool("release-allow-unsandboxed", false, "let a run whose build recorded no sandbox image digest pass the release decision, for the decision recorded after the override")
 	releaseAllowSkippedProjectCheck = flags.Bool("release-allow-skipped-project-check", false, "let a run started with -skip-project-check pass the release decision, for the decision recorded after the override")
 	finishFlags(flags)
 	return
 }
 
 func overrideMain(dp *deps, args []string) error {
-	flags, runID, dataDir, by, reason, state, releaseProtectedPaths, releaseMaxFilesChanged, releaseMaxChangedLines, releaseRollbackPlan, releaseAllowOverrides, releaseAllowDependencyLockfileChanges, releaseAllowUnsandboxed, releaseAllowSkippedProjectCheck := newOverrideFlags()
+	flags, runID, dataDir, by, reason, state, releaseProtectedPaths, releaseMaxFilesChanged, releaseMaxChangedLines, releaseRollbackPlan, releaseAllowOverrides, releaseAllowDependencyLockfileChanges, releaseAllowSkippedProjectCheck := newOverrideFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -95,7 +94,7 @@ func overrideMain(dp *deps, args []string) error {
 		// this subcommand only ever operates on an already-durable run
 		// record, which already carries it.
 		if newState == run.StateAccepted {
-			recordReleaseDecision(*dataDir, *runID, r, releasePolicyFromFlags(*releaseProtectedPaths, *releaseMaxFilesChanged, *releaseMaxChangedLines, *releaseRollbackPlan, *releaseAllowOverrides, *releaseAllowDependencyLockfileChanges, *releaseAllowUnsandboxed, *releaseAllowSkippedProjectCheck))
+			recordReleaseDecision(*dataDir, *runID, r, releasePolicyFromFlags(*releaseProtectedPaths, *releaseMaxFilesChanged, *releaseMaxChangedLines, *releaseRollbackPlan, *releaseAllowOverrides, *releaseAllowDependencyLockfileChanges, *releaseAllowSkippedProjectCheck))
 		}
 		// Found via codex review (round 2, 2026-08-28): the run-time
 		// rollback defer in runMainWithReady deliberately skips

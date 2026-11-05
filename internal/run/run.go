@@ -480,8 +480,8 @@ func SubscriptionBilled(attempts []Attempt) bool {
 // results look identical whether or not the code that produced them was
 // contained, so nothing could deny an unsandboxed run differently from a
 // sandboxed one at the point that actually matters (found via a real
-// Opus review pass, 2026-09-04). See
-// release.MergePolicy.AllowUnsandboxed for where this gets used.
+// Opus review pass, 2026-09-04). The release decision denies a run
+// for which it is false.
 func (r Run) Sandboxed() bool {
 	for i := len(r.Attempts) - 1; i >= 0; i-- {
 		if r.Attempts[i].Kind == "build" {
@@ -1868,7 +1868,6 @@ type ReleasePolicy struct {
 	RollbackPlan                   string   `json:"rollback_plan"`
 	AllowOverrides                 bool     `json:"allow_overrides,omitempty"`
 	AllowDependencyLockfileChanges bool     `json:"allow_dependency_lockfile_changes,omitempty"`
-	AllowUnsandboxed               bool     `json:"allow_unsandboxed,omitempty"`
 	RequiredGates                  []string `json:"required_gates,omitempty"`
 	AllowSkippedProjectCheck       bool     `json:"allow_skipped_project_check,omitempty"`
 }

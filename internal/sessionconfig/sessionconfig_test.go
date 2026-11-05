@@ -316,14 +316,24 @@ func TestLoadRejectsUnknownKeyByName(t *testing.T) {
 	}
 }
 
-// TestLoadRejectsAllowUnsandboxed: worker always runs sandboxed and has
-// no -allow-unsandboxed flag, so Config has no matching key -- a config
+// TestLoadRejectsAllowUnsandboxed: worker always runs sandboxed, so Config
+// has no matching key -- a config
 // file naming it must fail at Load, naming the key, the same as any other
 // unknown key.
 func TestLoadRejectsAllowUnsandboxed(t *testing.T) {
 	_, err := Load(writeConfig(t, "allow_unsandboxed: true\n"))
 	if err == nil || !strings.Contains(err.Error(), "allow_unsandboxed") {
 		t.Fatalf("Load(allow_unsandboxed) = %v, want an error naming allow_unsandboxed", err)
+	}
+}
+
+// TestLoadRejectsReleaseAllowUnsandboxed: a run whose build recorded no
+// image digest is always denied at the release decision, so the key is
+// unknown and Load names it.
+func TestLoadRejectsReleaseAllowUnsandboxed(t *testing.T) {
+	_, err := Load(writeConfig(t, "release_allow_unsandboxed: true\n"))
+	if err == nil || !strings.Contains(err.Error(), "release_allow_unsandboxed") {
+		t.Fatalf("Load(release_allow_unsandboxed) = %v, want an error naming release_allow_unsandboxed", err)
 	}
 }
 

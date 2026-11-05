@@ -124,7 +124,7 @@ func fenced(prefix, suffix string, lines ...string) string {
 
 // memoryRun is an accepted run from base to result, its inventory taken from git.
 func (m *memRepo) memoryRun(base, result, requestID string) *run.Run {
-	return &run.Run{ID: "run-1", Project: "widget", RequestID: requestID, State: run.StateAccepted, BaseSHA: base, ResultSHA: result, ChangedFiles: m.changed(base, result)}
+	return &run.Run{ID: "run-1", Project: "widget", RequestID: requestID, State: run.StateAccepted, BaseSHA: base, ResultSHA: result, ChangedFiles: m.changed(base, result), Attempts: []run.Attempt{{Kind: "build", ImageDigest: "sha256:" + strings.Repeat("c", 64)}}}
 }
 
 // saveMemoryRequest records requestID as a memory request against m and

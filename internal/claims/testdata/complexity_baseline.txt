@@ -1,4 +1,4 @@
-43 cmd/factoryd/api_start.go apiStartStarter
+42 cmd/factoryd/api_start.go apiStartStarter
 33 cmd/factoryd/cost_cmd_test.go TestBuildCostReportAggregatesAcrossRequests
 31 cmd/factoryd/daemon_cmd.go (*daemonRun).serviceRepository
 42 cmd/factoryd/doctor.go doctorMain

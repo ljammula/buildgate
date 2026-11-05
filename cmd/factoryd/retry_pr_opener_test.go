@@ -46,7 +46,6 @@ func acceptedRunFixture(t *testing.T, dataDir, runID string) *run.Run {
 			MaxChangedLines:                100,
 			RollbackPlan:                   "revert the PR",
 			RequiredGates:                  []string{"canonical_verify", "full_suite_verify"},
-			AllowUnsandboxed:               true,
 			AllowDependencyLockfileChanges: true,
 		}),
 	}

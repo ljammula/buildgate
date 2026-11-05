@@ -2304,7 +2304,6 @@ limits for API-started runs.
 | `release_rollback_plan` | empty (deny-all; see below) |
 | `release_allow_overrides` | `false` |
 | `release_allow_dependency_lockfile_changes` | `false` (a run that changes a dependency lockfile, any language profile's `Lockfiles`: `go.sum`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`, `Gemfile.lock`, `Cargo.lock`, `composer.lock`, `gradle.lockfile`, `packages.lock.json`, `pubspec.lock`, is accepted with no pull request) |
-| `release_allow_unsandboxed` | `false` |
 | `release_allow_skipped_project_check` | `false` |
 | `build_app_max_attempts` | `4` |
 | `verify_max_attempts` | `2` |

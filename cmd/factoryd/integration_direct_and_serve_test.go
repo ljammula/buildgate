@@ -1174,11 +1174,7 @@ func TestIntegrationServeDrainsAPIStartedRunBeforeExiting(t *testing.T) {
 // run always recorded its release decision against runMainWithReady's
 // restrictive zero-value policy regardless of what the operator actually
 // configured on `serve`. Starts `serve` with a permissive policy (a
-// generous file/insertion limit, a declared rollback plan, and
-// -release-allow-unsandboxed on `serve`'s own flag -- PR #50's
-// release.MergePolicy.AllowUnsandboxed gate, unrelated to Docker
-// containment itself, would otherwise deny this run for reasons
-// independent of whatever this test is actually proving), submits a run
+// generous file/insertion limit and a declared rollback plan), submits a run
 // through POST /runs (sandboxed through this package's own fake docker --
 // see TestMain), and proves the recorded
 // decision is actually Allowed: true, which only happens if the
@@ -1230,14 +1226,6 @@ func TestIntegrationAPIStartedRunUsesServerConfiguredReleasePolicy(t *testing.T)
 		"-release-max-files-changed", "10",
 		"-release-max-changed-lines", "100",
 		"-release-rollback-plan", "reviewed and reversible",
-		// release.MergePolicy's own, separate AllowUnsandboxed gate
-		// (restrictive by default, added by the 2026-09-04 Phase 5
-		// hardening pass) would otherwise deny the run's release decision
-		// regardless of the permissive settings above, which is what this
-		// test actually means to check propagated -- unrelated to Docker
-		// containment itself (which is unconditional, with no opt-out of
-		// its own to gate here anymore).
-		"-release-allow-unsandboxed",
 	)
 	cmd.Env = append(os.Environ(),
 		"FACTORYD_API_START_TOKEN="+startToken,

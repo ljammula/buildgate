@@ -87,7 +87,7 @@ func commandCatalog() []commandInfo {
 		{"memory", "factoryd memory <subcommand> [flags] [arguments]", "Read or change a repository's memory lines", groupAdvanced, func() *flag.FlagSet { return newMemoryFlags().set }},
 		{"sandbox", "factoryd sandbox <show|approve|evict> -repo <repository> [flags]", "Show or approve a repository's committed sandbox block, or evict its install images", groupAdvanced, func() *flag.FlagSet { return newSandboxFlags().set }},
 		{"kill-switch", "", "Show, engage or disengage a project's release kill switch", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _ := newKillSwitchFlags(); return fs }},
-		{"override", "", "Set a run's terminal state by hand, with the reason", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _, _, _, _ := newOverrideFlags(); return fs }},
+		{"override", "", "Set a run's terminal state by hand, with the reason", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _, _, _ := newOverrideFlags(); return fs }},
 		{"override-rate", "", "Report how many accepted runs needed an override", groupAdvanced, func() *flag.FlagSet { fs, _ := newOverrideRateFlags(); return fs }},
 		{"reset-stop-line", "", "Clear a repository's stop line", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _ := newResetStopLineFlags(); return fs }},
 		{"reconcile", "", "Remove the worktree, branch or marker a killed run left", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _ := newReconcileFlags(); return fs }},
