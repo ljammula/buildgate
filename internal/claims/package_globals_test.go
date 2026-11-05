@@ -137,6 +137,11 @@ func (gf globalsFile) assignedPackageVar(lhs ast.Expr, vars packageVars, importe
 			lhs = e.X
 		case *ast.StarExpr:
 			lhs = e.X
+		case *ast.UnaryExpr:
+			if e.Op != token.AND {
+				return ""
+			}
+			lhs = e.X
 		case *ast.ParenExpr:
 			lhs = e.X
 		case *ast.Ident:
@@ -159,11 +164,26 @@ func (gf globalsFile) assignedPackageVar(lhs ast.Expr, vars packageVars, importe
 	}
 }
 
-// isOnceBody reports whether call hands a function literal to a Do method
-// (sync.Once.Do): a lazy initialisation that runs once per process, allowed.
+// isOnceBody reports whether call hands a function literal to the Do method
+// of a value whose name says it is a once (sync.Once.Do: once.Do, s.initOnce.Do):
+// a lazy initialisation that runs once per process, allowed. Any other Do (a
+// retry helper, say) is scanned like any other call.
 func isOnceBody(call *ast.CallExpr) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && sel.Sel.Name == "Do"
+	if !ok || sel.Sel.Name != "Do" || len(call.Args) != 1 {
+		return false
+	}
+	if _, ok := call.Args[0].(*ast.FuncLit); !ok {
+		return false
+	}
+	var recv string
+	switch x := sel.X.(type) {
+	case *ast.Ident:
+		recv = x.Name
+	case *ast.SelectorExpr:
+		recv = x.Sel.Name
+	}
+	return strings.Contains(strings.ToLower(recv), "once")
 }
 
 // packageVarAssignments maps "<file> <function> <variable>" to the number of
@@ -201,6 +221,14 @@ func packageVarAssignments(files []globalsFile, vars packageVars) map[string]int
 					}
 				case *ast.IncDecStmt:
 					record(n.X)
+				case *ast.RangeStmt:
+					if n.Tok == token.ASSIGN {
+						for _, lhs := range []ast.Expr{n.Key, n.Value} {
+							if lhs != nil {
+								record(lhs)
+							}
+						}
+					}
 				}
 				return true
 			})
@@ -275,8 +303,9 @@ func TestNoFunctionAssignsAPackageVariable(t *testing.T) {
 
 // TestPackageVarAssignmentsSeesOnlyPackageVariables proves the scan on a
 // fixture: a package variable assigned in a function, directly, through a
-// field, by ++ and through another package's selector counts; a local that
-// shadows it, a := and an init function do not.
+// field, by ++, through *&, as a range variable, inside a non-once Do, and
+// through another package's selector counts; a local that shadows it, a :=,
+// a once.Do body and an init function do not.
 func TestPackageVarAssignmentsSeesOnlyPackageVariables(t *testing.T) {
 	const fixture = `package p
 
@@ -284,12 +313,18 @@ import other "buildgate/internal/other"
 
 var counter int
 var settings struct{ name string }
+var once onceType
 
 func init() { counter = 1 }
 
 func f() {
 	counter = 2
 	counter++
+	*&counter = 5
+	for counter = range []int{1} {
+	}
+	retry.Do(func() { counter = 6 })
+	once.Do(func() { counter = 7 })
 	settings.name = "x"
 	other.Hook = nil
 	counter := 3
@@ -322,7 +357,7 @@ func f() {
 	vars := packageVars{"p p": {"counter": true, "settings": true}, "internal/other other": {"Hook": true}}
 	got := packageVarAssignments(files, vars)
 	want := map[string]int{
-		"p/p.go f counter":    2,
+		"p/p.go f counter":    5,
 		"p/p.go f settings":   1,
 		"p/p.go f other.Hook": 1,
 	}
