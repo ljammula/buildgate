@@ -427,7 +427,7 @@ class BuildAppTests(unittest.TestCase):
 		self.assertIn("empty-diff", result.stopped_reason)
 
 	def test_review_base_sha_is_threaded_to_the_pi_invocation_env(self):
-		# ticket_runner.py passes its prior-ticket-boundary commit here so the
+		# A caller passes the ticket's start commit here so the
 		# reviewer anchors to the ticket's real start instead of "HEAD when
 		# this process happens to start" -- see cross-model-review.ts's
 		# AI_REVIEW_BASE_SHA handling.
@@ -587,8 +587,7 @@ class BuildAppTests(unittest.TestCase):
 		# so no code was ever produced -- retrying more rounds against the
 		# same dead route would just repeat this outcome. build_app.py should
 		# stop immediately rather than looping to max_rounds; recovery is
-		# ticket_runner.py's own build-attempt retry once the route is back
-		# (observed live: budget-pilot ticket 005 burned all 3 rounds this
+		# the caller's retry once the route is back (observed live: budget-pilot ticket 005 burned all 3 rounds this
 		# way before the outage was noticed -- Codex review of PR #28).
 		with tempfile.TemporaryDirectory() as directory:
 			root = Path(directory)
@@ -744,7 +743,7 @@ class BuildAppTests(unittest.TestCase):
 		# exact same symptom as a stalled-but-live round -- no code ever got
 		# a chance to run, so verify_command is also None. That must still
 		# report "model route unreachable" and stop after one round, leaving
-		# the outage to ticket_runner.py's own bounded retry.
+		# the outage to the caller's bounded retry.
 		with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as spec_dir:
 			root = Path(directory)
 			spec = Path(spec_dir) / "spec.md"
@@ -1439,8 +1438,7 @@ class EnsureGitRepoTests(unittest.TestCase):
 			self.assertEqual(toplevel_of(workspace), workspace.resolve())
 
 	def test_inits_a_repo_when_workspace_is_only_inside_an_ancestor_repo(self):
-		"""The ticket_runner.py pilot layout: workspace/ starts as a plain
-		subdirectory of the pilot dir's own control repo."""
+		"""workspace/ starts as a plain subdirectory of a control repo."""
 		with tempfile.TemporaryDirectory() as directory:
 			pilot_dir = Path(directory)
 			init_repo_with_commit(pilot_dir)
@@ -1483,7 +1481,7 @@ class EnsureGitRepoTests(unittest.TestCase):
 			(workspace / ".gitignore").write_text("release/\n")
 			exclude = workspace / ".git" / "info" / "exclude"
 			exclude.parent.mkdir(parents=True, exist_ok=True)
-			exclude.write_text(".pi-build-session/\n.pi-build-round-state.json\n.pi-conformity-session/\nBUILD_REPORT.md\nBUILD_EVIDENCE.json\nCONFORMITY_EVIDENCE.json\n.ticket-runner-staged.json\n")
+			exclude.write_text(".pi-build-session/\n.pi-build-round-state.json\n.pi-conformity-session/\nBUILD_REPORT.md\nBUILD_EVIDENCE.json\nCONFORMITY_EVIDENCE.json\n")
 
 			build_app.ensure_git_repo(workspace)
 			self.assertEqual((workspace / ".gitignore").read_text(), "release/\n")

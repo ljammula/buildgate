@@ -804,22 +804,15 @@ from `quickstart` above (which assumes an existing checkout):
 
 | # | Command | What it does |
 |---|---|---|
-| 1 | `factoryd intake -spec-input "<idea>" -pilot-dir ~/code/your-app` | Runs `goal_pilot.py`: writes `spec/spec.md`, `spec/tickets/001-*.md`, `ARCHITECTURE.md`, then stops for human review (never auto-approves) |
-| 2 | Edit `spec/spec.md`/`ARCHITECTURE.md`/tickets by hand, then flip `STATUS: DRAFT -- pending human review` to `STATUS: FROZEN -- reviewed` | Human review gate, non-skippable |
-| 3 | Re-run the **exact same** `intake` command | `goal_pilot.py` sees `FROZEN`, drafts `spec/contract.md` + `spec/acceptance/`, stops again. Review the contract by hand — tickets 2+ cite it by name |
-| 4 | `factoryd check-project -project <name> -spec <spec.md> -contract <contract.md> -architecture <ARCHITECTURE.md> -ticket <001-*.md> -ticket-number 1 -data-dir <dir>` | Validates ticket structure (`## Goal`, `## Required changes`, `## Verification` mentioning `make verify`, `## Commit`; ticket 2+ also needs "This is an existing repo."). No override — fix and re-run |
-| 5 | `factoryd -workspace <pilot-dir>/workspace -spec <001-*.md> -ticket 001 -ticket-file <001-*.md> -verify-command "make verify"` | Runs the ticket — see "Run a ticket" below |
-| 6 | `git merge factoryd/<run-id>` in the pilot dir | Merge the accepted run (§ below) |
-| 7 | Repeat 1-6 for ticket 2+, adding `-prior-run <ticket-1-run-id>` | Each ticket's run chains from the last |
+| 1 | `git init ~/code/your-app && factoryd init -project your-app -root ~/code/your-app` | Scaffolds `spec/spec.md`, `spec/contract.md` and `ARCHITECTURE.md` with the headings the preflight checks, placeholder prose and a `STATUS: DRAFT` line. It drafts no content |
+| 2 | Write the spec, contract, architecture and `spec/tickets/001-*.md` by hand, flip the spec's `STATUS:` line to `FROZEN`, add an `AGENTS.md` and an empty `workspace/` listed in `.gitignore`, commit | Human review gate: a run refuses a spec that is not `FROZEN` and a repository with no `AGENTS.md` |
+| 3 | `factoryd check-project -project <name> -spec <spec.md> -contract <contract.md> -architecture <ARCHITECTURE.md> -ticket <001-*.md> -ticket-number 1 -data-dir <dir>` | Validates ticket structure (`## Goal`, `## Required changes`, `## Verification` mentioning `make verify`, `## Commit`; ticket 2+ also needs "This is an existing repo."). No override — fix and re-run |
+| 4 | `factoryd -workspace <repo>/workspace -spec <001-*.md> -ticket 001 -ticket-file <001-*.md> -verify-command "make verify"` | Runs the ticket — see "Run a ticket" below |
+| 5 | `git merge factoryd/<run-id>` in the repository | Merge the accepted run (§ below) |
+| 6 | Repeat 2-5 for ticket 2+, adding `-prior-run <ticket-1-run-id>` | Each ticket's run chains from the last |
 
-No separate `git init` needed — `intake` already committed `spec/` into
-`-pilot-dir` and scaffolded an empty, gitignored `workspace/`. It writes no
-`AGENTS.md`: commit one at the pilot dir's root before step 5, or the run is
-refused.
-Every build runs at the *whole repo's*
-worktree root, not confined to `workspace/` — `workspace/` only lets
-`factoryd` derive the project root. Assumes `-pilot-dir`/`-workspace`'s
-parent is one git repo, the layout `intake` itself produces.
+Every build runs at the *whole repo's* worktree root, not confined to
+`workspace/` — `workspace/` only lets `factoryd` derive the project root.
 
 ## Run a ticket
 

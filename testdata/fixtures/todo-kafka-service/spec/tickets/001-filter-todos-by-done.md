@@ -27,7 +27,7 @@ client-side.
 Update `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.
 Neither file exists yet in this repo -- create both: `ARCHITECTURE.md`
 with a brief repo-layout/verification overview (matching this repo's own
-real structure, not a goal_pilot-drafted template), `PROGRESS.md` with
+real structure, not a drafted template), `PROGRESS.md` with
 one dated entry for this ticket.
 
 ## Out of scope

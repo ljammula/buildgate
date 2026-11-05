@@ -43,18 +43,18 @@ func TestResolveHarnessScriptDefaultsToEmbeddedHarness(t *testing.T) {
 	}
 }
 
-func TestResolveHarnessScriptGoalPilot(t *testing.T) {
+func TestResolveHarnessScriptDraftSpec(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	dir, err := harness.Ensure()
 	if err != nil {
 		t.Fatalf("harness.Ensure: %v", err)
 	}
-	got, err := resolveHarnessScript("", "goal_pilot.py")
+	got, err := resolveHarnessScript("", "draft_spec.py")
 	if err != nil {
 		t.Fatalf("resolveHarnessScript: %v", err)
 	}
-	if want := filepath.Join(dir, "goal_pilot.py"); got != want {
+	if want := filepath.Join(dir, "draft_spec.py"); got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }

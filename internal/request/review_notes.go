@@ -97,7 +97,7 @@ func (r *Request) RefreshReviewNotes(dataDir string) {
 		estimate, _ := ticketspec.EstimatedChangedLinesOf(string(content))
 		tickets = append(tickets, PlanTicket{Name: filepath.Base(ticket.SpecPath), Content: string(content), Allowed: allowed, Estimate: estimate})
 	}
-	r.ReviewNotes = planReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines, r.TestPatterns, r.PlanLockfilesDenied)
+	r.ReviewNotes = PlanReviewNotes(criteria, tickets, r.Workspace, idNotes, r.PlanBudgetLines, r.TestPatterns, r.PlanLockfilesDenied)
 }
 
 // planSkippedReview reports whether r is building on a plan the factory
@@ -190,7 +190,8 @@ func SpecReviewNotes(specContent string) []string {
 //     file exists, no ticket of the plan may change it, and the words
 //     around its name say it changes (criterionClause.saysFileChanges).
 //     That reading of prose is the weaker note.
-//   - for a spec whose criteria carry IDs, "criterion N has no test": a
+//   - when idNotes (a spec whose criteria carry IDs), "criterion N has no
+//     test": a
 //     ticket lists it as covered and none of the tickets listing it cites AC-N in
 //     its Tests to add.
 //   - "ticket T estimates N changed lines, over the B-line budget": a
@@ -222,11 +223,7 @@ func SpecReviewNotes(specContent string) []string {
 //
 // A criterion no ticket covers is request.ValidatePlanCoverage's refusal
 // and gets no note. Notes are deduplicated and capped (capReviewNotes).
-func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, budgetLines int, testPatterns []string, lockfilesDenied bool) []string {
-	return planReviewNotes(criteria, tickets, workspace, true, budgetLines, testPatterns, lockfilesDenied)
-}
-
-func planReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int, testPatterns []string, lockfilesDenied bool) []string {
+func PlanReviewNotes(criteria []string, tickets []PlanTicket, workspace string, idNotes bool, budgetLines int, testPatterns []string, lockfilesDenied bool) []string {
 	plan := criterionPlan{workspace: workspace, tickets: tickets, listed: map[string]map[string]bool{}}
 	covering := make(map[int][]string, len(criteria))
 	listing := make(map[int]map[int]bool, len(criteria))

@@ -97,7 +97,7 @@ func dockerCPUs(value string) (float64, error) {
 // keep their zero-value behavior unchanged; this validates only the
 // CLI-supplied flag values themselves, called once per flag set right
 // after parsing, at every site that supplies these three values (the
-// direct/Temporal/repository-owner path, factoryd daemon, and serve's own
+// single-ticket run path, factoryd daemon, and serve's own
 // -sandbox-* pair for API-started runs -- the last two now from
 // sessionconfig.Settings rather than their own flags). prefix names the
 // flag family in the returned error ("-sandbox") so the message points at

@@ -13,8 +13,6 @@ and [`USAGE.md`](../../USAGE.md).
 | `round_feedback.py` | Pure helpers for that: the excerpt of a failing command's output, the names it reports failing, an id for "the same failure", the per-round history, and the note for a failure of the agent process itself | imported by `build_app.py` |
 | `saved_prompts.py` | `save_prompt(session_dir, name, text)`: writes a prompt handed to the harness to `<session folder>/prompts/<name>.md`, which the host empties before each launch and copies after it (the agent can write there too, so the copy is what the folder held) (0600; at most 2 MiB, 50 per launch; a failure never changes the turn). The host copies the folder into the run's or request's directory and redacts it there | imported by `build_app.py` |
 | `tree_guard.py` | Records a directory tree (every path: kind, permission bits, content hash or link target; bounded in entries, bytes and seconds), compares two records, and puts a changed tree back from copies. Used around the notes turn of a build that passed | imported by `build_app.py` |
-| `goal_pilot.py` | Spec/contract/ticket drafting | `-goal-pilot-script` |
-| `ticket_runner.py` | Resumable per-ticket gate/build loop the two above build on | — |
 | `draft_spec.py` | Request driver's one-shot spec draft | `worker -draft-spec-script` |
 | `read_back.py` | Request driver's one-shot read-back of a handed-over spec, shown at spec review: a summary and up to 7 questions as JSON, refused whole (exit 3) when not that shape or over its byte limits | read from beside `worker -draft-spec-script` |
 | `plan_tickets.py` | Request driver's one-shot ticket plan, run only for a plan sent back (`reject -to plan`) or for a handed-over plan to revise (a request submitted without a plan has the approved spec as its one ticket, with no model call); given the read-back answers approved with the spec (`--spec-answers-file`) after the spec | `worker -plan-tickets-script` |
@@ -56,9 +54,7 @@ freely, headings only together with their validator.
 | `code_review.command_outcome_rule`, `.advice_scope_rule`, `.advice_severity_rule` | the review prompt, via `code_review.py` | none: literal text (`load_text`), braces are plain characters |
 
 The review and build templates keep each paragraph on one line, as the
-prompts were sent before; rewrapping one changes the prompt. The
-`goal_pilot.py` and `ticket_runner.py` prompts are still assembled in
-their scripts.
+prompts were sent before; rewrapping one changes the prompt.
 
 ## Behaviour worth knowing
 
@@ -171,9 +167,6 @@ in `<home>/skills/<name>` each round (Codex's bundled skills are off). Parsers a
 ## Prerequisites
 
 - [pi](https://pi.dev) installed.
-- `pi install git:github.com/ljammula/pi-harness-hardening`, run once:
-  `goal_pilot.py` invokes the `/spec-plan` and `/contract-plan` slash
-  commands, which pi resolves from that package's prompts.
 - A model route the role's harness can speak (`codex` needs the Responses API); see [`USAGE.md`](../../USAGE.md).
 - Inside the sandbox, `pi`, `codex` and `copilot` come from the standard worker image (`internal/sandbox/Dockerfile`); `pifork` needs its own image.
 

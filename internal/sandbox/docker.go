@@ -1881,8 +1881,8 @@ var ownerDebounceAfter = func(d time.Duration) <-chan time.Time { return time.Af
 // long as this attempt is actually being supervised, and returns a stop
 // func Run defers immediately after starting it. Found via review: an
 // earlier version recorded only the OS process's PID and treated that
-// process's continued existence as proof of ownership — correct for the
-// direct one-process-per-run CLI path, but not for a long-lived host (a
+// process's continued existence as proof of ownership — correct for a
+// one-process-per-run CLI invocation, but not for a long-lived host (a
 // `factoryd serve`/daemon process supervising many runs' attempts in
 // separate goroutines): that process stays alive long after one specific
 // attempt's own goroutine has finished — including the halted-but-
@@ -2059,8 +2059,6 @@ var HarnessSiblingModules = map[string]bool{
 	"harness_adapters.py": true, // imported by build_app.py and every model-bound script
 	"draft_spec.py":       true,
 	"plan_tickets.py":     true,
-	"ticket_runner.py":    true,
-	"goal_pilot.py":       true,
 	"code_review.py":      true, // imported by combined_review.py
 	"prompt_templates.py": true, // loads the *.prompt.md templates below
 	"round_feedback.py":   true, // imported by build_app.py
@@ -2114,8 +2112,7 @@ var HarnessSiblingModules = map[string]bool{
 // script StageFile already staged there -- the harness scripts import
 // each other as plain sibling modules, so the staged directory mounted
 // into the sandbox must carry those siblings too, not the one requested
-// file alone. Found live on the direct-execution path: the first
-// sandboxed spec draft died on ModuleNotFoundError before the model ran
+// file alone. Found live: the first sandboxed spec draft died on ModuleNotFoundError before the model ran
 // (draft_spec.py's own `import build_app`); found again on the Temporal
 // path, 2026-09-17, the first time a Temporal review Activity ran a real
 // review script against a live sandbox -- that Activity's own
@@ -2237,8 +2234,8 @@ func checkMinFreeBytes(path string) error {
 // SkipMountVisibilityCheckEnv opts a launch out of verifyWorkDirMountVisibility
 // when set to "1". This is an environment variable rather than a new
 // -sandbox-* CLI flag deliberately: a real CLI flag needs a definition at
-// every one of this repo's flag-definition sites (direct CLI, daemon,
-// API-started runs, `supervise`, and the Temporal path's own zero-value
+// every one of this repo's flag-definition sites (the CLI, daemon,
+// API-started runs, `supervise`, and the workflow's own zero-value
 // fallback -- a review found exactly this kind of change landing at 3 of
 // 5 sites and silently missing the other two), for an escape valve
 // expected to be rare (an operator

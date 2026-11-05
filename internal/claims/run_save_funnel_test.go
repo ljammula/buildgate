@@ -1,10 +1,9 @@
-// Package claims — this file makes M4-K1's funnel invariant ("every write
-// of a run record goes through internal/run.Run.Persist") a tested
-// property. run.Run.Save itself is unexported-equivalent outside
-// internal/run in spirit, if not in Go's own visibility rules: calling it
-// directly bypasses run.Run.RecordEvent's durable events.db append, the
-// exact gap M4-K1 closed (~11 production call sites once did this; see
-// run.Run.Persist's own doc comment).
+// Package claims — this file makes the funnel invariant ("every write of a
+// run record goes through internal/run.Run.Persist") a tested property.
+// run.Run.Save itself is unexported-equivalent outside internal/run in
+// spirit, if not in Go's own visibility rules: calling it directly skips
+// the provenance Persist stamps (UpdatedAt, FactorydVersion) and the
+// baseline verify it attaches.
 //
 // This is a parser-based heuristic, not a type-checked one:
 // golang.org/x/tools/go/packages (which would give real type information)
@@ -28,7 +27,7 @@ import (
 
 // runSaveFunnelAllowlist names production call sites permitted to call
 // run.Run.Save directly, as "<path relative to repo root>:<line>". Empty
-// today: every known production bypass was converted to Persist by M4-K1.
+// today.
 // A future legitimate exception (there should rarely be one -- Persist
 // exists precisely so callers never need to reach for Save directly)
 // gets added here with a comment explaining why Persist doesn't fit,
@@ -139,10 +138,9 @@ func findRunSaveCalls(fset *token.FileSet, node ast.Node, runVars map[string]boo
 	return lines
 }
 
-// TestNoDirectRunSaveOutsideRunPackage enforces M4-K1's funnel: no
-// production code outside internal/run may call run.Run.Save directly --
-// every write of a run record goes through run.Run.Persist instead (Save
-// plus the durable events.db RecordEvent append Persist adds). See this
+// TestNoDirectRunSaveOutsideRunPackage enforces the funnel: no production
+// code outside internal/run may call run.Run.Save directly -- every write
+// of a run record goes through run.Run.Persist instead. See this
 // file's own doc comment for the heuristic's scope and limits, and
 // runSaveFunnelAllowlist for the (currently empty) list of permitted
 // exceptions.
@@ -163,8 +161,8 @@ func TestNoDirectRunSaveOutsideRunPackage(t *testing.T) {
 				if path != walkRoot && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "testdata" || name == "vendor") {
 					return filepath.SkipDir
 				}
-				// internal/run itself is the funnel's home: Persist,
-				// RecordEvent, and every legitimate internal Save call
+				// internal/run itself is the funnel's home: Persist and
+				// every legitimate internal Save call
 				// (Persist's own, plus WithLock-adjacent helpers) live
 				// here and are exempt by design, not by omission.
 				if filepath.Base(path) == "run" && filepath.Dir(path) == filepath.Join(root, "internal") {

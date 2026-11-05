@@ -20,7 +20,6 @@ import (
 
 	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
-	"buildgate/internal/store"
 	"buildgate/internal/workflow"
 	wsisolation "buildgate/internal/workspace"
 )
@@ -327,68 +326,6 @@ func TestIntegrationTemporalRepositoryOwnerHeartbeatKillsHungSubprocess(t *testi
 	}
 }
 
-// TestIntegrationRecordsDurableEventLog proves a real factoryd run's own
-// save() calls append durable audit-trail events to the WAL-backed event
-// store (internal/run.RecordEvent), not just the run.json snapshot — a
-// real subprocess, not the in-package unit tests in internal/run that
-// only exercise RecordEvent directly.
-func TestIntegrationRecordsDurableEventLog(t *testing.T) {
-	ws := newFixtureRepo(t)
-	dataDir := t.TempDir()
-	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
-	if err != nil {
-		t.Fatalf("abs script path: %v", err)
-	}
-	cmd := factorydCommand(t,
-		"-ticket", "fixture-ticket",
-		"-sandbox-image", fakeSandboxImage,
-		"-workspace", ws,
-		"-spec", specPath,
-		"-build-app-interpreter", "/bin/sh",
-		"-build-app-script", scriptPath,
-		"-timeout", "30s",
-		"-verify-command", "true",
-		"-data-dir", dataDir,
-	)
-	cmd.Env = append(os.Environ(),
-		"FAKE_BUILD_APP_MODE=commit",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-	)
-	out, _ := cmd.CombinedOutput() // exit code intentionally unchecked; see runFactorydWithSpecAndFlags's own precedent
-	t.Logf("factoryd output:\n%s", out)
-
-	entries, err := os.ReadDir(filepath.Join(dataDir, "runs"))
-	if err != nil {
-		t.Fatalf("read runs dir: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("expected exactly 1 run directory, got %d: %v", len(entries), entries)
-	}
-	runID := entries[0].Name()
-
-	s, err := store.Open(run.EventsDBPath(dataDir))
-	if err != nil {
-		t.Fatalf("open event store: %v", err)
-	}
-	defer s.Close()
-	events, err := s.List(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(events) == 0 {
-		t.Fatal("expected at least one durable event for this run, got none")
-	}
-	last := events[len(events)-1]
-	if last.Kind != string(run.StateAccepted) {
-		t.Errorf("last event kind = %q, want %q", last.Kind, run.StateAccepted)
-	}
-}
-
 // TestIntegrationRejectsSpecTicketFileScopeMismatch reproduces, against the
 // real binary, the exact false-accept class found live against
 // calculator-pilot-v2: the documented invocation
@@ -457,22 +394,12 @@ func TestIntegrationRejectsSpecTicketFileScopeMismatch(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected exactly 1 halted run directory, got %d: %v", len(entries), entries)
 	}
-	runID := entries[0].Name()
-	s, err := store.Open(run.EventsDBPath(dataDir))
+	halted, err := run.Load(dataDir, entries[0].Name())
 	if err != nil {
-		t.Fatalf("open event store: %v", err)
+		t.Fatalf("load halted run: %v", err)
 	}
-	defer s.Close()
-	events, err := s.List(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(events) == 0 {
-		t.Fatal("expected at least one durable event for this run, got none")
-	}
-	last := events[len(events)-1]
-	if last.Kind != string(run.StateHalted) {
-		t.Errorf("last event kind = %q, want %q", last.Kind, run.StateHalted)
+	if halted.State != run.StateHalted {
+		t.Errorf("run state = %q, want %q", halted.State, run.StateHalted)
 	}
 	if strings.Contains(string(out), "fake_build_app:") {
 		t.Errorf("output = %q, want build_app.py never invoked for a rejected pre-submission configuration", out)

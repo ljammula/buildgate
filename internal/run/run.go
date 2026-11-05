@@ -1,9 +1,6 @@
 // Package run defines the durable record for one factoryd run and how it
-// is persisted to disk. This is a deliberately minimal stand-in for the
-// full plan's SQLite `runs`/`attempts`/`gate_results` tables: one JSON file
-// per run, written atomically, so state survives a crash without an
-// external dependency. Replace with SQLite when a second run needs to
-// exist concurrently or be queried.
+// is persisted to disk: one JSON file per run, written atomically, so state
+// survives a crash without an external dependency.
 package run
 
 import (
@@ -11,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1401,9 +1397,8 @@ type Run struct {
 	// link this run's own record to the Temporal Web UI
 	// (http://localhost:8233 locally) so an operator can look up the
 	// workflow execution actually driving it instead of finding an opaque
-	// list of ids there with nothing to correlate them by. Empty for a
-	// direct (non-Temporal) run, and for a Temporal-routed run recorded
-	// before these fields existed. TemporalWorkflowID equals this run's
+	// list of ids there with nothing to correlate them by. Empty until
+	// the run's workflow has started. TemporalWorkflowID equals this run's
 	// own ID on the plain -temporal-address path (see run_temporal.go's
 	// ExecuteWorkflow ID); under -repository it is the *child* RunWorkflow
 	// execution's id (RepositoryOwnerRunWorkflowID), distinct from the
@@ -1591,8 +1586,7 @@ type Run struct {
 	// CommittedByFactoryd is true when the agent finished with an
 	// uncommitted diff and factoryd committed it as a safety net. The POC
 	// run against a Flutter + Go app repo found the agent doesn't reliably
-	// commit its own verified work when driven outside ticket_runner.py's
-	// scaffolding — this is the factory's own backstop for that gap, not a
+	// commit its own verified work — this is the factory's own backstop for that gap, not a
 	// replacement for the agent committing correctly.
 	CommittedByFactoryd bool `json:"committed_by_factoryd"`
 	// ChangedFiles deliberately has no `omitempty`: a successfully
@@ -2122,31 +2116,15 @@ func DiffPath(dataDir, id string) string {
 var FactorydVersion string
 
 // Persist is the one funnel every write of a run record goes through: it
-// stamps provenance (r.UpdatedAt, r.FactorydVersion) then durably writes
-// the record twice -- Save's authoritative run.json, and RecordEvent's
-// append-only audit-trail entry in events.db -- so no caller can produce
-// one without the other. Introduced because ~11 call sites called
-// r.Save directly and so never appended an event (M4-K1); every one of
-// those, plus save()'s own former inline Save+RecordEvent pair in
-// cmd/factoryd/sandbox_exec.go, now calls this instead.
-//
-// A Save failure is returned, since a caller must know synchronously
-// whether the authoritative record actually landed. A RecordEvent failure
-// is only logged, never returned -- preserving save()'s pre-existing
-// behavior of treating the event log as supplementary evidence that must
-// never fail an otherwise-successful persist (see RecordEvent's own doc
-// comment).
+// stamps provenance (r.UpdatedAt, r.FactorydVersion), attaches the
+// baseline verify written beside the record, then writes run.json with
+// Save. A Save failure is returned, since a caller must know synchronously
+// whether the record landed.
 func (r *Run) Persist(dataDir string) error {
 	r.UpdatedAt = time.Now().Format(time.RFC3339)
 	r.FactorydVersion = FactorydVersion
 	r.AttachBaselineVerify(dataDir)
-	if err := r.Save(dataDir); err != nil {
-		return err
-	}
-	if err := r.RecordEvent(dataDir); err != nil {
-		log.Printf("run %s: warning: could not append durable event log entry: %v", r.ID, err)
-	}
-	return nil
+	return r.Save(dataDir)
 }
 
 // Save writes r atomically (write to a temp file, then rename) so a crash

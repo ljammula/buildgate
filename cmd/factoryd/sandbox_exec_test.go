@@ -30,7 +30,7 @@ func sandboxTestUser() string {
 // sandbox just because of its extension.
 func TestStageSandboxScriptStagesSiblingModules(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"draft_spec.py", "build_app.py", "harness_adapters.py", "goal_pilot.py", "notes.txt", "unrelated_helper.py"} {
+	for _, name := range []string{"draft_spec.py", "build_app.py", "harness_adapters.py", "plan_tickets.py", "notes.txt", "unrelated_helper.py"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("# "+name+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -43,7 +43,7 @@ func TestStageSandboxScriptStagesSiblingModules(t *testing.T) {
 	if filepath.Base(script) != "draft_spec.py" {
 		t.Fatalf("staged script = %q", script)
 	}
-	for _, name := range []string{"build_app.py", "harness_adapters.py", "goal_pilot.py"} {
+	for _, name := range []string{"build_app.py", "harness_adapters.py", "plan_tickets.py"} {
 		if _, err := os.Stat(filepath.Join(staged, name)); err != nil {
 			t.Fatalf("%s not staged beside the script: %v", name, err)
 		}

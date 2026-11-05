@@ -59,9 +59,7 @@ func DependencyLockfilesTouched(changedFiles []string) []string {
 // UnionSorted returns the sorted, deduplicated union of a and b. Used to
 // combine a committed-changes inventory (e.g. git diff --name-only)
 // with an uncommitted-changes inventory (e.g. git status) into one
-// changed-file list — shared, not duplicated, between cmd/factoryd's
-// direct-supervisor path and a Temporal Activity, since both need the
-// exact same combination for their evidence to agree.
+// changed-file list.
 func UnionSorted(a, b []string) []string {
 	set := make(map[string]bool, len(a)+len(b))
 	for _, f := range a {

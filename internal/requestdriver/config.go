@@ -137,7 +137,7 @@ type WorkerConfig struct {
 	// buildAppScript/buildAppInterpreter/timeoutMinutes above, for the
 	// request driver's own spec-drafting job rather than a ticket
 	// build -- see cmd/factoryd/spec_draft_job.go's own doc comment.
-	// allowUnsandboxedSpecDraft has no worker flag of its own (worker
+	// AllowUnsandboxedSpecDraft has no worker flag of its own (worker
 	// "always runs sandboxed and does not accept a host-execution
 	// opt-out", see -sandbox-image's own flag help above): it exists so a
 	// test can call runSpecDraftJob directly, on the host, without Docker,
@@ -159,7 +159,7 @@ type WorkerConfig struct {
 	// above, for the request driver's own plan-drafting job
 	// rather than a spec-drafting or ticket build -- see
 	// cmd/factoryd/plan_tickets_job.go's own doc comment.
-	// allowUnsandboxedSpecDraft (above) is reused for this job too rather
+	// AllowUnsandboxedSpecDraft (above) is reused for this job too rather
 	// than a second flag: both are the request driver's own one-shot pi
 	// invocations, and worker itself never accepts a host-execution
 	// opt-out either way (see -sandbox-image's own flag help).

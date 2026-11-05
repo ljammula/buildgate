@@ -108,12 +108,9 @@ distinct flows live here and must not be conflated: the bare
 `factoryd <run>` invocation (§6) and the `submit`/`worker` request
 pipeline (§11), which drafts spec and tickets itself and opens a draft PR.
 
-1. **Intake and scaffold** (`USAGE.md` §1–4): fresh pilot dir, `factoryd
-   intake` to the spec-freeze checkpoint; freeze `spec/spec.md` by hand;
-   re-run the identical `intake` to the acceptance-suite checkpoint;
-   `factoryd check-project` passes. Confirm both checkpoints actually
-   stop (exit, ticket 001 not built) — they are permanent human gates,
-   not a gap.
+1. **Scaffold** (`USAGE.md` "New app from scratch", steps 1–3): fresh
+   repository, `factoryd init`, spec, contract, architecture and ticket
+   001 written and frozen by hand; `factoryd check-project` passes.
 2. **Accepted run** via bare `factoryd <run>` (§6) for ticket 001, with
    `-spec`/`-ticket-file` both pointing at the ticket, default
    the per-run worktree, the gateway and meter running (`factoryd doctor -fix`), `-registry-proxy` on,
@@ -124,8 +121,7 @@ pipeline (§11), which drafts spec and tickets itself and opens a draft PR.
    `project` equals the repo basename; `changed_files` is `[]`-or-list,
    never `null`; `diff_stat` present; spec and verify-surface
    hashes present and equal to `sha256` of the spec snapshot and
-   `verify.log` respectively — SC-012), `events.db` (WAL, run's events
-   present), `diff.patch` byte-equal to `git diff <base_sha>..<result_sha>`
+   `verify.log` respectively — SC-012), `diff.patch` byte-equal to `git diff <base_sha>..<result_sha>`
    in the worktree, retained `BUILD_REPORT.md`, `BUILD_EVIDENCE.json`
    with `schema_version == run.AgentEvidenceSchemaVersion` and non-null
    `usage`, `notifications.log`, and a release decision readable via
@@ -312,21 +308,21 @@ each edge case the screen exists to handle:
   unbaked dependencies must fail loudly, not silently pass.
 - The run page's diff tab (`GET /runs/{id}/diff`) — byte-equal to `diff.patch`
   for the Phase 1.2 run.
-- `TriageScreen` / `OpsScreen` — operator triage against a real
+- `TriageScreen` — operator triage against a real
   quarantined run, override from the console (`POST /runs/{id}/override`
   takes `by`/`reason`/`state`, mirroring `factoryd override`), and confirm
   the recorded override carries the `by` the console sent, while a
   request approve/reject from the console records `by: "api"` as
   `USAGE.md` §11 documents.
-- The run page's release tab / `ProjectReleaseScreen` — read-only decision and
+- The run page's release tab / the project list's `ProjectReleasePanel` — read-only decision and
   kill-switch state, compared with `factoryd kill-switch -project <p>`
   output for the same project; a run with no decision renders "no
   decision", never allowed; the refresh action's stale-data warning on
-  a failed refresh; switch projects rapidly on `ProjectReleaseScreen`
+  a failed refresh; switch projects rapidly on `ProjectReleasePanel`
   and confirm no stale chip from the previous project lingers after the
   new one loads. Confirm by inspection that no control on either screen
   engages or disengages the switch, merges, pushes, or deploys.
-- `ProjectListScreen` / `ProjectStatsScreen` (`GET /projects`,
+- `ProjectListScreen` / `ProjectStatsPanel` (`GET /projects`,
   `GET /projects/{project}/stats`) — aggregates equal what `factoryd
   status -json` computes from the same run records; the derived project
   id is shown.
@@ -402,10 +398,6 @@ is a code-review/`grep` fact, not a run.
   factoryd's GID and colima's host-visible UID attribution both need
   daemon-level `userns-remap`; multi-tenant isolation is out of scope
   entirely.
-- Not re-demonstrating the `intake` `-pilot-dir` concurrent-invocation
-  lock (T-07) — closed 2026-09-16 via `acquireExclusiveLock`, covered by
-  `TestIntakeRefusesConcurrentInvocationOnSamePilotDir`; a live collision
-  would only reproduce what that test already proves.
 - Not validating the Anthropic Messages route (`credential_mode: static`
   against `api.anthropic.com`) — no live run to date has used it; Pi
   against the local OpenAI-compatible route and ChatGPT Codex

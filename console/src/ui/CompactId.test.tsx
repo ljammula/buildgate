@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CompactId } from "@/ui/CompactId";
-import { middleTruncate } from "@/ui/middleTruncate";
+import { middleTruncate } from "@/domain/middleTruncate";
 
 const long = "add-subtract-numbers-to-add-py-add-a-sub-20261005-225506";
 

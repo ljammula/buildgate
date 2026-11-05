@@ -277,9 +277,7 @@ func recapMaxRounds(dataDir, runID string) int {
 // outcome to w: state and duration, ticket/project, diff size, gate
 // results, agent evidence (rounds/tokens/cost) when present, a PR URL or
 // halt/quarantine reason, and a single closing "next" command. Called
-// both at the end of `factoryd watch` and from the direct execution
-// path's own terminal exit (run_ticket.go), so an operator sees the same
-// recap whether they watched the run live or ran it in the foreground.
+// at the end of `factoryd watch`.
 // relayModelEffortLine summarizes, per distinct Attempt Kind (in
 // first-appearance order), the relay worker model that Kind's attempts
 // were configured with and the HIGHEST reasoning effort the LAST such

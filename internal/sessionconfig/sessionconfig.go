@@ -635,8 +635,8 @@ type Settings struct {
 // -meter-cost-ceiling-micro-usd flag help documents (a relay ceiling
 // must always be positive; the standalone relay binary's own CLI, where
 // 0 does mean disabled, is a different surface). The single shared
-// implementation every relay-launch site (the direct build, the
-// drafting jobs, and modelrole.SelectRoute's own candidate-policy
+// implementation every relay-launch site (the build, the drafting jobs,
+// and modelrole.SelectRoute's own candidate-policy
 // construction) calls, so the 5x multiplier has exactly one place to
 // change.
 func (s Settings) EffectiveRelayCeilings() (tokenCeiling int, costCeilingMicroUSD int64) {

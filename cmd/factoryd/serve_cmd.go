@@ -978,8 +978,8 @@ func drainAfterShutdown(shutdownErr error, inFlight *sync.WaitGroup) error {
 }
 
 // repositoryAPIStarter makes cross-process serialization mandatory for the
-// HTTP execution surface. A direct or plain -temporal-address run is valid for
-// the CLI's bounded single-run mode, but a long-lived API can accept concurrent
+// HTTP execution surface. A plain -temporal-address run is valid for the
+// CLI's bounded single-run mode, but a long-lived API can accept concurrent
 // requests and must route every one through its repository owner Workflow.
 func repositoryAPIStarter(next api.RunStarter) api.RunStarter {
 	return func(ctx context.Context, req api.StartRequest) (*run.Run, error) {
@@ -992,7 +992,7 @@ func repositoryAPIStarter(next api.RunStarter) api.RunStarter {
 
 // apiStartStarter adapts the API's transport request to the existing
 // factoryd run entry point. It starts runMainWithReady in-process (never a
-// shell command), preserving the CLI's validation and direct/Temporal routing
+// shell command), preserving the CLI's validation and Temporal routing
 // while returning as soon as the initial durable record exists.
 //
 // inFlight tracks every background run this starter launches (found via

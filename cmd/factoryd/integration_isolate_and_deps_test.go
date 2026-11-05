@@ -1171,16 +1171,6 @@ func TestIntegrationDiffScopeGateCatchesVerifyCommandChanges(t *testing.T) {
 	}
 }
 
-// noteWith reports whether the run recorded a note containing want.
-func noteWith(r *run.Run, want string) bool {
-	return slices.ContainsFunc(r.Notes, func(n string) bool { return strings.Contains(n, want) })
-}
-
-// gateRecorded reports whether the run recorded a gate result named check.
-func gateRecorded(r *run.Run, check string) bool {
-	return slices.ContainsFunc(r.GateResults, func(g run.GateResult) bool { return g.Check == check })
-}
-
 // TestIntegrationHaltsWhenBaseSHANoLongerAnAncestor is the regression
 // test for a real finding from a live factoryd run against
 // a Flutter + Go app repo: the workspace's git history no longer contained

@@ -239,8 +239,7 @@ func buildAndVerify(ctx temporalworkflow.Context, ids *activityIDs, buildVerifyC
 	result.Build = build.Result
 	result.Attempts = append(result.Attempts, build.Attempts...)
 
-	// Ancestor check + safety-net commit, mirroring cmd/factoryd's direct
-	// path: found live (see runner.GitIsAncestor's doc comment) that a
+	// Ancestor check + safety-net commit: found live (see runner.GitIsAncestor's doc comment) that a
 	// real build_app.py/pi harness invocation can reset the workspace
 	// backward mid-run and commit on top of that older state, silently
 	// discarding already-completed unrelated work if nothing catches it.

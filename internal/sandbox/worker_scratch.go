@@ -5,8 +5,8 @@ import "strings"
 // PrepareWorkerScratch gives every worker launch a private disk-backed
 // scratch (LaunchSpec.Scratch) and routes Go's build and temporary files
 // there. The registry proxy may already have set GOCACHE; the values are
-// normalized here so direct and Temporal launches behave the same when the
-// proxy is disabled. It touches no host filesystem.
+// normalized here so every launch behaves the same when the proxy is
+// disabled. It touches no host filesystem.
 func PrepareWorkerScratch(spec LaunchSpec) LaunchSpec {
 	spec.Scratch = true
 	spec.Environment = replaceEnvironmentValue(spec.Environment, "GOCACHE", WorkerScratchMount+"/go-build")

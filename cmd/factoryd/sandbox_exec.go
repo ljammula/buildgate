@@ -665,9 +665,7 @@ func save(r *run.Run, dataDir string, cause ...error) error {
 	haltNotification, dispatchHalt := notify.PrepareHalt(r, dataDir)
 	// Persist is the one funnel every run-record write goes through (see
 	// its own doc comment, internal/run/run.go): it stamps r.UpdatedAt and
-	// r.FactorydVersion, writes run.json, then appends the durable event
-	// log entry, with the same Save-fails/RecordEvent-logs-only semantics
-	// this function used to implement inline.
+	// r.FactorydVersion and writes run.json.
 	if err := r.Persist(dataDir); err != nil {
 		if dispatchHalt {
 			// The notification staged above was never actually

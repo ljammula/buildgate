@@ -852,7 +852,7 @@ func TestRunProjectBootstrapCheckBrownfieldProfileAcceptsRealRepoLayout(t *testi
 	// has none of policy.DefaultArchitectureRequiredSections' own headings
 	// -- the real shape of an existing repo's own real docs.
 	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
-	if err := os.WriteFile(architecturePath, []byte("# My Real Project\n\nSome real docs, not goal_pilot.py-shaped.\n"), 0o644); err != nil {
+	if err := os.WriteFile(architecturePath, []byte("# My Real Project\n\nSome real docs, not factory-shaped.\n"), 0o644); err != nil {
 		t.Fatalf("write architecture doc: %v", err)
 	}
 	specPath := filepath.Join(root, "spec", "spec.md")

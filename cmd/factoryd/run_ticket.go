@@ -59,9 +59,8 @@ var fullSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // The factory does not drive a whole-diff "reviewer" extension trace inside
 // the build (that Pi extension was never present in the sandbox image and
 // always reported "unavailable"; correctness rests on the deterministic
-// gates, the review step and human review) -- build_app.py's own
-// --review-policy option still exists for the frozen intake bundle
-// (ticket_runner.py/goal_pilot.py), but the factory never passes it.
+// gates, the review step and human review), so the factory never passes
+// build_app.py's --review-policy option.
 
 // validateFollowUpRunInputs checks the two inputs only a run that follows
 // an earlier one is given: -diff-base, -instruction-base and -earlier-attempt.
@@ -1198,8 +1197,8 @@ func (tr *ticketRun) prepareSandbox() error {
 		}
 	}
 	// An isolated chained run is based on the predecessor's accepted ResultSHA, not the shared
-	// checkout's HEAD. Direct and Temporal paths validate the predecessor
-	// metadata before preparation, then validate chain cleanliness against
+	// checkout's HEAD. The predecessor metadata is validated before
+	// preparation, then validate chain cleanliness against
 	// the newly-created worktree.
 	// Resolved to an absolute path here, once, before it's ever carried
 	// into a RunWorkflowInput — found via review: -repository's own shared
@@ -1229,7 +1228,7 @@ func (tr *ticketRun) prepareSandbox() error {
 		return fmt.Errorf("resolve spec path: %w", err)
 	}
 	*tr.spec = absSpec
-	// Normalized here, once, for every path (direct, runViaTemporal,
+	// Normalized here, once, for every path (runViaTemporal,
 	// runViaRepositoryOwner) rather than left as 0 to mean "unset" only in
 	// some of them: found via review, RunWorkflowInput.BuildMaxAttempts/
 	// VerifyMaxAttempts use 0 as their own "not overridden, fall back to

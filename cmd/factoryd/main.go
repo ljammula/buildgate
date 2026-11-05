@@ -79,27 +79,19 @@ const readTokenEnvironmentVariable = "FACTORYD_API_READ_TOKEN"
 // comment.
 const maxAgentEvidenceFileSize = 10 << 20
 
-// resolveHarnessScript resolves the -build-app-script/-goal-pilot-script
-// flag values every flag surface that takes one shares (run_ticket.go,
-// daemon_cmd.go, serve_cmd.go, supervisor.go, intake.go): explicit wins
-// if the caller passed one, otherwise it's the named script inside the
-// embedded harness (agent/pi/scripts/, extracted on demand by
-// harness.Ensure to a cache directory -- see that package's doc comment).
-//
-// Before 2026-09-09 these defaulted to a path under a checkout at
-// $HOME/code/software-factory, so a go install'ed factoryd only worked
-// for an operator who happened to have that checkout in that exact
-// place. Embedding removes that dependency entirely; extraction failing
-// (a read-only or unwritable cache directory, say) is reported here with
-// the explicit-flag workaround rather than silently falling back to the
-// old checkout path.
+// resolveHarnessScript resolves a harness script flag value such as
+// -build-app-script: explicit wins if the caller passed one, otherwise it is
+// the named script inside the embedded harness (agent/pi/scripts/, extracted
+// on demand by harness.Ensure to a cache directory -- see that package's doc
+// comment). Extraction failing (a read-only or unwritable cache directory,
+// say) is reported with the explicit-flag workaround.
 func resolveHarnessScript(explicit, scriptName string) (string, error) {
 	if explicit != "" {
 		return explicit, nil
 	}
 	dir, err := harness.Ensure()
 	if err != nil {
-		return "", fmt.Errorf("resolve embedded %s: %w (pass -build-app-script/-goal-pilot-script explicitly to work around)", scriptName, err)
+		return "", fmt.Errorf("resolve embedded %s: %w (pass the script flag explicitly to work around)", scriptName, err)
 	}
 	return filepath.Join(dir, scriptName), nil
 }
@@ -484,7 +476,6 @@ func subcommands() map[string]subcommand {
 		"init":              initMain,
 		"onboard":           onboardMain,
 		"doctor":            doctorMain,
-		"intake":            withoutDeps(intakeMain),
 		"kill-switch":       withoutDeps(killSwitchMain),
 		"reconcile":         withoutDeps(reconcileMain),
 		"status":            withoutDeps(statusMain),

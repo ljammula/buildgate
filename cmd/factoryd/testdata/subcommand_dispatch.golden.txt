@@ -146,12 +146,6 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd doctor [flags]
 stderr:   Check this machine's setup; -fix repairs what it can
 
-$ factoryd intake -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd intake [flags]
-stderr:   Draft a spec and tickets into a pilot directory
-
 $ factoryd kill-switch -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag

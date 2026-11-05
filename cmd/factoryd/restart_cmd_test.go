@@ -33,7 +33,7 @@ func TestRestartBringsBackTheWorkerAndConsoleWithThisBinary(t *testing.T) {
 	dir := h.profiles.roots["default"]
 	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
 	var out bytes.Buffer
-	if err := restartRun(dp, nil, &out); err != nil {
+	if err := restartRunContext(context.Background(), dp, nil, &out, false); err != nil {
 		t.Fatalf("restart: %v\n%s", err, out.String())
 	}
 	if alive(queuePID) || alive(servePID) {
@@ -61,7 +61,7 @@ func TestRestartAllowsABuildingRequestWithNoStepInFlight(t *testing.T) {
 	}
 	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
 	var out bytes.Buffer
-	if err := restartRun(dp, nil, &out); err != nil {
+	if err := restartRunContext(context.Background(), dp, nil, &out, false); err != nil {
 		t.Fatalf("restart between two tickets: %v\n%s", err, out.String())
 	}
 	if alive(queuePID) || alive(servePID) || len(h.spawned) != 2 {
@@ -76,10 +76,10 @@ func TestRestartWithNothingRunningSaysSo(t *testing.T) {
 	dp := newTestDeps(t)
 	h := restartHarness(dp, t)
 	var out bytes.Buffer
-	if err := restartRun(dp, nil, &out); err != nil || !strings.Contains(out.String(), "no worker or console is running") || len(h.spawned) != 0 {
+	if err := restartRunContext(context.Background(), dp, nil, &out, false); err != nil || !strings.Contains(out.String(), "no worker or console is running") || len(h.spawned) != 0 {
 		t.Errorf("restart = %v, %q, spawned %v", err, out.String(), h.spawned)
 	}
-	if err := restartRun(dp, []string{"now"}, &out); err == nil {
+	if err := restartRunContext(context.Background(), dp, []string{"now"}, &out, false); err == nil {
 		t.Error("restart accepted an argument")
 	}
 }
@@ -145,7 +145,7 @@ func TestRestartStartsTheWorkerAgainWhenTheConsoleWillNotStop(t *testing.T) {
 	writeFreshWorkerHeartbeat(t, dir, queue.Process.Pid, "localhost:7233", 3)
 
 	var out bytes.Buffer
-	err = restartRun(dp, nil, &out)
+	err = restartRunContext(context.Background(), dp, nil, &out, false)
 	if err == nil || !strings.Contains(err.Error(), "serve ("+dir+")") {
 		t.Fatalf("want an error naming the console that is still running, got %v\n%s", err, out.String())
 	}
@@ -227,7 +227,7 @@ func TestRestartWithAStepInFlightDrainsThenRestarts(t *testing.T) {
 		writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
 	}()
 	var out bytes.Buffer
-	if err := restartRun(dp, nil, &out); err != nil {
+	if err := restartRunContext(context.Background(), dp, nil, &out, false); err != nil {
 		t.Fatalf("restart: %v\n%s", err, out.String())
 	}
 	if alive(queuePID) || alive(servePID) || len(h.spawned) != 2 {
@@ -330,7 +330,7 @@ func TestRestartMarksEveryWorkerAndRestartsTheStoppedOnesWhenAStopIsRefused(t *t
 		return "/installed/factoryd", nil
 	}
 	var out bytes.Buffer
-	err := restartRun(dp, nil, &out)
+	err := restartRunContext(context.Background(), dp, nil, &out, false)
 	if err == nil || !strings.Contains(err.Error(), "started again") {
 		t.Fatalf("want a refusal that says the stopped workers were started again, got %v\n%s", err, out.String())
 	}
@@ -375,7 +375,7 @@ func TestRestartWaitsForAPRReviewPassThatOnlyHoldsASlot(t *testing.T) {
 		close(released)
 	}()
 	var out bytes.Buffer
-	if err := restartRun(dp, nil, &out); err != nil {
+	if err := restartRunContext(context.Background(), dp, nil, &out, false); err != nil {
 		t.Fatalf("restart: %v\n%s", err, out.String())
 	}
 	select {

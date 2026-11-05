@@ -151,13 +151,12 @@ func liveRunnerProcessPID(dataDir, runID string) (int, error) {
 }
 
 // reconcileIsolationMarkers is called only after the caller has acquired the
-// repository Git-common-dir lock. That lock proves no in-scope direct,
-// Temporal, or recovery execution can currently mutate this repository, so
-// this function deliberately does not reacquire it. Any malformed or
-// inconclusive evidence is logged and leaked rather than guessed at. A plain
-// direct invocation has no Temporal client, so it conservatively leaves a
-// Temporal marker; a later Temporal/daemon reconciliation (or a confirmed
-// halt) can establish that cleanup is safe.
+// repository Git-common-dir lock. That lock proves no in-scope run or
+// recovery execution can currently mutate this repository, so this function
+// deliberately does not reacquire it. Any malformed or inconclusive evidence
+// is logged and leaked rather than guessed at. A caller with no Temporal
+// client conservatively leaves a Temporal marker; a later Temporal/daemon
+// reconciliation (or a confirmed halt) can establish that cleanup is safe.
 // The returned error aggregates only genuine operational failures (marker
 // enumeration itself failing; a marker this function decided WAS safe to
 // reap failing to actually go away) -- never a marker legitimately or
@@ -404,7 +403,7 @@ func temporalWorkflowRunning(ctx context.Context, temporalClient client.Client, 
 // scan).
 //
 // The repository filter is required — found via review: a `-data-dir`
-// shared with runs from a different repository, or from a direct/plain
+// shared with runs from a different repository, or from a plain
 // `-temporal-address` invocation that never went through a
 // RepositoryOwnerWorkflow at all, previously had no way to be excluded.
 // Reclaiming one anyway starts a recovery Worker on this daemon's own

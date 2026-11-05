@@ -1852,7 +1852,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 // -spec (specPath, the ticket's own build spec), then appending
 // -on-branch/-diff-base so the run checks out the quarantined run's own
 // existing branch, measured against the ticket's original base, on every
-// execution path (direct, -temporal-address, -repository), and its fresh,
+// execution path (-temporal-address, -repository), and its fresh,
 // independent review runs again. -open-pull-request is left at cfg's own
 // value: no pull request exists yet for the branch (a quarantined run never
 // opens one), so an accepted round opens it exactly as the ticket's first

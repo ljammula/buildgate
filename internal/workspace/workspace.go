@@ -332,10 +332,8 @@ func worktreeRegistered(repoDir, path string) bool {
 }
 
 // RemoveStaleEvidence deletes worktreePath's own BUILD_EVIDENCE.json, if
-// present, and reports whether one was actually there. Extracted so both
-// factoryd callers (the direct-execution path and internal/workflow's
-// PrepareIsolatedWorkspaceActivity) share one implementation instead of a
-// duplicated os.Remove/os.IsNotExist pair — found via review.
+// present, and reports whether one was actually there. Called by
+// internal/workflow's PrepareIsolatedWorkspaceActivity.
 //
 // "A fresh worktree can't have stale evidence" only holds for *untracked*
 // residue: `git worktree add` populates the new checkout from base_sha

@@ -112,10 +112,8 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	r.TestsRedOnBase = result.TestsRedOnBase
 	r.Challenge = result.Challenge
 	r.Notes = result.Notes
-	// Closes a known gap (see CLAIMS.md): result.Attempts carries every
-	// RunBuildActivity/RunVerifyActivity attempt, mirroring the direct
-	// path's own r.Attempts — previously left empty for every
-	// Temporal-routed run regardless of outcome.
+	// result.Attempts carries every RunBuildActivity/RunVerifyActivity
+	// attempt.
 	r.Attempts = append(r.Attempts, result.Attempts...)
 
 	// Found live (review): this Temporal-routed path returned without
@@ -312,12 +310,9 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		}
 		decision := recordReleaseDecision(dataDir, id, r, decisionPolicy)
 		// r.OpenPullRequest, not a new parameter threaded through every
-		// caller: found via Codex review, PR #64 -- the direct-execution
-		// path's own identical check was the only one ever reached,
-		// since every Temporal-routed run (runViaTemporal,
-		// runViaRepositoryOwner, and reconcileReclaimedRun's own delayed
-		// reconciliation) completes through this function instead, never
-		// through run_ticket.go's own save path. isolatedWorkspacePath,
+		// caller: every run (runViaTemporal, runViaRepositoryOwner, and
+		// reconcileReclaimedRun's own delayed reconciliation) completes
+		// through this function. isolatedWorkspacePath,
 		// not workspacePath, for the same reason recordReleaseDecision
 		// above uses r.ProjectPath and not workspacePath -- it is this
 		// run's own real checkout (the isolated worktree when one
