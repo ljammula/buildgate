@@ -560,13 +560,13 @@ func preambleAndHeadingDocument(n int) string {
 
 // assertParseScalesLinearly fails when parsing a document four times the
 // size takes more than eight times as long (linear is about 4, quadratic
-// about 16). It compares the best of three runs at each size, so it holds on a slow
-// or loaded machine where a fixed time limit does not.
+// about 16). It compares the best of five runs at each size, so it holds on a
+// slow or loaded machine where a fixed time limit does not.
 func assertParseScalesLinearly(t *testing.T, doc func(n int) string, n int, parse func(string)) {
 	t.Helper()
 	best := func(text string) time.Duration {
 		fastest := time.Duration(1<<63 - 1)
-		for range 3 {
+		for range 5 {
 			started := time.Now()
 			parse(text)
 			fastest = min(fastest, time.Since(started))
@@ -580,14 +580,22 @@ func assertParseScalesLinearly(t *testing.T, doc func(n int) string, n int, pars
 }
 
 func TestSpecAcceptanceCriteriaLargeHeadingDocumentIsLinearEnough(t *testing.T) {
+	started := time.Now()
 	if _, err := SpecAcceptanceCriteria(headingDocument(10_000)); err == nil {
 		t.Fatal("document with no list items: want a derivation error")
+	}
+	if elapsed := time.Since(started); elapsed > 30*time.Second {
+		t.Fatalf("parsing 10000 headings took %s", elapsed)
 	}
 	assertParseScalesLinearly(t, headingDocument, 5_000, func(text string) { _, _ = SpecAcceptanceCriteria(text) })
 }
 
 func TestSpecAcceptanceCriteriaLargePreambleAndHeadingDocumentIsLinearEnough(t *testing.T) {
+	started := time.Now()
 	criteria, err := SpecAcceptanceCriteria(preambleAndHeadingDocument(10_000))
+	if elapsed := time.Since(started); elapsed > 30*time.Second {
+		t.Fatalf("parsing a 15000-item preamble and 10000 headings took %s", elapsed)
+	}
 	if err != nil {
 		t.Fatalf("large preamble: %v", err)
 	}
