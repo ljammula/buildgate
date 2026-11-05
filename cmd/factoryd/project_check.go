@@ -319,11 +319,10 @@ func resolvePiTicketPath(workspace, ticket, ticketFile string) (string, int, err
 // advisory-only for exactly that reason. But piTicketPath was forwarded to
 // the Temporal workflow unconditionally, so the identical run -- having
 // already passed this process's own local preflight -- unconditionally
-// halted the moment it reached PreflightActivity on the Temporal path,
-// something the direct-execution path never re-checks a second time at
-// all. Passing an empty path here instead, in exactly the same
-// brownfield-and-missing case runProjectBootstrapCheck already treats as
-// advisory, makes the two paths agree again, while a genuine authoring
+// halted the moment it reached PreflightActivity. Passing an empty path
+// here instead, in exactly the same brownfield-and-missing case
+// runProjectBootstrapCheck already treats as advisory, makes the two
+// checks agree, while a genuine authoring
 // error (an explicit -ticket-file that doesn't exist, or a missing ticket
 // under the strict/default profile) still reaches PreflightActivity and
 // still fails, matching runProjectBootstrapCheck's own behavior for that
@@ -431,7 +430,7 @@ var errProjectBootstrapCheckFailed = errors.New("project-bootstrap preflight fai
 // profile is "" (strict, the default) or preflightProfileBrownfield: under
 // the brownfield profile, product_spec_frozen and program_design_structure
 // are omitted from checks entirely -- not run, not read, not reported --
-// since a repo new to this convention has neither a goal_pilot.py-shaped
+// since a repo new to this convention has neither a factory-shaped
 // spec.md nor contract.md to check in the first place, and
 // architecture_structure runs but is marked ProjectCheckResult.Advisory:
 // its own result is still reported so an operator can see what's missing,

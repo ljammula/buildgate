@@ -17,7 +17,6 @@ import (
 	"buildgate/internal/requestdriver/requestdrivertest"
 	"buildgate/internal/run"
 	"buildgate/internal/sessionconfig"
-	"buildgate/internal/store"
 )
 
 // TestBuildRequestBuildArgsIsAcceptedByRunMainWithReadysOwnFlagSet is the
@@ -229,25 +228,6 @@ func TestAdvanceBuildingBuildsThreeTicketsInOrderWithPriorRunChaining(t *testing
 		}
 		if tk.PRURL == "" || tk.PRState != "draft" {
 			t.Errorf("Tickets[%d] = %+v, want a PR URL and PRState %q", i, tk, "draft")
-		}
-	}
-
-	// M4-K1 regression: advanceBuilding's own onReady callback used to
-	// call startedRun.Save directly, bypassing RecordEvent entirely, so
-	// a ticket's run never appended to events.db the moment it started.
-	// It now goes through startedRun.Persist instead.
-	s, err := store.Open(run.EventsDBPath(dataDir))
-	if err != nil {
-		t.Fatalf("open event store: %v", err)
-	}
-	defer s.Close()
-	for i := 1; i <= 3; i++ {
-		events, err := s.List(context.Background(), requestdrivertest.TicketRunID(id, i))
-		if err != nil {
-			t.Fatalf("list events for ticket %d's run: %v", i, err)
-		}
-		if len(events) == 0 {
-			t.Errorf("ticket %d's run: events = [], want at least one durable event recorded when its run started", i)
 		}
 	}
 }

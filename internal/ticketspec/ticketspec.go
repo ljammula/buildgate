@@ -364,9 +364,8 @@ func parseFileListKeyLine(specPath, prefix string) ([]string, error) {
 	// full build round only to quarantine on an authoring mistake it
 	// could have rejected before the agent ever started. Failing closed
 	// here, at parse time, is the single choke point every execution path
-	// (direct, Temporal RunWorkflow, RepositoryOwnerWorkflow) already
-	// shares, since all three call ParseAllowedFiles
-	// once, before branching on how to execute.
+	// (RunWorkflow, RepositoryOwnerWorkflow) already shares, since the
+	// run calls ParseAllowedFiles once, before branching on how to execute.
 	if invalid := invalidWorkspaceRelativePaths(files); len(invalid) > 0 {
 		return nil, fmt.Errorf("ticket spec %s: %s declares path(s) that are not valid workspace-relative paths (must not be absolute and must not contain a \"..\" segment): %v", specPath, prefix, invalid)
 	}
@@ -510,9 +509,7 @@ func isValidWorkspaceRelativePath(p string) bool {
 // than the git checkout root.
 //
 // Found via a real live brownfield run against a Flutter + Go app repo,
-// 2026-09-11: a ticket (hand-written, but the same shape a real
-// goal_pilot.py /spec-plan drafting produced for an earlier ticket in the
-// same session) declared Allowed-Files the way a
+// 2026-09-11: a ticket declared Allowed-Files the way a
 // human or an LLM naturally thinks of a package path, with no awareness
 // that this repo's own application code lives under backend/, not the git
 // root. diff_scope correctly quarantined the run
@@ -852,9 +849,8 @@ func ClosesFence(trimmed string, ch byte, minLen int) bool {
 // accomplishes.") and returns a single-line, sanitized, length-capped
 // rendering fit for a commit subject or PR title. Shared by cmd/factoryd's
 // pullRequestTitle (the PR title) and internal/workflow's PostBuildActivity
-// plus cmd/factoryd's own direct-run host auto-commit (both build the
-// safety-net commit's subject line from it, N2) -- one goal-title
-// derivation, not three that could drift. The ticket text is agent-drafted
+// (the safety-net commit's subject line, N2) -- one goal-title
+// derivation, not two that could drift. The ticket text is agent-drafted
 // and therefore untrusted, the same status as every other agent-written
 // field a PR body already sanitizes before interpolating -- sanitize.Line
 // strips control/ANSI/secret-shaped content and folds it to one line

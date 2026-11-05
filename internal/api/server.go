@@ -2010,11 +2010,9 @@ func writeProgressEvent(w http.ResponseWriter, flusher http.Flusher, rawJSON str
 // has not yet been recorded into Run.Attempts -- the case 3.2 exists for,
 // tailing an in-progress run.
 //
-// The direct (non-Temporal) path (cmd/factoryd/run_ticket.go) writes
-// that first-attempt file as the plain "build_app.log". The Temporal
-// workflow path (internal/workflow/activity_records.go's
-// activityExecutionLogPathForExecution) instead names it
-// "<workflowID>-<runID>-<activityID>-build_app.log" inside the same
+// The workflow (internal/workflow/activity_records.go's
+// activityExecutionLogPathForExecution) names that first-attempt file
+// "<workflowID>-<runID>-<activityID>-build_app.log" inside the run's
 // directory -- a name this process cannot reconstruct without the live
 // activity's own identifiers, which aren't available here. Found in
 // review: without accounting for this, an in-progress Temporal build's
@@ -2022,6 +2020,8 @@ func writeProgressEvent(w http.ResponseWriter, flusher http.Flusher, rawJSON str
 // in-progress case this endpoint exists for. Globbing for the
 // "*-build_app.log" suffix recovers it -- at most one build activity is
 // ever in flight for a given run at a time, so at most one match exists.
+// With no match yet, the plain "build_app.log" is returned, which nothing
+// writes: the caller re-resolves on its next tick.
 //
 // Known gap: a run's SECOND build attempt, before it has itself
 // completed, is not resolved to its own (still being written) log file
@@ -2178,12 +2178,11 @@ func (s *Server) streamRunLog(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				// Re-resolve, not just re-open the same logPath computed
-				// before this loop started. Found in review: the
-				// Temporal path's log glob (logPathForRun) can find
-				// nothing on the very first tick (the activity hasn't
-				// created its prefixed file yet), which freezes logPath
-				// at the direct-run fallback name that Temporal never
-				// writes -- retrying that same wrong path forever. Every
+				// before this loop started: the log glob
+				// (logPathForRun) can find nothing on the very first
+				// tick (the activity hasn't created its prefixed file
+				// yet), which would freeze logPath at the fallback name
+				// nothing writes -- retrying that same wrong path forever. Every
 				// tick must look again for whichever name actually shows
 				// up, exactly as the non-waiting path above already does
 				// once.
@@ -2451,12 +2450,8 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		}
 		haltNotification, dispatchHalt := notify.PrepareHalt(loaded, s.dataDir)
 		// Persist is the one funnel every run-record write goes through
-		// (internal/run/run.go): it stamps UpdatedAt/FactorydVersion,
-		// writes run.json, then appends the durable event log entry --
-		// replacing this route's former separate Save+RecordEvent pair
-		// (found via review: this route called run.Run.Save directly,
-		// bypassing RecordEvent entirely, so an override never appended
-		// to events.db).
+		// (internal/run/run.go): it stamps UpdatedAt/FactorydVersion and
+		// writes run.json.
 		if err := loaded.Persist(s.dataDir); err != nil {
 			if dispatchHalt {
 				// See cmd/factoryd's own save() helper for why this must

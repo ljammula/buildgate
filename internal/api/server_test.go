@@ -22,7 +22,6 @@ import (
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
-	"buildgate/internal/store"
 	"buildgate/internal/testfixture"
 	"buildgate/internal/workspace"
 )
@@ -1215,22 +1214,6 @@ func TestOverrideRunAccepted(t *testing.T) {
 	}
 	if reloaded.State != run.StateAccepted {
 		t.Errorf("persisted State = %q, want %q", reloaded.State, run.StateAccepted)
-	}
-
-	// M4-K1 regression: this route used to call run.Run.Save directly,
-	// bypassing RecordEvent entirely, so an override never appended to
-	// events.db. It now goes through run.Run.Persist instead.
-	s, err := store.Open(run.EventsDBPath(dataDir))
-	if err != nil {
-		t.Fatalf("open event store: %v", err)
-	}
-	defer s.Close()
-	events, err := s.List(context.Background(), "run-1")
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	if len(events) == 0 {
-		t.Error("events = [], want at least one durable event recorded by the override")
 	}
 }
 

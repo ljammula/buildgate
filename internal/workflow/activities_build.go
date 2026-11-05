@@ -440,8 +440,7 @@ func composeRejectedProgressDetail(err error) string {
 // still an ancestor of the workspace's current HEAD (see
 // runner.GitIsAncestor's doc comment for why — found live, a real
 // harness invocation can reset the workspace backward mid-run and commit
-// on top of that older state), then — mirroring cmd/factoryd's direct
-// path — commits any uncommitted diff as a safety net if the build
+// on top of that older state), then commits any uncommitted diff as a safety net if the build
 // succeeded but the agent left it uncommitted, since accepted work is a
 // factory-owned guarantee, not an assumption about the agent.
 //
@@ -564,7 +563,7 @@ func (a *Activities) runPostBuild(ctx context.Context, checkpointDir string, inp
 		return result, nil
 	}
 	// N2: the ticket's own "## Goal" paragraph (the same helper
-	// cmd/factoryd's pullRequestTitle/direct-run auto-commit use), so a
+	// cmd/factoryd's pullRequestTitle uses), so a
 	// squash merge's own subject says what the ticket actually did instead
 	// of the generic "ticket: apply verified change" every such merge used
 	// to share -- falls back to the old generic subject when SpecPath has

@@ -183,16 +183,6 @@
       "description": "Assembles the review prompt: the diff (inline or self-fetched), the ticket spec, the command-outcome rule, the answer format and the optional repository-instruction diff; the advice scope and severity rules."
     },
     {
-      "id": "prompt-source:goal-pilot-command-wrapper",
-      "source_path": "agent/pi/scripts/goal_pilot.py",
-      "fragment": "step2_draft_spec / step4_compile",
-      "role": "planning",
-      "stage": "goal_pilot",
-      "kind": "inline-assembly",
-      "template_refs": [],
-      "description": "Invokes the harness-native /spec-plan and /contract-plan commands with file or project paths; command definitions and harness-provided context are opaque and out of scope."
-    },
-    {
       "id": "prompt-source:challenge",
       "source_path": "agent/pi/scripts/challenge.py",
       "fragment": "challenge_prompt",

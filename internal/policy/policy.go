@@ -166,15 +166,6 @@ func containsPath(list []string, f string) bool {
 	return false
 }
 
-// stringSet returns the members of list as a set.
-func stringSet(list []string) map[string]bool {
-	set := make(map[string]bool, len(list))
-	for _, s := range list {
-		set[s] = true
-	}
-	return set
-}
-
 // DefaultTestPatterns is used when the project's .factory.yml doesn't
 // declare test_patterns: every language profile's test-file patterns
 // (languageprofile.DefaultTestPatterns), so a repository in any ecosystem the
@@ -421,12 +412,8 @@ func RepoGate(check string, cmd []string, exitCode int, durationMs int64, logSHA
 // EvaluateRunInput bundles every already-collected piece of evidence
 // EvaluateRun needs to decide a run's accept/quarantine outcome. It exists
 // so that decision — which gates run, and how their results combine into
-// one accept/quarantine verdict — is written exactly once and shared
-// identically between cmd/factoryd's direct-supervisor path and a future
-// Temporal Activity, instead of each independently reimplementing it and
-// risking the two silently drifting apart (the same class of bug this
-// plan's --review-base-sha incident and CLAIMS.md's false-accept gaps
-// were both about: two things that were supposed to agree, didn't).
+// one accept/quarantine verdict — is written exactly once, in a pure
+// function the workflow's EvaluateRunActivity calls.
 // AllowedFiles is nil exactly when the ticket didn't declare the key — the
 // check is skipped entirely in that case, not evaluated against an empty list.
 type EvaluateRunInput struct {
@@ -744,8 +731,8 @@ func hasTopLevelLineWithPrefix(scan, prefix string) bool {
 }
 
 // DefaultArchitectureRequiredSections returns a fresh copy of the
-// section-heading convention goal_pilot.py's own drafted ARCHITECTURE.md
-// uses for a factory-scaffolded project. An onboarded EXISTING repo's own
+// section-heading convention of a factory-scaffolded project's
+// ARCHITECTURE.md (the one `factoryd init` writes). An onboarded EXISTING repo's own
 // architecture doc, written organically over real development, essentially
 // never already uses these exact three headings in this exact order --
 // found via a real brownfield validation attempt against a real existing
@@ -772,8 +759,8 @@ func DefaultArchitectureRequiredSections() []string {
 
 // ArchitectureStructure checks the stable shape of the architecture
 // artifact against requiredSections (nil or empty uses
-// DefaultArchitectureRequiredSections(), the convention goal_pilot.py's own
-// drafted ARCHITECTURE.md follows). The artifact convention is
+// DefaultArchitectureRequiredSections(), the convention a factory-scaffolded
+// ARCHITECTURE.md follows). The artifact convention is
 // deliberately small: it must describe the repository layout, how the
 // repository is verified, and any known deviations, each under its own
 // heading, in that order -- but an onboarded existing repo may already
@@ -792,10 +779,8 @@ func ArchitectureStructure(architectureContent string, requiredSections []string
 // AcceptanceSuiteWired checks that every drafted acceptance slice
 // (spec/acceptance/<NNN>/) is actually referenced somewhere in the
 // project's canonical verify command -- not merely present on disk.
-// `goal_pilot.py`'s own /contract-plan step drafts these slices, but
-// staging one into the verify command (a Makefile target, typically) is
-// left as a separate step a ticket's own build must do, and nothing
-// previously checked that it had been.
+// Staging a slice into the verify command (a Makefile target, typically)
+// is a separate step a ticket's own build must do.
 //
 // Found via real live builds, twice independently: a calculator app repo (the
 // pre-existing history behind commit 00e27bb's neighbors) and a notes app repo

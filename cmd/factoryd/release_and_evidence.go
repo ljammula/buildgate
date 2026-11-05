@@ -274,10 +274,8 @@ func mergePolicyFromRun(r *run.Run) (release.MergePolicy, bool) {
 // MergePolicyCheck/EvaluateDecision/SaveDecision were correctly tested but
 // had zero call sites anywhere in this repo (found via the 2026-09-03
 // Opus factory-pipeline review) -- Phase 7's evidence window
-// never started accumulating against real runs. Called from both the
-// direct-execution path and applyRunWorkflowResult (the Temporal-result
-// counterpart), so every accepted run gets one regardless of which engine
-// executed it.
+// never started accumulating against real runs. Called from
+// applyRunWorkflowResult, so every accepted run gets one.
 //
 // Returns the recorded decision, or nil on any RecordDecision error -- the
 // caller must treat nil the same as a denied decision (fail closed: no
@@ -1182,8 +1180,7 @@ func passedOnRerunLines(r *run.Run) []string {
 
 // recordComposeEvidence sets r.ComposeServices from the build phase's
 // compose services report and r.ComposeFilesChanged from r.ChangedFiles;
-// both feed renderRiskHeader. Shared by the direct and Temporal paths. The
-// root .env counts once services were launched: the loader interpolates the
+// both feed renderRiskHeader. The root .env counts once services were launched: the loader interpolates the
 // compose file with it (sandbox.LoadComposeServicesSpecFromGit), so an edit
 // there reshapes the next run's sidecars just as a compose edit would.
 func recordComposeEvidence(r *run.Run, dataDir string) {

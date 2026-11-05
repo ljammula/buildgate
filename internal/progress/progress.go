@@ -1,7 +1,6 @@
 // Package progress implements the run progress feed described in
 // progress-contract.md: an append-only sidecar file, one JSON object per
-// line, that both execution paths (direct and Temporal) write at every
-// stage boundary, plus worker lines relayed from the sandbox's stdout.
+// line, that a run writes at every stage boundary, plus worker lines relayed from the sandbox's stdout.
 // It is a sidecar to internal/run's run.json — run.json is never modified
 // for progress, and a write failure here must never fail or halt a run.
 //

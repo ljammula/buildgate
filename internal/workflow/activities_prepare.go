@@ -260,10 +260,9 @@ func (a *Activities) ValidateSliceChainActivity(_ context.Context, input Validat
 	}
 	// ValidateSliceChain only compares base_sha against the prior slice's
 	// result_sha — it says nothing about uncommitted changes sitting in
-	// the workspace on top of that commit. Mirrors cmd/factoryd's direct
-	// path's own matching GitIsClean check (see its doc comment there):
-	// without it, uncommitted dirt left after the prior slice would pass
-	// chain validation untouched, then get swept into this slice's own
+	// the workspace on top of that commit. Without this GitIsClean check,
+	// uncommitted dirt left after the prior slice would pass chain
+	// validation untouched, then get swept into this slice's own
 	// result by PostBuildActivity's/CollectEvidenceActivity's safety-net
 	// commit — this slice's evidence would then describe a change neither
 	// slice's own accepted evidence actually accounts for.

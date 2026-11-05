@@ -114,7 +114,7 @@ func loadConfigForPath(configPath string) (cfg *sessionconfig.Config, path strin
 // with roles: at all. Each caller that actually needs roles: enforced
 // calls validateRoles explicitly, once, itself: applySessionConfig
 // (worker), serveMain (serve), submitMain (submit), and
-// runMainWithReady (direct `factoryd run -config`, silently -- see
+// runMainWithReady (`factoryd run -config`, silently -- see
 // validateRoles' own doc comment).
 func loadSettingsForConfig(configPath string) (sessionconfig.Settings, error) {
 	settings := sessionconfig.DefaultSettings()
@@ -138,9 +138,8 @@ func loadSettingsForConfig(configPath string) (sessionconfig.Settings, error) {
 // no unwaived-warning case (see its own doc comment), so there is only
 // ever this one behavior. A schema-clean routes:/models:/roles: config
 // never refuses to start here -- modelrole.SelectRoute resolves an
-// actual route for the direct build/review/drafting paths (see
-// run_ticket.go/spec_draft_job.go), and the Temporal path
-// resolves one too (modelrole.CheckRouteBinding, the Worker's own trust
+// actual route for the drafting jobs (see spec_draft_job.go), and a build
+// on Temporal resolves one too (modelrole.CheckRouteBinding, the Worker's own trust
 // check, plus Activities.CheckRoute/ResolveRouteCredentials).
 func validateRoles(settings sessionconfig.Settings) error {
 	if err := sessionconfig.ValidateSkills(settings); err != nil {

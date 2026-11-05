@@ -454,9 +454,9 @@ func (d *daemonRun) startWorker() error {
 		SandboxCPUs:              *d.sandboxCPUs,
 		SandboxTmpfsSize:         *d.sandboxTmpfsSize,
 		ComposeServicesWorkerEnv: d.settings.ComposeServicesWorkerEnv,
-		// Temporal parity: the same session-config knob the direct
-		// path's acquireModelHostLock resolves via resolveSettings(),
-		// already defaulted to 1 by sessionconfig.DefaultSettings.
+		// The same session-config knob the host-side model jobs'
+		// acquireModelHostLock resolves via resolveSettings(), already
+		// defaulted to 1 by sessionconfig.DefaultSettings.
 		ModelHostConcurrency: *d.modelHostConcurrency,
 		// Same daemon-static, read-once-at-startup treatment regardless
 		// of routes:/legacy mode -- see Activities.EgressCABundlePath's

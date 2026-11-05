@@ -114,7 +114,7 @@ func reconcileMain(args []string) error {
 		}
 		defer temporalClient.Close()
 	}
-	// Best-effort, same convention as the direct-run startup path's own
+	// Best-effort, same convention as a single-ticket run's startup
 	// call to these (see its own doc comment): a project that has never
 	// used sandboxing at all shouldn't have plain worktree reconciliation
 	// start failing because Docker itself is unreachable for unrelated
@@ -131,7 +131,7 @@ func reconcileMain(args []string) error {
 	} else if len(removed) > 0 {
 		log.Printf("sandbox: removed %d orphaned sidecar resource(s) from a prior run: %v", len(removed), removed)
 	}
-	// scratchRunInFlight, same predicate the direct-run startup path's own
+	// scratchRunInFlight, same predicate a single-ticket run's startup
 	// removeScratchDirs call already shares: a compose-services project/
 	// network is not live under exactly the same condition a run's scratch
 	// cache isn't -- its owning run's record is missing or terminal.
@@ -141,7 +141,7 @@ func reconcileMain(args []string) error {
 		log.Printf("sandbox: removed %d orphaned compose services resource(s) from a prior run: %v", len(removed), removed)
 	}
 	removeScratchDirs(context.Background(), *sandboxDocker, absDataDir)
-	// Propagated, unlike the direct-run startup path's own best-effort
+	// Propagated, unlike a single-ticket run's startup best-effort
 	// call to this same function (found via review): this command's only
 	// job is reconciliation, so a caller or script needs its exit status
 	// to actually distinguish "cleaned up" from "tried and failed" --

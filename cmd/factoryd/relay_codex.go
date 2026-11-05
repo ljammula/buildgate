@@ -13,8 +13,7 @@ import (
 // codexTokenExpiryMargin is how far ahead of the ChatGPT access token's own
 // JWT "exp" claim resolveChatGPTCodexCredential starts refusing it: a
 // relay must not launch carrying a credential that could expire mid-run.
-// The direct and in-process Temporal paths resolve it once per run, and a
-// default run can take longer than 2h (-max-rounds 3 x -timeout-minutes 45
+// A run resolves it once, and a default run can take longer than 2h (-max-rounds 3 x -timeout-minutes 45
 // of build alone, plus verify and review; found in review 2026-09-23), so
 // 6h. Access tokens live ~10 days. The host codex CLI does not refresh one
 // inside this margin (seen 2026-10-07, codex-cli 0.157.1: a `codex exec`

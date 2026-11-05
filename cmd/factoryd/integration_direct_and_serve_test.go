@@ -311,8 +311,8 @@ func TestIntegrationRunAcceptsWellFormedPRBaseFlag(t *testing.T) {
 // is the regression test for a real brownfield-onboarding gap found
 // 2026-09-08: an existing repo's own real ARCHITECTURE.md, written
 // organically over real development, essentially never already uses
-// goal_pilot.py's own exact "Repo layout"/"Verification"/"Known
-// deviations" heading convention -- the mandatory preflight (unlike
+// the default "Repo layout"/"Verification"/"Known deviations" heading
+// convention -- the mandatory preflight (unlike
 // -skip-project-check, which turns off structural checking entirely) had
 // no way to accept a real architecture doc's own real heading names.
 // -architecture-required-sections closes that: this repo's ARCHITECTURE.md

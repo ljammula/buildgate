@@ -652,9 +652,7 @@ func (impl realForge) gitToplevel(dir string) (string, error) {
 // positional argument (or "." when omitted) to an absolute git repository
 // root, refusing anything not inside one -- quickstart's own target is
 // exactly an existing checkout ("a non-repo path is refused with a
-// pointer to factoryd init/intake"), never a from-scratch app (that path is
-// intake + factoryd <run>, not submit, which has no from-scratch shape at
-// all).
+// pointer to factoryd init"), never a from-scratch app.
 func resolveQuickstartRepoRoot(pathArg string, toplevel func(dir string) (string, error)) (string, error) {
 	if pathArg == "" {
 		pathArg = "."
@@ -670,7 +668,7 @@ func resolveQuickstartRepoRoot(pathArg string, toplevel func(dir string) (string
 	}
 	root, err := toplevel(abs)
 	if err != nil {
-		return "", fmt.Errorf("%q is not inside a git repository -- factoryd quickstart works against an existing checkout with a real history; for a brand-new app use `factoryd intake` followed by `factoryd <run>` instead, or `factoryd init` to scaffold a fresh repo first", pathArg)
+		return "", fmt.Errorf("%q is not inside a git repository -- factoryd quickstart works against an existing checkout with a real history; for a brand-new app run `factoryd init` to scaffold a fresh repo first", pathArg)
 	}
 	return root, nil
 }

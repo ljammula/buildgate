@@ -641,10 +641,6 @@ func drainLockHolderNote(dp *deps, dataDir string) string {
 // acquireWorkerLock's own doc comment above states: an operator who
 // started a second concurrent invocation against the same resource should
 // see that immediately, not have it sit silently behind the first one.
-//
-// Extracted from acquireWorkerLock (this file) so withIntakeLock
-// (intake.go) can take the same fail-fast lock on a pilot dir without
-// duplicating the flock boilerplate.
 func acquireExclusiveLock(path string, contendedMsg string) (func(), error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

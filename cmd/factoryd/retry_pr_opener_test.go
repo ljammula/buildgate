@@ -9,7 +9,6 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
-	"buildgate/internal/store"
 )
 
 // stubBranchTip overrides forge.branchTip for one test's
@@ -225,22 +224,6 @@ func TestRetryPullRequestOpenerLinksExistingPRWhenGHReportsAlreadyExists(t *test
 	}
 	if len(reloaded.Notifications) != 0 {
 		t.Errorf("Notifications = %d, want 0: linking an already-existing PR must not send a second \"accepted\" notification", len(reloaded.Notifications))
-	}
-
-	// M4-K1 regression: recoverExistingPullRequest used to call
-	// fresh.Save directly, bypassing RecordEvent entirely. It now goes
-	// through fresh.Persist instead.
-	s, err := store.Open(run.EventsDBPath(dataDir))
-	if err != nil {
-		t.Fatalf("open event store: %v", err)
-	}
-	defer s.Close()
-	events, err := s.List(context.Background(), "run-1")
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	if len(events) == 0 {
-		t.Error("events = [], want at least one durable event recorded by recovering the existing PR")
 	}
 }
 

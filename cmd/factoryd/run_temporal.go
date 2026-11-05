@@ -433,12 +433,10 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 }
 
 // runViaTemporal executes this run through internal/workflow's RunWorkflow
-// against a real Temporal server, instead of factoryd's own direct
-// in-process supervision below. It spins up a short-lived Worker on a
-// unique task queue for exactly this one run (not a long-running daemon —
-// see the plan's Phase 6 status for what a real multi-run deployment
-// still needs), waits for the Workflow to complete, and records the
-// outcome through save()/run.json.
+// against a real Temporal server. It spins up a short-lived Worker on a
+// unique task queue for exactly this one run (not a long-running daemon),
+// waits for the Workflow to complete, and records the outcome through
+// save()/run.json.
 func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient client.Client, r *run.Run, opts runOptions) error {
 	// Resolved to its canonical (symlink-free) absolute form before anything
 	// below derives a path from it (found via review): -data-dir defaults to
@@ -991,8 +989,8 @@ func rollbackIsolatedWorkspaceOnSaveFailure(r *run.Run) {
 // its own loadAgentEvidence call below for why.
 //
 // invalidatePriorRunOnFullSuiteRegression is the cross-run attribution half
-// of gap 3 (the plan's 2026-08-28 readiness review), shared verbatim with
-// the direct-execution path below: a full_suite_verify failure means the
+// of gap 3 (the plan's 2026-08-28 readiness review): a full_suite_verify
+// failure means the
 // repository no longer passes its full suite as of this run's result, so
 // durably flag the immediate declared predecessor's evidence as suspect —
 // see run.Run.InvalidatedByRunID's own doc comment for why this is an

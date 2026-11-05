@@ -2967,12 +2967,10 @@ func doctorCheckReleasePolicy(maxFilesChanged, maxChangedLines int, rollbackPlan
 // review/execution independence rule has no unwaived-warning case, only
 // a hard FAIL unless allow_shared_model is set.
 //
-// A schema-clean routes: config is a plain OK here: the direct build/
-// review/drafting paths resolve an actual route via
-// modelrole.SelectRoute, and the Temporal path (`factoryd daemon`,
-// `factoryd run -temporal-address`) resolves one too
-// (modelrole.CheckRouteBinding, the Worker's own trust check, plus
-// Activities.CheckRoute/ResolveRouteCredentials).
+// A schema-clean routes: config is a plain OK here: the drafting jobs
+// resolve an actual route via modelrole.SelectRoute, and a build on
+// Temporal resolves one too (modelrole.CheckRouteBinding, the Worker's own
+// trust check, plus Activities.CheckRoute/ResolveRouteCredentials).
 //
 // This check alone only proves the schema is internally consistent --
 // doctorChecksFor's own doctorRoutesModeChecks is what actually probes

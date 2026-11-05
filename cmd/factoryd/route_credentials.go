@@ -12,7 +12,8 @@ import (
 )
 
 // routeCredentials is the one credential value shape every relay launch
-// site (the direct build, review, and drafting) needs,
+// site (the host-side model jobs, and the workflow's activities through
+// Activities.ResolveRouteCredentials) needs,
 // regardless of which of a route's three credential_mode values resolved
 // it -- only the field(s) that mode actually uses are populated; the rest
 // stay the zero, unconfigured sandbox.RouteSecret. Mirrors

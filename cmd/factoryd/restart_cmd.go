@@ -41,10 +41,6 @@ func newRestartFlags() *flag.FlagSet {
 	return flags
 }
 
-func restartRun(dp *deps, args []string, w io.Writer) error {
-	return restartRunContext(context.Background(), dp, args, w, false)
-}
-
 // restartBusy lists, as "<request> (<dir>)", the requests the workers of dirs
 // hold a job slot for: a running step, and a pr_review pass (whose corrective
 // build is no job, so ActiveRequests alone misses it).

@@ -281,8 +281,9 @@ func haltDeadOwnerRun(dataDir, runID string) (bool, error) {
 // and files, so every reaper skips the run until a human decides (a resume
 // adopts it; release.ClearKeptForResume reaps it). The worktree path and branch are
 // copied onto the record when the run was lost before it recorded them.
-// Direct-mode worktrees are never kept: only the Temporal path can resume
-// one, so keeping it would leak it. Must run inside the run lock, before the
+// A worktree whose isolation marker is not in temporal mode is never kept:
+// only a Temporal run can resume one, so keeping it would leak it. Must run
+// inside the run lock, before the
 // save that records the halt.
 func markKeptForResume(dataDir string, r *run.Run) {
 	// Only a request's run: retry, cancel and rebuild are the human

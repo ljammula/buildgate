@@ -98,7 +98,6 @@ func commandCatalog() []commandInfo {
 		{"ticket-template", "", "Print a skeleton ticket", groupAdvanced, func() *flag.FlagSet { fs, _ := newTicketTemplateFlags(); return fs }},
 		{"check-ticket", "<ticket-file>", "Validate a ticket's header lines", groupAdvanced, newCheckTicketFlags},
 		{"check-project", "", "Run the project-bootstrap checks on the files you name", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _ := newCheckProjectFlags(); return fs }},
-		{"intake", "", "Draft a spec and tickets into a pilot directory", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newIntakeFlags(); return fs }},
 		{"daemon", "", "Service one repository's task queue", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _ := newDaemonFlags(); return fs }},
 		{"supervise", "", "Run one daemon per repository and restart it", groupAdvanced, func() *flag.FlagSet { fs, _, _ := newSuperviseFlags(); return fs }},
 	}

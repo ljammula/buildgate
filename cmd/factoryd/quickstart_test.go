@@ -38,8 +38,8 @@ func TestResolveQuickstartRepoRootRefusesNonGitPath(t *testing.T) {
 	if !strings.Contains(err.Error(), "not inside a git repository") {
 		t.Errorf("error = %q, want a message pointing at the non-git-repo refusal", err.Error())
 	}
-	if !strings.Contains(err.Error(), "factoryd intake") || !strings.Contains(err.Error(), "factoryd init") {
-		t.Errorf("error = %q, want it to point at intake/init as the from-scratch path", err.Error())
+	if !strings.Contains(err.Error(), "factoryd init") {
+		t.Errorf("error = %q, want it to point at init as the from-scratch path", err.Error())
 	}
 }
 

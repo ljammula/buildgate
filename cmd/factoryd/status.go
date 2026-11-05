@@ -39,8 +39,8 @@ type statusEntry struct {
 	PullRequestURL string `json:"pull_request_url,omitempty"`
 	Reason         string `json:"reason,omitempty"`
 	// TemporalUIURL links to this run's Temporal Web UI page (see
-	// TemporalUIURL's own doc comment) — empty for a direct (non-Temporal)
-	// run, or one whose Temporal server isn't on the default port.
+	// TemporalUIURL's own doc comment) — empty for a run with no recorded
+	// workflow, or one whose Temporal server isn't on the default port.
 	TemporalUIURL string `json:"temporal_ui_url,omitempty"`
 	// Baseline is the verify command's result on the base commit, before
 	// the build (run.BaselineVerify.Summary): "passed", or "failed" with

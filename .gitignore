@@ -5,9 +5,6 @@ data/workspaces/
 data/isolation-markers/
 data/project-checks/
 data/*.out
-data/events.db
-data/events.db-wal
-data/events.db-shm
 data/daemon-heartbeat-*.json
 data/temporal-checkpoints/
 /dist/

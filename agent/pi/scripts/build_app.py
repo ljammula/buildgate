@@ -24,8 +24,7 @@ The installed Pi thinking policy is inherited by default. `--review-policy`
 defaults to advisory: the whole-diff reviewer is recorded when present, but
 only canonical verification blocks completion. factoryd never passes the
 option (the reviewer extension is not in the sandbox image, so `required`
-would fail every round as "review unavailable"); the intake scripts
-(ticket_runner.py, goal_pilot.py) always pass it explicitly.
+would fail every round as "review unavailable").
 
 `--review-policy` governs only the legacy whole-diff "reviewer" extension
 trace. The per-criterion spec-conformity review is retired: the review step
@@ -802,9 +801,8 @@ def run_agent_streaming(
 	stray stderr lines interleaved into the JSON-lines stdout the parsers
 	above scan.
 
-	Mirrors ticket_runner.py's own invoke_build_app() process-group
-	kill-on-timeout pattern (start_new_session=True, SIGTERM then SIGKILL
-	after a grace period) rather than inventing a new one."""
+	Kills the process group on timeout (start_new_session=True, SIGTERM
+	then SIGKILL after a grace period)."""
 	try:
 		proc = subprocess.Popen(
 			command, cwd=cwd, env=env, text=True, stdin=subprocess.DEVNULL,
@@ -869,17 +867,13 @@ def ensure_git_repo(workspace: Path) -> None:
 	# Checking only the command's exit code is not enough: `git rev-parse
 	# --show-toplevel` also succeeds -- resolving to an ancestor directory --
 	# when `workspace` is merely a subdirectory of an already-git-tracked
-	# directory one level up. That's exactly ticket_runner.py's own pilot
-	# layout: `workspace/` starts as a plain subdirectory of the pilot dir's
-	# control repo, by design (see pi/prompts/spec-plan.md's scaffold step --
-	# the control repo's own .gitignore excludes `workspace/` precisely so it
-	# can get its own separate repo here). Comparing the resolved toplevel
-	# against `workspace` itself is what actually detects "workspace has no
-	# repo of its own yet"; a bare exit-code check leaves this always-false
-	# for every pilot ticket, and the model then has to work around the
-	# missing repo by force-committing past the control repo's .gitignore
-	# instead -- which breaks ticket_runner.py's own gate, since the commit's
-	# paths end up prefixed with `workspace/` where it expects bare paths.
+	# directory one level up (a `workspace/` subdirectory of a control repo
+	# whose .gitignore excludes it). Comparing the resolved toplevel against
+	# `workspace` itself is what actually detects "workspace has no repo of
+	# its own yet"; a bare exit-code check leaves this always-false there,
+	# and the model then has to work around the missing repo by
+	# force-committing past the control repo's .gitignore instead, so the
+	# commit's paths end up prefixed with `workspace/`.
 	toplevel = sh(["git", "rev-parse", "--show-toplevel"], cwd=workspace)
 	# `Path("").resolve()` is the *process* cwd, which would read as a match
 	# whenever this script happens to run from the workspace itself -- so an
@@ -929,7 +923,7 @@ def ensure_git_repo(workspace: Path) -> None:
 	# by hand outside factoryd.
 	gitignore = workspace / ".gitignore"
 	existing = gitignore.read_text() if gitignore.exists() else ""
-	needed = [line for line in (".pi-build-session/", ".pi-build-round-state.json", ".pi-conformity-session/", "BUILD_REPORT.md", "BUILD_EVIDENCE.json", "CONFORMITY_EVIDENCE.json", ".ticket-runner-staged.json") if not _git_ignores(workspace, line)]
+	needed = [line for line in (".pi-build-session/", ".pi-build-round-state.json", ".pi-conformity-session/", "BUILD_REPORT.md", "BUILD_EVIDENCE.json", "CONFORMITY_EVIDENCE.json") if not _git_ignores(workspace, line)]
 	if needed:
 		with gitignore.open("a") as handle:
 			if existing and not existing.endswith("\n"):
@@ -955,10 +949,9 @@ def workspace_fingerprint(workspace: Path) -> tuple | None:
 	Deliberately scoped to *the moment this is called*, not the ticket's
 	overall starting commit: an earlier version of this check compared
 	against review_base_sha instead, which a real Codex review of PR #4
-	caught as broken two ways -- ticket_runner.py's own stage() call runs
-	before build_app.py is invoked at all, so newly staged
-	acceptance/contract files already make a same-round no-op look
-	"changed"; and any real work a *prior* round in this same build_app.py
+	caught as broken two ways -- files a caller staged before build_app.py
+	is invoked at all already make a same-round no-op look "changed"; and
+	any real work a *prior* round in this same build_app.py
 	invocation did remains in the diff too, so a later no-op round inherits that earlier
 	round's credit and reports success for work it didn't do. Comparing
 	round-start to round-end instead of ticket-start to round-end catches
@@ -2717,8 +2710,7 @@ def _run_build(
 		result.session = "resumed" if session_resumed else f"fresh({reason})"
 	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
 	# Anchors the independent reviewer's diff scope to the ticket's true
-	# starting commit (the caller's job to know -- ticket_runner.py passes
-	# its own prior-ticket-boundary sha) instead of cross-model-review.ts's
+	# starting commit (the caller's job to know) instead of cross-model-review.ts's
 	# own default of "HEAD when this OS process happened to start". Without
 	# this, a build_app.py invocation retried against a ticket a prior,
 	# interrupted process already finished and committed sees an empty diff
@@ -3030,9 +3022,8 @@ def _run_build(
 			# this outcome and burn the rest of the round budget for nothing
 			# (observed live: budget-pilot ticket 005 burned all 3 rounds this
 			# way before the outage was noticed). Stop immediately instead of
-			# looping to max_rounds; ticket_runner.py's own build-attempt
-			# retry is the layer that should recover once the route is back
-			# -- checked before the verify_command-is-None case, since a full
+			# looping to max_rounds; the caller's retry is the layer that
+			# should recover once the route is back -- checked before the verify_command-is-None case, since a full
 			# route outage produces that exact symptom (nothing got a chance
 			# to create anything).
 			result.stopped_reason = f"model route unreachable ({errored}/{total} assistant turns errored)"
@@ -3336,7 +3327,7 @@ def main() -> int:
 		default=None,
 		help="Commit the independent reviewer should diff against for the whole invocation, "
 		"instead of HEAD when this process starts -- pass the true ticket-start boundary "
-		"(e.g. ticket_runner.py's prior-ticket commit) so a retried invocation against "
+		"(e.g. the prior ticket's commit) so a retried invocation against "
 		"already-committed work still gets reviewed rather than seeing an empty diff.",
 	)
 	parser.add_argument(

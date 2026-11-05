@@ -19,7 +19,7 @@ import (
 var dispatchGoldenSubcommands = []string{
 	"override", "serve", "daemon", "supervise", "reset-stop-line", "override-rate",
 	"check-project", "check-ticket", "ticket-template", "init", "onboard", "doctor",
-	"intake", "kill-switch", "reconcile", "status", "inbox", "inspect", "stop", "uninstall",
+	"kill-switch", "reconcile", "status", "inbox", "inspect", "stop", "uninstall",
 	"upgrade", "use", "watch", "logs", "cost", "submit", "approve", "reject", "answer", "cancel",
 	"worker", "retry", "rounds", "resume", "amend-scope", "init-config", "install-service",
 	"uninstall-service", "quickstart", "console", "install-skill", "configure-images",

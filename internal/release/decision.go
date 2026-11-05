@@ -296,7 +296,7 @@ func SinglePathComponent(field, value string) error {
 // point derive or supply its own, so the same checkout landed under two
 // ids and one's kill switch never gated the other's runs (Codex review of
 // PR #96, four findings with that single root cause). The repository
-// root, not the path's parent: the product-spec intake layout keeps an
+// root, not the path's parent: the product-spec layout keeps an
 // empty <repo>/workspace placeholder inside the repository, and
 // `factoryd submit ~/code/payments` points at the repository itself, and
 // both must yield "payments" rather than "workspace" or "code".
@@ -388,8 +388,8 @@ func ProjectOf(r *run.Run) string {
 
 // RecordDecision evaluates and durably records a release decision for one
 // accepted run in a single call -- the shared core every caller that
-// accepts a run (the direct/Temporal execution paths, and both the CLI and
-// HTTP override paths) uses, so the same evaluate-then-save sequence isn't
+// accepts a run (the workflow result, and both the CLI and HTTP override
+// paths) uses, so the same evaluate-then-save sequence isn't
 // duplicated per caller. Groundwork only, per this file's own doc
 // comments: it performs no merge, push, or deploy side effect.
 //

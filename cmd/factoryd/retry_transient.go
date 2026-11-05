@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// transientRetryAttempts is the bounded attempt budget for the direct
-// path's own idempotent, read-only/hash-only infra steps (base-SHA
+// transientRetryAttempts is the bounded attempt budget for the
+// single-ticket run path's own idempotent, read-only/hash-only infra steps (base-SHA
 // capture, chain-successor lookup, chain-cleanliness checks, evidence
 // hashing/git-read, the worker-group-write revoke) — see
 // retryTransientInfra's own doc comment for the invariant this must never

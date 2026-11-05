@@ -25,7 +25,7 @@ import (
 // harness filename -- see internal/harness's doc comment: every
 // agent/pi/scripts/*.py file is embedded and extracted together, so this
 // needs no change to that package, only to be named here the same way
-// resolveHarnessScript's other callers name build_app.py/goal_pilot.py.
+// resolveHarnessScript's other callers name build_app.py.
 const specDraftScriptName = "draft_spec.py"
 
 // specDraftScratchDirName is where the sandboxed spec-drafting job (and

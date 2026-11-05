@@ -262,7 +262,7 @@ func TestProjectOfFallsBackToDerivationForLegacyRuns(t *testing.T) {
 // derivation every entry point shares: the containing repository's own
 // basename, whether the path is the repository root (`factoryd submit
 // ~/code/payments`) or the empty <repo>/workspace placeholder the
-// product-spec intake layout keeps inside it, and never the parent
+// product-spec layout keeps inside it, and never the parent
 // directory's ("code") or the placeholder's ("workspace") -- the two
 // collisions the Codex review of PR #96 traced back to having more than
 // one derivation.

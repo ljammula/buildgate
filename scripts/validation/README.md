@@ -2,7 +2,7 @@
 
 The executable half of
 [`doc/designs/validation-plan.md`](../../doc/designs/validation-plan.md):
-baseline and Temporal end-to-end runs on a throwaway repo, plus
+a baseline run, plus
 deterministic stand-ins so gate and state-machine mechanisms can be
 exercised without a model.
 
@@ -12,15 +12,12 @@ Not the release smoke test. That is `make live-smoke`
 
 ## Phase runners
 
-Real Docker, real OpenShell gateway and meter, real Temporal (Phase 2); nothing mocked. Run in
-order: each assumes the previous phase passed. They take no flags; edit
-the constants at the top.
+Real Docker, real OpenShell gateway and meter; nothing mocked. It takes
+no flags; edit the constants at the top.
 
 | Script | Plan phase | What it does |
 |---|---|---|
 | `phase0-baseline.sh` | 0 | `make verify`, `make console-test`, `agent/pi` pytest, the live-gated Go tests, `factoryd doctor` |
-| `phase1-direct-e2e.sh` | 1 (steps 1–3) | Scaffolds a throwaway repo, runs `intake` to both checkpoints, drives ticket 001 to `accepted`, audits evidence |
-| `phase2-temporal-e2e.sh` | 2 (steps 0–1) | Same scaffold, run through a local Temporal server |
 
 ## Stand-ins (no model call)
 
@@ -45,9 +42,9 @@ The stand-ins cover the default request path (`spec_review` ->
 
 ## Not scripted, deliberately
 
-- **Phase 1 steps 4–7, Phase 2 concurrency/termination/flake.** These
-  kill processes, restart Temporal or compare timings. The stand-ins are
-  the building blocks; wiring them together is done by hand each pass.
+- **Phases 1 and 2.** Their steps scaffold a repository by hand, kill
+  processes, restart Temporal or compare timings. The stand-ins are the
+  building blocks; wiring them together is done by hand each pass.
 - **Phase 3 (chaos).** The plan document is the checklist. A script that
   fills a disk or restarts shared Docker/Temporal is too dangerous to
   leave lying around.
