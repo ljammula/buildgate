@@ -1276,10 +1276,11 @@ func TestIntegrationIsolateWorkspaceRollsBackWhenStaleEvidenceCleanupFails(t *te
 // which is already set to StateAccepted/StateQuarantined in memory by the
 // time the one terminal save runs. If that save itself fails (a read-only
 // or full data volume), the durable run.json stays stuck at whatever state
-// was last saved (typically "verifying") -- not override-eligible -- while
+// was last saved ("slice_running") -- not override-eligible -- while
 // the defer, seeing only the in-memory terminal state, skipped rollback
 // anyway, leaking the worktree and branch with no path back to them. This
-// makes the run directory read-only right after it reaches "verifying"
-// (the last state saved before the terminal transition), forcing the
+// makes the run directory read-only once its verify has started (run.json
+// is still "slice_running", the last state saved before the terminal
+// transition), forcing the
 // terminal save to fail with a real permission error, then proves the
 // isolated worktree and branch are cleaned up anyway.

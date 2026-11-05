@@ -196,7 +196,7 @@ func TestIntegrationQuarantineNotifiesSlackWebhook(t *testing.T) {
 // regression test for a real finding from review: run.json used to be
 // saved only after the Discord dispatch loop, so a crash or forced
 // shutdown during a slow/hung webhook's wait would leave the durable
-// record stuck at its previously saved "verifying" state instead of the
+// record stuck at its previously saved "slice_running" state instead of the
 // "quarantined" the run actually reached. The fixture Discord endpoint
 // here blocks until explicitly released; while it's still blocked (proven
 // by hitting the endpoint at all), run.json must already show

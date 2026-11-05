@@ -1,6 +1,6 @@
 # Factory safety contract
 
-Status: normative Phase 0 contract (2026-08-27; condensed 2026-09-25)
+Status: normative.
 
 This document is the reviewable safety boundary for unattended factory work.
 It describes what the factory may do, what it must refuse, and how a run
@@ -8,8 +8,7 @@ reaches a terminal state. It is intentionally independent of any particular
 Go package, Temporal deployment, runner, or operator console. A control marked
 `partial` or `not yet implemented` is a known prerequisite for unattended
 operation up to an accepted, mergeable state, not permission to bypass that
-control. Merge and deploy stay outside that scope permanently (decided
-2026-09-08).
+control. Merge and deploy stay outside that scope permanently.
 
 This file states rules and names where they are enforced. The review history
 behind each rule (dates, findings, incident write-ups) lives in git history
@@ -398,7 +397,7 @@ follow it, and no means to pass a gate.
 |---|---|---|---|---|
 | T-01 | Agent changes or substitutes the acceptance oracle | Keep the oracle outside the worker's writable boundary and hash the exact oracle used | Halt and quarantine on oracle drift or inaccessible oracle | partial |
 | T-02 | Worker reads or exfiltrates host/cloud credentials | Do not inject credentials; the route's model credential is held in the OpenShell gateway's store and substituted by the supervisor outside the worker. Residual: a credential header the worker writes itself is forwarded | Halt, quarantine, and asynchronously notify; never wait for approval | partial |
-| T-03 | Worker writes outside its selected workspace | Explicit writable-root allow-list and containment/escape checks | Terminate the complete process tree, then halt and quarantine | partial; a reproduced linked-worktree `.git` pointer escape was closed 2026-09-04 (`containment-matrix.md` Filesystem row) |
+| T-03 | Worker writes outside its selected workspace | Explicit writable-root allow-list and containment/escape checks | Terminate the complete process tree, then halt and quarantine | partial; the linked-worktree `.git` pointer escape is closed (`containment-matrix.md` Filesystem row) |
 | T-04 | Worker reaches arbitrary network services | Network-denied baseline; the run's OpenShell network policy names every admitted destination and calling binary | Terminate the worker and quarantine on an escape or policy violation | partial |
 | T-05 | Agent claims success without implementing the required change | Factory-owned oracle, diff, scope, and evidence checks | Treat prose as evidence only; fail the policy check | enforced in bounded slices |
 | T-06 | A timeout or crash loses the real outcome | Durable attempt, artifact, and state records, plus a best-effort stage history; recovery marks unknown work ambiguous | Halt and quarantine rather than rerun an ambiguous side effect | partial |
@@ -531,11 +530,13 @@ requires a new contract review and an updated machine-checkable test.
   `factoryd resume` (continue the lost build in its kept worktree from the
   last completed round, or rerun a lost drafting or planning step),
   `factoryd resume -from scratch` (rebuild the ticket) or `factoryd cancel`,
-  with one exception: a step the provider refused with its own limit
-  (`provider_quota`) whose refusal carries the meter's RFC 3339 reset time
-  may be resumed by the factory itself after that time, at most once per
-  request (the automatic resume, under "Request lifecycle: a lost step
-  waits for a human").
+  with one exception, at most one automatic resume per request for each of
+  two kinds: a step that never got to the work (`sandbox_launch`,
+  `model_unavailable`, `dependency_fetch`) while its wait is younger than
+  `request.AutoRetryWindow` (1 hour), and a step the provider refused with
+  its own limit (`provider_quota`) whose refusal carries the meter's RFC 3339
+  reset time, may each be resumed by the factory itself once (the automatic
+  resume, under "Request lifecycle: a lost step waits for a human").
   A lost build keeps its worktree, never its harness session, and every
   gate reruns on the final commit. A heartbeat RPC that fails on the
   connection to the Temporal server does not cancel a step: a long step
@@ -743,7 +744,7 @@ requires a new contract review and an updated machine-checkable test.
   by route name within one data dir and is derived from that record alone:
   the holder's resume, cancel or rebuild releases it, and a time a worker
   printed ends nothing. The holder's own wait may end by itself: the
-  factory's one automatic resume of a request, a minute after the reset
+  factory's one automatic provider-quota resume of a request, a minute after the reset
   time of the refusal that ended its step (the automatic resume, under
   "Request lifecycle: a lost step waits for a human"). Rounds, a read-back and the challenger are not held
   and meet the limit as before. What reaches `resume_review` with the cause is what that check
@@ -1037,7 +1038,215 @@ A repository can require that parts of a change ship as separate pull requests, 
 - **SC-019 — a review reads the base commit's instructions:** every model review of a run, and its challenger job (SC-022), launches with the repository's instruction files (AGENTS.md-style files, harness folders, project skills, MCP and hook configuration, at any depth of the repository) as the commit the request started from holds them (for a single-ticket run, the run's own base), mounted read-only over the worktree; what the build changed in them reaches the reviewer only as quoted data; an instruction-named path the worktree holds beyond the result commit is removed before the review; a tracked instruction file that no longer matches the result commit, a link from an instruction path to a directory that is not one, a checkout-converted instruction file, or any other shape the mask cannot carry halts the run before the review launches, and a build is never told why. Each review attempt and challenge record records the snapshot's SHA-256, the masked paths and the removed paths.
 - **SC-020 — memory reaches another ticket only approved or merged, and only inside the fence:** a line derived from one ticket's runs (a build agent's note that passed the fixed text rule, rendered by the host as one list line) reaches a model working on another ticket in two ways only: inside the spec and ticket of a memory request, which stops at spec review until the operator approves it, or as the fenced section of root `AGENTS.md` at the commit that work starts from. A run of a memory request is released only when its result commit holds exactly one root path whose name folds to `AGENTS.md`, spelled `AGENTS.md`, a regular file of mode 100644 that is byte-for-byte the text the factory rendered when the change was proposed, and the run changed no other file; and only when root `AGENTS.md` at the run's diff base is the file the proposal was rendered from (its SHA-256 is the proposal's `base_blob_sha256`, or neither has a file), so a change a person made to the file after the proposal is never overwritten: the release is refused with `AGENTS.md changed after the memory change was proposed; propose it again`, and the worker halts such a request with the same sentence before its build when the checkout's HEAD already differs. Once a repository's root `AGENTS.md` holds a memory section (at the run's diff base, a root file of that name in any letter case holds the text `buildgate:memory`), a run that is not a memory request's may not change that file in any way (its text outside the markers, its mode, its type, a move or a delete) nor add a case variant of its name; before a section exists, such a run may change or create the file but may not leave the marker text in it (written plainly or as HTML character references), a second spelling of its name, or a symlink, submodule or directory in its place. The host reads this from git objects, never the worktree, records it on the run, and refuses the release on any read failure; the operator's override computes it on the host before its decision, and the HTTP override refuses a run that lacks it. With pull requests on, a ticket whose release decision is not allowed halts its request before a later ticket is built on its commit; with pull requests off nothing is pushed or opened, the tickets are built in order and each run's decision is on its record. A memory request changes at most five lines, and when the section is full the proposal is refused: the factory never chooses a line to drop. Candidates are shown only to the operator (`factoryd memory list` and `show`, the project's memory route); nothing collects, proposes or drops one without a person running the command, the factory never runs a command a line names, and a reviewer's comment on a memory request's pull request is answered and starts no build. The section is read only when every line of it is free of control and format characters, and a file with no section is given one only when it does not end inside a code fence: whatever the factory accepts, the file it renders reads back. Memory is off for a repository until the operator lists it under `memory.repositories`, and the project's kill switch or `factoryd memory off` stops every memory action that changes anything. Of the three switches, two stop a memory request already in flight: its run is not released while the kill switch is engaged (as for any run) or while the store holds the off marker `factoryd memory off` wrote (`repository memory is switched off (factoryd memory off)`). Removing a repository from `memory.repositories` stops new proposals and every other changing subcommand, and does not stop the release of a request already in flight.
 - **SC-021 — a repository's install runs only as approved, and its cached result comes only from a trusted commit:** a run whose committed .factory.yml has a sandbox: block launches no sandbox unless the operator approved that block's SHA-256 for that repository; a reused install image was built from the commit .factory.yml was read from, keyed by every InstallImageKey input, and holds nothing a build, verify or gate sandbox wrote; a run whose starting commit's install inputs differ uses a run-local image no other run reuses. The key covers the image format, `Dockerfile.install` and the restore step, the scope, the repository, the block's hash, the configured and the effective sandbox image (both pinned by digest, else refused), the worker's uid:gid, the narrowed registry proxy routes and the proxy image, and the path and blob id of every dependency manifest, lockfile, package-manager setting and version file (and the block's `inputs`) at the commit the install ran on, outside `vendor/`, `testdata/` and `node_modules/`. The image's tree holds only regular files, directories and links that resolve inside their cache path through the tree's other links, and is launched by the digest the local registry serves for its key. The run records the image as `Run.Install`; an accepted result whose input carried the block's hash and that has no `Install` record for it is quarantined (`InstallNotRunMessage`).
-- **SC-022 — a challenger's test refuses nothing and starts no round of its own:** After every gate of a request's ticket build before the code review has passed, and its size is within the pull request bands (the paragraph on size after SC-018), the ticket's challenger job runs once, started with the code review on the same result commit where Docker's memory holds both at the limits (`max_parallel_jobs` × 2 × `sandbox_memory`), else after it, the order recorded on the challenge record, and never given the review's findings, nor the review given its files: the first such run of the ticket is challenged, and no later build of the ticket starts another challenger job. The job is a sandbox launch of the `challenger` role (SC-015, SC-016) on that role's model through its own route, with the run's image, registry proxy, setup commands and `.factory/` mount, on a scratch worktree of the run's result commit under the run's directory, discarded afterwards: it reads the whole tree and may write and run tests there, but it is never the run's own worktree or branch, and nothing it writes reaches either except as below. That it tests the change's public surface is an instruction in its prompt, not a containment. It reads the base commit's instruction files (SC-019). It is given the approved spec (re-hashed against the hash `spec_review` approved), followed, unless every criterion is labelled `AC-<n>` with its own number, by each criterion the factory numbers with its ID, the read-back answers and the list of the diff's changed paths, and no build session, handoff, agent notes, review finding or build prompt (SC-018). It may run its tests in its own sandbox before it hands them over; nothing it reports is read as a verdict. A single-ticket `factoryd run` outside a request has no approved spec and runs no challenger. What the challenger hands over counts only through the factory's copy. The host copies out once, created exclusively under the run's `challenge/` directory with mode 0444, each file that is a new relative path matching `test_patterns` (or the global defaults when unset) as read from the commit `.factory.yml` was read from, with no `..` component and no link among its parents, not equal under case folding to a path tracked in the result commit, not an instruction path (SC-019), not under `.factory/` and not a protected path, within the size cap per file and the cap on the number of files. Its SHA-256 is recorded on the challenge record and checked before each mount; its content is never recorded there. A file whose first lines carry no derivation header (one fixed header line naming one numbered acceptance criterion of the approved spec, `AC-<n>`, or one numbered read-back answer, that the spec or the answers hold) is held, not run, and is one note in the pull request; the header is read as a label and a number, never as prose. The header also names the file's subject, `subject: <path>[, <path>]` (one to three repo-relative paths), the source files the test exercises and a fix would change; the subject is read as paths (cleaned, none absolute or holding `..`), never as prose; a valid label with a malformed subject is held, not run, with its own note. Where the ticket's Allowed-Files are a person's (not an unapproved list), a file whose subject is missing, not a path tracked in the result commit, or not covered by Allowed-Files is held, not run, and one note built from the file's path, its label and the subject paths alone: it gives no verdict and starts no round. The request records such a file, and each red file of an advice round that `diff_scope` quarantined, with the files its fix needs (`challenge_out_of_scope`): the ticket starts no further round for it, the declined comment says what it needs, and a later ticket's challenger is told, in its spec, the raised criteria whose files all lie among that ticket's Allowed-Files, after the list of the files that ticket may change. A round's record carries each red file's criterion text, and its build is told that a test asserting behaviour the criterion does not state is declined, not satisfied. With several red files in such a round nothing is recorded, since the files may serve only one of them; neither the subject rule nor the memory changes a verdict the factory's own gates give, and `diff_scope` stays the backstop of every round. A request ticket's challenge may cite only a criterion that the ticket or an earlier ticket of the request lists under its `### Acceptance criteria covered` (or an answer): a file whose header cites any other criterion is held and not run, with a note, and the challenger is told the covered criteria; a ticket whose own coverage cannot be read is not narrowed. A file the shape rules refuse is a note naming its rule. The factory's run of the held files is a gate sandbox launched by the same path as every other gate (the run's image, network policy, setup commands and `.factory/` mount, no model route, no credential) on a scratch worktree of the result commit, discarded afterwards and never the run's own worktree, with every held file that carries a header mounted read-only at its path. Where a reproduction runner covers the file's path (`internal/reproduction`: Go, Vitest, pytest, Maven Surefire, Minitest), chosen in the file's nearest enclosing directory, the repository root included, whose marker files (read from the judged commit) a runner accepts, its command run in that directory, and reads test IDs in it (a Vitest test inside a suite called through `.each` or `.for` has none: its name is known only at run time), the command is that runner's, selecting only the held files' own test IDs with the factory's per-test timeout, and the verdict is the runner's structured report for those IDs: every ID passed is green, a failed ID (an assertion, a panic or exception, the per-test timeout) is red, and a compile or collection error naming a held file, or a missing or unreadable report, is a broken challenge: a note in the pull request, no round. Any other file runs under the repository's own `verify_command` from the committed `.factory.yml`, all such files in one launch, whose exit status alone is the group's verdict (0 green, any other red), recorded on each file as the group's (`group`) and told in the pull request and a round's record as one run that failed, never as a failure of each file; the pull request notes that its collection is not proven. A red verdict is run once more as a separate launch before anything follows from it, and counts as red only when both launches are red; a red then green is advice, no round. The launches that do not depend on one another run up to two at a time (the run worker's two Activity slots), each its own sandbox and verdict on the same commit with the same mounts: the first launch of every runner-covered file and of the verify-command group together, then the second launch of each unit whose first was red together, counted against the launch budget as before; a challenge beside the code review (where both fit Docker's memory) launches one at a time so the review keeps a slot, as does a run with compose services or whose Activities retry. A launch whose sandbox never started the command, a copy, hash or mount failure, and a challenger job that handed over no file, whatever its exit status (SC-017's causes included; the files a job left are held whatever its exit status, with a note when it was not 0), are no verdict: the run goes on without a challenge and the pull request names the cause; nothing halts. Each launch counts against the launch budget and the Activity's time (SC-009); its exit status, its log and the SHA-256 of every file it ran are recorded on the run (SC-008). Green, with the code review's verdict given (a review with no verdict commits nothing, keeps the challenge record on the run, and the ticket is challenged afresh by the build that follows the resume): the factory's one host step that commits pinned files onto a run's branch commits the held files as a child of the result commit, re-reads each committed file from that commit and compares it with its pinned hash, and that commit is the run's `ResultSHA` for the release decision and the pull request, once the run's `verify_command` has passed on it in a fresh sandbox (the held files' own test IDs do not cover a table row, a type error or a vet failure); a verify command that fails there, or a verify step that errors, hard-resets the worktree and branch to the previous result commit (only when HEAD is the challenge commit and its parent that result commit; the run's deadline allows for this one verify), leaves `ResultSHA` and the changed files as they were, makes the verdict no verdict with the failure as its cause and a note in the pull request, and a reset that fails halts the run; `diff_scope` sets the files aside by their pinned hash, never their path. Red: an open item of the ticket's advice rounds below, once its pull request is open; with no pull request open, and for a run `pr_order` carves into several tickets, no round runs, the red files are listed in the run record, and the pull request body lists them when one opens (a carved run's, on the first carved ticket's pull request, with a note that no round ran). A round given red held files has them mounted read-only where the build can read and never write them, listed only in that build sandbox's own git ignore file and never in the repository's `info/exclude`, is told to fix the code or decline with a reason, and runs them again on its result as above; while they are not yet committed on the branch, a round whose held files are all green commits them as above. A held file still red after the last round is advice: the pull request lists each red challenge file's path, the criterion it cites and the build's reason, one line each, cut and cleaned as SC-018's values are, never the file's content; the body is written when the pull request opens and not edited afterwards, so a red list names the build's result commit it judges and says the section is not updated for later commits on the branch. A challenge never quarantines, halts or parks a run or a request, and is never a failed or ambiguous policy check under SC-013; a round's push that failed once sent halts the request whatever the round was given (below), because the commit may be on the remote. Every later build of the ticket (a corrective, PR-review, CI or advice round, a retry, a resume) runs the held files again on its result by the same path; that result starts a round only as an open item of the advice rounds that follow an accepted ticket run (its first build, or an accepted corrective round), and is otherwise advice in the pull request. A restack's replay run runs no challenge. It is given the held files of the challenge its branch may carry as set-aside only (`-challenge-set-aside`, refused without `-replay` and with `-challenge`, `-challenge-held` or `-challenge-round`): those of the ticket's own challenge run, or, for a carved ticket, of the run it was carved from when that run's challenge was committed. `diff_scope` sets a file aside where the branch's commit holds it at its pinned hash, as for every build, and nothing mounts, runs or times them. A model review's finding never refuses a run and never starts a corrective build: `code_review` fails only when the reviewer gave no verdict, and no review writes a test the factory runs. Every finding is listed in the pull request body with its severity and one line, cut and cleaned as SC-018's values are; after an advice round's confirmed push one pull request comment lists, the same way and with its severity and summary only, the findings the round was given and its own review's findings. A review that gave no verdict is not a finding: it hands the run to a human under SC-017 and refuses nothing. A request's accepted ticket run whose pull request is open and that has an open item (a `high` review finding, or a red held challenge file) gets up to `review_advice_rounds` advice rounds (0 to 3, 3 by default; at least one when the accepted run has a red held file) before the request leaves `building`, each one build on the run's branch with the ticket's unchanged spec on the execution role's model (never the escalation), given one `-earlier-attempt` record (SC-018) with the red held files of the run it follows first and then its `high` findings, opening no pull request, judged by every gate and a fresh review, the held files run again on its result; round k+1 runs only after round k's result was pushed and that result still has an open item, never after a round whose run it followed had no red held file and whose own review recorded no fewer `high` findings, and a round runs only while every launch budget has at least the spend of the run it repeats left (its spend counts toward the request's budget). An advice round never refuses: only its accepted result whose held files include none that was green on the run it followed and is not green on it (red, or broken), pushed to the pull request's branch under the Forge row's checks and confirmed, replaces the run it followed as the ticket's run and PR head; any other outcome, a release decision not allowed, or a push check that refuses leaves that run, the remote branch and the pull request as they were, puts the local branch back on that run's commit (the Forge row), and quarantines, halts or parks nothing (a push that failed once sent, or a local branch still ahead that could not be put back, halts the request). While a round builds the ticket's run stays the run it follows. Advice rounds count against neither `review_corrective_rounds` nor `max_review_rounds`. One a stopped worker left in flight (`Ticket.Advice`) is settled from its run by the next pass, never started again, and settled as halted once its run has not ended within a ticket build's step limit and an hour; a worker lost mid-round parks the request in `resume_review` through the lost-step path as for any build, and the round is settled when the request returns to `building`; one still in flight when the request reaches `pr_review` (a halt, then a retry) is recorded as not pushed, once its run has ended (waited for up to the same bound), before any PR head is read.
+- **SC-022 — a challenger's test refuses nothing and starts no round of its own:** its six parts below are the rule, each a paragraph of its own; this line only names them.
+
+  - **SC-022.1 — the challenger job:** After every gate of a request's ticket
+    build before the code review has passed, and its size is within the pull
+    request bands (the paragraph on size after SC-018), the ticket's
+    challenger job runs once, started with the code review on the same result
+    commit where Docker's memory holds both at the limits (`max_parallel_jobs`
+    × 2 × `sandbox_memory`), else after it, the order recorded on the
+    challenge record, and never given the review's findings, nor the review
+    given its files: the first such run of the ticket is challenged, and no
+    later build of the ticket starts another challenger job. The job is a
+    sandbox launch of the `challenger` role (SC-015, SC-016) on that role's
+    model through its own route, with the run's image, registry proxy, setup
+    commands and `.factory/` mount, on a scratch worktree of the run's result
+    commit under the run's directory, discarded afterwards: it reads the whole
+    tree and may write and run tests there, but it is never the run's own
+    worktree or branch, and nothing it writes reaches either except as below.
+    That it tests the change's public surface is an instruction in its prompt,
+    not a containment. It reads the base commit's instruction files (SC-019).
+    It is given the approved spec (re-hashed against the hash `spec_review`
+    approved), followed, unless every criterion is labelled `AC-<n>` with its
+    own number, by each criterion the factory numbers with its ID, the
+    read-back answers and the list of the diff's changed paths, and no build
+    session, handoff, agent notes, review finding or build prompt (SC-018). It
+    may run its tests in its own sandbox before it hands them over; nothing it
+    reports is read as a verdict. A single-ticket `factoryd run` outside a
+    request has no approved spec and runs no challenger.
+
+  - **SC-022.2 — what the factory holds:** What the challenger hands over
+    counts only through the factory's copy. The host copies out once, created
+    exclusively under the run's `challenge/` directory with mode 0444, each
+    file that is a new relative path matching `test_patterns` (or the global
+    defaults when unset) as read from the commit `.factory.yml` was read from,
+    with no `..` component and no link among its parents, not equal under case
+    folding to a path tracked in the result commit, not an instruction path
+    (SC-019), not under `.factory/` and not a protected path, within the size
+    cap per file and the cap on the number of files. Its SHA-256 is recorded
+    on the challenge record and checked before each mount; its content is
+    never recorded there. A file whose first lines carry no derivation header
+    (one fixed header line naming one numbered acceptance criterion of the
+    approved spec, `AC-<n>`, or one numbered read-back answer, that the spec
+    or the answers hold) is held, not run, and is one note in the pull
+    request; the header is read as a label and a number, never as prose. The
+    header also names the file's subject, `subject: <path>[, <path>]` (one to
+    three repo-relative paths), the source files the test exercises and a fix
+    would change; the subject is read as paths (cleaned, none absolute or
+    holding `..`), never as prose; a valid label with a malformed subject is
+    held, not run, with its own note. Where the ticket's Allowed-Files are a
+    person's (not an unapproved list), a file whose subject is missing, not a
+    path tracked in the result commit, or not covered by Allowed-Files is
+    held, not run, and one note built from the file's path, its label and the
+    subject paths alone: it gives no verdict and starts no round. The request
+    records such a file, and each red file of an advice round that
+    `diff_scope` quarantined, with the files its fix needs
+    (`challenge_out_of_scope`): the ticket starts no further round for it, the
+    declined comment says what it needs, and a later ticket's challenger is
+    told, in its spec, the raised criteria whose files all lie among that
+    ticket's Allowed-Files, after the list of the files that ticket may
+    change. A round's record carries each red file's criterion text, and its
+    build is told that a test asserting behaviour the criterion does not state
+    is declined, not satisfied. With several red files in such a round nothing
+    is recorded, since the files may serve only one of them; neither the
+    subject rule nor the memory changes a verdict the factory's own gates
+    give, and `diff_scope` stays the backstop of every round. A request
+    ticket's challenge may cite only a criterion that the ticket or an earlier
+    ticket of the request lists under its `### Acceptance criteria covered`
+    (or an answer): a file whose header cites any other criterion is held and
+    not run, with a note, and the challenger is told the covered criteria; a
+    ticket whose own coverage cannot be read is not narrowed. A file the shape
+    rules refuse is a note naming its rule.
+
+  - **SC-022.3 — the factory's run of the held files:** The factory's run of
+    the held files is a gate sandbox launched by the same path as every other
+    gate (the run's image, network policy, setup commands and `.factory/`
+    mount, no model route, no credential) on a scratch worktree of the result
+    commit, discarded afterwards and never the run's own worktree, with every
+    held file that carries a header mounted read-only at its path. Where a
+    reproduction runner covers the file's path (`internal/reproduction`: Go,
+    Vitest, pytest, Maven Surefire, Minitest), chosen in the file's nearest
+    enclosing directory, the repository root included, whose marker files
+    (read from the judged commit) a runner accepts, its command run in that
+    directory, and reads test IDs in it (a Vitest test inside a suite called
+    through `.each` or `.for` has none: its name is known only at run time),
+    the command is that runner's, selecting only the held files' own test IDs
+    with the factory's per-test timeout, and the verdict is the runner's
+    structured report for those IDs: every ID passed is green, a failed ID (an
+    assertion, a panic or exception, the per-test timeout) is red, and a
+    compile or collection error naming a held file, or a missing or unreadable
+    report, is a broken challenge: a note in the pull request, no round. Any
+    other file runs under the repository's own `verify_command` from the
+    committed `.factory.yml`, all such files in one launch, whose exit status
+    alone is the group's verdict (0 green, any other red), recorded on each
+    file as the group's (`group`) and told in the pull request and a round's
+    record as one run that failed, never as a failure of each file; the pull
+    request notes that its collection is not proven. A red verdict is run once
+    more as a separate launch before anything follows from it, and counts as
+    red only when both launches are red; a red then green is advice, no round.
+    The launches that do not depend on one another run up to two at a time
+    (the run worker's two Activity slots), each its own sandbox and verdict on
+    the same commit with the same mounts: the first launch of every
+    runner-covered file and of the verify-command group together, then the
+    second launch of each unit whose first was red together, counted against
+    the launch budget as before; a challenge beside the code review (where
+    both fit Docker's memory) launches one at a time so the review keeps a
+    slot, as does a run with compose services or whose Activities retry. A
+    launch whose sandbox never started the command, a copy, hash or mount
+    failure, and a challenger job that handed over no file, whatever its exit
+    status (SC-017's causes included; the files a job left are held whatever
+    its exit status, with a note when it was not 0), are no verdict: the run
+    goes on without a challenge and the pull request names the cause; nothing
+    halts. Each launch counts against the launch budget and the Activity's
+    time (SC-009); its exit status, its log and the SHA-256 of every file it
+    ran are recorded on the run (SC-008).
+
+  - **SC-022.4 — what a verdict does:** Green, with the code review's verdict
+    given (a review with no verdict commits nothing, keeps the challenge
+    record on the run, and the ticket is challenged afresh by the build that
+    follows the resume): the factory's one host step that commits pinned files
+    onto a run's branch commits the held files as a child of the result
+    commit, re-reads each committed file from that commit and compares it with
+    its pinned hash, and that commit is the run's `ResultSHA` for the release
+    decision and the pull request, once the run's `verify_command` has passed
+    on it in a fresh sandbox (the held files' own test IDs do not cover a
+    table row, a type error or a vet failure); a verify command that fails
+    there, or a verify step that errors, hard-resets the worktree and branch
+    to the previous result commit (only when HEAD is the challenge commit and
+    its parent that result commit; the run's deadline allows for this one
+    verify), leaves `ResultSHA` and the changed files as they were, makes the
+    verdict no verdict with the failure as its cause and a note in the pull
+    request, and a reset that fails halts the run; `diff_scope` sets the files
+    aside by their pinned hash, never their path. Red: an open item of the
+    ticket's advice rounds below, once its pull request is open; with no pull
+    request open, and for a run `pr_order` carves into several tickets, no
+    round runs, the red files are listed in the run record, and the pull
+    request body lists them when one opens (a carved run's, on the first
+    carved ticket's pull request, with a note that no round ran). A round
+    given red held files has them mounted read-only where the build can read
+    and never write them, listed only in that build sandbox's own git ignore
+    file and never in the repository's `info/exclude`, is told to fix the code
+    or decline with a reason, and runs them again on its result as above;
+    while they are not yet committed on the branch, a round whose held files
+    are all green commits them as above. A held file still red after the last
+    round is advice: the pull request lists each red challenge file's path,
+    the criterion it cites and the build's reason, one line each, cut and
+    cleaned as SC-018's values are, never the file's content; the body is
+    written when the pull request opens and not edited afterwards, so a red
+    list names the build's result commit it judges and says the section is not
+    updated for later commits on the branch. A challenge never quarantines,
+    halts or parks a run or a request, and is never a failed or ambiguous
+    policy check under SC-013; a round's push that failed once sent halts the
+    request whatever the round was given (below), because the commit may be on
+    the remote. Every later build of the ticket (a corrective, PR-review, CI
+    or advice round, a retry, a resume) runs the held files again on its
+    result by the same path; that result starts a round only as an open item
+    of the advice rounds that follow an accepted ticket run (its first build,
+    or an accepted corrective round), and is otherwise advice in the pull
+    request. A restack's replay run runs no challenge. It is given the held
+    files of the challenge its branch may carry as set-aside only
+    (`-challenge-set-aside`, refused without `-replay` and with `-challenge`,
+    `-challenge-held` or `-challenge-round`): those of the ticket's own
+    challenge run, or, for a carved ticket, of the run it was carved from when
+    that run's challenge was committed. `diff_scope` sets a file aside where
+    the branch's commit holds it at its pinned hash, as for every build, and
+    nothing mounts, runs or times them.
+
+  - **SC-022.5 — a review finding is advice:** A model review's finding never
+    refuses a run and never starts a corrective build: `code_review` fails
+    only when the reviewer gave no verdict, and no review writes a test the
+    factory runs. Every finding is listed in the pull request body with its
+    severity and one line, cut and cleaned as SC-018's values are; after an
+    advice round's confirmed push one pull request comment lists, the same way
+    and with its severity and summary only, the findings the round was given
+    and its own review's findings. A review that gave no verdict is not a
+    finding: it hands the run to a human under SC-017 and refuses nothing.
+
+  - **SC-022.6 — advice rounds:** A request's accepted ticket run whose pull
+    request is open and that has an open item (a `high` review finding, or a
+    red held challenge file) gets up to `review_advice_rounds` advice rounds
+    (0 to 3, 3 by default; at least one when the accepted run has a red held
+    file) before the request leaves `building`, each one build on the run's
+    branch with the ticket's unchanged spec on the execution role's model
+    (never the escalation), given one `-earlier-attempt` record (SC-018) with
+    the red held files of the run it follows first and then its `high`
+    findings, opening no pull request, judged by every gate and a fresh
+    review, the held files run again on its result; round k+1 runs only after
+    round k's result was pushed and that result still has an open item, never
+    after a round whose run it followed had no red held file and whose own
+    review recorded no fewer `high` findings, and a round runs only while
+    every launch budget has at least the spend of the run it repeats left (its
+    spend counts toward the request's budget). An advice round never refuses:
+    only its accepted result whose held files include none that was green on
+    the run it followed and is not green on it (red, or broken), pushed to the
+    pull request's branch under the Forge row's checks and confirmed, replaces
+    the run it followed as the ticket's run and PR head; any other outcome, a
+    release decision not allowed, or a push check that refuses leaves that
+    run, the remote branch and the pull request as they were, puts the local
+    branch back on that run's commit (the Forge row), and quarantines, halts
+    or parks nothing (a push that failed once sent, or a local branch still
+    ahead that could not be put back, halts the request). While a round builds
+    the ticket's run stays the run it follows. Advice rounds count against
+    neither `review_corrective_rounds` nor `max_review_rounds`. One a stopped
+    worker left in flight (`Ticket.Advice`) is settled from its run by the
+    next pass, never started again, and settled as halted once its run has not
+    ended within a ticket build's step limit and an hour; a worker lost
+    mid-round parks the request in `resume_review` through the lost-step path
+    as for any build, and the round is settled when the request returns to
+    `building`; one still in flight when the request reaches `pr_review` (a
+    halt, then a retry) is recorded as not pushed, once its run has ended
+    (waited for up to the same bound), before any PR head is read.
 
 `factoryd memory add -run <id>` records an operator-cited evidence reference separately from runs whose agent notes said a candidate. It accepts only a confirmed terminal run recorded against the same repository root; the reference is shown only to the operator and does not change the candidate's agent-run count, collection eligibility, or what a model receives. Each list is capped at 20 run IDs, and schema migration preserves existing stores.
 
@@ -1088,83 +1297,91 @@ receives. None of them changes what that check enforces.
 
 ## State transitions
 
-The following transitions are the complete normative state graph up to an
-accepted, mergeable state. A transition is factory-owned and must be backed
-by durable evidence; an agent report cannot create one. Merge and deploy
-themselves are not part of this graph — they are human actions that happen
-after it, informed by the recorded decision, never automated.
+Two graphs make up the normative state graph up to an accepted, mergeable
+state: a run's (one ticket build, `internal/run`) and a request's (spec to
+pull requests, `internal/request`). A transition is factory-owned and must
+be backed by durable evidence; an agent report cannot create one. Merge and
+deploy are not part of either graph: they are human actions after it,
+informed by the recorded release decision, never automated.
+
+### Run state graph
+
+The graph is what `run.json` records, save after save.
 
 ```text
-  draft -> product_policy_check -> architecture_policy_check
-        -> program_design_policy_check -> ready -> slice_running
-        -> verifying -> slice_policy_check -> accepted
-                                                  |
-                              +-------------------+-------------------+
-                              v                                       v
-                         next_slice -> slice_running          merge_policy_check
-                                                                       |
-                                                                       v
-                                                             decision_recorded (terminal)
-
-  {slice_running, verifying, slice_policy_check}
-    -- any execution --------------> halted
-    -- failed/ambiguous check -----> quarantined
-  halted -> quarantined
-  quarantined -- policy-approved retry, or an
-              authenticated human override --> resumed
+  ready -> slice_running -> accepted | quarantined
+    |            |
+    +------------+--> halted, quarantined
+  halted (unconfirmed) -> accepted | quarantined   (the owner's own result)
+  quarantined -> accepted | halted                 (authenticated override only)
 ```
 
-The diagram is a reading aid. The edge lists below are normative and are
-verified line-for-line by `internal/claims/safety_contract_test.go`.
+The edges below are `run.Transitions()`, edge for edge:
+`internal/claims/safety_contract_test.go` fails when this list and the code
+differ in either direction, and `run.CanTransition` is what
+`Run.ApplyOverride` checks.
 
-### Normal progression
-
-- `draft -> product_policy_check`
-- `product_policy_check -> architecture_policy_check`
-- `architecture_policy_check -> program_design_policy_check`
-- `program_design_policy_check -> ready`
 - `ready -> slice_running`
-- `slice_running -> verifying`
-- `verifying -> slice_policy_check`
-- `slice_policy_check -> accepted`
-- `accepted -> next_slice`
-- `next_slice -> slice_running`
-
-### Failure, recovery, and delivery
-
-- `any execution -> halted`
+- `ready -> halted`
+- `ready -> quarantined`
+- `slice_running -> accepted`
+- `slice_running -> halted`
+- `slice_running -> quarantined`
+- `halted -> accepted`
 - `halted -> quarantined`
-- `any execution -> quarantined`
-- `quarantined -> resumed`
-- `accepted -> merge_policy_check`
-- `merge_policy_check -> decision_recorded`
+- `quarantined -> accepted`
+- `quarantined -> halted`
 
-A failed policy check goes directly from execution to `quarantined`, not
-via `halted`. This is deliberate (`cmd/factoryd/apply_run_result.go`): an
+| Edge | Where the code saves it |
+|---|---|
+| created `ready` | `cmd/factoryd/run_ticket.go` (every run that goes on toward its build) |
+| created `halted` (confirmed) | `cmd/factoryd/run_ticket.go` (a `-ticket-file` scope that differs from `-spec`'s, a missing `Allowed-Files:` under `-require-declared-scope`) |
+| `ready -> slice_running` | `cmd/factoryd/run_ticket.go`, before the build is dispatched |
+| `ready -> halted` | `cmd/factoryd/run_ticket.go` (a check before dispatch, the `slice_running` save failing); the reclaim of a run whose owner is gone (`cmd/factoryd/reclaim.go`, `reclaim_dead_owner.go`) |
+| `slice_running -> accepted`, `-> quarantined` | `cmd/factoryd/apply_run_result.go` (`r.State = result.State`: the policy evaluation's verdict, a setup or repository gate turning an accepted result into `quarantined`) |
+| `slice_running -> halted` | `cmd/factoryd/run_ticket.go`, `run_temporal.go`, `run_repository_owner.go` (a lost step, a refused launch, a deadline, a give-up path); the reclaim |
+| `ready`, `slice_running`, unconfirmed `halted` `-> quarantined` | `internal/sandbox.ReconcileOrphans`: owner and container are gone |
+| `halted -> accepted`, `-> quarantined` | the reclaim (`cmd/factoryd/reclaim.go`) applying the owner's real result through `apply_run_result.go` to a run a give-up path saved halted and unconfirmed |
+| `quarantined -> accepted`, `-> halted` | `Run.ApplyOverride` |
+
+A run is created `ready`, or already `halted` and confirmed when a check
+before its build refuses it. `verifying` is a stage of the workflow's
+progress feed (`RunWorkflowResult`, the owner's query while a build runs),
+not a saved state: the policy evaluation overwrites it with the verdict
+before the result is applied, so the save after `slice_running` is
+`accepted`, `quarantined` or `halted`. A halt (a lost step, a refused
+launch, a deadline) may end any unfinished state. A failed or ambiguous
+policy check goes straight to `quarantined`, never via `halted`: an
 intermediate `halted` save would open a crash window that leaves the record
-stuck at `halted`, where `factoryd override` cannot reach it, since override
-accepts only a `quarantined` run. `halted -> quarantined` is the separate
-path for a run an operator investigates and confirms should quarantine.
+at `halted`, where `factoryd override` cannot reach it
+(`cmd/factoryd/apply_run_result.go`). A give-up path that cannot confirm
+the owner stopped saves the run `halted` with `HaltConfirmed` false; such a
+halt is not final. The reclaim takes the owner's result and applies it
+(`accepted`, `quarantined`, or `halted` again, now confirmed), and the
+orphan reclaim quarantines a run whose owner and container are gone, from
+any unfinished state, a halt not yet confirmed included. A confirmed halt
+has no outgoing edge.
 
-`resumed` is permitted only after a policy-approved retry or a durable,
-authenticated human override; a quarantined run never silently resumes. A
-failed or ambiguous policy check cannot skip `halted`/`quarantined` to reach
-`decision_recorded`. `decision_recorded` is terminal: an allowed/denied
-verdict, durable and evidence-backed, with no factory-owned edge onward to a
-merged or deployed state.
+`accepted` is terminal. The release decision recorded on an accepted run
+(`release.Decision`, its own durable record beside the run: allowed or
+denied, evidence-backed) is not a state, and no edge leads to a merged or deployed one. A failed or ambiguous
+policy check cannot reach `accepted` except through `quarantined` and an
+override. Only `Run.ApplyOverride` leaves `quarantined`: a durable,
+authenticated, attributed human decision (`factoryd override`, or the
+override route with the override token). A quarantined run never resumes: a
+retry of its ticket builds a new run.
 
 ### Request lifecycle: dismissing a dead end
 
-Separate from the run-level graph above (`internal/run`, one slice at a
-time): `internal/request`'s own request lifecycle runs `submitted ->
+Separate from the run state graph above: `internal/request`'s own request lifecycle runs `submitted ->
 spec_drafting -> ... -> building -> pr_review -> done`, with `quarantined`
 and `halted` reachable from any non-terminal state on a gate or
 infrastructure failure (`internal/request.Quarantine`/`Halt`). A
-quarantined or halted request could previously only be retried
-(`internal/request.Retry`), never dismissed, so a request an operator has
-no intention of retrying stayed red in `factoryd doctor`'s mount-visibility
-check forever. `internal/request.Cancel` accepts these two states, and every
-non-terminal one, as the operator's own distinct end of a request:
+quarantined or halted request may be retried (`internal/request.Retry`) or
+dismissed: `internal/request.Cancel` accepts these two states, and every
+non-terminal one, as the operator's own distinct end of a request, so a
+request no one will retry does not stay red in `factoryd doctor`'s
+mount-visibility check:
 
 - `submitted -> cancelled`
 - `spec_drafting -> cancelled`
@@ -1333,8 +1550,9 @@ A request step (a drafting or planning step, a ticket build, a corrective
 or PR-review round) whose worker stopped, or a ticket build or round that
 ended with no verdict on the work for another of SC-017's causes, or whose
 only failed gates are reviews that gave no verdict, is never
-rerun on its own, but for a request's one automatic resume after a
-provider's limit resets (below). A ticket whose recorded run halted with such a cause,
+rerun on its own, but for a request's automatic resumes, at most one for
+each of two kinds: a step that never got to the work, and a provider's limit
+that reset (below). A ticket whose recorded run halted with such a cause,
 and about which no decision of the current `Generation` exists, is moved to
 `resume_review` by the step that finds it, also when the request is still
 `building`: its kept worktree is not reaped and no build starts. A run that
@@ -1358,17 +1576,28 @@ records the decision and returns the request to the state of the lost step:
 - `resume_review -> pr_review`
 - `resume_review -> cancelled`
 
-The factory makes the same decision itself at most once per request, ever
-(the automatic resume, `internal/request.AutoResumeRequest`, through the
-same `resumeLoaded` and preflight as `ResumeRequest`), and for no other
-wait. A request with no automatic resume recorded (`AutoResumed`), waiting
-in `resume_review` with cause `provider_quota`, not parked, not refused a
-resume, and whose last History entry is still the factory's move into
-`resume_review` (no operator action since, such as a reopen after an
-expired gate), is resumed by the factory (`By: factory`, a History reason
-naming the provider's reset time) once its reset time plus
-`request.AutoResumeMargin` (1 minute) has passed. The reset time is
-`Resume.ResetAt`: the Retry-After of the refusal with the provider's own
+The factory makes the same decision itself (the automatic resume,
+`internal/request.AutoResumeRequest`, through the same `resumeLoaded` and
+preflight as `ResumeRequest`), at most one automatic resume per request for
+each of two kinds, ever, and for no other wait. Each kind has its own
+record, never cleared, and spending one does not spend the other:
+`AutoRetried` for the transient kind, `AutoResumed` for the provider-quota
+kind (a record with no `cause` is the provider-quota kind). A request waiting in `resume_review` with no record of
+its wait's kind, not parked, not refused a resume, and whose last History
+entry is still the factory's move into `resume_review` (no operator action
+since, such as a reopen after an expired gate), is resumed by the factory
+(`By: factory`, a History reason naming the cause or the provider's reset
+time) in two cases only:
+
+| Kind | Causes | Resumed | Record |
+|---|---|---|---|
+| Transient | `unresolved.Cause.Transient`: `sandbox_launch` (the sandbox never started the step's command), `model_unavailable` (the route served none of the step's last requests), `dependency_fetch` (a package registry was unreachable, so the command's failure judged nothing) | once `request.AutoRetryDelay` (5 minutes) has passed since the request entered the wait, and only while the wait is younger than `request.AutoRetryWindow` (1 hour) since that entry: an older wait (a worker that was down, an install over a wait the operator left) waits for a human, and nothing is spent | `AutoRetried` |
+| Provider quota | `provider_quota` | once its reset time plus `request.AutoResumeMargin` (1 minute) has passed; no age limit, the time is the provider's | `AutoResumed` |
+
+Every other cause (a lost worker or Temporal server, a meter or credential
+refusal, a full disk, a memory kill, a review with no verdict, a drafting
+job with no draft, an unheld test file) waits for a human. The reset time
+is `Resume.ResetAt`: the Retry-After of the refusal with the provider's own
 limit that ended the step, as the meter's ledger recorded that refusal
 (`meter.Calls.RefusedAtEndRetryAt`, of the launch whose ledger gave the
 cause), never an earlier refusal's in the same or an earlier launch, and
@@ -1381,10 +1610,10 @@ and the decision is re-checked under the request's lock, so concurrent
 polls make one resume; the verb is the one the prompt offers (`round`, or
 `scratch` for a lost build that kept nothing); a resume that continues no
 build reaps the kept worktree as `factoryd resume` does; the operator is
-notified. A preflight that refuses or cannot be made spends it: the request
-keeps waiting with the reasons recorded. `AutoResumed` is never cleared:
-every later `provider_quota` wait of the request, on any step or ticket and
-after any operator resume, retry or rebuild, waits for a human.
+notified, with what is left of the two. A preflight that refuses or cannot
+be made spends that kind: the request keeps waiting with the reasons
+recorded. Every later wait of a kind already spent, on any step or ticket
+and after any operator resume, retry or rebuild, waits for a human.
 
 `cancelled` is `Cancel`, as above. A build resumed with `round` is checked
 again before it launches; a failed check returns the request to

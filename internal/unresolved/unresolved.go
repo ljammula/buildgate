@@ -9,7 +9,9 @@ import "fmt"
 // member decided from a fact the factory itself observed (a Temporal timeout,
 // a sandbox whose command was never released), never from a worker's or a provider's
 // wording. An unresolved step accepts nothing and judges nothing: its request
-// waits in resume_review for a human, and its round is not counted.
+// waits in resume_review for a human (the automatic resumes aside: at most
+// one per request for a transient cause, and one for a provider's limit),
+// and its round is not counted.
 //
 // A halted run records its cause as run.Run.HaltReasonCode; a request records
 // it as request.ResumeInfo.Cause. Adding a cause is one constant and one
@@ -97,6 +99,29 @@ var causes = map[Cause]string{
 	TemporalUnreachable: "factoryd lost contact with the Temporal server while the %s step ran",
 	ReproductionUnheld:  "the factory could not hold or mount a test file it holds for the %s step",
 	RouteCredential:     "the model route's credential was missing or expired too soon for the %s step, so the work was not judged; refresh it first (a chatgpt-codex route: `codex login` on the host)",
+}
+
+// transient holds the causes whose step decided nothing about the work and
+// whose fact is outside the work and usually clears by itself: a sandbox
+// that never started its command, a model route that served none of the
+// step's last requests, a package registry that could not be reached. A
+// request waiting on one of them is resumed by the factory itself
+// (request.AutoResumeDue), as the operator's `factoryd resume` would: once
+// per request, and only while the wait is younger than
+// request.AutoRetryWindow.
+// Nothing else is: a lost worker or Temporal server may have left work
+// whose state a person should look at, a meter or credential refusal and a
+// full disk or memory kill need the operator to change something first.
+var transient = map[Cause]bool{
+	SandboxLaunch:    true,
+	ModelUnavailable: true,
+	DependencyFetch:  true,
+}
+
+// Transient reports whether c is one of the causes the factory resumes once
+// by itself, a few minutes after the wait began (transient).
+func (c Cause) Transient() bool {
+	return transient[c]
 }
 
 // Known reports whether c is a member of the closed set.

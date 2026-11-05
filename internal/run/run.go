@@ -25,10 +25,14 @@ type State string
 const (
 	StateReady        State = "ready"
 	StateSliceRunning State = "slice_running"
-	StateVerifying    State = "verifying"
-	StateAccepted     State = "accepted"
-	StateHalted       State = "halted"
-	StateQuarantined  State = "quarantined"
+	// StateVerifying is the verify stage of the workflow's progress feed
+	// (RunWorkflowResult and the owner's query while a build runs): it is
+	// overwritten by the verdict before the result is applied, so run.json
+	// never records it (Transitions).
+	StateVerifying   State = "verifying"
+	StateAccepted    State = "accepted"
+	StateHalted      State = "halted"
+	StateQuarantined State = "quarantined"
 )
 
 // BillingSubscription/BillingMetered are the two valid values of
@@ -1892,6 +1896,9 @@ func (r *Run) RecordRescue(by, reason, action string, newState State, now func()
 func (r *Run) ApplyOverride(by, reason string, newState State, now func() string) error {
 	if r.State != StateQuarantined {
 		return fmt.Errorf("override requires a quarantined run; current state is %q", r.State)
+	}
+	if !CanTransition(r.State, newState) {
+		return fmt.Errorf("override cannot move a quarantined run to %q", newState)
 	}
 	if r.Replay != nil {
 		return fmt.Errorf("run %s is a replay run: a replayed result is never accepted by hand", r.ID)

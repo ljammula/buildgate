@@ -579,9 +579,16 @@ type Request struct {
 	// transition clears it.
 	ResumeDecision *ResumeDecision `json:"resume_decision,omitempty"`
 	// AutoResumed is the factory's one automatic resume of this request
-	// (AutoResumeRequest), nil until it is made. It is never cleared: every
-	// later provider-quota wait of the request waits for the operator.
+	// after a provider's limit reset (AutoResumeRequest on a provider_quota
+	// wait), nil until it is made. It is never cleared: every later
+	// provider-quota wait of the request waits for the operator.
 	AutoResumed *AutoResume `json:"auto_resumed,omitempty"`
+	// AutoRetried is the factory's one automatic resume of this request
+	// after a step that never got to the work (AutoResumeRequest on a
+	// transient cause), nil until it is made. Separate from AutoResumed:
+	// spending one does not spend the other. It is never cleared: every
+	// later transient wait of the request waits for the operator.
+	AutoRetried *AutoResume `json:"auto_retried,omitempty"`
 	// RetryFromScratch is the operator's `factoryd retry -from scratch`:
 	// the rebuild the retry leads to starts from the base commit even when
 	// the quarantined attempt's commit could be continued. Set by

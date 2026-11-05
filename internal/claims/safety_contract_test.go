@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+
+	"buildgate/internal/run"
 )
 
 // TestSafetyContractContainsRequiredControls keeps the standalone Phase 0
@@ -43,22 +46,9 @@ func TestSafetyContractContainsRequiredControls(t *testing.T) {
 		}
 	}
 
+	// The request lifecycle's edges (internal/request has no table of its
+	// own yet; each is checked to be present).
 	requiredTransitions := [][2]string{
-		{"draft", "product_policy_check"},
-		{"product_policy_check", "architecture_policy_check"},
-		{"architecture_policy_check", "program_design_policy_check"},
-		{"program_design_policy_check", "ready"},
-		{"ready", "slice_running"},
-		{"slice_running", "verifying"},
-		{"verifying", "slice_policy_check"},
-		{"slice_policy_check", "accepted"},
-		{"accepted", "next_slice"},
-		{"next_slice", "slice_running"},
-		{"any execution", "halted"},
-		{"halted", "quarantined"},
-		{"quarantined", "resumed"},
-		{"accepted", "merge_policy_check"},
-		{"merge_policy_check", "decision_recorded"},
 		{"quarantined", "cancelled"},
 		{"halted", "cancelled"},
 		{"submitted", "cancelled"},
@@ -91,6 +81,45 @@ func TestSafetyContractContainsRequiredControls(t *testing.T) {
 		line := "- `" + transition[0] + " -> " + transition[1] + "`"
 		if !regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(line) + `$`).MatchString(contract) {
 			t.Errorf("safety contract is missing required transition %q", line)
+		}
+	}
+}
+
+// TestSafetyContractRunGraphIsTheCodes checks the contract's "Run state
+// graph" edge list against run.Transitions() in both directions: an edge the
+// code allows and the contract omits, or one the contract lists and the code
+// does not have, fails.
+func TestSafetyContractRunGraphIsTheCodes(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile(filepath.Join(findRepoRoot(t), "safety-contract.md"))
+	if err != nil {
+		t.Fatalf("read safety contract: %v", err)
+	}
+	contract := string(b)
+	start := strings.Index(contract, "\n### Run state graph\n")
+	if start < 0 {
+		t.Fatal(`safety contract has no "### Run state graph" section`)
+	}
+	section := contract[start+1:]
+	if end := strings.Index(section[1:], "\n### "); end >= 0 {
+		section = section[:end+1]
+	}
+	documented := map[string]bool{}
+	for _, m := range regexp.MustCompile("(?m)^- `([a-z_]+) -> ([a-z_]+)`$").FindAllStringSubmatch(section, -1) {
+		documented[m[1]+" -> "+m[2]] = true
+	}
+	code := map[string]bool{}
+	for _, tr := range run.Transitions() {
+		code[string(tr.From)+" -> "+string(tr.To)] = true
+	}
+	for edge := range code {
+		if !documented[edge] {
+			t.Errorf("run.Transitions() has %q; the contract's run state graph does not list it", edge)
+		}
+	}
+	for edge := range documented {
+		if !code[edge] {
+			t.Errorf("the contract's run state graph lists %q; run.Transitions() does not have it", edge)
 		}
 	}
 }

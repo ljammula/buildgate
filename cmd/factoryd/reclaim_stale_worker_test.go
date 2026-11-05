@@ -183,6 +183,22 @@ func TestReclaimAcceptsAResultThatRanTheGatesAndSetup(t *testing.T) {
 	}
 }
 
+// A give-up path saves a run halted and unconfirmed when it cannot tell
+// whether the owner stopped; the reclaim then applies the owner's real
+// result to it. An accepted result moves the record halted -> accepted, an
+// edge of the run state graph (run.CanTransition), and confirms it.
+func TestReclaimAppliesTheOwnersResultToAnUnconfirmedHalt(t *testing.T) {
+	f := newReclaimFixture(t, "reclaim-unconfirmed-halt", reclaimGateYML+reclaimSetupYML)
+	f.record.State, f.record.HaltConfirmed = run.StateHalted, false
+	got := f.reclaim(t, currentWorkerResult())
+	if got.State != run.StateAccepted || !got.HaltConfirmed {
+		t.Fatalf("state = %s, confirmed = %t; want the owner's accepted result applied", got.State, got.HaltConfirmed)
+	}
+	if !run.CanTransition(run.StateHalted, got.State) {
+		t.Fatalf("run.CanTransition(halted, %s) = false; the reclaim saves that edge", got.State)
+	}
+}
+
 // When the file the run was dispatched with cannot be read again as the
 // record names it, the reclaim cannot tell which gates and setup the result
 // had to run: an accepted result is refused, for the operator, saying why.

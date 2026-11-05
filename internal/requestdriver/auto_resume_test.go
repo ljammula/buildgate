@@ -61,7 +61,7 @@ func TestAutoResumeResumesAProviderQuotaWaitOnceItsRetryTimeHasPassed(t *testing
 	dataDir := t.TempDir()
 	requestdrivertest.SeedQuotaWait(t, dataDir, "req-1", request.StateSpecDrafting, quotaRetryAt.Format(time.RFC3339), quotaRefusedAt)
 	waiting := requestdrivertest.LoadRequest(t, dataDir, "req-1")
-	if due, ok := waiting.AutoResumeDue(); !ok || !due.Equal(quotaDue) {
+	if due, ok := waiting.AutoResumeDue(quotaRefusedAt); !ok || !due.Equal(quotaDue) {
 		t.Fatalf("AutoResumeDue = %v, %t, want %v", due, ok, quotaDue)
 	}
 	if !strings.Contains(waiting.NextAction(), "the factory resumes it by itself, once, at "+quotaDue.Format(time.RFC3339)) {
@@ -157,7 +157,7 @@ func TestAutoResumeIgnoresAResetBeforeTheRefusal(t *testing.T) {
 }
 
 func TestAutoResumeLeavesEveryOtherCauseToTheOperator(t *testing.T) {
-	for _, cause := range []unresolved.Cause{unresolved.ModelUnavailable, unresolved.MeterDenied, unresolved.RouteCredential, unresolved.NoVerdict, unresolved.WorkerLost, unresolved.SandboxMemory, unresolved.SandboxDisk} {
+	for _, cause := range []unresolved.Cause{unresolved.MeterDenied, unresolved.RouteCredential, unresolved.NoVerdict, unresolved.WorkerLost, unresolved.SandboxMemory, unresolved.SandboxDisk, unresolved.DraftingJob, unresolved.TemporalUnreachable, unresolved.ReproductionUnheld} {
 		dataDir := t.TempDir()
 		requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecDrafting)
 		r := requestdrivertest.LoadRequest(t, dataDir, "req-1")
@@ -227,7 +227,7 @@ func TestAutoResumeIsOncePerRequestAndAnOperatorResumeDoesNotReArmIt(t *testing.
 	secondRetry := quotaDue.Add(time.Hour)
 	meetQuotaAgain(t, dataDir, "req-1", secondRetry, quotaDue.Add(time.Minute))
 	again := requestdrivertest.LoadRequest(t, dataDir, "req-1")
-	if _, ok := again.AutoResumeDue(); ok || again.AutoResumed == nil {
+	if _, ok := again.AutoResumeDue(quotaDue); ok || again.AutoResumed == nil {
 		t.Fatalf("AutoResumed = %+v; want the second refusal not due, the record kept", again.AutoResumed)
 	}
 	if !strings.Contains(again.Error, "already made its one automatic resume of this request") || !strings.Contains(again.NextAction(), "so it waits for you") {
@@ -405,5 +405,184 @@ func TestAParkAfterAnAutomaticResumeSaysNothingOfIt(t *testing.T) {
 	}
 	if strings.Contains(r.Error, "automatic resume") || strings.Contains(r.NextAction(), "automatic resume") {
 		t.Errorf("Error = %q, NextAction = %q; want the park's prompt alone", r.Error, r.NextAction())
+	}
+}
+
+// seedTransientWait puts id, a spec_drafting request, in resume_review on
+// cause at quotaRefusedAt, as the driver does when the step's job never got
+// to the work.
+func seedTransientWait(t *testing.T, dataDir, id string, cause unresolved.Cause) {
+	t.Helper()
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, id, request.StateSpecDrafting)
+	r := requestdrivertest.LoadRequest(t, dataDir, id)
+	if err := r.EnterResumeReview(request.StateSpecDrafting, request.LostStep{Cause: cause}, quotaRefusedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A step that never got to the work (its sandbox never started, the route
+// served nothing, a registry was unreachable) is resumed once by the factory
+// AutoRetryDelay after the wait began, as `factoryd resume` would.
+func TestAutoResumeRetriesATransientCauseOnceAfterItsDelay(t *testing.T) {
+	due := quotaRefusedAt.Add(request.AutoRetryDelay)
+	for _, cause := range []unresolved.Cause{unresolved.SandboxLaunch, unresolved.ModelUnavailable, unresolved.DependencyFetch} {
+		dataDir := t.TempDir()
+		seedTransientWait(t, dataDir, "req-1", cause)
+		waiting := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+		if got, ok := waiting.AutoResumeDue(quotaRefusedAt); !ok || !got.Equal(due) {
+			t.Fatalf("cause %s: AutoResumeDue = %v, %t, want %v", cause, got, ok, due)
+		}
+		if !strings.Contains(waiting.NextAction(), "the factory resumes it by itself, once, at "+due.Format(time.RFC3339)) {
+			t.Errorf("cause %s: NextAction = %q, want it to say when the factory resumes it", cause, waiting.NextAction())
+		}
+		if resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), due.Add(-time.Second)); resumed || r.AutoRetried != nil {
+			t.Fatalf("cause %s: resumed before its delay (state %s)", cause, r.State)
+		}
+		resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), due)
+		if !resumed || r.State != request.StateSpecDrafting {
+			t.Fatalf("cause %s: resumed = %t, state %s; want the spec_drafting step resumed", cause, resumed, r.State)
+		}
+		if auto := r.AutoRetried; auto == nil || auto.Cause != cause || auto.RetryAt != "" || r.AutoResumed != nil {
+			t.Fatalf("cause %s: AutoRetried = %+v, AutoResumed = %+v; want the transient record with its cause, the quota record untouched", cause, auto, r.AutoResumed)
+		}
+		last := r.History[len(r.History)-1]
+		if last.By != "factory" || !strings.Contains(last.Reason, "after the step ended with cause "+string(cause)) {
+			t.Errorf("cause %s: History ends with %+v, want the factory's automatic resume naming the cause", cause, last)
+		}
+		log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, "req-1"))
+		if err != nil || !strings.Contains(string(log), "Resumed automatically after a step that never got to the work") {
+			t.Errorf("cause %s: notifications.log = %q, %v; want the automatic resume announced", cause, log, err)
+		}
+	}
+}
+
+// enterWaitAgain moves id, back in its step, to resume_review on step at at,
+// as the driver does when the resumed step ends with no verdict again.
+func enterWaitAgain(t *testing.T, dataDir, id string, step request.LostStep, at time.Time) {
+	t.Helper()
+	unlock, err := request.Lock(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	r, err := request.Load(dataDir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requestdriver.EnterResumeReviewHoldingLock(dataDir, r, step, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two budgets, each spent once per request: a transient retry does not spend
+// the provider-quota resume, and a second wait of either kind waits for the
+// operator.
+func TestAutoResumeKeepsSeparateBudgetsForTheTwoKinds(t *testing.T) {
+	dataDir := t.TempDir()
+	seedTransientWait(t, dataDir, "req-1", unresolved.SandboxLaunch)
+	if resumed, _ := autoResume(t, dataDir, "req-1", autoResumeConfig(), quotaRefusedAt.Add(request.AutoRetryDelay)); !resumed {
+		t.Fatal("the transient wait was not retried")
+	}
+
+	quotaAt := quotaRefusedAt.Add(time.Hour)
+	reset := quotaAt.Add(time.Hour)
+	enterWaitAgain(t, dataDir, "req-1", request.LostStep{Cause: unresolved.ProviderQuota, RetryAt: reset.Format(time.RFC3339), ResetAt: reset.Format(time.RFC3339)}, quotaAt)
+	resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), reset.Add(request.AutoResumeMargin))
+	if !resumed || r.AutoResumed == nil || r.AutoRetried == nil {
+		t.Fatalf("quota wait after a transient retry: resumed = %t, AutoResumed %+v, AutoRetried %+v; want it resumed, both records kept", resumed, r.AutoResumed, r.AutoRetried)
+	}
+	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, "req-1"))
+	if err != nil || !strings.Contains(string(log), "is spent too") {
+		t.Errorf("notifications.log = %q, %v; want the notice to say both automatic resumes are spent", log, err)
+	}
+
+	secondQuota := reset.Add(time.Hour)
+	secondReset := secondQuota.Add(time.Hour)
+	enterWaitAgain(t, dataDir, "req-1", request.LostStep{Cause: unresolved.ProviderQuota, RetryAt: secondReset.Format(time.RFC3339), ResetAt: secondReset.Format(time.RFC3339)}, secondQuota)
+	if resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), secondReset.Add(time.Hour)); resumed || r.State != request.StateResumeReview {
+		t.Fatalf("second quota wait: resumed = %t, state %s; want it left to the operator", resumed, r.State)
+	} else if !strings.Contains(r.NextAction(), "already made its one automatic resume of this request after a provider's limit reset") {
+		t.Errorf("NextAction = %q, want it to say the quota resume is spent", r.NextAction())
+	}
+	if _, err := request.ResumeRequest(dataDir, "req-1", request.ResumeRound, "alice", secondReset.Add(2*time.Hour), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	secondTransient := secondReset.Add(3 * time.Hour)
+	enterWaitAgain(t, dataDir, "req-1", request.LostStep{Cause: unresolved.DependencyFetch}, secondTransient)
+	if resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), secondTransient.Add(request.AutoRetryDelay)); resumed || r.State != request.StateResumeReview {
+		t.Fatalf("second transient wait: resumed = %t, state %s; want it left to the operator", resumed, r.State)
+	} else if !strings.Contains(r.NextAction(), "already made its one automatic retry of this request") {
+		t.Errorf("NextAction = %q, want it to say the transient retry is spent", r.NextAction())
+	}
+}
+
+// The other order: a provider-quota resume leaves the transient retry, and a
+// second transient wait waits for the operator.
+func TestAutoResumeRetriesATransientWaitAfterAQuotaResume(t *testing.T) {
+	dataDir := t.TempDir()
+	requestdrivertest.SeedQuotaWait(t, dataDir, "req-1", request.StateSpecDrafting, quotaRetryAt.Format(time.RFC3339), quotaRefusedAt)
+	if resumed, _ := autoResume(t, dataDir, "req-1", autoResumeConfig(), quotaDue); !resumed {
+		t.Fatal("the quota wait was not resumed")
+	}
+	first := quotaDue.Add(time.Minute)
+	enterWaitAgain(t, dataDir, "req-1", request.LostStep{Cause: unresolved.ModelUnavailable}, first)
+	if resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), first.Add(request.AutoRetryDelay)); !resumed || r.AutoRetried == nil || r.AutoRetried.Cause != unresolved.ModelUnavailable {
+		t.Fatalf("transient wait after a quota resume: resumed = %t, AutoRetried %+v; want it retried", resumed, r.AutoRetried)
+	}
+	second := first.Add(time.Hour)
+	enterWaitAgain(t, dataDir, "req-1", request.LostStep{Cause: unresolved.SandboxLaunch}, second)
+	if resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), second.Add(request.AutoRetryDelay)); resumed || r.State != request.StateResumeReview {
+		t.Fatalf("second transient wait: resumed = %t, state %s; want it left to the operator", resumed, r.State)
+	}
+}
+
+// A record an earlier release wrote (auto_resumed with no cause) is the
+// provider-quota resume spent; the transient retry is still there.
+func TestAnEarlierAutoResumeRecordIsTheQuotaBudget(t *testing.T) {
+	dataDir := t.TempDir()
+	seedTransientWait(t, dataDir, "req-1", unresolved.SandboxLaunch)
+	r := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	r.AutoResumed = &request.AutoResume{At: quotaRefusedAt.Add(-time.Hour).Format(time.RFC3339Nano), RetryAt: quotaRefusedAt.Add(-2 * time.Hour).Format(time.RFC3339), FromState: request.StateSpecDrafting}
+	if err := r.Save(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if resumed, after := autoResume(t, dataDir, "req-1", autoResumeConfig(), quotaRefusedAt.Add(request.AutoRetryDelay)); !resumed || after.AutoRetried == nil {
+		t.Fatalf("resumed = %t, AutoRetried %+v; want the transient wait retried", resumed, after.AutoRetried)
+	}
+	again := quotaRefusedAt.Add(time.Hour)
+	reset := again.Add(time.Hour)
+	enterWaitAgain(t, dataDir, "req-1", request.LostStep{Cause: unresolved.ProviderQuota, RetryAt: reset.Format(time.RFC3339), ResetAt: reset.Format(time.RFC3339)}, again)
+	if resumed, after := autoResume(t, dataDir, "req-1", autoResumeConfig(), reset.Add(time.Hour)); resumed || after.State != request.StateResumeReview {
+		t.Fatalf("quota wait: resumed = %t, state %s; want the earlier record to count as the quota resume spent", resumed, after.State)
+	}
+}
+
+// A transient wait is resumed by the factory only while it is younger than
+// AutoRetryWindow: an older one (a worker that was down, an install over a
+// wait the operator left) waits for the operator, and nothing is spent.
+func TestAutoResumeLeavesAStaleTransientWaitToTheOperator(t *testing.T) {
+	until := quotaRefusedAt.Add(request.AutoRetryWindow)
+	for _, now := range []time.Time{until, until.Add(72 * time.Hour)} {
+		dataDir := t.TempDir()
+		seedTransientWait(t, dataDir, "req-1", unresolved.SandboxLaunch)
+		waiting := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+		if _, ok := waiting.AutoResumeDue(now); ok {
+			t.Fatalf("at %v: AutoResumeDue is ok; want a wait past its window not due", now)
+		}
+		if !strings.Contains(waiting.NextAction(), "before "+until.Format(time.RFC3339)) {
+			t.Errorf("NextAction = %q, want it to name the end of the window", waiting.NextAction())
+		}
+		if resumed, r := autoResume(t, dataDir, "req-1", autoResumeConfig(), now); resumed || r.State != request.StateResumeReview || r.AutoRetried != nil {
+			t.Fatalf("at %v: resumed = %t, state %s, AutoRetried %+v; want it left to the operator, nothing spent", now, resumed, r.State, r.AutoRetried)
+		}
+	}
+	dataDir := t.TempDir()
+	seedTransientWait(t, dataDir, "req-1", unresolved.SandboxLaunch)
+	if resumed, _ := autoResume(t, dataDir, "req-1", autoResumeConfig(), until.Add(-time.Second)); !resumed {
+		t.Fatal("a transient wait inside its window was not resumed")
 	}
 }
