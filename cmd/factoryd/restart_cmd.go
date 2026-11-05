@@ -117,7 +117,6 @@ func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer
 	if err := refuseCredentialGaps(running); err != nil {
 		return err
 	}
-	restartSayWorkerless(w, running)
 	// Never under a build: the stop below would refuse it, after stopping
 	// the processes of the data dirs before it. The workers drain first: they
 	// finish the steps in flight and start no new one, so the wait ends even
@@ -178,6 +177,7 @@ func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer
 		return errors.New("not everything that was running came back; the lines above say what to start")
 	}
 	fmt.Fprintf(w, "restarted with factoryd %s: %s\n", version, strings.Join(restarted, "; "))
+	restartSayWorkerless(w, running)
 	return nil
 }
 
@@ -257,13 +257,12 @@ func workerCredentialGap(profiles []profileInfo, configPath string) string {
 		return ""
 	}
 	var gaps []string
-	for _, spec := range doctorRoleSpecs {
-		if spec.role == modelrole.RoleChallenger && (settings.Roles == nil || settings.Roles.Challenger == nil) {
-			continue
-		}
-		_, err := modelrole.SelectRoute(settings, spec.role, "", "", "", doctorRouteCredentialProbe)
+	// The selections the worker's start check resolves: each configured
+	// role, and the execution role's escalation model.
+	for _, sel := range doctorRoleSelections(settings) {
+		_, err := modelrole.SelectRoute(settings, sel.role, sel.model, "", "", doctorRouteCredentialProbe)
 		if fix := doctorRouteCredentialFix(settings, err); fix != "" {
-			gaps = append(gaps, "roles."+spec.name+": "+fix)
+			gaps = append(gaps, "roles."+sel.label+": "+fix)
 		}
 	}
 	return strings.Join(gaps, "; ")
@@ -281,7 +280,7 @@ func refuseCredentialGaps(running []upgradeProcess) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	return fmt.Errorf("nothing was stopped: a worker started from this shell could not reach its model route, so it would exit on start: %s; export the variable it names and run this again", strings.Join(lines, "; "))
+	return fmt.Errorf("nothing was stopped: a worker started from this shell could not reach its model route, so it would exit on start: %s; set what it names (export the variable, or refresh the credential file, e.g. codex login) and run this again", strings.Join(lines, "; "))
 }
 
 // restartSayWorkerless prints one line for each data dir with a running
