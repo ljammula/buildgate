@@ -52,3 +52,14 @@ func TestHostCommitIdentityFallsBackToBuildgateAndCommits(t *testing.T) {
 		t.Fatalf("author = %q, %v", out, err)
 	}
 }
+
+func TestHostCommitIdentityKeepsAConfiguredName(t *testing.T) {
+	dir := identityRepo(t)
+	if out, err := exec.Command("git", "-C", dir, "config", "user.name", "Dev").CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v: %s", err, out)
+	}
+	want := []string{"-c", "user.email=buildgate@localhost"}
+	if got := HostCommitIdentity(dir); !reflect.DeepEqual(got, want) {
+		t.Fatalf("HostCommitIdentity = %v, want %v", got, want)
+	}
+}

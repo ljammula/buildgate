@@ -1159,16 +1159,20 @@ func GitCommitArgv(dir, message string) []string {
 	return append(argv, "-c", "core.hooksPath=/dev/null", "commit", "-m", message)
 }
 
-// HostCommitIdentity returns the `-c user.name=... -c user.email=...` arguments
-// for a commit the factory makes on the host in dir, or nil when git already
-// has an effective identity there (which then authors the commit). A machine
-// with no identity (a CI runner, a fresh account) gets the identity of the
-// hand-off commit, buildgate <buildgate@localhost>.
+// HostCommitIdentity returns the `-c user.name=...`/`-c user.email=...`
+// arguments for a commit the factory makes on the host in dir: one for each
+// of the two git has no value for there, from the hand-off commit's identity
+// buildgate <buildgate@localhost>. A configured value is kept, so an
+// operator's identity still authors the commit; nil when both are set.
 func HostCommitIdentity(dir string) []string {
-	if gitConfigValue(dir, "user.name") != "" && gitConfigValue(dir, "user.email") != "" {
-		return nil
+	var args []string
+	if gitConfigValue(dir, "user.name") == "" {
+		args = append(args, "-c", "user.name=buildgate")
 	}
-	return []string{"-c", "user.name=buildgate", "-c", "user.email=buildgate@localhost"}
+	if gitConfigValue(dir, "user.email") == "" {
+		args = append(args, "-c", "user.email=buildgate@localhost")
+	}
+	return args
 }
 
 func gitConfigValue(dir, key string) string {
