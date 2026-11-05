@@ -28,7 +28,7 @@ func reviewStepPassed(exitCode int) bool {
 }
 
 // RunReviewStepActivity invokes the review step (reviewstep.CombinedStep,
-// agent/pi/scripts/combined_review.py) through runner.RunWithRetries.
+// agent/pi/scripts/combined_review.py) in a sandboxed worker.
 // A step a retired plan scheduled (input.Step "spec_conformity" or
 // "code_review", or a combined review carrying acceptance criteria, pending
 // in a history recorded before reviewReproductionChange: retiredReviewStep)

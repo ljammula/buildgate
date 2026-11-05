@@ -162,11 +162,7 @@ func Run(ctx context.Context, dir, logPath string, name string, args ...string) 
 //
 // The request driver's own spec/plan-drafting jobs run every real
 // invocation through the same Docker sandbox a ticket build uses
-// (runSandboxWithRetriesVia, cmd/factoryd); each also keeps an unsandboxed
-// fallback branch reachable only under WorkerConfig.AllowUnsandboxedSpecDraft,
-// which has no operator-facing flag and is exercised only by this repo's
-// own tests. This baseline is what that test-only branch's subprocess
-// receives.
+// (runSandboxWithRetriesVia, cmd/factoryd); none has a host branch.
 var hostWorkerEnvBaseline = map[string]bool{
 	"PATH":   true,
 	"HOME":   true,
