@@ -320,7 +320,7 @@ func write(dir string, files []loaded, message string) error {
 	if exec.Command("git", "-C", dir, "diff", "--cached", "--quiet").Run() == nil {
 		return errors.New("the pinned files changed nothing")
 	}
-	if out, err := exec.Command("git", "-C", dir, "-c", "core.hooksPath=/dev/null", "commit", "-m", message).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", append(append([]string{"-C", dir}, runner.HostCommitIdentity(dir)...), "-c", "core.hooksPath=/dev/null", "commit", "-m", message)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit pinned files: %w: %s", err, out)
 	}
 	return nil

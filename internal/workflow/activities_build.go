@@ -573,7 +573,7 @@ func (a *Activities) runPostBuild(ctx context.Context, checkpointDir string, inp
 		subject = "ticket: apply verified change"
 	}
 	msg := subject + "\n\nAuto-committed by the Temporal Worker: build_app.py reported success but\nthe agent left its diff uncommitted."
-	if _, err := recordActivityIntent(ctx, checkpointDir, "post-build-commit", []string{"git", "-C", input.WorkspacePath, "-c", "core.hooksPath=/dev/null", "commit", "-m", msg}); err != nil {
+	if _, err := recordActivityIntent(ctx, checkpointDir, "post-build-commit", runner.GitCommitArgv(input.WorkspacePath, msg)); err != nil {
 		return PostBuildResult{}, temporal.NewApplicationErrorWithCause("record post-build-commit Activity intent", InfrastructureFailureType, err)
 	}
 	if err := runner.GitCommitAll(input.WorkspacePath, msg); err != nil {
