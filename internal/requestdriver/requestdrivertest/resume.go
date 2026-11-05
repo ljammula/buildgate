@@ -228,16 +228,17 @@ func NoContainersDocker(t *testing.T) string {
 }
 
 // SeedQuotaWait saves a request whose step in state the provider refused
-// with its own limit, waiting in resume_review since at; retryAt is the
-// meter's retry time ("" for none). It returns the saved record.
-func SeedQuotaWait(t *testing.T, dataDir, id string, state request.State, retryAt string, at time.Time) *request.Request {
+// with its own limit, waiting in resume_review since at; resetAt is the
+// meter's reset time of the refusal that ended the step, and its retry time
+// ("" for none). It returns the saved record.
+func SeedQuotaWait(t *testing.T, dataDir, id string, state request.State, resetAt string, at time.Time) *request.Request {
 	t.Helper()
 	NewApprovableDriverRequest(t, dataDir, id, state)
 	r, err := request.Load(dataDir, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.EnterResumeReview(state, request.LostStep{Cause: unresolved.ProviderQuota, RetryAt: retryAt, Routes: []string{"codex"}}, at); err != nil {
+	if err := r.EnterResumeReview(state, request.LostStep{Cause: unresolved.ProviderQuota, RetryAt: resetAt, ResetAt: resetAt, Routes: []string{"codex"}}, at); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Save(dataDir); err != nil {

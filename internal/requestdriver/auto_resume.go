@@ -37,7 +37,7 @@ func AutoResumeIfDue(ctx context.Context, dataDir, id string, cfg WorkerConfig, 
 	case err != nil:
 		return false, err
 	}
-	log.Printf("request %s: resume_review -> %s (%s)", r.ID, r.State, r.Resume.AutoResumed.Note())
+	log.Printf("request %s: resume_review -> %s (%s)", r.ID, r.State, r.AutoResumed.Note())
 	if r.State != request.StateBuilding {
 		if err := ClearKeptRunsOfRequest(dataDir, r.ID); err != nil {
 			log.Printf("request %s: could not discard a kept worktree: %v", r.ID, err)
@@ -64,13 +64,13 @@ func remindAutoResumeRefused(dataDir, id string, now time.Time) error {
 func notifyAutoResumed(dataDir, id string, now time.Time) error {
 	var sent *notify.Notification
 	_, err := updateLocked(dataDir, id, func(r *request.Request) bool {
-		if r.Resume == nil || r.Resume.AutoResumed == nil || r.State == request.StateResumeReview {
+		if r.Resume == nil || r.AutoResumed == nil || r.State == request.StateResumeReview {
 			return false
 		}
-		auto := r.Resume.AutoResumed
+		auto := r.AutoResumed
 		n := prepareRequestNotification(dataDir, r, requestNotice{
 			Ask:    "Resumed automatically after the provider's limit reset",
-			Detail: fmt.Sprintf("The factory resumed the %s step once by itself, %s; if the provider refuses it again, it waits for you.", auto.FromState, auto.Note()),
+			Detail: fmt.Sprintf("The factory resumed the %s step by itself, %s. It is this request's one automatic resume: a later refusal by the provider's limit waits for you.", auto.FromState, auto.Note()),
 			Next:   fmt.Sprintf("nothing to do; `factoryd cancel %s` stops it", r.ID),
 		}, now)
 		sent = &n

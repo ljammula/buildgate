@@ -52,3 +52,26 @@ func TestQuotaRefusedRoutesAreTheLaunchesTheProviderRefused(t *testing.T) {
 		t.Fatalf("QuotaRefusedRoutes = %v, want [codex terra]", got)
 	}
 }
+
+// The reset the factory may resume on is the last launch's own terminal
+// refusal's, never an earlier launch's.
+func TestQuotaResetAtIsTheLastLaunchsTerminalRefusal(t *testing.T) {
+	limited := func(resetAt string) *meter.Calls {
+		return &meter.Calls{RateLimited: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByProviderLimit, RetryAt: resetAt, RefusedAtEndRetryAt: resetAt}
+	}
+	r := &Run{Attempts: []Attempt{{RelayCalls: limited("2026-11-04T02:00:20Z")}, {RelayCalls: limited("")}}}
+	if got := QuotaResetAt(LastCalls(r)); got != "" {
+		t.Errorf("an earlier launch's reset, the last launch none: QuotaResetAt = %q, want none", got)
+	}
+	if got := ProviderRetryAt(r); got != "2026-11-04T02:00:20Z" {
+		t.Errorf("ProviderRetryAt = %q, want the earlier launch's time still shown", got)
+	}
+	r.Attempts = append(r.Attempts, Attempt{RelayCalls: limited("2026-11-04T05:00:00Z")})
+	if got := QuotaResetAt(LastCalls(r)); got != "2026-11-04T05:00:00Z" {
+		t.Errorf("QuotaResetAt = %q, want the last launch's own reset", got)
+	}
+	served := &meter.Calls{Answered: 3, RefusedAtEndRetryAt: "2026-11-04T05:00:00Z"}
+	if got := QuotaResetAt(served); got != "" {
+		t.Errorf("a served launch: QuotaResetAt = %q, want none", got)
+	}
+}

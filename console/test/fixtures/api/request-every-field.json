@@ -50,6 +50,7 @@
     "lost_run_id": "every-field lost_run_id",
     "reason": "every-field reason",
     "retry_at": "2026-09-10T09:00:00Z",
+    "reset_at": "2026-09-10T09:00:00Z",
     "routes": [
       "every-field routes"
     ],
@@ -57,22 +58,22 @@
     "at": "2026-09-10T09:00:00Z",
     "refused": [
       "every-field refused"
-    ],
-    "auto_resumed": {
-      "at": "2026-09-10T09:00:00Z",
-      "retry_at": "2026-09-10T09:00:00Z",
-      "from_state": "",
-      "ticket_index": 3,
-      "refused": [
-        "every-field refused"
-      ]
-    }
+    ]
   },
   "resume_decision": {
     "verb": "every-field verb",
     "generation": 3,
     "by": "every-field by",
     "at": "2026-09-10T09:00:00Z"
+  },
+  "auto_resumed": {
+    "at": "2026-09-10T09:00:00Z",
+    "retry_at": "2026-09-10T09:00:00Z",
+    "from_state": "",
+    "ticket_index": 3,
+    "refused": [
+      "every-field refused"
+    ]
   },
   "retry_from_scratch": true,
   "retry_from_round": 3,

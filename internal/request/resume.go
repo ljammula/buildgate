@@ -26,8 +26,7 @@ var resumableStates = []State{
 }
 
 // ResumeInfo records the step a lost worker left behind. Written by
-// EnterResumeReview and RefuseResume, and its AutoResumed by
-// AutoResumeRequest, never by an operator's decision.
+// EnterResumeReview and RefuseResume, never by a decision.
 type ResumeInfo struct {
 	// FromState is the state of the lost step; every decision except cancel
 	// returns the request to it.
@@ -51,6 +50,13 @@ type ResumeInfo struct {
 	// text; only the meter's RFC 3339 form also ends a route hold
 	// (RouteHolder), never the text a worker printed.
 	RetryAt string `json:"retry_at,omitempty"`
+	// ResetAt is the provider's own time (RFC 3339 UTC) in the refusal with
+	// its limit that ended the step: the meter's record of that refusal
+	// alone, never of an earlier one or an earlier launch, "" when it gave
+	// none. Only it lets the factory resume the wait by itself
+	// (AutoResumeDue); RetryAt is what the prompt says and the route hold
+	// reads.
+	ResetAt string `json:"reset_at,omitempty"`
 	// Routes are the model routes the provider refused with its own limit
 	// (Cause provider_quota), as the meter recorded each launch's route.
 	// While r waits here, a launch of any request on one of them waits too
@@ -65,11 +71,6 @@ type ResumeInfo struct {
 	// preconditions were checked (a container still alive, the history
 	// rewritten, ...). While set, only ResumeScratch or cancel are possible.
 	Refused []string `json:"refused,omitempty"`
-	// AutoResumed is the factory's own resume of this wait after the
-	// provider's limit reset (AutoResumeRequest), nil while none has been
-	// made. Set, it is spent: the wait, and a provider-quota refusal of the
-	// step it resumed, wait for the operator.
-	AutoResumed *AutoResume `json:"auto_resumed,omitempty"`
 }
 
 // ResumeDecision is the operator's answer to a ResumeInfo.
@@ -152,6 +153,8 @@ type LostStep struct {
 	Reason string
 	// RetryAt is ResumeInfo.RetryAt.
 	RetryAt string
+	// ResetAt is ResumeInfo.ResetAt.
+	ResetAt string
 	// Routes is ResumeInfo.Routes.
 	Routes []string
 	// Detail, when set, is what the step's job reported, one sanitised line;
@@ -164,28 +167,25 @@ type LostStep struct {
 // resume_review, which waits on a human: nothing reruns on its own but the
 // one automatic resume of a provider-quota wait (AutoResumeDue). from must
 // be the state of that step and the request's current state. It starts the
-// next Generation and resets the reminder bookkeeping. An automatic resume
-// that brought the request into from is carried into the new wait, spent
-// (spentAutoResume).
+// next Generation and resets the reminder bookkeeping.
 func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) error {
 	if !stateIn(from, resumableStates) {
 		return fmt.Errorf("request %s: a lost %q step cannot enter %s (allowed from: %v) %w", r.ID, from, StateResumeReview, resumableStates, ErrIllegalTransition)
 	}
 	prompt := ResumePrompt(r.ID, from, step)
-	spent := r.spentAutoResume()
 	if err := advance(r, []State{from}, StateResumeReview, factoryActor, prompt, now); err != nil {
 		return err
 	}
 	r.Resume = &ResumeInfo{
-		AutoResumed: spent,
-		FromState:   from,
-		LostRunID:   step.RunID,
-		Cause:       step.Cause,
-		Reason:      step.Reason,
-		RetryAt:     step.RetryAt,
-		Routes:      step.Routes,
-		Generation:  r.nextResumeGeneration(),
-		At:          r.UpdatedAt,
+		FromState:  from,
+		LostRunID:  step.RunID,
+		Cause:      step.Cause,
+		Reason:     step.Reason,
+		RetryAt:    step.RetryAt,
+		ResetAt:    step.ResetAt,
+		Routes:     step.Routes,
+		Generation: r.nextResumeGeneration(),
+		At:         r.UpdatedAt,
 	}
 	r.Error = prompt + r.autoResumeClause()
 	if step.Detail != "" {

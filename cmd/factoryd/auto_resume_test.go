@@ -38,8 +38,8 @@ func TestRemindRequestResumesADueProviderQuotaWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := requestdrivertest.LoadRequest(t, dataDir, "req-1")
-	if r.State != request.StateSpecDrafting || r.Resume.AutoResumed == nil {
-		t.Fatalf("state %s, AutoResumed %+v; want the step resumed by the factory", r.State, r.Resume.AutoResumed)
+	if r.State != request.StateSpecDrafting || r.AutoResumed == nil {
+		t.Fatalf("state %s, AutoResumed %+v; want the step resumed by the factory", r.State, r.AutoResumed)
 	}
 	entry := buildRequestStatusEntry(r, nil, time.Now())
 	if want := "  [resumed automatically after the provider's limit reset at " + retryAt.Format(time.RFC3339) + "]"; requestRowSuffix(entry) != want {

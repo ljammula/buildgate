@@ -84,6 +84,30 @@ func QuotaRefusedRoutes(r *Run) []string {
 	return routes
 }
 
+// LastCalls is what the meter recorded of r's last launch that called a
+// model, nil when none did: for a run halted with a model-route cause, the
+// launch whose ledger gave it.
+func LastCalls(r *Run) *meter.Calls {
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if calls := r.Attempts[i].RelayCalls; calls != nil {
+			return calls
+		}
+	}
+	return nil
+}
+
+// QuotaResetAt is the time the provider asked to wait until in the refusal
+// with its own limit that ended calls' requests (meter.Calls.
+// RefusedAtEndRetryAt), "" when calls do not end in such a refusal or that
+// refusal gave no time. An earlier refusal's time, in calls or in an earlier
+// launch, is never it.
+func QuotaResetAt(calls *meter.Calls) string {
+	if ModelRouteCause(calls) != unresolved.ProviderQuota {
+		return ""
+	}
+	return calls.RefusedAtEndRetryAt
+}
+
 // ProviderRetryAt is the time the model provider asked r's most recent
 // launch that recorded one to wait until (meter.Calls.RetryAt), "" when no
 // launch did. An earlier launch's time is not shown for a later refusal.
