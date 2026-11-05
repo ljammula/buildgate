@@ -1620,7 +1620,7 @@ What changes for a build:
 | A different harness for one request | `factoryd submit -harness execution=<name> ...` (within `roles.execution.allowed_harnesses`) |
 | Per-repo defaults | Commit `.factory.yml` |
 | Prove the pipeline end to end before merging pipeline changes | `make live-smoke` (real Docker, real model route, a few minutes) |
-| Unit and lint checks | `make verify` (Go), `make console-test` (console). CI is manual-only — run these yourself |
+| Unit and lint checks | `make verify` (Go), `make console-test` (console). CI runs only `make verify` on a pull request — run the rest yourself |
 
 ## Troubleshooting
 

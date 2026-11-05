@@ -95,9 +95,9 @@ tests scan tracked files only. A few tests are known to fail only under
 full-suite load (AGENTS.md lists them); rerun such a test alone before
 calling it a flake.
 
-CI (`.github/workflows/ci.yml`) does not run on push or on a pull request,
-so the checks above are the gate: run `make ci` yourself before asking for
-review.
+CI (`.github/workflows/ci.yml`) runs `make verify` on every pull request to
+`main`. It does not run the console, Python or `scripts/` tests: run
+`make ci` yourself before asking for review.
 
 ## Open a pull request
 

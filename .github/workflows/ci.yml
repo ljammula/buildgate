@@ -1,19 +1,22 @@
 name: CI
 
-# Manual-only by operator decision: nothing here runs on a pull request or a
-# push unless someone starts it (Actions tab -> CI -> Run workflow, or
-# `gh workflow run ci.yml --ref <branch>`). Hosted runner minutes are the
-# constraint: a review-driven PR pushes several times before merge, and each
-# run starts a Temporal dev server. `make ci` on a developer machine is the
-# pre-merge gate.
+# Every pull request to main runs `verify` on ubuntu-latest, and a newer push
+# to the same pull request cancels the run it supersedes (`concurrency`).
+# Without the self-hosted runner (below), a push to main does not run it
+# again: the pull request's run is the check.
+# A manual run (Actions tab -> CI -> Run workflow, or
+# `gh workflow run ci.yml --ref <branch>`) runs it on any branch.
 #
-# Self-hosted runner: the push and nightly triggers below are wired but stay
-# no-ops -- both jobs' `if:` gates them on the `SELF_HOSTED_RUNNER`
-# repository variable, which is unset. Setting it to `true` once a runner
-# labelled `self-hosted`,`macOS` is registered turns them on and moves
-# `verify` to that runner; unsetting it reverts.
+# Self-hosted runner: when the repository variable SELF_HOSTED_RUNNER is
+# 'true', a push to main and the nightly schedule also run `verify` on the
+# registered `self-hosted`,`macOS` runner, and the nightly `verify-live` job
+# runs there. A pull request always runs on ubuntu-latest, never on the
+# self-hosted runner: the repository is public, and code from a fork's pull
+# request must not run on the operator's machine.
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   schedule:
@@ -21,16 +24,16 @@ on:
     # own `if:` gates) until SELF_HOSTED_RUNNER=true.
     - cron: "17 9 * * *"
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
-    # ubuntu-latest by default; once the operator sets the repository
-    # variable SELF_HOSTED_RUNNER=true, this retargets at the registered
-    # self-hosted runner instead.
-    runs-on: ${{ vars.SELF_HOSTED_RUNNER == 'true' && fromJSON('["self-hosted", "macOS"]') || 'ubuntu-latest' }}
-    # A manual run (workflow_dispatch) always runs. The push and schedule
-    # triggers are no-ops (hosted runner minutes, see the top of this file)
-    # until the operator opts in.
-    if: github.event_name == 'workflow_dispatch' || vars.SELF_HOSTED_RUNNER == 'true'
+    # ubuntu-latest, or the self-hosted runner once SELF_HOSTED_RUNNER=true;
+    # a pull request always gets ubuntu-latest (see the header).
+    runs-on: ${{ vars.SELF_HOSTED_RUNNER == 'true' && github.event_name != 'pull_request' && fromJSON('["self-hosted", "macOS"]') || 'ubuntu-latest' }}
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || vars.SELF_HOSTED_RUNNER == 'true'
     permissions:
       contents: read
     steps:
@@ -178,18 +181,14 @@ jobs:
           fi
 
   # Nightly live-Docker + Temporal-live backbone (`make verify-live`,
-  # scripts/verify-live.sh) on the self-hosted runner only -- never
-  # meaningful on GitHub-hosted ubuntu (no persistent Docker/Temporal state,
-  # and no reason to pay Actions minutes for a live run there). Runs only
-  # once the operator has set SELF_HOSTED_RUNNER=true, and only on the
-  # nightly schedule or a manual
-  # dispatch -- never on every push, since a live run takes minutes rather
-  # than the `verify` job's seconds. Deliberately calls the Makefile target
-  # rather than duplicating the `verify` job's own per-test steps above: one
-  # place defines what "live" coverage means, exercised identically here and
-  # on a developer's own machine (`make verify-live`).
+  # scripts/verify-live.sh) on the self-hosted runner only. Runs only once
+  # the operator has set SELF_HOSTED_RUNNER=true, and only on the nightly
+  # schedule or a manual dispatch -- never on a push or a pull request.
+  # Calls the Makefile target rather than duplicating the `verify` job's own
+  # steps: one place defines what "live" coverage means, here and on a
+  # developer's own machine (`make verify-live`).
   verify-live:
-    if: vars.SELF_HOSTED_RUNNER == 'true' && github.event_name != 'push'
+    if: vars.SELF_HOSTED_RUNNER == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
