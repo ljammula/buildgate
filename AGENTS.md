@@ -41,8 +41,9 @@ This repo enforces its own safety properties on itself. Two files are
 
 `internal/claims/safety_contract_test.go` and
 `internal/claims/claims_test.go` parse both files structurally (required
-section headers, exact `SC-NNN —` invariant lines, exact `` `draft ->
-product_policy_check` `` -style transition bullets in the first, every
+section headers, exact `SC-NNN —` invariant lines, exact `` `ready ->
+slice_running` `` -style transition bullets in the first, the run state
+graph's equal to `run.Transitions()` in `internal/run`, every
 backtick-wrapped `` `TestXxx` `` name resolving to a real Go test in the
 second, every row's status one of Enforced/Partial/Pending, one Invariants
 row per `SC-NNN`). `make test` then fails unless every test an Enforced row

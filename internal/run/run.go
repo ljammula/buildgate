@@ -1893,6 +1893,9 @@ func (r *Run) ApplyOverride(by, reason string, newState State, now func() string
 	if r.State != StateQuarantined {
 		return fmt.Errorf("override requires a quarantined run; current state is %q", r.State)
 	}
+	if !CanTransition(r.State, newState) {
+		return fmt.Errorf("override cannot move a quarantined run to %q", newState)
+	}
 	if r.Replay != nil {
 		return fmt.Errorf("run %s is a replay run: a replayed result is never accepted by hand", r.ID)
 	}

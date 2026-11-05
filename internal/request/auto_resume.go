@@ -14,9 +14,16 @@ import (
 // resets at that time is not met again by a launch a few seconds early.
 const AutoResumeMargin = time.Minute
 
+// AutoRetryDelay is how long after a request entered resume_review on a
+// transient cause (unresolved.Cause.Transient: a sandbox that never started,
+// a model route that served nothing, an unreachable package registry) the
+// factory resumes it by itself: long enough for a gateway restart or a
+// network blip to clear, short enough that a night's queue keeps moving.
+const AutoRetryDelay = 5 * time.Minute
+
 // ErrAutoResumeNotDue is AutoResumeRequest's answer for a request it does
-// not resume: not waiting on a provider's limit with a time to resume at, or
-// that time not yet come. Nothing is saved.
+// not resume: not waiting on a cause the factory resumes by itself, or the
+// time to resume it not yet come. Nothing is saved.
 var ErrAutoResumeNotDue = errors.New("no automatic resume is due")
 
 // AutoResume records the factory's one automatic resume of a request
@@ -25,8 +32,12 @@ type AutoResume struct {
 	// At is when the factory made it (RFC 3339, UTC): the At of its
 	// History entry and of its ResumeDecision.
 	At string `json:"at"`
-	// RetryAt is the provider's reset time it waited for (ResumeInfo.ResetAt).
-	RetryAt string `json:"retry_at"`
+	// Cause is the wait's cause (ResumeInfo.Cause): provider_quota, or a
+	// transient cause (unresolved.Cause.Transient).
+	Cause unresolved.Cause `json:"cause,omitempty"`
+	// RetryAt is the provider's reset time it waited for (ResumeInfo.ResetAt),
+	// for a provider_quota wait; "" for a transient cause.
+	RetryAt string `json:"retry_at,omitempty"`
 	// FromState and TicketIndex are the step it resumed.
 	FromState   State `json:"from_state"`
 	TicketIndex int   `json:"ticket_index,omitempty"`
@@ -36,40 +47,52 @@ type AutoResume struct {
 	Refused []string `json:"refused,omitempty"`
 }
 
-// AutoResumeDue reports when the factory resumes r by itself: the
-// provider's reset time plus AutoResumeMargin, for a request that has had no
-// automatic resume (AutoResumed: at most one per request, ever), waiting in
-// resume_review because the provider refused its step with its own limit
-// (cause provider_quota), whose refusal that ended the step carried the
-// meter's reset time (ResumeInfo.ResetAt) later than the request's entry
-// into the wait. Nothing else is resumed by the factory: another cause, a
-// refusal with no time of its own (a time from an earlier refusal, or one
-// only a worker printed, does not count), a time at or before the entry
-// (it is not that refusal's reset), a park, a refused resume, and a wait
-// anyone has acted on since the factory entered it (its last History entry
-// is not that entry: a reopen after an expired gate, say).
+// AutoResumeDue reports when the factory resumes r by itself, for a request
+// that has had no automatic resume (AutoResumed: at most one per request,
+// ever, whatever its cause) and waits in resume_review on one of two kinds
+// of cause:
+//
+//   - provider_quota, whose refusal that ended the step carried the meter's
+//     reset time (ResumeInfo.ResetAt) later than the request's entry into
+//     the wait: that time plus AutoResumeMargin. A refusal with no time of
+//     its own (a time from an earlier refusal, or one only a worker printed,
+//     does not count) and a time at or before the entry (it is not that
+//     refusal's reset) are not resumed.
+//   - a transient cause (unresolved.Cause.Transient: the step decided
+//     nothing about the work): the entry plus AutoRetryDelay.
+//
+// Nothing else is resumed by the factory: another cause, a park, a refused
+// resume, and a wait anyone has acted on since the factory entered it (its
+// last History entry is not that entry: a reopen after an expired gate, say).
 func (r *Request) AutoResumeDue() (time.Time, bool) {
-	if r.AutoResumed != nil || !r.quotaWait() || len(r.Resume.Refused) > 0 {
-		return time.Time{}, false
-	}
-	resetAt, err := time.Parse(time.RFC3339, r.Resume.ResetAt)
-	if err != nil {
+	if r.AutoResumed != nil || !r.autoWait() || len(r.Resume.Refused) > 0 {
 		return time.Time{}, false
 	}
 	entered, err := time.Parse(time.RFC3339Nano, r.Resume.At)
-	if err != nil || !resetAt.After(entered) {
+	if err != nil {
 		return time.Time{}, false
 	}
 	if n := len(r.History); n == 0 || r.History[n-1].To != StateResumeReview || r.History[n-1].By != factoryActor || r.History[n-1].At != r.Resume.At {
 		return time.Time{}, false
 	}
+	if r.Resume.Cause.Transient() {
+		return entered.Add(AutoRetryDelay), true
+	}
+	resetAt, err := time.Parse(time.RFC3339, r.Resume.ResetAt)
+	if err != nil || !resetAt.After(entered) {
+		return time.Time{}, false
+	}
 	return resetAt.Add(AutoResumeMargin), true
 }
 
-// quotaWait reports whether r waits in resume_review because the provider
-// refused its step with its own limit, and is not a park.
-func (r *Request) quotaWait() bool {
-	return r.State == StateResumeReview && r.Resume != nil && r.Resume.Cause == unresolved.ProviderQuota && !r.Resume.Parked()
+// autoWait reports whether r waits in resume_review on a cause the factory
+// may resume by itself (provider_quota, or a transient cause), and is not a
+// park.
+func (r *Request) autoWait() bool {
+	if r.State != StateResumeReview || r.Resume == nil || r.Resume.Parked() {
+		return false
+	}
+	return r.Resume.Cause == unresolved.ProviderQuota || r.Resume.Cause.Transient()
 }
 
 // autoResumeVerb is the resume the factory makes of r's wait: the one its
@@ -102,14 +125,17 @@ func (r *Request) EnteredByAutoResume() *AutoResume {
 }
 
 // autoResumeClause is what the factory does by itself about r's
-// provider-quota wait, said after its prompt (Error) and NextAction: when it
-// resumes it, or that its one automatic resume of the request is spent. ""
-// for any other wait, a park included.
+// wait (provider_quota or a transient cause), said after its prompt (Error)
+// and NextAction: when it resumes it, or that its one automatic resume of
+// the request is spent. "" for any other wait, a park included.
 func (r *Request) autoResumeClause() string {
 	if due, ok := r.AutoResumeDue(); ok {
+		if r.Resume.Cause.Transient() {
+			return fmt.Sprintf("; the factory resumes it by itself, once, at %s", due.UTC().Format(time.RFC3339))
+		}
 		return fmt.Sprintf("; the factory resumes it by itself, once, at %s, after the provider's limit resets", due.UTC().Format(time.RFC3339))
 	}
-	if r.AutoResumed == nil || !r.quotaWait() {
+	if r.AutoResumed == nil || !r.autoWait() {
 		return ""
 	}
 	auto := r.AutoResumed
@@ -129,11 +155,14 @@ func (a *AutoResume) before(at string) bool {
 
 // Note is the History note of an automatic resume.
 func (a *AutoResume) Note() string {
+	if a.Cause.Transient() {
+		return fmt.Sprintf("automatic, %s after the step ended with cause %s", AutoRetryDelay, a.Cause)
+	}
 	return "automatic, after the provider's limit reset at " + a.RetryAt
 }
 
 // AutoResumeRequest is the factory's one automatic resume of request id once
-// its provider-quota wait is due (AutoResumeDue at now): under the request's
+// its wait is due (AutoResumeDue at now): under the request's
 // lock, on a fresh read, it makes the resume `factoryd resume` makes
 // (resumeLoaded, with preflight), by the factory, with the verb the prompt
 // offers (autoResumeVerb), and records it as Request.AutoResumed in the same
@@ -157,7 +186,7 @@ func AutoResumeRequest(dataDir, id string, now time.Time, preflight ResumePrefli
 	if err := r.refuseLapsed(dataDir, now, opts); err != nil {
 		return nil, err
 	}
-	auto := &AutoResume{RetryAt: r.Resume.ResetAt, FromState: r.Resume.FromState, TicketIndex: r.TicketIndex}
+	auto := &AutoResume{Cause: r.Resume.Cause, RetryAt: r.Resume.ResetAt, FromState: r.Resume.FromState, TicketIndex: r.TicketIndex}
 	waiting := r.autoResumeClause()
 	resumeErr := r.resumeLoaded(r.autoResumeVerb(), factoryActor, auto.Note(), now, preflight)
 	var refused *ResumeRefusedError

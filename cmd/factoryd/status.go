@@ -306,7 +306,7 @@ func buildRequestStatusEntry(r *request.Request, wait *request.Wait, now time.Ti
 		entry.Kind = string(request.SourceMemory)
 	}
 	if auto := r.EnteredByAutoResume(); auto != nil {
-		entry.AutoResumed = "resumed automatically after the provider's limit reset at " + auto.RetryAt
+		entry.AutoResumed = "resumed automatically " + strings.TrimPrefix(auto.Note(), "automatic, ")
 	}
 	if r.AwaitingPullRequest() {
 		entry.AwaitingPullRequest = true

@@ -12,7 +12,8 @@ import (
 )
 
 // AutoResumeIfDue makes the factory's one automatic resume of request id
-// once the provider's limit that stopped its step has reset
+// once its wait is due: the provider's limit that stopped its step has
+// reset, or a transient cause's delay has passed
 // (request.AutoResumeRequest decides, under the request's lock): the resume
 // `factoryd resume` makes, with the same checks (cfg.Resume) and the same
 // gate expiry, and afterwards, as that command does, the reap of a kept
@@ -32,7 +33,7 @@ func AutoResumeIfDue(ctx context.Context, dataDir, id string, cfg WorkerConfig, 
 	case errors.Is(err, request.ErrGateExpired):
 		return false, NotifyGateExpired(dataDir, id, now)
 	case errors.As(err, &refused), errors.As(err, &preflightErr):
-		log.Printf("request %s: the automatic resume after the provider's limit reset was refused: %v", id, err)
+		log.Printf("request %s: the automatic resume was refused: %v", id, err)
 		return false, remindAutoResumeRefused(dataDir, id, now)
 	case err != nil:
 		return false, err
@@ -68,9 +69,13 @@ func notifyAutoResumed(dataDir, id string, now time.Time) error {
 			return false
 		}
 		auto := r.AutoResumed
+		ask, later := "Resumed automatically after the provider's limit reset", "a later refusal by the provider's limit waits for you"
+		if auto.Cause.Transient() {
+			ask, later = "Resumed automatically after a step that never got to the work", "a later step that ends this way waits for you"
+		}
 		n := prepareRequestNotification(dataDir, r, requestNotice{
-			Ask:    "Resumed automatically after the provider's limit reset",
-			Detail: fmt.Sprintf("The factory resumed the %s step by itself, %s. It is this request's one automatic resume: a later refusal by the provider's limit waits for you.", auto.FromState, auto.Note()),
+			Ask:    ask,
+			Detail: fmt.Sprintf("The factory resumed the %s step by itself, %s. It is this request's one automatic resume: %s.", auto.FromState, auto.Note(), later),
 			Next:   fmt.Sprintf("nothing to do; `factoryd cancel %s` stops it", r.ID),
 		}, now)
 		sent = &n

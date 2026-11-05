@@ -31,3 +31,15 @@ func TestACauseOutsideTheSetReadsAsALostWorker(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyCausesThatDecidedNothingAreTransient(t *testing.T) {
+	want := map[Cause]bool{SandboxLaunch: true, ModelUnavailable: true, DependencyFetch: true}
+	for cause := range causes {
+		if got := cause.Transient(); got != want[cause] {
+			t.Errorf("%q.Transient() = %v, want %v", cause, got, want[cause])
+		}
+	}
+	if Cause("").Transient() {
+		t.Error(`"".Transient() = true`)
+	}
+}

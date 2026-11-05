@@ -118,7 +118,7 @@ const minReviewWait = time.Second
 // reviewWait is how long a request at a review gate waits before the workflow
 // looks again: the reminder interval, cut short to the time left before the
 // gate expires (review_gate_expiry) or before the factory resumes a
-// provider-quota wait by itself (request.AutoResumeDue), and never below
+// wait by itself (request.AutoResumeDue), and never below
 // minReviewWait.
 func reviewWait(r *request.Request, reminder, expiry time.Duration, now time.Time) time.Duration {
 	wait := reminder
@@ -457,8 +457,8 @@ func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bo
 
 // RemindRequest sends request id's review reminder when one is due, after
 // halting the request if its gate has expired, and after the factory's one
-// automatic resume of a provider-quota wait whose retry time has passed,
-// which ends the wait instead.
+// automatic resume of a wait that is due (a provider's limit reset, or a
+// transient cause's delay passed), which ends the wait instead.
 func (a *requestActivities) RemindRequest(ctx context.Context, id string) error {
 	a.ensureConsole()
 	// A gate past its review_gate_expiry halts instead of reminding.
