@@ -401,7 +401,7 @@ follow it, and no means to pass a gate.
 | T-03 | Worker writes outside its selected workspace | Explicit writable-root allow-list and containment/escape checks | Terminate the complete process tree, then halt and quarantine | partial; a reproduced linked-worktree `.git` pointer escape was closed 2026-09-04 (`containment-matrix.md` Filesystem row) |
 | T-04 | Worker reaches arbitrary network services | Network-denied baseline; the run's OpenShell network policy names every admitted destination and calling binary | Terminate the worker and quarantine on an escape or policy violation | partial |
 | T-05 | Agent claims success without implementing the required change | Factory-owned oracle, diff, scope, and evidence checks | Treat prose as evidence only; fail the policy check | enforced in bounded slices |
-| T-06 | A timeout or crash loses the real outcome | Durable attempt, event, artifact, and state records; recovery marks unknown work ambiguous | Halt and quarantine rather than rerun an ambiguous side effect | partial |
+| T-06 | A timeout or crash loses the real outcome | Durable attempt, artifact, and state records, plus a best-effort stage history; recovery marks unknown work ambiguous | Halt and quarantine rather than rerun an ambiguous side effect | partial |
 | T-07 | Two workers mutate one workspace concurrently | One worker lease / repository owner at a time; isolated runs and `-on-branch` runs share the repository (an `-on-branch` run also holds its branch's lock exclusively), a run that touches the shared checkout holds it alone, and a waiting exclusive acquirer goes ahead of shared acquirers that reach the turnstile after it began waiting (one already past it can win once, not repeatedly) | Queue the request or halt on an ownership violation | partial; covered for build execution (shared/exclusive repository flock, `factoryd-git.lock` for shared Git metadata / `RepositoryOwnerWorkflow`), and the kill switch |
 | T-08 | A failure silently waits for a person | Explicit halt → quarantine → asynchronous notification path | Persist the failure and return; never block on a human | partial |
 | T-09 | An override is unauditable or can bypass authentication | Require authenticated operator identity and reason; append durable history | Reject the override and retain the prior state | partial |
@@ -446,9 +446,11 @@ requires a new contract review and an updated machine-checkable test.
 - **SC-007 — durable attributable override:** every human override records the
   operator, reason, prior state, new state, and time; an override is never a
   required approval step.
-- **SC-008 — durable reconstruction:** state, attempts, events, policy results,
-  and artifact hashes are durable so a crash can be reconstructed; an unknown
+- **SC-008 — durable reconstruction:** state, attempts, policy results, and
+  artifact hashes are durable so a crash can be reconstructed; an unknown
   side effect is ambiguous, not an automatic success or safe-to-rerun result.
+  The stage-by-stage history (`progress.jsonl`) is append-only but best-effort:
+  a failed write there never fails the run, so it is not part of the guarantee.
 - **SC-009 — bounded attempts:** every attempt has time, token, retry, and cost
   limits, and retry classification distinguishes infrastructure, verification,
   oracle-drift, and implementation failures.
