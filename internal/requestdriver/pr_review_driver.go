@@ -1080,6 +1080,9 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 	if err != nil {
 		return fmt.Errorf("request %s: ticket %d: round %d: %w", r.ID, ticket.Index, roundIndex, err)
 	}
+	// now was taken before the round built; what the round leads to (a wait
+	// in resume_review among them) is stamped at its end.
+	now = time.Now()
 	if attempt.errText != "" {
 		log.Printf("request %s: ticket %d: round %d: %s: %s", r.ID, ticket.Index, roundIndex, attempt.outcome, attempt.errText)
 	}

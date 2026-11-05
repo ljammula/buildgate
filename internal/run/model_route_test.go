@@ -75,3 +75,22 @@ func TestQuotaResetAtIsTheLastLaunchsTerminalRefusal(t *testing.T) {
 		t.Errorf("a served launch: QuotaResetAt = %q, want none", got)
 	}
 }
+
+// TestLastCallsReadsOnlyTheLastAttempt: an earlier attempt's ledger did not
+// end the run, so a last attempt that recorded nothing gives nil, never the
+// earlier one's calls (whose refusal time must not resume a request).
+func TestLastCallsReadsOnlyTheLastAttempt(t *testing.T) {
+	earlier := &meter.Calls{RefusedAtEndRetryAt: "2026-11-04T10:00:00Z"}
+	r := &Run{Attempts: []Attempt{{RelayCalls: earlier}, {}}}
+	if got := LastCalls(r); got != nil {
+		t.Errorf("LastCalls = %+v, want nil: the last attempt recorded nothing", got)
+	}
+	last := &meter.Calls{}
+	r.Attempts[1].RelayCalls = last
+	if got := LastCalls(r); got != last {
+		t.Errorf("LastCalls = %+v, want the last attempt's calls", got)
+	}
+	if got := LastCalls(&Run{}); got != nil {
+		t.Errorf("LastCalls of a run with no attempt = %+v, want nil", got)
+	}
+}

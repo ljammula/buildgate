@@ -509,6 +509,8 @@ func writeReplayRecord(path string, replay *run.Replay) error {
 func judgeRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, need restackNeed, replay *run.Replay, file string, cfg WorkerConfig, now time.Time) error {
 	rs := ticket.Restack
 	runID, ended, err := runReplay(dp, ctx, dataDir, r, ticket, cfg, rs, file)
+	// now was taken before the replay built; stamp what follows at its end.
+	now = time.Now()
 	if err != nil {
 		ticket.Restack = nil
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack %d: %v", ticket.Index, r.TicketCount, rs.N, err), now)
