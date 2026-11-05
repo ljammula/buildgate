@@ -1374,16 +1374,19 @@ retry of its ticket builds a new run.
 ### A ticket build with no request
 
 `factoryd run -spec <ticket> -open-pull-request`, and `serve`'s `POST /runs`
-with `open_pull_request` (a start-class route: it always needs the start
-token), build one ticket the operator wrote, with no request record. No
+and `POST /runs/{id}/start` with `open_pull_request` (start-class routes:
+they always need the start token), build one ticket the operator wrote, with
+no request record. No
 `spec_review` or `plan_review` precedes it: the person who would approve the
 ticket wrote it. It is the one path to a pull request that no review gate
 holds, so the gate guarantees of the request lifecycle below (a spec approved
 before planning; a plan approved, or a one-ticket plan approved by the
-factory, before building) hold for requests only. Everything after the gates
-is the same as a request's ticket build: the run state graph above, the
-sandbox, every gate, the code review `code_review_policy` sets, the release decision before the branch is
-pushed, a draft pull request, and merge left to a human (SC-001). Without
+factory, before building) hold for requests only, and so do the request's
+plan-time checks and the challenger (SC-022). The build itself is held as a
+request's ticket build is: the run state graph above, the sandbox, the
+build's gates, the code review `code_review_policy` sets, the release
+decision before the branch is pushed, a draft pull request, and merge left
+to a human (SC-001). Without
 `-open-pull-request` (`open_pull_request`) the run pushes nothing.
 
 ### Request lifecycle: dismissing a dead end
