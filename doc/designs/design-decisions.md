@@ -26,7 +26,7 @@ entry names the invariant and does not restate it.
 | | [Every build runs in the sandbox](#every-build-runs-in-the-sandbox) |
 | | [The MCP endpoint reads and submits, never decides a gate](#the-mcp-endpoint-reads-and-submits-never-decides-a-gate) |
 | | [Worker skills are operator snapshots, opt-in](#worker-skills-are-operator-snapshots-opt-in) |
-| Operations | [CI is manual](#ci-is-manual) |
+| Operations | [CI runs `make verify` on pull requests](#ci-runs-make-verify-on-pull-requests) |
 
 ```text
 factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
@@ -204,11 +204,11 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
 
 ## Operations
 
-### CI is manual
+### CI runs `make verify` on pull requests
 
 | | |
 |---|---|
-| Decision | `.github/workflows/ci.yml` runs on `workflow_dispatch` only. `make ci` runs the same checks locally, and running it before a merge is on the author |
-| Because | Hosted runner minutes are the constraint. The push and nightly triggers are in the workflow and turn on with a registered self-hosted runner (the `SELF_HOSTED_RUNNER` repository variable) |
-| Rules out | Treating a green pull request page as evidence the checks ran |
-| Revisit when | A self-hosted runner is registered |
+| Decision | `.github/workflows/ci.yml` runs `make verify` and the live Docker sandbox tests on every pull request to `main`, on ubuntu-latest, cancelling a run a newer push supersedes. `make ci` (adding the console, Python and `scripts/` tests) stays the author's to run before a merge |
+| Because | A merge with no recorded check is how a red `main` gets in unseen. The public repository's hosted minutes are free; the per-pull-request `concurrency` group keeps review-round pushes from stacking runs |
+| Rules out | A pull request running on the self-hosted runner (fork code on the operator's machine); treating a green pull request page as evidence `make ci` ran |
+| Revisit when | `make ci`'s other checks fit a hosted runner, or a self-hosted runner is registered (push and nightly triggers turn on with the `SELF_HOSTED_RUNNER` repository variable) |

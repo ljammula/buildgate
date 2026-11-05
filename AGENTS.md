@@ -129,11 +129,10 @@ override them (`LIVE_SMOKE_JOBS=1` on a single-instance local model route).
 
 Run whichever toolchain(s) your change actually touches. `make verify`
 alone does not cover a console or Python change, and vice versa.
-`.github/workflows/ci.yml` is manual-only (`workflow_dispatch`) by
-operator decision — it does not run automatically on push to `main` or on
-a PR push unless the optional, currently-unused self-hosted runner is
-registered (see README's Build & test section) — so running `make ci`
-yourself before claiming a change is done is on you, not CI.
+`.github/workflows/ci.yml` runs `make verify` (plus the live Docker
+sandbox tests) on every pull request to `main`, on ubuntu-latest. It does
+not run the console, Python or `scripts/` tests, so running `make ci`
+yourself before claiming a change is done is still on you.
 
 Test gotchas that have broken `main` before:
 
