@@ -695,20 +695,18 @@ esac
 // measuring wall time across a scan with one of each candidate type: it
 // must stay well under two debounce intervals.
 func TestReconcileRelayOrphansSharesOneDebounceAcrossContainerAndNetworkOrphans(t *testing.T) {
-	// Counts debounce waits through the ownerDebounceAfter seam instead of
+	// Counts debounce waits through the debounce wait it passes instead of
 	// timing wall clock: the wall-clock version (a 700ms unit vs ~10 forks
 	// of a fake docker script) failed under make verify's sharded -race
 	// load while passing alone.
 	const unit = 700 * time.Millisecond
 	debounceWaits := 0
-	previousDebounceAfter := ownerDebounceAfter
-	ownerDebounceAfter = func(time.Duration) <-chan time.Time {
+	after := func(time.Duration) <-chan time.Time {
 		debounceWaits++
 		fired := make(chan time.Time, 1)
 		fired <- time.Now()
 		return fired
 	}
-	t.Cleanup(func() { ownerDebounceAfter = previousDebounceAfter })
 	previousStale := ownerStaleAfter
 	ownerStaleAfter = 0
 	t.Cleanup(func() { ownerStaleAfter = previousStale })
@@ -750,7 +748,7 @@ esac
 		t.Fatal(err)
 	}
 
-	removed, err := ReconcileRelayOrphans(context.Background(), docker, dataDir)
+	removed, err := reconcileRelayOrphans(context.Background(), after, docker, dataDir)
 	if err != nil {
 		t.Fatalf("ReconcileRelayOrphans: %v", err)
 	}
@@ -797,7 +795,7 @@ func TestReconcileRelayOrphansDebouncesNetworkOnlyStaleness(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("save run: %v", err)
 	}
-	debounces := staleOwnerRefreshedDuringDebounce(t, dataDir, r.ID)
+	after, debounces := staleOwnerRefreshedDuringDebounce(t, dataDir, r.ID)
 
 	docker := filepath.Join(t.TempDir(), "docker-fake")
 	script := `#!/bin/sh
@@ -814,7 +812,7 @@ esac
 		t.Fatal(err)
 	}
 
-	removed, err := ReconcileRelayOrphans(context.Background(), docker, dataDir)
+	removed, err := reconcileRelayOrphans(context.Background(), after, docker, dataDir)
 	if err != nil {
 		t.Fatalf("ReconcileRelayOrphans: %v", err)
 	}

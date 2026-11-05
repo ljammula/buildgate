@@ -39,14 +39,32 @@ const DefaultServeAddr = "127.0.0.1:8090"
 // CLI-hint paths, so it must be quick whether or not serve is up.
 const probeTimeout = 250 * time.Millisecond
 
-// embedded reports whether this binary carries the console bundle; a
-// package variable so tests do not depend on whether a developer happens
-// to have run `make console-build` in their checkout.
-var embedded = consoleweb.Embedded
+// Prober is what ServeAddress and ServePID ask of the machine about the
+// serve a record names. Machine is this machine's; a caller with a boundary
+// of its own (cmd/factoryd's host, hostcontrol.Deps) answers through it, so
+// a test fakes the answers without opening sockets or depending on
+// processes it does not own.
+type Prober interface {
+	// ProcessAlive reports whether pid names a live process.
+	ProcessAlive(pid int) bool
+	// Listening reports whether a TCP listener answers on addr.
+	Listening(addr string) bool
+}
 
-// Listening reports whether a TCP listener answers on addr. A package
-// variable so tests can stub it without opening sockets.
-var Listening = func(addr string) bool {
+// Machine is the Prober over this machine.
+type Machine struct{}
+
+// ProcessAlive reports whether pid names a live process.
+func (Machine) ProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// Listening reports whether a TCP listener answers on addr.
+func (Machine) Listening(addr string) bool {
 	conn, err := net.DialTimeout("tcp", addr, probeTimeout)
 	if err != nil {
 		return false
@@ -55,20 +73,27 @@ var Listening = func(addr string) bool {
 	return true
 }
 
+// LocalBaseURL is BaseURL with no flag, on this machine and this binary.
+func LocalBaseURL(dataDir string) string {
+	return BaseURL(Machine{}, consoleweb.Embedded(), "", dataDir)
+}
+
 // BaseURL resolves the console base URL: flagValue, then EnvVar (each only
-// when it is an address and nothing more, addressOnly), then --
-// only when the console is embedded in this binary -- the live address a
-// serve for dataDir recorded (ServeAddress). "" means no console to link
-// to.
-func BaseURL(flagValue, dataDir string) string {
+// when it is an address and nothing more, addressOnly), then -- only when
+// the console is embedded in this binary (embedded, consoleweb.Embedded,
+// passed in so a test need not depend on whether a developer happens to
+// have run `make console-build` in their checkout) -- the live address a
+// serve for dataDir recorded (ServeAddress, asked through p). "" means no
+// console to link to.
+func BaseURL(p Prober, embedded bool, flagValue, dataDir string) string {
 	if base := addressOnly(flagValue); base != "" {
 		return base
 	}
 	if env := EnvBase(); env != "" {
 		return env
 	}
-	if embedded() {
-		if addr := ServeAddress(dataDir); addr != "" {
+	if embedded {
+		if addr := ServeAddress(p, dataDir); addr != "" {
 			return "http://" + addr
 		}
 	}
@@ -104,16 +129,6 @@ const addressFile = "console-address"
 type serveRecord struct {
 	Addr string `json:"addr"`
 	PID  int    `json:"pid"`
-}
-
-// processAlive reports whether pid names a live process; a package
-// variable so tests can stub it.
-var processAlive = func(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // RecordServeAddress records addr (serve's bound -addr) as dataDir's
@@ -165,12 +180,12 @@ func readRecord(dataDir string) (serveRecord, bool) {
 
 // ServeAddress returns the console address a serve for dataDir recorded,
 // or "" when none did, its process is gone, or nothing answers there.
-func ServeAddress(dataDir string) string {
+func ServeAddress(p Prober, dataDir string) string {
 	if dataDir == "" {
 		return ""
 	}
 	record, ok := readRecord(dataDir)
-	if !ok || !processAlive(record.PID) || !Listening(record.Addr) {
+	if !ok || !p.ProcessAlive(record.PID) || !p.Listening(record.Addr) {
 		return ""
 	}
 	return record.Addr
@@ -180,12 +195,12 @@ func ServeAddress(dataDir string) string {
 // address, and that record's address, when the record exists and its
 // process is alive. It does not probe the address: `factoryd stop` uses it
 // to find a serve that is starting or wedged as well as a healthy one.
-func ServePID(dataDir string) (pid int, addr string, ok bool) {
+func ServePID(p Prober, dataDir string) (pid int, addr string, ok bool) {
 	if dataDir == "" {
 		return 0, "", false
 	}
 	record, found := readRecord(dataDir)
-	if !found || !processAlive(record.PID) {
+	if !found || !p.ProcessAlive(record.PID) {
 		return 0, "", false
 	}
 	return record.PID, record.Addr, true

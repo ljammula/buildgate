@@ -18,10 +18,8 @@ import (
 func TestDiffScopeQuarantinedRoundRecordsTheRedAsOutOfScope(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
 	f.cfg.Settings.ReviewAdviceRounds = 3
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
 	rounds := 0
-	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	f.dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		rounds++
 		id := requestdrivertest.ArgValue(args, "-ticket")
 		onReady(&run.Run{ID: id})

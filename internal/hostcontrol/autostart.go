@@ -22,6 +22,9 @@ import (
 // Docker and Temporal boundaries it calls, and two answers that come from
 // code elsewhere in the command.
 type Deps interface {
+	// Prober answers whether a recorded serve's process is alive and its
+	// address answers (consolelink.ServeAddress, consolelink.ServePID).
+	consolelink.Prober
 	ColimaBinary() string
 	DockerBinary() string
 	EnsureTemporal(ctx context.Context, w io.Writer) string
@@ -314,7 +317,7 @@ func ShellCredentialEnv() []string {
 // EnsureServe starts `factoryd serve` for dataDir unless one is already
 // recorded and answering. It reports why in one line when it cannot.
 func EnsureServe(dp Deps, w io.Writer, binaryPath, configPath, dataDir string) {
-	if consolelink.ServeAddress(dataDir) != "" {
+	if consolelink.ServeAddress(dp, dataDir) != "" {
 		return
 	}
 	if configPath == "" {

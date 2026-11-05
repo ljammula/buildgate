@@ -12,7 +12,6 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
-	"buildgate/internal/requestdriver"
 	"buildgate/internal/run"
 )
 
@@ -32,13 +31,6 @@ import (
 func TicketRunResultSHA(i int) string {
 	return fmt.Sprintf("%040d", 900+i)
 }
-
-// LastPushedSHA is stubPRReviewDeps' own default forge.pushExistingBranch/
-// forge.remoteBranchHeadSHA pairing's shared state -- see stubPRReviewDeps'
-// own doc comment. Reset at the start of every stubPRReviewDeps call, so
-// tests never leak state into one another despite this package's
-// non-parallel convention.
-var LastPushedSHA map[string]string
 
 func StubPRReviewTestFixture(t *testing.T, ticketCount int) (*request.Request, string) {
 	t.Helper()
@@ -109,31 +101,33 @@ type PrReviewHooks struct {
 	ReplyToReviewComment        *func(ctx context.Context, prURL string, commentID int64, body string) error
 }
 
+// PushedSHAs is the remote branch heads StubPRReviewHooks' default
+// RemoteBranchHeadSHA reads: a test's own PushExistingBranch records what it
+// pushed here (branch -> sha), so the post-push verification read sees it.
+type PushedSHAs map[string]string
+
 // StubPRReviewHooks overrides every seam of the PR-review driver: the fields
-// of the caller's Deps fake that h points at and the package-level ones, restoring each to its production value on test cleanup -- the
-// same "swap and defer-restore" shape worker_config_test.go's own
-// stubWorkerDoctorChecks helper uses.
-func StubPRReviewHooks(h PrReviewHooks, t *testing.T, state forge.ReviewState, readErr error) {
+// of the caller's Deps fake that h points at, restoring each to its value on
+// test cleanup -- the same "swap and defer-restore" shape
+// worker_config_test.go's own stubWorkerDoctorChecks helper uses. It returns
+// the remote branch heads its default RemoteBranchHeadSHA reads.
+func StubPRReviewHooks(h PrReviewHooks, t *testing.T, state forge.ReviewState, readErr error) PushedSHAs {
 	t.Helper()
 	origRead := *h.ReadReviewState
-	origRunner := requestdriver.PrReviewCorrectiveRunner
 	origReady := *h.MarkPullRequestReady
 	origUndoReady := *h.UndoMarkPullRequestReady
 	origPush := *h.PushExistingBranch
 	origRemoteHead := *h.RemoteBranchHeadSHA
 	origDescendsFromHead := *h.RoundResultDescendsFromHead
 	origReply := *h.ReplyToReviewComment
-	origStartNext := requestdriver.ContinueAfterPRApproval
 	t.Cleanup(func() {
 		*h.ReadReviewState = origRead
-		requestdriver.PrReviewCorrectiveRunner = origRunner
 		*h.MarkPullRequestReady = origReady
 		*h.UndoMarkPullRequestReady = origUndoReady
 		*h.PushExistingBranch = origPush
 		*h.RemoteBranchHeadSHA = origRemoteHead
 		*h.RoundResultDescendsFromHead = origDescendsFromHead
 		*h.ReplyToReviewComment = origReply
-		requestdriver.ContinueAfterPRApproval = origStartNext
 	})
 	// Defaults to a no-op success: every case that doesn't specifically
 	// exercise the post-ready-flip revert (decisionStillAllows still true
@@ -147,7 +141,7 @@ func StubPRReviewHooks(h PrReviewHooks, t *testing.T, state forge.ReviewState, r
 	*h.ReadReviewState = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 		return state, readErr
 	}
-	// LastPushedSHA/forge.remoteBranchHeadSHA/forge.roundResultDescendsFromHead
+	// pushed/forge.remoteBranchHeadSHA/forge.roundResultDescendsFromHead
 	// default to a consistent, always-succeeding trio for
 	// pushAcceptedRoundAndReply's own pre-push branch/ancestry guards and
 	// its post-push remote-verification read (see that function's own
@@ -157,14 +151,15 @@ func StubPRReviewHooks(h PrReviewHooks, t *testing.T, state forge.ReviewState, r
 	// round's push. A test that specifically exercises one of these
 	// guards overrides forge.roundResultDescendsFromHead or
 	// forge.remoteBranchHeadSHA directly instead of using this default.
-	LastPushedSHA = map[string]string{}
+	pushed := PushedSHAs{}
 	*h.RemoteBranchHeadSHA = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
 	}
 	*h.RoundResultDescendsFromHead = func(dir, ancestor, descendant string) (bool, error) { return true, nil }
+	return pushed
 }
 
 // AcceptAndReview makes ticket i's fixture run an accepted one whose

@@ -90,13 +90,13 @@ func TestReconcileRequestJobOrphansLeavesALiveOwnerAlone(t *testing.T) {
 }
 
 func TestReconcileRequestJobOrphansReclaimsAStaleMarkerWithALivePidButNotAFreshOne(t *testing.T) {
-	prevStale, prevDebounce := ownerStaleAfter, ownerDebounceAfter
-	ownerDebounceAfter = func(time.Duration) <-chan time.Time {
+	prevStale := ownerStaleAfter
+	after := func(time.Duration) <-chan time.Time {
 		c := make(chan time.Time, 1)
 		c <- time.Time{}
 		return c
 	}
-	t.Cleanup(func() { ownerStaleAfter, ownerDebounceAfter = prevStale, prevDebounce })
+	t.Cleanup(func() { ownerStaleAfter = prevStale })
 
 	dataDir := t.TempDir()
 	for _, id := range []string{"req-stale", "req-fresh"} {
@@ -112,7 +112,7 @@ func TestReconcileRequestJobOrphansReclaimsAStaleMarkerWithALivePidButNotAFreshO
 	docker, logFile := fakeRequestJobDocker(t, "factoryd-sandbox-stale\treq-stale\nfactoryd-sandbox-fresh\treq-fresh\n")
 
 	// Every pid reads as alive, as a reused pid does.
-	removed, err := ReconcileRequestJobOrphans(context.Background(), docker, dataDir, func(string) bool { return false })
+	removed, err := reconcileRequestJobOrphans(context.Background(), after, docker, dataDir, func(string) bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}

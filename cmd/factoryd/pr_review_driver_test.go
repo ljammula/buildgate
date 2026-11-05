@@ -14,10 +14,10 @@ import (
 )
 
 // stubPRReviewDeps is stubPRReviewHooks over this package's forge fake.
-func stubPRReviewDeps(dp *deps, t *testing.T, state forge.ReviewState, readErr error) {
+func stubPRReviewDeps(dp *deps, t *testing.T, state forge.ReviewState, readErr error) requestdrivertest.PushedSHAs {
 	t.Helper()
 	f := fakeForgeOf(dp)
-	requestdrivertest.StubPRReviewHooks(requestdrivertest.PrReviewHooks{
+	return requestdrivertest.StubPRReviewHooks(requestdrivertest.PrReviewHooks{
 		ReadReviewState: &f.readReviewStateFn, MarkPullRequestReady: &f.markPullRequestReadyFn,
 		UndoMarkPullRequestReady: &f.undoMarkPullRequestReadyFn, PushExistingBranch: &f.pushExistingBranchFn,
 		RemoteBranchHeadSHA: &f.remoteBranchHeadSHAFn, RoundResultDescendsFromHead: &f.roundResultDescendsFromHeadFn,

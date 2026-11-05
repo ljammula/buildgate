@@ -7,48 +7,30 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
-// tier2SettingsOverride, when non-nil, is used by resolveSettings instead
-// of loading the session config from disk itself. It has exactly two
-// writers, both of which own this whole process for the duration:
+// resolveSettings returns the session settings a build uses: caller's when
+// it is non-nil, else sessionconfig.DefaultSettings() overlaid with the
+// first of sessionconfig.DefaultPaths() that exists. caller is what a
+// long-lived caller resolved once for every build it starts in its own
+// process: the worker's (WorkerConfig.Settings, from its -config), serve's
+// for an API-started run (apiStartTier2Settings, folding in its
+// daemon-static release/sandbox-resource flags), or -config's of a bare
+// run. Every build in the worker's process thus uses exactly the settings
+// the worker's own startup (and its doctor preflight) resolved, not a
+// second, independent load of the default session config path. Settings
+// is all value types and this returns a copy, so a run that mutates its
+// own resolved settings -- as runMainWithReady does, applying .factory.yml
+// over them -- cannot reach the caller's or another concurrently-running
+// build's.
 //
-//   - worker_config.go, immediately around its own in-process drain loop.
-//     worker and runMainWithReady share this process (never a
-//     subprocess -- see ticketRunner's own doc comment), so a queued
-//     entry's Tier-2 settings are exactly the same sessionconfig.Settings
-//     worker's own startup (and its doctor preflight) already resolved
-//     from whatever -config path it was given, rather than a second,
-//     independent load of the default session config path that would
-//     ignore that -config entirely. Cleared on return, so a later bare
-//     `factoryd <run>` invocation in the same process (there is none in
-//     production, but tests share a binary) resolves its own settings
-//     normally.
-//   - serve_cmd.go, once, after every startup validation that can still
-//     return early and before the server accepts its first connection, so
-//     that an API-started run picks up serve's own daemon-static release/
-//     sandbox-resource flags (runMainWithReady has no CLI flag left to
-//     forward them through). Deliberately never cleared -- see that
-//     assignment's own comment.
-//
-// Neither writer can observe the other: `worker` and `serve` are
-// separate commands, and `serve`'s own daemon supervisor spawns real
-// subprocesses. resolveSettings returns a *copy* (Settings is all value
-// types), so a run that mutates its own resolved settings -- as
-// runMainWithReady does, applying .factory.yml over them -- cannot reach
-// this shared value or another concurrently-running API-started run's.
-var tier2SettingsOverride *sessionconfig.Settings
-
-// resolveSettings returns sessionconfig.DefaultSettings() overlaid with
-// whatever session config is in effect: tier2SettingsOverride when
-// worker_config.go set one, else the first of sessionconfig.DefaultPaths()
-// that exists. This is the Tier-2 half of the settings precedence chain
-// (defaults, then session config, then .factory.yml, then an explicit
-// CLI Tier-1 flag) -- applyProjectConfigDefaults applies the .factory.yml
-// half, for the handful of these fields it also overlays
-// (release-protected-paths, plus the relay token/cost ceilings), and the
-// flags remaining in runMainWithReady's own var block are the CLI half.
-func resolveSettings() (sessionconfig.Settings, error) {
-	if tier2SettingsOverride != nil {
-		return *tier2SettingsOverride, nil
+// This is the Tier-2 half of the settings precedence chain (defaults, then
+// session config, then .factory.yml, then an explicit CLI Tier-1 flag) --
+// applyProjectConfigDefaults applies the .factory.yml half, for the handful
+// of these fields it also overlays (release-protected-paths, plus the relay
+// token/cost ceilings), and the flags remaining in runMainWithReady's own
+// var block are the CLI half.
+func resolveSettings(caller *sessionconfig.Settings) (sessionconfig.Settings, error) {
+	if caller != nil {
+		return *caller, nil
 	}
 	return loadDefaultSettings()
 }

@@ -48,7 +48,6 @@ func serveMainUntilBind(t *testing.T, dataDir string) (string, error) {
 	previousOutput := log.Writer()
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 	err = serveMain(newTestDeps(t), []string{"-data-dir", dataDir, "-addr", listener.Addr().String(), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID())})
 	return logBuf.String(), err
 }

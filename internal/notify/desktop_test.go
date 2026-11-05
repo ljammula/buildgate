@@ -11,45 +11,31 @@ import (
 	"testing"
 )
 
-// withDesktopOS temporarily overrides desktopOS for the duration of a test.
-func withDesktopOS(t *testing.T, os string) {
+// testDesktopEnv is this machine's desktopEnv with the icon cache in a
+// throwaway directory; a test then replaces what it fakes.
+func testDesktopEnv(t *testing.T) *desktopEnv {
 	t.Helper()
-	orig := desktopOS
-	desktopOS = os
-	t.Cleanup(func() { desktopOS = orig })
-}
-
-// withDesktopNotifierLookPath temporarily overrides desktopNotifierLookPath.
-func withDesktopNotifierLookPath(t *testing.T, fn func() (string, error)) {
-	t.Helper()
-	orig := desktopNotifierLookPath
-	desktopNotifierLookPath = fn
-	t.Cleanup(func() { desktopNotifierLookPath = orig })
-}
-
-// withDesktopClickNotifierLookPath temporarily overrides
-// desktopClickNotifierLookPath.
-func withDesktopClickNotifierLookPath(t *testing.T, fn func() (string, error)) {
-	t.Helper()
-	orig := desktopClickNotifierLookPath
-	desktopClickNotifierLookPath = fn
-	t.Cleanup(func() { desktopClickNotifierLookPath = orig })
+	env := machineDesktopEnv()
+	cacheDir := t.TempDir()
+	env.iconCacheDir = func() (string, error) { return cacheDir, nil }
+	return env
 }
 
 func TestDesktopNotifierNoOpsWhenOptedOut(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "0")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	called := false
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		called = true
 		return "/usr/bin/osascript", nil
-	})
+	}
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{}); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), Notification{}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if called {
-		t.Error("desktopNotifierLookPath was called, want the opt-out env var to short-circuit before it")
+		t.Error("the osascript lookup was called, want the opt-out env var to short-circuit before it")
 	}
 }
 
@@ -57,30 +43,32 @@ func TestDesktopNotifierNoOpsWhenOptedOut(t *testing.T) {
 // the notifier reaches the (injected) osascript lookup instead of
 // short-circuiting, so an engineer gets notifications without opting in.
 func TestDesktopNotifierIsOnByDefault(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	called := false
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		called = true
 		return "/usr/bin/true", nil
-	})
+	}
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{RunID: "run-1"}); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), Notification{RunID: "run-1"}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if !called {
-		t.Error("desktopNotifierLookPath was never called, want an unset env var to leave desktop notifications on")
+		t.Error("the osascript lookup was never called, want an unset env var to leave desktop notifications on")
 	}
 }
 
 func TestDesktopNotifierNoOpsOnAnotherOS(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "freebsd")
+	env.os = "freebsd"
 	called := false
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		called = true
 		return "/usr/bin/osascript", nil
-	})
+	}
 	// A notify-send that records its run, on an otherwise empty PATH.
 	dir := t.TempDir()
 	ran := filepath.Join(dir, "ran")
@@ -90,7 +78,7 @@ func TestDesktopNotifierNoOpsOnAnotherOS(t *testing.T) {
 	t.Setenv("PATH", dir)
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{}); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), Notification{}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if called {
@@ -105,12 +93,13 @@ func TestDesktopNotifierNoOpsOnAnotherOS(t *testing.T) {
 // notify-send, with the request's text escaped as plain text, and only
 // when there is a session bus to reach a notification daemon over.
 func TestDesktopNotifierUsesNotifySendOnLinux(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "linux")
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.os = "linux"
+	env.notifierLookPath = func() (string, error) {
 		t.Error("osascript was looked up on Linux")
 		return "", errors.New("no osascript")
-	})
+	}
 	dir := t.TempDir()
 	argvLog := filepath.Join(dir, "argv")
 	stand := filepath.Join(dir, "notify-send")
@@ -121,7 +110,7 @@ func TestDesktopNotifierUsesNotifySendOnLinux(t *testing.T) {
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
 
 	n := Notification{RequestID: "req-1", Ask: "Approve the plan", Subject: "req-1", Reason: "3 tickets <and> a & b"}
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(argvLog)
@@ -138,7 +127,7 @@ func TestDesktopNotifierUsesNotifySendOnLinux(t *testing.T) {
 	os.Remove(argvLog)
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "")
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(argvLog); err == nil {
@@ -158,32 +147,34 @@ func TestDesktopNotifierUsesNotifySendOnLinux(t *testing.T) {
 // injected lookup always fails, so this test can never accidentally
 // shell out to the machine's real osascript.
 func TestDesktopNotifierNoOpsWhenOsascriptMissing(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.os = "darwin"
+	env.notifierLookPath = func() (string, error) {
 		return "", errNotFoundForTest
-	})
+	}
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{}); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), Notification{}); err != nil {
 		t.Fatalf("Notify: %v, want nil (best-effort, never errors)", err)
 	}
 }
 
 // TestDesktopNotifierUsesInjectedBinary proves Notify shells out to
-// whatever desktopNotifierLookPath resolves, rather than a hardcoded
+// whatever the osascript lookup resolves, rather than a hardcoded
 // "osascript" — this is what lets tests point it at a harmless stand-in
 // binary instead of a real osascript.
 func TestDesktopNotifierUsesInjectedBinary(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	// /usr/bin/true exists on darwin and Linux CI runners alike, ignores
 	// its arguments, and exits 0 -- a harmless stand-in that proves the
 	// injected path is actually invoked without ever calling osascript.
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		return "/usr/bin/true", nil
-	})
+	}
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{RunID: "run-1"}); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), Notification{RunID: "run-1"}); err != nil {
 		t.Fatalf("Notify: %v, want nil (best-effort, never errors)", err)
 	}
 }
@@ -193,28 +184,29 @@ func TestDesktopNotifierUsesInjectedBinary(t *testing.T) {
 // and never even looks up osascript -- the two are mutually exclusive per
 // call, not "try click, then also plain-notify".
 func TestDesktopNotifierPrefersClickNotifierWhenRunDirSet(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	clickCalled := false
-	withDesktopClickNotifierLookPath(t, func() (string, error) {
+	env.clickNotifierLookPath = func() (string, error) {
 		clickCalled = true
 		return "/usr/bin/true", nil
-	})
+	}
 	osascriptCalled := false
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		osascriptCalled = true
 		return "/usr/bin/osascript", nil
-	})
+	}
 
 	n := Notification{RunID: "run-1", Ticket: "TICK-1", Reason: "run halted", RunDir: "/data/runs/run-1"}
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatalf("Notify: %v, want nil (best-effort, never errors)", err)
 	}
 	if !clickCalled {
-		t.Error("desktopClickNotifierLookPath was never called, want it consulted first when RunDir is set")
+		t.Error("the terminal-notifier lookup was never called, want it consulted first when RunDir is set")
 	}
 	if osascriptCalled {
-		t.Error("desktopNotifierLookPath was called, want the click-notifier path to short-circuit before it")
+		t.Error("the osascript lookup was called, want the click-notifier path to short-circuit before it")
 	}
 }
 
@@ -222,27 +214,28 @@ func TestDesktopNotifierPrefersClickNotifierWhenRunDirSet(t *testing.T) {
 // or path-less notification (RunDir == "") never even attempts the click
 // notifier -- there would be nothing for -execute to open.
 func TestDesktopNotifierFallsBackToOsascriptWhenRunDirEmpty(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	clickCalled := false
-	withDesktopClickNotifierLookPath(t, func() (string, error) {
+	env.clickNotifierLookPath = func() (string, error) {
 		clickCalled = true
 		return "/usr/bin/true", nil
-	})
+	}
 	osascriptCalled := false
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		osascriptCalled = true
 		return "/usr/bin/osascript", nil
-	})
+	}
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), Notification{RunID: "run-1"}); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), Notification{RunID: "run-1"}); err != nil {
 		t.Fatalf("Notify: %v, want nil (best-effort, never errors)", err)
 	}
 	if clickCalled {
-		t.Error("desktopClickNotifierLookPath was called, want an empty RunDir to skip it entirely")
+		t.Error("the terminal-notifier lookup was called, want an empty RunDir to skip it entirely")
 	}
 	if !osascriptCalled {
-		t.Error("desktopNotifierLookPath was never called, want the empty-RunDir path to fall back to it")
+		t.Error("the osascript lookup was never called, want the empty-RunDir path to fall back to it")
 	}
 }
 
@@ -251,23 +244,24 @@ func TestDesktopNotifierFallsBackToOsascriptWhenRunDirEmpty(t *testing.T) {
 // not on PATH, Notify still falls back to osascript rather than going
 // silent.
 func TestDesktopNotifierFallsBackWhenClickNotifierMissing(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
-	withDesktopClickNotifierLookPath(t, func() (string, error) {
+	env.os = "darwin"
+	env.clickNotifierLookPath = func() (string, error) {
 		return "", errNotFoundForTest
-	})
+	}
 	osascriptCalled := false
-	withDesktopNotifierLookPath(t, func() (string, error) {
+	env.notifierLookPath = func() (string, error) {
 		osascriptCalled = true
 		return "/usr/bin/osascript", nil
-	})
+	}
 
 	n := Notification{RunID: "run-1", RunDir: "/data/runs/run-1"}
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatalf("Notify: %v, want nil (best-effort, never errors)", err)
 	}
 	if !osascriptCalled {
-		t.Error("desktopNotifierLookPath was never called, want the missing-click-notifier path to fall back to it")
+		t.Error("the osascript lookup was never called, want the missing-click-notifier path to fall back to it")
 	}
 }
 
@@ -278,15 +272,16 @@ func TestDesktopNotifierFallsBackWhenClickNotifierMissing(t *testing.T) {
 // its own argv, since exec.CommandContext's target binary is stubbed
 // out, not spied on, by the other tests in this file.
 func TestDesktopNotifierClickTargetPrefersLinkOverRunDir(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 
 	argsFile := filepath.Join(t.TempDir(), "args")
 	script := filepath.Join(t.TempDir(), "fake-terminal-notifier.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \""+argsFile+"\"\n"), 0o755); err != nil {
 		t.Fatalf("write fake terminal-notifier: %v", err)
 	}
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return script, nil })
+	env.clickNotifierLookPath = func() (string, error) { return script, nil }
 
 	n := Notification{
 		RunID:  "run-1",
@@ -296,7 +291,7 @@ func TestDesktopNotifierClickTargetPrefersLinkOverRunDir(t *testing.T) {
 		RunDir: "/data/runs/run-1",
 		Link:   "https://console.example/requests/req-1",
 	}
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 
@@ -320,18 +315,19 @@ func TestDesktopNotifierClickTargetPrefersLinkOverRunDir(t *testing.T) {
 // the pre-existing behavior (open RunDir) still holds when a
 // notification has no console Link.
 func TestDesktopNotifierClickTargetFallsBackToRunDirWhenLinkEmpty(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 
 	argsFile := filepath.Join(t.TempDir(), "args")
 	script := filepath.Join(t.TempDir(), "fake-terminal-notifier.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \""+argsFile+"\"\n"), 0o755); err != nil {
 		t.Fatalf("write fake terminal-notifier: %v", err)
 	}
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return script, nil })
+	env.clickNotifierLookPath = func() (string, error) { return script, nil }
 
 	n := Notification{RunID: "run-1", Reason: "run halted", RunDir: "/data/runs/run-1"}
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 
@@ -347,19 +343,19 @@ func TestDesktopNotifierClickTargetFallsBackToRunDirWhenLinkEmpty(t *testing.T) 
 // recordClickNotifierArgs installs a fake terminal-notifier that records
 // its argv, fires n through DesktopNotifier, and returns the recorded
 // args one per element.
-func recordClickNotifierArgs(t *testing.T, n Notification) []string {
+func recordClickNotifierArgs(t *testing.T, env *desktopEnv, n Notification) []string {
 	t.Helper()
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 
 	argsFile := filepath.Join(t.TempDir(), "args")
 	script := filepath.Join(t.TempDir(), "fake-terminal-notifier.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \""+argsFile+"\"\n"), 0o755); err != nil {
 		t.Fatalf("write fake terminal-notifier: %v", err)
 	}
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return script, nil })
+	env.clickNotifierLookPath = func() (string, error) { return script, nil }
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	got, err := os.ReadFile(argsFile)
@@ -369,20 +365,13 @@ func recordClickNotifierArgs(t *testing.T, n Notification) []string {
 	return strings.Split(strings.TrimSuffix(string(got), "\n"), "\n")
 }
 
-// withDesktopIconCacheDir temporarily overrides desktopIconCacheDir.
-func withDesktopIconCacheDir(t *testing.T, fn func() (string, error)) {
-	t.Helper()
-	orig := desktopIconCacheDir
-	desktopIconCacheDir = fn
-	t.Cleanup(func() { desktopIconCacheDir = orig })
-}
-
 // TestDesktopNotifierAttachesBuildgateIcon proves the click-notifier path
 // passes -contentImage pointing at a file holding the embedded Buildgate
 // icon, and that a stale copy left by an older binary is replaced.
 func TestDesktopNotifierAttachesBuildgateIcon(t *testing.T) {
+	env := testDesktopEnv(t)
 	cache := t.TempDir()
-	withDesktopIconCacheDir(t, func() (string, error) { return cache, nil })
+	env.iconCacheDir = func() (string, error) { return cache, nil }
 	stale := filepath.Join(cache, "buildgate", "notification-icon.png")
 	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
 		t.Fatal(err)
@@ -391,7 +380,7 @@ func TestDesktopNotifierAttachesBuildgateIcon(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args := recordClickNotifierArgs(t, Notification{RunID: "run-1", Reason: "run halted", RunDir: "/data/runs/run-1"})
+	args := recordClickNotifierArgs(t, env, Notification{RunID: "run-1", Reason: "run halted", RunDir: "/data/runs/run-1"})
 
 	var icon string
 	for i, a := range args {
@@ -415,9 +404,10 @@ func TestDesktopNotifierAttachesBuildgateIcon(t *testing.T) {
 // never costs the notification itself: the banner still fires, just
 // without -contentImage.
 func TestDesktopNotifierOmitsIconWhenCacheUnavailable(t *testing.T) {
-	withDesktopIconCacheDir(t, func() (string, error) { return "", errors.New("no cache dir") })
+	env := testDesktopEnv(t)
+	env.iconCacheDir = func() (string, error) { return "", errors.New("no cache dir") }
 
-	args := recordClickNotifierArgs(t, Notification{RunID: "run-1", Reason: "run halted", RunDir: "/data/runs/run-1"})
+	args := recordClickNotifierArgs(t, env, Notification{RunID: "run-1", Reason: "run halted", RunDir: "/data/runs/run-1"})
 
 	if slices.Contains(args, "-contentImage") {
 		t.Errorf("recorded args = %q, want no -contentImage when the cache dir is unavailable", args)

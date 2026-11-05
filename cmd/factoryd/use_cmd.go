@@ -144,7 +144,7 @@ func useList(dp *deps, w io.Writer) error {
 			queue = "worker running"
 		}
 		serve := "serve stopped"
-		if addr := consolelink.ServeAddress(dir); addr != "" {
+		if addr := consolelink.ServeAddress(dp, dir); addr != "" {
 			serve = "serve " + addr
 		}
 		fmt.Fprintf(w, "%s %-14s %s  %s  %s, %s\n", mark, p.Name, dir, profileRouteSummary(p.Config), queue, serve)

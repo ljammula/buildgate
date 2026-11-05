@@ -5,21 +5,21 @@ import "testing"
 func TestResolveConsoleBaseURL(t *testing.T) {
 	t.Run("flag wins over env", func(t *testing.T) {
 		t.Setenv(consoleLinkEnvVar, "http://env-console:9000")
-		if got := resolveConsoleBaseURL("http://flag-console:8000", t.TempDir()); got != "http://flag-console:8000" {
+		if got := resolveConsoleBaseURL(newTestDeps(t), "http://flag-console:8000", t.TempDir()); got != "http://flag-console:8000" {
 			t.Errorf("got %q, want flag value", got)
 		}
 	})
 
 	t.Run("falls back to env when flag unset", func(t *testing.T) {
 		t.Setenv(consoleLinkEnvVar, "http://env-console:9000")
-		if got := resolveConsoleBaseURL("", t.TempDir()); got != "http://env-console:9000" {
+		if got := resolveConsoleBaseURL(newTestDeps(t), "", t.TempDir()); got != "http://env-console:9000" {
 			t.Errorf("got %q, want env value", got)
 		}
 	})
 
 	t.Run("empty when neither set", func(t *testing.T) {
 		t.Setenv(consoleLinkEnvVar, "")
-		if got := resolveConsoleBaseURL("", t.TempDir()); got != "" {
+		if got := resolveConsoleBaseURL(newTestDeps(t), "", t.TempDir()); got != "" {
 			t.Errorf("got %q, want empty", got)
 		}
 	})

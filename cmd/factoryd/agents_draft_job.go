@@ -201,7 +201,7 @@ func runAgentsDraftJob(ctx context.Context, in agentsDraftJobInput) (agentsDraft
 	defer cancel()
 	sandboxUser, workerUID := requestJobSandboxIdentity(cfg)
 	res, err := runSandboxWithRetriesVia(
-		in.Sandboxes, in.MeterLedgerRoot, sandboxCtx, draftWorkspace, promptPath, "", script, logPath, 1,
+		in.Sandboxes, in.Settings.ModelHostConcurrency, in.MeterLedgerRoot, sandboxCtx, draftWorkspace, promptPath, "", script, logPath, 1,
 		in.SandboxImage, in.Settings.SandboxDocker, sandboxUser, workerUID, runID, sandboxDataDir,
 		in.Settings.SandboxMemory, in.Settings.SandboxCPUs, in.Settings.SandboxTmpfsSize,
 		nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},

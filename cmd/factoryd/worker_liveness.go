@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"buildgate/internal/consolelink"
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/modelrole"
@@ -436,7 +437,7 @@ func notifyWorkerStale(dataDir string, requests []*request.Request, now time.Tim
 			SentAt:    now.UTC().Format(time.RFC3339Nano),
 			Delivered: &delivered,
 			Next:      "restart factoryd worker",
-			Link:      consoleRequestURL(resolveConsoleBaseURL("", dataDir), r.ID),
+			Link:      consoleRequestURL(consolelink.LocalBaseURL(dataDir), r.ID),
 		}
 		if err := (notify.DesktopNotifier{}).Notify(context.Background(), n); err != nil {
 			log.Printf("worker stale notification for %s: %v", r.ID, err)

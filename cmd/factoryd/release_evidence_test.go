@@ -867,9 +867,9 @@ func TestRecordAcceptedRunSideEffectsLockedMutatesRDirectly(t *testing.T) {
 // PullRequestURL left empty -- a failed evidence-PR attempt must never
 // block or retroactively change an already-earned acceptance.
 //
-// tier2SettingsOverride is given a real, allowing release policy
+// the run's settings are given a real, allowing release policy
 // (RollbackPlan/MaxFilesChanged/MaxChangedLines) on top of
-// withFakeSandboxSettings' own fixture, not left at its zero-value
+// fakeSandboxSettings' own fixture, not left at its zero-value
 // default: with the release-decision gate added ahead of
 // -open-pull-request, a denying policy (this repo's actual default) would
 // stop openEvidencePullRequest from ever being reached at all, which
@@ -878,11 +878,11 @@ func TestRecordAcceptedRunSideEffectsLockedMutatesRDirectly(t *testing.T) {
 // is actually about.
 func TestAPIStartStarterPlumbsOpenPullRequestFlagBestEffort(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
-	tier2SettingsOverride.ReleaseRollbackPlan = "reviewed and reversible"
-	tier2SettingsOverride.ReleaseMaxFilesChanged = 100
-	tier2SettingsOverride.ReleaseMaxChangedLines = 100000
-	tier2SettingsOverride.ReleaseAllowUnsandboxed = true
+	settings := fakeSandboxSettings(t)
+	settings.ReleaseRollbackPlan = "reviewed and reversible"
+	settings.ReleaseMaxFilesChanged = 100
+	settings.ReleaseMaxChangedLines = 100000
+	settings.ReleaseAllowUnsandboxed = true
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
@@ -897,7 +897,7 @@ func TestAPIStartStarterPlumbsOpenPullRequestFlagBestEffort(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-open-pull-request-1",
 		Ticket:              "001",
@@ -978,25 +978,16 @@ func TestWarnIfReleasePolicyCanNeverAllowLogsOnlyWhenBothConditionsHold(t *testi
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// releasePolicyWarned is now process-wide, one-time-logging
-			// state living inside warnIfReleasePolicyCanNeverAllow itself
-			// (found via review, GitHub Codex App, PR #154 round 2: an
-			// external sync.Once wrapping the call site could consume its
-			// one chance to warn on a call whose own condition was false).
-			// Reset it before each case so this table's own three cases
-			// -- and any other test in this package that also exercises a
-			// denying policy with -open-pull-request on -- can't leave
-			// this test order-dependent on whichever ran first.
-			releasePolicyWarnedMu.Lock()
-			releasePolicyWarned = false
-			releasePolicyWarnedMu.Unlock()
+			// The one-time state is the process's (dp.releaseWarning): a
+			// fresh dp per case keeps this table order-independent.
+			dp := newTestDeps(t)
 
 			var logBuf strings.Builder
 			previousOutput := log.Writer()
 			log.SetOutput(&logBuf)
 			t.Cleanup(func() { log.SetOutput(previousOutput) })
 
-			warnIfReleasePolicyCanNeverAllow(tc.openPullRequest, tc.policy)
+			warnIfReleasePolicyCanNeverAllow(dp, tc.openPullRequest, tc.policy)
 
 			gotWarning := strings.Contains(logBuf.String(), releasePolicyNeverAllowsWarning)
 			if gotWarning != tc.wantWarning {
@@ -1017,9 +1008,7 @@ func TestWarnIfReleasePolicyCanNeverAllowLogsOnlyWhenBothConditionsHold(t *testi
 // this function, gated on the condition itself, so this exact sequence
 // must now still warn on the second call.
 func TestWarnIfReleasePolicyCanNeverAllowFirstNoOpCallDoesNotConsumeTheGuard(t *testing.T) {
-	releasePolicyWarnedMu.Lock()
-	releasePolicyWarned = false
-	releasePolicyWarnedMu.Unlock()
+	dp := newTestDeps(t)
 
 	var logBuf strings.Builder
 	previousOutput := log.Writer()
@@ -1028,14 +1017,14 @@ func TestWarnIfReleasePolicyCanNeverAllowFirstNoOpCallDoesNotConsumeTheGuard(t *
 
 	// First call: -open-pull-request off, so the condition is false and
 	// nothing should be warned OR consumed.
-	warnIfReleasePolicyCanNeverAllow(false, release.MergePolicy{})
+	warnIfReleasePolicyCanNeverAllow(dp, false, release.MergePolicy{})
 	if strings.Contains(logBuf.String(), releasePolicyNeverAllowsWarning) {
 		t.Fatalf("first (no-op) call unexpectedly logged a warning: %q", logBuf.String())
 	}
 
 	// Second call: -open-pull-request on, denying policy -- must warn,
 	// proving the first call's own no-op did not consume the guard.
-	warnIfReleasePolicyCanNeverAllow(true, release.MergePolicy{})
+	warnIfReleasePolicyCanNeverAllow(dp, true, release.MergePolicy{})
 	if !strings.Contains(logBuf.String(), releasePolicyNeverAllowsWarning) {
 		t.Errorf("second (warning-worthy) call did not log the warning after an earlier no-op call: %q", logBuf.String())
 	}

@@ -280,7 +280,7 @@ func TestQuickstartCredentialEnvUsesExecutionRoleRoute(t *testing.T) {
 func TestDoctorListModelsRoutesModeUsesSelectedRoute(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("GITHUB_COPILOT_TOKEN", "gho_test_token")
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 200000}}, nil
 	})
 	settings := doctorRoutesModeTestSettings(
@@ -296,6 +296,7 @@ func TestDoctorListModelsRoutesModeUsesSelectedRoute(t *testing.T) {
 	// must be overridden from the real selection, not read verbatim.
 	in := doctorInputs{settings: settings, relayCredentialMode: meter.CredentialModeStatic}
 	var out bytes.Buffer
+	in.copilotModels = list
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
 	}

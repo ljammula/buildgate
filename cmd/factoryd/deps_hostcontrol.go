@@ -10,7 +10,12 @@ import (
 // The methods that make *deps a hostcontrol dependency set.
 
 func (dp *deps) ColimaBinary() string { return dp.docker.colimaBinary() }
-func (dp *deps) DockerBinary() string { return dp.docker.dockerBinary() }
+
+// ProcessAlive and Listening make dp the consolelink.Prober of this machine
+// (consolelink.ServeAddress, consolelink.ServePID).
+func (dp *deps) ProcessAlive(pid int) bool  { return dp.host.pidAlive(pid) }
+func (dp *deps) Listening(addr string) bool { return dp.host.tcpListening(addr) }
+func (dp *deps) DockerBinary() string       { return dp.docker.dockerBinary() }
 func (dp *deps) EnsureTemporal(ctx context.Context, w io.Writer) string {
 	return dp.temporal.ensure(ctx, w)
 }

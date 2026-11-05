@@ -26,13 +26,14 @@ func TestAdvanceBuildingReviewCorrectiveRoundQuarantinedAgainQuarantines(t *test
 	baseSHA := fmt.Sprintf("%040d", 1)
 	buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, baseSHA, "")
 
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+	rounds := &runTicketStub{deps: dp}
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&rounds.runTicket, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		// The round's own review refused it through a new reproduction.
 		return requestdrivertest.CorrectableQuarantine(t, dataDir, roundRunID, branch, baseSHA, fmt.Sprintf("%040d", 3))
 	})
 
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
-	if err := driveRequests(dp, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
+	if err := driveRequests(rounds, context.Background(), dataDir, cfg, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), buildRunner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 	if *calls != 1 {

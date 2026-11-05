@@ -76,13 +76,13 @@ func consoleMain(dp *deps, args []string) error {
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
-	if consolelink.ServeAddress(dataDir) == "" && hostcontrol.AutostartEnabled() {
+	if consolelink.ServeAddress(dp, dataDir) == "" && hostcontrol.AutostartEnabled() {
 		if binaryPath, err := os.Executable(); err == nil {
 			startConfig, _ := resolveEffectiveConfigPath(*configPath)
 			hostcontrol.EnsureServe(dp, os.Stdout, binaryPath, startConfig, dataDir)
 		}
 	}
-	serveAddr := consolelink.ServeAddress(dataDir)
+	serveAddr := consolelink.ServeAddress(dp, dataDir)
 	// The stable start token is attached only to this data dir's own live
 	// serve (its record): the default-address fallback below may be
 	// another data dir's serve, which must never receive this token.
@@ -90,7 +90,7 @@ func consoleMain(dp *deps, args []string) error {
 	if !recorded {
 		serveAddr = consolelink.DefaultServeAddr
 	}
-	base := consolelink.BaseURL("", dataDir)
+	base := resolveConsoleBaseURL(dp, "", dataDir)
 	if base == "" {
 		// consolelink.BaseURL links only to a live serve for this data dir
 		// -- see its own doc comment. `factoryd console` is explicitly

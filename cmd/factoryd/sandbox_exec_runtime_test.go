@@ -39,7 +39,7 @@ func TestRunSandboxWithRetriesViaLaunchesThroughTheSandboxRuntime(t *testing.T) 
 	workspace, dataDir, logPath := runtimeJobWorkspace(t)
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"drafted"}, ExitCode: 2}
 	res, err := runSandboxWithRetriesVia(
-		rt, filepath.Join(dataDir, "ledgers"), context.Background(), workspace, "", "", "", logPath, 1,
+		rt, 0, filepath.Join(dataDir, "ledgers"), context.Background(), workspace, "", "", "", logPath, 1,
 		"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", noDocker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"job-1", dataDir, "4g", "2", "256m", nil,
 		nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
@@ -67,7 +67,7 @@ func TestRunSandboxWithRetriesViaDoesNotRetryACommandStartedTwice(t *testing.T) 
 	workspace, dataDir, logPath := runtimeJobWorkspace(t)
 	rt := &sandboxtest.WorkerRuntime{Lines: []string{"x"}, ExitCode: sandbox.WorkerExitRerun}
 	_, err := runSandboxWithRetriesVia(
-		rt, filepath.Join(dataDir, "ledgers"), context.Background(), workspace, "", "", "", logPath, 3,
+		rt, 0, filepath.Join(dataDir, "ledgers"), context.Background(), workspace, "", "", "", logPath, 3,
 		"worker@sha256:2222222222222222222222222222222222222222222222222222222222222222", noDocker, sandboxTestUser(), sandbox.DefaultWorkerUID,
 		"job-1", dataDir, "4g", "2", "256m", nil,
 		nil, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},

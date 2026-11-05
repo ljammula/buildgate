@@ -902,21 +902,12 @@ const (
 	AdvanceOnPRApproved = "pr_approved"
 )
 
-// RequestAdvanceOn is worker's own resolved -advance-on value, read by
-// startNextTicketOrFinish below. A package-level variable rather than a
-// parameter because startNextTicketOrFinish's own signature --
-// (dataDir, r, now) -- is shared with the PR-review driver
-// (internal/requestdriver/pr_review_driver.go), which has no WorkerConfig of its
-// own to pass either; this mirrors tier2SettingsOverride's own reasoning
-// (workerMain, worker_config.go) for the identical shape: worker and the
-// request driver run in the same process, never a subprocess, so there is
-// no argv-based way to thread this through. workerMain sets it from
-// cfg.advanceOn for the lifetime of one worker invocation and resets
-// it on return (like tier2SettingsOverride); it defaults to
-// advanceOnAccepted, -advance-on's own flag default, so a test calling
-// startNextTicketOrFinish or AdvanceBuilding directly, without ever going
-// through workerMain, behaves like an unconfigured worker.
-var RequestAdvanceOn = AdvanceOnAccepted
+// advancesOnPRApproval reports whether c's ticket-sequencing policy is
+// pr_approved. Anything else, the unset value of a WorkerConfig a test
+// builds included, is -advance-on's own default, accepted.
+func (c WorkerConfig) advancesOnPRApproval() bool {
+	return c.AdvanceOn == AdvanceOnPRApproved
+}
 
 // TicketAt returns a pointer into r.Tickets for ticket index idx
 // (1-based), so a caller can read or mutate that ticket's own fields
@@ -1433,20 +1424,20 @@ func refuseResume(dp Deps, dataDir string, r *request.Request, reasons []string,
 // "accepted · awaiting PR", found live 2026-09-24), then the next ticket
 // or pr_review. A missing PR is caught there, by AdvancePRReview's
 // noPullRequestHaltReason, which reads ticket.RunID.
-func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, opensPullRequests bool, now time.Time) error {
+func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) error {
 	ticket.Branch = runRecord.Branch
 	ticket.PRURL = runRecord.PullRequestURL
 	if ticket.PRURL != "" {
 		ticket.PRState = "draft"
 	}
-	return advanceAcceptedTicket(dataDir, r, ticket, runRecord, opensPullRequests, now)
+	return advanceAcceptedTicket(dataDir, r, ticket, runRecord, cfg, now)
 }
 
 // advanceAcceptedTicket is acceptTicketRun after the ticket's branch and pull
 // request are recorded: an advice round settled after a restart
 // (settleInterruptedAdviceRound) advances here, the branch and pull request
 // being the accepted run's, recorded before its first round.
-func advanceAcceptedTicket(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, opensPullRequests bool, now time.Time) error {
+func advanceAcceptedTicket(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) error {
 	if ticket.PRURL != "" && ticket.PRState == "" {
 		ticket.PRState = "draft"
 	}
@@ -1460,12 +1451,12 @@ func advanceAcceptedTicket(dataDir string, r *request.Request, ticket *request.T
 	// or an allowed decision on record. With pull requests off nothing is
 	// pushed or opened: the tickets are built in order and each run's
 	// decision is on its record.
-	if opensPullRequests && ticket.PRURL == "" && ticket.Index < r.TicketCount {
+	if cfg.OpenPullRequest && ticket.PRURL == "" && ticket.Index < r.TicketCount {
 		if refusal := releaseRefusal(dataDir, r, ticket, runRecord); refusal != "" {
 			return haltRequestAcceptedNoPR(dataDir, r, refusal, now)
 		}
 	}
-	if err := startNextTicketOrFinish(dataDir, r, now); err != nil {
+	if err := startNextTicketOrFinish(dataDir, r, cfg.advancesOnPRApproval(), now); err != nil {
 		return err
 	}
 	return r.Save(dataDir)
@@ -1487,11 +1478,6 @@ func releaseRefusal(dataDir string, r *request.Request, ticket *request.Ticket, 
 	}
 	return noPullRequestHaltReason(dataDir, r, ticket)
 }
-
-// ReviewCorrectiveRunner, when a test sets it, runs an automatic corrective
-// round's build in place of runMainWithReady, exactly like
-// PrReviewCorrectiveRunner (pr_review_driver.go).
-var ReviewCorrectiveRunner TicketRunner
 
 // reviewUnavailable reports whether runRecord's review produced no verdict:
 // its code_review gate failed and the review result it records says the
@@ -1667,7 +1653,7 @@ type correctiveLaunch struct {
 // list, and its run is recorded as Ticket.Advice.RunID, not Ticket.RunID.
 func launchCorrectiveRound(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, args []string, roundRunID, name, recordOf, stackBaseSHA string, escalated, advice bool) (launched correctiveLaunch, stop bool, err error) {
 	var startedRunID string
-	runErr := correctiveRunner(dp, ReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
+	runErr := dp.RunTicket(ctx, args, func(started *run.Run) {
 		startedRunID = started.ID
 		started.RequestID = r.ID
 		started.TicketIndex = ticket.Index
@@ -1897,7 +1883,7 @@ func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Tick
 // Does not save r -- callers own that, as part of whatever else they are
 // already saving in the same step.
 //
-// RequestAdvanceOn (above) picks one of two policies:
+// advanceOnPRApproval (WorkerConfig.AdvanceOn) picks one of two policies:
 //
 //   - advanceOnAccepted (default): if more tickets remain after
 //     TicketIndex, increments it and leaves r in building --
@@ -1908,8 +1894,8 @@ func correctiveBuildArgs(dataDir string, r *request.Request, ticket request.Tick
 //     just the last. Advancing TicketIndex and returning to building once
 //     that PR is approved is the PR-review driver's job; this function
 //     only ever handles the forward (into pr_review) half.
-func startNextTicketOrFinish(dataDir string, r *request.Request, now time.Time) error {
-	if RequestAdvanceOn == AdvanceOnPRApproved {
+func startNextTicketOrFinish(dataDir string, r *request.Request, advanceOnPRApproval bool, now time.Time) error {
+	if advanceOnPRApproval {
 		return r.StartPRReview(now)
 	}
 	if r.TicketIndex < r.TicketCount {
@@ -1919,15 +1905,14 @@ func startNextTicketOrFinish(dataDir string, r *request.Request, now time.Time) 
 	return r.StartPRReview(now)
 }
 
-// ContinueAfterPRApproval is the pr_review driver's hook once the CURRENT
+// continueAfterPRApproval is the pr_review driver's step once the CURRENT
 // ticket's (r.TicketIndex) PR is approved: with tickets still to build --
 // only reachable under advance_on: pr_approved, since under accepted a
 // request enters pr_review after its last ticket -- advance TicketIndex
 // and resume building; otherwise stay in pr_review, where every ticket's
 // PR keeps being watched until all have merged (handleClosedOrMergedTicket
-// completes the request). A package-level var so pr_review_driver_test.go
-// can count calls without a build runner.
-var ContinueAfterPRApproval = func(dataDir string, r *request.Request, now time.Time) error {
+// completes the request).
+func continueAfterPRApproval(dataDir string, r *request.Request, now time.Time) error {
 	if r.TicketIndex < r.TicketCount {
 		r.TicketIndex++
 		if err := r.ResumeBuilding(now); err != nil {

@@ -82,7 +82,6 @@ func serveMainLogsBeforeFailingToBind(dp *deps, t *testing.T, args []string) str
 	previousOutput := log.Writer()
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
 	fullArgs := append([]string{"-data-dir", t.TempDir(), "-addr", listener.Addr().String(), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID())}, args...)
 	if err := serveMain(dp, fullArgs); err == nil {

@@ -272,6 +272,13 @@ func ConfiguredModel(s sessionconfig.Settings, r Role) (modelName, modelID, thin
 // factory-authored reason (RouteSkip's own doc comment) -- never probe's
 // own error text, which could echo a file path or a secret fragment.
 func SelectRoute(s sessionconfig.Settings, r Role, choice, harnessChoice string, forceRoute string, probe func(name string, route sessionconfig.Route) error) (Selection, error) {
+	return selectRoute(harness.Lookup, s, r, choice, harnessChoice, forceRoute, probe)
+}
+
+// selectRoute is SelectRoute over the harness registry lookup names:
+// harness.Lookup, or in a test one with an entry the compiled registry does
+// not have yet.
+func selectRoute(lookup func(name string) (harness.Descriptor, error), s sessionconfig.Settings, r Role, choice, harnessChoice string, forceRoute string, probe func(name string, route sessionconfig.Route) error) (Selection, error) {
 	rc := roleConfig(s, r)
 	if rc == nil || rc.Model == "" {
 		return Selection{}, fmt.Errorf("modelrole: roles.%s.model is not configured; configure routes:/models:/roles: (see USAGE_REFERENCE.md \"Model routes\")", r)
@@ -290,7 +297,7 @@ func SelectRoute(s sessionconfig.Settings, r Role, choice, harnessChoice string,
 	if err != nil {
 		return Selection{}, err
 	}
-	harnessDescriptor, err := harnessLookup(selectedHarness)
+	harnessDescriptor, err := lookup(selectedHarness)
 	if err != nil {
 		return Selection{}, fmt.Errorf("modelrole: roles.%s: %w", r, err)
 	}
@@ -583,10 +590,6 @@ func checkBoundModel(s sessionconfig.Settings, role Role, rc *sessionconfig.Role
 	}
 	return compareBoundRelayPolicy(p.Route, p, expected)
 }
-
-// harnessLookup resolves a harness name; a variable only so a test can inject
-// a registry entry the compiled registry does not have yet.
-var harnessLookup = harness.Lookup
 
 // RoleHarness resolves role r's harness without selecting a route: the
 // caller's per-request choice when non-empty (it must be one of

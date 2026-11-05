@@ -40,12 +40,13 @@ func recordingNotifier(t *testing.T, status string) (script, argsFile string) {
 }
 
 func TestRequestBannerSaysWhatIsAskedAndItsClickOpensTheRequestPage(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	script, argsFile := recordingNotifier(t, "0")
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return script, nil })
+	env.clickNotifierLookPath = func() (string, error) { return script, nil }
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), requestNotification()); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), requestNotification()); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(argsFile)
@@ -68,14 +69,15 @@ func TestRequestBannerSaysWhatIsAskedAndItsClickOpensTheRequestPage(t *testing.T
 }
 
 func TestBannerFallsBackToOsascriptWhenTerminalNotifierIsRefused(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
+	env.os = "darwin"
 	refused, _ := recordingNotifier(t, "3")
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return refused, nil })
+	env.clickNotifierLookPath = func() (string, error) { return refused, nil }
 	osascript, argsFile := recordingNotifier(t, "0")
-	withDesktopNotifierLookPath(t, func() (string, error) { return osascript, nil })
+	env.notifierLookPath = func() (string, error) { return osascript, nil }
 
-	if err := (DesktopNotifier{}).Notify(context.Background(), requestNotification()); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), requestNotification()); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(argsFile)
@@ -94,11 +96,12 @@ func TestBannerFallsBackToOsascriptWhenTerminalNotifierIsRefused(t *testing.T) {
 }
 
 func TestHostBannerStandsDownOnlyForARequestWhileATabNotifies(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return "", errNotFoundForTest })
+	env.os = "darwin"
+	env.clickNotifierLookPath = func() (string, error) { return "", errNotFoundForTest }
 	osascript, argsFile := recordingNotifier(t, "0")
-	withDesktopNotifierLookPath(t, func() (string, error) { return osascript, nil })
+	env.notifierLookPath = func() (string, error) { return osascript, nil }
 	shown := func() bool {
 		_, err := os.Stat(argsFile)
 		_ = os.Remove(argsFile)
@@ -106,18 +109,18 @@ func TestHostBannerStandsDownOnlyForARequestWhileATabNotifies(t *testing.T) {
 	}
 
 	dataDir := t.TempDir()
-	DispatchDesktop(dataDir, requestNotification())
+	dispatchDesktop(DesktopNotifier{env: env}, dataDir, requestNotification())
 	if !shown() {
 		t.Fatal("no banner with no console tab notifying")
 	}
 	if err := consolelink.TouchTabNotifier(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	DispatchDesktop(dataDir, requestNotification())
+	dispatchDesktop(DesktopNotifier{env: env}, dataDir, requestNotification())
 	if shown() {
 		t.Error("the host banner was shown for a request while a console tab raises its notifications")
 	}
-	DispatchDesktop(dataDir, Notification{RunID: "run-1", Ticket: "t", State: run.StateHalted, Reason: "halted"})
+	dispatchDesktop(DesktopNotifier{env: env}, dataDir, Notification{RunID: "run-1", Ticket: "t", State: run.StateHalted, Reason: "halted"})
 	if !shown() {
 		t.Error("a run's own notification was held back; no tab raises it")
 	}
@@ -163,14 +166,15 @@ func TestTerminalNotifierTextCannotBeReadAsAnOption(t *testing.T) {
 }
 
 func TestTheUnclickableBannerEndsTheReasonBeforeSayingWhereToGo(t *testing.T) {
+	env := testDesktopEnv(t)
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
-	withDesktopOS(t, "darwin")
-	withDesktopClickNotifierLookPath(t, func() (string, error) { return "", errNotFoundForTest })
+	env.os = "darwin"
+	env.clickNotifierLookPath = func() (string, error) { return "", errNotFoundForTest }
 	osascript, argsFile := recordingNotifier(t, "0")
-	withDesktopNotifierLookPath(t, func() (string, error) { return osascript, nil })
+	env.notifierLookPath = func() (string, error) { return osascript, nil }
 	n := requestNotification()
 	n.Reason = "full_suite_verify failed: exit 1"
-	if err := (DesktopNotifier{}).Notify(context.Background(), n); err != nil {
+	if err := (DesktopNotifier{env: env}).Notify(context.Background(), n); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(argsFile)

@@ -63,7 +63,7 @@ func TestAutomaticCorrectiveRoundsRunOnTheEscalation(t *testing.T) {
 				firstArgs = append([]string(nil), args...)
 				return first(ctx, args, onReady)
 			}
-			calls, roundArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, roundArgs := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				if started, err := run.Load(dataDir, roundRunID); err != nil || !started.Escalated {
 					t.Errorf("the started round's run: %v, escalated %v, want it recorded as escalated", err, started != nil && started.Escalated)
 				}
@@ -143,20 +143,20 @@ func TestPRReviewRoundStaysOnTheRolesModel(t *testing.T) {
 	dp := newFakeDeps(t)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 10, Author: "alice", Body: "please rename this", CommentID: 111}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedArgs []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		capturedArgs = args
 		accepted := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil

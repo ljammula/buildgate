@@ -252,7 +252,7 @@ func TestV0_0_13PRReviewRequestRunsItsRoundOnTheOldInput(t *testing.T) {
 	dp.listReviewCommentsFn = func(context.Context, string) ([]requestdriver.ReviewComment, error) { return nil, nil }
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
 	var inputs []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		b, err := os.ReadFile(requestdrivertest.ArgValue(args, "-spec"))
 		if err != nil {
 			t.Errorf("read the round's -spec: %v", err)

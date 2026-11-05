@@ -4,6 +4,7 @@ import (
 	"buildgate/internal/dockerbackend"
 	"buildgate/internal/forge"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/meter"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
@@ -226,9 +227,11 @@ type fakeHost struct {
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
 	launchctlFn          func(args ...string) ([]byte, error)
 	launchctlBinaryFn    func() string
+	listCopilotModelsFn  func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error)
 	launchdServicePIDFn  func(domain string) (int, bool)
 	portListenersFn      func(port string) ([]byte, error)
 	pidAliveFn           func(pid int) bool
+	tcpListeningFn       func(addr string) bool
 	pidLooksLikeWorkerFn func(pid int) bool
 	processUIDFn         func(pid int) (int, bool)
 	rootTreeAtCommitFn   func(ctx context.Context, repoDir string, commit string) ([]gitTreeEntry, error)
@@ -262,11 +265,15 @@ func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args
 func (f *fakeHost) headCommit(ctx context.Context, repoDir string) (string, error) {
 	return f.headCommitFn(ctx, repoDir)
 }
-func (f *fakeHost) launchctl(args ...string) ([]byte, error)       { return f.launchctlFn(args...) }
-func (f *fakeHost) launchctlBinary() string                        { return f.launchctlBinaryFn() }
+func (f *fakeHost) launchctl(args ...string) ([]byte, error) { return f.launchctlFn(args...) }
+func (f *fakeHost) launchctlBinary() string                  { return f.launchctlBinaryFn() }
+func (f *fakeHost) listGitHubCopilotModels(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	return f.listCopilotModelsFn(ctx, caBundlePath, githubToken, upstream)
+}
 func (f *fakeHost) launchdServicePID(domain string) (int, bool)    { return f.launchdServicePIDFn(domain) }
 func (f *fakeHost) portListeners(port string) ([]byte, error)      { return f.portListenersFn(port) }
 func (f *fakeHost) pidAlive(pid int) bool                          { return f.pidAliveFn(pid) }
+func (f *fakeHost) tcpListening(addr string) bool                  { return f.tcpListeningFn(addr) }
 func (f *fakeHost) pidLooksLikeWorker(pid int) bool                { return f.pidLooksLikeWorkerFn(pid) }
 func (f *fakeHost) processUID(pid int) (int, bool)                 { return f.processUIDFn(pid) }
 func (f *fakeHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) { return f.runUpgradeCommandFn(c) }
@@ -372,7 +379,7 @@ func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal)
 //	sandbox.runtime      the gateway runtime: none, in either build variant
 //	sandbox.startStack   starts containers: refused
 func newTestDeps(t testing.TB) *deps {
-	dp := &deps{backends: &backendMemo{}}
+	dp := &deps{backends: &backendMemo{}, releaseWarning: &releasePolicyWarning{}, ghLogins: &forge.SelfLogins{}}
 	realDocker := realDocker{dp: dp}
 	dp.docker = &fakeDocker{
 		colimaBinaryFn: realDocker.colimaBinary,
@@ -475,12 +482,20 @@ func newTestDeps(t testing.TB) *deps {
 			return nil, errors.New("test host: no go command is run")
 		},
 		// A local read of the test's own temp repository, like blobAtCommit.
-		headCommitFn:         realHost.headCommit,
-		launchctlFn:          realHost.launchctl,
-		launchctlBinaryFn:    realHost.launchctlBinary,
-		launchdServicePIDFn:  realHost.launchdServicePID,
-		portListenersFn:      realHost.portListeners,
-		pidAliveFn:           realHost.pidAlive,
+		headCommitFn:      realHost.headCommit,
+		launchctlFn:       realHost.launchctl,
+		launchctlBinaryFn: realHost.launchctlBinary,
+		// No test reaches GitHub: one that lists Copilot models sets its own.
+		listCopilotModelsFn: func(context.Context, string, string, string) ([]meter.CopilotModel, error) {
+			return nil, errors.New("test host: no Copilot models are listed")
+		},
+		launchdServicePIDFn: realHost.launchdServicePID,
+		portListenersFn:     realHost.portListeners,
+		pidAliveFn:          realHost.pidAlive,
+		// No console link to a serve that happens to run on this machine
+		// (consolelink.BaseURL falls back to a live local serve when this
+		// binary embeds a real console build): a test of one sets its own.
+		tcpListeningFn:       func(string) bool { return false },
 		pidLooksLikeWorkerFn: realHost.pidLooksLikeWorker,
 		processUIDFn:         realHost.processUID,
 		runUpgradeCommandFn:  realHost.runUpgradeCommand,

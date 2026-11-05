@@ -18,7 +18,7 @@ import (
 func TestAcquireModelHostLockNilRelaySpecIsNoOp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	handle, err := acquireModelHostLock(context.Background(), t.TempDir(), "run-1", nil)
+	handle, err := acquireModelHostLock(context.Background(), t.TempDir(), "run-1", nil, sessionconfig.DefaultSettings().ModelHostConcurrency)
 	if err != nil || handle != nil {
 		t.Fatalf("acquireModelHostLock(nil relaySpec) = %v, %v, want nil, nil", handle, err)
 	}
@@ -39,12 +39,10 @@ func TestAcquireModelHostLockSerializesJobsAndEmitsProgress(t *testing.T) {
 
 	settings := sessionconfig.DefaultSettings()
 	settings.ModelHostConcurrency = 1
-	tier2SettingsOverride = &settings
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
 	relaySpec := &sandbox.RouteSpec{RoutePolicy: sandbox.RoutePolicy{Upstream: "https://10.99.0.1:8080"}}
 
-	first, err := acquireModelHostLock(context.Background(), dataDir, "run-first", relaySpec)
+	first, err := acquireModelHostLock(context.Background(), dataDir, "run-first", relaySpec, settings.ModelHostConcurrency)
 	if err != nil {
 		t.Fatalf("acquireModelHostLock(first): %v", err)
 	}
@@ -56,7 +54,7 @@ func TestAcquireModelHostLockSerializesJobsAndEmitsProgress(t *testing.T) {
 	var secondErr error
 	go func() {
 		defer close(secondDone)
-		handle, err := acquireModelHostLock(context.Background(), dataDir, "run-second", relaySpec)
+		handle, err := acquireModelHostLock(context.Background(), dataDir, "run-second", relaySpec, settings.ModelHostConcurrency)
 		secondErr = err
 		if handle != nil {
 			_ = handle.Release()
@@ -101,11 +99,9 @@ func TestAcquireModelHostLockDisabledByZeroConcurrency(t *testing.T) {
 	t.Setenv("HOME", home)
 	settings := sessionconfig.DefaultSettings()
 	settings.ModelHostConcurrency = 0
-	tier2SettingsOverride = &settings
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
 	relaySpec := &sandbox.RouteSpec{RoutePolicy: sandbox.RoutePolicy{Upstream: "https://10.99.0.2:8080"}}
-	handle, err := acquireModelHostLock(context.Background(), t.TempDir(), "run-1", relaySpec)
+	handle, err := acquireModelHostLock(context.Background(), t.TempDir(), "run-1", relaySpec, settings.ModelHostConcurrency)
 	if err != nil || handle != nil {
 		t.Fatalf("acquireModelHostLock(concurrency 0) = %v, %v, want nil, nil", handle, err)
 	}
@@ -119,11 +115,9 @@ func TestAcquireModelHostLockSkipsRemoteSaaSUpstream(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	settings := sessionconfig.DefaultSettings()
-	tier2SettingsOverride = &settings
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
 	relaySpec := &sandbox.RouteSpec{RoutePolicy: sandbox.RoutePolicy{Upstream: "https://api.anthropic.com"}}
-	handle, err := acquireModelHostLock(context.Background(), t.TempDir(), "run-1", relaySpec)
+	handle, err := acquireModelHostLock(context.Background(), t.TempDir(), "run-1", relaySpec, settings.ModelHostConcurrency)
 	if err != nil || handle != nil {
 		t.Fatalf("acquireModelHostLock(remote SaaS upstream) = %v, %v, want nil, nil", handle, err)
 	}

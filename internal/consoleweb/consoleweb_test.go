@@ -86,26 +86,17 @@ func TestHandlerFallbackOnlyForExtensionlessPaths(t *testing.T) {
 	}
 }
 
-// withFS swaps the package's embedded dist/ view for fake, restoring it
-// when the test ends.
-func withFS(t *testing.T, fake fstest.MapFS) {
-	t.Helper()
-	saved := fsys
-	fsys = fake
-	t.Cleanup(func() { fsys = saved })
-}
-
 // TestManifestWithoutIndexServesPlaceholder: a manifest with no index.html
 // is a partial bundle; with / answered by the file server it would be a raw
 // directory listing, so the placeholder is served instead.
 func TestManifestWithoutIndexServesPlaceholder(t *testing.T) {
-	withFS(t, fstest.MapFS{".vite/manifest.json": {Data: []byte("{}")}, "assets/index-abc123.js": {Data: []byte("// js")}})
-	if Embedded() {
-		t.Fatal("Embedded() = true for a bundle with no index.html, want false")
+	b := NewBundle(fstest.MapFS{".vite/manifest.json": {Data: []byte("{}")}, "assets/index-abc123.js": {Data: []byte("// js")}})
+	if b.Embedded() {
+		t.Fatal("b.Embedded() = true for a bundle with no index.html, want false")
 	}
 	for _, target := range []string{"/", "/requests/abc"} {
 		rec := httptest.NewRecorder()
-		Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		b.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Buildgate console is not embedded") {
 			t.Errorf("GET %s = %d %q, want the placeholder page", target, rec.Code, rec.Body.String())
 		}
@@ -115,9 +106,9 @@ func TestManifestWithoutIndexServesPlaceholder(t *testing.T) {
 // TestUnbuiltIndexHTMLServesPlaceholder: an explicit /index.html on an
 // unbuilt binary gets the placeholder, not a bare 404.
 func TestUnbuiltIndexHTMLServesPlaceholder(t *testing.T) {
-	withFS(t, fstest.MapFS{".gitkeep": {Data: nil}})
+	b := NewBundle(fstest.MapFS{".gitkeep": {Data: nil}})
 	rec := httptest.NewRecorder()
-	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.html", nil))
+	b.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.html", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Buildgate console is not embedded") {
 		t.Errorf("GET /index.html = %d %q, want the placeholder page", rec.Code, rec.Body.String())
 	}
@@ -126,23 +117,23 @@ func TestUnbuiltIndexHTMLServesPlaceholder(t *testing.T) {
 // TestBundleIsEmbedded: index.html and the Vite manifest mark a real
 // bundle; a deep link and an asset are served from it.
 func TestBundleIsEmbedded(t *testing.T) {
-	withFS(t, fstest.MapFS{
+	b := NewBundle(fstest.MapFS{
 		"index.html":             {Data: []byte("<!doctype html><title>Buildgate</title>")},
 		".vite/manifest.json":    {Data: []byte("{}")},
 		"assets/index-abc123.js": {Data: []byte("// js")},
 	})
-	if !Embedded() {
-		t.Fatal("Embedded() = false for a bundle with index.html and a Vite manifest, want true")
+	if !b.Embedded() {
+		t.Fatal("b.Embedded() = false for a bundle with index.html and a Vite manifest, want true")
 	}
 	for _, target := range []string{"/", "/requests/abc", "/app/projects"} {
 		rec := httptest.NewRecorder()
-		Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		b.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<title>Buildgate</title>") {
 			t.Errorf("GET %s = %d %q, want the bundle's index.html", target, rec.Code, rec.Body.String())
 		}
 	}
 	rec := httptest.NewRecorder()
-	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
+	b.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/index-abc123.js", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != "// js" {
 		t.Errorf("GET the asset = %d %q, want the file", rec.Code, rec.Body.String())
 	}
@@ -152,13 +143,13 @@ func TestBundleIsEmbedded(t *testing.T) {
 // application/manifest+json on every machine, not as whatever the host's
 // mime.types says about .webmanifest.
 func TestManifestHasItsContentType(t *testing.T) {
-	withFS(t, fstest.MapFS{
+	b := NewBundle(fstest.MapFS{
 		"index.html":           {Data: []byte("<!doctype html><title>Buildgate</title>")},
 		".vite/manifest.json":  {Data: []byte("{}")},
 		"manifest.webmanifest": {Data: []byte(`{"name":"Buildgate"}`)},
 	})
 	rec := httptest.NewRecorder()
-	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil))
+	b.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != `{"name":"Buildgate"}` {
 		t.Fatalf("GET /manifest.webmanifest = %d %q, want the file", rec.Code, rec.Body.String())
 	}

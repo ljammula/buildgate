@@ -206,7 +206,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		// /inputs/run (see runSandboxWithRetries' own doc comment on
 		// extraRunInput for the live bug this fixes).
 		res, err = runSandboxWithRetriesVia(
-			cfg.Sandboxes, cfg.MeterLedgerRoot, sandboxCtx, r.Workspace, specPath, requestTextPath, script, logPath, 1,
+			cfg.Sandboxes, cfg.Settings.ModelHostConcurrency, cfg.MeterLedgerRoot, sandboxCtx, r.Workspace, specPath, requestTextPath, script, logPath, 1,
 			sandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
 			cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
 			nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},

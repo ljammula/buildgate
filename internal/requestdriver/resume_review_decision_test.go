@@ -41,7 +41,7 @@ func TestAResumeDecidedAfterAnUnresolvedCorrectiveRoundIsKept(t *testing.T) {
 	dp.afterReviewSave(after)
 	branch := "factoryd/" + id + "-001"
 	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
-	requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(_, roundRunID string) *run.Run {
+	requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(_, roundRunID string) *run.Run {
 		return unresolvedHalts(roundRunID)[unresolved.SandboxLaunch]
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
@@ -58,12 +58,11 @@ func TestAResumeDecidedAfterAnUnresolvedPRReviewRoundIsKept(t *testing.T) {
 	dp.afterReviewSave(after)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
-	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(_ context.Context, args []string, onReady func(*run.Run)) error {
 		halted := unresolvedHalts(requestdrivertest.ArgValue(args, "-ticket"))[unresolved.SandboxLaunch]
 		onReady(&run.Run{ID: halted.ID, State: run.StateReady})
 		return halted.Save(dataDir)
 	}
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = nil })
 	if err := requestdriver.RunCorrectiveRound(dp, context.Background(), dataDir, r, &r.Tickets[0], threads, requestdriver.WorkerConfig{MaxReviewRounds: 1}, time.Now()); err != nil {
 		t.Fatalf("RunCorrectiveRound: %v", err)
 	}

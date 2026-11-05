@@ -490,10 +490,8 @@ func TestACorrectiveRoundRunsOnADeferredTicket(t *testing.T) {
 	st := f.prs[t3.PRURL]
 	st.BlocksReadyThreads, st.ActionableThreads = threads, threads
 	f.prs[t3.PRURL] = st
-	old := requestdriver.PrReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = old })
 	builds := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	f.dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		builds++
 		return reviewFlaggedRoundRun(t, f.dataDir, requestdrivertest.ArgValue(args, "-ticket"), "x").Save(f.dataDir)
 	}

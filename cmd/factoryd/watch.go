@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/consolelink"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -751,7 +752,7 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 		if header := renderRequestHeader(r); header != lastHeader {
 			sp.Println(header)
 			if lastHeader == "" {
-				if url := consoleRequestURL(resolveConsoleBaseURL("", dataDir), r.ID); url != "" {
+				if url := consoleRequestURL(consolelink.LocalBaseURL(dataDir), r.ID); url != "" {
 					sp.Println("  console: " + url)
 				}
 			}

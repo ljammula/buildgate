@@ -22,25 +22,30 @@ import (
 // so a `go test` on a Mac never fires a real notification.
 const DesktopNotificationsEnvironmentVariable = "FACTORYD_DESKTOP_NOTIFICATIONS"
 
-// desktopOS holds the running OS, as runtime.GOOS -- a package-level var
-// rather than a direct runtime.GOOS reference so a test can fake a
-// non-darwin OS without needing to actually run on one.
-var desktopOS = runtime.GOOS
-
-// desktopNotifierLookPath resolves the osascript binary -- a package-level
-// var rather than a direct exec.LookPath("osascript") call so a test can
-// simulate osascript being absent from PATH without needing to actually
-// remove it.
-var desktopNotifierLookPath = func() (string, error) {
-	return exec.LookPath("osascript")
+// desktopEnv is what a DesktopNotifier reads of the machine it shows a
+// notification on. A test hands DesktopNotifier its own, to fake another
+// OS, a missing or present notifier binary, or an icon cache dir, without
+// touching the machine's real PATH or ~/Library/Caches.
+type desktopEnv struct {
+	// os is the running OS, as runtime.GOOS.
+	os string
+	// notifierLookPath resolves the osascript binary.
+	notifierLookPath func() (string, error)
+	// clickNotifierLookPath resolves the optional terminal-notifier binary.
+	clickNotifierLookPath func() (string, error)
+	// iconCacheDir is the per-user cache directory the icon is written
+	// under.
+	iconCacheDir func() (string, error)
 }
 
-// desktopClickNotifierLookPath resolves the optional terminal-notifier
-// binary -- a package-level var, mirroring desktopNotifierLookPath, so a
-// test can simulate it being present or absent without touching the
-// machine's real PATH.
-var desktopClickNotifierLookPath = func() (string, error) {
-	return exec.LookPath("terminal-notifier")
+// machineDesktopEnv is this machine's desktopEnv.
+func machineDesktopEnv() *desktopEnv {
+	return &desktopEnv{
+		os:                    runtime.GOOS,
+		notifierLookPath:      func() (string, error) { return exec.LookPath("osascript") },
+		clickNotifierLookPath: func() (string, error) { return exec.LookPath("terminal-notifier") },
+		iconCacheDir:          os.UserCacheDir,
+	}
 }
 
 // LinuxNotifier is how a Linux desktop notification would be shown here:
@@ -94,19 +99,14 @@ func notifySendMarkupEscape(s string) string {
 //go:embed buildgate-icon.png
 var buildgateIcon []byte
 
-// desktopIconCacheDir resolves the per-user cache directory the icon is
-// written under -- a package-level var so tests write into a temp dir
-// instead of the real ~/Library/Caches.
-var desktopIconCacheDir = os.UserCacheDir
-
 // desktopIconPath returns a local file holding buildgateIcon, writing it
 // first when it's missing or stale (a newer binary with a redrawn icon),
 // since terminal-notifier's -contentImage takes local paths only. The
 // write goes through a temp file + rename so a concurrent factoryd
 // process never hands terminal-notifier a half-written image. Any
 // failure returns "" and the banner simply goes out without an image.
-func desktopIconPath() string {
-	base, err := desktopIconCacheDir()
+func desktopIconPath(env *desktopEnv) string {
+	base, err := env.iconCacheDir()
 	if err != nil {
 		return ""
 	}
@@ -150,20 +150,34 @@ func desktopIconPath() string {
 //
 // `make install` installs terminal-notifier with Homebrew when it is
 // missing, and `factoryd doctor` says when a click would do nothing.
-type DesktopNotifier struct{}
+//
+// The zero value shows notifications on this machine.
+type DesktopNotifier struct {
+	// env is the machine read; nil is this one (machineDesktopEnv).
+	env *desktopEnv
+}
+
+// machine is the desktopEnv d reads.
+func (d DesktopNotifier) machine() *desktopEnv {
+	if d.env != nil {
+		return d.env
+	}
+	return machineDesktopEnv()
+}
 
 // Notify shows a desktop notification for n, or silently does nothing
 // when desktop notifications are opted out of, the OS is neither darwin nor
 // linux, or no notifier can be run.
-func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
+func (d DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 	if os.Getenv(DesktopNotificationsEnvironmentVariable) == "0" {
 		return nil
 	}
-	if desktopOS == "linux" {
+	env := d.machine()
+	if env.os == "linux" {
 		notifyLinux(ctx, n)
 		return nil
 	}
-	if desktopOS != "darwin" {
+	if env.os != "darwin" {
 		return nil
 	}
 
@@ -178,12 +192,12 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 		target = n.RunDir
 	}
 	if target != "" {
-		if _, err := showClickable(ctx, n, target); err == nil {
+		if _, err := showClickable(ctx, env, n, target); err == nil {
 			return nil
 		}
 	}
 
-	path, err := desktopNotifierLookPath()
+	path, err := env.notifierLookPath()
 	if err != nil {
 		return nil
 	}
@@ -216,8 +230,8 @@ func (DesktopNotifier) Notify(ctx context.Context, n Notification) error {
 // click opens, and returns terminal-notifier's output and error: not on
 // PATH, or a non-zero exit, which is how it reports that macOS does not
 // allow its notifications.
-func showClickable(ctx context.Context, n Notification, target string) ([]byte, error) {
-	clickPath, err := desktopClickNotifierLookPath()
+func showClickable(ctx context.Context, env *desktopEnv, n Notification, target string) ([]byte, error) {
+	clickPath, err := env.clickNotifierLookPath()
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +250,7 @@ func showClickable(ctx context.Context, n Notification, target string) ([]byte, 
 		// One banner per request: a later one replaces the earlier.
 		args = append(args, "-group", "buildgate-"+n.RequestID)
 	}
-	if icon := desktopIconPath(); icon != "" {
+	if icon := desktopIconPath(env); icon != "" {
 		args = append(args, "-contentImage", icon)
 	}
 	cmd := exec.CommandContext(ctx, clickPath, args...)
@@ -252,7 +266,7 @@ func showClickable(ctx context.Context, n Notification, target string) ([]byte, 
 // macOS allows terminal-notifier's banners, which DesktopNotifier.Notify,
 // falling back to osascript without a word, cannot.
 func ShowClickableTest(ctx context.Context, message, dir string) ([]byte, error) {
-	return showClickable(ctx, Notification{Reason: message}, dir)
+	return showClickable(ctx, machineDesktopEnv(), Notification{Reason: message}, dir)
 }
 
 // terminalNotifierText makes s safe as the value of a terminal-notifier text

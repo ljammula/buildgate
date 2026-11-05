@@ -2263,7 +2263,7 @@ func (b *quickstartConfigBuild) copilotRoute() (*sessionconfig.Config, []string,
 	if preresolvedToken != "" {
 		listingAttempted = true
 		listCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		models, listingErr = listGitHubCopilotModelsFn(listCtx, b.opts.EgressCABundle, preresolvedToken, "")
+		models, listingErr = b.dp.host.listGitHubCopilotModels(listCtx, b.opts.EgressCABundle, preresolvedToken, "")
 		cancel()
 		if listingErr != nil {
 			// Worded by whether a model id is already in hand: with one,
@@ -3038,7 +3038,7 @@ type consoleLinkTokens struct {
 // `xdg-open` on PATH, a headless box) is reported but never fails the
 // run -- the link itself was already printed either way.
 func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID string, link consoleLinkTokens, autoOpen bool) {
-	base := resolveConsoleBaseURL("", dataDir)
+	base := resolveConsoleBaseURL(dp, "", dataDir)
 	url := consoleRequestURL(base, requestID)
 	if url == "" {
 		return
@@ -3051,7 +3051,7 @@ func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID
 	// ...and only when a serve this data dir can prove it owns holds that
 	// address: its record alone can outlive the serve that wrote it, and
 	// the default address can be another data dir's serve.
-	ownServe := consolelink.ServeAddress(dataDir)
+	ownServe := consolelink.ServeAddress(dp, dataDir)
 	if ownServe == "" {
 		ownServe = consolelink.DefaultServeAddr
 	}

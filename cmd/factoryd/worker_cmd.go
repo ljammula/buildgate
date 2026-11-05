@@ -49,7 +49,6 @@ func workerMain(dp *deps, args []string) error {
 		return err
 	}
 	defer unlock()
-	defer useWorkerGlobals(&cfg)()
 	// The same liveness heartbeat worker writes, so status, stop, use,
 	// upgrade and the console see the worker and the requests it runs.
 	heartbeatMode, heartbeatModel := heartbeatRoute(cfg)
@@ -98,7 +97,7 @@ func workerMain(dp *deps, args []string) error {
 		specRunner: runSpecDraftJob,
 		planRunner: runPlanTicketsJob,
 		buildRunner: func(a0 context.Context, a1 []string, a2 func(*run.Run)) error {
-			return runMainWithReady(dp, a0, a1, a2)
+			return runTicketWithSettings(dp, a0, &cfg.Settings, a1, a2)
 		},
 	}
 	jobs := temporalworker.New(temporalClient, jobsQueue, jobsWorkerOptions(cfg.Settings.MaxParallelJobs))

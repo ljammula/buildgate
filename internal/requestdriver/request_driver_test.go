@@ -1916,12 +1916,8 @@ func TestAdvanceBuildingRunnerErrorWithNoRunIDStillHalts(t *testing.T) {
 func TestStartNextTicketOrFinishPRApprovedMovesToPRReviewAfterEveryTicket(t *testing.T) {
 	dp := newFakeDeps(t)
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 2)
-	previous := requestdriver.RequestAdvanceOn
-	requestdriver.RequestAdvanceOn = requestdriver.AdvanceOnPRApproved
-	defer func() { requestdriver.RequestAdvanceOn = previous }()
-
 	runner := requestdrivertest.AcceptingBuildRunner(t, dataDir)
-	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
+	if err := requestdrivertest.DriveRequests(dp, context.Background(), dataDir, requestdriver.WorkerConfig{AdvanceOn: requestdriver.AdvanceOnPRApproved}, requestdrivertest.FailingSpecDraftRunner(t), requestdrivertest.FailingPlanTicketsRunner(t), runner); err != nil {
 		t.Fatalf("driveRequests: %v", err)
 	}
 

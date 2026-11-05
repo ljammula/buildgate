@@ -73,7 +73,6 @@ esac
 
 func readChecksState(t *testing.T, checksFixture string, failOnRequired bool) ReviewState {
 	t.Helper()
-	resetSelfLoginCache(t)
 	gh := fakeGHChecks(t, t.TempDir(),
 		string(readTestdata(t, "prview_approved.json")),
 		string(readTestdata(t, "reviewthreads_none.json")),

@@ -73,13 +73,13 @@ func newAdviceFixtureOf(t *testing.T, tickets int, findings []run.CodeReviewFind
 	}
 	f.cfg = requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
 	f.cfg.Settings.ReviewAdviceRounds = 1
-	stubPRReviewDeps(f.dp, t, forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil)
+	pushed := stubPRReviewDeps(f.dp, t, forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil)
 	// Origin has ticket 1's branch at its accepted run's commit, as the
 	// build that opened the pull request pushed it.
-	requestdrivertest.LastPushedSHA[f.branch()] = f.resultSHA
+	pushed[f.branch()] = f.resultSHA
 	f.dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
 		f.pushed = append(f.pushed, branch+"@"+sha)
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	f.dp.restoreBranchFn = func(dir, branch, sha string) (bool, error) {
@@ -141,7 +141,7 @@ func (f *adviceFixture) drive(t *testing.T, ctx context.Context, buildRunner req
 // last args.
 func (f *adviceFixture) acceptingRounds(t *testing.T) (*int, *[]string) {
 	t.Helper()
-	return requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	return requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.adviceRun(t, id, run.StateAccepted, true)
 	})
 }
@@ -276,9 +276,7 @@ func TestAdviceRoundThatIsNotAcceptedLeavesTheAcceptedRunStanding(t *testing.T) 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newAdviceFixture(t, adviceFindings)
-			orig := requestdriver.ReviewCorrectiveRunner
-			t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-			requestdriver.ReviewCorrectiveRunner = tc.runner(f, t)
+			f.dp.runTicketFn = tc.runner(f, t)
 			if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
 				t.Fatalf("drive: %v", err)
 			}
@@ -341,7 +339,7 @@ func TestAdviceRoundPushChecksThatRefuseLeaveTheAcceptedRunStanding(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			f := newAdviceFixture(t, adviceFindings)
 			tc.setup(f)
-			requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+			requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 				return f.adviceRun(t, id, run.StateAccepted, tc.allowed)
 			})
 			if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -370,7 +368,7 @@ func TestAdviceRoundBranchThatCannotBePutBack(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newAdviceFixture(t, adviceFindings)
 			f.dp.restoreBranchFn = func(string, string, string) (bool, error) { return tc.ahead, errors.New("cannot lock ref") }
-			requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+			requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 				return f.adviceRun(t, id, run.StateAccepted, false)
 			})
 			if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -466,7 +464,7 @@ func TestAdviceRoundRunsOnTheExecutionModel(t *testing.T) {
 	settings := escalationSettings(&sessionconfig.Escalation{Model: "sol", Thinking: "high"})
 	settings.ReviewAdviceRounds = 1
 	f.cfg.Settings = settings
-	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		if started, err := run.Load(dataDir, id); err != nil || started.Escalated {
 			t.Errorf("the started advice run: %v, escalated %v, want not escalated", err, started != nil && started.Escalated)
 		}
@@ -508,12 +506,12 @@ func TestAdviceRoundsCount(t *testing.T) {
 			f.cfg.Settings.ReviewAdviceRounds = tc.count
 			f.roundFindings[1] = tc.round1
 			var args [][]string
-			requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+			requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 				return f.adviceRun(t, id, run.StateAccepted, roundOf(id) != 1 || tc.allowed1)
 			})
 			calls := 0
-			stub := requestdriver.ReviewCorrectiveRunner
-			requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
+			stub := f.dp.runTicketFn
+			f.dp.runTicketFn = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
 				calls++
 				args = append(args, a)
 				return stub(ctx, a, onReady)
@@ -576,9 +574,7 @@ func (f *adviceFixture) stopMidRound(t *testing.T, stopAt int, started bool) (ca
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	n := 0
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-	requestdriver.ReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
+	f.dp.runTicketFn = func(_ context.Context, args []string, onReady func(*run.Run)) error {
 		n++
 		id := requestdrivertest.ArgValue(args, "-ticket")
 		if roundOf(id) < stopAt {
@@ -777,7 +773,7 @@ func TestALaterTicketChainsFromTheTicketsPushedRun(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newAdviceFixtureOf(t, 2, adviceFindings)
-			requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+			requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 				return f.adviceRun(t, id, run.StateAccepted, tc.allowed)
 			})
 			for pass := 0; pass < 2; pass++ {
@@ -815,7 +811,7 @@ func TestAdviceRoundCountsAgainstNeitherBudget(t *testing.T) {
 		}
 		branch := "factoryd/" + id + "-001"
 		buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
-		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 			return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -833,13 +829,13 @@ func TestAdviceRoundCountsAgainstNeitherBudget(t *testing.T) {
 		r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 		ticket := &r.Tickets[0]
 		ticket.Rounds = []request.Round{adviceRound}
-		stubPRReviewDeps(dp, t, forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil)
+		pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: forge.PRStateOpen, IsDraft: true}, nil)
 		dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-			requestdrivertest.LastPushedSHA[branch] = sha
+			pushed[branch] = sha
 			return nil
 		}
 		dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
-		requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 			id := requestdrivertest.ArgValue(args, "-ticket")
 			return saveAcceptedRoundRun(t, dataDir, &run.Run{ID: id, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")})
 		}
@@ -891,7 +887,7 @@ func TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn(t *testing.T) {
 			dp := newFakeDeps(t)
 			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
-			calls, roundArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, roundArgs := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -920,9 +916,7 @@ func TestARoundContinuesTheFollowedRunsSessionOnlyWithTheKeyOn(t *testing.T) {
 // the ticket's: the request moves on, not to resume_review.
 func TestAnAdviceRoundRefusedForItsRouteCredentialLeavesTheAcceptedRunStanding(t *testing.T) {
 	f := newAdviceFixture(t, adviceFindings)
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-	requestdriver.ReviewCorrectiveRunner = func(context.Context, []string, func(*run.Run)) error {
+	f.dp.runTicketFn = func(context.Context, []string, func(*run.Run)) error {
 		return sandbox.RouteCredentialError(errors.New("codex route's credential did not resolve"))
 	}
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {

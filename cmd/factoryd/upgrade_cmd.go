@@ -341,7 +341,7 @@ func upgradeRunning(dp *deps, profiles []profileInfo, dirs []string, now time.Ti
 			out = append(out, upgradeProcess{Kind: "worker", DataDir: dir, Supervisor: sup, Service: hostcontrol.WorkerService, ConfigPath: configPath, TemporalAddress: workerAddr})
 		}
 		if sup := upgradeSupervisor(dp, hostcontrol.ServeService, dir); sup != "" || len(hostcontrol.ServePIDs(dp, dir)) > 0 {
-			addr := consolelink.ServeAddress(dir)
+			addr := consolelink.ServeAddress(dp, dir)
 			if addr == "" {
 				addr = consolelink.DefaultServeAddr
 			}

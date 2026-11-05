@@ -153,9 +153,9 @@ func TestQuickstartWritesRoutesConfigCopilotWithTokenFile(t *testing.T) {
 	t.Setenv("HOME", home)
 	authPath := home + "/.pi/agent/auth.json"
 	writeCopilotAuthFixture(t, authPath, "gho_discovered_token")
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 200000}}, nil
-	})
+	}
 
 	opts := &quickstartOptions{
 		NonInteractive:        true,

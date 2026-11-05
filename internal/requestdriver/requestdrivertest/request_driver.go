@@ -443,17 +443,15 @@ func AcceptingBuildRunner(t *testing.T, dataDir string) requestdriver.TicketRunn
 	}
 }
 
-// StubReviewCorrectiveRunner installs a package-var override for the
-// duration of the test (mirroring stubPRReviewDeps' own swap-and-restore
-// shape) that records the args it was called with and its call count, and
+// StubReviewCorrectiveRunner sets the RunTicket field of the caller's Deps
+// fake (runTicket points at it) to a stand-in for a corrective round's
+// build that records the args it was called with and its call count, and
 // finishes the round according to finish.
-func StubReviewCorrectiveRunner(t *testing.T, dataDir string, finish func(dataDir, roundRunID string) *run.Run) (calls *int, lastArgs *[]string) {
+func StubReviewCorrectiveRunner(runTicket *func(ctx context.Context, args []string, onReady func(*run.Run)) error, t *testing.T, dataDir string, finish func(dataDir, roundRunID string) *run.Run) (calls *int, lastArgs *[]string) {
 	t.Helper()
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
 	calls = new(int)
 	lastArgs = new([]string)
-	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	*runTicket = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		*calls++
 		*lastArgs = args
 		roundRunID := ArgValue(args, "-ticket")

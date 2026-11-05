@@ -178,7 +178,7 @@ func TestPRReviewCommentOnAMemoryRequestStartsNoRoundAndIsAnswered(t *testing.T)
 		}
 		stubPRReviewDeps(dp, t, state, nil)
 		builds := 0
-		requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+		dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 			builds++
 			return reviewFlaggedRoundRun(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "x").Save(dataDir)
 		}
@@ -280,7 +280,6 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 		wantPRState    string
 		wantReadyCalls int
 		wantRoundRuns  int
-		wantStartNext  int
 		wantRequest    request.State
 	}{
 		{
@@ -310,11 +309,12 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			wantRequest:    request.StatePRReview,
 		},
 		{
-			name:          "open not draft checks passing approved: PRState approved, continueAfterPRApproval called",
-			state:         approvedOnHeadState(requestdrivertest.TicketRunResultSHA(1), &trueVal),
-			wantPRState:   "approved",
-			wantStartNext: 1,
-			wantRequest:   request.StatePRReview,
+			// continueAfterPRApproval leaves the request in pr_review: its
+			// only ticket's pull request still waits to merge.
+			name:        "open not draft checks passing approved: PRState approved, request stays in pr_review",
+			state:       approvedOnHeadState(requestdrivertest.TicketRunResultSHA(1), &trueVal),
+			wantPRState: "approved",
+			wantRequest: request.StatePRReview,
 		},
 		{
 			// Regression for the GitHub Codex App's round-3 finding on
@@ -366,27 +366,22 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-			stubPRReviewDeps(dp, t, tc.state, nil)
+			pushed := stubPRReviewDeps(dp, t, tc.state, nil)
 
 			readyCalls := 0
 			dp.markPullRequestReadyFn = func(ctx context.Context, prURL string) error {
 				readyCalls++
 				return nil
 			}
-			startNextCalls := 0
-			requestdriver.ContinueAfterPRApproval = func(dataDir string, r *request.Request, now time.Time) error {
-				startNextCalls++
-				return nil
-			}
 			roundRuns := 0
-			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+			dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 				roundRuns++
 				runID := requestdrivertest.ArgValue(args, "-ticket")
 				accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 				return saveAcceptedRoundRun(t, dataDir, accepted)
 			}
 			dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-				requestdrivertest.LastPushedSHA[branch] = sha
+				pushed[branch] = sha
 				return nil
 			}
 			dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
@@ -404,9 +399,6 @@ func TestAdvancePRReviewStateTable(t *testing.T) {
 			}
 			if roundRuns != tc.wantRoundRuns {
 				t.Errorf("corrective round runs = %d, want %d", roundRuns, tc.wantRoundRuns)
-			}
-			if startNextCalls != tc.wantStartNext {
-				t.Errorf("continueAfterPRApproval calls = %d, want %d", startNextCalls, tc.wantStartNext)
 			}
 			if r.State != tc.wantRequest {
 				t.Errorf("request state = %q, want %q", r.State, tc.wantRequest)
@@ -426,11 +418,11 @@ func TestRunCorrectiveRoundTwoThreadsProducesOneRunAndTwoReplies(t *testing.T) {
 		{ID: "thread-2", Path: "b.go", Line: 20, Author: "bob", Body: "add a test here", CommentID: 222},
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedSpecPath, capturedDiffBase string
 	runCalls := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runCalls++
 		capturedSpecPath = requestdrivertest.ArgValue(args, "-spec")
 		capturedDiffBase = requestdrivertest.ArgValue(args, "-diff-base")
@@ -441,7 +433,7 @@ func TestRunCorrectiveRoundTwoThreadsProducesOneRunAndTwoReplies(t *testing.T) {
 	pushCalls := 0
 	var pushedBranch string
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		pushCalls++
 		pushedBranch = branch
 		return nil
@@ -510,14 +502,14 @@ func TestPRReviewAnswersOnlyThreadsIncludedInTheBoundedAddendum(t *testing.T) {
 		}
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	var replied []int64
@@ -566,9 +558,9 @@ func TestRunCorrectiveRoundSetsRunRequestID(t *testing.T) {
 		{ID: "thread-1", Path: "a.go", Line: 10, Author: "alice", Body: "please rename this", CommentID: 111},
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		started := &run.Run{ID: runID, WorkspacePath: t.TempDir()}
 		if onReady != nil {
@@ -589,11 +581,11 @@ func TestRunCorrectiveRoundSetsRunRequestID(t *testing.T) {
 		return saveAcceptedRoundRun(t, dataDir, loaded)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -631,21 +623,21 @@ func TestRunCorrectiveRoundCarriesRequestPreflightProfile(t *testing.T) {
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	r.PreflightProfile = "brownfield"
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedArgs []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		capturedArgs = args
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -697,17 +689,17 @@ func TestRunCorrectiveRoundCarriesFullSuiteSource(t *testing.T) {
 			r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 			r.FullSuiteCommand = tc.fullSuiteCommand
 			r.FullSuiteSource = tc.fullSuiteSource
-			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+			pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 			var capturedArgs []string
-			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+			dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 				capturedArgs = args
 				runID := requestdrivertest.ArgValue(args, "-ticket")
 				accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 				return saveAcceptedRoundRun(t, dataDir, accepted)
 			}
 			dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-				requestdrivertest.LastPushedSHA[branch] = sha
+				pushed[branch] = sha
 				return nil
 			}
 			dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
@@ -740,21 +732,21 @@ func TestRunCorrectiveRoundCarriesExecutionHarness(t *testing.T) {
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	r.Harnesses = map[string]string{"execution": "pifork"}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedArgs []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		capturedArgs = args
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -794,7 +786,7 @@ func TestRunCorrectiveRoundFourthRoundHaltsRequest(t *testing.T) {
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	runCalls := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runCalls++
 		return nil
 	}
@@ -822,9 +814,9 @@ func TestRunCorrectiveRoundQuarantineDoesNotPush(t *testing.T) {
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		quarantined := &run.Run{ID: runID, State: run.StateQuarantined}
 		if err := quarantined.Save(dataDir); err != nil {
@@ -834,7 +826,7 @@ func TestRunCorrectiveRoundQuarantineDoesNotPush(t *testing.T) {
 	}
 	pushCalls := 0
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		pushCalls++
 		return nil
 	}
@@ -878,7 +870,7 @@ func TestRunCorrectiveRoundRecordsRunnerErrorWhenHaltErrorIsEmpty(t *testing.T) 
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		// Halted, no HaltError -- exactly the record shape the live bug
 		// produced: something failed before a single command of the
@@ -937,7 +929,7 @@ func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 
 	calls := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		calls++
 		if calls <= 3 {
 			// Start failure: no run record ever saved, matching exactly
@@ -949,13 +941,13 @@ func TestRunCorrectiveRoundStartFailuresDoNotConsumeTheCap(t *testing.T) {
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
-	requestdrivertest.LastPushedSHA = map[string]string{}
+	pushed := map[string]string{}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1009,30 +1001,30 @@ func TestRunCorrectiveRoundDoesNotCountConformityRoundsTowardMaxReviewRounds(t *
 	})
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 
-	origRunner := requestdriver.PrReviewCorrectiveRunner
+	origRunner := dp.runTicketFn
 	origPush := dp.pushExistingBranchFn
 	origRemoteHead := dp.remoteBranchHeadSHAFn
 	origDescendsFromHead := dp.roundResultDescendsFromHeadFn
 	origReply := dp.replyToReviewCommentFn
 	t.Cleanup(func() {
-		requestdriver.PrReviewCorrectiveRunner = origRunner
+		dp.runTicketFn = origRunner
 		dp.pushExistingBranchFn = origPush
 		dp.remoteBranchHeadSHAFn = origRemoteHead
 		dp.roundResultDescendsFromHeadFn = origDescendsFromHead
 		dp.replyToReviewCommentFn = origReply
 	})
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
-	requestdrivertest.LastPushedSHA = map[string]string{}
+	pushed := map[string]string{}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1100,31 +1092,31 @@ func TestRunCorrectiveRoundAfterAcceptedConformityRoundUsesOriginalBase(t *testi
 
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 	var capturedArgs []string
-	origRunner := requestdriver.PrReviewCorrectiveRunner
+	origRunner := dp.runTicketFn
 	origPush := dp.pushExistingBranchFn
 	origRemoteHead := dp.remoteBranchHeadSHAFn
 	origDescendsFromHead := dp.roundResultDescendsFromHeadFn
 	origReply := dp.replyToReviewCommentFn
 	t.Cleanup(func() {
-		requestdriver.PrReviewCorrectiveRunner = origRunner
+		dp.runTicketFn = origRunner
 		dp.pushExistingBranchFn = origPush
 		dp.remoteBranchHeadSHAFn = origRemoteHead
 		dp.roundResultDescendsFromHeadFn = origDescendsFromHead
 		dp.replyToReviewCommentFn = origReply
 	})
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		capturedArgs = args
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
-	requestdrivertest.LastPushedSHA = map[string]string{}
+	pushed := map[string]string{}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1465,7 +1457,7 @@ func TestAdvancePRReviewWatchesEveryOpenTicketPR(t *testing.T) {
 		t.Fatal(err)
 	}
 	trueVal := true
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal}, nil)
 	dp.readReviewStateFn = func(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
 		if strings.HasSuffix(prURL, "/101") {
 			thread := []forge.Thread{{ID: "t1", Path: "a.go", Line: 3, Author: "reviewer", Body: "rename this"}}
@@ -1474,17 +1466,17 @@ func TestAdvancePRReviewWatchesEveryOpenTicketPR(t *testing.T) {
 		return forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal}, nil
 	}
 	var roundTickets []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		roundTickets = append(roundTickets, requestdrivertest.ArgValue(args, "-ticket"))
 		accepted := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -1543,7 +1535,7 @@ func TestRunCorrectiveRoundQuarantineLeavesThreadsEligibleForRetry(t *testing.T)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	runs := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runs++
 		q := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateQuarantined}
 		return q.Save(dataDir)
@@ -1572,7 +1564,7 @@ func TestRunCorrectiveRoundPushFailureHaltsRequest(t *testing.T) {
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		a := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
@@ -1618,7 +1610,7 @@ func TestPushAcceptedRoundHaltsWhenRemoteBranchDidNotAdvance(t *testing.T) {
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		a := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
@@ -1668,7 +1660,7 @@ func TestPushAcceptedRoundHaltsWhenRoundBuiltOnADifferentBranch(t *testing.T) {
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		// Ignores -on-branch entirely: this round's own run record names
 		// a DIFFERENT branch than the one it was asked to build on --
 		// exactly what a Temporal-path -on-branch bug produces (a fresh
@@ -1713,8 +1705,8 @@ func TestPushAcceptedRoundHappyPathPushesResultSHAToBranchAndReplies(t *testing.
 	dp := newFakeDeps(t)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		a := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00dcafef00dcafef00dcafef00dcafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
@@ -1723,7 +1715,7 @@ func TestPushAcceptedRoundHappyPathPushesResultSHAToBranchAndReplies(t *testing.
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
 		pushCalls++
 		pushedSHA, pushedBranch = sha, branch
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	replyCalls := 0
@@ -1768,7 +1760,7 @@ func TestRunCorrectiveRoundWithholdsPushWhenRoundOwnDecisionDenies(t *testing.T)
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		roundRunID := requestdrivertest.ArgValue(args, "-ticket")
 		roundRun := &run.Run{ID: roundRunID, Project: "widget", State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef"}
 		if err := roundRun.Save(dataDir); err != nil {
@@ -1816,7 +1808,7 @@ func TestRunCorrectiveRoundWithholdsPushOnMemoryDenialAndStartsNoFurtherRound(t 
 			r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 			rounds := 0
-			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+			dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 				rounds++
 				roundRunID := requestdrivertest.ArgValue(args, "-ticket")
 				roundRun := &run.Run{ID: roundRunID, Project: "widget", State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "deadbeef"}
@@ -2244,7 +2236,7 @@ func TestRunCorrectiveRoundAfterAQuarantinedRoundCarriesTheGatesFindings(t *test
 	approveRequestSpec(t, dataDir, r)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	var argvs [][]string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		argvs = append(argvs, args)
 		return requestdrivertest.CorrectableQuarantine(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "").Save(dataDir)
 	}
@@ -2309,7 +2301,7 @@ func TestRunCorrectiveRoundAfterAHaltedRoundCarriesNoFindings(t *testing.T) {
 		{Index: 2, RunID: "round-2", Outcome: request.RoundHalted},
 	}
 	var addendum string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		content, err := os.ReadFile(requestdrivertest.ArgValue(args, "-spec"))
 		if err != nil {
 			return err
@@ -2346,7 +2338,7 @@ func TestRunCorrectiveRoundOpensNoPullRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		got = args
 		q := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateQuarantined}
 		return q.Save(dataDir)
@@ -2397,7 +2389,7 @@ func TestRunCorrectiveRoundCancelledDuringARoundRecordsNothing(t *testing.T) {
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	builds := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		builds++
 		onDisk, err := request.Load(dataDir, r.ID)
 		if err != nil {
@@ -2437,7 +2429,7 @@ func TestRunCorrectiveRoundQuarantinedRepliesOnTheThread(t *testing.T) {
 	// may build on round 1's refused commits.
 	approveRequestSpec(t, dataDir, r)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		q := reviewFlaggedRoundRun(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "nil map write @octocat ```\n# heading")
 		q.HaltError = "exec /Users/someone/secret/path failed"
 		return q.Save(dataDir)
@@ -2489,7 +2481,7 @@ func TestRunCorrectiveRoundReplyForAHaltedRoundAndNoneForAStartFailure(t *testin
 			threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "alice", Body: "fix", CommentID: 5}}
 			r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 			stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-			requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+			dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 				if tc.saved == nil {
 					return errors.New("git worktree add: branch is checked out elsewhere")
 				}
@@ -2527,15 +2519,15 @@ func TestReadyToMergeFollowsTheLastPushedRoundAndClearsWhileOneRuns(t *testing.T
 	requestdrivertest.AcceptAndReview(t, dataDir, 1, run.GateResult{Check: "code_review", Passed: true})
 	r.Tickets[0].MergeReadiness = &request.MergeReadiness{Ready: true}
 	roundSHA := "cafef00dcafef00dcafef00dcafef00dcafef00d"
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: requestdrivertest.TicketRunResultSHA(1), BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &yes, HeadSHA: requestdrivertest.TicketRunResultSHA(1), BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	var duringRound *request.MergeReadiness
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		duringRound = r.Tickets[0].MergeReadiness
 		a := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: roundSHA, Branch: requestdrivertest.ArgValue(args, "-on-branch"), GateResults: []run.GateResult{{Check: "code_review", Passed: true}}}
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
@@ -2575,7 +2567,7 @@ func TestRunCorrectiveRoundResolvesOutcomeFromOnReadyRunIDNotTicketFlag(t *testi
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedTicketArg string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		capturedTicketArg = requestdrivertest.ArgValue(args, "-ticket")
 		// The real run_ticket.go saves under its own generated id, never
 		// the plain -ticket value -- reproduced here directly.
@@ -2645,21 +2637,21 @@ func TestRunCorrectiveRoundCarriesTheFullSuiteCommand(t *testing.T) {
 	}
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	r.FullSuiteCommand = "go test ./..."
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 
 	var capturedArgs []string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		capturedArgs = args
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -2693,16 +2685,16 @@ func TestRunCorrectiveRoundUsesTicketRunsRecordedBranch(t *testing.T) {
 	if err := ticketRun.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	var onBranch string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		onBranch = requestdrivertest.ArgValue(args, "-on-branch")
 		accepted := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: onBranch}
 		return saveAcceptedRoundRun(t, dataDir, accepted)
 	}
 	var pushedBranch string
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		pushedBranch = branch
 		return nil
 	}
@@ -2761,8 +2753,8 @@ func TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush(t *testing.T) {
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	trueVal := true
 	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	events := readyPullRequestForARound(t, dp, dataDir, false)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	events := readyPullRequestForARound(t, dp, pushed, dataDir, false)
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
@@ -2778,7 +2770,7 @@ func TestPRReviewRoundTurnsAReadyPullRequestToDraftBeforeThePush(t *testing.T) {
 // turns it to draft, runs an accepted review round, and records the draft
 // flips and pushes in order. markedReadyDuringPush marks it ready again as
 // the round's push lands, as a person could.
-func readyPullRequestForARound(t *testing.T, dp *fakeDeps, dataDir string, markedReadyDuringPush bool) *[]string {
+func readyPullRequestForARound(t *testing.T, dp *fakeDeps, pushed requestdrivertest.PushedSHAs, dataDir string, markedReadyDuringPush bool) *[]string {
 	t.Helper()
 	isDraft := false
 	inner := dp.readReviewStateFn
@@ -2793,13 +2785,13 @@ func readyPullRequestForARound(t *testing.T, dp *fakeDeps, dataDir string, marke
 		isDraft = true
 		return nil
 	}
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		return saveAcceptedRoundRun(t, dataDir, &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: strings.Repeat("d", 40), Branch: requestdrivertest.ArgValue(args, "-on-branch")})
 	}
 	dp.pushExistingBranchFn = func(_ context.Context, _, sha, branch string) error {
 		events = append(events, "push "+branch)
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		if markedReadyDuringPush {
 			isDraft = false
 		}
@@ -2819,8 +2811,8 @@ func TestPRReviewRoundTurnsAPullRequestMarkedReadyDuringThePushBackToDraft(t *te
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	trueVal := true
 	threads := []forge.Thread{{ID: "t1", Path: "a.go", Line: 1, Author: "reviewer", Body: "fix this", CommentID: 555}}
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	events := readyPullRequestForARound(t, dp, dataDir, true)
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", ChecksPassing: &trueVal, BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	events := readyPullRequestForARound(t, dp, pushed, dataDir, true)
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
@@ -2848,7 +2840,7 @@ func TestRoundClearsMergeReadinessOnDiskBeforeItsBuildStarts(t *testing.T) {
 
 	var onDisk *request.MergeReadiness
 	sawBuild := false
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		sawBuild = true
 		saved, err := request.Load(dataDir, r.ID)
 		if err != nil {

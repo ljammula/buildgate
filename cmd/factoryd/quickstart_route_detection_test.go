@@ -319,12 +319,12 @@ func TestQuickstartBuildConfigCopilotUsesDiscoveredLoginNeverPromptsForToken(t *
 	t.Setenv("HOME", home)
 	authPath := home + "/.pi/agent/auth.json"
 	writeCopilotAuthFixture(t, authPath, "gho_discovered_token")
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		if githubToken != "gho_discovered_token" {
 			t.Errorf("githubToken = %q, want the token resolved from the discovered auth file", githubToken)
 		}
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 272000}}, nil
-	})
+	}
 
 	opts := &quickstartOptions{Route: "copilot"}
 	var out bytes.Buffer
@@ -367,10 +367,10 @@ func TestQuickstartBuildConfigCopilotExplicitCredentialWinsOverDiscoveredLogin(t
 	writeCopilotAuthFixture(t, home+"/.pi/agent/auth.json", "gho_discovered_token")
 
 	var gotToken string
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		gotToken = githubToken
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 272000}}, nil
-	})
+	}
 
 	opts := &quickstartOptions{NonInteractive: true, Route: "copilot", ModelID: "gpt-5.6-luna", Credential: "gho_explicit_token", CredentialProvided: true}
 	var out bytes.Buffer
@@ -406,10 +406,10 @@ func TestQuickstartBuildConfigCopilotEnvTokenWinsOverDiscoveredLogin(t *testing.
 	t.Setenv("GITHUB_COPILOT_TOKEN", "gho_env_token")
 
 	var gotToken string
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		gotToken = githubToken
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 272000}}, nil
-	})
+	}
 
 	opts := &quickstartOptions{NonInteractive: true, Route: "copilot", ModelID: "gpt-5.6-luna"}
 	var out bytes.Buffer
@@ -441,10 +441,10 @@ func TestQuickstartBuildConfigCopilotNonInteractiveMissingModelIDNeverCallsListi
 	writeCopilotAuthFixture(t, home+"/.pi/agent/auth.json", "gho_discovered_token")
 
 	called := false
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		called = true
 		return nil, nil
-	})
+	}
 
 	opts := &quickstartOptions{NonInteractive: true, Route: "copilot"}
 	_, _, err := quickstartBuildConfig(dp, opts, newQuickstartPrompter(strings.NewReader("")), &bytes.Buffer{}, t.TempDir())

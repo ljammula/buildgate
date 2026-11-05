@@ -76,6 +76,12 @@ func listRunLabelled(ctx context.Context, dockerBinary, dataDir, runID string) (
 // returns the names it removed. A registry-proxy container is never touched:
 // no request-level job starts one.
 func ReconcileRequestJobOrphans(ctx context.Context, dockerBinary, dataDir string, ownerDead func(id string) bool) ([]string, error) {
+	return reconcileRequestJobOrphans(ctx, time.After, dockerBinary, dataDir, ownerDead)
+}
+
+// reconcileRequestJobOrphans is ReconcileRequestJobOrphans with its debounce
+// wait passed in.
+func reconcileRequestJobOrphans(ctx context.Context, after debounceAfter, dockerBinary, dataDir string, ownerDead func(id string) bool) ([]string, error) {
 	found, err := listRunLabelled(ctx, dockerBinary, dataDir, "")
 	if err != nil {
 		return nil, err
@@ -126,7 +132,7 @@ func ReconcileRequestJobOrphans(ctx context.Context, dockerBinary, dataDir strin
 	}
 	if staleOnly {
 		select {
-		case <-ownerDebounceAfter(ownerHeartbeatInterval):
+		case <-after(ownerHeartbeatInterval):
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}

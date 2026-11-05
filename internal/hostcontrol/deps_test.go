@@ -31,7 +31,6 @@ func runTests(m *testing.M) int {
 	os.Setenv("HOME", home)
 	os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	os.Setenv(AutostartEnvVar, "0")
-	consolelink.Listening = func(string) bool { return false }
 	return m.Run()
 }
 
@@ -59,7 +58,12 @@ type fakeDeps struct {
 	spawnWorkerFn        func(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
 	temporalHealthyFn    func(ctx context.Context, addr string) error
 	workerServiceStateFn func(ctx context.Context, plistPath string) string
+	processAliveFn       func(pid int) bool
+	listeningFn          func(addr string) bool
 }
+
+func (f *fakeDeps) ProcessAlive(pid int) bool  { return f.processAliveFn(pid) }
+func (f *fakeDeps) Listening(addr string) bool { return f.listeningFn(addr) }
 
 func (f *fakeDeps) ColimaBinary() string { return f.colimaBinaryFn() }
 func (f *fakeDeps) DockerBinary() string { return f.dockerBinaryFn() }
@@ -123,6 +127,10 @@ func (f *fakeDeps) WorkerServiceState(ctx context.Context, plistPath string) str
 func newFakeDeps(t testing.TB) *fakeDeps {
 	t.Helper()
 	f := &fakeDeps{}
+	f.processAliveFn = consolelink.Machine{}.ProcessAlive
+	// No console link to a serve that happens to run on this machine: a test
+	// of a live serve sets its own.
+	f.listeningFn = func(string) bool { return false }
 	f.dockerBinaryFn = func() string { return RealDockerBinary(f) }
 	f.launchdServicePIDFn = func(domain string) (int, bool) { return RealLaunchdServicePID(f, domain) }
 	f.portListenersFn = func(port string) ([]byte, error) { return RealPortListeners(f, port) }

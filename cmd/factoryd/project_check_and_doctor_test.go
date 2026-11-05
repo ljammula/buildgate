@@ -970,7 +970,7 @@ func TestRunProjectBootstrapCheckBrownfieldNeverSuggestsOnboard(t *testing.T) {
 // repeatedly found in flag-forwarding code).
 func TestAPIStartStarterPlumbsPreflightProfileFlag(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
 	ticketsDir := filepath.Join(filepath.Dir(workspace), "spec", "tickets")
 	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
@@ -997,7 +997,7 @@ func TestAPIStartStarterPlumbsPreflightProfileFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-preflight-profile-1",
 		Ticket:              "api-brownfield-ticket",
@@ -1034,7 +1034,7 @@ func TestAPIStartStarterPlumbsPreflightProfileFlag(t *testing.T) {
 // instead.
 func TestAPIStartStarterRejectsInvalidPreflightProfile(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// No t.Parallel(): newFixtureRepo -> testfixture.NewGitRepo calls
 	// t.Setenv, which panics if the test has already called t.Parallel().
 	workspace := newFixtureRepo(t)
@@ -1045,7 +1045,7 @@ func TestAPIStartStarterRejectsInvalidPreflightProfile(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:  sharedTemporalAddress(t),
 		ID:               "api-preflight-profile-invalid",
 		Ticket:           "api-ticket",

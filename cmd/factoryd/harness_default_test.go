@@ -103,13 +103,6 @@ func TestServeMainWithoutDaemonStartsWithUnwritableHarnessCache(t *testing.T) {
 	}
 	defer listener.Close()
 
-	// serveMain reaches its own tier2SettingsOverride assignment before
-	// ever getting to ListenAndServe below, unlike a real `serve` process
-	// (never invoked twice in one process) this shares its test binary
-	// with every other test in this package -- reset it once this test is
-	// done so it does not leak into an unrelated later test.
-	t.Cleanup(func() { tier2SettingsOverride = nil })
-
 	err = serveMain(dp, []string{"-data-dir", t.TempDir(), "-addr", listener.Addr().String()})
 	if err == nil {
 		t.Fatal("serveMain unexpectedly succeeded (it should have failed to bind the already-occupied address)")

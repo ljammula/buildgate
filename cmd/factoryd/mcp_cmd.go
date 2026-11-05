@@ -106,7 +106,7 @@ func mcpMain(dp *deps, stdout io.Writer, args []string) error {
 	// As `factoryd console` does with the start token: the token is paired
 	// with an address only when this data dir's own serve recorded it. The
 	// default address may be another data dir's serve.
-	addr := consolelink.ServeAddress(dataDir)
+	addr := consolelink.ServeAddress(dp, dataDir)
 	if addr == "" {
 		fmt.Fprintf(stdout, "MCP token ready: %s\n", tokenPath)
 		fmt.Fprintf(stdout, "No `factoryd serve` is recorded for data dir %s. Start it with `factoryd console`, then run `factoryd mcp` again for the endpoint.\n", dataDir)

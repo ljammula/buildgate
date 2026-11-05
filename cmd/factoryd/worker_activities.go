@@ -339,7 +339,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 		// inside its slot.
 		defer repositoryWaits.clear(id)
 		stopHeartbeat := heartbeatUntilDone(ctx, requestHeartbeatInterval)
-		err = requestdriver.AdvanceRequest(a.dp, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.buildRunner)
+		err = requestdriver.AdvanceRequest(workerDriverDeps{deps: a.dp, settings: &a.cfg.Settings}, ctx, a.dataDir, r, a.cfg, a.specRunner, a.planRunner, a.buildRunner)
 		stopHeartbeat()
 		if err != nil && !errors.Is(err, request.ErrCancelledOnDisk) {
 			return "", err
@@ -399,12 +399,12 @@ const consoleStartEvery = 5 * time.Minute
 // FACTORYD_AUTOSTART=0 or without a session config; a notification then has
 // no link and says to run `factoryd console`.
 func (a *requestActivities) ensureConsole() {
-	if consolelink.ServeAddress(a.dataDir) != "" || !hostcontrol.AutostartEnabled() || a.cfg.SessionConfigPath == "" {
+	if consolelink.ServeAddress(a.dp, a.dataDir) != "" || !hostcontrol.AutostartEnabled() || a.cfg.SessionConfigPath == "" {
 		return
 	}
 	a.consoleStart.Lock()
 	defer a.consoleStart.Unlock()
-	if consolelink.ServeAddress(a.dataDir) != "" || (!a.consoleStartedAt.IsZero() && time.Since(a.consoleStartedAt) < consoleStartEvery) {
+	if consolelink.ServeAddress(a.dp, a.dataDir) != "" || (!a.consoleStartedAt.IsZero() && time.Since(a.consoleStartedAt) < consoleStartEvery) {
 		return
 	}
 	a.consoleStartedAt = time.Now()

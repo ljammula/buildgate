@@ -432,10 +432,10 @@ func submitMain(dp *deps, args []string) error {
 
 	fmt.Println(result.id)
 	startDependenciesAfterSubmit(dp, os.Stdout, flags.Lookup("config").Value.String(), *dataDir)
-	if url := consoleRequestURL(resolveConsoleBaseURL(*consoleBaseURL, *dataDir), result.id); url != "" {
+	if url := consoleRequestURL(resolveConsoleBaseURL(dp, *consoleBaseURL, *dataDir), result.id); url != "" {
 		fmt.Println("View:", url)
 	} else {
-		fmt.Println(noConsoleLinkHint(*dataDir))
+		fmt.Println(noConsoleLinkHint(dp, *dataDir))
 	}
 	if *watch {
 		return watchRequest(os.Stdout, *dataDir, result.id, false)
@@ -446,11 +446,11 @@ func submitMain(dp *deps, args []string) error {
 // noConsoleLinkHint says why submit printed no console link and what fixes
 // it: a binary built without the console (serve runs but has nothing to
 // show), or no serve for this data dir.
-func noConsoleLinkHint(dataDir string) string {
+func noConsoleLinkHint(dp *deps, dataDir string) string {
 	if !consoleweb.Embedded() {
 		return "No console link: this factoryd was built without the console -- `make install` (with Node and npm on PATH) embeds it."
 	}
-	if consolelink.ServeAddress(dataDir) == "" {
+	if consolelink.ServeAddress(dp, dataDir) == "" {
 		return "No console link: no `factoryd serve` is running for this data dir -- start one with `factoryd serve`."
 	}
 	return "No console link could be built for this request."

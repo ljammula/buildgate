@@ -71,9 +71,7 @@ func TestMCPMainCreatesRotatesAndRemovesTheToken(t *testing.T) {
 		t.Errorf("a second `factoryd mcp` changed the token")
 	}
 
-	origListening := consolelink.Listening
-	t.Cleanup(func() { consolelink.Listening = origListening })
-	consolelink.Listening = func(string) bool { return true }
+	fakeHostOf(dp).tcpListeningFn = func(string) bool { return true }
 	remove, err := consolelink.RecordServeAddress(dataDir, "127.0.0.1:8097")
 	if err != nil {
 		t.Fatal(err)

@@ -7,72 +7,75 @@ import (
 	"time"
 )
 
+// fakeProber answers ProcessAlive and Listening as its fields say.
+type fakeProber struct{ alive, listening bool }
+
+func (f *fakeProber) ProcessAlive(int) bool { return f.alive }
+func (f *fakeProber) Listening(string) bool { return f.listening }
+
+// listeningHere is this machine's prober with every address answering:
+// a process check is real.
+type listeningHere struct{ Machine }
+
+func (listeningHere) Listening(string) bool { return true }
+
 func TestBaseURLPrecedence(t *testing.T) {
 	t.Setenv(EnvVar, "")
-	orig := Listening
-	t.Cleanup(func() { Listening = orig })
-	Listening = func(string) bool { return true }
-	origAlive := processAlive
-	t.Cleanup(func() { processAlive = origAlive })
-	processAlive = func(int) bool { return true }
+	p := &fakeProber{alive: true, listening: true}
 	dataDir := t.TempDir()
 
-	if got := BaseURL("http://flag:1", dataDir); got != "http://flag:1" {
+	if got := BaseURL(p, false, "http://flag:1", dataDir); got != "http://flag:1" {
 		t.Errorf("flag: got %q", got)
 	}
 	t.Setenv(EnvVar, "http://env:2")
-	if got := BaseURL("", dataDir); got != "http://env:2" {
+	if got := BaseURL(p, false, "", dataDir); got != "http://env:2" {
 		t.Errorf("env: got %q", got)
 	}
 	t.Setenv(EnvVar, "")
-	origEmbedded := embedded
-	t.Cleanup(func() { embedded = origEmbedded })
-	embedded = func() bool { return true }
+	embedded := true
 
 	// Another data dir's serve on the default port is never guessed.
-	if got := BaseURL("", dataDir); got != "" {
+	if got := BaseURL(p, embedded, "", dataDir); got != "" {
 		t.Errorf("no serve recorded for this data dir: got %q, want empty", got)
 	}
 	remove, err := RecordServeAddress(dataDir, "127.0.0.1:8092")
 	if err != nil {
 		t.Fatalf("RecordServeAddress: %v", err)
 	}
-	if got := BaseURL("", dataDir); got != "http://127.0.0.1:8092" {
+	if got := BaseURL(p, embedded, "", dataDir); got != "http://127.0.0.1:8092" {
 		t.Errorf("recorded and live: got %q, want this data dir's serve", got)
 	}
-	Listening = func(string) bool { return false }
-	if got := BaseURL("", dataDir); got != "" {
+	p.listening = false
+	if got := BaseURL(p, embedded, "", dataDir); got != "" {
 		t.Errorf("recorded but nothing listening: got %q, want empty", got)
 	}
-	Listening = func(string) bool { return true }
+	p.listening = true
 	// A record whose serve died is ignored even if something else now
 	// answers on its port (another data dir's serve, say).
-	processAlive = func(int) bool { return false }
-	if got := BaseURL("", dataDir); got != "" {
+	p.alive = false
+	if got := BaseURL(p, embedded, "", dataDir); got != "" {
 		t.Errorf("recorded serve's process gone: got %q, want empty", got)
 	}
-	processAlive = func(int) bool { return true }
-	embedded = func() bool { return false }
-	if got := BaseURL("", dataDir); got != "" {
+	p.alive = true
+	embedded = false
+	if got := BaseURL(p, embedded, "", dataDir); got != "" {
 		t.Errorf("not embedded: got %q, want empty", got)
 	}
-	embedded = func() bool { return true }
+	embedded = true
 	remove()
-	if got := BaseURL("", dataDir); got != "" {
+	if got := BaseURL(p, embedded, "", dataDir); got != "" {
 		t.Errorf("after serve removed its record: got %q, want empty", got)
 	}
 }
 
 func TestRecordServeAddressMapsWildcardToLoopback(t *testing.T) {
-	orig := Listening
-	t.Cleanup(func() { Listening = orig })
-	Listening = func(string) bool { return true }
 	// This test process is the recording serve, so the real check applies.
+	p := listeningHere{}
 	dataDir := t.TempDir()
 	if _, err := RecordServeAddress(dataDir, ":8095"); err != nil {
 		t.Fatal(err)
 	}
-	if got := ServeAddress(dataDir); got != "127.0.0.1:8095" {
+	if got := ServeAddress(p, dataDir); got != "127.0.0.1:8095" {
 		t.Errorf("ServeAddress = %q, want 127.0.0.1:8095", got)
 	}
 	// A second serve's record is not removed by the first one's cleanup.
@@ -81,7 +84,7 @@ func TestRecordServeAddressMapsWildcardToLoopback(t *testing.T) {
 		t.Fatal(err)
 	}
 	removeFirst()
-	if got := ServeAddress(dataDir); got != "127.0.0.1:8097" {
+	if got := ServeAddress(p, dataDir); got != "127.0.0.1:8097" {
 		t.Errorf("ServeAddress after the older serve's cleanup = %q, want the newer record", got)
 	}
 }
@@ -174,12 +177,7 @@ func TestTabNotifierIsPresentOnlyWhileFresh(t *testing.T) {
 }
 
 func TestBaseURLTreatsABaseThatCarriesMoreThanAnAddressAsUnset(t *testing.T) {
-	orig := Listening
-	t.Cleanup(func() { Listening = orig })
-	Listening = func(string) bool { return true }
-	origEmbedded := embedded
-	t.Cleanup(func() { embedded = origEmbedded })
-	embedded = func() bool { return true }
+	p := listeningHere{}
 	dataDir := t.TempDir()
 	remove, err := RecordServeAddress(dataDir, "127.0.0.1:18090")
 	if err != nil {
@@ -199,16 +197,16 @@ func TestBaseURLTreatsABaseThatCarriesMoreThanAnAddressAsUnset(t *testing.T) {
 		if got := EnvBase(); got != "" {
 			t.Errorf("EnvBase with %q = %q, want none", base, got)
 		}
-		if got := BaseURL("", dataDir); got != "http://127.0.0.1:18090" {
+		if got := BaseURL(p, true, "", dataDir); got != "http://127.0.0.1:18090" {
 			t.Errorf("BaseURL with %s=%q = %q, want the recorded serve", EnvVar, base, got)
 		}
 		t.Setenv(EnvVar, "")
-		if got := BaseURL(base, dataDir); got != "http://127.0.0.1:18090" {
+		if got := BaseURL(p, true, base, dataDir); got != "http://127.0.0.1:18090" {
 			t.Errorf("BaseURL(%q) = %q, want the recorded serve", base, got)
 		}
 	}
 	t.Setenv(EnvVar, "https://console.example/base/")
-	if got := RequestURL(BaseURL("", dataDir), "req-1"); got != "https://console.example/base/requests/req-1" {
+	if got := RequestURL(BaseURL(p, true, "", dataDir), "req-1"); got != "https://console.example/base/requests/req-1" {
 		t.Errorf("a base with a path: %q", got)
 	}
 }

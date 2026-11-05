@@ -1,6 +1,9 @@
 package main
 
-import "buildgate/internal/consolelink"
+import (
+	"buildgate/internal/consolelink"
+	"buildgate/internal/consoleweb"
+)
 
 // consoleLinkEnvVar is the operator's machine-wide default for where the
 // console web app (console/, not the factoryd API) is served --
@@ -14,9 +17,12 @@ const consoleLinkEnvVar = consolelink.EnvVar
 // resolveConsoleBaseURL resolves the console base URL for dataDir: see
 // consolelink.BaseURL (the flag, FACTORYD_CONSOLE_URL, then the address a
 // serve for dataDir recorded while it answers).
-func resolveConsoleBaseURL(flagValue, dataDir string) string {
-	return consolelink.BaseURL(flagValue, dataDir)
+func resolveConsoleBaseURL(dp *deps, flagValue, dataDir string) string {
+	return consolelink.BaseURL(dp, consoleweb.Embedded(), flagValue, dataDir)
 }
+
+// tcpListening reports whether a TCP listener answers on addr.
+func (impl realHost) tcpListening(addr string) bool { return consolelink.Machine{}.Listening(addr) }
 
 // consoleRequestURL returns the console's deep link to request id under
 // base (as returned by resolveConsoleBaseURL), matching the path-based

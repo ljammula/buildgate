@@ -1633,8 +1633,6 @@ PASSED_NOTES_BACKUP_MAX_BYTES = 32 << 20
 # elapsed time on the monotonic clock against this budget.
 BUILD_TIME_BUDGET_ENV = "FACTORY_BUILD_TIME_BUDGET_SECONDS"
 _monotonic = time.monotonic
-# Set first thing in main(); run_build falls back to its own entry.
-_process_started: float | None = None
 CORRECTIVE_STUCK = prompt_templates.load("build_corrective.stuck", ("streak",))
 ROUND_CHECKLIST = prompt_templates.load("build_round_checklist", ("verify",))
 
@@ -2676,8 +2674,9 @@ def _run_build(
 	started_monotonic: float | None = None,
 	resume_session: bool = False,
 ) -> BuildResult:
+	# main passes the process's own start; a direct call measures from here.
 	if started_monotonic is None:
-		started_monotonic = _process_started if _process_started is not None else _monotonic()
+		started_monotonic = _monotonic()
 	resume = load_round_state(resume_from_state, max_rounds) if resume_from_state is not None else None
 	workspace.mkdir(parents=True, exist_ok=True)
 	ensure_git_repo(workspace)
@@ -3304,8 +3303,7 @@ def write_evidence_json(result: BuildResult) -> Path:
 
 
 def main() -> int:
-	global _process_started
-	_process_started = _monotonic()
+	process_started = _monotonic()
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 	parser.add_argument("--workspace", required=True, type=Path)
 	parser.add_argument("--spec", required=True, type=Path)
@@ -3424,6 +3422,7 @@ def main() -> int:
 	try:
 		result = run_build(
 			args.workspace.resolve(), args.spec.resolve(),
+			started_monotonic=process_started,
 			max_rounds=args.max_rounds,
 			timeout_minutes=args.timeout_minutes,
 			thinking=args.thinking, review_policy=args.review_policy,
