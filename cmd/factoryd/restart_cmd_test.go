@@ -384,3 +384,44 @@ func TestRestartWaitsForAPRReviewPassThatOnlyHoldsASlot(t *testing.T) {
 		t.Error("restart did not wait for the slot holder")
 	}
 }
+
+func TestRestartStopsNothingWhenAWorkerCouldNotReachItsRouteFromThisShell(t *testing.T) {
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	queuePID, servePID := h.startDefaultProcesses()
+	dir := h.profiles.roots["default"]
+	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
+	t.Setenv("PROFILE_TEST_KEY", "")
+	var out bytes.Buffer
+	err := restartRunContext(context.Background(), dp, nil, &out, false)
+	if err == nil || !strings.Contains(err.Error(), "PROFILE_TEST_KEY") || !strings.Contains(err.Error(), "nothing was stopped") {
+		t.Fatalf("restart = %v, want a refusal naming PROFILE_TEST_KEY\n%s", err, out.String())
+	}
+	if !alive(queuePID) || !alive(servePID) || len(h.spawned) != 0 {
+		t.Errorf("worker alive %v, console alive %v, spawned %v: want both left running, nothing started", alive(queuePID), alive(servePID), h.spawned)
+	}
+	if daemonheartbeat.Draining(dir) {
+		t.Error("a drain was requested before the refusal")
+	}
+}
+
+func TestRestartSaysADataDirHasAConsoleButNoWorker(t *testing.T) {
+	dp := newTestDeps(t)
+	h := restartHarness(dp, t)
+	dir := h.profiles.roots["default"]
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	serve := standIn(t)
+	writeConsoleRecord(t, dir, serve.Process.Pid)
+	var out bytes.Buffer
+	if err := restartRunContext(context.Background(), dp, nil, &out, false); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "worker ("+dir+"): not running, so not started") {
+		t.Errorf("output does not say the worker is not running:\n%s", out.String())
+	}
+	if len(h.spawned) != 1 || !strings.HasPrefix(h.spawned[0], "serve ") {
+		t.Errorf("spawned %v, want the console alone", h.spawned)
+	}
+}

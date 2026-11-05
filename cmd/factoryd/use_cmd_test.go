@@ -30,6 +30,9 @@ func newProfileFixture(t *testing.T, names ...string) *profileFixture {
 	t.Helper()
 	isolateSessionConfig(t)
 	t.Setenv(sessionconfig.ProfileEnv, "")
+	// The key profileRoutesYAML's route reads: a worker started from this
+	// test process resolves it (restart and upgrade check that).
+	t.Setenv("PROFILE_TEST_KEY", "test-key")
 	f := &profileFixture{dir: sessionconfig.ConfigDir(), roots: map[string]string{}}
 	root := t.TempDir()
 	for _, name := range names {

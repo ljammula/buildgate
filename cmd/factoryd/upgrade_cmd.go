@@ -96,6 +96,10 @@ type upgradeProcess struct {
 	ConfigPath string
 	// TemporalAddress is the address a worker serves, restarted with.
 	TemporalAddress string
+	// CredentialGap, for a detached worker, says which route credentials a
+	// worker started from this process could not resolve (workerCredentialGap);
+	// "" when every role resolves.
+	CredentialGap string
 }
 
 func (p upgradeProcess) how() string {
@@ -167,6 +171,9 @@ func upgradeRun(dp *deps, args []string, in io.Reader, w io.Writer, interactive,
 	skills := upgradeSkillTargets()
 	upgradePrintPlan(w, source, current, target, targetSHA, upgradeCommitCount(dp, source, current, targetSHA), profiles, running, skills)
 
+	if err := refuseCredentialGaps(running); err != nil {
+		return err
+	}
 	if !*f.yes {
 		fmt.Fprint(w, "Proceed? [y/N] ")
 		line, _ := bufio.NewReader(in).ReadString('\n')
@@ -338,7 +345,11 @@ func upgradeRunning(dp *deps, profiles []profileInfo, dirs []string, now time.Ti
 			if hb, err := daemonheartbeat.Read(workerHeartbeatPath(dir)); err == nil && hb.Worker() {
 				workerAddr = hb.TemporalAddress
 			}
-			out = append(out, upgradeProcess{Kind: "worker", DataDir: dir, Supervisor: sup, Service: hostcontrol.WorkerService, ConfigPath: configPath, TemporalAddress: workerAddr})
+			gap := ""
+			if sup == "" {
+				gap = workerCredentialGap(profiles, configPath)
+			}
+			out = append(out, upgradeProcess{Kind: "worker", DataDir: dir, Supervisor: sup, Service: hostcontrol.WorkerService, ConfigPath: configPath, TemporalAddress: workerAddr, CredentialGap: gap})
 		}
 		if sup := upgradeSupervisor(dp, hostcontrol.ServeService, dir); sup != "" || len(hostcontrol.ServePIDs(dp, dir)) > 0 {
 			addr := consolelink.ServeAddress(dp, dir)
