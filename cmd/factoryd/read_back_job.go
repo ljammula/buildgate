@@ -95,7 +95,7 @@ func runReadBackJobIn(ctx context.Context, dataDir string, r *request.Request, s
 		logName:     "read_back",
 		promptKind:  "read_back",
 		sessions:    []string{readBackScratchDirName + "/session"},
-		args: func(scratch string, _ bool, timeoutMinutes int, role requestJobRoleOverride) []string {
+		args: func(scratch string, timeoutMinutes int, role requestJobRoleOverride) []string {
 			return readBackArgs(r.Workspace, specPath, scratch+"/read-back.json", scratch+"/evidence.json", timeoutMinutes, role.Thinking, role.Harness)
 		},
 	})

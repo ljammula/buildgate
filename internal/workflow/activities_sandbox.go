@@ -813,7 +813,9 @@ func (a *Activities) runWithRetriesFn() runWithRetriesCheckedFunc {
 			return result, runErr
 		}
 	}
-	return runner.RunWithRetriesChecked
+	// Unreachable: every caller checks hasFakeRunner first, and no
+	// production launch runs on the host.
+	panic("workflow: runWithRetriesFn called with no fake runner set")
 }
 
 // restoresInstall reports whether a launch of image restores the run's

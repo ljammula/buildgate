@@ -136,16 +136,9 @@ type WorkerConfig struct {
 	// buildAppScript/buildAppInterpreter/timeoutMinutes above, for the
 	// request driver's own spec-drafting job rather than a ticket
 	// build -- see cmd/factoryd/spec_draft_job.go's own doc comment.
-	// AllowUnsandboxedSpecDraft has no worker flag of its own (worker
-	// "always runs sandboxed and does not accept a host-execution
-	// opt-out", see -sandbox-image's own flag help above): it exists so a
-	// test can call runSpecDraftJob directly, on the host, without Docker,
-	// the same way the worker's tests inject a stub TicketRunner
-	// instead of needing Docker for a ticket build.
-	DraftSpecScript           string
-	DraftSpecInterpreter      string
-	SpecDraftTimeoutMinutes   int
-	AllowUnsandboxedSpecDraft bool
+	DraftSpecScript         string
+	DraftSpecInterpreter    string
+	SpecDraftTimeoutMinutes int
 
 	// ReadBack is the read-back job for a handed-over spec (see
 	// ReadBackRunner), run with the spec-drafting job's script directory,
@@ -158,10 +151,6 @@ type WorkerConfig struct {
 	// above, for the request driver's own plan-drafting job
 	// rather than a spec-drafting or ticket build -- see
 	// cmd/factoryd/plan_tickets_job.go's own doc comment.
-	// AllowUnsandboxedSpecDraft (above) is reused for this job too rather
-	// than a second flag: both are the request driver's own one-shot pi
-	// invocations, and worker itself never accepts a host-execution
-	// opt-out either way (see -sandbox-image's own flag help).
 	PlanTicketsScript         string
 	PlanTicketsInterpreter    string
 	PlanTicketsTimeoutMinutes int

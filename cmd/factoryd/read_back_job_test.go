@@ -8,48 +8,95 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestdriver/requestdrivertest"
-	"buildgate/internal/sessionconfig"
+	"buildgate/internal/sandbox/sandboxtest"
 )
 
 // readBackJobFixture is a handed-over request with spec.md written, a plain
-// (non-git) workspace, and a host-run fake read_back.py: under
-// AllowUnsandboxedSpecDraft the interpreter is run with the script's own
-// arguments, so the fake is the interpreter.
-func readBackJobFixture(t *testing.T, fakeBody string) (string, *request.Request, requestdriver.WorkerConfig, string) {
+// (non-git) workspace, and the fake sandbox runtime a launch goes through: the
+// runtime exits with exitCode, and the test plays the script by writing its
+// outputs (see writeReadBackAfterLaunch).
+func readBackJobFixture(t *testing.T, exitCode int) (string, *request.Request, requestdriver.WorkerConfig, *sandboxtest.WorkerRuntime) {
 	t.Helper()
+	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	dataDir := t.TempDir()
 	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
 	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(requestdrivertest.CanonicalValidSpec), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r.Workspace = t.TempDir()
-	argsFile := filepath.Join(t.TempDir(), "args")
-	fake := filepath.Join(t.TempDir(), "fake-read-back")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\nwhile [ $# -gt 0 ]; do case \"$1\" in --out) out=$2;; --evidence) ev=$2;; --spec) spec=$2;; esac; shift; done\ncp \"$spec\" " + argsFile + ".spec\nmkdir -p \"$(dirname \"$out\")\"\n" + fakeBody
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	settings := sessionconfig.DefaultSettings()
-	settings.Routes = map[string]sessionconfig.Route{"local": {AllowNoCredential: true, Upstream: "https://model-a.example.invalid"}}
-	settings.Models = map[string]sessionconfig.Model{"alias-a": {ID: "model-a", Routes: []string{"local"}}}
-	settings.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "alias-a"}}
-	cfg := requestdriver.WorkerConfig{
-		DraftSpecScript:           filepath.Join(t.TempDir(), "draft_spec.py"),
-		DraftSpecInterpreter:      fake,
-		AllowUnsandboxedSpecDraft: true,
-		Settings:                  settings,
+	r.Workspace = workspace
+	scriptDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(scriptDir, readBackScriptName), []byte("# fake\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	return dataDir, r, cfg, argsFile
+	rt := &sandboxtest.WorkerRuntime{ExitCode: exitCode, DiskFree: []uint64{1 << 40}}
+	cfg := requestdriver.WorkerConfig{
+		DraftSpecScript:      filepath.Join(scriptDir, "draft_spec.py"),
+		DraftSpecInterpreter: "python3",
+		SandboxImage:         agentsDraftTestImage,
+		Settings:             routesModeExecutionOnlySettings(),
+		Sandboxes:            rt,
+		MeterLedgerRoot:      filepath.Join(dataDir, "meter-ledgers"),
+	}
+	return dataDir, r, cfg, rt
+}
+
+// readBackLaunch is what writeReadBackAfterLaunch saw while the launch was
+// live: the text of the staged input the sandbox mounts at /inputs/run, and
+// the error, if any, of playing the script.
+type readBackLaunch struct {
+	staged string
+	err    error
+}
+
+// writeReadBackAfterLaunch waits for the sandbox launch, reads the staged
+// input mounted at /inputs/run (it is removed with the job), and writes the
+// script's outputs into the /workspace mount's scratch directory.
+func writeReadBackAfterLaunch(rt *sandboxtest.WorkerRuntime, stagedName, readBack, evidence string) <-chan readBackLaunch {
+	done := make(chan readBackLaunch, 1)
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			requests := rt.Requests()
+			if len(requests) == 0 {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			var out readBackLaunch
+			for _, mount := range requests[0].Mounts {
+				switch mount.Target {
+				case "/inputs/run":
+					data, err := os.ReadFile(filepath.Join(mount.Source, stagedName))
+					out.staged = string(data)
+					out.err = errors.Join(out.err, err)
+				case "/workspace":
+					scratch := filepath.Join(mount.Source, readBackScratchDirName)
+					out.err = errors.Join(out.err, os.MkdirAll(scratch, 0o750),
+						os.WriteFile(filepath.Join(scratch, "read-back.json"), []byte(readBack), 0o644),
+						os.WriteFile(filepath.Join(scratch, "evidence.json"), []byte(evidence), 0o644))
+				}
+			}
+			done <- out
+			return
+		}
+		done <- readBackLaunch{err: os.ErrDeadlineExceeded}
+	}()
+	return done
 }
 
 func TestRunReadBackJobReturnsTheScriptsReadBack(t *testing.T) {
-	dataDir, r, cfg, argsFile := readBackJobFixture(t, `printf '{"summary": "Makes refunds idempotent.", "questions": [{"id": "Q1", "text": "How long is a key kept?"}]}' > "$out"
-printf '{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s": 1.5, "agents_md_used": false}' > "$ev"
-`)
+	dataDir, r, cfg, rt := readBackJobFixture(t, 0)
+	launched := writeReadBackAfterLaunch(rt, readBackInputFileName,
+		`{"summary": "Makes refunds idempotent.", "questions": [{"id": "Q1", "text": "How long is a key kept?"}]}`,
+		`{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s": 1.5, "agents_md_used": false}`)
 	drafted := requestdrivertest.CanonicalValidSpec + "\nThe text this pass puts up for review.\n"
 	rb, evidence, err := runReadBackJob(context.Background(), dataDir, r, drafted, cfg)
 	if err != nil {
@@ -61,18 +108,22 @@ printf '{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s":
 	if evidence == nil || evidence.DurationS != 1.5 {
 		t.Fatalf("evidence = %+v", evidence)
 	}
-	raw, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatal(err)
+	seen := <-launched
+	if seen.err != nil {
+		t.Fatalf("playing read_back.py: %v", seen.err)
 	}
-	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	requests := rt.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("sandbox requests = %d, want one", len(requests))
+	}
+	args := requests[0].Command
+	if i := slices.Index(args, "--spec"); i < 0 || args[i+1] != "/inputs/run/"+readBackInputFileName {
+		t.Fatalf("read_back.py args = %q, want --spec naming the staged input at /inputs/run", args)
+	}
+	if seen.staged != drafted {
+		t.Fatalf("read_back.py was given %q, want the text it was handed, not spec.md", seen.staged)
+	}
 	staged := filepath.Join(request.Dir(dataDir, r.ID), readBackInputFileName)
-	if i := slices.Index(args, "--spec"); i < 0 || args[i+1] != staged {
-		t.Fatalf("read_back.py args = %q, want --spec naming the staged input %s", args, staged)
-	}
-	if read, err := os.ReadFile(argsFile + ".spec"); err != nil || string(read) != drafted {
-		t.Fatalf("read_back.py read %q (%v), want the text it was given, not spec.md", read, err)
-	}
 	if _, err := os.Stat(staged); !os.IsNotExist(err) {
 		t.Errorf("staged spec left behind: %v", err)
 	}
@@ -82,14 +133,26 @@ printf '{"schema_version": 1, "usage": null, "agent_exit_code": 0, "duration_s":
 }
 
 func TestRunReadBackJobRefusedAndFailedExits(t *testing.T) {
-	dataDir, r, cfg, _ := readBackJobFixture(t, "echo 'read_back: refused: 8 questions, at most 7' >&2\nexit 3\n")
+	dataDir, r, cfg, _ := readBackJobFixture(t, readBackRefusedExitCode)
 	if _, _, err := runReadBackJob(context.Background(), dataDir, r, requestdrivertest.CanonicalValidSpec, cfg); !errors.Is(err, request.ErrReadBackRefused) {
 		t.Fatalf("exit 3: %v, want ErrReadBackRefused", err)
 	}
-	dataDir, r, cfg, _ = readBackJobFixture(t, "echo 'read_back: agent exited 1' >&2\nexit 2\n")
+	dataDir, r, cfg, _ = readBackJobFixture(t, 2)
 	_, _, err := runReadBackJob(context.Background(), dataDir, r, requestdrivertest.CanonicalValidSpec, cfg)
 	if err == nil || errors.Is(err, request.ErrReadBackRefused) {
 		t.Fatalf("exit 2: %v, want a plain job failure", err)
+	}
+}
+
+func TestRunSpecStageJobWithoutASandboxImageIsRefused(t *testing.T) {
+	dataDir, r, cfg, rt := readBackJobFixture(t, 0)
+	cfg.SandboxImage = ""
+	_, _, err := runReadBackJob(context.Background(), dataDir, r, requestdrivertest.CanonicalValidSpec, cfg)
+	if err == nil || !strings.Contains(err.Error(), "no sandbox image configured") {
+		t.Fatalf("runReadBackJob without an image = %v, want the no-sandbox-image error", err)
+	}
+	if n := len(rt.Requests()); n != 0 {
+		t.Fatalf("sandbox requests = %d, want none", n)
 	}
 }
 

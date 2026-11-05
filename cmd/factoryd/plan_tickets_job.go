@@ -120,8 +120,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 	defer os.RemoveAll(scratchDir)
 
 	sandboxUser, _ := requestJobSandboxIdentity(cfg)
-	hostCriteriaPath, err := stagePlanTicketsCriteria(specPath, scratchDir, sandboxUser)
-	if err != nil {
+	if err := stagePlanTicketsCriteria(specPath, scratchDir, sandboxUser); err != nil {
 		return nil, nil, err
 	}
 
@@ -162,7 +161,7 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		timeoutMinutes = defaultPlanTicketsTimeoutMinutes
 	}
 	sandboxImage := cfg.SandboxImage
-	if sandboxImage == "" && !cfg.AllowUnsandboxedSpecDraft {
+	if sandboxImage == "" {
 		return nil, nil, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
 	}
 	roleOverride, roleErr := resolveRequestJobRole(cfg, modelrole.StagePlanning, "plan drafting", r.Models["planning"], r.Harnesses["planning"])
@@ -182,42 +181,34 @@ func runPlanTicketsJobIn(ctx context.Context, dataDir string, r *request.Request
 		return filepath.Join(logDir, fmt.Sprintf("plan_tickets.attempt%d.log", attempt))
 	}
 
-	var res runner.Result
-	if sandboxImage != "" {
-		sandboxDataDir, sddErr := requestdriver.SandboxDataDirFor(dataDir)
-		if sddErr != nil {
-			return nil, nil, sddErr
-		}
-		relaySpec, relayErr := resolveRequestJobRelaySpec(cfg, "plan drafting", r.ID, sandboxDataDir, roleOverride)
-		if relayErr != nil {
-			return nil, nil, relayErr
-		}
-		outDir := planTicketsContainerOutDir
-		evidencePath := planTicketsContainerEvidencePath
-		args := planTicketsArgs(script, r.Workspace, specPath, planTicketsContainerCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+planTicketsScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness, cfg.Settings.PRBudgetLines)
-		sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
-		defer cancel()
-		_, workerUID := requestJobSandboxIdentity(cfg)
-		// specPath and requestTextPath are two distinct host files
-		// plan_tickets.py needs (--spec and --request); both must be
-		// staged and translated, not just one, so specPath is passed as
-		// its own specPath argument and requestTextPath as the second
-		// extraRunInput slot -- both then mounted together at
-		// /inputs/run (see runSandboxWithRetries' own doc comment on
-		// extraRunInput for the live bug this fixes).
-		res, err = runSandboxWithRetriesVia(
-			cfg.Sandboxes, cfg.Settings.ModelHostConcurrency, cfg.MeterLedgerRoot, sandboxCtx, r.Workspace, specPath, requestTextPath, script, logPath, 1,
-			sandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
-			cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
-			nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
-			roleOverride.WorkerEnv, roleOverride.Skills, cfg.PlanTicketsInterpreter, args[1:]...,
-		)
-	} else {
-		outDir := filepath.Join(scratchDir, "tickets")
-		evidencePath := filepath.Join(scratchDir, "evidence.json")
-		args := planTicketsArgs(script, r.Workspace, specPath, hostCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles, timeoutMinutes, roleOverride.Thinking, roleOverride.Harness, cfg.Settings.PRBudgetLines)
-		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.PlanTicketsInterpreter, args[1:]...)
+	sandboxDataDir, sddErr := requestdriver.SandboxDataDirFor(dataDir)
+	if sddErr != nil {
+		return nil, nil, sddErr
 	}
+	relaySpec, relayErr := resolveRequestJobRelaySpec(cfg, "plan drafting", r.ID, sandboxDataDir, roleOverride)
+	if relayErr != nil {
+		return nil, nil, relayErr
+	}
+	outDir := planTicketsContainerOutDir
+	evidencePath := planTicketsContainerEvidencePath
+	args := planTicketsArgs(script, r.Workspace, specPath, planTicketsContainerCriteriaPath, requestTextPath, verifyCommand, outDir, evidencePath, hostFiles.inContainer(specDraftContainerWorkDir+"/"+planTicketsScratchDirName), timeoutMinutes, roleOverride.Thinking, roleOverride.Harness, cfg.Settings.PRBudgetLines)
+	sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
+	defer cancel()
+	_, workerUID := requestJobSandboxIdentity(cfg)
+	// specPath and requestTextPath are two distinct host files
+	// plan_tickets.py needs (--spec and --request); both must be
+	// staged and translated, not just one, so specPath is passed as
+	// its own specPath argument and requestTextPath as the second
+	// extraRunInput slot -- both then mounted together at
+	// /inputs/run (see runSandboxWithRetries' own doc comment on
+	// extraRunInput for the live bug this fixes).
+	res, err := runSandboxWithRetriesVia(
+		cfg.Sandboxes, cfg.Settings.ModelHostConcurrency, cfg.MeterLedgerRoot, sandboxCtx, r.Workspace, specPath, requestTextPath, script, logPath, 1,
+		sandboxImage, cfg.Settings.SandboxDocker, sandboxUser, workerUID, r.ID, sandboxDataDir,
+		cfg.Settings.SandboxMemory, cfg.Settings.SandboxCPUs, cfg.Settings.SandboxTmpfsSize,
+		nil, relaySpec, nil, sandbox.RegistryProxyHooks{}, nil, sandbox.ComposeServicesHooks{},
+		roleOverride.WorkerEnv, roleOverride.Skills, cfg.PlanTicketsInterpreter, args[1:]...,
+	)
 	retainDraftPrompts(dataDir, r.ID, "plan", r.Workspace, []string{planTicketsScratchDirName + "/session"})
 	if err != nil {
 		return nil, nil, fmt.Errorf("plan_tickets.py did not run to completion: %w", err)
@@ -331,26 +322,24 @@ func longestTildeRun(s string) int {
 }
 
 // stagePlanTicketsCriteria gives plan_tickets.py the factory's numbered
-// criteria in the same scratch directory as its other job inputs. The
-// sandboxed path is fixed below; the returned host path is used by the
-// unsandboxed test/escape-hatch runner.
-func stagePlanTicketsCriteria(specPath, scratchDir, sandboxUser string) (string, error) {
+// criteria in the same scratch directory as its other job inputs, where the
+// sandbox sees it at planTicketsContainerCriteriaPath.
+func stagePlanTicketsCriteria(specPath, scratchDir, sandboxUser string) error {
 	specContent, err := os.ReadFile(specPath)
 	if err != nil {
-		return "", fmt.Errorf("read approved spec for planning: %w", err)
+		return fmt.Errorf("read approved spec for planning: %w", err)
 	}
 	criteria, err := request.SpecAcceptanceCriteria(string(specContent))
 	if err != nil {
-		return "", fmt.Errorf("read approved spec criteria for planning: %w", err)
+		return fmt.Errorf("read approved spec criteria for planning: %w", err)
 	}
 	if err := ensureRequestJobScratchDir(scratchDir, sandboxUser); err != nil {
-		return "", fmt.Errorf("create plan-draft scratch dir: %w", err)
+		return fmt.Errorf("create plan-draft scratch dir: %w", err)
 	}
-	hostCriteriaPath := filepath.Join(scratchDir, "criteria.md")
-	if err := writeRequestJobFeedbackFile(hostCriteriaPath, []byte(strings.Join(criteria, "\n")+"\n"), sandboxUser); err != nil {
-		return "", fmt.Errorf("stage plan criteria: %w", err)
+	if err := writeRequestJobFeedbackFile(filepath.Join(scratchDir, "criteria.md"), []byte(strings.Join(criteria, "\n")+"\n"), sandboxUser); err != nil {
+		return fmt.Errorf("stage plan criteria: %w", err)
 	}
-	return hostCriteriaPath, nil
+	return nil
 }
 
 // requestJobFailureTailBytes bounds how much of a request job's own log

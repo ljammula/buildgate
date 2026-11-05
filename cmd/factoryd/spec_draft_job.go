@@ -255,12 +255,8 @@ func runSpecDraftJobIn(ctx context.Context, dataDir string, r *request.Request, 
 		logName:     "spec_draft",
 		promptKind:  "spec",
 		sessions:    []string{specDraftScratchDirName + "/session", specDraftScratchDirName + "/check-session"},
-		args: func(scratch string, sandboxed bool, timeoutMinutes int, role requestJobRoleOverride) []string {
-			files := hostFiles
-			if sandboxed {
-				files = hostFiles.inContainer(scratch)
-			}
-			return draftSpecArgs(script, r.Workspace, requestTextPath, scratch+"/spec.md", scratch+"/evidence.json", files, timeoutMinutes, role.Thinking, role.Harness)[1:]
+		args: func(scratch string, timeoutMinutes int, role requestJobRoleOverride) []string {
+			return draftSpecArgs(script, r.Workspace, requestTextPath, scratch+"/spec.md", scratch+"/evidence.json", hostFiles.inContainer(scratch), timeoutMinutes, role.Thinking, role.Harness)[1:]
 		},
 	})
 	if err != nil {
@@ -315,23 +311,20 @@ type specStageJob struct {
 	promptKind string
 	sessions   []string
 	// args returns the script's arguments after its path. scratch is the
-	// scratch directory as the script sees it: the container path when
-	// sandboxed, the host path otherwise.
-	args func(scratch string, sandboxed bool, timeoutMinutes int, role requestJobRoleOverride) []string
+	// scratch directory as the script sees it, the container path.
+	args func(scratch string, timeoutMinutes int, role requestJobRoleOverride) []string
 }
 
 // runSpecStageJob is the one launch path of the spec-stage jobs: the same
 // relay, budget ceilings and timeout shape as a ticket build's, through
-// runSandboxWithRetriesVia (or, only under AllowUnsandboxedSpecDraft in
-// tests, on the host). It returns the job's result and the role it ran with;
+// runSandboxWithRetriesVia. It returns the job's result and the role it ran with;
 // reading the job's outputs is the caller's.
 func runSpecStageJob(ctx context.Context, dataDir string, r *request.Request, cfg requestdriver.WorkerConfig, job specStageJob) (runner.Result, requestJobRoleOverride, error) {
 	timeoutMinutes := cfg.SpecDraftTimeoutMinutes
 	if timeoutMinutes <= 0 {
 		timeoutMinutes = defaultSpecDraftTimeoutMinutes
 	}
-	sandboxImage := cfg.SandboxImage
-	if sandboxImage == "" && !cfg.AllowUnsandboxedSpecDraft {
+	if cfg.SandboxImage == "" {
 		return runner.Result{}, requestJobRoleOverride{}, fmt.Errorf("no sandbox image configured: run `make install` from the buildgate checkout, or pass -sandbox-image")
 	}
 	roleOverride, roleErr := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", r.Models["planning"], r.Harnesses["planning"])
@@ -351,14 +344,7 @@ func runSpecStageJob(ctx context.Context, dataDir string, r *request.Request, cf
 		return filepath.Join(logDir, fmt.Sprintf("%s.attempt%d.log", job.logName, attempt))
 	}
 
-	var res runner.Result
-	var err error
-	if sandboxImage != "" {
-		res, err = launchSandboxedSpecStageJob(ctx, dataDir, r, cfg, job, roleOverride, timeoutMinutes, logPath)
-	} else {
-		args := job.args(filepath.Join(r.Workspace, job.scratchName), false, timeoutMinutes, roleOverride)
-		res, err = runner.RunWithRetries(ctx, r.Workspace, logPath, 1, nil, cfg.DraftSpecInterpreter, args...)
-	}
+	res, err := launchSandboxedSpecStageJob(ctx, dataDir, r, cfg, job, roleOverride, timeoutMinutes, logPath)
 	retainDraftPrompts(dataDir, r.ID, job.promptKind, r.Workspace, job.sessions)
 	if err != nil {
 		return res, roleOverride, fmt.Errorf("%s did not run to completion: %w", job.scriptName, err)
@@ -376,7 +362,7 @@ func launchSandboxedSpecStageJob(ctx context.Context, dataDir string, r *request
 	if err != nil {
 		return runner.Result{}, err
 	}
-	args := job.args(specDraftContainerWorkDir+"/"+job.scratchName, true, timeoutMinutes, roleOverride)
+	args := job.args(specDraftContainerWorkDir+"/"+job.scratchName, timeoutMinutes, roleOverride)
 	sandboxCtx, cancel := context.WithTimeout(ctx, requestJobContainerDeadline(time.Duration(timeoutMinutes)*time.Minute, false, 0))
 	defer cancel()
 	sandboxUser, workerUID := requestJobSandboxIdentity(cfg)
