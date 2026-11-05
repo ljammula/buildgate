@@ -606,7 +606,6 @@
     "rollback_plan": "every-field rollback_plan",
     "allow_overrides": true,
     "allow_dependency_lockfile_changes": true,
-    "allow_unsandboxed": true,
     "required_gates": [
       "every-field required_gates"
     ],

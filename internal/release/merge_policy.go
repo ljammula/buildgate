@@ -30,19 +30,6 @@ type MergePolicy struct {
 	// which dependency or version changed, only that a known lockfile was
 	// touched at all.
 	AllowDependencyLockfileChanges bool
-	// AllowUnsandboxed is deliberately false by default, same reasoning as
-	// AllowOverrides/AllowDependencyLockfileChanges: before this field
-	// existed, an accepted run's own state and gate results looked
-	// identical whether the code that produced them ran inside the Docker
-	// sandbox or bare on the host -- containment status was real evidence
-	// (run.Attempt.ImageDigest) but invisible to this exact fail-closed
-	// path (found via a real Opus review pass, 2026-09-04). This does
-	// not require every run in the repo to be sandboxed --
-	// Phase 5 sandboxing itself stays opt-in -- it only means an
-	// unsandboxed run is denied at *this* gate unless an operator
-	// explicitly opts back in, the same restrictive-by-default shape
-	// every other flag on this struct already uses.
-	AllowUnsandboxed bool
 	// RequiredGates lists the policy.GateResult.Check names that must both
 	// appear in r.GateResults and have passed for this run to be
 	// release-eligible. Every other check in this function inspects
@@ -74,7 +61,7 @@ type MergePolicy struct {
 	// unconfigured policy denies honestly rather than passing by omission.
 	RequiredGates []string
 	// AllowSkippedProjectCheck is deliberately false by default, same
-	// restrictive-by-default reasoning as AllowOverrides/AllowUnsandboxed:
+	// restrictive-by-default reasoning as AllowOverrides:
 	// a run recorded with SkipProjectCheck bypassed the mandatory
 	// project-bootstrap preflight (product_spec_frozen/
 	// program_design_structure/architecture_structure), so its acceptance
@@ -126,8 +113,8 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 		reasons = append(reasons, "run has override history and policy does not allow overridden runs")
 	}
 
-	if !r.Sandboxed() && !cfg.AllowUnsandboxed {
-		reasons = append(reasons, "run's build attempt did not execute inside the Docker sandbox (no image digest recorded) and policy does not allow unsandboxed runs")
+	if !r.Sandboxed() {
+		reasons = append(reasons, "run's build attempt did not execute inside the Docker sandbox (no image digest recorded)")
 	}
 
 	reasons = append(reasons, requiredGateReasons(r, cfg)...)
@@ -140,7 +127,7 @@ func MergePolicyCheck(r run.Run, cfg MergePolicy) (bool, []string) {
 	// why), so without reading them here a run durably flagged this way
 	// still evaluates identically to one that was never flagged at all.
 	// There is no AllowInvalidated/AllowSpecDrift escape hatch: unlike
-	// AllowOverrides or AllowUnsandboxed, these do not represent a
+	// AllowOverrides, these do not represent a
 	// legitimate operator choice to accept known risk -- they are the
 	// factory's own record that this run's evidence may no longer be
 	// trustworthy, so a human must resolve the underlying flag (not this

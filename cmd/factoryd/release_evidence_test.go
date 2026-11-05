@@ -882,7 +882,6 @@ func TestAPIStartStarterPlumbsOpenPullRequestFlagBestEffort(t *testing.T) {
 	settings.ReleaseRollbackPlan = "reviewed and reversible"
 	settings.ReleaseMaxFilesChanged = 100
 	settings.ReleaseMaxChangedLines = 100000
-	settings.ReleaseAllowUnsandboxed = true
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {

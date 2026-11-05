@@ -22,7 +22,7 @@ import (
 // MergePolicy.RequiredGates' own doc comment for the full reasoning.
 func TestReleasePolicyFromFlagsDefaultsRequiredGatesToCanonicalAndFullSuite(t *testing.T) {
 	t.Parallel()
-	got := releasePolicyFromFlags("", 0, 0, "", false, false, false, false)
+	got := releasePolicyFromFlags("", 0, 0, "", false, false, false)
 	want := []string{"canonical_verify", "full_suite_verify"}
 	if !reflect.DeepEqual(got.RequiredGates, want) {
 		t.Errorf("releasePolicyFromFlags(...).RequiredGates = %v, want %v", got.RequiredGates, want)
@@ -39,10 +39,10 @@ func TestReleasePolicyFromFlagsDefaultsRequiredGatesToCanonicalAndFullSuite(t *t
 // release-policy exception through any supported factoryd surface.
 func TestReleasePolicyFromFlagsPropagatesAllowSkippedProjectCheck(t *testing.T) {
 	t.Parallel()
-	if got := releasePolicyFromFlags("", 0, 0, "", false, false, false, false); got.AllowSkippedProjectCheck {
+	if got := releasePolicyFromFlags("", 0, 0, "", false, false, false); got.AllowSkippedProjectCheck {
 		t.Errorf("AllowSkippedProjectCheck = true with the flag unset, want false")
 	}
-	if got := releasePolicyFromFlags("", 0, 0, "", false, false, false, true); !got.AllowSkippedProjectCheck {
+	if got := releasePolicyFromFlags("", 0, 0, "", false, false, true); !got.AllowSkippedProjectCheck {
 		t.Errorf("AllowSkippedProjectCheck = false with the flag set, want true")
 	}
 }

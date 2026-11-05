@@ -123,7 +123,7 @@ const subscriptionCostAggregateSuffix = " (includes subscription-billed runs; AP
 // runViaTemporal/runViaRepositoryOwner (called from runMain, where these
 // flag pointers are in scope) can build the identical policy to pass down
 // to applyRunWorkflowResult, rather than each re-deriving it.
-func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxChangedLines int, rollbackPlan string, allowOverrides, allowDependencyLockfileChanges, allowUnsandboxed, allowSkippedProjectCheck bool) release.MergePolicy {
+func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxChangedLines int, rollbackPlan string, allowOverrides, allowDependencyLockfileChanges, allowSkippedProjectCheck bool) release.MergePolicy {
 	var protectedPaths []string
 	if protectedPathsCSV != "" {
 		protectedPaths = strings.Split(protectedPathsCSV, ",")
@@ -135,7 +135,6 @@ func releasePolicyFromFlags(protectedPathsCSV string, maxFilesChanged, maxChange
 		RollbackPlan:                   rollbackPlan,
 		AllowOverrides:                 allowOverrides,
 		AllowDependencyLockfileChanges: allowDependencyLockfileChanges,
-		AllowUnsandboxed:               allowUnsandboxed,
 		AllowSkippedProjectCheck:       allowSkippedProjectCheck,
 		// Hardcoded rather than another -release-* flag: unlike the
 		// fields above, there is no legitimate operator reason to want
@@ -237,7 +236,6 @@ func runReleasePolicy(p release.MergePolicy) *run.ReleasePolicy {
 		RollbackPlan:                   p.RollbackPlan,
 		AllowOverrides:                 p.AllowOverrides,
 		AllowDependencyLockfileChanges: p.AllowDependencyLockfileChanges,
-		AllowUnsandboxed:               p.AllowUnsandboxed,
 		RequiredGates:                  p.RequiredGates,
 		AllowSkippedProjectCheck:       p.AllowSkippedProjectCheck,
 	}
@@ -262,7 +260,6 @@ func mergePolicyFromRun(r *run.Run) (release.MergePolicy, bool) {
 		RollbackPlan:                   p.RollbackPlan,
 		AllowOverrides:                 p.AllowOverrides,
 		AllowDependencyLockfileChanges: p.AllowDependencyLockfileChanges,
-		AllowUnsandboxed:               p.AllowUnsandboxed,
 		RequiredGates:                  p.RequiredGates,
 		AllowSkippedProjectCheck:       p.AllowSkippedProjectCheck,
 	}, true

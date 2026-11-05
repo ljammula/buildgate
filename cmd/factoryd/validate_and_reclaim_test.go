@@ -577,7 +577,6 @@ func TestRunReleasePolicyRoundTrip(t *testing.T) {
 		RollbackPlan:                   "git revert the merge commit on main",
 		AllowOverrides:                 true,
 		AllowDependencyLockfileChanges: true,
-		AllowUnsandboxed:               true,
 		RequiredGates:                  []string{"canonical_verify", "full_suite_verify"},
 		AllowSkippedProjectCheck:       true,
 	}
@@ -737,11 +736,9 @@ func TestReconcilePersistedPolicyRendersProtectedPathEvaluationInPRBody(t *testi
 // -- unlike &release.MergePolicy{}, which denies by construction
 // (RollbackPlan == "" alone guarantees that) and, since the release-
 // decision gate added ahead of -open-pull-request, would leave
-// openEvidencePullRequest correctly never called at all. AllowUnsandboxed
-// is set because these fixtures record no build Attempts with an
-// ImageDigest.
+// openEvidencePullRequest correctly never called at all.
 func allowingMergePolicyForTest() *release.MergePolicy {
-	return &release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 1000, AllowUnsandboxed: true}
+	return &release.MergePolicy{RollbackPlan: "reviewed and reversible", MaxFilesChanged: 10, MaxChangedLines: 1000}
 }
 
 // allowingRunWorkflowResultForTest is a workflow.RunWorkflowResult that,
@@ -757,6 +754,7 @@ func allowingRunWorkflowResultForTest(state run.State, resultSHA string) workflo
 		DiffStat:     &run.DiffStat{FilesChanged: 1, Insertions: 2},
 		ChangeSize:   &run.ChangeSize{SourceFiles: 1, SourceLines: 2},
 		GateResults:  []run.GateResult{{Check: "verify", Passed: true}},
+		Attempts:     []run.Attempt{{Kind: "build", ImageDigest: "sha256:" + strings.Repeat("c", 64)}},
 	}
 }
 

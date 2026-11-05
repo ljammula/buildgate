@@ -309,7 +309,6 @@ type Config struct {
 	ReleaseRollbackPlan                   *string `yaml:"release_rollback_plan,omitempty"`
 	ReleaseAllowOverrides                 *bool   `yaml:"release_allow_overrides,omitempty"`
 	ReleaseAllowDependencyLockfileChanges *bool   `yaml:"release_allow_dependency_lockfile_changes,omitempty"`
-	ReleaseAllowUnsandboxed               *bool   `yaml:"release_allow_unsandboxed,omitempty"`
 	ReleaseAllowSkippedProjectCheck       *bool   `yaml:"release_allow_skipped_project_check,omitempty"`
 
 	// Roles picks a model (see Config.Models) and a Pi reasoning
@@ -578,7 +577,6 @@ type Settings struct {
 	ReleaseRollbackPlan                   string
 	ReleaseAllowOverrides                 bool
 	ReleaseAllowDependencyLockfileChanges bool
-	ReleaseAllowUnsandboxed               bool
 	ReleaseAllowSkippedProjectCheck       bool
 
 	// Roles mirrors Config.Roles -- see that field's own doc comment. nil
@@ -887,7 +885,6 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	str(&s.ReleaseRollbackPlan, c.ReleaseRollbackPlan)
 	boolean(&s.ReleaseAllowOverrides, c.ReleaseAllowOverrides)
 	boolean(&s.ReleaseAllowDependencyLockfileChanges, c.ReleaseAllowDependencyLockfileChanges)
-	boolean(&s.ReleaseAllowUnsandboxed, c.ReleaseAllowUnsandboxed)
 	boolean(&s.ReleaseAllowSkippedProjectCheck, c.ReleaseAllowSkippedProjectCheck)
 
 	if c.Roles != nil {

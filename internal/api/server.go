@@ -133,13 +133,6 @@ type StartRequest struct {
 	// particular decides what identity a container's code runs as.
 	SandboxDocker string `json:"sandbox_docker,omitempty"`
 	SandboxUser   string `json:"sandbox_user,omitempty"`
-	// AllowUnsandboxed no longer has any effect: Docker containment is
-	// unconditional, with no host-execution opt-out anywhere in factoryd
-	// (the CLI's own -allow-unsandboxed is gone too). The field stays here
-	// only so a caller that still sends it gets an explicit rejection
-	// instead of silently having it ignored, matching SandboxDocker/
-	// SandboxUser's own treatment above.
-	AllowUnsandboxed bool `json:"allow_unsandboxed,omitempty"`
 }
 
 // RunStarter starts one run and returns its initial durable record. A starter

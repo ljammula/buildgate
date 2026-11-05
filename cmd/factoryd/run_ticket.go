@@ -507,7 +507,6 @@ type ticketRun struct {
 	releaseRollbackPlan                   *string
 	releaseAllowOverrides                 *bool
 	releaseAllowDependencyLockfileChanges *bool
-	releaseAllowUnsandboxed               *bool
 	releaseAllowSkippedProjectCheck       *bool
 	relayNeededForExecution               bool
 	testPatterns                          []string
@@ -787,7 +786,6 @@ func (tr *ticketRun) parseFlags() error {
 	tr.releaseRollbackPlan = &tr.settings.ReleaseRollbackPlan
 	tr.releaseAllowOverrides = &tr.settings.ReleaseAllowOverrides
 	tr.releaseAllowDependencyLockfileChanges = &tr.settings.ReleaseAllowDependencyLockfileChanges
-	tr.releaseAllowUnsandboxed = &tr.settings.ReleaseAllowUnsandboxed
 	tr.releaseAllowSkippedProjectCheck = &tr.settings.ReleaseAllowSkippedProjectCheck
 	// Called unconditionally, every time runMainWithReady is reached (a
 	// worker's own many ticket builds, or the API
@@ -2265,7 +2263,7 @@ func (tr *ticketRun) createRunRecord() error {
 		// against the policy this run actually started with, instead of
 		// an always-deny release.MergePolicy{} -- see run.Run.ReleasePolicy's
 		// own doc comment.
-		ReleasePolicy: runReleasePolicy(releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)),
+		ReleasePolicy: runReleasePolicy(releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowSkippedProjectCheck)),
 		// RFC3339Nano — see the other CreatedAt assignment above's doc
 		// comment for why.
 		CreatedAt: time.Now().Format(time.RFC3339Nano),
@@ -2630,7 +2628,7 @@ func (tr *ticketRun) dispatch() error {
 			ExecutionRouteSkips: routeSkipsOf(tr.execSelection),
 			ReviewRouteSkips:    routeSkipsOf(tr.reviewSelection),
 		}
-		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowUnsandboxed, *tr.releaseAllowSkippedProjectCheck)
+		releasePolicy := releasePolicyFromFlags(*tr.releaseProtectedPaths, *tr.releaseMaxFilesChanged, *tr.releaseMaxChangedLines, *tr.releaseRollbackPlan, *tr.releaseAllowOverrides, *tr.releaseAllowDependencyLockfileChanges, *tr.releaseAllowSkippedProjectCheck)
 		relayOpts := modelRouteOptions{Policy: tr.relayPolicy, CABundlePath: *tr.egressCABundle}
 		relayOpts.CheckRoute = checkRouteFunc(tr.settings)
 		relayOpts.ResolveRouteCredentials = resolveRouteCredentialsFunc(tr.settings)

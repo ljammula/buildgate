@@ -308,16 +308,6 @@ func apiStartStarter(dp *deps, dataDir string, inFlight *sync.WaitGroup, release
 		if id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
 			return nil, fmt.Errorf("%w: invalid run id %q", api.ErrInvalidStartRequest, id)
 		}
-		// AllowUnsandboxed no longer has any effect: Docker containment is
-		// unconditional, with no host-execution opt-out anywhere in
-		// factoryd (the CLI's own -allow-unsandboxed is gone too). The
-		// field stays on the request struct only so a caller that still
-		// sends it gets this explicit rejection instead of silently having
-		// it ignored, matching SandboxDocker/SandboxUser's own treatment
-		// above.
-		if req.AllowUnsandboxed {
-			return nil, fmt.Errorf("%w: allow_unsandboxed is no longer accepted on POST /runs -- Docker containment is unconditional, with no host-execution opt-out", api.ErrInvalidStartRequest)
-		}
 		if req.Repository != "" && req.TemporalAddress == "" {
 			return nil, fmt.Errorf("%w: repository requires temporal_address", api.ErrInvalidStartRequest)
 		}

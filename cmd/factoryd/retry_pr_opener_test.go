@@ -35,6 +35,7 @@ func acceptedRunFixture(t *testing.T, dataDir, runID string) *run.Run {
 		WorkspacePath:              t.TempDir(),
 		ChangedFiles:               []string{"lib/app.go"},
 		DependencyLockfilesTouched: []string{},
+		Attempts:                   []run.Attempt{{Kind: "build", ImageDigest: "sha256:" + strings.Repeat("c", 64)}},
 		DiffStat:                   &run.DiffStat{FilesChanged: 1, Insertions: 2},
 		ChangeSize:                 &run.ChangeSize{SourceFiles: 1, SourceLines: 2},
 		GateResults: []run.GateResult{
@@ -46,7 +47,6 @@ func acceptedRunFixture(t *testing.T, dataDir, runID string) *run.Run {
 			MaxChangedLines:                100,
 			RollbackPlan:                   "revert the PR",
 			RequiredGates:                  []string{"canonical_verify", "full_suite_verify"},
-			AllowUnsandboxed:               true,
 			AllowDependencyLockfileChanges: true,
 		}),
 	}

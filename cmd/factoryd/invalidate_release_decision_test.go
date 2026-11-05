@@ -133,7 +133,7 @@ func TestInvalidatePriorRunOnFullSuiteRegressionWritesATombstoneWhenNoDecisionEx
 	// own recordReleaseDecision call finally reaching this point) must not
 	// silently clear the tombstone with a fresh Allowed: true evaluation.
 	if _, err := release.RecordDecision(dataDir, "myapp", *prior, release.MergePolicy{
-		RollbackPlan: "reviewed and reversible", AllowUnsandboxed: true,
+		RollbackPlan: "reviewed and reversible",
 	}); err != nil {
 		t.Fatalf("RecordDecision: %v", err)
 	}
