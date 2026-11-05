@@ -1,42 +1,35 @@
 name: CI
 
-# pull_request deliberately not a trigger here: an iterative PR (several
-# review-driven pushes to the same branch before merge, e.g. addressing
-# review feedback in rounds) previously re-ran this full job -- Temporal
-# dev server included -- on every single push, burning Actions minutes
-# for runs whose result is superseded within minutes by the next push.
-# main still verifies automatically post-merge as a safety net; run this
-# manually against a PR branch (Actions tab -> CI -> Run workflow) when
-# its result is actually needed before merging.
+# Manual-only by operator decision: nothing here runs on a pull request or a
+# push unless someone starts it (Actions tab -> CI -> Run workflow, or
+# `gh workflow run ci.yml --ref <branch>`). Hosted runner minutes are the
+# constraint: a review-driven PR pushes several times before merge, and each
+# run starts a Temporal dev server. `make ci` on a developer machine is the
+# pre-merge gate.
 #
-# Self-hosted runner: push/schedule triggers below are
-# wired but stay no-ops on GitHub-hosted runners -- both jobs' own `if:`
-# gates them on the `SELF_HOSTED_RUNNER` repository variable, which defaults
-# unset (falsy), so today's effective behavior (manual-only, ubuntu-latest)
-# is unchanged. See doc/self-hosted-runner.md for the one-time registration
-# steps and exactly what flipping that variable turns on.
+# Self-hosted runner: the push and nightly triggers below are wired but stay
+# no-ops -- both jobs' `if:` gates them on the `SELF_HOSTED_RUNNER`
+# repository variable, which is unset. Setting it to `true` once a runner
+# labelled `self-hosted`,`macOS` is registered turns them on and moves
+# `verify` to that runner; unsetting it reverts.
 on:
   workflow_dispatch:
   push:
     branches: [main]
   schedule:
-    # Nightly, well outside any normal working hours -- see
-    # doc/self-hosted-runner.md. No-op (see the jobs' own `if:` gates) until
-    # SELF_HOSTED_RUNNER=true.
+    # Nightly, well outside any normal working hours. No-op (see the jobs'
+    # own `if:` gates) until SELF_HOSTED_RUNNER=true.
     - cron: "17 9 * * *"
 
 jobs:
   verify:
-    # ubuntu-latest by default (today's behavior, unchanged); once the
-    # operator sets the repository variable SELF_HOSTED_RUNNER=true (see
-    # doc/self-hosted-runner.md), this retargets at the registered
-    # self-hosted Mac Studio runner instead.
+    # ubuntu-latest by default; once the operator sets the repository
+    # variable SELF_HOSTED_RUNNER=true, this retargets at the registered
+    # self-hosted runner instead.
     runs-on: ${{ vars.SELF_HOSTED_RUNNER == 'true' && fromJSON('["self-hosted", "macOS"]') || 'ubuntu-latest' }}
-    # A manual run (workflow_dispatch) always runs, on ubuntu-latest, exactly
-    # as before this change. The push/schedule triggers added above are
-    # otherwise no-ops (Actions minutes are the constraint on GitHub-hosted
-    # runners -- see the historical comment this replaced) until the
-    # operator opts in.
+    # A manual run (workflow_dispatch) always runs. The push and schedule
+    # triggers are no-ops (hosted runner minutes, see the top of this file)
+    # until the operator opts in.
     if: github.event_name == 'workflow_dispatch' || vars.SELF_HOSTED_RUNNER == 'true'
     permissions:
       contents: read
@@ -188,8 +181,8 @@ jobs:
   # scripts/verify-live.sh) on the self-hosted runner only -- never
   # meaningful on GitHub-hosted ubuntu (no persistent Docker/Temporal state,
   # and no reason to pay Actions minutes for a live run there). Runs only
-  # once the operator has set SELF_HOSTED_RUNNER=true (see
-  # doc/self-hosted-runner.md), and only on the nightly schedule or a manual
+  # once the operator has set SELF_HOSTED_RUNNER=true, and only on the
+  # nightly schedule or a manual
   # dispatch -- never on every push, since a live run takes minutes rather
   # than the `verify` job's seconds. Deliberately calls the Makefile target
   # rather than duplicating the `verify` job's own per-test steps above: one
