@@ -140,7 +140,7 @@ func (a *Activities) runCollectEvidence(ctx context.Context, checkpointDir strin
 		}
 		if !verifyClean {
 			msg := "ticket: commit verification output\n\nAuto-committed by the Temporal Worker: canonical verification left\nthe workspace dirty (e.g. a formatter or code generator) without\ncommitting its own output."
-			if _, err := recordActivityIntent(ctx, checkpointDir, "collect-evidence-commit", []string{"git", "-C", input.WorkspacePath, "-c", "core.hooksPath=/dev/null", "commit", "-m", msg}); err != nil {
+			if _, err := recordActivityIntent(ctx, checkpointDir, "collect-evidence-commit", runner.GitCommitArgv(input.WorkspacePath, msg)); err != nil {
 				return CollectedEvidence{}, temporal.NewApplicationErrorWithCause("record collect-evidence-commit Activity intent", InfrastructureFailureType, err)
 			}
 			if err := runner.GitCommitAll(input.WorkspacePath, msg); err != nil {

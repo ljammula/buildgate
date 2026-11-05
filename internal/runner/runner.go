@@ -1144,8 +1144,41 @@ func GitCommitAll(dir, message string) error {
 	if out, err := exec.Command("git", "-C", dir, "add", "-A").CombinedOutput(); err != nil {
 		return fmt.Errorf("git add -A: %w: %s", err, out)
 	}
-	if out, err := exec.Command("git", "-C", dir, "-c", "core.hooksPath=/dev/null", "commit", "-m", message).CombinedOutput(); err != nil {
+	argv := GitCommitArgv(dir, message)
+	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %w: %s", err, out)
 	}
 	return nil
+}
+
+// GitCommitArgv is the argv GitCommitAll runs for its commit, so a caller can
+// record exactly what will run.
+func GitCommitArgv(dir, message string) []string {
+	argv := []string{"git", "-C", dir}
+	argv = append(argv, HostCommitIdentity(dir)...)
+	return append(argv, "-c", "core.hooksPath=/dev/null", "commit", "-m", message)
+}
+
+// HostCommitIdentity returns the `-c user.name=...`/`-c user.email=...`
+// arguments for a commit the factory makes on the host in dir: one for each
+// of the two git has no value for there, from the hand-off commit's identity
+// buildgate <buildgate@localhost>. A configured value is kept, so an
+// operator's identity still authors the commit; nil when both are set.
+func HostCommitIdentity(dir string) []string {
+	var args []string
+	if gitConfigValue(dir, "user.name") == "" {
+		args = append(args, "-c", "user.name=buildgate")
+	}
+	if gitConfigValue(dir, "user.email") == "" {
+		args = append(args, "-c", "user.email=buildgate@localhost")
+	}
+	return args
+}
+
+func gitConfigValue(dir, key string) string {
+	out, err := exec.Command("git", "-C", dir, "config", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
