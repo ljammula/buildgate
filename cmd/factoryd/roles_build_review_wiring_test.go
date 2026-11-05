@@ -81,9 +81,6 @@ func TestRunMainWithReadyUsesConfigFlag(t *testing.T) {
 	if !strings.Contains(err.Error(), `model "distinctive-alias-name-xyz" is not a models: entry`) {
 		t.Fatalf("runMainWithReady error = %v, want it to name the -config file's own roles.execution.model", err)
 	}
-	if tier2SettingsOverride != nil {
-		t.Fatal("tier2SettingsOverride left set after runMainWithReady returned; -config's override must be cleared on return")
-	}
 }
 
 // TestRunMainWithReadyConfigNonexistentPathErrors proves a -config path
@@ -101,16 +98,12 @@ func TestRunMainWithReadyConfigNonexistentPathErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("runMainWithReady with a nonexistent -config path = nil, want an error")
 	}
-	if tier2SettingsOverride != nil {
-		t.Fatal("tier2SettingsOverride left set after a failed -config load")
-	}
 }
 
 // TestRunMainWithReadyConfigRefusedWithCallerOverride proves -config is
 // refused, rather than silently winning or silently losing, when a
 // caller (worker's in-process drain loop, serve's API-started runs)
-// already installed its own tier2SettingsOverride before invoking
-// runMainWithReady -- our own callers never pass -config themselves, so
+// already supplied its own settings (runTicketWithSettings) -- our own callers never pass -config themselves, so
 // this only ever catches a direct misuse.
 func TestRunMainWithReadyConfigRefusedWithCallerOverride(t *testing.T) {
 	dp := newTestDeps(t)
@@ -119,10 +112,8 @@ func TestRunMainWithReadyConfigRefusedWithCallerOverride(t *testing.T) {
 	writeSessionConfig(t, configPath, "")
 
 	callerSettings := sessionconfig.DefaultSettings()
-	tier2SettingsOverride = &callerSettings
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
-	err := runMainWithReady(dp, context.Background(), []string{
+	err := runTicketWithSettings(dp, context.Background(), &callerSettings, []string{
 		"-ticket", "t", "-workspace", "/does/not/exist", "-spec", "/does/not/exist",
 		"-config", configPath,
 	}, nil)

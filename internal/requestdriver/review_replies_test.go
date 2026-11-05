@@ -52,8 +52,8 @@ func runReplyRoundsOn(t *testing.T, threads []forge.Thread, finals []string, sta
 	t.Helper()
 	dp := newFakeDeps(t)
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		a := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: replySHA, Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		if finals != nil {
 			ev := &run.AgentEvidence{}
@@ -65,7 +65,7 @@ func runReplyRoundsOn(t *testing.T, threads []forge.Thread, finals []string, sta
 		return saveAcceptedRoundRun(t, dataDir, a)
 	}
 	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	if stats != nil {

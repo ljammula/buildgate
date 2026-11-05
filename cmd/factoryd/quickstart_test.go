@@ -441,9 +441,9 @@ func TestQuickstartBuildConfigCopilotSetsContextWindow(t *testing.T) {
 	// let quickstartBuildConfig attempt a real network call. "gpt-x"
 	// isn't in this listing, so the worker-API check just warns
 	// (unverified) -- unrelated to what this test actually checks.
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return nil, nil
-	})
+	}
 	opts := &quickstartOptions{
 		NonInteractive:        true,
 		Route:                 "copilot",
@@ -522,11 +522,11 @@ func TestQuickstartPickCopilotModelIDOffersResponsesOnlyModel(t *testing.T) {
 func TestQuickstartBuildConfigCopilotResponsesOnlyModelSetsWorkerAPI(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{
 			{ID: "gpt-5.6-luna", ContextWindow: 200000, SupportedEndpoints: []string{"/responses"}},
 		}, nil
-	})
+	}
 	opts := &quickstartOptions{
 		NonInteractive:     true,
 		Route:              "copilot",
@@ -556,12 +556,12 @@ func TestQuickstartBuildConfigCopilotResponsesOnlyModelWithExplicitContextWindow
 	dp := newTestDeps(t)
 	t.Setenv("HOME", t.TempDir())
 	listingCalled := false
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		listingCalled = true
 		return []meter.CopilotModel{
 			{ID: "gpt-5.6-luna", ContextWindow: 200000, SupportedEndpoints: []string{"/responses"}},
 		}, nil
-	})
+	}
 	opts := &quickstartOptions{
 		NonInteractive:        true,
 		Route:                 "copilot",
@@ -576,7 +576,7 @@ func TestQuickstartBuildConfigCopilotResponsesOnlyModelWithExplicitContextWindow
 		t.Fatalf("quickstartBuildConfig: %v", err)
 	}
 	if !listingCalled {
-		t.Fatal("listGitHubCopilotModelsFn was never called, want the listing to run even with -context-window given explicitly")
+		t.Fatal("the Copilot model listing was never called, want the listing to run even with -context-window given explicitly")
 	}
 	model, ok := cfg.Models["gpt-5.6-luna"]
 	if !ok || model.API != meter.RequestFormatOpenAIResponses {
@@ -626,11 +626,11 @@ func TestQuickstartBuildConfigCopilotWarnsWhenNoListingRan(t *testing.T) {
 func TestQuickstartBuildConfigCopilotRefusesModelAbsentFromSuccessfulListing(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	fakeHostOf(dp).listCopilotModelsFn = func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{
 			{ID: "gpt-4.1", ContextWindow: 128000, SupportedEndpoints: []string{"/chat/completions"}},
 		}, nil
-	})
+	}
 	opts := &quickstartOptions{
 		NonInteractive:        true,
 		Route:                 "copilot",

@@ -20,24 +20,6 @@ func readTestdata(t *testing.T, name string) []byte {
 	return data
 }
 
-// resetSelfLoginCache undoes resolveSelfLogin's own process-wide caching
-// between tests -- otherwise the first test to resolve a self login would
-// leak its cached value (or error) into every later test in this package,
-// since selfLoginOnce is a package-level var.
-func resetSelfLoginCache(t *testing.T) {
-	t.Helper()
-	selfLoginMu.Lock()
-	selfLoginValue = ""
-	selfLoginKnown = false
-	selfLoginMu.Unlock()
-	t.Cleanup(func() {
-		selfLoginMu.Lock()
-		selfLoginValue = ""
-		selfLoginKnown = false
-		selfLoginMu.Unlock()
-	})
-}
-
 func TestParsePRView(t *testing.T) {
 	cases := []struct {
 		file              string
@@ -466,7 +448,6 @@ esac
 }
 
 func TestReadReviewStateCombinesPRViewAndReviewThreads(t *testing.T) {
-	resetSelfLoginCache(t)
 	dir := t.TempDir()
 	ghBinary := fakeGHDispatcher(t, dir,
 		string(readTestdata(t, "prview_approved.json")),
@@ -492,7 +473,6 @@ func TestReadReviewStateCombinesPRViewAndReviewThreads(t *testing.T) {
 // BlocksReadyThreads and ActionableThreads, even though it was never
 // passed as an explicit policy.Ignore entry.
 func TestReadReviewStateExcludesFactorysOwnAccount(t *testing.T) {
-	resetSelfLoginCache(t)
 	dir := t.TempDir()
 	selfAuthoredThreads := `{
   "data": {
@@ -622,14 +602,14 @@ printf '%s' "` + login + `"
 }
 
 func TestResolveSelfLoginRetriesAfterTransientFailureThenCaches(t *testing.T) {
-	resetSelfLoginCache(t)
 	dir := t.TempDir()
 	ghBinary := countingFailThenSucceedGH(t, dir, "factory-bot")
 
-	if _, err := resolveSelfLogin(context.Background(), ghBinary); err == nil {
+	logins := &SelfLogins{}
+	if _, err := resolveSelfLogin(context.Background(), logins, ghBinary); err == nil {
 		t.Fatal("resolveSelfLogin (1st call) = nil error, want the transient failure surfaced")
 	}
-	login, err := resolveSelfLogin(context.Background(), ghBinary)
+	login, err := resolveSelfLogin(context.Background(), logins, ghBinary)
 	if err != nil {
 		t.Fatalf("resolveSelfLogin (2nd call): %v", err)
 	}
@@ -641,7 +621,7 @@ func TestResolveSelfLoginRetriesAfterTransientFailureThenCaches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read call-count: %v", err)
 	}
-	if login, err = resolveSelfLogin(context.Background(), ghBinary); err != nil || login != "factory-bot" {
+	if login, err = resolveSelfLogin(context.Background(), logins, ghBinary); err != nil || login != "factory-bot" {
 		t.Fatalf("resolveSelfLogin (3rd call) = %q, %v, want cached %q, nil", login, err, "factory-bot")
 	}
 	countAfter, err := os.ReadFile(filepath.Join(dir, "call-count"))
@@ -659,7 +639,6 @@ func TestResolveSelfLoginRetriesAfterTransientFailureThenCaches(t *testing.T) {
 // without the self-exclusion (which would let the factory mistake its own
 // PR replies for reviewer comments).
 func TestReadReviewStateFailsClosedWhileSelfLoginUnresolved(t *testing.T) {
-	resetSelfLoginCache(t)
 	dir := t.TempDir()
 	script := `#!/bin/sh
 case "$1 $2" in
@@ -738,7 +717,6 @@ esac
 }
 
 func TestReadReviewStatePaginatesReviewThreads(t *testing.T) {
-	resetSelfLoginCache(t)
 	dir := t.TempDir()
 	ghBinary := fakeGHPaginatedDispatcher(t, dir,
 		string(readTestdata(t, "prview_no_reviews.json")),

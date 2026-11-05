@@ -315,10 +315,8 @@ func TestPRReviewCorrectiveRoundUsesCurrentPRHeadRun(t *testing.T) {
 	dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return nil }
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
 
-	origRunner := requestdriver.PrReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
 	var gotBranch, gotDiffBase, gotStackBase string
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		gotBranch = requestdrivertest.ArgValue(args, "-on-branch")
 		gotDiffBase = requestdrivertest.ArgValue(args, "-diff-base")
 		runID := requestdrivertest.ArgValue(args, "-ticket")
@@ -357,17 +355,11 @@ func TestApprovalOnOlderCommitDoesNotAdvancePRReview(t *testing.T) {
 		ReviewDecision: forge.ReviewDecisionApproved,
 		Reviews:        []forge.Review{{Author: "reviewer", CommitOID: "old-head", State: "APPROVED"}},
 	}, nil)
-	called := 0
-	requestdriver.ContinueAfterPRApproval = func(string, *request.Request, time.Time) error {
-		called++
-		return nil
-	}
-
 	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, requestdriver.WorkerConfig{PrPollInterval: time.Minute}, time.Now()); err != nil {
 		t.Fatalf("advancePRReview: %v", err)
 	}
-	if called != 0 || r.Tickets[0].PRState == "approved" {
-		t.Fatalf("approval on old commit advanced: calls=%d PRState=%q", called, r.Tickets[0].PRState)
+	if r.Tickets[0].PRState == "approved" || r.State != request.StatePRReview || r.TicketIndex != 1 {
+		t.Fatalf("approval on old commit advanced: PRState=%q state=%q ticket index=%d", r.Tickets[0].PRState, r.State, r.TicketIndex)
 	}
 }
 
@@ -443,9 +435,7 @@ func reviewRoundOn(t *testing.T, head *run.Run, rounds []request.Round, maxRound
 	}
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { return nil }
 	dp.undoMarkPullRequestReadyFn = func(context.Context, string) error { return nil }
-	origRunner := requestdriver.PrReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		ran = true
 		branch, diffBase = requestdrivertest.ArgValue(args, "-on-branch"), requestdrivertest.ArgValue(args, "-diff-base")
 		runID := requestdrivertest.ArgValue(args, "-ticket")

@@ -112,3 +112,9 @@ func CheckEarlierTicketForTest(dp Deps, ctx context.Context, dataDir string, r *
 func SaveObservationForTest(dataDir string, r *request.Request, earlier *request.Ticket, state forge.ReviewState, now time.Time) {
 	saveObservation(dataDir, r, earlier, state, now)
 }
+
+// ContinueAfterPRApproval is continueAfterPRApproval, for the tests of the
+// step out of pr_review.
+func ContinueAfterPRApproval(dataDir string, r *request.Request, now time.Time) error {
+	return continueAfterPRApproval(dataDir, r, now)
+}

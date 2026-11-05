@@ -679,17 +679,11 @@ func (sv *serveRun) resolveSandboxPolicy() error {
 	// process lives, the same "daemon-static" reasoning their own doc
 	// comments already give -- so instead of forwarding them as argv flags
 	// (impossible now) they are folded into a Settings value (see
-	// apiStartTier2Settings) here, once, and installed as
-	// tier2SettingsOverride right before this server starts accepting
-	// connections (after every startup validation above that can still
-	// return early, so a validation failure here never leaves this
-	// package-level override set behind a serveMain call that otherwise
-	// never ran a server at all -- tests call serveMain directly and rely on
-	// exactly that). Every API-started run's own runMainWithReady call (a
+	// apiStartTier2Settings) here, once, and held as sandboxPolicy.settings,
+	// which apiStartStarter hands every API-started run's own build (a
 	// goroutine inside this same process, never a subprocess -- see
-	// apiStartStarter's own doc comment) then picks this up through its own
-	// resolveSettings() call exactly as a worker-drained entry already
-	// does via that same variable.
+	// apiStartStarter's own doc comment) exactly as the worker hands its
+	// own settings to each build it starts (runTicketWithSettings).
 	//
 	// baseSettings loads the same on-disk session config a bare `factoryd
 	// <run>`/`worker` invocation would when -config is unset
@@ -715,19 +709,8 @@ func (sv *serveRun) resolveSandboxPolicy() error {
 		return fmt.Errorf("session-config sandbox_image %q is not allowlisted by -api-allowed-sandbox-images (allowed: %s)", sv.sandboxPolicy.defaultImage, sv.sandboxPolicy.allowedImagesDescription())
 	}
 	warnIfImagesStale(sv.baseSettings)
-	//
-	// Unlike worker_config.go's own use of tier2SettingsOverride (set, used for
-	// one drain loop, then cleared via defer so a later runMainWithReady
-	// call in the same process is unaffected), this assignment is NOT
-	// cleared: `serve` has no equivalent bounded lifetime to clear it at the
-	// end of -- every API-started run's background goroutine must keep
-	// resolving these same values for as long as this process runs, and
-	// nothing else in this command ever sets or clears
-	// tier2SettingsOverride afterward (the daemon-supervisor path,
-	// daemonMain/daemon_cmd.go, is a separate `factoryd daemon` process with
-	// its own resolveSettings() call and is not reachable from here).
 	tier2Settings := apiStartTier2Settings(sv.baseSettings, sv.releasePolicy, sv.sandboxLimits)
-	tier2SettingsOverride = &tier2Settings
+	sv.sandboxPolicy.settings = &tier2Settings
 	return nil
 }
 
@@ -1086,8 +1069,8 @@ func resolveServeReleasePolicy(flags *flag.FlagSet, base sessionconfig.Settings,
 // invocation already gets via loadDefaultSettings) with serveMain's own
 // release/sandbox-resource flags into a single sessionconfig.Settings
 // value: the Tier-2 half of what an API-started run's own
-// resolveSettings() call resolves, once tier2SettingsOverride is set to
-// the result (see serveMain's own assignment). releasePolicy is not
+// resolveSettings call resolves, once sandboxPolicy.settings holds the
+// result (see serveMain's own assignment). releasePolicy is not
 // simply serveMain's own raw -release-* flags: the
 // caller has already resolved it session-config-first (baseSettings wins for any -release-*
 // flag the operator did not pass explicitly; an explicit flag still
@@ -1173,6 +1156,10 @@ type apiSandboxPolicy struct {
 	// defaultImage above, never a per-request api.StartRequest field:
 	// it names a path on THIS machine, meaningless coming from a caller.
 	egressCABundle string
+	// settings are the session settings every API-started run uses
+	// (apiStartTier2Settings, resolveSettings), set once at startup; nil
+	// loads the session config per run.
+	settings *sessionconfig.Settings
 }
 
 // imageAllowed reports whether image may be used as an API-started run's

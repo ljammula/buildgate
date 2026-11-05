@@ -315,7 +315,6 @@ func TestServeUsesStableStartTokenFileWhenPresent(t *testing.T) {
 	previousOutput := log.Writer()
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
 	if err := serveMain(dp, []string{"-data-dir", dataDir, "-addr", listener.Addr().String(), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID())}); err == nil {
 		t.Fatal("serveMain unexpectedly succeeded (it should have failed to bind the already-occupied address)")

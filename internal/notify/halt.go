@@ -26,7 +26,7 @@ import (
 // for the same layering reason as consoleRunEnvVar above. Empty when the
 // env var is unset, same as that pair's own "" fallback.
 func consoleRunLink(dataDir, runID string) string {
-	return consolelink.RunURL(consolelink.BaseURL("", dataDir), runID)
+	return consolelink.RunURL(consolelink.LocalBaseURL(dataDir), runID)
 }
 
 // haltNext names the one command an operator should run to move a halted
@@ -218,11 +218,16 @@ func DispatchSlack(n Notification) {
 // tab's, whose click brings that tab to the front. A run's own notification
 // is always shown: no tab raises it.
 func DispatchDesktop(dataDir string, n Notification) {
+	dispatchDesktop(DesktopNotifier{}, dataDir, n)
+}
+
+// dispatchDesktop is DispatchDesktop through desktop.
+func dispatchDesktop(desktop DesktopNotifier, dataDir string, n Notification) {
 	if n.Ask != "" && consolelink.TabNotifierPresent(dataDir) {
 		return
 	}
 	desktopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	_ = (DesktopNotifier{}).Notify(desktopCtx, n)
+	_ = desktop.Notify(desktopCtx, n)
 	cancel()
 }
 
@@ -302,6 +307,11 @@ func (p *pendingCounter) zeroReached() <-chan struct{} {
 // channels entirely. Concurrent, the worst case is ~5s: the slowest
 // single channel, not their sum.
 func DispatchExternal(dataDir string, n Notification) {
+	dispatchExternal(DesktopNotifier{}, dataDir, n)
+}
+
+// dispatchExternal is DispatchExternal with its desktop channel desktop.
+func dispatchExternal(desktop DesktopNotifier, dataDir string, n Notification) {
 	pendingDispatches.add()
 	go func() {
 		defer pendingDispatches.done()
@@ -309,7 +319,7 @@ func DispatchExternal(dataDir string, n Notification) {
 		channels.Add(3)
 		go func() { defer channels.Done(); DispatchDiscord(n) }()
 		go func() { defer channels.Done(); DispatchSlack(n) }()
-		go func() { defer channels.Done(); DispatchDesktop(dataDir, n) }()
+		go func() { defer channels.Done(); dispatchDesktop(desktop, dataDir, n) }()
 		channels.Wait()
 	}()
 }

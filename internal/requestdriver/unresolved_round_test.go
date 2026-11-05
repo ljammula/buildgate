@@ -57,7 +57,7 @@ func TestAnUnresolvedCorrectiveRoundIsNotCountedAndWaitsInResumeReview(t *testin
 			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(_, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(_, roundRunID string) *run.Run {
 				return unresolvedHalts(roundRunID)[cause]
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
@@ -98,7 +98,7 @@ func TestAnUnresolvedPRReviewRoundIsNotCountedAndWaitsInResumeReview(t *testing.
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 	replies := 0
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { replies++; return nil }
-	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(_ context.Context, args []string, onReady func(*run.Run)) error {
 		halted := unresolvedHalts(requestdrivertest.ArgValue(args, "-ticket"))[unresolved.SandboxLaunch]
 		onReady(&run.Run{ID: halted.ID, State: run.StateReady})
 		return halted.Save(dataDir)
@@ -124,7 +124,7 @@ func TestAnUnresolvedPRReviewRoundIsNotCountedAndWaitsInResumeReview(t *testing.
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(_ context.Context, args []string, onReady func(*run.Run)) error {
 		id := requestdrivertest.ArgValue(args, "-ticket")
 		onReady(&run.Run{ID: id, State: run.StateReady})
 		return (&run.Run{ID: id, State: run.StateQuarantined, GateResults: []run.GateResult{{Check: "canonical_verify"}}}).Save(dataDir)

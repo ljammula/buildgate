@@ -88,9 +88,7 @@ func remoteConsoleFixture(t *testing.T, addr string) (dp *deps, ts *fakeTailscal
 	cfgDir, dataDir = mcpTestConfig(t)
 	ts = &fakeTailscale{state: "Running", web: map[int]string{443: "http://127.0.0.1:3000"}, tcp: map[int]bool{}, funnel: map[int]bool{}, otherPaths: map[int]bool{}, otherName: map[int]bool{}}
 	dp.host.(*fakeHost).tailscaleFn = ts.run
-	origListening := consolelink.Listening
-	t.Cleanup(func() { consolelink.Listening = origListening })
-	consolelink.Listening = func(string) bool { return true }
+	dp.host.(*fakeHost).tcpListeningFn = func(string) bool { return true }
 	if addr != "" {
 		remove, err := consolelink.RecordServeAddress(dataDir, addr)
 		if err != nil {
@@ -439,11 +437,11 @@ func TestRemoteConsoleFileThatCannotBeTrustedAllowsNoHost(t *testing.T) {
 func TestDoctorWarnsOfARemoteConsoleWhoseListenerPointsElsewhere(t *testing.T) {
 	dp, _, cfgDir, dataDir := remoteConsoleFixture(t, "127.0.0.1:8097")
 	configPath := filepath.Join(cfgDir, "config.yml")
-	if checks := doctorRemoteConsoleChecks(configPath, dataDir); len(checks) != 0 {
+	if checks := doctorRemoteConsoleChecks(dp, configPath, dataDir); len(checks) != 0 {
 		t.Fatalf("remote console off: %+v, want no row", checks)
 	}
 	runRemoteConsole(t, dp)
-	if checks := doctorRemoteConsoleChecks(configPath, dataDir); len(checks) != 0 {
+	if checks := doctorRemoteConsoleChecks(dp, configPath, dataDir); len(checks) != 0 {
 		t.Fatalf("listener matches the serve: %+v, want no row", checks)
 	}
 	remove, err := consolelink.RecordServeAddress(dataDir, "127.0.0.1:8123")
@@ -451,7 +449,7 @@ func TestDoctorWarnsOfARemoteConsoleWhoseListenerPointsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer remove()
-	checks := doctorRemoteConsoleChecks(configPath, dataDir)
+	checks := doctorRemoteConsoleChecks(dp, configPath, dataDir)
 	if len(checks) != 1 || !checks[0].Advisory || !strings.Contains(checks[0].Err.Error(), "127.0.0.1:8097") || !strings.Contains(checks[0].Err.Error(), "127.0.0.1:8123") || !strings.Contains(checks[0].Fix, "factoryd remote-console") {
 		t.Errorf("checks = %+v, want one warning naming both addresses and the command", checks)
 	}

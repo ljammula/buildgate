@@ -6,7 +6,6 @@ import (
 	"os"
 	"testing"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
 	"buildgate/internal/request"
@@ -32,7 +31,6 @@ func runTests(m *testing.M) int {
 	os.Setenv("HOME", home)
 	os.Setenv("XDG_CONFIG_HOME", home+"/xdg")
 	os.Setenv(notify.DesktopNotificationsEnvironmentVariable, "0")
-	consolelink.Listening = func(string) bool { return false }
 	return m.Run()
 }
 
@@ -241,9 +239,9 @@ func newFakeDeps(testing.TB) *fakeDeps {
 
 // stubPRReviewDeps is requestdrivertest.StubPRReviewHooks over this package's
 // fake.
-func stubPRReviewDeps(dp *fakeDeps, t *testing.T, state forge.ReviewState, readErr error) {
+func stubPRReviewDeps(dp *fakeDeps, t *testing.T, state forge.ReviewState, readErr error) requestdrivertest.PushedSHAs {
 	t.Helper()
-	requestdrivertest.StubPRReviewHooks(requestdrivertest.PrReviewHooks{
+	return requestdrivertest.StubPRReviewHooks(requestdrivertest.PrReviewHooks{
 		ReadReviewState: &dp.readReviewStateFn, MarkPullRequestReady: &dp.markPullRequestReadyFn,
 		UndoMarkPullRequestReady: &dp.undoMarkPullRequestReadyFn, PushExistingBranch: &dp.pushExistingBranchFn,
 		RemoteBranchHeadSHA: &dp.remoteBranchHeadSHAFn, RoundResultDescendsFromHead: &dp.roundResultDescendsFromHeadFn,

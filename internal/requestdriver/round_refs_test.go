@@ -77,7 +77,7 @@ func TestEachTicketRoundGetsARefAndLedgerEntry(t *testing.T) {
 		onReady(&run.Run{ID: runID})
 		return requestdrivertest.CorrectableQuarantine(t, dataDir, runID, "factoryd/"+runID, base, first).Save(dataDir)
 	}
-	requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+	requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{
 			ID: roundRunID, State: run.StateQuarantined, HaltError: "gate failed: canonical_verify", Branch: "factoryd/x",
 			BaseSHA: first, DiffBaseSHA: base, ResultSHA: second,
@@ -122,7 +122,7 @@ func TestEachPRReviewRoundGetsARefAndLedgerEntry(t *testing.T) {
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	roundSHA := sha40(0xbeef)
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		runID := requestdrivertest.ArgValue(args, "-ticket")
 		rr := &run.Run{ID: runID, State: run.StateQuarantined, BaseSHA: sha40(7), ResultSHA: roundSHA, GateResults: []run.GateResult{{Check: "code_review", Passed: false}}}
 		if err := rr.Save(dataDir); err != nil {

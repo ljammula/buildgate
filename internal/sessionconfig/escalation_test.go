@@ -146,20 +146,18 @@ func TestValidateRoutingEscalationSharingTheReviewBackendIsWaivable(t *testing.T
 // harness that speaks only anthropic-messages: the role's own model is on
 // that api and passes, the escalation's is not.
 func TestValidateRoutingRefusesAnEscalationModelTheHarnessCannotRun(t *testing.T) {
-	prev := harnessLookup
-	t.Cleanup(func() { harnessLookup = prev })
-	harnessLookup = func(name string) (harness.Descriptor, error) {
+	lookup := func(name string) (harness.Descriptor, error) {
 		if name == "narrow" {
 			return harness.Descriptor{Name: "narrow", WireAPIs: []string{"anthropic-messages"}}, nil
 		}
-		return prev(name)
+		return harness.Lookup(name)
 	}
 	s := escalationSettings()
 	luna := s.Models["luna"]
 	luna.API = "anthropic-messages"
 	s.Models["luna"] = luna
 	s.Roles.Execution.Harness = "narrow"
-	err := ValidateRouting(s)
+	err := validateRouting(s, lookup)
 	if err == nil {
 		t.Fatal("ValidateRouting accepted an escalation model the role's harness cannot speak to")
 	}

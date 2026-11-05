@@ -6,6 +6,7 @@ import (
 
 	"buildgate/internal/request"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/run"
 )
 
 // driveRequests advances the oldest request in a state the request
@@ -21,7 +22,7 @@ import (
 // Test-only: one pass of the retired poll loop. Production advances each
 // request through its own Temporal workflow (worker_cmd.go). The runners are
 // injectable stubs.
-func driveRequests(dp *deps, ctx context.Context, dataDir string, cfg requestdriver.WorkerConfig, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner, buildRunner requestdriver.TicketRunner) error {
+func driveRequests(dp requestdriver.Deps, ctx context.Context, dataDir string, cfg requestdriver.WorkerConfig, specRunner requestdriver.SpecDraftRunner, planRunner requestdriver.PlanTicketsRunner, buildRunner requestdriver.TicketRunner) error {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		return fmt.Errorf("list requests: %w", err)
@@ -60,4 +61,15 @@ func driveRequests(dp *deps, ctx context.Context, dataDir string, cfg requestdri
 		}
 	}
 	return firstErr
+}
+
+// runTicketStub is a requestdriver.Deps over a test's deps whose ticket
+// builds (a corrective round's) run runTicket instead of a real build.
+type runTicketStub struct {
+	*deps
+	runTicket func(ctx context.Context, args []string, onReady func(*run.Run)) error
+}
+
+func (s *runTicketStub) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	return s.runTicket(ctx, args, onReady)
 }

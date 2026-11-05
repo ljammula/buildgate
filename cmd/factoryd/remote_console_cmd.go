@@ -455,7 +455,7 @@ func remoteConsoleOn(ctx context.Context, dp *deps, stdout io.Writer, configPath
 // remoteConsoleBackend is the address of dataDir's own serve, started here
 // when none runs and FACTORYD_AUTOSTART allows it.
 func remoteConsoleBackend(dp *deps, stdout io.Writer, configPath, dataDir string) (string, error) {
-	if addr := consolelink.ServeAddress(dataDir); addr != "" {
+	if addr := consolelink.ServeAddress(dp, dataDir); addr != "" {
 		return proxyBackend("http://" + addr), nil
 	}
 	notRunning := fmt.Errorf("no `factoryd serve` answers for data dir %s: start it with `factoryd console`, then run this command again", dataDir)
@@ -468,7 +468,7 @@ func remoteConsoleBackend(dp *deps, stdout io.Writer, configPath, dataDir string
 	}
 	hostcontrol.QuickstartEnsureServe(dp, false, stdout, binary, configPath, dataDir)
 	for waited := time.Duration(0); waited < remoteConsoleServeWait; waited += 500 * time.Millisecond {
-		if addr := consolelink.ServeAddress(dataDir); addr != "" {
+		if addr := consolelink.ServeAddress(dp, dataDir); addr != "" {
 			return proxyBackend("http://" + addr), nil
 		}
 		dp.host.sleep(500 * time.Millisecond)
@@ -538,7 +538,7 @@ func remoteConsoleRemoveListener(ctx context.Context, dp *deps, rc remoteConsole
 // forwards to an address this data dir's serve no longer has: the other
 // machine reaches nothing, or another process. No row when the remote
 // console is off or its listener matches.
-func doctorRemoteConsoleChecks(configPath, dataDir string) []doctorCheck {
+func doctorRemoteConsoleChecks(dp *deps, configPath, dataDir string) []doctorCheck {
 	configPath, found := resolveEffectiveConfigPath(configPath)
 	if !found || dataDir == "" {
 		return nil
@@ -547,7 +547,7 @@ func doctorRemoteConsoleChecks(configPath, dataDir string) []doctorCheck {
 	if !ok {
 		return nil
 	}
-	current := consolelink.ServeAddress(dataDir)
+	current := consolelink.ServeAddress(dp, dataDir)
 	if current != "" && proxyBackend("http://"+current) == rc.Backend {
 		return nil
 	}

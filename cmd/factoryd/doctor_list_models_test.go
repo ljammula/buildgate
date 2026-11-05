@@ -34,18 +34,6 @@ func doctorInputsForRoute(route sessionconfig.Route, modelID string) doctorInput
 	return doctorInputs{settings: settings}
 }
 
-// stubListGitHubCopilotModels overrides listGitHubCopilotModelsFn for the
-// duration of the test, restoring the real meter.ListGitHubCopilotModels
-// on cleanup -- so a doctor/quickstart test can assert on the
-// model-listing behavior without ever making a real network call to
-// api.individual.githubcopilot.com/api.github.com.
-func stubListGitHubCopilotModels(t *testing.T, fn func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error)) {
-	t.Helper()
-	orig := listGitHubCopilotModelsFn
-	listGitHubCopilotModelsFn = fn
-	t.Cleanup(func() { listGitHubCopilotModelsFn = orig })
-}
-
 // TestDoctorListModelsChatGPTCodexNamesConfiguredModelNoNetworkCall proves
 // -list-models for chatgpt-codex never attempts a network call (there is
 // no listing endpoint -- codex exec speaks only POST /responses) and
@@ -111,7 +99,7 @@ func TestDoctorListModelsCopilotFailsClosedWithNoTokenSource(t *testing.T) {
 func TestDoctorListModelsCopilotPrintsListingWithTagsAndAdvisory(t *testing.T) {
 	t.Setenv("GITHUB_COPILOT_TOKEN", "gho_test_token")
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		if githubToken != "gho_test_token" {
 			t.Errorf("githubToken = %q, want the resolved GITHUB_COPILOT_TOKEN", githubToken)
 		}
@@ -123,6 +111,7 @@ func TestDoctorListModelsCopilotPrintsListingWithTagsAndAdvisory(t *testing.T) {
 
 	var out bytes.Buffer
 	in := doctorInputsForRoute(sessionconfig.Route{CredentialMode: meter.CredentialModeGitHubCopilot}, "gpt-5.6-luna")
+	in.copilotModels = list
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
 	}
@@ -143,7 +132,7 @@ func TestDoctorListModelsCopilotPrintsListingWithTagsAndAdvisory(t *testing.T) {
 func TestDoctorListModelsCopilotAcceptsResponsesOnlyModelAndLabelsEndpoints(t *testing.T) {
 	t.Setenv("GITHUB_COPILOT_TOKEN", "gho_test_token")
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{
 			{ID: "gpt-5.6-luna", ContextWindow: 272000, SupportedEndpoints: []string{"/responses"}},
 			{ID: "gpt-4.1", ContextWindow: 128000, SupportedEndpoints: []string{"/chat/completions"}},
@@ -156,6 +145,7 @@ func TestDoctorListModelsCopilotAcceptsResponsesOnlyModelAndLabelsEndpoints(t *t
 	settings.Models = map[string]sessionconfig.Model{"m": {ID: "gpt-5.6-luna", API: meter.RequestFormatOpenAIResponses, Routes: []string{"r"}}}
 	settings.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "m"}}
 	in := doctorInputs{settings: settings}
+	in.copilotModels = list
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
 	}
@@ -465,12 +455,12 @@ func TestDoctorListModelsExplicitAnthropicUpstreamAlsoSkipsListing(t *testing.T)
 // the configured id is one this account actually serves.
 func TestDoctorCheckCopilotModelListedPassesWhenModelPresent(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 200000}, {ID: "gpt-4.1", ContextWindow: 128000}}, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err != nil {
 		t.Fatalf("doctorCheckCopilotModelListed: Err = %v, want nil (the model is in the listing)", check.Err)
 	}
@@ -478,12 +468,12 @@ func TestDoctorCheckCopilotModelListedPassesWhenModelPresent(t *testing.T) {
 
 func TestDoctorCheckCopilotModelListedFailsWithFixNamingRealIDs(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna", ContextWindow: 200000}, {ID: "gpt-4.1", ContextWindow: 128000}}, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "placeholder-model", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "placeholder-model", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil {
 		t.Fatal("doctorCheckCopilotModelListed with an unentitled id: Err = nil, want a failure")
 	}
@@ -502,12 +492,12 @@ func TestDoctorCheckCopilotModelListedFailsWithFixNamingRealIDs(t *testing.T) {
 // doctorCheck failure naming that error, not a silent pass.
 func TestDoctorCheckCopilotModelListedFailsClosedOnListingError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return nil, &meter.CopilotModelsHTTPStatusError{StatusCode: http.StatusUnauthorized}
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil || !strings.Contains(check.Err.Error(), "401") {
 		t.Fatalf("doctorCheckCopilotModelListed with a listing error: Err = %v, want it to surface the listing failure", check.Err)
 	}
@@ -524,12 +514,13 @@ func TestDoctorCheckCopilotModelListedFailsClosedOnListingError(t *testing.T) {
 func TestDoctorListModelsCopilotUnauthorizedExplainsNextStep(t *testing.T) {
 	t.Setenv("GITHUB_COPILOT_TOKEN", "gho_test_token")
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return nil, &meter.CopilotModelsHTTPStatusError{StatusCode: http.StatusUnauthorized}
 	})
 
 	var out bytes.Buffer
 	in := doctorInputsForRoute(sessionconfig.Route{CredentialMode: meter.CredentialModeGitHubCopilot}, "gpt-5.6-luna")
+	in.copilotModels = list
 	err := doctorListModels(context.Background(), &out, in)
 	if err == nil {
 		t.Fatal("doctorListModels with a rejected Copilot catalog request = nil error, want a failure")
@@ -554,13 +545,13 @@ func TestDoctorCheckCopilotModelListedForwardsConfiguredUpstream(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	const businessUpstream = "https://api.business.githubcopilot.com"
 	var gotUpstream string
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		gotUpstream = upstream
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna"}}, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", businessUpstream, "", false, doctorRoutesModeRouteKeys("route", "model"))
+	doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", businessUpstream, "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if gotUpstream != businessUpstream {
 		t.Errorf("upstream forwarded to the listing = %q, want %q", gotUpstream, businessUpstream)
 	}
@@ -574,12 +565,12 @@ func TestDoctorCheckCopilotModelListedForwardsConfiguredUpstream(t *testing.T) {
 // derived URL can't be trusted as authoritative.
 func TestDoctorCheckCopilotModelListedDowngradesToAdvisoryOnNonDefaultUpstream(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna"}}, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "placeholder-model", "https://api.business.githubcopilot.com", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "placeholder-model", "https://api.business.githubcopilot.com", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil {
 		t.Fatal("check.Err = nil, want a failure naming the unentitled id")
 	}
@@ -593,12 +584,12 @@ func TestDoctorCheckCopilotModelListedDowngradesToAdvisoryOnNonDefaultUpstream(t
 // FAIL behavior -- only an explicitly non-default upstream downgrades.
 func TestDoctorCheckCopilotModelListedStaysHardFailOnDefaultUpstream(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{{ID: "gpt-5.6-luna"}}, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "placeholder-model", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "placeholder-model", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Advisory {
 		t.Error("check.Advisory = true, want false for the default upstream (a hard FAIL)")
 	}
@@ -609,19 +600,19 @@ func TestDoctorCheckCopilotModelListedStaysHardFailOnDefaultUpstream(t *testing.
 // relay_upstream (e.g. left over from a local-model route after
 // switching to github-copilot) must never receive the exchanged Copilot
 // API token in cleartext -- the check must FAIL, naming the reason, and
-// must never even call listGitHubCopilotModelsFn (which itself performs
+// must never even call the Copilot model listing (which itself performs
 // the real GitHub token exchange), since the plaintext refusal happens
 // BEFORE that exchange, not just before using its result.
 func TestDoctorCheckCopilotModelListedRefusesPlaintextUpstreamBeforeExchange(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	called := false
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		called = true
 		return nil, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "http://local-model:8080", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", "http://local-model:8080", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil {
 		t.Fatal("check.Err = nil, want a failure naming the invalid upstream")
 	}
@@ -629,7 +620,7 @@ func TestDoctorCheckCopilotModelListedRefusesPlaintextUpstreamBeforeExchange(t *
 		t.Errorf("check.Err = %v, want it to name the route's upstream as not valid for github-copilot", check.Err)
 	}
 	if called {
-		t.Fatal("listGitHubCopilotModelsFn (which itself exchanges the GitHub OAuth token) was called despite an invalid plaintext upstream")
+		t.Fatal("the Copilot model listing (which itself exchanges the GitHub OAuth token) was called despite an invalid plaintext upstream")
 	}
 }
 
@@ -646,19 +637,20 @@ func TestDoctorCheckCopilotModelListedRefusesPlaintextUpstreamBeforeExchange(t *
 func TestDoctorListModelsCopilotRefusesPlaintextUpstreamBeforeExchange(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	called := false
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		called = true
 		return nil, nil
 	})
 
 	var out bytes.Buffer
 	in := doctorInputsForRoute(sessionconfig.Route{CredentialMode: meter.CredentialModeGitHubCopilot, Upstream: "http://local-model:8080"}, "gpt-5.6-luna")
+	in.copilotModels = list
 	err := doctorListModels(context.Background(), &out, in)
 	if !errors.Is(err, modelrole.ErrNoRouteAvailable) {
 		t.Fatalf("doctorListModels = %v, want modelrole.ErrNoRouteAvailable (an invalid plaintext upstream makes the route unusable)", err)
 	}
 	if called {
-		t.Fatal("listGitHubCopilotModelsFn was called despite an invalid plaintext upstream")
+		t.Fatal("the Copilot model listing was called despite an invalid plaintext upstream")
 	}
 }
 
@@ -674,13 +666,13 @@ func TestDoctorListModelsCopilotRefusesPlaintextUpstreamBeforeExchange(t *testin
 func TestDoctorCheckCopilotModelListedRefusesNonCopilotHostBeforeExchange(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	called := false
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		called = true
 		return nil, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "https://openrouter.ai/api", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", "https://openrouter.ai/api", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil {
 		t.Fatal("check.Err = nil, want a failure naming the non-Copilot upstream")
 	}
@@ -688,7 +680,7 @@ func TestDoctorCheckCopilotModelListedRefusesNonCopilotHostBeforeExchange(t *tes
 		t.Errorf("check.Err = %v, want it to name the route's upstream as not valid for github-copilot", check.Err)
 	}
 	if called {
-		t.Fatal("listGitHubCopilotModelsFn (which itself exchanges the GitHub OAuth token) was called despite a non-Copilot https upstream")
+		t.Fatal("the Copilot model listing (which itself exchanges the GitHub OAuth token) was called despite a non-Copilot https upstream")
 	}
 }
 
@@ -702,19 +694,20 @@ func TestDoctorCheckCopilotModelListedRefusesNonCopilotHostBeforeExchange(t *tes
 func TestDoctorListModelsCopilotRefusesNonCopilotHostBeforeExchange(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	called := false
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		called = true
 		return nil, nil
 	})
 
 	var out bytes.Buffer
 	in := doctorInputsForRoute(sessionconfig.Route{CredentialMode: meter.CredentialModeGitHubCopilot, Upstream: "https://openrouter.ai/api"}, "gpt-5.6-luna")
+	in.copilotModels = list
 	err := doctorListModels(context.Background(), &out, in)
 	if !errors.Is(err, modelrole.ErrNoRouteAvailable) {
 		t.Fatalf("doctorListModels = %v, want modelrole.ErrNoRouteAvailable (a non-Copilot upstream makes the route unusable)", err)
 	}
 	if called {
-		t.Fatal("listGitHubCopilotModelsFn was called despite a non-Copilot https upstream")
+		t.Fatal("the Copilot model listing was called despite a non-Copilot https upstream")
 	}
 }
 
@@ -750,7 +743,7 @@ func TestDoctorValidateCopilotUpstreamRefusesPlaintextEvenWhenAllowed(t *testing
 // only models the relay can serve.
 func TestDoctorCheckCopilotModelListedFailsListedButUnservableModel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{
 			{ID: "gpt-5.6-luna", SupportedEndpoints: []string{"/responses", "ws:/responses"}},
 			{ID: "claude-sonnet-5", ContextWindow: 200000, SupportedEndpoints: []string{"/chat/completions", "/v1/messages"}},
@@ -758,14 +751,14 @@ func TestDoctorCheckCopilotModelListedFailsListedButUnservableModel(t *testing.T
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil || check.Advisory {
 		t.Fatalf("check = %+v, want a hard failure for a /responses-only model", check)
 	}
 	if !strings.Contains(check.Fix, "claude-sonnet-5") || strings.Contains(check.Fix, "gpt-5.6-luna") {
 		t.Errorf("Fix = %q, want only servable models suggested", check.Fix)
 	}
-	if ok := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "claude-sonnet-5", "", "", false, doctorRoutesModeRouteKeys("route", "model")); ok.Err != nil {
+	if ok := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "claude-sonnet-5", "", "", false, doctorRoutesModeRouteKeys("route", "model")); ok.Err != nil {
 		t.Errorf("servable model: Err = %v, want nil", ok.Err)
 	}
 }
@@ -775,7 +768,7 @@ func TestDoctorCheckCopilotModelListedFailsListedButUnservableModel(t *testing.T
 // "disabled" and rejected at run time with 400 model_not_supported.
 func TestDoctorCheckCopilotModelListedFailsPolicyDisabledModel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{
 			{ID: "claude-sonnet-5", SupportedEndpoints: []string{"/chat/completions"}, PolicyState: "disabled"},
 			{ID: "kimi-k3-copilot", ContextWindow: 917504, SupportedEndpoints: []string{"/chat/completions"}, PolicyState: "enabled"},
@@ -783,7 +776,7 @@ func TestDoctorCheckCopilotModelListedFailsPolicyDisabledModel(t *testing.T) {
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "claude-sonnet-5", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "claude-sonnet-5", "", "", false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err == nil || !strings.Contains(check.Err.Error(), "disabled") {
 		t.Fatalf("check = %+v, want a failure naming the disabled policy", check)
 	}
@@ -798,14 +791,14 @@ func TestDoctorCheckCopilotModelListedFailsPolicyDisabledModel(t *testing.T) {
 // pass this check, not just meter.CopilotModelUsable in isolation.
 func TestDoctorCheckCopilotModelListedAcceptsResponsesOnlyModelUnderResponsesAPI(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	stubListGitHubCopilotModels(t, func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	list := copilotModelLister(func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
 		return []meter.CopilotModel{
 			{ID: "gpt-5.6-luna", ContextWindow: 200000, SupportedEndpoints: []string{"/responses"}},
 		}, nil
 	})
 	tokenFile := newCopilotAuthFixturePath(t, "gho_test_token")
 
-	check := doctorCheckCopilotModelListed(context.Background(), tokenFile, "", "", "gpt-5.6-luna", "", meter.RequestFormatOpenAIResponses, false, doctorRoutesModeRouteKeys("route", "model"))
+	check := doctorCheckCopilotModelListed(context.Background(), list, tokenFile, "", "", "gpt-5.6-luna", "", meter.RequestFormatOpenAIResponses, false, doctorRoutesModeRouteKeys("route", "model"))
 	if check.Err != nil {
 		t.Fatalf("doctorCheckCopilotModelListed with relay_worker_api openai-responses: Err = %v, want nil", check.Err)
 	}

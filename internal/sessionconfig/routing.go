@@ -529,6 +529,13 @@ func resolveAllowed(rc *RoleConfig) []string {
 }
 
 func ValidateRouting(s Settings) error {
+	return validateRouting(s, harness.Lookup)
+}
+
+// validateRouting is ValidateRouting over the harness registry lookup
+// names: harness.Lookup, or in a test one with an entry the compiled
+// registry does not have yet.
+func validateRouting(s Settings, lookup func(name string) (harness.Descriptor, error)) error {
 	if s.Routes == nil && s.Models == nil && s.Roles == nil {
 		return nil
 	}
@@ -555,16 +562,16 @@ func ValidateRouting(s Settings) error {
 		return errors.New("roles.execution is required to launch a relay; configure routes:/models:/roles: (see USAGE_REFERENCE.md \"Model routes\")")
 	}
 
-	if err := checkRoutingRole(s, "planning", s.Roles.Planning); err != nil {
+	if err := checkRoutingRole(s, lookup, "planning", s.Roles.Planning); err != nil {
 		return err
 	}
-	if err := checkRoutingRole(s, "execution", s.Roles.Execution); err != nil {
+	if err := checkRoutingRole(s, lookup, "execution", s.Roles.Execution); err != nil {
 		return err
 	}
-	if err := checkRoutingRole(s, "review", s.Roles.Review); err != nil {
+	if err := checkRoutingRole(s, lookup, "review", s.Roles.Review); err != nil {
 		return err
 	}
-	if err := checkRoutingRole(s, "challenger", s.Roles.Challenger); err != nil {
+	if err := checkRoutingRole(s, lookup, "challenger", s.Roles.Challenger); err != nil {
 		return err
 	}
 
@@ -607,7 +614,7 @@ func checkRoutingModel(s Settings, context, name string) (Model, error) {
 
 // checkRoutingRole validates one roles: entry; a role that is not configured
 // passes.
-func checkRoutingRole(s Settings, roleName string, rc *RoleConfig) error {
+func checkRoutingRole(s Settings, lookup func(name string) (harness.Descriptor, error), roleName string, rc *RoleConfig) error {
 	if rc == nil {
 		return nil
 	}
@@ -630,7 +637,7 @@ func checkRoutingRole(s Settings, roleName string, rc *RoleConfig) error {
 	if err := checkRoleEscalation(s, roleName, rc); err != nil {
 		return err
 	}
-	return checkRoleHarness(roleName, rc, s.Routes, s.Models)
+	return checkRoleHarness(lookup, roleName, rc, s.Routes, s.Models)
 }
 
 // checkThinking refuses a reasoning-effort level the model would not be sent
@@ -800,10 +807,6 @@ func ValidateRequestModels(s Settings, models map[string]string) error {
 	return nil
 }
 
-// harnessLookup resolves a harness name; a variable only so a test can
-// inject a registry entry the compiled registry does not have yet.
-var harnessLookup = harness.Lookup
-
 // HarnessName is the role's default harness, canonical: lower-cased,
 // trimmed, "" meaning pi.
 func (rc *RoleConfig) HarnessName() string {
@@ -843,11 +846,11 @@ func CheckHarnessAPI(role string, d harness.Descriptor, modelName, api string) e
 // checkRoleHarness validates a role's harness choices: every named harness is
 // a registry name, the default is in the allowed set, and every allowed
 // harness can speak the api of every model/route the role may resolve to.
-func checkRoleHarness(role string, rc *RoleConfig, routes map[string]Route, models map[string]Model) error {
+func checkRoleHarness(lookup func(name string) (harness.Descriptor, error), role string, rc *RoleConfig, routes map[string]Route, models map[string]Model) error {
 	descriptors := map[string]harness.Descriptor{}
 	names := append([]string{rc.HarnessName()}, rc.AllowedHarnessNames()...)
 	for _, name := range names {
-		d, err := harnessLookup(name)
+		d, err := lookup(name)
 		if err != nil {
 			return fmt.Errorf("roles.%s: %w", role, err)
 		}
@@ -903,7 +906,7 @@ func ValidateRequestHarnesses(s Settings, harnesses map[string]string) error {
 		if rc == nil {
 			return fmt.Errorf("harnesses: roles.%s is not configured; cannot choose a harness for it", role)
 		}
-		if _, err := harnessLookup(harnesses[role]); err != nil {
+		if _, err := harness.Lookup(harnesses[role]); err != nil {
 			return fmt.Errorf("harnesses: %w", err)
 		}
 		chosen := canonicalHarnessName(harnesses[role])

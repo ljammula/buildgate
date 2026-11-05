@@ -210,6 +210,10 @@ type LaunchSpec struct {
 	// without exposing repository metadata for writes.
 	gitCommonDir       string
 	gitCommonDirTarget string
+	// freeBytes reads a path's filesystem's free space for the pre-launch
+	// floor (checkMinFreeBytes); nil is statfs. A test sets it to make one
+	// path report what it needs.
+	freeBytes func(path string) (free uint64, ok bool)
 }
 
 // InputMount describes a read-only host directory exposed under /inputs.
@@ -844,11 +848,11 @@ func (s LaunchSpec) withResolvedMounts() (LaunchSpec, error) {
 	// "protects the volume holding durable run evidence" purpose whenever
 	// they differ. statfs is cheap; checking both costs nothing a single
 	// check didn't already pay.
-	if err := checkMinFreeBytes(s.WorkDir); err != nil {
+	if err := checkMinFreeBytes(s.freeBytes, s.WorkDir); err != nil {
 		return LaunchSpec{}, err
 	}
 	if s.DataDir != s.WorkDir {
-		if err := checkMinFreeBytes(s.DataDir); err != nil {
+		if err := checkMinFreeBytes(s.freeBytes, s.DataDir); err != nil {
 			return LaunchSpec{}, fmt.Errorf("data directory: %w", err)
 		}
 	}
@@ -1677,6 +1681,11 @@ func orphanCandidates(ctx context.Context, dockerBinary, dataDir string) ([]stri
 // only after this process was already running — doesn't accumulate
 // indefinitely either way.
 func ReconcileOrphans(ctx context.Context, dockerBinary, dataDir string) ([]string, error) {
+	return reconcileOrphans(ctx, time.After, dockerBinary, dataDir)
+}
+
+// reconcileOrphans is ReconcileOrphans with its debounce wait passed in.
+func reconcileOrphans(ctx context.Context, after debounceAfter, dockerBinary, dataDir string) ([]string, error) {
 	dataDir, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox data directory: %w", err)
@@ -1805,7 +1814,7 @@ func ReconcileOrphans(ctx context.Context, dockerBinary, dataDir string) ([]stri
 		// still hold a full ownerHeartbeatInterval later closes that),
 		// just applied once instead of per-container.
 		select {
-		case <-ownerDebounceAfter(ownerHeartbeatInterval):
+		case <-after(ownerHeartbeatInterval):
 		case <-ctx.Done():
 			for _, c := range staleCandidates {
 				errs = append(errs, fmt.Errorf("reconcile abandoned container %q (run %q): staleness debounce wait: %w", c.name, c.runID, ctx.Err()))
@@ -1866,16 +1875,17 @@ var (
 	ownerStaleAfter        = 6 * ownerHeartbeatInterval
 )
 
-// ownerDebounceAfter constructs the channel the batch-staleness debounce
-// above waits on. A var, like ownerHeartbeatInterval, so a test asserting
-// the batch is debounced only once (as opposed to once per candidate) can
-// replace real-time waiting with a deterministic, immediately-firing
-// channel instead of asserting on wall-clock elapsed time — which is
-// inherently flaky on a loaded machine (found via intermittent -race
-// failures under concurrent `make verify` runs, never standalone). Other
-// tests that rely on the wait actually taking real time (e.g. to let a
-// concurrent heartbeat refresh land mid-wait) leave this at its default.
-var ownerDebounceAfter = func(d time.Duration) <-chan time.Time { return time.After(d) }
+// debounceAfter constructs the channel a reconciler's batch-staleness
+// debounce waits on: time.After in production. The reconcilers take it as
+// a parameter so a test asserting the batch is debounced only once (as
+// opposed to once per candidate) can pass a deterministic,
+// immediately-firing channel instead of asserting on wall-clock elapsed
+// time — which is inherently flaky on a loaded machine (found via
+// intermittent -race failures under concurrent `make verify` runs, never
+// standalone). Other tests that rely on the wait actually taking real time
+// (e.g. to let a concurrent heartbeat refresh land mid-wait) pass
+// time.After.
+type debounceAfter func(d time.Duration) <-chan time.Time
 
 // startOwnerHeartbeat periodically rewrites runID's owner marker for as
 // long as this attempt is actually being supervised, and returns a stop
@@ -2189,26 +2199,14 @@ func ScriptsSHA256(dir string) (string, error) {
 // generous ceiling.
 var minFreeBytesForLaunch uint64 = 1 << 30
 
-// checkMinFreeBytes refuses to launch a worker against a workDir whose
-// filesystem already has less than minFreeBytesForLaunch free. This is a
-// pre-launch guard, not a running quota -- it does nothing to stop a
-// worker that starts with plenty of room and fills the disk during its
-// own run (found via a real Opus review pass, 2026-09-04); closing that
-// half would need a post-attempt check in every caller that retries a
-// launch, not just here.
 // statfsFreeBytes reports path's filesystem's free space, as (bytes, ok) --
 // ok is false when the lookup itself failed (unsupported filesystem, a
 // permissions quirk, or the path not existing yet -- DataDir in particular
-// has no guarantee of existing before its first write). A package-level
-// var, not a direct syscall.Statfs call inline in checkMinFreeBytes, so a
-// test can make one specific path report arbitrary free space without
-// needing two real, distinct filesystems to prove WorkDir's and DataDir's
-// checks are independent (found via a real Codex review comment on this
-// same change's own PR: the original test put both temp dirs on the same
-// real filesystem, so WorkDir's check -- always run first -- short-circuited
-// before DataDir's was ever reached, and deleting the DataDir branch
-// entirely would still have passed that test).
-var statfsFreeBytes = func(path string) (free uint64, ok bool) {
+// has no guarantee of existing before its first write). LaunchSpec.freeBytes
+// replaces it in a test, which can then make one specific path report
+// arbitrary free space without needing two real, distinct filesystems to
+// prove WorkDir's and DataDir's checks are independent.
+func statfsFreeBytes(path string) (free uint64, ok bool) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 0, false
@@ -2216,8 +2214,18 @@ var statfsFreeBytes = func(path string) (free uint64, ok bool) {
 	return uint64(stat.Bavail) * uint64(stat.Bsize), true
 }
 
-func checkMinFreeBytes(path string) error {
-	free, ok := statfsFreeBytes(path)
+// checkMinFreeBytes refuses to launch a worker against a workDir whose
+// filesystem already has less than minFreeBytesForLaunch free. This is a
+// pre-launch guard, not a running quota -- it does nothing to stop a
+// worker that starts with plenty of room and fills the disk during its
+// own run (found via a real Opus review pass, 2026-09-04); closing that
+// half would need a post-attempt check in every caller that retries a
+// launch, not just here.
+func checkMinFreeBytes(freeBytes func(string) (uint64, bool), path string) error {
+	if freeBytes == nil {
+		freeBytes = statfsFreeBytes
+	}
+	free, ok := freeBytes(path)
 	if !ok {
 		// Fails open deliberately: an unreadable filesystem says nothing
 		// about whether space is actually low, and failing every launch

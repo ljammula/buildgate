@@ -40,7 +40,7 @@ func TestAdvanceBuildingCheckCorrectiveRoundGivesTheBuildTheHandoff(t *testing.T
 	baseSHA, resultSHA := fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2)
 	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, baseSHA, resultSHA, "repo-lint")
 
-	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		// The round's run, as the driver saved it when it started, names
 		// the run its build's record is of: a resume of it needs that.
 		if startedRun, err := run.Load(dataDir, roundRunID); err != nil || startedRun.EarlierAttemptOf != id+"-001" {
@@ -133,7 +133,7 @@ func TestCheckCorrectiveRoundEligibility(t *testing.T) {
 			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, base, tc.resultSHA, tc.failed...)
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: tc.budget}
@@ -193,7 +193,7 @@ func TestCheckCorrectiveRoundIsNotSpentOnAGateThatFailsTheSameWayOnTheBaseCommit
 				}
 				return rr.Save(dataDir)
 			}
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -244,7 +244,7 @@ func TestCheckCorrectiveRoundNeedsAHandoffTheRunVouchesFor(t *testing.T) {
 				spoil(dataDir, rr)
 				return rr.Save(dataDir)
 			}
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -275,7 +275,7 @@ func TestCorrectiveRoundsShareOneBudget(t *testing.T) {
 		// A reviewer's reproduction refuses the first build; its round then
 		// fails lint, which a build could fix: the budget is spent.
 		buildRunner := requestdrivertest.ReviewQuarantinedBuildRunner(t, dataDir, branch, base, "")
-		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 			return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, "repo-lint")
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -295,7 +295,7 @@ func TestCorrectiveRoundsShareOneBudget(t *testing.T) {
 		dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 		branch := "factoryd/" + id + "-001"
 		buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, base, result, "repo-lint")
-		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+		calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 			return requestdrivertest.QuarantinedOn(t, dataDir, roundRunID, branch, base, result, "repo-unit")
 		})
 		cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 2}
@@ -360,7 +360,7 @@ func TestCheckCorrectiveRoundEligibilityFromTheRunRecord(t *testing.T) {
 				}
 				return rr.Save(dataDir)
 			}
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted, Branch: branch}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -384,7 +384,7 @@ func TestCheckCorrectiveRoundKeepsTheDiffScopeCheckOnTheRequest(t *testing.T) {
 			dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 			branch := "factoryd/" + id + "-001"
 			buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, base, result, "diff_scope")
-			requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				checks := []string{"diff_scope"}
 				if budget == 1 {
 					checks = append(checks, "tests_red_on_base") // no longer something a build is told about

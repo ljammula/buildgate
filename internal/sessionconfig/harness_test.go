@@ -51,17 +51,15 @@ func TestValidateRoutingHarnessMustBeInAllowedHarnesses(t *testing.T) {
 // registry entry whose wire APIs exclude the fixture model's api: the
 // compiled harnesses all speak every api today.
 func TestValidateRoutingRefusesHarnessThatCannotSpeakTheModelAPI(t *testing.T) {
-	prev := harnessLookup
-	t.Cleanup(func() { harnessLookup = prev })
-	harnessLookup = func(name string) (harness.Descriptor, error) {
+	lookup := func(name string) (harness.Descriptor, error) {
 		if name == "narrow" {
 			return harness.Descriptor{Name: "narrow", WireAPIs: []string{"anthropic-messages"}}, nil
 		}
-		return prev(name)
+		return harness.Lookup(name)
 	}
 	s := routesModeSettings()
 	s.Roles.Execution.Harness = "narrow"
-	err := ValidateRouting(s)
+	err := validateRouting(s, lookup)
 	if err == nil {
 		t.Fatal("ValidateRouting accepted a harness that cannot speak the model's api")
 	}

@@ -921,6 +921,12 @@ func dockerListEitherLabel(ctx context.Context, dockerBinary string, listArgs []
 // ReconcileOrphans already is. A per-run service container is reconciled by
 // exactly one sweep, so both kinds share this one.
 func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([]string, error) {
+	return reconcileRelayOrphans(ctx, time.After, dockerBinary, dataDir)
+}
+
+// reconcileRelayOrphans is ReconcileRelayOrphans with its debounce wait
+// passed in.
+func reconcileRelayOrphans(ctx context.Context, after debounceAfter, dockerBinary, dataDir string) ([]string, error) {
 	dataDir, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox data directory: %w", err)
@@ -929,7 +935,7 @@ func ReconcileRelayOrphans(ctx context.Context, dockerBinary, dataDir string) ([
 		dockerBinary = "docker"
 	}
 	label := dataDirLabel(dataDir)
-	rc := &relayReconcile{ctx: ctx, dockerBinary: dockerBinary, dataDir: dataDir, label: label, present: map[string]bool{}}
+	rc := &relayReconcile{ctx: ctx, after: after, dockerBinary: dockerBinary, dataDir: dataDir, label: label, present: map[string]bool{}}
 	parsed, err := rc.listContainers()
 	if err != nil {
 		return nil, err
@@ -957,6 +963,7 @@ type relayOrphan struct {
 // networks of non-terminal runs whose owner looks dead.
 type relayReconcile struct {
 	ctx                          context.Context
+	after                        debounceAfter
 	dockerBinary, dataDir, label string
 
 	removed         []string
@@ -1215,7 +1222,7 @@ func (rc *relayReconcile) waitOutStalenessDebounce() bool {
 	// candidates should not each (or, here, each *type* of candidate)
 	// add their own ownerHeartbeatInterval of delay.
 	select {
-	case <-ownerDebounceAfter(ownerHeartbeatInterval):
+	case <-rc.after(ownerHeartbeatInterval):
 	case <-rc.ctx.Done():
 		for _, c := range rc.staleContainers {
 			rc.errs = append(rc.errs, fmt.Errorf("reconcile abandoned relay %q (run %q): staleness debounce wait: %w", c.name, c.runID, rc.ctx.Err()))

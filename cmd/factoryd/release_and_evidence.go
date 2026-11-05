@@ -1,6 +1,7 @@
 package main
 
 import (
+	"buildgate/internal/consolelink"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestsubmit"
 	"context"
@@ -328,8 +329,9 @@ func releasePolicyCanNeverAllow(policy release.MergePolicy) bool {
 // assert on its exact text without duplicating it.
 const releasePolicyNeverAllowsWarning = "warning: -open-pull-request is set but the release policy denies by default (no -release-rollback-plan and/or -release-max-files-changed=0/-release-max-changed-lines=0 means every run will be denied and no pull request will ever open); set real values or PRs will never appear"
 
-// releasePolicyWarnedOnce guards releasePolicyNeverAllowsWarning's own
-// log line -- deliberately NOT a sync.Once wrapping the whole call (an
+// releasePolicyWarning guards releasePolicyNeverAllowsWarning's own
+// log line for the process that holds it (deps.releaseWarning) --
+// deliberately NOT a sync.Once wrapping the whole call (an
 // earlier version of this fix did that at each call site): a long-lived
 // `factoryd serve` process's first API-started run can easily have
 // -open-pull-request false (a per-request field, not a static flag) or
@@ -346,10 +348,7 @@ const releasePolicyNeverAllowsWarning = "warning: -open-pull-request is set but 
 // warranted -- never zero times because an earlier no-op call consumed
 // the guard, and never more than once because of the two call sites this
 // process's worker/API paths both reach.
-var (
-	releasePolicyWarnedMu sync.Mutex
-	releasePolicyWarned   bool
-)
+type releasePolicyWarning struct{ once sync.Once }
 
 // warnIfReleasePolicyCanNeverAllow logs releasePolicyNeverAllowsWarning,
 // at most once per process, the first time openPullRequest is set and
@@ -359,18 +358,11 @@ var (
 // deny every run today, so shipping the "check the decision before
 // opening a PR" fix with no accompanying warning would make every
 // -open-pull-request operator's PRs stop appearing with no clue why.
-func warnIfReleasePolicyCanNeverAllow(openPullRequest bool, policy release.MergePolicy) {
+func warnIfReleasePolicyCanNeverAllow(dp *deps, openPullRequest bool, policy release.MergePolicy) {
 	if !openPullRequest || !releasePolicyCanNeverAllow(policy) {
 		return
 	}
-	releasePolicyWarnedMu.Lock()
-	alreadyWarned := releasePolicyWarned
-	releasePolicyWarned = true
-	releasePolicyWarnedMu.Unlock()
-	if alreadyWarned {
-		return
-	}
-	log.Println(releasePolicyNeverAllowsWarning)
+	dp.releaseWarning.once.Do(func() { log.Println(releasePolicyNeverAllowsWarning) })
 }
 
 // openEvidencePullRequest is -open-pull-request's own best-effort call
@@ -778,7 +770,7 @@ func notifyAcceptedRun(dataDir, id, ticket, requestID, prURL, prWithheldReason s
 		Delivered: &delivered,
 		RunDir:    run.AbsDir(dataDir, id),
 		Next:      next,
-		Link:      consoleRunURL(resolveConsoleBaseURL("", dataDir), id),
+		Link:      consoleRunURL(consolelink.LocalBaseURL(dataDir), id),
 	}
 	notifyCtx, cancelNotify := context.WithTimeout(context.Background(), 2*time.Second)
 	notifyErr := (notify.LogNotifier{Path: filepath.Join(run.Dir(dataDir, id), "notifications.log")}).Notify(notifyCtx, n)

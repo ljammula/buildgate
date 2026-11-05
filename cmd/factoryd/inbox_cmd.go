@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"buildgate/internal/consolelink"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
@@ -120,7 +121,7 @@ func collectInbox(warn io.Writer, now time.Time, configArg, project string) ([]i
 		if err != nil {
 			return nil, fmt.Errorf("load requests from %q: %w", dir, err)
 		}
-		base := resolveConsoleBaseURL("", dir)
+		base := consolelink.LocalBaseURL(dir)
 		for _, r := range requests {
 			if inboxStates[r.State] && (project == "" || r.Project == project) {
 				entries = append(entries, buildInboxEntry(r, label[dir], dir, base, now))

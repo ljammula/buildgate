@@ -104,6 +104,9 @@ type GHPullRequestOpener struct {
 	// PushRetryWaits are the pauses before each further push attempt after a
 	// failed one; nil means defaultPushRetryWaits.
 	PushRetryWaits []time.Duration
+	// SelfLogins caches the factory's own gh login across calls; nil reads
+	// it on every ReadReviewState.
+	SelfLogins *SelfLogins
 }
 
 // defaultPushRetryWaits is how long OpenDraftPullRequest waits before each

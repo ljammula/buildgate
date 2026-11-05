@@ -572,27 +572,31 @@ const reviewThreadsQuery = `query($owner: String!, $repo: String!, $number: Int!
   }
 }`
 
-// selfLogin caches `gh api user --jq .login`'s result process-wide, but
+// SelfLogins caches `gh api user --jq .login`'s result per gh binary, but
 // only once it has actually succeeded: a transient failure (network, a
 // rate limit, gh not yet authenticated) is retried on every subsequent
 // call rather than cached forever, since a permanently cached error would
 // leave every later ReadReviewState call unable to recognize the
 // factory's own PR replies as its own (see resolveSelfLogin's own doc
-// comment on ReadReviewState below for why that failure mode matters).
-var (
-	selfLoginMu    sync.Mutex
-	selfLoginValue string
-	selfLoginKnown bool
-)
+// comment on ReadReviewState below for why that failure mode matters). A
+// long-lived caller holds one and hands it to every GHPullRequestOpener it
+// builds; the zero value is ready to use.
+type SelfLogins struct {
+	mu       sync.Mutex
+	byBinary map[string]string
+}
 
-func resolveSelfLogin(ctx context.Context, ghBinary string) (string, error) {
-	selfLoginMu.Lock()
-	if selfLoginKnown {
-		value := selfLoginValue
-		selfLoginMu.Unlock()
-		return value, nil
+// resolveSelfLogin returns ghBinary's login, from logins when it holds one;
+// a nil logins reads it on every call.
+func resolveSelfLogin(ctx context.Context, logins *SelfLogins, ghBinary string) (string, error) {
+	if logins != nil {
+		logins.mu.Lock()
+		value, known := logins.byBinary[ghBinary]
+		logins.mu.Unlock()
+		if known {
+			return value, nil
+		}
 	}
-	selfLoginMu.Unlock()
 
 	cmd := exec.CommandContext(ctx, ghBinary, "api", "user", "--jq", ".login")
 	out, err := cmd.Output()
@@ -601,10 +605,14 @@ func resolveSelfLogin(ctx context.Context, ghBinary string) (string, error) {
 	}
 	login := strings.TrimSpace(string(out))
 
-	selfLoginMu.Lock()
-	selfLoginValue = login
-	selfLoginKnown = true
-	selfLoginMu.Unlock()
+	if logins != nil {
+		logins.mu.Lock()
+		if logins.byBinary == nil {
+			logins.byBinary = map[string]string{}
+		}
+		logins.byBinary[ghBinary] = login
+		logins.mu.Unlock()
+	}
 	return login, nil
 }
 
@@ -657,7 +665,7 @@ func (o GHPullRequestOpener) ReadReviewState(ctx context.Context, prURL string, 
 		return ReviewState{}, err
 	}
 
-	selfLogin, err := resolveSelfLogin(ctx, ghBinary)
+	selfLogin, err := resolveSelfLogin(ctx, o.SelfLogins, ghBinary)
 	if err != nil {
 		return ReviewState{}, fmt.Errorf("resolve factory's own gh login: %w", err)
 	}

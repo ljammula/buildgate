@@ -41,9 +41,7 @@ func newCIHarness(t *testing.T, checks ...forge.Check) *ciHarness {
 		h.jobLogs = append(h.jobLogs, id)
 		return "compiling\nFAIL: TestWidget expected 3 got 4\n", nil
 	}
-	orig := requestdriver.PrReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = orig })
-	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, _ func(*run.Run)) error {
+	h.dp.runTicketFn = func(_ context.Context, args []string, _ func(*run.Run)) error {
 		h.roundRun++
 		if path := requestdrivertest.ArgValue(args, "-earlier-attempt"); path != "" {
 			data, err := os.ReadFile(path)
@@ -57,13 +55,13 @@ func newCIHarness(t *testing.T, checks ...forge.Check) *ciHarness {
 		accepted := &run.Run{ID: requestdrivertest.ArgValue(args, "-ticket"), State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: strings.Repeat("c", 40), Branch: requestdrivertest.ArgValue(args, "-on-branch")}
 		return saveAcceptedRoundRun(t, h.dataDir, accepted)
 	}
-	requestdrivertest.LastPushedSHA = map[string]string{}
+	pushed := map[string]string{}
 	h.dp.pushExistingBranchFn = func(_ context.Context, _, sha, branch string) error {
-		requestdrivertest.LastPushedSHA[branch] = sha
+		pushed[branch] = sha
 		return nil
 	}
 	h.dp.remoteBranchHeadSHAFn = func(_ context.Context, _, branch string) (string, error) {
-		if sha, ok := requestdrivertest.LastPushedSHA[branch]; ok {
+		if sha, ok := pushed[branch]; ok {
 			return sha, nil
 		}
 		return strings.Repeat("0", 40), nil
@@ -258,7 +256,7 @@ func TestCIRoundAfterAQuarantinedRoundGivesOneRecordWithBothTheRefusalAndTheChec
 	thread := []forge.Thread{{ID: "t1", Path: "main.go", Line: 3, Author: "rev", Body: "set a header", CommentID: 5}}
 	h.state.BlocksReadyThreads, h.state.ActionableThreads = thread, thread
 	var argvs [][]string
-	requestdriver.PrReviewCorrectiveRunner = func(_ context.Context, args []string, _ func(*run.Run)) error {
+	h.dp.runTicketFn = func(_ context.Context, args []string, _ func(*run.Run)) error {
 		argvs = append(argvs, args)
 		return requestdrivertest.CorrectableQuarantine(t, h.dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "").Save(h.dataDir)
 	}

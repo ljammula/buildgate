@@ -168,10 +168,8 @@ func TestRunCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	ticket := &r.Tickets[0]
 	threads := []forge.Thread{{ID: "thread-1", Path: "a.go", Line: 1, Author: "dave", Body: "needs work", CommentID: 444}}
 
-	origRunner := requestdriver.PrReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.PrReviewCorrectiveRunner = origRunner })
 	calls := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		calls++
 		t.Fatal("prReviewCorrectiveRunner must not be called once the request budget is already exhausted")
 		return nil
@@ -369,7 +367,7 @@ func TestCorrectiveRoundQuarantinesWhenRequestBudgetExhausted(t *testing.T) {
 	ticket := &r.Tickets[0]
 	runRecord := requestdrivertest.CorrectableQuarantine(t, dataDir, "run-under-test", branch, baseSHA, fmt.Sprintf("%040d", 2))
 
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}
 	})
 

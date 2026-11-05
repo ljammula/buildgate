@@ -389,19 +389,17 @@ func apiStartStarter(dp *deps, dataDir string, inFlight *sync.WaitGroup, release
 		// sessionconfig.Settings. Both are daemon-static for the life of
 		// this process -- identical for every request, exactly like before
 		// -- so serveMain now builds a Settings value from these same two
-		// operator-configured inputs once, at startup, and assigns it to
-		// tier2SettingsOverride before ever accepting a connection; every
-		// API-started run's own resolveSettings() call picks that up the
-		// same way worker_config.go's own entries already do. See serveMain's
-		// own comment at that assignment for why this is safe to leave set
-		// for the whole daemon lifetime, unlike worker's clear-on-return.
+		// operator-configured inputs once, at startup, as
+		// sandboxPolicy.settings, which every API-started run's build is
+		// handed (runTicketWithSettings) the same way the worker's builds
+		// are handed the worker's settings.
 		// releasePolicy/sandboxLimits themselves stay as this function's own
 		// parameters (unused in this body now) rather than being dropped
 		// from the signature: every existing call site -- serveMain's own,
 		// and every test in this package that constructs one directly --
 		// already supplies them, and removing the parameters would be pure
 		// signature churn with no behavior change now that serveMain builds
-		// the same values into tier2SettingsOverride itself.
+		// the same values into sandboxPolicy.settings itself.
 		//
 		// Same rationale again: sandboxPolicy.egressCABundle is this
 		// daemon's own -egress-ca-bundle, forwarded so an API-started
@@ -444,7 +442,7 @@ func apiStartStarter(dp *deps, dataDir string, inFlight *sync.WaitGroup, release
 			// owner of this process's SIGINT/SIGTERM handling — see
 			// runMainWithReady's doc comment for why an embedded run must
 			// not install its own competing handler.
-			err := runMainWithReady(dp, context.Background(), args, func(record *run.Run) {
+			err := runTicketWithSettings(dp, context.Background(), sandboxPolicy.settings, args, func(record *run.Run) {
 				copy := *record
 				ready <- &copy
 				readySent = true

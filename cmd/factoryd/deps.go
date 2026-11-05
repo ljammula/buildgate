@@ -4,6 +4,7 @@ import (
 	"buildgate/internal/dockerbackend"
 	"buildgate/internal/forge"
 	"buildgate/internal/hostcontrol"
+	"buildgate/internal/meter"
 	"buildgate/internal/openshell"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
@@ -24,18 +25,10 @@ import (
 // a long-lived struct (ticketRun, daemonRun, serveRun, requestActivities)
 // holds it. A test builds its own with newTestDeps (deps_test.go).
 //
-// Four package-level function variables remain, none of them one of these
-// boundaries. One is here:
-//
-//	listGitHubCopilotModelsFn  doctor's model listing over HTTP
-//
-// and three in internal/requestdriver:
-//
-//	PrReviewCorrectiveRunner, ReviewCorrectiveRunner
-//	                           test overrides of the build entry point
-//	                           (Deps.RunTicket); nil in production
-//	ContinueAfterPRApproval    the request driver's own next step, replaced
-//	                           by the tests of the step before it
+// A dependency is passed in like this, never reached through a package
+// variable: no function assigns one (TestNoFunctionAssignsAPackageVariable,
+// internal/claims, whose baseline lists the timeouts and limits tests still
+// shrink).
 type deps struct {
 	docker   dockerBoundary
 	forge    forgeBoundary
@@ -47,11 +40,16 @@ type deps struct {
 	gateway *openshell.Lazy
 	// backends keeps docker.backend's detections for the process.
 	backends *backendMemo
+	// releaseWarning logs the never-allowing release policy warning once
+	// for the process.
+	releaseWarning *releasePolicyWarning
+	// ghLogins keeps the factory's own gh login for the process.
+	ghLogins *forge.SelfLogins
 }
 
 // newDeps returns the real implementations.
 func newDeps() *deps {
-	dp := &deps{backends: &backendMemo{}}
+	dp := &deps{backends: &backendMemo{}, releaseWarning: &releasePolicyWarning{}, ghLogins: &forge.SelfLogins{}}
 	dp.docker = realDocker{dp: dp}
 	dp.forge = realForge{dp: dp}
 	dp.host = realHost{dp: dp}
@@ -174,9 +172,14 @@ type hostBoundary interface {
 	goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	launchctl(args ...string) ([]byte, error)
 	launchctlBinary() string
+	// listGitHubCopilotModels exchanges githubToken for a Copilot API token
+	// and lists the models it is entitled to, over HTTP.
+	listGitHubCopilotModels(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error)
 	launchdServicePID(domain string) (int, bool)
 	portListeners(port string) ([]byte, error)
 	pidAlive(pid int) bool
+	// tcpListening reports whether a TCP listener answers on addr.
+	tcpListening(addr string) bool
 	pidLooksLikeWorker(pid int) bool
 	processUID(pid int) (int, bool)
 	runUpgradeCommand(c upgradeCmd) ([]byte, error)

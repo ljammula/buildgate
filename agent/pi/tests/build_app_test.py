@@ -3121,11 +3121,10 @@ class NotesTurnTests(unittest.TestCase):
 				mock.patch.object(build_app, "write_round_state", side_effect=capture),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
-				mock.patch.object(build_app, "_process_started", 0.0),
 				contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
 			):
 				result = build_app.run_build(
-					root, spec, max_rounds=1, timeout_minutes=1,
+					root, spec, max_rounds=1, timeout_minutes=1, started_monotonic=0.0,
 					**extra,
 				)
 				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
@@ -3742,10 +3741,9 @@ class PassedNotesTurnTests(unittest.TestCase):
 				mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verification)),
 				mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 				mock.patch.object(build_app, "_monotonic", return_value=float(elapsed)),
-				mock.patch.object(build_app, "_process_started", 0.0),
 				contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
 			):
-				result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1, **extra)
+				result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1, started_monotonic=0.0, **extra)
 				after = tree_of(root)
 				notes_file = root / ".pi-build-session" / build_app.HANDOFF_NOTES_FILE
 				return {
@@ -4079,11 +4077,10 @@ class ResumeAfterPassTests(unittest.TestCase):
 			mock.patch.object(build_app, "run_verification", side_effect=failing_again_when_rerun(verification)),
 			mock.patch.object(build_app, "run_agent_streaming", side_effect=stream),
 			mock.patch.object(build_app, "_monotonic", return_value=0.0),
-			mock.patch.object(build_app, "_process_started", 0.0),
 			contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()),
 		):
 			try:
-				result = build_app.run_build(root, spec, max_rounds=max_rounds, timeout_minutes=1, resume_from_state=resume_from)
+				result = build_app.run_build(root, spec, max_rounds=max_rounds, timeout_minutes=1, resume_from_state=resume_from, started_monotonic=0.0)
 			except Killed:
 				pass
 		return result, calls, len(verify) - len(verify_left)

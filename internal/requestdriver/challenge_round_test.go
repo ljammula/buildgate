@@ -94,7 +94,7 @@ func (f *adviceFixture) roundChallengeRun(t *testing.T, id, verdict string, othe
 // request and branch: the round opens none of its own.
 func TestRedChallengeStartsOneRoundWhichWhenGreenIsPushed(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
-	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.roundChallengeRun(t, id, run.ChallengeGreen)
 	})
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -157,7 +157,7 @@ func (f *adviceFixture) assertRoundsPushed(t *testing.T, n int) {
 // still failing. With the budget spent no second round follows.
 func TestChallengeRoundThatStaysRedIsAdviceAndTheRunStands(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.roundChallengeRun(t, id, run.ChallengeRed)
 	})
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -177,7 +177,7 @@ func TestChallengeRoundThatStaysRedIsAdviceAndTheRunStands(t *testing.T) {
 // job.
 func TestGreenChallengeStartsNoRound(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeGreen)
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.roundChallengeRun(t, id, run.ChallengeGreen)
 	})
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -203,7 +203,7 @@ func TestGreenChallengeStartsNoRound(t *testing.T) {
 // the tests first and then the finding.
 func TestRedTestsAndAHighFindingAreOneRoundWithOneBrief(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed, adviceFindings...)
-	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, lastArgs := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.roundChallengeRun(t, id, run.ChallengeGreen)
 	})
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -240,7 +240,7 @@ func TestZeroAdviceRoundsGiveARedTestOneRoundAndAFindingNone(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := challengeFixture(t, tc.verdict, tc.findings...)
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 				return f.roundChallengeRun(t, id, run.ChallengeRed)
 			})
 			if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -261,15 +261,15 @@ func TestRedStaysRedRoundsRunToTheBudgetAndCommittedTestsAreNotCommittedAgain(t 
 	f.cfg.Settings.ReviewAdviceRounds = 3
 	f.roundFindings[2] = stillHigh
 	var all [][]string
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		verdict := run.ChallengeRed
 		if roundOf(id) >= 2 {
 			verdict = run.ChallengeGreen
 		}
 		return f.roundChallengeRun(t, id, verdict)
 	})
-	stub := requestdriver.ReviewCorrectiveRunner
-	requestdriver.ReviewCorrectiveRunner = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
+	stub := f.dp.runTicketFn
+	f.dp.runTicketFn = func(ctx context.Context, a []string, onReady func(*run.Run)) error {
 		all = append(all, a)
 		return stub(ctx, a, onReady)
 	}
@@ -311,7 +311,7 @@ func TestRoundThatRegressesAGreenHeldTestIsNotPushed(t *testing.T) {
 				rec.Challenge.Files = append(rec.Challenge.Files, g)
 				return rec.Save(f.dataDir)
 			}
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 				broken := other
 				broken.Verdict = verdict
 				return f.roundChallengeRun(t, id, run.ChallengeGreen, broken)
@@ -353,7 +353,7 @@ func TestAdviceOnlyRoundWithNoFewerHighFindingsIsPushedAndEndsTheRounds(t *testi
 func TestRoundGivenRedTestsWhosePushFailsHalts(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
 	f.dp.pushExistingBranchFn = func(context.Context, string, string, string) error { return errors.New("remote hung up") }
-	requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.roundChallengeRun(t, id, run.ChallengeGreen)
 	})
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {
@@ -385,9 +385,7 @@ func TestChallengeRoundInterruptedIsSettledNotRelaunched(t *testing.T) {
 			f := challengeFixture(t, run.ChallengeRed)
 			ctx, cancel := context.WithCancel(context.Background())
 			calls := 0
-			orig := requestdriver.ReviewCorrectiveRunner
-			t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
-			requestdriver.ReviewCorrectiveRunner = func(_ context.Context, args []string, onReady func(*run.Run)) error {
+			f.dp.runTicketFn = func(_ context.Context, args []string, onReady func(*run.Run)) error {
 				calls++
 				defer cancel()
 				if tc.started {
@@ -443,7 +441,7 @@ func TestChallengeRoundRefusedByTheLaunchBudgetStartsNothing(t *testing.T) {
 	f := challengeFixture(t, run.ChallengeRed)
 	// The accepted run spent 800 tokens: 1000 leaves 200.
 	f.cfg.Settings.RequestTokenBudget = 1000
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, f.dataDir, func(dataDir, id string) *run.Run {
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&f.dp.runTicketFn, t, f.dataDir, func(dataDir, id string) *run.Run {
 		return f.roundChallengeRun(t, id, run.ChallengeGreen)
 	})
 	if err := f.drive(t, context.Background(), f.buildRunner); err != nil {

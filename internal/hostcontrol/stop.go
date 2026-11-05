@@ -119,7 +119,7 @@ func WorkerPIDs(dp Deps, dir string, now time.Time) []pidSource {
 // console-address record names, then the quickstart pid file.
 func ServePIDs(dp Deps, dir string) []pidSource {
 	var out []pidSource
-	if pid, _, ok := consolelink.ServePID(dir); ok && AliveFactoryd(dp, pid) {
+	if pid, _, ok := consolelink.ServePID(dp, dir); ok && AliveFactoryd(dp, pid) {
 		out = append(out, pidSource{pid, ""})
 	}
 	pidFile := filepath.Join(dir, "quickstart-serve.pid")

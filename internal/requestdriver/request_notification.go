@@ -67,7 +67,7 @@ func prepareRequestNotification(dataDir string, r *request.Request, notice reque
 		SentAt:     ts,
 		Delivered:  &delivered,
 		Next:       notice.Next,
-		Link:       consolelink.RequestURL(consolelink.BaseURL("", dataDir), r.ID),
+		Link:       consolelink.RequestURL(consolelink.LocalBaseURL(dataDir), r.ID),
 		RemoteLink: consolelink.RequestURL(consolelink.RemoteBaseURL(dataDir), r.ID),
 	}
 	// request.Dir exists since submit; nothing here depends on that.

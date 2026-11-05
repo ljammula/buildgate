@@ -171,7 +171,7 @@ func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.
 	if _, stop, err := runRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
 		return err
 	}
-	return acceptTicketRun(dataDir, r, ticket, accepted, cfg.OpenPullRequest, time.Now())
+	return acceptTicketRun(dataDir, r, ticket, accepted, cfg, time.Now())
 }
 
 // runRounds runs rounds after current while they apply (roundApplies), each
@@ -597,7 +597,7 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	} else if pushed != nil {
 		last = pushed
 	}
-	return advanceAcceptedTicket(dataDir, r, ticket, last, cfg.OpenPullRequest, time.Now())
+	return advanceAcceptedTicket(dataDir, r, ticket, last, cfg, time.Now())
 }
 
 // interruptedAdviceOutcome is how the in-flight round adv ended, or, in

@@ -31,13 +31,29 @@ func copilotModelsFailureNextStep(err error) string {
 	return "Check the GitHub Copilot login/token source and network access, then retry `factoryd doctor -list-models`. The configured model ID was not checked."
 }
 
-// listGitHubCopilotModelsFn is meter.ListGitHubCopilotModels, indirected
-// through a package var (the same pattern forge.userLogin uses)
-// so doctorCheckCopilotModelListed, doctorListModels's own github-copilot
-// branch, and quickstartBuildConfig's own copilot model picker are all
-// testable against a stub instead of a real network call to
+// copilotModelLister lists the Copilot models a GitHub token is entitled to
+// (hostBoundary.listGitHubCopilotModels): doctorInputs carries one, so
+// doctorCheckCopilotModelListed and doctorListModels's own github-copilot
+// branch are testable against a stub instead of a real network call to
 // api.individual.githubcopilot.com/api.github.com.
-var listGitHubCopilotModelsFn = meter.ListGitHubCopilotModels
+type copilotModelLister func(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error)
+
+// listGitHubCopilotModels is meter.ListGitHubCopilotModels: the token
+// exchange and the model listing over HTTP.
+func (impl realHost) listGitHubCopilotModels(ctx context.Context, caBundlePath, githubToken, upstream string) ([]meter.CopilotModel, error) {
+	return meter.ListGitHubCopilotModels(ctx, caBundlePath, githubToken, upstream)
+}
+
+// copilotModelList is in.copilotModels, or a refusal when the caller that
+// built in gave it none.
+func (in doctorInputs) copilotModelList() copilotModelLister {
+	if in.copilotModels != nil {
+		return in.copilotModels
+	}
+	return func(context.Context, string, string, string) ([]meter.CopilotModel, error) {
+		return nil, errors.New("this doctor run lists no Copilot models")
+	}
+}
 
 // doctorRegisterListModelsFlag mirrors doctorRegisterYesFlag/
 // doctorRegisterNotifyTestFlag's own pattern: registered directly on
@@ -156,7 +172,7 @@ func doctorListModels(ctx context.Context, w io.Writer, in doctorInputs) error {
 		if err != nil {
 			return fmt.Errorf("%w; configure a GitHub Copilot login token with `pi login`, `GITHUB_COPILOT_TOKEN`, or the route's github_token_file, then retry", err)
 		}
-		models, err := listGitHubCopilotModelsFn(ctx, in.egressCABundle, token, in.relayUpstream)
+		models, err := in.copilotModelList()(ctx, in.egressCABundle, token, in.relayUpstream)
 		if err != nil {
 			return fmt.Errorf("list copilot models: %w; %s", err, copilotModelsFailureNextStep(err))
 		}

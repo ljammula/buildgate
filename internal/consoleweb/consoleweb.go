@@ -21,9 +21,16 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
-// fsys is dist/ itself, not embed's own dist/-prefixed root, so a request
+// dist is dist/ itself, not embed's own dist/-prefixed root, so a request
 // for "/assets/index.js" resolves to "assets/index.js" inside it.
-var fsys = mustSub(distFS, "dist")
+var dist = mustSub(distFS, "dist")
+
+// Bundle is a console build to serve: this binary's embedded one (Embedded,
+// Handler), or any other file tree a test hands NewBundle.
+type Bundle struct{ fsys fs.FS }
+
+// NewBundle is the console build whose files are f, laid out as dist/ is.
+func NewBundle(f fs.FS) Bundle { return Bundle{fsys: f} }
 
 func mustSub(f embed.FS, dir string) fs.FS {
 	sub, err := fs.Sub(f, dir)
@@ -59,9 +66,13 @@ server against this API -- see <code>console/README.md</code>.</p>
 // manifest without index.html is a stale or partial bundle that would
 // answer / with a raw directory listing instead of the console or the
 // placeholder.
-func Embedded() bool {
+func Embedded() bool { return NewBundle(dist).Embedded() }
+
+// Embedded reports whether b is a real console build: see the package
+// function Embedded.
+func (b Bundle) Embedded() bool {
 	for _, name := range []string{"index.html", ".vite/manifest.json"} {
-		if _, err := fs.Stat(fsys, name); err != nil {
+		if _, err := fs.Stat(b.fsys, name); err != nil {
 			return false
 		}
 	}
@@ -81,23 +92,27 @@ var contentTypes = map[string]string{
 // serves index.html instead of 404, so the console's own path-based deep
 // links (the path builders of console/src/routes/paths.ts) work on a hard reload/refresh, not just client-side
 // navigation.
-func Handler() http.Handler {
-	fileServer := http.FileServer(http.FS(fsys))
+func Handler() http.Handler { return NewBundle(dist).Handler() }
+
+// Handler serves b with the SPA fallback the package function Handler
+// describes.
+func (b Bundle) Handler() http.Handler {
+	fileServer := http.FileServer(http.FS(b.fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := path.Clean(r.URL.Path)
 		trimmed := strings.TrimPrefix(clean, "/")
 		// An unbuilt binary has no index.html to serve, so an explicit
 		// /index.html gets the placeholder too rather than a bare 404.
-		if trimmed == "index.html" && !Embedded() {
+		if trimmed == "index.html" && !b.Embedded() {
 			trimmed = ""
 		}
 		if trimmed != "" && path.Ext(trimmed) == "" {
-			if _, err := fs.Stat(fsys, trimmed); err != nil {
+			if _, err := fs.Stat(b.fsys, trimmed); err != nil {
 				trimmed = ""
 			}
 		}
 		if trimmed == "" {
-			if !Embedded() {
+			if !b.Embedded() {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				io.WriteString(w, placeholderHTML)
 				return

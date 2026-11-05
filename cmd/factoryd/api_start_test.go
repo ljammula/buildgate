@@ -20,33 +20,21 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
-// apiSandboxTestMu serializes every test that points tier2SettingsOverride
-// at a fake sandbox Docker binary -- tier2SettingsOverride is process-wide
-// mutable state (the same production mechanism serveMain uses to configure
-// every API-started run), so two tests mutating it concurrently would race
-// under -race regardless of what either one actually asserts.
-var apiSandboxTestMu sync.Mutex
-
-// withFakeSandboxSettings points tier2SettingsOverride's SandboxDocker/
-// SandboxImage at testdata/fake_docker.sh for the duration of one test, so
-// apiStartStarter's spawned runMainWithReady call sandboxes through it
+// fakeSandboxSettings are session settings whose SandboxDocker/SandboxImage
+// point at testdata/fake_docker.sh, for a test to hand apiStartStarter
+// (apiSandboxPolicy.settings), so its spawned build sandboxes through it
 // instead of a real Docker daemon -- sandboxing is unconditional, with no
 // -allow-unsandboxed opt-out anywhere in factoryd anymore. A request's own
 // explicit SandboxImage (an allowlisted one, say) still wins over this
 // default the same way an explicit -sandbox-image flag always would.
-func withFakeSandboxSettings(t *testing.T) {
+func fakeSandboxSettings(t *testing.T) *sessionconfig.Settings {
 	t.Helper()
-	apiSandboxTestMu.Lock()
 	settings := sessionconfig.DefaultSettings()
 	settings.SandboxDocker = fakeSandboxDockerBinary(t)
 	settings.SandboxImage = fakeSandboxImage
 	settings.SandboxWorkerUID = testSandboxWorkerUID()
 	settings.CodeReviewPolicy = codereview.PolicyOff // the default, required, needs a model relay
-	tier2SettingsOverride = &settings
-	t.Cleanup(func() {
-		tier2SettingsOverride = nil
-		apiSandboxTestMu.Unlock()
-	})
+	return &settings
 }
 
 func TestRefuseAPITokensInEnvironment(t *testing.T) {
@@ -105,7 +93,7 @@ func writeNativeTicketForAPI(t *testing.T, workspace, ticket string) {
 
 func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -125,7 +113,7 @@ func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 	}
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{allowedImages: []string{fakeSandboxImage}})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{settings: settings, allowedImages: []string{fakeSandboxImage}})(context.Background(), api.StartRequest{
 		TemporalAddress: "127.0.0.1:1", // nothing listens there
 		ID:              "api-start-unreachable-temporal",
 		Ticket:          "api-ticket",
@@ -163,7 +151,7 @@ func TestAPIStartedRunHaltsWhenInitializationFailsAfterReady(t *testing.T) {
 // than requiring a Temporal server or a real build.
 func TestAPIStartStarterUsesBoundedSupervisor(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -179,7 +167,7 @@ func TestAPIStartStarterUsesBoundedSupervisor(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-start-1",
 		Ticket:              "api-ticket",
@@ -219,7 +207,7 @@ func TestAPIStartStarterUsesBoundedSupervisor(t *testing.T) {
 // ends up isolated (a distinct worktree/branch, not the shared checkout).
 func TestAPIStartStarterPlumbsIsolateWorkspaceFlag(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -235,7 +223,7 @@ func TestAPIStartStarterPlumbsIsolateWorkspaceFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-isolated-1",
 		Ticket:              "api-ticket",
@@ -273,7 +261,7 @@ func TestAPIStartStarterPlumbsIsolateWorkspaceFlag(t *testing.T) {
 // quarantine on full_suite_verify instead.
 func TestAPIStartStarterPlumbsFullSuiteCadence(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -289,7 +277,7 @@ func TestAPIStartStarterPlumbsFullSuiteCadence(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // see TestAPIStartStarterPlumbsIsolateWorkspaceFlag's matching comment.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-full-suite-1",
 		Ticket:              "api-ticket",
@@ -341,7 +329,7 @@ func TestAPIStartStarterPlumbsFullSuiteCadence(t *testing.T) {
 // would (see TestIntegrationIsolateWorkspaceRequiresReachableTemporalServer).
 func TestAPIStartStarterAllowsIsolateWorkspaceWithTemporalAddress(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
@@ -356,7 +344,7 @@ func TestAPIStartStarterAllowsIsolateWorkspaceWithTemporalAddress(t *testing.T) 
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		Ticket:    "api-ticket",
 		Workspace: workspace,
 		Spec:      spec,
@@ -398,7 +386,7 @@ func TestAPIStartStarterAllowsIsolateWorkspaceWithTemporalAddress(t *testing.T) 
 // carries no bootstrap scaffold).
 func TestAPIStartStarterPlumbsSkipProjectCheckFlag(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
@@ -413,7 +401,7 @@ func TestAPIStartStarterPlumbsSkipProjectCheckFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-skip-project-check-1",
 		Ticket:              "api-ticket",
@@ -464,7 +452,7 @@ func TestAPIStartStarterPlumbsSkipProjectCheckFlag(t *testing.T) {
 // still naming the preflight failure.
 func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepoWithoutBootstrapScaffold calls t.Setenv internally
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -479,7 +467,7 @@ func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testin
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress: sharedTemporalAddress(t),
 		ID:              "api-project-bootstrap-failure-1",
 		Ticket:          "api-ticket",
@@ -526,7 +514,7 @@ func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testin
 // confirming this run never took the -request-ticket path.
 func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	workspace := newFixtureRepo(t)
@@ -544,7 +532,7 @@ func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-request-ticket-marker-1",
 		Ticket:              "api-ticket",
@@ -581,7 +569,7 @@ func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 // only fires if the flag was actually plumbed through.
 func TestAPIStartStarterPlumbsSandboxImageFlag(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
@@ -596,7 +584,7 @@ func TestAPIStartStarterPlumbsSandboxImageFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{allowedImages: []string{"not-digest-pinned:latest"}})(context.Background(), api.StartRequest{
+	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings, allowedImages: []string{"not-digest-pinned:latest"}})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-sandbox-image-1",
 		Ticket:              "api-ticket",
@@ -650,14 +638,14 @@ func TestAPIStartStarterPlumbsSandboxImageFlag(t *testing.T) {
 // ceiling would still see ordinary API runs consume up to 4g.
 // flags-consolidate (2026-09-10) then removed -sandbox-memory/cpus/pids/
 // tmpfs-size as CLI flags entirely, so serveMain now folds them into a
-// sessionconfig.Settings (apiStartTier2Settings) and installs it as
-// tier2SettingsOverride before ever accepting a connection, rather than
+// sessionconfig.Settings (apiStartTier2Settings) and holds it as
+// sandboxPolicy.settings before ever accepting a connection, rather than
 // forwarding them into the spawned run's own argv -- see serveMain's own
 // comment at that assignment. Proven the same way as before, adapted to
 // this mechanism: deliberately constructing an invalid sandboxResourceLimits
-// (empty Memory), folding it into tier2SettingsOverride the way serveMain
+// (empty Memory), folding it into sandboxPolicy.settings the way serveMain
 // would, and confirming the started run still fails on it -- if
-// apiStartStarter/runMainWithReady silently ignored tier2SettingsOverride,
+// apiStartStarter/runMainWithReady silently ignored those settings,
 // sessionconfig.DefaultSettings' own "4g" would apply instead and the run
 // would start normally. Fails synchronously with
 // validateSandboxResourceLimitFlags' own error (runMainWithReady's startup
@@ -682,15 +670,10 @@ func TestAPIStartStarterForwardsServerConfiguredSandboxResourceLimits(t *testing
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
 
-	// Mirrors serveMain's own tier2SettingsOverride assignment -- see its
-	// doc comment for why it is safe to leave set for a real daemon's whole
-	// lifetime; reset here so this test does not leak it into another test
-	// sharing this package's test binary.
+	// Mirrors serveMain's own sandboxPolicy.settings assignment.
 	settings := apiStartTier2Settings(sessionconfig.DefaultSettings(), release.MergePolicy{}, sandboxResourceLimits{memory: "", cpus: "2", tmpfsSize: "256m"})
-	tier2SettingsOverride = &settings
-	t.Cleanup(func() { tier2SettingsOverride = nil })
 
-	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{allowedImages: []string{"factory-worker:test@sha256:deadbeef"}})(context.Background(), api.StartRequest{
+	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: &settings, allowedImages: []string{"factory-worker:test@sha256:deadbeef"}})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-sandbox-resource-limits-1",
 		Ticket:              "api-ticket",
@@ -704,7 +687,7 @@ func TestAPIStartStarterForwardsServerConfiguredSandboxResourceLimits(t *testing
 		SandboxImage:        "factory-worker:test@sha256:deadbeef",
 	})
 	if err == nil || !strings.Contains(err.Error(), "-sandbox-memory must not be empty") {
-		t.Fatalf("start through API adapter with an empty configured sandbox memory limit: error = %v, want it to name the empty -sandbox-memory flag -- this only happens if the value genuinely reached resolveSettings via tier2SettingsOverride instead of being silently dropped", err)
+		t.Fatalf("start through API adapter with an empty configured sandbox memory limit: error = %v, want it to name the empty -sandbox-memory flag -- this only happens if the value genuinely reached resolveSettings via sandboxPolicy.settings instead of being silently dropped", err)
 	}
 }
 
@@ -753,7 +736,7 @@ func TestAPIStartTier2SettingsPreservesBaseSettingsOutsideReleaseAndSandbox(t *t
 // itself, synchronously, when isolation is requested.
 func TestAPIStartStarterRejectsIsolatedRunIDInvalidAsGitRef(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -763,7 +746,7 @@ func TestAPIStartStarterRejectsIsolatedRunIDInvalidAsGitRef(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress: sharedTemporalAddress(t),
 		ID:              "foo..bar",
 		Ticket:          "api-ticket",
@@ -780,7 +763,7 @@ func TestAPIStartStarterRejectsIsolatedRunIDInvalidAsGitRef(t *testing.T) {
 // synchronously, before the 202.
 func TestAPIStartStarterRejectsInvalidGitRefIDWithoutExplicitIsolateWorkspace(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -790,7 +773,7 @@ func TestAPIStartStarterRejectsInvalidGitRefIDWithoutExplicitIsolateWorkspace(t 
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // found via CI (-race, no local Temporal server): a background apiStartStarter goroutine can still be writing under dataDir (a t.TempDir()) after run.Load first observes a terminal state, racing t.TempDir()'s own cleanup ("directory not empty"). inFlight.Wait() blocks until that goroutine's own inFlight.Done() actually fires.
-	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress: sharedTemporalAddress(t),
 		ID:              "foo..bar",
 		Ticket:          "api-ticket",
@@ -820,7 +803,7 @@ func TestAPIStartStarterRejectsInvalidGitRefIDWithoutExplicitIsolateWorkspace(t 
 // starter only ever produces before it builds an argv.
 func TestAPIStartStarterRejectsSandboxDockerAndSandboxUser(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepo calls t.Setenv internally
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
@@ -843,7 +826,7 @@ func TestAPIStartStarterRejectsSandboxDockerAndSandboxUser(t *testing.T) {
 			req.Ticket = "api-ticket"
 			req.Workspace = workspace
 			req.Spec = spec
-			_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), req)
+			_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), req)
 			if !errors.Is(err, api.ErrInvalidStartRequest) {
 				t.Fatalf("err = %v, want api.ErrInvalidStartRequest", err)
 			}
@@ -887,7 +870,7 @@ func TestAPIStartStarterRejectsNonAllowlistedSandboxImage(t *testing.T) {
 // one is refused: runMainWithReady resolves the address itself.
 func TestAPIStartStarterRefusesAStartWithNoTemporalAddress(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "0")
 	workspace := newFixtureRepo(t)
 	writeNativeTicketForAPI(t, workspace, "api-ticket")
@@ -902,7 +885,7 @@ func TestAPIStartStarterRefusesAStartWithNoTemporalAddress(t *testing.T) {
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
 
-	_, err = apiStartStarter(dp, t.TempDir(), &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+	_, err = apiStartStarter(dp, t.TempDir(), &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m", workerUID: testSandboxWorkerUID()}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		Ticket:              "api-ticket",
 		Workspace:           workspace,
 		Spec:                spec,
@@ -921,7 +904,7 @@ func TestAPIStartStarterRefusesAStartWithNoTemporalAddress(t *testing.T) {
 // asking. Both runs reach Temporal: the record carries a workflow id.
 func TestAPIStartStarterResolvesAnEmptyTemporalAddress(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	address := sharedTemporalAddress(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	old := fakeTemporalOf(dp).ensureFn
@@ -947,7 +930,7 @@ func TestAPIStartStarterResolvesAnEmptyTemporalAddress(t *testing.T) {
 		var inFlight sync.WaitGroup
 		defer inFlight.Wait()
 		calls = 0
-		started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{})(context.Background(), api.StartRequest{
+		started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 			ID: id, TemporalAddress: named, Ticket: "api-ticket", Workspace: workspace, Spec: spec,
 			BuildAppInterpreter: "/bin/sh", BuildAppScript: script, Timeout: "30s", VerifyCommand: "true",
 		})
@@ -1113,7 +1096,7 @@ func TestAPIStartStarterRunsWithExecutionRoleAlias(t *testing.T) {
 // accepted by apiSandboxPolicy.
 func TestAPIStartStarterForwardsEgressCABundleFlag(t *testing.T) {
 	dp := newTestDeps(t)
-	withFakeSandboxSettings(t)
+	settings := fakeSandboxSettings(t)
 	// roles.execution must resolve to a real (fake-credentialed) route
 	// before runMainWithReady ever reaches its own -egress-ca-bundle
 	// validation further down (routes:/models:/roles: is the only
@@ -1121,13 +1104,13 @@ func TestAPIStartStarterForwardsEgressCABundleFlag(t *testing.T) {
 	// before this check): a config with no roles at all would otherwise
 	// fail earlier on "roles.execution.model is not configured", never
 	// reaching the check this test means to exercise.
-	tier2SettingsOverride.Routes = map[string]sessionconfig.Route{
+	settings.Routes = map[string]sessionconfig.Route{
 		"local": {AllowNoCredential: true, Upstream: "https://model-a.example.invalid"},
 	}
-	tier2SettingsOverride.Models = map[string]sessionconfig.Model{
+	settings.Models = map[string]sessionconfig.Model{
 		"m": {ID: "some-model", Routes: []string{"local"}},
 	}
-	tier2SettingsOverride.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "m"}}
+	settings.Roles = &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "m"}}
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
@@ -1140,7 +1123,7 @@ func TestAPIStartStarterForwardsEgressCABundleFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait()
-	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{egressCABundle: badBundle})(context.Background(), api.StartRequest{
+	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings, egressCABundle: badBundle})(context.Background(), api.StartRequest{
 		TemporalAddress: sharedTemporalAddress(t),
 		Ticket:          "api-ticket",
 		Workspace:       workspace,

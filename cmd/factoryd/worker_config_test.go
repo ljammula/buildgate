@@ -361,8 +361,16 @@ sandbox_tmpfs_size: 2g
 	// reflect.DeepEqual, not !=: doctorInputs.settings embeds
 	// sessionconfig.Settings, which holds map fields (Routes, Models),
 	// making the struct no longer comparable with ==/!=.
-	if !reflect.DeepEqual(**got, want) {
-		t.Fatalf("doctor inputs = %+v, want %+v", **got, want)
+	// copilotModels is the worker's host boundary method: a func, which
+	// DeepEqual never matches, so it is checked for being set and then
+	// left out of the comparison.
+	compared := **got
+	if compared.copilotModels == nil {
+		t.Error("the worker's doctor inputs carry no Copilot model listing")
+	}
+	compared.copilotModels = nil
+	if !reflect.DeepEqual(compared, want) {
+		t.Fatalf("doctor inputs = %+v, want %+v", compared, want)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "queue", hostcontrol.WorkerLockFileName)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("worker took the drain lock despite a failed doctor check (stat err = %v)", err)

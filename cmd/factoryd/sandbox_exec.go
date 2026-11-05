@@ -128,7 +128,7 @@ func sandboxAttemptMargin(hasRegistryProxy bool, composeReadyTimeout time.Durati
 // worker environment (harness.Descriptor.WorkerEnv, resolved by the caller from
 // the job's own role); nil for a job with no model-backed harness (verify,
 // gates).
-func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
+func runSandboxWithRetriesVia(rt sandbox.Runtime, modelHostConcurrency int, meterLedgerRoot string, ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (result runner.Result, err error) {
 	maxAttempts = max(maxAttempts, 1)
 	var last runner.Result
 	var lastErr error
@@ -157,7 +157,7 @@ func runSandboxWithRetriesVia(rt sandbox.Runtime, meterLedgerRoot string, ctx co
 	// Acquired before any sidecar starts and released after their cleanup
 	// below, via defer ordering: this defer is registered first, so it runs
 	// LAST (defers are LIFO).
-	modelHostLock, err := acquireModelHostLock(ctx, dataDir, runID, relaySpec)
+	modelHostLock, err := acquireModelHostLock(ctx, dataDir, runID, relaySpec, modelHostConcurrency)
 	if err != nil {
 		return last, err
 	}
@@ -710,30 +710,25 @@ func save(r *run.Run, dataDir string, cause ...error) error {
 	return nil
 }
 
-// acquireModelHostLock resolves this process's session config
-// (resolveSettings, the same Tier-2 resolution every other
-// caller uses) and, if relaySpec names an upstream that
-// modelhost.ShouldLock says needs serializing, blocks until this job has
-// its turn -- see internal/modelhost's own doc comment. A nil relaySpec
+// acquireModelHostLock, when relaySpec names an upstream that
+// modelhost.ShouldLock says needs serializing and concurrency (the session
+// config's model_host_concurrency, from the caller's resolved settings) is
+// positive, blocks until this job has its turn -- see internal/modelhost's own doc comment. A nil relaySpec
 // (no relay configured at all: canonical verification, the full-suite
 // gate) is a no-op, matching every other relay-shaped behavior in this
 // function. A waiting caller emits a "queued behind <holder>"
 // model_host_lock progress event each time the reported holder changes,
 // per the operator-visibility goal (silence is a bug) -- never fails
 // just because another job is running.
-func acquireModelHostLock(ctx context.Context, dataDir, runID string, relaySpec *sandbox.RouteSpec) (*modelhost.Handle, error) {
+func acquireModelHostLock(ctx context.Context, dataDir, runID string, relaySpec *sandbox.RouteSpec, concurrency int) (*modelhost.Handle, error) {
 	if relaySpec == nil || relaySpec.Upstream == "" {
 		return nil, nil
 	}
-	settings, err := resolveSettings()
-	if err != nil {
-		return nil, fmt.Errorf("resolve model-host lock settings: %w", err)
-	}
-	if settings.ModelHostConcurrency <= 0 || !modelhost.ShouldLock(relaySpec.Upstream) {
+	if concurrency <= 0 || !modelhost.ShouldLock(relaySpec.Upstream) {
 		return nil, nil
 	}
 	waited := false
-	handle, err := modelhost.Acquire(ctx, relaySpec.Upstream, runID, settings.ModelHostConcurrency, func(holder string) {
+	handle, err := modelhost.Acquire(ctx, relaySpec.Upstream, runID, concurrency, func(holder string) {
 		waited = true
 		progressMark(dataDir, runID, "model_host_lock", "waiting", "", fmt.Sprintf("queued behind %s", holder))
 	})

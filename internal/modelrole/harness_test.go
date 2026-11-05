@@ -43,17 +43,15 @@ func TestSelectRouteHarnessChoiceOutsideAllowedErrors(t *testing.T) {
 // entry whose wire APIs exclude the model's: every compiled harness speaks all
 // three apis today.
 func TestSelectRouteRefusesHarnessThatCannotSpeakTheModelAPI(t *testing.T) {
-	prev := harnessLookup
-	t.Cleanup(func() { harnessLookup = prev })
-	harnessLookup = func(name string) (harness.Descriptor, error) {
+	lookup := func(name string) (harness.Descriptor, error) {
 		if name == "narrow" {
 			return harness.Descriptor{Name: "narrow", WireAPIs: []string{"anthropic-messages"}}, nil
 		}
-		return prev(name)
+		return harness.Lookup(name)
 	}
 	s := routesModeSettings()
 	s.Roles.Execution.Harness = "narrow"
-	_, err := SelectRoute(s, RoleExecution, "", "", "", alwaysOK)
+	_, err := selectRoute(lookup, s, RoleExecution, "", "", "", alwaysOK)
 	if err == nil {
 		t.Fatal("SelectRoute accepted a harness that cannot speak the model's api")
 	}

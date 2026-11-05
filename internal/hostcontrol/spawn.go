@@ -129,7 +129,7 @@ const quickstartServeReadyTimeout = 10 * time.Second
 
 // serveHealthzOK probes GET /healthz at addr (an exact
 // "host:port", e.g. consolelink.DefaultServeAddr) -- a real HTTP request,
-// not merely a TCP dial like consolelink.Listening, so a listener that
+// not merely a TCP dial like consolelink.Machine.Listening, so a listener that
 // accepts connections but never actually answers (a hung startup) is not
 // mistaken for a serving process. Go's own http.Client sets the request's
 // Host header from the URL it dials, which for a loopback addr like
@@ -314,7 +314,7 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 	// A serve started by hand for this data dir (`factoryd serve`) has no
 	// pid file; it recorded itself in the data dir it serves. The port and
 	// uid checks below apply to it like any other candidate.
-	if pid, recorded, ok := consolelink.ServePID(dataDir); ok && recorded == addr {
+	if pid, recorded, ok := consolelink.ServePID(dp, dataDir); ok && recorded == addr {
 		candidates = append(candidates, pid)
 	}
 
@@ -377,7 +377,7 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 	// owns answers there: a record left by a killed serve can name a port
 	// some other process has since taken.
 	addr := consolelink.DefaultServeAddr
-	if recorded := consolelink.ServeAddress(dataDir); recorded != "" && dp.ServeHealthzOK(recorded) {
+	if recorded := consolelink.ServeAddress(dp, dataDir); recorded != "" && dp.ServeHealthzOK(recorded) {
 		if _, ours := dp.ServeVerifiedOurs(dataDir, recorded); ours {
 			addr = recorded
 		}
@@ -420,7 +420,7 @@ func QuickstartEnsureServe(dp Deps, noServe bool, w io.Writer, binaryPath, confi
 		// The token goes only with a serve this data dir's record names: a
 		// spawn that has not recorded itself yet leaves the held address as
 		// the only one a link could point at.
-		if consolelink.ServeAddress(dataDir) != free {
+		if consolelink.ServeAddress(dp, dataDir) != free {
 			return ""
 		}
 		return token

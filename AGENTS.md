@@ -253,6 +253,7 @@ Rules for a new boundary:
 | No mock framework | `TestNoMockFrameworkIsImported` | Write a fake struct |
 | A package's non-test files hold exactly one package comment, beginning `Package <name>` (a command: `Command <name>` or its name) | `TestEveryPackageHasOnePackageComment` | Say what the package does, in the present tense, in the comment above one file's `package` clause; put a blank line after any other file's header comment |
 | Only listed packages import `os/exec` | `TestOnlyListedPackagesRunProcesses` | Run the process through an interface the caller declares, then add the package to `processRunningPackages` |
+| No function assigns a package-level variable, its own package's or another's (an `init` function and a `sync.Once` body excepted) | `TestNoFunctionAssignsAPackageVariable` | Pass the dependency in as a parameter or a struct field. One already listed in `internal/claims/testdata/package_globals_baseline.txt` may shrink, never grow |
 
 One design rule has no single test, and is checked at review:
 
@@ -263,6 +264,8 @@ One design rule has no single test, and is checked at review:
 After splitting or moving a listed function, regenerate the baseline with
 `CLAIMS_UPDATE_COMPLEXITY_BASELINE=1 go test ./internal/claims -run TestFunctionComplexityStaysWithinLimit`.
 Its diff may only remove lines, lower numbers, or rename a moved function.
+The package-variable baseline regenerates the same way, with
+`CLAIMS_UPDATE_PACKAGE_GLOBALS_BASELINE=1 go test ./internal/claims -run TestNoFunctionAssignsAPackageVariable`.
 
 `internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `install-service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
 

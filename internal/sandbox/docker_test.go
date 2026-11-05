@@ -1078,7 +1078,7 @@ func TestRunRefusesToLaunchBelowFreeSpaceFloor(t *testing.T) {
 // stated purpose of protecting the volume holding durable run evidence
 // whenever the two differ.
 //
-// Injects statfsFreeBytes rather than putting both directories on the
+// Injects LaunchSpec.freeBytes rather than putting both directories on the
 // real filesystem (found via a real Codex review comment on this same
 // change's own PR): WorkDir's check always runs first, so with both
 // paths on one real filesystem it short-circuits before DataDir's check
@@ -1088,19 +1088,16 @@ func TestRunRefusesToLaunchBelowFreeSpaceFloor(t *testing.T) {
 // only a genuine, independent DataDir check can produce the failure
 // asserted below.
 func TestRunChecksFreeSpaceOnDataDirSeparatelyFromWorkDir(t *testing.T) {
-	previous := statfsFreeBytes
-	t.Cleanup(func() { statfsFreeBytes = previous })
-
 	workspace := t.TempDir()
 	dataDir := t.TempDir()
-	statfsFreeBytes = func(path string) (uint64, bool) {
+	freeBytes := func(path string) (uint64, bool) {
 		switch path {
 		case workspace:
 			return minFreeBytesForLaunch * 2, true // WorkDir: plenty of room
 		case dataDir:
 			return minFreeBytesForLaunch / 2, true // DataDir: below the floor
 		default:
-			return previous(path)
+			return statfsFreeBytes(path)
 		}
 	}
 
@@ -1119,6 +1116,7 @@ func TestRunChecksFreeSpaceOnDataDirSeparatelyFromWorkDir(t *testing.T) {
 	spec.InputDir = ""
 	spec.LogPath = filepath.Join(t.TempDir(), "worker.log")
 	spec.DataDir = dataDir
+	spec.freeBytes = freeBytes
 
 	_, err := Run(context.Background(), docker, spec)
 	if err == nil || !strings.Contains(err.Error(), "data directory:") {
@@ -1129,7 +1127,7 @@ func TestRunChecksFreeSpaceOnDataDirSeparatelyFromWorkDir(t *testing.T) {
 	// lookup itself fails (e.g. DataDir doesn't exist on disk yet --
 	// Validate only requires the string to be a non-empty absolute path,
 	// never that the directory already exists).
-	statfsFreeBytes = func(path string) (uint64, bool) {
+	spec.freeBytes = func(path string) (uint64, bool) {
 		if path == workspace {
 			return minFreeBytesForLaunch * 2, true
 		}
@@ -1533,7 +1531,7 @@ func TestReconcileOrphansDebouncesStalenessBeforeReaping(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatalf("save run: %v", err)
 	}
-	debounces := staleOwnerRefreshedDuringDebounce(t, dataDir, r.ID)
+	after, debounces := staleOwnerRefreshedDuringDebounce(t, dataDir, r.ID)
 
 	docker := filepath.Join(t.TempDir(), "docker-fake")
 	script := "#!/bin/sh\ncase \"$1\" in\nps) printf 'container-resumed-owner\\trun-resumed-owner\\n' ;;\nrm) exit 0 ;;\nesac\n"
@@ -1541,7 +1539,7 @@ func TestReconcileOrphansDebouncesStalenessBeforeReaping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, err := ReconcileOrphans(context.Background(), docker, dataDir)
+	removed, err := reconcileOrphans(context.Background(), after, docker, dataDir)
 	if err != nil {
 		t.Fatalf("ReconcileOrphans: %v", err)
 	}
@@ -1562,12 +1560,12 @@ func TestReconcileOrphansDebouncesStalenessBeforeReaping(t *testing.T) {
 
 // staleOwnerRefreshedDuringDebounce sets up a suspended-then-resumed owner
 // for runID without any wall-clock wait: its heartbeat marker is written and
-// back-dated past ownerStaleAfter, and the debounce wait (ownerDebounceAfter)
-// is replaced by one that refreshes the marker, as the owner's heartbeat
+// back-dated past ownerStaleAfter, and the debounce wait it returns
+// is one that refreshes the marker, as the owner's heartbeat
 // goroutine would on resume, and then fires at once. It fails the test if the
 // marker does not read stale before the wait or fresh after the refresh, and
-// returns the number of debounce waits started.
-func staleOwnerRefreshedDuringDebounce(t *testing.T, dataDir, runID string) *int {
+// returns that wait and the number of debounce waits started.
+func staleOwnerRefreshedDuringDebounce(t *testing.T, dataDir, runID string) (debounceAfter, *int) {
 	t.Helper()
 	// Strictly positive, so that a refreshed marker reads as fresh again,
 	// and far larger than any scheduling delay.
@@ -1587,8 +1585,7 @@ func staleOwnerRefreshedDuringDebounce(t *testing.T, dataDir, runID string) *int
 	}
 
 	debounces := new(int)
-	previousDebounceAfter := ownerDebounceAfter
-	ownerDebounceAfter = func(time.Duration) <-chan time.Time {
+	after := func(time.Duration) <-chan time.Time {
 		*debounces++
 		if err := writeOwnerHeartbeat(dataDir, runID); err != nil {
 			t.Errorf("refresh owner heartbeat during the debounce wait: %v", err)
@@ -1600,8 +1597,7 @@ func staleOwnerRefreshedDuringDebounce(t *testing.T, dataDir, runID string) *int
 		ch <- time.Now()
 		return ch
 	}
-	t.Cleanup(func() { ownerDebounceAfter = previousDebounceAfter })
-	return debounces
+	return after, debounces
 }
 
 // TestReconcileOrphansDebouncesBatchOnce is the regression for a real P2
@@ -1630,14 +1626,12 @@ func TestReconcileOrphansDebouncesBatchOnce(t *testing.T) {
 	// the batch is debounced once, not once per candidate — not how long a
 	// real wait takes on a possibly-loaded machine.
 	var debounceCalls int
-	previousDebounceAfter := ownerDebounceAfter
-	ownerDebounceAfter = func(d time.Duration) <-chan time.Time {
+	after := func(d time.Duration) <-chan time.Time {
 		debounceCalls++
 		ch := make(chan time.Time, 1)
 		ch <- time.Now()
 		return ch
 	}
-	t.Cleanup(func() { ownerDebounceAfter = previousDebounceAfter })
 
 	dataDir := t.TempDir()
 	ids := []string{"run-batch-a", "run-batch-b", "run-batch-c"}
@@ -1664,7 +1658,7 @@ func TestReconcileOrphansDebouncesBatchOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, err := ReconcileOrphans(context.Background(), docker, dataDir)
+	removed, err := reconcileOrphans(context.Background(), after, docker, dataDir)
 	if err != nil {
 		t.Fatalf("ReconcileOrphans: %v", err)
 	}

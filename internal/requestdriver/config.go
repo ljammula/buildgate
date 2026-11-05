@@ -98,9 +98,8 @@ type WorkerConfig struct {
 	HitlReminderInterval time.Duration
 	// advanceOn is the request driver's own ticket-sequencing policy: "accepted"
 	// (default) or "pr_approved" -- see startNextTicketOrFinish's own doc
-	// comment (request_driver.go) for what each means. Threaded to that
-	// function via the package-level RequestAdvanceOn variable (see its
-	// own doc comment for why), not as a parameter.
+	// comment (request_driver.go) for what each means, and
+	// advancesOnPRApproval for how an unset value reads.
 	AdvanceOn string
 	// codeReviewPolicy mirrors factoryd <run>'s own -code-review-policy
 	// flag -- the review step (agent/pi/scripts/combined_review.py,

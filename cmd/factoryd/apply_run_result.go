@@ -225,7 +225,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 			Delivered: &delivered,
 			RunDir:    run.AbsDir(dataDir, id),
 			Next:      next,
-			Link:      consoleRunURL(resolveConsoleBaseURL("", dataDir), id),
+			Link:      consoleRunURL(resolveConsoleBaseURL(dp, "", dataDir), id),
 		}
 		notifyCtx, cancelNotify := context.WithTimeout(context.Background(), 2*time.Second)
 		notifyErr := (notify.LogNotifier{Path: filepath.Join(run.Dir(dataDir, id), "notifications.log")}).Notify(notifyCtx, n)

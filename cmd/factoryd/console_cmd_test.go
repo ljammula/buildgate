@@ -52,9 +52,7 @@ func TestConsoleMainPrintsStableTokenLink(t *testing.T) {
 		t.Fatalf("ensureTokenFile: %v", err)
 	}
 	t.Setenv(consolelink.EnvVar, "")
-	origListening := consolelink.Listening
-	t.Cleanup(func() { consolelink.Listening = origListening })
-	consolelink.Listening = func(string) bool { return true }
+	fakeHostOf(dp).tcpListeningFn = func(string) bool { return true }
 
 	// No serve recorded for this data dir: the default address may be
 	// another data dir's serve, so the token is withheld.

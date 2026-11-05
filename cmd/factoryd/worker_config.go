@@ -17,6 +17,7 @@ import (
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/release"
 	"buildgate/internal/requestdriver"
+	"buildgate/internal/run"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/sessionconfig"
 )
@@ -322,7 +323,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	// /code-review pass, 2026-09-15, and refined further after a second
 	// review round on PR #154 found the original external sync.Once
 	// wrapper could itself suppress a later, warning-worthy call).
-	warnIfReleasePolicyCanNeverAllow(cfg.OpenPullRequest, release.MergePolicy{
+	warnIfReleasePolicyCanNeverAllow(dp, cfg.OpenPullRequest, release.MergePolicy{
 		RollbackPlan:    cfg.Settings.ReleaseRollbackPlan,
 		MaxFilesChanged: cfg.Settings.ReleaseMaxFilesChanged,
 		MaxChangedLines: cfg.Settings.ReleaseMaxChangedLines,
@@ -331,19 +332,18 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	return cfg, *dataDir, nil
 }
 
-// useWorkerGlobals installs cfg's process-wide values and returns the
-// function that clears them. tier2SettingsOverride makes every build use
-// cfg.settings rather than reloading the session config per build;
-// requestAdvanceOn: see its own doc comment (request_driver.go) for why it
-// is a package-level variable rather than a parameter threaded everywhere
-// startNextTicketOrFinish is called.
-func useWorkerGlobals(cfg *requestdriver.WorkerConfig) func() {
-	tier2SettingsOverride = &cfg.Settings
-	requestdriver.RequestAdvanceOn = cfg.AdvanceOn
-	return func() {
-		tier2SettingsOverride = nil
-		requestdriver.RequestAdvanceOn = requestdriver.AdvanceOnAccepted
-	}
+// workerDriverDeps is the worker's requestdriver.Deps: a build it starts
+// (a corrective round's, a restack's replay) uses the worker's own
+// settings rather than reloading the session config per build, like the
+// ticket builds of its buildRunner.
+type workerDriverDeps struct {
+	*deps
+	settings *sessionconfig.Settings
+}
+
+// RunTicket runs one ticket build in this process with the worker's settings.
+func (w workerDriverDeps) RunTicket(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	return runTicketWithSettings(w.deps, ctx, w.settings, args, onReady)
 }
 
 // splitCommaList splits a comma-separated -pr-ignore-authors-style flag
@@ -527,7 +527,7 @@ func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir 
 	//
 	// sandboxTmpfsSize is daemon-wide, exactly like sandboxDocker just
 	// above (both resolved once from cfg.settings and applied identically
-	// to every drained entry via tier2SettingsOverride) -- not a per-entry
+	// to every drained entry, runTicketWithSettings) -- not a per-entry
 	// concern, so it belongs here the same way sandboxDocker already does.
 	// Missing before this fix (found via Codex review of this same PR):
 	// `factoryd doctor` itself always checks it (doctorMain populates this
@@ -545,6 +545,7 @@ func runWorkerDoctorPreflight(dp *deps, cfg requestdriver.WorkerConfig, dataDir 
 	// release policy -- the same false-alarm class as an unresolved
 	// session-config value silently defaulting to its zero value.
 	in := doctorInputs{
+		copilotModels:          dp.host.listGitHubCopilotModels,
 		sandboxDocker:          cfg.Settings.SandboxDocker,
 		sandboxTmpfsSize:       cfg.Settings.SandboxTmpfsSize,
 		sandboxImage:           cfg.SandboxImage,

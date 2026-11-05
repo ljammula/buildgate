@@ -569,14 +569,25 @@ type ticketRun struct {
 	resumeFrom                    *workflow.ResumeFrom
 	r                             *run.Run
 	onReady                       func(*run.Run)
-	baseSHA                       string
-	priorRunSnapshot              *run.Run
+	// sessionSettings are the session settings the caller resolved for
+	// this build (the worker's, serve's) or -config's; nil loads the
+	// default session config (resolveSettings).
+	sessionSettings  *sessionconfig.Settings
+	baseSHA          string
+	priorRunSnapshot *run.Run
 
 	exitFuncs
 }
 
 func runMainWithReady(dp *deps, lifecycleCtx context.Context, args []string, onReady func(*run.Run)) error {
-	tr := &ticketRun{dp: dp, lifecycleCtx: lifecycleCtx, args: args, onReady: onReady}
+	return runTicketWithSettings(dp, lifecycleCtx, nil, args, onReady)
+}
+
+// runTicketWithSettings is runMainWithReady for a caller that resolved the
+// session settings once for every build it starts: the worker and serve
+// (resolveSettings). nil settings is runMainWithReady.
+func runTicketWithSettings(dp *deps, lifecycleCtx context.Context, settings *sessionconfig.Settings, args []string, onReady func(*run.Run)) error {
+	tr := &ticketRun{dp: dp, lifecycleCtx: lifecycleCtx, sessionSettings: settings, args: args, onReady: onReady}
 	defer tr.runDeferred()
 	if err := tr.parseFlags(); err != nil {
 		return err
@@ -642,35 +653,32 @@ func (tr *ticketRun) parseFlags() error {
 	// -config lets a bare `factoryd run` (or a script such as
 	// scripts/live-smoke.sh) point at a session config file explicitly,
 	// the same flag every other subcommand already exposes (worker_config.go,
-	// doctor.go, daemon_cmd.go). It installs a process-wide
-	// tier2SettingsOverride for the duration of this call, restored
-	// afterward, so every resolveSettings() call in the run path
-	// (including sandbox_exec.go's) sees the same file. Refused when a
-	// caller already installed an override of its own (the worker's
-	// in-process builds, serve's API-started runs): those already
-	// resolved -config against their own settings, and silently picking
-	// one or the other here would be ambiguous. Our own callers never
-	// pass -config, so this only ever refuses a direct misuse.
+	// doctor.go, daemon_cmd.go). Its settings become this run's
+	// sessionSettings. Refused when a caller already supplied settings of
+	// its own (the worker's in-process builds, serve's API-started runs):
+	// those already resolved -config against their own settings, and
+	// silently picking one or the other here would be ambiguous. Our own
+	// callers never pass -config, so this only ever refuses a direct
+	// misuse.
 	if *configPath != "" {
-		if tier2SettingsOverride != nil {
+		if tr.sessionSettings != nil {
 			return fmt.Errorf("-config cannot be combined with a caller-supplied session config")
 		}
 		loaded, err := loadSettingsForConfig(*configPath)
 		if err != nil {
 			return err
 		}
-		tier2SettingsOverride = &loaded
-		tr.atExit(func() { tier2SettingsOverride = nil })
+		tr.sessionSettings = &loaded
 	}
 
 	// settings resolves every Tier-2 knob this file used to expose as its
 	// own CLI flag (sandbox resource limits, the remaining relay/registry-
 	// proxy tuning surface, the release-evaluation knobs): defaults
 	// (sessionconfig.DefaultSettings), overridden by the session config file
-	// in effect (tier2SettingsOverride when worker_config.go set one for this
-	// in-process call, or serveMain's own daemon-static assignment for an
-	// API-started run, else the first sessionconfig.DefaultPaths() entry
-	// that exists) -- see resolveSettings's own doc comment. A CLI flag no
+	// in effect (sessionSettings when the worker or serve supplied them for
+	// this in-process call, or -config's, else the first
+	// sessionconfig.DefaultPaths() entry that exists) -- see
+	// resolveSettings's own doc comment. A CLI flag no
 	// longer exists for any of these, so this is the whole story for them;
 	// verifyCommand/fastCheckCommand/preflightProfile/releaseProtectedPaths
 	// above (Tier-1 flags, or in releaseProtectedPaths' case a plain
@@ -691,7 +699,7 @@ func (tr *ticketRun) parseFlags() error {
 	// TestIntegrationTemporalHaltedRunStillRecordsAttempts, which exercises
 	// precisely this: a session config value with no matching CLI flag at
 	// all).
-	tr.settings, err = resolveSettings()
+	tr.settings, err = resolveSettings(tr.sessionSettings)
 	if err != nil {
 		return err
 	}
@@ -789,7 +797,7 @@ func (tr *ticketRun) parseFlags() error {
 	// merely being called -- see that function's own doc comment for why
 	// an external sync.Once wrapping this call site used to let a later
 	// request's own warning-worthy call go silently unwarned.
-	warnIfReleasePolicyCanNeverAllow(*tr.openPullRequest, release.MergePolicy{
+	warnIfReleasePolicyCanNeverAllow(tr.dp, *tr.openPullRequest, release.MergePolicy{
 		RollbackPlan:    *tr.releaseRollbackPlan,
 		MaxFilesChanged: *tr.releaseMaxFilesChanged,
 		MaxChangedLines: *tr.releaseMaxChangedLines,
@@ -800,7 +808,7 @@ func (tr *ticketRun) parseFlags() error {
 // resolveRoutesAndDefaults resolves the execution and review routes, applies the project config's defaults and validates the sandbox settings.
 func (tr *ticketRun) resolveRoutesAndDefaults() error {
 	// -build-app-max-attempts/-verify-max-attempts fall back to settings
-	// (resolveSettings' own session config/tier2SettingsOverride
+	// (resolveSettings' own session config/sessionSettings
 	// resolution) only when the caller left the flag itself unset -- see
 	// this function's own comment on the settings assignment above for why.
 	buildAppMaxAttemptsExplicit := false

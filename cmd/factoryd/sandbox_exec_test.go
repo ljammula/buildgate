@@ -13,6 +13,7 @@ import (
 	"buildgate/internal/composeservices"
 	"buildgate/internal/runner"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sessionconfig"
 	"buildgate/internal/testfixture"
 )
 
@@ -363,5 +364,5 @@ func TestStageSandboxInputsRemovesWhatItStagedWhenALaterStepFails(t *testing.T) 
 // runSandboxWithRetries is runSandboxWithRetriesVia with no sandbox runtime:
 // the worker is launched with `docker run`.
 func runSandboxWithRetries(ctx context.Context, workspace, specPath, extraRunInput, script string, logPath func(int) string, maxAttempts int, image, dockerBinary, user string, workerUID int, runID, dataDir string, memory, cpus, tmpfsSize string, onAttempt func(int, runner.Result, error), relaySpec *sandbox.RouteSpec, registrySpec *sandbox.RegistryProxySpec, registryHooks sandbox.RegistryProxyHooks, composeSpec *sandbox.ComposeServicesSpec, composeHooks sandbox.ComposeServicesHooks, workerEnv []string, skills []sandbox.SkillSource, interpreter string, args ...string) (runner.Result, error) {
-	return runSandboxWithRetriesVia(nil, "", ctx, workspace, specPath, extraRunInput, script, logPath, maxAttempts, image, dockerBinary, user, workerUID, runID, dataDir, memory, cpus, tmpfsSize, onAttempt, relaySpec, registrySpec, registryHooks, composeSpec, composeHooks, workerEnv, skills, interpreter, args...)
+	return runSandboxWithRetriesVia(nil, sessionconfig.DefaultSettings().ModelHostConcurrency, "", ctx, workspace, specPath, extraRunInput, script, logPath, maxAttempts, image, dockerBinary, user, workerUID, runID, dataDir, memory, cpus, tmpfsSize, onAttempt, relaySpec, registrySpec, registryHooks, composeSpec, composeHooks, workerEnv, skills, interpreter, args...)
 }

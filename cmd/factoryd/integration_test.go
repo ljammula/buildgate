@@ -16,7 +16,6 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	temporalclient "go.temporal.io/sdk/client"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/notify"
 	"buildgate/internal/sandbox"
@@ -154,14 +153,6 @@ func runTests(m *testing.M) int {
 	defer os.RemoveAll(tmp)
 	killOrphanTestTemporalServers()
 	defer stopSharedTemporal()
-
-	// consolelink.BaseURL falls back to a live local serve on
-	// 127.0.0.1:8090 when this binary embeds a real console build, so any
-	// in-process test expecting "no console link" failed on a machine
-	// running `factoryd serve` after `make console-build` (found
-	// 2026-09-26, the Flutter + Go app operator demo). Stubbed package-wide like
-	// docker.initChecks; a test of the fallback itself overrides it.
-	consolelink.Listening = func(string) bool { return false }
 
 	// Tests start no real process or container of their own: submit, console
 	// and worker autostart Temporal, worker and serve when they are

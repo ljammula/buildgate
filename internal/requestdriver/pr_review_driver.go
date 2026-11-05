@@ -33,37 +33,20 @@ import (
 // The request driver (a separate, concurrently-developed piece) owns
 // starting each ticket's build and the transition INTO pr_review -- by
 // the time AdvancePRReview below is ever called, r.Tickets[r.TicketIndex-1].RunID
-// and .PRURL are already set. ContinueAfterPRApproval (request_driver.go)
+// and .PRURL are already set. continueAfterPRApproval (request_driver.go)
 // is the hook out of pr_review once this file marks the current ticket
 // "approved".
 
-// readReviewState reads prURL's current review state -- a package-level
-// var, not a direct forge.GHPullRequestOpener{}.ReadReviewState call, so a
-// test can stub it without a real gh binary or network. Production always
-// uses forge.GHPullRequestOpener{}, the same zero-value opener
-// release_and_evidence.go's own accepted-run PR-open call site uses.
-func RealReadReviewState(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
-	return forge.GHPullRequestOpener{}.ReadReviewState(ctx, prURL, policy)
+// RealReadReviewState is the real body of Deps.ReadReviewState: prURL's
+// current review state through gh, with the factory's own login cached in
+// logins, which the caller keeps for its process.
+func RealReadReviewState(ctx context.Context, logins *forge.SelfLogins, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
+	return forge.GHPullRequestOpener{SelfLogins: logins}.ReadReviewState(ctx, prURL, policy)
 }
-
-// PrReviewCorrectiveRunner, when a test sets it, runs a corrective build in
-// place of runMainWithReady (TicketRunner's own shape -- see
-// worker_config.go), the same function the worker's queue drainer and the
-// request driver's spec/plan jobs ultimately bottom out in.
-var PrReviewCorrectiveRunner TicketRunner
 
 // RealReadJobLog is the real body of Deps.ReadJobLog.
 func RealReadJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
 	return forge.GHPullRequestOpener{}.ReadJobLog(ctx, prURL, jobID)
-}
-
-// correctiveRunner is override when a test set one, else runMainWithReady
-// reaching the outside through dp.
-func correctiveRunner(dp Deps, override TicketRunner) TicketRunner {
-	if override != nil {
-		return override
-	}
-	return dp.RunTicket
 }
 
 // markPullRequestReady shells `gh pr ready <url>`, clearing a PR's draft
@@ -409,8 +392,8 @@ func noPullRequestHaltReason(dataDir string, r *request.Request, ticket *request
 // request on the current ticket's release decision before building ticket,
 // and a retry has since opened the current ticket's pull request. There is
 // nothing to halt on: the build goes on from ticket.
-func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket) bool {
-	return RequestAdvanceOn == AdvanceOnAccepted && ticket.RunID == "" && ticket.Index == r.TicketIndex+1
+func nextUnbuiltTicket(r *request.Request, ticket *request.Ticket, cfg WorkerConfig) bool {
+	return !cfg.advancesOnPRApproval() && ticket.RunID == "" && ticket.Index == r.TicketIndex+1
 }
 
 // AdvancePRReview is request_driver.go's own dispatch target for
@@ -466,7 +449,7 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// openEvidencePullRequest's own best-effort push/open attempt
 			// simply failed, where a retry (or just re-running the opener)
 			// may well succeed.
-			if cfg.OpenPullRequest && nextUnbuiltTicket(r, ticket) {
+			if cfg.OpenPullRequest && nextUnbuiltTicket(r, ticket, cfg) {
 				r.TicketIndex = ticket.Index
 				if err := r.ResumeBuilding(now); err != nil {
 					return err
@@ -888,7 +871,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 	// human comment is never treated as resolved just because it isn't
 	// actionable, and that contract has to hold here too, not only at the
 	// `gh pr ready` check: without this, such a thread would never block
-	// `ticket.PRState = "approved"`/`ContinueAfterPRApproval` starting the
+	// `ticket.PRState = "approved"`/`continueAfterPRApproval` starting the
 	// next ticket, even though it visibly blocks readiness (found via
 	// review, GitHub Codex App, PR #154 round 2).
 	ticket.MergeReadiness = checkMergeReadiness(dataDir, ticket, state, now)
@@ -899,7 +882,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 			return err
 		}
 		if ticket.Index == r.TicketIndex {
-			return ContinueAfterPRApproval(dataDir, r, now)
+			return continueAfterPRApproval(dataDir, r, now)
 		}
 		return nil
 	}
@@ -1233,7 +1216,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// roundRunID) against a directory that never existed, misreporting a
 	// real quarantine (or acceptance) as a start failure every time.
 	var startedRunID string
-	runErr := correctiveRunner(dp, PrReviewCorrectiveRunner)(ctx, args, func(started *run.Run) {
+	runErr := dp.RunTicket(ctx, args, func(started *run.Run) {
 		startedRunID = started.ID
 		// RequestID back-reference, same as the corrective round's own
 		// onReady callback (request_driver.go's launchCorrectiveRound)
@@ -1298,7 +1281,7 @@ func withEarlierRecord(dataDir, dir string, refused *run.Run, ciRecord *handoff.
 
 // correctiveRoundOutcome resolves a just-finished corrective run's real
 // outcome from its own durable record (run.Load), never from
-// PrReviewCorrectiveRunner's own returned error alone -- the same
+// Deps.RunTicket's own returned error alone -- the same
 // never-trust-self-report posture every other terminal-state decision in
 // this codebase already takes. runErr is consulted only when the durable
 // record itself cannot be loaded at all (an infrastructure failure so early

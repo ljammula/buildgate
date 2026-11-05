@@ -255,6 +255,7 @@ func doctorMain(dp *deps, args []string) error {
 		temporalAddress:        *temporalAddress,
 		profileImages:          doctorProfileImages(),
 		baselineCheck:          doctorBaselineCheckRunner(dp, resolvedConfigPath, doctorExplicitDataDir(flags, *dataDir), *temporalAddress),
+		copilotModels:          dp.host.listGitHubCopilotModels,
 		egressCABundle:         *egressCABundle,
 		composeServices:        *composeServices,
 		targetRepo:             *targetRepo,
@@ -309,7 +310,7 @@ func doctorMain(dp *deps, args []string) error {
 	checks = append(checks, doctorWorkerBinaryChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorWorkerGitHubLoginChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorGateTokenChecks(in.configPath, time.Now())...)
-	checks = append(checks, doctorRemoteConsoleChecks(in.configPath, in.dataDir)...)
+	checks = append(checks, doctorRemoteConsoleChecks(dp, in.configPath, in.dataDir)...)
 	// -fix also offers to fix the first-run blockers doctorFixAbsentImages
 	// (inside doctorRunChecks above) doesn't cover -- see doctorApplyFixes'
 	// own doc comment. Runs after checks are collected (so it can see, e.g.,
@@ -848,6 +849,10 @@ type doctorInputs struct {
 	// the clock (clock), so a caller that builds doctorInputs for other
 	// checks need not set it.
 	now time.Time
+	// copilotModels lists a GitHub Copilot token's models for the
+	// github-copilot route checks and -list-models; nil refuses
+	// (copilotModelList).
+	copilotModels copilotModelLister
 	// presenceOnly marks a doctor call that only wants to know whether
 	// images are present locally (quickstartPullDoctorInputs, run before
 	// this quickstart invocation's own config is finalized -- see its own
@@ -1186,7 +1191,7 @@ func doctorRouteChecks(ctx context.Context, in doctorInputs, image string, r doc
 		// the harness's RequiresWorkerModel check just below reports an
 		// unset id.
 		if r.workerModelID != "" {
-			c := doctorCheckCopilotModelListed(ctx, r.githubTokenFile, r.githubTokenKey, in.egressCABundle, r.workerModelID, r.upstream, r.workerAPI, r.allowPlaintextUpstream, r.keys)
+			c := doctorCheckCopilotModelListed(ctx, in.copilotModelList(), r.githubTokenFile, r.githubTokenKey, in.egressCABundle, r.workerModelID, r.upstream, r.workerAPI, r.allowPlaintextUpstream, r.keys)
 			c.Name = doctorRouteCheckName(r.label, c.Name)
 			checks = append(checks, c)
 		}
@@ -2263,7 +2268,7 @@ func doctorCheckCopilotTokenExchange(ctx context.Context, tokenFile, tokenKey, c
 // runs, so an invalid upstream never even causes a GitHub API call, let
 // alone a Copilot-token-bearing one. allowPlaintextUpstream mirrors
 // relay_allow_plaintext_upstream/-relay-allow-plaintext-upstream.
-func doctorCheckCopilotModelListed(ctx context.Context, tokenFile, tokenKey, caBundlePath, modelID, relayUpstream, workerAPI string, allowPlaintextUpstream bool, keys doctorRouteKeys) doctorCheck {
+func doctorCheckCopilotModelListed(ctx context.Context, list copilotModelLister, tokenFile, tokenKey, caBundlePath, modelID, relayUpstream, workerAPI string, allowPlaintextUpstream bool, keys doctorRouteKeys) doctorCheck {
 	name := fmt.Sprintf("github copilot lists the configured worker model (%s)", modelID)
 	nonDefaultUpstream := relayUpstream != "" && relayUpstream != meter.CopilotAPIBase
 	effectiveUpstream := effectiveCopilotUpstream(relayUpstream)
@@ -2274,7 +2279,7 @@ func doctorCheckCopilotModelListed(ctx context.Context, tokenFile, tokenKey, caB
 	if err != nil {
 		return doctorCheck{Name: name, Err: err, Fix: "configure a GitHub Copilot login token with `pi login`, GITHUB_COPILOT_TOKEN, or the route's github_token_file, then rerun `factoryd doctor`"}
 	}
-	models, err := listGitHubCopilotModelsFn(ctx, caBundlePath, token, relayUpstream)
+	models, err := list(ctx, caBundlePath, token, relayUpstream)
 	if err != nil {
 		return doctorCheck{Name: name, Err: fmt.Errorf("list copilot models: %w", err), Fix: copilotModelsFailureNextStep(err), Advisory: nonDefaultUpstream}
 	}

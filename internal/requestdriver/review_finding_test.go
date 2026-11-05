@@ -45,7 +45,7 @@ func TestHighSeverityFindingStartsNoCorrectiveRound(t *testing.T) {
 				}
 				return rr.Save(dataDir)
 			}
-			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+			calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 				return &run.Run{ID: roundRunID, State: run.StateAccepted}
 			})
 			cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1, OpenPullRequest: true}
@@ -77,7 +77,7 @@ func TestCodeReviewWithNoVerdictStartsNoRoundAndWaitsInResumeReview(t *testing.T
 		rr.CodeReview = &run.CodeReviewResult{Policy: "required", Available: false}
 		return rr.Save(dataDir)
 	}
-	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(t, dataDir, func(dataDir, roundRunID string) *run.Run {
+	calls, _ := requestdrivertest.StubReviewCorrectiveRunner(&dp.runTicketFn, t, dataDir, func(dataDir, roundRunID string) *run.Run {
 		return &run.Run{ID: roundRunID, State: run.StateAccepted}
 	})
 	cfg := requestdriver.WorkerConfig{ReviewCorrectiveRounds: 1}
@@ -101,7 +101,7 @@ func TestRunCorrectiveRoundNoFixAttemptWithoutAReviewFinding(t *testing.T) {
 	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
 	stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
 	builds := 0
-	requestdriver.PrReviewCorrectiveRunner = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
+	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
 		builds++
 		rr := requestdrivertest.CorrectableQuarantine(t, dataDir, requestdrivertest.ArgValue(args, "-ticket"), "", "", "")
 		rr.CodeReview = &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{{Severity: "high", File: "a.go", Line: 2, Summary: "x"}}}

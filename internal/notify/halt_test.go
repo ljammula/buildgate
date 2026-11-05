@@ -81,7 +81,7 @@ func TestPrepareHaltIncludesHaltError(t *testing.T) {
 // reaches Discord, Slack, and the desktop notifier, using each channel's
 // own configured/injected seam as a spy: two fake webhook servers stood
 // in via the two env vars (the same seam DiscordWebhookURLs/DispatchDiscord
-// already use), and desktopNotifierLookPath pointed at a stand-in script
+// already use), and the desktop notifier's osascript lookup pointed at a stand-in script
 // that records its own invocation, since there is no HTTP call to
 // intercept for the desktop channel.
 func TestDispatchExternalCallsAllThreeChannels(t *testing.T) {
@@ -107,16 +107,11 @@ func TestDispatchExternalCallsAllThreeChannels(t *testing.T) {
 		t.Fatalf("write fake osascript: %v", err)
 	}
 
-	origOS := desktopOS
-	origLookPath := desktopNotifierLookPath
-	desktopOS = "darwin"
-	desktopNotifierLookPath = func() (string, error) { return script, nil }
-	defer func() {
-		desktopOS = origOS
-		desktopNotifierLookPath = origLookPath
-	}()
+	env := testDesktopEnv(t)
+	env.os = "darwin"
+	env.notifierLookPath = func() (string, error) { return script, nil }
 
-	DispatchExternal(t.TempDir(), Notification{RunID: "run-1", Ticket: "ticket-1", State: run.StateHalted, Reason: "test"})
+	dispatchExternal(DesktopNotifier{env: env}, t.TempDir(), Notification{RunID: "run-1", Ticket: "ticket-1", State: run.StateHalted, Reason: "test"})
 	// DispatchExternal itself returns immediately (its fan-out runs on a
 	// background goroutine) -- wait for it to finish before asserting.
 	WaitForPendingDispatches(5 * time.Second)

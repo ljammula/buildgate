@@ -99,7 +99,7 @@ func (dp *deps) RunTicket(ctx context.Context, args []string, onReady func(*run.
 // The real pull-request and git-push methods whose bodies live in requestdriver.
 
 func (impl realForge) readReviewState(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error) {
-	return requestdriver.RealReadReviewState(ctx, prURL, policy)
+	return requestdriver.RealReadReviewState(ctx, impl.dp.ghLogins, prURL, policy)
 }
 func (impl realForge) readJobLog(ctx context.Context, prURL string, jobID int64) (string, error) {
 	return requestdriver.RealReadJobLog(ctx, prURL, jobID)

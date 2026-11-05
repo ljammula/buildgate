@@ -131,11 +131,9 @@ func writeServeTestConfig(t *testing.T) string {
 // recorded itself there.
 func TestQuickstartEnsureServeTakesAFreePortWhenTheDefaultIsHeld(t *testing.T) {
 	dp := newTestDeps(t)
-	// The suite stubs the probe to false (TestMain); this test's serve
-	// really listens, so the record is read with a real dial.
-	origListening := consolelink.Listening
-	t.Cleanup(func() { consolelink.Listening = origListening })
-	consolelink.Listening = func(addr string) bool {
+	// newTestDeps answers the probe with false; this test's serve really
+	// listens, so the record is read with a real dial.
+	fakeHostOf(dp).tcpListeningFn = func(addr string) bool {
 		conn, err := net.DialTimeout("tcp", addr, time.Second)
 		if err != nil {
 			return false
@@ -172,7 +170,7 @@ func TestQuickstartEnsureServeTakesAFreePortWhenTheDefaultIsHeld(t *testing.T) {
 	if token == "" {
 		t.Error("no token returned for this data dir's own recorded serve")
 	}
-	if got := consolelink.ServeAddress(dataDir); got != addr {
+	if got := consolelink.ServeAddress(dp, dataDir); got != addr {
 		t.Errorf("recorded console address = %q, want %q", got, addr)
 	}
 	if !strings.Contains(out.String(), "held by another process") || !strings.Contains(out.String(), addr) {
@@ -336,9 +334,7 @@ func TestQuickstartEnsureServeWaitsForItsOwnStartingServe(t *testing.T) {
 func TestQuickstartEnsureServeDistrustsAStaleRecord(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv("HOME", t.TempDir())
-	origListening := consolelink.Listening
-	t.Cleanup(func() { consolelink.Listening = origListening })
-	consolelink.Listening = func(string) bool { return true }
+	fakeHostOf(dp).tcpListeningFn = func(string) bool { return true }
 	dataDir := t.TempDir()
 	const stale = "127.0.0.1:18478"
 	if _, err := consolelink.RecordServeAddress(dataDir, stale); err != nil {

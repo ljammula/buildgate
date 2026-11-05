@@ -150,7 +150,7 @@ func TestAPRReviewRoundRefusedForItsRouteCredentialWaitsInResumeReview(t *testin
 	replies := 0
 	dp.replyToReviewCommentFn = func(context.Context, string, int64, string) error { replies++; return nil }
 	calls := 0
-	requestdriver.PrReviewCorrectiveRunner = func(context.Context, []string, func(*run.Run)) error {
+	dp.runTicketFn = func(context.Context, []string, func(*run.Run)) error {
 		calls++
 		return errRoundCredential
 	}
@@ -177,10 +177,8 @@ func TestACorrectiveRoundRefusedForItsRouteCredentialWaitsInResumeReview(t *test
 	dataDir, id := requestdrivertest.BuildingFixture(dp, t, 1)
 	branch := "factoryd/" + id + "-001"
 	buildRunner := checkQuarantinedBuildRunner(t, dataDir, branch, fmt.Sprintf("%040d", 1), fmt.Sprintf("%040d", 2), "repo-lint")
-	orig := requestdriver.ReviewCorrectiveRunner
-	t.Cleanup(func() { requestdriver.ReviewCorrectiveRunner = orig })
 	calls := 0
-	requestdriver.ReviewCorrectiveRunner = func(context.Context, []string, func(*run.Run)) error {
+	dp.runTicketFn = func(context.Context, []string, func(*run.Run)) error {
 		calls++
 		return errRoundCredential
 	}
