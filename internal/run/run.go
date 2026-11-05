@@ -25,10 +25,14 @@ type State string
 const (
 	StateReady        State = "ready"
 	StateSliceRunning State = "slice_running"
-	StateVerifying    State = "verifying"
-	StateAccepted     State = "accepted"
-	StateHalted       State = "halted"
-	StateQuarantined  State = "quarantined"
+	// StateVerifying is the verify stage of the workflow's progress feed
+	// (RunWorkflowResult and the owner's query while a build runs): it is
+	// overwritten by the verdict before the result is applied, so run.json
+	// never records it (Transitions).
+	StateVerifying   State = "verifying"
+	StateAccepted    State = "accepted"
+	StateHalted      State = "halted"
+	StateQuarantined State = "quarantined"
 )
 
 // BillingSubscription/BillingMetered are the two valid values of

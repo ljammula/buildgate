@@ -125,7 +125,7 @@ func reviewWait(r *request.Request, reminder, expiry time.Duration, now time.Tim
 	if deadline, ok := r.GateDeadline(expiry); ok {
 		wait = min(wait, deadline.Sub(now))
 	}
-	if due, ok := r.AutoResumeDue(); ok {
+	if due, ok := r.AutoResumeDue(now); ok {
 		wait = min(wait, due.Sub(now))
 	}
 	return max(wait, minReviewWait)

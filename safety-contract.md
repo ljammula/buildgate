@@ -530,12 +530,13 @@ requires a new contract review and an updated machine-checkable test.
   `factoryd resume` (continue the lost build in its kept worktree from the
   last completed round, or rerun a lost drafting or planning step),
   `factoryd resume -from scratch` (rebuild the ticket) or `factoryd cancel`,
-  with one exception, at most once per request: a step that never got to
-  the work (`sandbox_launch`, `model_unavailable`, `dependency_fetch`), or a
-  step the provider refused with its own limit (`provider_quota`) whose
-  refusal carries the meter's RFC 3339 reset time, may be resumed by the
-  factory itself (the automatic resume, under "Request lifecycle: a lost
-  step waits for a human").
+  with one exception, at most one automatic resume per request for each of
+  two kinds: a step that never got to the work (`sandbox_launch`,
+  `model_unavailable`, `dependency_fetch`) while its wait is younger than
+  `request.AutoRetryWindow` (1 hour), and a step the provider refused with
+  its own limit (`provider_quota`) whose refusal carries the meter's RFC 3339
+  reset time, may each be resumed by the factory itself once (the automatic
+  resume, under "Request lifecycle: a lost step waits for a human").
   A lost build keeps its worktree, never its harness session, and every
   gate reruns on the final commit. A heartbeat RPC that fails on the
   connection to the Temporal server does not cancel a step: a long step
@@ -743,7 +744,7 @@ requires a new contract review and an updated machine-checkable test.
   by route name within one data dir and is derived from that record alone:
   the holder's resume, cancel or rebuild releases it, and a time a worker
   printed ends nothing. The holder's own wait may end by itself: the
-  factory's one automatic resume of a request, a minute after the reset
+  factory's one automatic provider-quota resume of a request, a minute after the reset
   time of the refusal that ended its step (the automatic resume, under
   "Request lifecycle: a lost step waits for a human"). Rounds, a read-back and the challenger are not held
   and meet the limit as before. What reaches `resume_review` with the cause is what that check
@@ -1305,12 +1306,14 @@ informed by the recorded release decision, never automated.
 
 ### Run state graph
 
+The graph is what `run.json` records, save after save.
+
 ```text
-  ready -> slice_running -> verifying -> accepted
-    |            |              |
-    +------------+--------------+--> halted, quarantined
-  halted (unconfirmed) -> quarantined
-  quarantined -> accepted | halted     (authenticated override only)
+  ready -> slice_running -> accepted | quarantined
+    |            |
+    +------------+--> halted, quarantined
+  halted (unconfirmed) -> accepted | quarantined   (the owner's own result)
+  quarantined -> accepted | halted                 (authenticated override only)
 ```
 
 The edges below are `run.Transitions()`, edge for edge:
@@ -1321,25 +1324,43 @@ differ in either direction, and `run.CanTransition` is what
 - `ready -> slice_running`
 - `ready -> halted`
 - `ready -> quarantined`
-- `slice_running -> verifying`
+- `slice_running -> accepted`
 - `slice_running -> halted`
 - `slice_running -> quarantined`
-- `verifying -> accepted`
-- `verifying -> halted`
-- `verifying -> quarantined`
+- `halted -> accepted`
 - `halted -> quarantined`
 - `quarantined -> accepted`
 - `quarantined -> halted`
 
-A run is created `ready`. A halt (a lost step, a refused launch, a deadline)
-may end any unfinished state. A failed or ambiguous policy check goes
-straight to `quarantined` from `slice_running` (a setup or repository gate)
-or `verifying`, never via `halted`: an intermediate `halted` save would open
-a crash window that leaves the record at `halted`, where `factoryd override`
-cannot reach it (`cmd/factoryd/apply_run_result.go`). `halted ->
-quarantined` is the orphan reclaim (`internal/sandbox.ReconcileOrphans`) of
-a run whose owner and container are gone, from any unfinished state, a halt
-not yet confirmed included.
+| Edge | Where the code saves it |
+|---|---|
+| created `ready` | `cmd/factoryd/run_ticket.go` (every run that goes on toward its build) |
+| created `halted` (confirmed) | `cmd/factoryd/run_ticket.go` (a `-ticket-file` scope that differs from `-spec`'s, a missing `Allowed-Files:` under `-require-declared-scope`) |
+| `ready -> slice_running` | `cmd/factoryd/run_ticket.go`, before the build is dispatched |
+| `ready -> halted` | `cmd/factoryd/run_ticket.go` (a check before dispatch, the `slice_running` save failing); the reclaim of a run whose owner is gone (`cmd/factoryd/reclaim.go`, `reclaim_dead_owner.go`) |
+| `slice_running -> accepted`, `-> quarantined` | `cmd/factoryd/apply_run_result.go` (`r.State = result.State`: the policy evaluation's verdict, a setup or repository gate turning an accepted result into `quarantined`) |
+| `slice_running -> halted` | `cmd/factoryd/run_ticket.go`, `run_temporal.go`, `run_repository_owner.go` (a lost step, a refused launch, a deadline, a give-up path); the reclaim |
+| `ready`, `slice_running`, unconfirmed `halted` `-> quarantined` | `internal/sandbox.ReconcileOrphans`: owner and container are gone |
+| `halted -> accepted`, `-> quarantined` | the reclaim (`cmd/factoryd/reclaim.go`) applying the owner's real result through `apply_run_result.go` to a run a give-up path saved halted and unconfirmed |
+| `quarantined -> accepted`, `-> halted` | `Run.ApplyOverride` |
+
+A run is created `ready`, or already `halted` and confirmed when a check
+before its build refuses it. `verifying` is a stage of the workflow's
+progress feed (`RunWorkflowResult`, the owner's query while a build runs),
+not a saved state: the policy evaluation overwrites it with the verdict
+before the result is applied, so the save after `slice_running` is
+`accepted`, `quarantined` or `halted`. A halt (a lost step, a refused
+launch, a deadline) may end any unfinished state. A failed or ambiguous
+policy check goes straight to `quarantined`, never via `halted`: an
+intermediate `halted` save would open a crash window that leaves the record
+at `halted`, where `factoryd override` cannot reach it
+(`cmd/factoryd/apply_run_result.go`). A give-up path that cannot confirm
+the owner stopped saves the run `halted` with `HaltConfirmed` false; such a
+halt is not final. The reclaim takes the owner's result and applies it
+(`accepted`, `quarantined`, or `halted` again, now confirmed), and the
+orphan reclaim quarantines a run whose owner and container are gone, from
+any unfinished state, a halt not yet confirmed included. A confirmed halt
+has no outgoing edge.
 
 `accepted` is terminal. The release decision recorded on an accepted run
 (`release.Decision`, its own durable record beside the run: allowed or
@@ -1529,8 +1550,9 @@ A request step (a drafting or planning step, a ticket build, a corrective
 or PR-review round) whose worker stopped, or a ticket build or round that
 ended with no verdict on the work for another of SC-017's causes, or whose
 only failed gates are reviews that gave no verdict, is never
-rerun on its own, but for a request's one automatic resume of a step that
-never got to the work or after a provider's limit resets (below). A ticket whose recorded run halted with such a cause,
+rerun on its own, but for a request's automatic resumes, at most one for
+each of two kinds: a step that never got to the work, and a provider's limit
+that reset (below). A ticket whose recorded run halted with such a cause,
 and about which no decision of the current `Generation` exists, is moved to
 `resume_review` by the step that finds it, also when the request is still
 `building`: its kept worktree is not reaped and no build starts. A run that
@@ -1554,26 +1576,28 @@ records the decision and returns the request to the state of the lost step:
 - `resume_review -> pr_review`
 - `resume_review -> cancelled`
 
-The factory makes the same decision itself at most once per request, ever
-(the automatic resume, `internal/request.AutoResumeRequest`, through the
-same `resumeLoaded` and preflight as `ResumeRequest`), and for no other
-wait. A request with no automatic resume recorded (`AutoResumed`), waiting
-in `resume_review`, not parked, not refused a resume, and whose last History
+The factory makes the same decision itself (the automatic resume,
+`internal/request.AutoResumeRequest`, through the same `resumeLoaded` and
+preflight as `ResumeRequest`), at most one automatic resume per request for
+each of two kinds, ever, and for no other wait. Each kind has its own
+record, never cleared, and spending one does not spend the other:
+`AutoRetried` for the transient kind, `AutoResumed` for the provider-quota
+kind (a record with no `cause` is the provider-quota kind). A request waiting in `resume_review` with no record of
+its wait's kind, not parked, not refused a resume, and whose last History
 entry is still the factory's move into `resume_review` (no operator action
 since, such as a reopen after an expired gate), is resumed by the factory
 (`By: factory`, a History reason naming the cause or the provider's reset
-time) in two cases only. With a transient cause
-(`unresolved.Cause.Transient`: `sandbox_launch`, the sandbox never started
-the step's command; `model_unavailable`, the route served none of the
-step's last requests; `dependency_fetch`, a package registry was
-unreachable, so the command's failure judged nothing), once
-`request.AutoRetryDelay` (5 minutes) has passed since the request entered
-the wait; every other cause (a lost worker or Temporal server, a meter or
-credential refusal, a full disk, a memory kill, a review with no verdict,
-a drafting job with no draft, an unheld test file) waits for a human. With
-cause `provider_quota`, once its reset time plus
-`request.AutoResumeMargin` (1 minute) has passed. The reset time is
-`Resume.ResetAt`: the Retry-After of the refusal with the provider's own
+time) in two cases only:
+
+| Kind | Causes | Resumed | Record |
+|---|---|---|---|
+| Transient | `unresolved.Cause.Transient`: `sandbox_launch` (the sandbox never started the step's command), `model_unavailable` (the route served none of the step's last requests), `dependency_fetch` (a package registry was unreachable, so the command's failure judged nothing) | once `request.AutoRetryDelay` (5 minutes) has passed since the request entered the wait, and only while the wait is younger than `request.AutoRetryWindow` (1 hour) since that entry: an older wait (a worker that was down, an install over a wait the operator left) waits for a human, and nothing is spent | `AutoRetried` |
+| Provider quota | `provider_quota` | once its reset time plus `request.AutoResumeMargin` (1 minute) has passed; no age limit, the time is the provider's | `AutoResumed` |
+
+Every other cause (a lost worker or Temporal server, a meter or credential
+refusal, a full disk, a memory kill, a review with no verdict, a drafting
+job with no draft, an unheld test file) waits for a human. The reset time
+is `Resume.ResetAt`: the Retry-After of the refusal with the provider's own
 limit that ended the step, as the meter's ledger recorded that refusal
 (`meter.Calls.RefusedAtEndRetryAt`, of the launch whose ledger gave the
 cause), never an earlier refusal's in the same or an earlier launch, and
@@ -1586,9 +1610,9 @@ and the decision is re-checked under the request's lock, so concurrent
 polls make one resume; the verb is the one the prompt offers (`round`, or
 `scratch` for a lost build that kept nothing); a resume that continues no
 build reaps the kept worktree as `factoryd resume` does; the operator is
-notified. A preflight that refuses or cannot be made spends it: the request
-keeps waiting with the reasons recorded. `AutoResumed` is never cleared:
-every later wait of the request, whatever its cause, on any step or ticket
+notified, with what is left of the two. A preflight that refuses or cannot
+be made spends that kind: the request keeps waiting with the reasons
+recorded. Every later wait of a kind already spent, on any step or ticket
 and after any operator resume, retry or rebuild, waits for a human.
 
 `cancelled` is `Cancel`, as above. A build resumed with `round` is checked

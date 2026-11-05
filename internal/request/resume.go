@@ -165,7 +165,7 @@ type LostStep struct {
 // EnterResumeReview moves a request whose step ended with no verdict on the
 // work, or whose stacked predecessor needs operator repair, out of from into
 // resume_review, which waits on a human: nothing reruns on its own but the
-// one automatic resume of a provider-quota or transient wait (AutoResumeDue). from must
+// automatic resumes, one per request for each kind (AutoResumeDue). from must
 // be the state of that step and the request's current state. It starts the
 // next Generation and resets the reminder bookkeeping.
 func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) error {

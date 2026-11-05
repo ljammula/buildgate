@@ -146,8 +146,10 @@ type requestStatusEntry struct {
 	// empty for every other. A label only.
 	Kind string `json:"kind,omitempty"`
 	// AutoResumed is set while the request is in the step the factory
-	// resumed by itself after the provider's limit reset, naming the
-	// provider's time (request.Request.EnteredByAutoResume). Empty otherwise.
+	// resumed by itself, of either kind (after the provider's limit reset,
+	// naming the provider's time, or after a step that never got to the
+	// work, naming its cause: request.Request.EnteredByAutoResume). Empty
+	// otherwise.
 	AutoResumed string `json:"auto_resumed,omitempty"`
 	// AwaitingPullRequest is set for a halted request whose only gap is a
 	// missing pull request (request.HaltAcceptedNoPR); Label is its calm

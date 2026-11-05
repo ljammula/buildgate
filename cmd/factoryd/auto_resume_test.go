@@ -71,11 +71,27 @@ func TestRemindRequestResumesADueTransientWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = requestdrivertest.LoadRequest(t, dataDir, "req-1")
-	if r.State != request.StateSpecDrafting || r.AutoResumed == nil || r.AutoResumed.Cause != unresolved.SandboxLaunch {
-		t.Fatalf("state %s, AutoResumed %+v; want the step resumed by the factory", r.State, r.AutoResumed)
+	if r.State != request.StateSpecDrafting || r.AutoRetried == nil || r.AutoRetried.Cause != unresolved.SandboxLaunch {
+		t.Fatalf("state %s, AutoRetried %+v; want the step resumed by the factory", r.State, r.AutoRetried)
 	}
 	entry := buildRequestStatusEntry(r, nil, time.Now())
 	if want := "  [resumed automatically 5m0s after the step ended with cause sandbox_launch]"; requestRowSuffix(entry) != want {
 		t.Errorf("status row suffix = %q, want %q", requestRowSuffix(entry), want)
+	}
+}
+
+// A transient wait past request.AutoRetryWindow is the operator's: its
+// workflow goes back to the reminder interval instead of polling for a
+// resume that will not be made.
+func TestReviewWaitOfAStaleTransientWaitIsTheReminderInterval(t *testing.T) {
+	now := time.Now()
+	dataDir := t.TempDir()
+	requestdrivertest.NewApprovableDriverRequest(t, dataDir, "req-1", request.StateSpecDrafting)
+	r := requestdrivertest.LoadRequest(t, dataDir, "req-1")
+	if err := r.EnterResumeReview(request.StateSpecDrafting, request.LostStep{Cause: unresolved.SandboxLaunch}, now.Add(-2*request.AutoRetryWindow)); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewWait(r, time.Hour, 0, now); got != time.Hour {
+		t.Errorf("reviewWait = %v, want the reminder interval", got)
 	}
 }

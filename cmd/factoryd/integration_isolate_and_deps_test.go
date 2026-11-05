@@ -77,16 +77,10 @@ func TestIntegrationIsolateWorkspaceRollsBackWhenTerminalSaveFails(t *testing.T)
 	}
 
 	runDir := run.Dir(dataDir, runID)
-	// Waiting for run.json's own State field to reach "verifying" is not
-	// enough: that save happens *before* the verify subprocess even
-	// starts (see the state=verifying save just above where verify.log is
-	// first opened), so a chmod triggered by it can itself race the log
-	// file's own creation under load -- caught live running this exact
-	// test under the full suite's concurrency, where it failed one level
-	// earlier than intended ("create log file: ... permission denied")
-	// instead of at the terminal save this test means to target. Waiting
-	// for verify.log to actually exist on disk instead removes that race:
-	// once it exists, the verify subprocess (a fast, synchronous "true")
+	// run.json never records "verifying" (it is the workflow's progress
+	// stage; the last save before the verdict is "slice_running"), so the
+	// test waits for verify.log to exist instead of for a state: once it
+	// exists, the verify subprocess (a fast, synchronous "true")
 	// already has its file descriptor open and needs no further directory
 	// permission to keep writing to it, so making the directory read-only
 	// at that point can no longer fail anything before the terminal save.
