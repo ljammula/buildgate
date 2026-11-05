@@ -117,11 +117,16 @@ const minReviewWait = time.Second
 
 // reviewWait is how long a request at a review gate waits before the workflow
 // looks again: the reminder interval, cut short to the time left before the
-// gate expires (review_gate_expiry), and never below minReviewWait.
+// gate expires (review_gate_expiry) or before the factory resumes a
+// provider-quota wait by itself (request.AutoResumeDue), and never below
+// minReviewWait.
 func reviewWait(r *request.Request, reminder, expiry time.Duration, now time.Time) time.Duration {
 	wait := reminder
 	if deadline, ok := r.GateDeadline(expiry); ok {
 		wait = min(wait, deadline.Sub(now))
+	}
+	if due, ok := r.AutoResumeDue(); ok {
+		wait = min(wait, due.Sub(now))
 	}
 	return max(wait, minReviewWait)
 }
@@ -451,11 +456,16 @@ func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bo
 }
 
 // RemindRequest sends request id's review reminder when one is due, after
-// halting the request if its gate has expired.
-func (a *requestActivities) RemindRequest(_ context.Context, id string) error {
+// halting the request if its gate has expired, and after the factory's one
+// automatic resume of a provider-quota wait whose retry time has passed,
+// which ends the wait instead.
+func (a *requestActivities) RemindRequest(ctx context.Context, id string) error {
 	a.ensureConsole()
 	// A gate past its review_gate_expiry halts instead of reminding.
 	if expired, err := requestdriver.ExpireIfDue(a.dataDir, id, a.cfg.Settings.ReviewGateExpiry, time.Now()); err != nil || expired {
+		return err
+	}
+	if resumed, err := requestdriver.AutoResumeIfDue(ctx, a.dataDir, id, a.cfg, time.Now()); err != nil || resumed {
 		return err
 	}
 	return requestdriver.RemindIfDue(a.dataDir, id, a.cfg.HitlReminderInterval, time.Now)
