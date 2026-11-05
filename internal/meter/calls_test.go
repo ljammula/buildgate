@@ -219,3 +219,29 @@ func TestAnExactSettlementOnAFailedStreamIsNotCountedAsAnswered(t *testing.T) {
 		t.Errorf("SummarizeCalls = %+v, want 0 answered, 2 failed, 2 refused at the end by the provider's error", got)
 	}
 }
+
+// The reset of the refusal that ended the requests is that refusal's own: a
+// transient 429's Retry-After is not carried to a later refusal that gave
+// none, and an answer ends it.
+func TestRefusedAtEndRetryAtIsTheLastRefusalsOwn(t *testing.T) {
+	limited := func(id, ts string, retryAfter int64) []LedgerRecord {
+		return []LedgerRecord{{Kind: LedgerKindAdmit, RequestID: id}, {Kind: LedgerKindComplete, RequestID: id, Settled: SettledReleased, Status: 429, TS: ts, RetryAfterSeconds: retryAfter}}
+	}
+	transient := limited("a", "2026-11-04T02:00:00Z", 20)
+	if got := SummarizeCalls(transient); got.RefusedAtEndRetryAt != "2026-11-04T02:00:20Z" {
+		t.Errorf("one 429 with Retry-After 20s: %+v, want its own reset", got)
+	}
+	hard := append(append([]LedgerRecord{}, transient...), limited("b", "2026-11-04T02:01:00Z", 0)...)
+	got := SummarizeCalls(hard)
+	if got.RefusedAtEndRetryAt != "" || got.RetryAt != "2026-11-04T02:00:20Z" || got.RefusedAtEnd != 2 {
+		t.Errorf("transient 429 then a 429 with no time: %+v, want no reset for the refusal that ended them (RetryAt keeps the transient's)", got)
+	}
+	failed := append(append([]LedgerRecord{}, transient...), LedgerRecord{Kind: LedgerKindComplete, RequestID: "c", Settled: SettledReleased, Status: 502})
+	if got := SummarizeCalls(failed); got.RefusedAtEndRetryAt != "" {
+		t.Errorf("transient 429 then a 502: %+v, want no reset", got)
+	}
+	answered := append(append([]LedgerRecord{}, transient...), LedgerRecord{Kind: LedgerKindComplete, RequestID: "d", Settled: SettledExact, Status: 200})
+	if got := SummarizeCalls(answered); got.RefusedAtEndRetryAt != "" {
+		t.Errorf("transient 429 then an answer: %+v, want no reset", got)
+	}
+}

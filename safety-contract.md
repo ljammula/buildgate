@@ -530,7 +530,12 @@ requires a new contract review and an updated machine-checkable test.
   request in `resume_review`, and nothing reruns until a human chooses
   `factoryd resume` (continue the lost build in its kept worktree from the
   last completed round, or rerun a lost drafting or planning step),
-  `factoryd resume -from scratch` (rebuild the ticket) or `factoryd cancel`.
+  `factoryd resume -from scratch` (rebuild the ticket) or `factoryd cancel`,
+  with one exception: a step the provider refused with its own limit
+  (`provider_quota`) whose refusal carries the meter's RFC 3339 reset time
+  may be resumed by the factory itself after that time, at most once per
+  request (the automatic resume, under "Request lifecycle: a lost step
+  waits for a human").
   A lost build keeps its worktree, never its harness session, and every
   gate reruns on the final commit. A heartbeat RPC that fails on the
   connection to the Temporal server does not cancel a step: a long step
@@ -737,7 +742,10 @@ requires a new contract review and an updated machine-checkable test.
   a refusal is not held by a refusal at or before that resume. The hold is
   by route name within one data dir and is derived from that record alone:
   the holder's resume, cancel or rebuild releases it, and a time a worker
-  printed ends nothing. Rounds, a read-back and the challenger are not held
+  printed ends nothing. The holder's own wait may end by itself: the
+  factory's one automatic resume of a request, a minute after the reset
+  time of the refusal that ended its step (the automatic resume, under
+  "Request lifecycle: a lost step waits for a human"). Rounds, a read-back and the challenger are not held
   and meet the limit as before. What reaches `resume_review` with the cause is what that check
   does not see: a credential that fails between the check and the launch,
   the sandbox runtime's budget check, a read-back, and the rounds above. A refused resume of a kept build
@@ -1325,7 +1333,8 @@ A request step (a drafting or planning step, a ticket build, a corrective
 or PR-review round) whose worker stopped, or a ticket build or round that
 ended with no verdict on the work for another of SC-017's causes, or whose
 only failed gates are reviews that gave no verdict, is never
-rerun on its own. A ticket whose recorded run halted with such a cause,
+rerun on its own, but for a request's one automatic resume after a
+provider's limit resets (below). A ticket whose recorded run halted with such a cause,
 and about which no decision of the current `Generation` exists, is moved to
 `resume_review` by the step that finds it, also when the request is still
 `building`: its kept worktree is not reaped and no build starts. A run that
@@ -1348,6 +1357,34 @@ records the decision and returns the request to the state of the lost step:
 - `resume_review -> building`
 - `resume_review -> pr_review`
 - `resume_review -> cancelled`
+
+The factory makes the same decision itself at most once per request, ever
+(the automatic resume, `internal/request.AutoResumeRequest`, through the
+same `resumeLoaded` and preflight as `ResumeRequest`), and for no other
+wait. A request with no automatic resume recorded (`AutoResumed`), waiting
+in `resume_review` with cause `provider_quota`, not parked, not refused a
+resume, and whose last History entry is still the factory's move into
+`resume_review` (no operator action since, such as a reopen after an
+expired gate), is resumed by the factory (`By: factory`, a History reason
+naming the provider's reset time) once its reset time plus
+`request.AutoResumeMargin` (1 minute) has passed. The reset time is
+`Resume.ResetAt`: the Retry-After of the refusal with the provider's own
+limit that ended the step, as the meter's ledger recorded that refusal
+(`meter.Calls.RefusedAtEndRetryAt`, of the launch whose ledger gave the
+cause), never an earlier refusal's in the same or an earlier launch, and
+never a time a worker printed; a refusal that carried none, and a time at
+or before the request's entry into the wait, leave the wait to the
+operator. `Resume.RetryAt`, which the prompt shows and the route hold
+reads, keeps the latest time any launch recorded. The worker's request
+poll checks it (`RemindRequest`, whose timer is cut short to that moment),
+and the decision is re-checked under the request's lock, so concurrent
+polls make one resume; the verb is the one the prompt offers (`round`, or
+`scratch` for a lost build that kept nothing); a resume that continues no
+build reaps the kept worktree as `factoryd resume` does; the operator is
+notified. A preflight that refuses or cannot be made spends it: the request
+keeps waiting with the reasons recorded. `AutoResumed` is never cleared:
+every later `provider_quota` wait of the request, on any step or ticket and
+after any operator resume, retry or rebuild, waits for a human.
 
 `cancelled` is `Cancel`, as above. A build resumed with `round` is checked
 again before it launches; a failed check returns the request to

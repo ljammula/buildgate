@@ -49,6 +49,12 @@ type Calls struct {
 	// kind of the last of them (RefusedBy*).
 	RefusedAtEnd   int    `json:"refused_at_end,omitempty"`
 	RefusedAtEndBy string `json:"refused_at_end_by,omitempty"`
+	// RefusedAtEndRetryAt is the time the last of those refusals asked the
+	// client to wait until (its arrival plus its Retry-After), RFC 3339 UTC:
+	// the reset of the refusal that ended the requests, never of an earlier
+	// one. "" when that refusal carried none, or nothing was refused at the
+	// end.
+	RefusedAtEndRetryAt string `json:"refused_at_end_retry_at,omitempty"`
 	// Legacy is true when the ledger holds a complete record from before
 	// the meter recorded how a request ended. Its counts are then inferred
 	// (SummarizeCalls) and say less: a provider's 429 reads as Failed, an
@@ -142,12 +148,13 @@ func (c *Calls) countComplete(rec LedgerRecord, usageBefore bool) {
 		c.refusedAtEnd(RefusedByProviderError)
 	case rec.Status >= 200 && rec.Status < 300 && rec.Settled == SettledExact:
 		c.Answered++
-		c.RefusedAtEnd, c.RefusedAtEndBy = 0, ""
+		c.RefusedAtEnd, c.RefusedAtEndBy, c.RefusedAtEndRetryAt = 0, "", ""
 	case rec.Status >= 200 && rec.Status < 300:
 		c.AnsweredUnread++
 	case rec.Status == 429:
 		c.RateLimited++
 		c.refusedAtEnd(RefusedByProviderLimit)
+		c.RefusedAtEndRetryAt = retryAtOf(rec)
 	case rec.Status >= 400 && rec.Status < 500:
 		c.Rejected++
 	default:
@@ -156,23 +163,32 @@ func (c *Calls) countComplete(rec LedgerRecord, usageBefore bool) {
 	}
 }
 
+// refusedAtEnd counts one more refusal at the end, by by. Its own retry time
+// replaces the last one's (a 429 sets it after this call): a refusal that
+// carries none leaves none.
 func (c *Calls) refusedAtEnd(by string) {
 	c.RefusedAtEnd++
 	c.RefusedAtEndBy = by
+	c.RefusedAtEndRetryAt = ""
 }
 
 // noteRetryAt keeps the latest "wait until" of the refused responses: the
 // record's own time plus its Retry-After.
 func (c *Calls) noteRetryAt(rec LedgerRecord) {
+	if at := retryAtOf(rec); at > c.RetryAt {
+		c.RetryAt = at
+	}
+}
+
+// retryAtOf is rec's own "wait until": its time plus its Retry-After, RFC
+// 3339 UTC; "" when it carries none.
+func retryAtOf(rec LedgerRecord) string {
 	if rec.RetryAfterSeconds <= 0 {
-		return
+		return ""
 	}
 	arrived, err := time.Parse(time.RFC3339Nano, rec.TS)
 	if err != nil {
-		return
+		return ""
 	}
-	at := arrived.Add(time.Duration(rec.RetryAfterSeconds) * time.Second).UTC().Format(time.RFC3339)
-	if at > c.RetryAt {
-		c.RetryAt = at
-	}
+	return arrived.Add(time.Duration(rec.RetryAfterSeconds) * time.Second).UTC().Format(time.RFC3339)
 }

@@ -52,3 +52,45 @@ func TestQuotaRefusedRoutesAreTheLaunchesTheProviderRefused(t *testing.T) {
 		t.Fatalf("QuotaRefusedRoutes = %v, want [codex terra]", got)
 	}
 }
+
+// The reset the factory may resume on is the last launch's own terminal
+// refusal's, never an earlier launch's.
+func TestQuotaResetAtIsTheLastLaunchsTerminalRefusal(t *testing.T) {
+	limited := func(resetAt string) *meter.Calls {
+		return &meter.Calls{RateLimited: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByProviderLimit, RetryAt: resetAt, RefusedAtEndRetryAt: resetAt}
+	}
+	r := &Run{Attempts: []Attempt{{RelayCalls: limited("2026-11-04T02:00:20Z")}, {RelayCalls: limited("")}}}
+	if got := QuotaResetAt(LastCalls(r)); got != "" {
+		t.Errorf("an earlier launch's reset, the last launch none: QuotaResetAt = %q, want none", got)
+	}
+	if got := ProviderRetryAt(r); got != "2026-11-04T02:00:20Z" {
+		t.Errorf("ProviderRetryAt = %q, want the earlier launch's time still shown", got)
+	}
+	r.Attempts = append(r.Attempts, Attempt{RelayCalls: limited("2026-11-04T05:00:00Z")})
+	if got := QuotaResetAt(LastCalls(r)); got != "2026-11-04T05:00:00Z" {
+		t.Errorf("QuotaResetAt = %q, want the last launch's own reset", got)
+	}
+	served := &meter.Calls{Answered: 3, RefusedAtEndRetryAt: "2026-11-04T05:00:00Z"}
+	if got := QuotaResetAt(served); got != "" {
+		t.Errorf("a served launch: QuotaResetAt = %q, want none", got)
+	}
+}
+
+// TestLastCallsReadsOnlyTheLastAttempt: an earlier attempt's ledger did not
+// end the run, so a last attempt that recorded nothing gives nil, never the
+// earlier one's calls (whose refusal time must not resume a request).
+func TestLastCallsReadsOnlyTheLastAttempt(t *testing.T) {
+	earlier := &meter.Calls{RefusedAtEndRetryAt: "2026-11-04T10:00:00Z"}
+	r := &Run{Attempts: []Attempt{{RelayCalls: earlier}, {}}}
+	if got := LastCalls(r); got != nil {
+		t.Errorf("LastCalls = %+v, want nil: the last attempt recorded nothing", got)
+	}
+	last := &meter.Calls{}
+	r.Attempts[1].RelayCalls = last
+	if got := LastCalls(r); got != last {
+		t.Errorf("LastCalls = %+v, want the last attempt's calls", got)
+	}
+	if got := LastCalls(&Run{}); got != nil {
+		t.Errorf("LastCalls of a run with no attempt = %+v, want nil", got)
+	}
+}

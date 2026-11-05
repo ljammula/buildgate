@@ -275,6 +275,7 @@
         "retry_at": "2026-09-10T09:00:00Z",
         "refused_at_end": 3,
         "refused_at_end_by": "every-field refused_at_end_by",
+        "refused_at_end_retry_at": "2026-09-10T09:00:00Z",
         "legacy": true
       },
       "sandbox_resources": {

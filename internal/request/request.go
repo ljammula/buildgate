@@ -578,6 +578,10 @@ type Request struct {
 	// ResumeDecide and consumed by the step it re-enables. Every other
 	// transition clears it.
 	ResumeDecision *ResumeDecision `json:"resume_decision,omitempty"`
+	// AutoResumed is the factory's one automatic resume of this request
+	// (AutoResumeRequest), nil until it is made. It is never cleared: every
+	// later provider-quota wait of the request waits for the operator.
+	AutoResumed *AutoResume `json:"auto_resumed,omitempty"`
 	// RetryFromScratch is the operator's `factoryd retry -from scratch`:
 	// the rebuild the retry leads to starts from the base commit even when
 	// the quarantined attempt's commit could be continued. Set by

@@ -145,6 +145,10 @@ type requestStatusEntry struct {
 	// Kind is "memory" for a request `factoryd memory propose` created,
 	// empty for every other. A label only.
 	Kind string `json:"kind,omitempty"`
+	// AutoResumed is set while the request is in the step the factory
+	// resumed by itself after the provider's limit reset, naming the
+	// provider's time (request.Request.EnteredByAutoResume). Empty otherwise.
+	AutoResumed string `json:"auto_resumed,omitempty"`
 	// AwaitingPullRequest is set for a halted request whose only gap is a
 	// missing pull request (request.HaltAcceptedNoPR); Label is its calm
 	// one-line status with the exact next command. Both empty otherwise.
@@ -281,6 +285,9 @@ func requestRowSuffix(r requestStatusEntry) string {
 	if r.Kind != "" {
 		suffix += "  [" + r.Kind + "]"
 	}
+	if r.AutoResumed != "" {
+		suffix += "  [" + r.AutoResumed + "]"
+	}
 	return suffix
 }
 
@@ -297,6 +304,9 @@ func buildRequestStatusEntry(r *request.Request, wait *request.Wait, now time.Ti
 	}
 	if r.Source.Kind == request.SourceMemory {
 		entry.Kind = string(request.SourceMemory)
+	}
+	if auto := r.EnteredByAutoResume(); auto != nil {
+		entry.AutoResumed = "resumed automatically after the provider's limit reset at " + auto.RetryAt
 	}
 	if r.AwaitingPullRequest() {
 		entry.AwaitingPullRequest = true

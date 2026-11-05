@@ -62,7 +62,8 @@ func routeCredentialStep(err error) (step request.LostStep, ok bool) {
 
 // lostStepOf describes runRecord, a run that gave no verdict for cause, for
 // request.EnterResumeReview: the run a resume continues (kept is false when
-// its worktree was not kept), and the time the provider said to try again.
+// its worktree was not kept), the time the provider said to try again, and
+// the reset of the refusal that ended the step (ResetAt).
 // That time is the meter's (run.ProviderRetryAt); when the meter recorded
 // none, it is the time of day the provider's message gave in the run's
 // retained review evidence (providerResetTimeInEvidence), which names no
@@ -80,6 +81,14 @@ func lostStepOf(dataDir string, runRecord *run.Run, cause unresolved.Cause, kept
 		if step.RetryAt == "" {
 			step.RetryAt = providerResetTimeInEvidence(dataDir, runRecord.ID)
 		}
+		// The reset of the refusal that ended the step, from the launch
+		// whose ledger gave the cause: a halted run's last launch, a review
+		// that did not answer's own.
+		calls := run.LastCalls(runRecord)
+		if run.UnresolvedCauseOf(runRecord) == "" {
+			calls = run.LastReviewCalls(runRecord)
+		}
+		step.ResetAt = run.QuotaResetAt(calls)
 	}
 	return step
 }

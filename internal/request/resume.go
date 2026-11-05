@@ -50,6 +50,13 @@ type ResumeInfo struct {
 	// text; only the meter's RFC 3339 form also ends a route hold
 	// (RouteHolder), never the text a worker printed.
 	RetryAt string `json:"retry_at,omitempty"`
+	// ResetAt is the provider's own time (RFC 3339 UTC) in the refusal with
+	// its limit that ended the step: the meter's record of that refusal
+	// alone, never of an earlier one or an earlier launch, "" when it gave
+	// none. Only it lets the factory resume the wait by itself
+	// (AutoResumeDue); RetryAt is what the prompt says and the route hold
+	// reads.
+	ResetAt string `json:"reset_at,omitempty"`
 	// Routes are the model routes the provider refused with its own limit
 	// (Cause provider_quota), as the meter recorded each launch's route.
 	// While r waits here, a launch of any request on one of them waits too
@@ -146,6 +153,8 @@ type LostStep struct {
 	Reason string
 	// RetryAt is ResumeInfo.RetryAt.
 	RetryAt string
+	// ResetAt is ResumeInfo.ResetAt.
+	ResetAt string
 	// Routes is ResumeInfo.Routes.
 	Routes []string
 	// Detail, when set, is what the step's job reported, one sanitised line;
@@ -155,7 +164,8 @@ type LostStep struct {
 
 // EnterResumeReview moves a request whose step ended with no verdict on the
 // work, or whose stacked predecessor needs operator repair, out of from into
-// resume_review, which waits on a human: nothing reruns on its own. from must
+// resume_review, which waits on a human: nothing reruns on its own but the
+// one automatic resume of a provider-quota wait (AutoResumeDue). from must
 // be the state of that step and the request's current state. It starts the
 // next Generation and resets the reminder bookkeeping.
 func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) error {
@@ -172,11 +182,12 @@ func (r *Request) EnterResumeReview(from State, step LostStep, now time.Time) er
 		Cause:      step.Cause,
 		Reason:     step.Reason,
 		RetryAt:    step.RetryAt,
+		ResetAt:    step.ResetAt,
 		Routes:     step.Routes,
 		Generation: r.nextResumeGeneration(),
 		At:         r.UpdatedAt,
 	}
-	r.Error = prompt
+	r.Error = prompt + r.autoResumeClause()
 	if step.Detail != "" {
 		r.Error += "; the job reported: " + step.Detail
 	}
@@ -219,6 +230,12 @@ func (r *Request) nextResumeGeneration() int {
 // Whether a resumed build's preconditions hold is the caller's check
 // (ResumeRequest runs it first) and the build's own.
 func (r *Request) ResumeDecide(verb, by string, now time.Time) (State, error) {
+	return r.resumeDecide(verb, by, "", now)
+}
+
+// resumeDecide is ResumeDecide with note, when set, added to the History
+// reason of the move.
+func (r *Request) resumeDecide(verb, by, note string, now time.Time) (State, error) {
 	if verb != ResumeRound && verb != ResumeScratch {
 		return "", fmt.Errorf("request %s: resume decision %q must be %q or %q", r.ID, verb, ResumeRound, ResumeScratch)
 	}
@@ -229,7 +246,11 @@ func (r *Request) ResumeDecide(verb, by string, now time.Time) (State, error) {
 	if !stateIn(to, resumableStates) {
 		return "", fmt.Errorf("request %s: recorded lost step %q cannot be resumed %w", r.ID, to, ErrIllegalTransition)
 	}
-	if err := advance(r, []State{StateResumeReview}, to, by, "resume decision: "+verb, now); err != nil {
+	reason := "resume decision: " + verb
+	if note != "" {
+		reason += " (" + note + ")"
+	}
+	if err := advance(r, []State{StateResumeReview}, to, by, reason, now); err != nil {
 		return "", err
 	}
 	r.ResumeDecision = &ResumeDecision{Verb: verb, Generation: r.Resume.Generation, By: by, At: r.UpdatedAt}
@@ -256,8 +277,14 @@ func (r *Request) ConsumeResumeDecision() {
 	r.ResumeDecision = nil
 }
 
-// resumeNextAction is NextAction's resume_review branch.
+// resumeNextAction is NextAction's resume_review branch: the ways on, and
+// what the factory does by itself after the provider's limit resets.
 func (r *Request) resumeNextAction() string {
+	return r.resumeWaysOn() + r.autoResumeClause()
+}
+
+// resumeWaysOn is the operator's ways out of resume_review.
+func (r *Request) resumeWaysOn() string {
 	if r.Resume == nil {
 		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd resume %s`, `factoryd resume -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
 	}
@@ -334,7 +361,9 @@ type ResumePreflight func(r *Request) (reasons []string, err error)
 // runs preflight (for a ResumeRound of a lost build, and for any other lost
 // step), and applies
 // ResumeDecide. A refused preflight returns *ResumeRefusedError and saves
-// nothing. A request not in resume_review wraps ErrIllegalTransition.
+// nothing. A request not in resume_review wraps ErrIllegalTransition. The
+// factory's own resume after a provider's limit resets (AutoResumeRequest)
+// is this same resume (resumeLoaded).
 func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight ResumePreflight, opts ...DecisionOption) (*Request, error) {
 	unlock, err := Lock(dataDir, id)
 	if err != nil {
@@ -348,11 +377,25 @@ func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight Resume
 	if err := r.refuseLapsed(dataDir, now, opts); err != nil {
 		return nil, err
 	}
+	if err := r.resumeLoaded(verb, by, "", now, preflight); err != nil {
+		return nil, err
+	}
+	if err := r.Save(dataDir); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// resumeLoaded is the resume ResumeRequest and AutoResumeRequest make of r,
+// loaded under its lock: preflight (for a ResumeRound of a lost build, and
+// for any other lost step), then ResumeDecide with note. The caller saves r.
+// A refused preflight returns *ResumeRefusedError and changes nothing.
+func (r *Request) resumeLoaded(verb, by, note string, now time.Time, preflight ResumePreflight) error {
 	if verb != ResumeRound && verb != ResumeScratch {
-		return nil, fmt.Errorf("request %s: resume decision %q must be %q or %q", id, verb, ResumeRound, ResumeScratch)
+		return fmt.Errorf("request %s: resume decision %q must be %q or %q", r.ID, verb, ResumeRound, ResumeScratch)
 	}
 	if r.State != StateResumeReview || r.Resume == nil {
-		return nil, fmt.Errorf("request %s: cannot resume from state %q (must be %q) %w", id, r.State, StateResumeReview, ErrIllegalTransition)
+		return fmt.Errorf("request %s: cannot resume from state %q (must be %q) %w", r.ID, r.State, StateResumeReview, ErrIllegalTransition)
 	}
 	// A lost build is checked for a "round" resume only (a rebuild starts a
 	// fresh worktree); any other lost step reruns in place whichever verb is
@@ -360,17 +403,12 @@ func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight Resume
 	if preflight != nil && (r.Resume.FromState != StateBuilding || verb == ResumeRound) {
 		reasons, err := preflight(r)
 		if err != nil {
-			return nil, &ResumePreflightError{RequestID: id, Err: err}
+			return &ResumePreflightError{RequestID: r.ID, Err: err}
 		}
 		if len(reasons) > 0 {
-			return nil, &ResumeRefusedError{RequestID: id, Reasons: reasons, Step: r.Resume.FromState}
+			return &ResumeRefusedError{RequestID: r.ID, Reasons: reasons, Step: r.Resume.FromState}
 		}
 	}
-	if _, err := r.ResumeDecide(verb, by, now); err != nil {
-		return nil, err
-	}
-	if err := r.Save(dataDir); err != nil {
-		return nil, err
-	}
-	return r, nil
+	_, err := r.resumeDecide(verb, by, note, now)
+	return err
 }

@@ -509,6 +509,8 @@ func writeReplayRecord(path string, replay *run.Replay) error {
 func judgeRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, need restackNeed, replay *run.Replay, file string, cfg WorkerConfig, now time.Time) error {
 	rs := ticket.Restack
 	runID, ended, err := runReplay(dp, ctx, dataDir, r, ticket, cfg, rs, file)
+	// now was taken before the replay built; stamp what follows at its end.
+	now = time.Now()
 	if err != nil {
 		ticket.Restack = nil
 		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack %d: %v", ticket.Index, r.TicketCount, rs.N, err), now)
@@ -542,7 +544,7 @@ func settleRestackRun(dp Deps, ctx context.Context, dataDir string, r *request.R
 	switch {
 	case ended.unresolved != "":
 		log.Printf("request %s: ticket %d: restack run %s gave no verdict (%s): %s", r.ID, ticket.Index, runID, ended.unresolved, ended.errText)
-		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: ended.unresolved, RetryAt: ended.retryAt, Routes: ended.routes}, now)
+		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: ended.unresolved, RetryAt: ended.retryAt, ResetAt: ended.resetAt, Routes: ended.routes}, now)
 	case ended.startFailure:
 		if n := restackStartFailures(r, ticket); n >= maxRestackStartFailures {
 			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: the replay run of its restack onto %s did not start %d times in a row, the last (run %s): %s. Nothing was pushed. `factoryd retry %s` restacks again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), n, runID, ended.errText, r.ID, r.ID), now)

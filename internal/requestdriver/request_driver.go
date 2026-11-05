@@ -1794,7 +1794,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if launched.unresolved != "" {
 			// No verdict on the round's work, so no quarantine: a human
 			// decides what runs next, and the round used none of the budget.
-			return true, EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt, Routes: launched.routes}, now)
+			return true, EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: launched.unresolved, RetryAt: launched.retryAt, ResetAt: launched.resetAt, Routes: launched.routes}, now)
 		}
 		if outcome != request.RoundQuarantined {
 			// A start failure or a genuine halt (never triggered by
