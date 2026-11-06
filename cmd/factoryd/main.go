@@ -20,12 +20,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"buildgate/internal/buildversion"
 	"buildgate/internal/codereview"
 	"buildgate/internal/evidence"
 	"buildgate/internal/harness"
@@ -34,13 +34,13 @@ import (
 	"buildgate/internal/run"
 )
 
-// version identifies this build; set via -ldflags "-X main.version=...".
-// "dev" otherwise, in which case `factoryd version` reports the git
+// version identifies this build: the linker-stamped value of
+// internal/buildversion ("dev" when unstamped), in which case `factoryd version` reports the git
 // revision the Go toolchain embeds in a `go build`/`go install` from a
-// checkout instead (see buildVersion). Reported by `factoryd version`
+// checkout instead (see buildversion.String). Reported by `factoryd version`
 // only -- the embedded harness's own cache directory (harness.Ensure) is
 // content-addressed, not version-addressed, so it doesn't depend on this.
-var version = "dev"
+var version = buildversion.Stamped()
 
 // overrideTokenEnvironmentVariable names the environment variable holding
 // the bearer token `serve`'s POST /runs/{id}/override endpoint requires —
@@ -330,42 +330,8 @@ func refuseAPITokensInEnvironment() error {
 // versionMain implements `factoryd version`: print the version this
 // binary was built with (see the version var's own doc comment).
 func versionMain() error {
-	var settings []debug.BuildSetting
-	if info, ok := debug.ReadBuildInfo(); ok {
-		settings = info.Settings
-	}
-	fmt.Println("factoryd version", buildVersion(version, settings))
+	fmt.Println("factoryd version", buildversion.String())
 	return nil
-}
-
-// buildVersion returns stamped unless it is "dev", in which case it falls
-// back to the embedded vcs.revision (12 hex digits, "-dirty" when the
-// checkout had uncommitted changes). `go run` embeds no revision, so that
-// still reports "dev".
-func buildVersion(stamped string, settings []debug.BuildSetting) string {
-	if stamped != "dev" {
-		return stamped
-	}
-	var revision string
-	var dirty bool
-	for _, s := range settings {
-		switch s.Key {
-		case "vcs.revision":
-			revision = s.Value
-		case "vcs.modified":
-			dirty = s.Value == "true"
-		}
-	}
-	if revision == "" {
-		return stamped
-	}
-	if len(revision) > 12 {
-		revision = revision[:12]
-	}
-	if dirty {
-		revision += "-dirty"
-	}
-	return revision
 }
 
 // topLevelHelpTokens are the ways an operator asks for top-level help
@@ -391,15 +357,6 @@ func isTopLevelHelpRequest(args []string) bool {
 }
 
 func realMain(dp *deps) error {
-	// Set once, here, before any subcommand can persist a run record --
-	// run.Persist (internal/run/run.go) stamps this package-level value
-	// onto every run it saves, so a run always shows which build last
-	// wrote it (M4-K1).
-	var settings []debug.BuildSetting
-	if info, ok := debug.ReadBuildInfo(); ok {
-		settings = info.Settings
-	}
-	run.FactorydVersion = buildVersion(version, settings)
 	if isTopLevelHelpRequest(os.Args[1:]) {
 		printTopLevelHelp(os.Stdout)
 		return nil

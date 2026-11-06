@@ -1,4 +1,4 @@
-package main
+package buildversion
 
 import (
 	"runtime/debug"
@@ -22,8 +22,8 @@ func TestBuildVersion(t *testing.T) {
 		{"dirty revision", "dev", []debug.BuildSetting{{Key: "vcs.revision", Value: rev}, {Key: "vcs.modified", Value: "true"}}, "0123456789ab-dirty"},
 		{"no vcs info", "dev", nil, "dev"},
 	} {
-		if got := buildVersion(tc.stamped, tc.settings); got != tc.want {
-			t.Errorf("%s: buildVersion = %q, want %q", tc.name, got, tc.want)
+		if got := From(tc.stamped, tc.settings); got != tc.want {
+			t.Errorf("%s: From = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
