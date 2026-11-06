@@ -575,7 +575,7 @@ func (d *daemonRun) serviceRepository() error {
 				lockPath = recovered.ProjectPath
 			}
 			if lockPath == "" {
-				if _, haltErr := haltReclaimedRunConfirmed(d.absDataDir, id, "", ""); haltErr != nil {
+				if _, haltErr := haltReclaimedRunConfirmed(d.dp, d.absDataDir, id, "", ""); haltErr != nil {
 					log.Printf("daemon: warning: could not durably halt reclaimed run %s after missing repository path: %v", id, haltErr)
 				}
 				log.Printf("daemon: halted reclaimed run %s: no workspace or project path for repository ownership", id)
@@ -593,7 +593,7 @@ func (d *daemonRun) serviceRepository() error {
 					log.Printf("daemon: recovery for run %s deferred until repository ownership is available: %v", id, lockErr)
 					continue
 				}
-				if _, haltErr := haltReclaimedRunConfirmed(d.absDataDir, id, recovered.WorkspacePath, recovered.Branch); haltErr != nil {
+				if _, haltErr := haltReclaimedRunConfirmed(d.dp, d.absDataDir, id, recovered.WorkspacePath, recovered.Branch); haltErr != nil {
 					log.Printf("daemon: warning: could not durably halt reclaimed run %s after repository ownership failure: %v", id, haltErr)
 				}
 				log.Printf("daemon: halted reclaimed run %s: could not establish repository ownership: %v", id, lockErr)

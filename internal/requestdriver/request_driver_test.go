@@ -1683,7 +1683,7 @@ func TestRemindIfDueSendsImmediateThenEveryInterval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestdriver.RemindRequest(dataDir, loaded, now())
+	requestdriver.RemindRequest(newFakeDeps(t), dataDir, loaded, now())
 	if err := loaded.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -1691,7 +1691,7 @@ func TestRemindIfDueSendsImmediateThenEveryInterval(t *testing.T) {
 	interval := 15 * time.Minute
 	for minute := 1; minute <= 31; minute++ {
 		clock = base.Add(time.Duration(minute) * time.Minute)
-		if err := requestdriver.RemindIfDue(dataDir, "req-1", interval, now); err != nil {
+		if err := requestdriver.RemindIfDue(newFakeDeps(t), dataDir, "req-1", interval, now); err != nil {
 			t.Fatalf("RemindIfDue at t+%dm: %v", minute, err)
 		}
 	}
@@ -1730,7 +1730,7 @@ func TestRemindIfDueStopsAfterApproval(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	requestdriver.RemindRequest(dataDir, r, base)
+	requestdriver.RemindRequest(newFakeDeps(t), dataDir, r, base)
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
@@ -1740,7 +1740,7 @@ func TestRemindIfDueStopsAfterApproval(t *testing.T) {
 	}
 
 	afterInterval := base.Add(time.Hour)
-	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return afterInterval }); err != nil {
+	if err := requestdriver.RemindIfDue(newFakeDeps(t), dataDir, "req-1", 15*time.Minute, func() time.Time { return afterInterval }); err != nil {
 		t.Fatalf("RemindIfDue after approval: %v", err)
 	}
 	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 1 {
@@ -1770,7 +1770,7 @@ func TestRemindIfDueIsRestartSafe(t *testing.T) {
 	}
 
 	restartNow := base.Add(5 * time.Minute)
-	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return restartNow }); err != nil {
+	if err := requestdriver.RemindIfDue(newFakeDeps(t), dataDir, "req-1", 15*time.Minute, func() time.Time { return restartNow }); err != nil {
 		t.Fatalf("RemindIfDue: %v", err)
 	}
 	if got := requestdrivertest.CountNotificationLogLines(t, dataDir, "req-1"); got != 0 {
@@ -2445,7 +2445,7 @@ func TestRemindIfDueDoesNotRevertAnApprovalMadeMeanwhile(t *testing.T) {
 	if _, err := request.Approve(dataDir, "req-1", "alice", base.Add(time.Minute), nil); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
-	if err := requestdriver.RemindIfDue(dataDir, "req-1", 15*time.Minute, func() time.Time { return base.Add(time.Hour) }); err != nil {
+	if err := requestdriver.RemindIfDue(newFakeDeps(t), dataDir, "req-1", 15*time.Minute, func() time.Time { return base.Add(time.Hour) }); err != nil {
 		t.Fatalf("remindIfDue: %v", err)
 	}
 	loaded, err := request.Load(dataDir, "req-1")

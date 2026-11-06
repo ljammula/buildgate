@@ -462,7 +462,7 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 		TestsRequiredOptOut: testsRequiredOptOut,
 		CreatedAt:           time.Now().Format(time.RFC3339Nano),
 	}
-	if err := save(r, dataDir); err != nil {
+	if err := save(newTestDeps(t), r, dataDir); err != nil {
 		t.Fatalf("save initial run record: %v", err)
 	}
 
@@ -476,7 +476,7 @@ func runTemporalPathFixtureWithCompose(t *testing.T, workspace, mode, verifyComm
 		r.HaltConfirmed = true
 		r.HaltReasonCode = workflow.HaltReasonCodeFromError(werr)
 		r.HaltError = werr.Error()
-		if saveErr := save(r, dataDir); saveErr != nil {
+		if saveErr := save(newTestDeps(t), r, dataDir); saveErr != nil {
 			t.Fatalf("save halted run record: %v", saveErr)
 		}
 	} else {

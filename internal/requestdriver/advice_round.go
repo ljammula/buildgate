@@ -171,7 +171,7 @@ func acceptAfterAdvice(dp Deps, ctx context.Context, dataDir string, r *request.
 	if _, stop, err := runRounds(dp, ctx, dataDir, r, ticket, accepted, cfg, now); stop {
 		return err
 	}
-	return acceptTicketRun(dataDir, r, ticket, accepted, cfg, time.Now())
+	return acceptTicketRun(dp, dataDir, r, ticket, accepted, cfg, time.Now())
 }
 
 // runRounds runs rounds after current while they apply (roundApplies), each
@@ -343,7 +343,7 @@ func concludeRound(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 	refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, current.Branch, adviceRoundName, nil)
 	switch {
 	case failed != "":
-		return nil, true, HaltRequest(dataDir, r, failed, now)
+		return nil, true, HaltRequest(dp, dataDir, r, failed, now)
 	case refused != "":
 		log.Printf("request %s: ticket %d/%d: %s %s accepted but not pushed: %s; run %s stands", r.ID, ticket.Index, r.TicketCount, adviceRoundName, roundRun.ID, refused, current.ID)
 		return notPushed(roundRun, refused)
@@ -401,7 +401,7 @@ func restoreUnpushed(dp Deps, dataDir string, r *request.Request, ticket *reques
 	if !ahead {
 		return false, nil
 	}
-	return true, HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: advice round %s was not pushed, and %s; point the branch back at that commit (`git update-ref refs/heads/%s %s`) before `factoryd retry %s`", ticket.Index, r.TicketCount, ticket.Rounds[slice].RunID, note, current.Branch, current.ResultSHA, r.ID), now)
+	return true, HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: advice round %s was not pushed, and %s; point the branch back at that commit (`git update-ref refs/heads/%s %s`) before `factoryd retry %s`", ticket.Index, r.TicketCount, ticket.Rounds[slice].RunID, note, current.Branch, current.ResultSHA, r.ID), now)
 }
 
 // maxCommentFindings bounds the findings an advice round's comment lists.
@@ -597,7 +597,7 @@ func settleInterruptedAdviceRound(dp Deps, ctx context.Context, dataDir string, 
 	} else if pushed != nil {
 		last = pushed
 	}
-	return advanceAcceptedTicket(dataDir, r, ticket, last, cfg, time.Now())
+	return advanceAcceptedTicket(dp, dataDir, r, ticket, last, cfg, time.Now())
 }
 
 // interruptedAdviceOutcome is how the in-flight round adv ended, or, in

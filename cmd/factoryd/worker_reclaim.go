@@ -48,7 +48,7 @@ func keptLostRun(dataDir, runID string) string {
 // returns their ids: a request still building that run as its current ticket,
 // or in pr_review when the run started after the request entered it (the run
 // was a corrective round). A request that has moved on is left alone. Best-effort, like the reclaim itself: failures are logged.
-func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
+func haltRequestsOfLostRuns(dp *deps, dataDir string, runs []*run.Run) []string {
 	var halted []string
 	for _, lost := range runs {
 		if lost.RequestID == "" {
@@ -78,7 +78,7 @@ func haltRequestsOfLostRuns(dataDir string, runs []*run.Run) []string {
 			default:
 				return nil
 			}
-			if err := requestdriver.EnterResumeReviewHoldingLock(dataDir, r, request.LostStep{RunID: keptLostRun(dataDir, lost.ID), Cause: unresolved.WorkerLost}, time.Now()); err != nil {
+			if err := requestdriver.EnterResumeReviewHoldingLock(dp, dataDir, r, request.LostStep{RunID: keptLostRun(dataDir, lost.ID), Cause: unresolved.WorkerLost}, time.Now()); err != nil {
 				return err
 			}
 			halted = append(halted, r.ID)

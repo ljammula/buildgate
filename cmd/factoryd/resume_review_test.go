@@ -215,7 +215,7 @@ func TestResumeReviewNextActionIsSanitizedInWatchAndInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := watchRequest(f, dataDir, "req-1", true); err != nil {
+	if err := watchRequest(newTestDeps(t), f, dataDir, "req-1", true); err != nil {
 		t.Fatalf("watchRequest: %v", err)
 	}
 	b, _ := os.ReadFile(f.Name())

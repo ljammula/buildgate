@@ -260,11 +260,11 @@ func holdForEarlierTicket(dp Deps, ctx context.Context, dataDir string, r *reque
 	hold, err := checkEarlierTicket(dp, ctx, dataDir, r, idx, cfg)
 	switch {
 	case err != nil:
-		return true, HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: %v", idx, r.TicketCount, err), now)
+		return true, HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: %v", idx, r.TicketCount, err), now)
 	case hold.park != "":
 		return true, parkRequest(dp, dataDir, r, hold.park, now)
 	case hold.wait != "":
-		return true, recordStepWait(dataDir, r, &r.StackedWait, hold.wait, cfg.HitlReminderInterval, now)
+		return true, recordStepWait(dp, dataDir, r, &r.StackedWait, hold.wait, cfg.HitlReminderInterval, now)
 	}
 	// The wait is over: its reminders end with it.
 	endStepWait(r, &r.StackedWait)

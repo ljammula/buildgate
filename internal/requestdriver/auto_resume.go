@@ -22,7 +22,7 @@ import (
 // told either way: that it was resumed, or that its checks refused it and it
 // waits for them. It reports whether the request left resume_review. A
 // request with no automatic resume due is left untouched.
-func AutoResumeIfDue(ctx context.Context, dataDir, id string, cfg WorkerConfig, now time.Time) (bool, error) {
+func AutoResumeIfDue(dp Deps, ctx context.Context, dataDir, id string, cfg WorkerConfig, now time.Time) (bool, error) {
 	r, err := request.AutoResumeRequest(dataDir, id, now, func(r *request.Request) ([]string, error) {
 		return cfg.Resume.RequestResumeRefusals(ctx, dataDir, cfg.Settings.SandboxDocker, r)
 	}, request.WithGateExpiry(cfg.Settings.ReviewGateExpiry))
@@ -32,10 +32,10 @@ func AutoResumeIfDue(ctx context.Context, dataDir, id string, cfg WorkerConfig, 
 	case errors.Is(err, request.ErrAutoResumeNotDue):
 		return false, nil
 	case errors.Is(err, request.ErrGateExpired):
-		return false, NotifyGateExpired(dataDir, id, now)
+		return false, NotifyGateExpired(dp, dataDir, id, now)
 	case errors.As(err, &refused), errors.As(err, &preflightErr):
 		log.Printf("request %s: the automatic resume was refused: %v", id, err)
-		return false, remindAutoResumeRefused(dataDir, id, now)
+		return false, remindAutoResumeRefused(dp, dataDir, id, now)
 	case err != nil:
 		return false, err
 	}
@@ -47,17 +47,17 @@ func AutoResumeIfDue(ctx context.Context, dataDir, id string, cfg WorkerConfig, 
 			log.Printf("request %s: could not discard a kept worktree: %v", r.ID, err)
 		}
 	}
-	return true, notifyAutoResumed(dataDir, r.ID, now)
+	return true, notifyAutoResumed(dp, dataDir, r.ID, now)
 }
 
 // remindAutoResumeRefused tells the operator that id, whose automatic
 // resume was refused, waits for them (its NextAction says why).
-func remindAutoResumeRefused(dataDir, id string, now time.Time) error {
+func remindAutoResumeRefused(dp Deps, dataDir, id string, now time.Time) error {
 	_, err := updateLocked(dataDir, id, func(r *request.Request) bool {
 		if r.State != request.StateResumeReview {
 			return false
 		}
-		RemindRequest(dataDir, r, now)
+		RemindRequest(dp, dataDir, r, now)
 		return true
 	})
 	return err
@@ -65,14 +65,14 @@ func remindAutoResumeRefused(dataDir, id string, now time.Time) error {
 
 // notifyAutoResumed tells the operator the factory resumed id by itself.
 // Nothing is asked of them: the notice says what happened and what follows.
-func notifyAutoResumed(dataDir, id string, now time.Time) error {
+func notifyAutoResumed(dp Deps, dataDir, id string, now time.Time) error {
 	var sent *notify.Notification
 	_, err := updateLocked(dataDir, id, func(r *request.Request) bool {
 		auto := r.EnteredByAutoResume()
 		if r.Resume == nil || auto == nil || r.State == request.StateResumeReview {
 			return false
 		}
-		n := prepareRequestNotification(dataDir, r, requestNotice{
+		n := prepareRequestNotification(dp, dataDir, r, requestNotice{
 			Ask:    autoResumedAsk(auto),
 			Detail: fmt.Sprintf("The factory resumed the %s step by itself, %s. %s", auto.FromState, auto.Note(), autoResumeBudgetLeft(r, auto)),
 			Next:   fmt.Sprintf("nothing to do; `factoryd cancel %s` stops it", r.ID),

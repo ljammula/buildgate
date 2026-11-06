@@ -436,7 +436,7 @@ func (o runOptions) workflowInput() workflow.RunWorkflowInput {
 // against a real Temporal server. It spins up a short-lived Worker on a
 // unique task queue for exactly this one run (not a long-running daemon),
 // waits for the Workflow to complete, and records the outcome through
-// save()/run.json.
+// save(dp, )/run.json.
 func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient client.Client, r *run.Run, opts runOptions) error {
 	// Resolved to its canonical (symlink-free) absolute form before anything
 	// below derives a path from it (found via review): -data-dir defaults to
@@ -458,7 +458,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 		r.State = run.StateHalted
 		r.HaltConfirmed = true // synchronous, single-process halt: the outcome is confirmed the instant it's observed
 		haltErr := fmt.Errorf("resolve data dir: %w", err)
-		if saveErr := save(r, opts.DataDir, haltErr); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir, haltErr); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return haltErr
@@ -485,7 +485,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 		r.State = run.StateHalted
 		r.HaltConfirmed = true // synchronous, single-process halt: the outcome is confirmed the instant it's observed
 		haltErr := fmt.Errorf("start Temporal worker: %w", err)
-		if saveErr := save(r, opts.DataDir, haltErr); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir, haltErr); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return haltErr
@@ -494,7 +494,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 	runCtx, cancel := context.WithTimeout(lifecycleCtx, effectiveTimeout)
 	defer cancel()
 
-	execution, startErr := startRunWorkflow(runCtx, temporalClient, r, opts, taskQueue)
+	execution, startErr := startRunWorkflow(dp, runCtx, temporalClient, r, opts, taskQueue)
 	if startErr != nil {
 		return startErr
 	}
@@ -505,7 +505,7 @@ func runViaTemporal(dp *deps, lifecycleCtx context.Context, temporalClient clien
 // records the Temporal ids on r. Any failure is already persisted as a halted
 // run (HaltConfirmed false: an ExecuteWorkflow error does not prove the
 // workflow never started) and returned.
-func startRunWorkflow(runCtx context.Context, temporalClient client.Client, r *run.Run, opts runOptions, taskQueue string) (client.WorkflowRun, error) {
+func startRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Client, r *run.Run, opts runOptions, taskQueue string) (client.WorkflowRun, error) {
 	// Memo/TypedSearchAttributes make this execution legible in the
 	// Temporal Web UI's workflow list (USAGE_REFERENCE.md, "Observe a run in Temporal") instead of an
 	// opaque id — see workflow.RunSearchAttributes's own doc comment for
@@ -545,7 +545,7 @@ func startRunWorkflow(runCtx context.Context, temporalClient client.Client, r *r
 		// of a client-side error alone could let a later reclaim/query
 		// path skip checking whether the workflow actually started.
 		haltErr := fmt.Errorf("start Temporal workflow: %w", err)
-		if saveErr := save(r, opts.DataDir, haltErr); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir, haltErr); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return nil, haltErr
@@ -561,7 +561,7 @@ func startRunWorkflow(runCtx context.Context, temporalClient client.Client, r *r
 	r.TemporalRunID = execution.GetRunID()
 	r.TemporalTaskQueue = taskQueue
 	r.TemporalAddress = opts.TemporalAddress
-	if saveErr := save(r, opts.DataDir); saveErr != nil {
+	if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
 		log.Printf("run %s: additionally failed to persist Temporal workflow ids: %v", opts.ID, saveErr)
 	}
 	return execution, nil
@@ -800,7 +800,7 @@ func awaitRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 		if r.HaltError == "" {
 			r.HaltError = err.Error()
 		}
-		if saveErr := save(r, opts.DataDir); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return fmt.Errorf("temporal workflow did not complete: %w", err)
@@ -1024,7 +1024,7 @@ func rollbackIsolatedWorkspaceOnSaveFailure(r *run.Run) {
 // same predecessor — landing between an unlocked load and save — could
 // have its own write silently lost to this function's stale in-memory
 // copy, the exact lost-update class run.WithLock exists to close.
-func invalidatePriorRunOnFullSuiteRegression(dataDir, runID, priorRunID string, failedChecks []string) {
+func invalidatePriorRunOnFullSuiteRegression(dp *deps, dataDir, runID, priorRunID string, failedChecks []string) {
 	if priorRunID == "" || !slices.Contains(failedChecks, "full_suite_verify") {
 		return
 	}
@@ -1036,7 +1036,7 @@ func invalidatePriorRunOnFullSuiteRegression(dataDir, runID, priorRunID string, 
 		prior.InvalidatedByRunID = runID
 		prior.InvalidatedAt = time.Now().Format(time.RFC3339)
 		prior.InvalidatedReason = fmt.Sprintf("full_suite_verify failed on run %q (its declared successor): the repository no longer passes its full test suite as of that run's result", runID)
-		if err := save(prior, dataDir); err != nil {
+		if err := save(dp, prior, dataDir); err != nil {
 			return err
 		}
 		// See invalidateStoredReleaseDecision's own doc comment: a
@@ -1087,7 +1087,7 @@ func invalidatePriorRunOnFullSuiteRegression(dataDir, runID, priorRunID string, 
 // passed into the locked section itself, so a concurrent override landing
 // between the caller's own load and this call can't be silently
 // overwritten by a stale copy.
-func recordSpecDriftIfDetected(dataDir, thisRunID, thisProjectPath string, prior *run.Run, productSpecSHA256, contractSHA256 string) {
+func recordSpecDriftIfDetected(dp *deps, dataDir, thisRunID, thisProjectPath string, prior *run.Run, productSpecSHA256, contractSHA256 string) {
 	if prior.State != run.StateAccepted || prior.ProjectPath != thisProjectPath {
 		return
 	}
@@ -1118,7 +1118,7 @@ func recordSpecDriftIfDetected(dataDir, thisRunID, thisProjectPath string, prior
 		// this function runs (before the -repository path's own chain
 		// validation confirms thisRunID is even a legitimate successor)
 		// to retroactively flip an already-published decision on.
-		return save(fresh, dataDir)
+		return save(dp, fresh, dataDir)
 	})
 	if lockErr != nil {
 		log.Printf("run %s: warning: could not record spec/contract drift on prior run %q: %v", thisRunID, priorID, lockErr)

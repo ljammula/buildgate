@@ -22,8 +22,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"buildgate/internal/consoleweb"
 )
 
 // EnvVar names the environment variable an operator sets to point links
@@ -71,11 +69,6 @@ func (Machine) Listening(addr string) bool {
 	}
 	_ = conn.Close()
 	return true
-}
-
-// LocalBaseURL is BaseURL with no flag, on this machine and this binary.
-func LocalBaseURL(dataDir string) string {
-	return BaseURL(Machine{}, consoleweb.Embedded(), "", dataDir)
 }
 
 // BaseURL resolves the console base URL: flagValue, then EnvVar (each only

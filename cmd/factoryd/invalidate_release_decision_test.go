@@ -26,7 +26,7 @@ func TestInvalidatePriorRunOnFullSuiteRegressionInvalidatesStoredDecision(t *tes
 		t.Fatalf("seed prior decision: %v", err)
 	}
 
-	invalidatePriorRunOnFullSuiteRegression(dataDir, "run-successor", prior.ID, []string{"full_suite_verify"})
+	invalidatePriorRunOnFullSuiteRegression(newTestDeps(t), dataDir, "run-successor", prior.ID, []string{"full_suite_verify"})
 
 	decision, err := release.LoadDecision(dataDir, "myapp", prior.ID)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestRecordSpecDriftIfDetectedDoesNotInvalidateStoredDecision(t *testing.T) 
 		t.Fatalf("seed prior decision: %v", err)
 	}
 
-	recordSpecDriftIfDetected(dataDir, "run-successor", prior.ProjectPath, prior, "different-hash", "")
+	recordSpecDriftIfDetected(newTestDeps(t), dataDir, "run-successor", prior.ProjectPath, prior, "different-hash", "")
 
 	reloaded, err := run.Load(dataDir, prior.ID)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestInvalidatePriorRunOnFullSuiteRegressionWritesATombstoneWhenNoDecisionEx
 	}
 	// Deliberately no release.SaveDecision call: no decision exists yet.
 
-	invalidatePriorRunOnFullSuiteRegression(dataDir, "run-successor", prior.ID, []string{"full_suite_verify"})
+	invalidatePriorRunOnFullSuiteRegression(newTestDeps(t), dataDir, "run-successor", prior.ID, []string{"full_suite_verify"})
 
 	decision, err := release.LoadDecision(dataDir, "myapp", prior.ID)
 	if err != nil {

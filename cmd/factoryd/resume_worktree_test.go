@@ -26,7 +26,7 @@ func TestHaltDeadOwnerRunKeepsTheWorktreeOfALostTemporalBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	halted, err := haltDeadOwnerRun(dataDir, "lost-build")
+	halted, err := haltDeadOwnerRun(newTestDeps(t), dataDir, "lost-build")
 	if err != nil || !halted {
 		t.Fatalf("haltDeadOwnerRun = %v, %v; want halted", halted, err)
 	}
@@ -50,8 +50,8 @@ func TestHaltDeadOwnerRunDoesNotKeepWithoutATemporalWorktree(t *testing.T) {
 	seedOwnedRun(t, dataDir, "no-worktree", run.StateSliceRunning, deadPID(t), "")
 
 	for _, id := range []string{"direct-run", "no-worktree"} {
-		if halted, err := haltDeadOwnerRun(dataDir, id); err != nil || !halted {
-			t.Fatalf("haltDeadOwnerRun(%s) = %v, %v", id, halted, err)
+		if halted, err := haltDeadOwnerRun(newTestDeps(t), dataDir, id); err != nil || !halted {
+			t.Fatalf("haltDeadOwnerRun(dp, %s) = %v, %v", id, halted, err)
 		}
 		if r, _ := run.Load(dataDir, id); r.KeptForResume {
 			t.Errorf("run %s kept for resume, want only a Temporal run with a prepared worktree kept", id)
@@ -66,7 +66,7 @@ func TestHaltDeadOwnerRunDoesNotKeepASingleTicketRunsWorktree(t *testing.T) {
 	dataDir := t.TempDir()
 	requestdrivertest.IsolationMarker(t, repoDir, dataDir, "single-ticket", "temporal")
 	seedOwnedRun(t, dataDir, "single-ticket", run.StateSliceRunning, deadPID(t), "")
-	if halted, err := haltDeadOwnerRun(dataDir, "single-ticket"); err != nil || !halted {
+	if halted, err := haltDeadOwnerRun(newTestDeps(t), dataDir, "single-ticket"); err != nil || !halted {
 		t.Fatalf("haltDeadOwnerRun = %v, %v", halted, err)
 	}
 	if r, _ := run.Load(dataDir, "single-ticket"); r.KeptForResume {
@@ -296,7 +296,7 @@ func TestALostCorrectiveRoundIsNotKeptAndIsReaped(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if halted, err := haltDeadOwnerRun(dataDir, "corrective"); err != nil || !halted {
+	if halted, err := haltDeadOwnerRun(newTestDeps(t), dataDir, "corrective"); err != nil || !halted {
 		t.Fatalf("haltDeadOwnerRun = %v, %v", halted, err)
 	}
 	if got, _ := run.Load(dataDir, "corrective"); got.KeptForResume {

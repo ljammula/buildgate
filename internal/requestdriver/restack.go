@@ -157,7 +157,7 @@ func restackIfNeeded(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	}
 	need, err := checkRestackNeed(dp, ctx, dataDir, r, ticket)
 	if err != nil {
-		holdRestack(dataDir, r, ticket, restackHoldSentence(r, ticket, err), cfg.HitlReminderInterval, now)
+		holdRestack(dp, dataDir, r, ticket, restackHoldSentence(r, ticket, err), cfg.HitlReminderInterval, now)
 		return false, true, nil
 	}
 	if ticket.RestackHold != nil {
@@ -211,7 +211,7 @@ func restackHoldSentence(r *request.Request, ticket *request.Ticket, err error) 
 // told (Ticket.RestackHold), keeping the time the hold began, and reminds
 // the operator once it has lasted interval since it began or since the last
 // reminder. An interval of 0 or less reminds never.
-func holdRestack(dataDir string, r *request.Request, ticket *request.Ticket, on string, interval time.Duration, now time.Time) {
+func holdRestack(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, on string, interval time.Duration, now time.Time) {
 	ts := now.UTC().Format(time.RFC3339Nano)
 	if ticket.RestackHold == nil {
 		ticket.RestackHold = &request.TicketRestackHold{Since: ts}
@@ -230,7 +230,7 @@ func holdRestack(dataDir string, r *request.Request, ticket *request.Ticket, on 
 	if now.Sub(from) < interval {
 		return
 	}
-	n := prepareRequestNotification(dataDir, r, requestNotice{
+	n := prepareRequestNotification(dp, dataDir, r, requestNotice{
 		Ask:    "A stacked pull request is held",
 		Detail: on,
 		Next:   fmt.Sprintf("fix what it names; the worker checks again every PR poll (or `factoryd cancel %s`)", r.ID),
@@ -269,16 +269,16 @@ func restackTicket(dp Deps, ctx context.Context, dataDir string, r *request.Requ
 	commits, merges, err := dp.RevListRange(r.Workspace, need.upstream, head)
 	switch {
 	case err != nil:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: list the commits to restack: %v", ticket.Index, r.TicketCount, err), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: list the commits to restack: %v", ticket.Index, r.TicketCount, err), now)
 	case len(merges) > 0:
 		return parkRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d's commits after %s include merge commit %s, which the factory does not replay, so it cannot be restacked onto %s: take the merge out of branch %s", ticket.Index, r.TicketCount, shortSHA(need.upstream), shortSHA(merges[0]), shortSHA(need.onto), need.head.Branch), now)
 	case len(commits) == 0:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d has no commits after %s to restack", ticket.Index, r.TicketCount, shortSHA(need.upstream)), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d has no commits after %s to restack", ticket.Index, r.TicketCount, shortSHA(need.upstream)), now)
 	}
 	sources, uncovered, err := restackSources(dp, dataDir, r, ticket, need, commits)
 	switch {
 	case err != nil:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: read the runs of its commits before a restack: %v", ticket.Index, r.TicketCount, err), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: read the runs of its commits before a restack: %v", ticket.Index, r.TicketCount, err), now)
 	case uncovered != "":
 		return parkRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d's commit %s on branch %s is not the work of any of its own runs, so it cannot be restacked onto %s: take it out of the branch", ticket.Index, r.TicketCount, shortSHA(uncovered), need.head.Branch, shortSHA(need.onto)), now)
 	}
@@ -436,7 +436,7 @@ func replayTicketCommits(dp Deps, ctx context.Context, dataDir string, r *reques
 			log.Printf("request %s: ticket %d: its commits do not apply onto %s: %v", r.ID, ticket.Index, shortSHA(need.onto), err)
 			return nil, "", parkRequest(dp, dataDir, r, restackConflictPark(r, ticket, need, "do not apply cleanly onto it (git's cherry-pick stopped on a conflict, and was aborted)"), now)
 		}
-		return nil, "", HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: replay its commits onto %s on %s: %v", ticket.Index, r.TicketCount, shortSHA(need.onto), branch, err), now)
+		return nil, "", HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: replay its commits onto %s on %s: %v", ticket.Index, r.TicketCount, shortSHA(need.onto), branch, err), now)
 	}
 	replay := &run.Replay{RequestID: r.ID, TicketIndex: ticket.Index, OfRunID: need.head.Run.ID, SourceRunIDs: sources, UpstreamSHA: need.upstream, SourceHeadSHA: need.head.Run.ResultSHA, OntoSHA: need.onto, HeadSHA: replayed[len(replayed)-1]}
 	for i := range commits {
@@ -446,7 +446,7 @@ func replayTicketCommits(dp Deps, ctx context.Context, dataDir string, r *reques
 		}
 		if err != nil {
 			ticket.Restack = nil
-			return nil, "", HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: patch id of a restacked commit: %v", ticket.Index, r.TicketCount, err), now)
+			return nil, "", HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: patch id of a restacked commit: %v", ticket.Index, r.TicketCount, err), now)
 		}
 		replay.Commits = append(replay.Commits, pair)
 		if what := replayedPairDiffers(pair); what != "" {
@@ -458,7 +458,7 @@ func replayTicketCommits(dp Deps, ctx context.Context, dataDir string, r *reques
 	file := filepath.Join(filepath.Dir(scratch), fmt.Sprintf("t%d-restack%d.json", ticket.Index, ticket.Restack.N))
 	if err := writeReplayRecord(file, replay); err != nil {
 		ticket.Restack = nil
-		return nil, "", HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: write the restack's replay record: %v", ticket.Index, r.TicketCount, err), now)
+		return nil, "", HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: write the restack's replay record: %v", ticket.Index, r.TicketCount, err), now)
 	}
 	return replay, file, nil
 }
@@ -513,7 +513,7 @@ func judgeRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reque
 	now = time.Now()
 	if err != nil {
 		ticket.Restack = nil
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack %d: %v", ticket.Index, r.TicketCount, rs.N, err), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: restack %d: %v", ticket.Index, r.TicketCount, rs.N, err), now)
 	}
 	if ok, err := stillInState(dataDir, r.ID, request.StatePRReview); err != nil || !ok {
 		log.Printf("request %s: ticket %d: restack %d finished but the request left pr_review while it ran -- discarding the result", r.ID, ticket.Index, rs.N)
@@ -547,12 +547,12 @@ func settleRestackRun(dp Deps, ctx context.Context, dataDir string, r *request.R
 		return EnterResumeReview(dp, dataDir, r, request.LostStep{Cause: ended.unresolved, RetryAt: ended.retryAt, ResetAt: ended.resetAt, Routes: ended.routes}, now)
 	case ended.startFailure:
 		if n := restackStartFailures(r, ticket); n >= maxRestackStartFailures {
-			return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: the replay run of its restack onto %s did not start %d times in a row, the last (run %s): %s. Nothing was pushed. `factoryd retry %s` restacks again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), n, runID, ended.errText, r.ID, r.ID), now)
+			return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: the replay run of its restack onto %s did not start %d times in a row, the last (run %s): %s. Nothing was pushed. `factoryd retry %s` restacks again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), n, runID, ended.errText, r.ID, r.ID), now)
 		}
 		log.Printf("request %s: ticket %d: restack run %s did not start (%s); the next poll restacks again", r.ID, ticket.Index, runID, ended.errText)
 		return r.Save(dataDir)
 	case ended.outcome != request.RoundAccepted:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d's restack onto %s was not accepted: run %s %s (%s); nothing was pushed, and the factory does not rebuild the ticket to fix it. Read the run's report (`factoryd status %s`), then `factoryd retry %s` to restack again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), runID, ended.outcome, ended.errText, runID, r.ID, r.ID), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d's restack onto %s was not accepted: run %s %s (%s); nothing was pushed, and the factory does not rebuild the ticket to fix it. Read the run's report (`factoryd status %s`), then `factoryd retry %s` to restack again once the cause is fixed, or `factoryd cancel %s`", ticket.Index, r.TicketCount, shortSHA(need.onto), runID, ended.outcome, ended.errText, runID, r.ID, r.ID), now)
 	}
 	return pushRestack(dp, ctx, dataDir, r, ticket, runID, need, now)
 }
@@ -652,16 +652,16 @@ func replayRunOutcome(dataDir, runID string, runErr error) (roundOutcome, error)
 func pushRestack(dp Deps, ctx context.Context, dataDir string, r *request.Request, ticket *request.Ticket, runID string, need restackNeed, now time.Time) error {
 	rec, err := run.Load(dataDir, runID)
 	if err != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: load restack run %s: %v", ticket.Index, r.TicketCount, runID, err), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: load restack run %s: %v", ticket.Index, r.TicketCount, runID, err), now)
 	}
 	if why := replayResultRefusal(dp, r, rec); why != "" {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s: %s; nothing was pushed", ticket.Index, r.TicketCount, runID, why), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s: %s; nothing was pushed", ticket.Index, r.TicketCount, runID, why), now)
 	}
 	branch, old := need.head.Branch, need.head.Run.ResultSHA
 	remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch)
 	switch {
 	case err != nil:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: read branch %s before pushing restack run %s: %v; nothing was pushed", ticket.Index, r.TicketCount, branch, runID, err), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: read branch %s before pushing restack run %s: %v; nothing was pushed", ticket.Index, r.TicketCount, branch, runID, err), now)
 	case remote != old:
 		if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, remote, now); confirmed || err != nil {
 			return err
@@ -669,10 +669,10 @@ func pushRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 		return parkRequest(dp, dataDir, r, humanCommitPark(r, ticket, need, remote), now)
 	}
 	if err := draftBeforeFactoryPush(dp, ctx, ticket); err != nil {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: turn pull request %s back to draft before pushing restack run %s: %v; nothing was pushed", ticket.Index, r.TicketCount, ticket.PRURL, runID, err), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: turn pull request %s back to draft before pushing restack run %s: %v; nothing was pushed", ticket.Index, r.TicketCount, ticket.PRURL, runID, err), now)
 	}
 	if allowed, err := decisionStillAllows(dataDir, runID); err != nil || !allowed {
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s's release decision does not allow it (%v); withholding the push to %s", ticket.Index, r.TicketCount, runID, err, branch), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s's release decision does not allow it (%v); withholding the push to %s", ticket.Index, r.TicketCount, runID, err, branch), now)
 	}
 	pushCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	pushErr := dp.PushWithLease(pushCtx, r.Workspace, rec.ResultSHA, branch, old)
@@ -686,11 +686,11 @@ func pushRestack(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 		if pushErr != nil {
 			pushed = fmt.Sprintf("pushed (the push reported: %v)", pushErr)
 		}
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s (%s) was %s to %s, but origin could not be read back: %v. The pull request's head run stays %s; `factoryd retry %s` polls again, and records the restack as pushed if origin is at %s", ticket.Index, r.TicketCount, runID, shortSHA(rec.ResultSHA), pushed, branch, readErr, need.head.Run.ID, r.ID, shortSHA(rec.ResultSHA)), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: restack run %s (%s) was %s to %s, but origin could not be read back: %v. The pull request's head run stays %s; `factoryd retry %s` polls again, and records the restack as pushed if origin is at %s", ticket.Index, r.TicketCount, runID, shortSHA(rec.ResultSHA), pushed, branch, readErr, need.head.Run.ID, r.ID, shortSHA(rec.ResultSHA)), now)
 	case back == old && pushErr != nil:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: push restack run %s to %s: %v; origin is still at %s, so nothing was pushed", ticket.Index, r.TicketCount, runID, branch, pushErr, shortSHA(old)), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: push restack run %s to %s: %v; origin is still at %s, so nothing was pushed", ticket.Index, r.TicketCount, runID, branch, pushErr, shortSHA(old)), now)
 	case back == old:
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: pushed restack run %s (%s) to %s, but origin reads %s; the pull request's head run stays %s", ticket.Index, r.TicketCount, runID, shortSHA(rec.ResultSHA), branch, shortSHA(back), need.head.Run.ID), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: pushed restack run %s (%s) to %s, but origin reads %s; the pull request's head run stays %s", ticket.Index, r.TicketCount, runID, shortSHA(rec.ResultSHA), branch, shortSHA(back), need.head.Run.ID), now)
 	}
 	if pushErr != nil {
 		log.Printf("request %s: ticket %d: the push of restack run %s reported %v; origin reads %s", r.ID, ticket.Index, runID, pushErr, shortSHA(back))
@@ -871,12 +871,12 @@ func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.R
 			log.Printf("request %s: ticket %d: restack %d's replay run %s is still %s; no other replay or round of the ticket starts until it ends", r.ID, ticket.Index, rs.N, rec.ID, rec.State)
 			return true, false, r.Save(dataDir)
 		case loadErr != nil && !errors.Is(loadErr, os.ErrNotExist):
-			return holdInterruptedRestack(dataDir, r, ticket, interval, now, fmt.Errorf("its replay run %s cannot be read: %w", rs.RunID, loadErr))
+			return holdInterruptedRestack(dp, dataDir, r, ticket, interval, now, fmt.Errorf("its replay run %s cannot be read: %w", rs.RunID, loadErr))
 		case loadErr == nil:
 			branch := ticketPRBranch(dataDir, ticket)
 			remote, err := dp.RemoteBranchHeadSHA(ctx, r.Workspace, branch)
 			if err != nil {
-				return holdInterruptedRestack(dataDir, r, ticket, interval, now, fmt.Errorf("its branch %s cannot be read on origin: %w", branch, err))
+				return holdInterruptedRestack(dp, dataDir, r, ticket, interval, now, fmt.Errorf("its branch %s cannot be read on origin: %w", branch, err))
 			}
 			if confirmed, err := confirmLandedRestack(dp, ctx, dataDir, r, ticket, remote, now); confirmed || err != nil {
 				return true, false, err
@@ -896,9 +896,9 @@ func reconcileRestack(dp Deps, ctx context.Context, dataDir string, r *request.R
 // pass because why: what it needs to settle it could not be read. The
 // ticket's poll ends this pass, and the hold is recorded and reminded as a
 // need that cannot be told is (holdRestack).
-func holdInterruptedRestack(dataDir string, r *request.Request, ticket *request.Ticket, interval time.Duration, now time.Time, why error) (ran, held bool, err error) {
+func holdInterruptedRestack(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, interval time.Duration, now time.Time, why error) (ran, held bool, err error) {
 	on := fmt.Sprintf("ticket %d/%d (%s) is held: its interrupted restack %d cannot be settled (%v), so its pull request is neither retargeted nor marked ready, and no round starts. If git cannot reach origin, fix its access (`git ls-remote origin` in %s); the worker reads it again every PR poll (or `factoryd cancel %s`)", ticket.Index, r.TicketCount, ticket.PRURL, ticket.Restack.N, why, r.Workspace, r.ID)
-	holdRestack(dataDir, r, ticket, on, interval, now)
+	holdRestack(dp, dataDir, r, ticket, on, interval, now)
 	return true, true, r.Save(dataDir)
 }
 

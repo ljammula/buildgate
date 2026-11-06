@@ -31,7 +31,7 @@ func holdForRoutes(dp Deps, dataDir string, r *request.Request, cfg WorkerConfig
 	for _, need := range needs {
 		need.ResumedAt = resumedAt
 		if reason := dp.RouteWait(dataDir, cfg.Settings, need); reason != "" {
-			return true, RecordRouteWait(dataDir, r, reason, cfg.HitlReminderInterval, now)
+			return true, RecordRouteWait(dp, dataDir, r, reason, cfg.HitlReminderInterval, now)
 		}
 	}
 	if err := EndRouteWait(dataDir, r); err != nil {

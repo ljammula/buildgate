@@ -25,14 +25,14 @@ func TestHaltRequestsOfLostRunsEntersResumeReviewOnlyForTheBuildingTicketsReques
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	haltRequestsOfLostRuns(dataDir, []*run.Run{
+	haltRequestsOfLostRuns(dp, dataDir, []*run.Run{
 		{ID: "run-other", RequestID: reqID},
 		{ID: "run-unowned"},
 	})
 	if got, _ := request.Load(dataDir, reqID); got.State != request.StateBuilding {
 		t.Fatalf("state = %s after an unrelated run, want building", got.State)
 	}
-	if halted := haltRequestsOfLostRuns(dataDir, []*run.Run{{ID: "run-lost", RequestID: reqID}}); len(halted) != 1 || halted[0] != reqID {
+	if halted := haltRequestsOfLostRuns(dp, dataDir, []*run.Run{{ID: "run-lost", RequestID: reqID}}); len(halted) != 1 || halted[0] != reqID {
 		t.Fatalf("halted = %v, want [%s]", halted, reqID)
 	}
 	got, err := request.Load(dataDir, reqID)
@@ -51,7 +51,7 @@ func TestHaltRequestsOfLostRunsEntersResumeReviewOnlyForTheBuildingTicketsReques
 func TestHaltRequestsOfLostRunsEntersResumeReviewForAPRReviewRequest(t *testing.T) {
 	dataDir := t.TempDir()
 	saveRequestInState(t, dataDir, "req-pr", request.StatePRReview)
-	halted := haltRequestsOfLostRuns(dataDir, []*run.Run{{ID: "run-round", RequestID: "req-pr"}})
+	halted := haltRequestsOfLostRuns(newTestDeps(t), dataDir, []*run.Run{{ID: "run-round", RequestID: "req-pr"}})
 	if len(halted) != 1 {
 		t.Fatalf("halted = %v, want [req-pr]", halted)
 	}
@@ -75,14 +75,14 @@ func TestHaltRequestsOfLostRunsLeavesAPRReviewRequestForARunFromBeforeIt(t *test
 		t.Fatal(err)
 	}
 	old := &run.Run{ID: "run-old", RequestID: "req-pr", CreatedAt: "2026-10-20T03:42:04Z"}
-	if halted := haltRequestsOfLostRuns(dataDir, []*run.Run{old}); len(halted) != 0 {
+	if halted := haltRequestsOfLostRuns(newTestDeps(t), dataDir, []*run.Run{old}); len(halted) != 0 {
 		t.Fatalf("halted = %v, want none for a run from before pr_review", halted)
 	}
 	if got, _ := request.Load(dataDir, "req-pr"); got.State != request.StatePRReview {
 		t.Fatalf("state = %s, want pr_review", got.State)
 	}
 	round := &run.Run{ID: "run-round", RequestID: "req-pr", CreatedAt: "2026-10-20T04:10:00Z"}
-	if halted := haltRequestsOfLostRuns(dataDir, []*run.Run{round}); len(halted) != 1 {
+	if halted := haltRequestsOfLostRuns(newTestDeps(t), dataDir, []*run.Run{round}); len(halted) != 1 {
 		t.Fatalf("halted = %v, want [req-pr] for a round started in pr_review", halted)
 	}
 }

@@ -456,7 +456,7 @@ func AdvancePRReview(dp Deps, ctx context.Context, dataDir string, r *request.Re
 				}
 				return r.Save(dataDir)
 			}
-			return haltRequestAcceptedNoPR(dataDir, r, noPullRequestHaltReason(dataDir, r, ticket), now)
+			return haltRequestAcceptedNoPR(dp, dataDir, r, noPullRequestHaltReason(dataDir, r, ticket), now)
 		}
 		restackActed, err := pollTicketPR(dp, ctx, dataDir, r, ticket, cfg, now)
 		if err != nil {
@@ -640,7 +640,7 @@ func handleClosedOrMergedTicket(dp Deps, dataDir string, r *request.Request, tic
 			return err
 		}
 		log.Printf("request %s: pr_review -> closed (%s)", r.ID, reason)
-		return notifyClosedRequest(dataDir, r, ticket, now)
+		return notifyClosedRequest(dp, dataDir, r, ticket, now)
 	default:
 		log.Printf("request %s: ticket %d: pull request %s reported state %q, neither open, merged nor closed -- reading it again next poll", r.ID, ticket.Index, ticket.PRURL, state.State)
 		return r.Save(dataDir)
@@ -875,7 +875,7 @@ func advancePRReadyOrApproved(dp Deps, ctx context.Context, dataDir string, r *r
 	// next ticket, even though it visibly blocks readiness (found via
 	// review, GitHub Codex App, PR #154 round 2).
 	ticket.MergeReadiness = checkMergeReadiness(dataDir, ticket, state, now)
-	notifyPullRequestWaiting(dataDir, r, ticket, now)
+	notifyPullRequestWaiting(dp, dataDir, r, ticket, now)
 	if state.ApprovedOnCurrentHead() && len(state.BlocksReadyThreads) == 0 {
 		ticket.PRState = "approved"
 		if err := r.Save(dataDir); err != nil {
@@ -1026,13 +1026,13 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 		}
 	}
 	if countedRounds >= cfg.MaxReviewRounds {
-		return HaltRequest(dataDir, r, fmt.Sprintf("review rounds exhausted for ticket %d/%d", ticket.Index, r.TicketCount), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("review rounds exhausted for ticket %d/%d", ticket.Index, r.TicketCount), now)
 	}
 
 	if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 		return err
 	} else if check != "" {
-		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
+		return quarantineRequestWithCheck(dp, dataDir, r, reason, check, now)
 	}
 
 	roundRunID := fmt.Sprintf("%s-%03d-review%d", r.ID, ticket.Index, roundIndex)
@@ -1124,7 +1124,7 @@ func runPRReviewRound(dp Deps, ctx context.Context, dataDir string, r *request.R
 	if outcome != request.RoundAccepted {
 		// Quarantined or halted: never push, request stays in pr_review,
 		// one notification dispatched -- see this file's own doc comment.
-		notifyRoundOutcome(dataDir, r, ticket, roundIndex, outcome, errText, now)
+		notifyRoundOutcome(dp, dataDir, r, ticket, roundIndex, outcome, errText, now)
 		if err := r.Save(dataDir); err != nil {
 			return err
 		}
@@ -1362,7 +1362,7 @@ func pushAcceptedRoundAndReply(dp Deps, ctx context.Context, dataDir string, r *
 	}
 	var prHeadBefore string
 	if refused, failed := pushRoundResult(dp, ctx, dataDir, r, ticket, roundRun, branch, "review round", &prHeadBefore); refused != "" || failed != "" {
-		return HaltRequest(dataDir, r, refused+failed, now)
+		return HaltRequest(dp, dataDir, r, refused+failed, now)
 	}
 	afterRoundPushed(dp, ctx, r, ticket, roundSliceIndex, roundRun)
 
@@ -1742,12 +1742,12 @@ func writeRoundAddendum(dataDir, requestID string, ticket *request.Ticket, threa
 // pr_review); the notification is appended to the request's log, recorded on
 // r (LastNotifiedAt, LastAsk) and dispatched. The caller
 // (RunCorrectiveRound) saves r and ticket.
-func notifyRoundOutcome(dataDir string, r *request.Request, ticket *request.Ticket, roundIndex int, outcome request.RoundOutcome, errText string, now time.Time) {
+func notifyRoundOutcome(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, roundIndex int, outcome request.RoundOutcome, errText string, now time.Time) {
 	detail := fmt.Sprintf("Ticket %d/%d: corrective review round %d was %s; pull request %s needs attention", ticket.Index, r.TicketCount, roundIndex, outcome, ticket.PRURL)
 	if errText != "" {
 		detail += ": " + errText
 	}
-	n := prepareRequestNotification(dataDir, r, requestNotice{
+	n := prepareRequestNotification(dp, dataDir, r, requestNotice{
 		Ask:    fmt.Sprintf("Review round %s: pull request needs you", outcome),
 		Detail: detail,
 		Next:   fmt.Sprintf("review %s", ticket.PRURL),

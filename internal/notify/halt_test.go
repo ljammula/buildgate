@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 )
@@ -19,7 +18,7 @@ func TestPrepareHaltNotifiesOnce(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &run.Run{ID: "run-1", Ticket: "ticket-1", State: run.StateHalted}
 
-	n, dispatch := PrepareHalt(r, dataDir)
+	n, dispatch := PrepareHalt(r, dataDir, "")
 	if !dispatch {
 		t.Fatal("dispatch = false, want true for a run newly transitioned to halted")
 	}
@@ -40,7 +39,7 @@ func TestPrepareHaltNotifiesOnce(t *testing.T) {
 
 	// A second call against a run that already carries this notification
 	// (matching save()'s own dedup guard) must not re-notify.
-	_, dispatchAgain := PrepareHalt(r, dataDir)
+	_, dispatchAgain := PrepareHalt(r, dataDir, "")
 	if dispatchAgain {
 		t.Error("dispatch = true on a second call, want false (already notified)")
 	}
@@ -68,7 +67,7 @@ func TestPrepareHaltIncludesHaltError(t *testing.T) {
 		HaltError: "run build_app.py: context canceled",
 	}
 
-	n, dispatch := PrepareHalt(r, dataDir)
+	n, dispatch := PrepareHalt(r, dataDir, "")
 	if !dispatch {
 		t.Fatal("dispatch = false, want true for a run newly transitioned to halted")
 	}
@@ -259,7 +258,7 @@ func TestPrepareHaltNextRetriesOwningRequest(t *testing.T) {
 	}
 	r := &run.Run{ID: "run-1", Ticket: "ticket-1", State: run.StateHalted}
 
-	n, dispatch := PrepareHalt(r, dataDir)
+	n, dispatch := PrepareHalt(r, dataDir, "")
 	if !dispatch {
 		t.Fatal("dispatch = false, want true")
 	}
@@ -275,7 +274,7 @@ func TestPrepareHaltNextWatchesRunWithoutOwningRequest(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &run.Run{ID: "run-1", Ticket: "ticket-1", State: run.StateHalted}
 
-	n, dispatch := PrepareHalt(r, dataDir)
+	n, dispatch := PrepareHalt(r, dataDir, "")
 	if !dispatch {
 		t.Fatal("dispatch = false, want true")
 	}
@@ -284,15 +283,13 @@ func TestPrepareHaltNextWatchesRunWithoutOwningRequest(t *testing.T) {
 	}
 }
 
-// TestPrepareHaltLinkUsesConsoleEnvVar proves Link is populated from
-// FACTORYD_CONSOLE_URL as the run's own console deep link, and empty
-// when that env var is unset.
-func TestPrepareHaltLinkUsesConsoleEnvVar(t *testing.T) {
-	t.Setenv(consolelink.EnvVar, "https://console.example/")
+// TestPrepareHaltLinkUsesConsoleBase proves Link is the run.s console deep
+// link under the base passed in.
+func TestPrepareHaltLinkUsesConsoleBase(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &run.Run{ID: "run-1", Ticket: "ticket-1", State: run.StateHalted}
 
-	n, dispatch := PrepareHalt(r, dataDir)
+	n, dispatch := PrepareHalt(r, dataDir, "https://console.example")
 	if !dispatch {
 		t.Fatal("dispatch = false, want true")
 	}
@@ -303,7 +300,7 @@ func TestPrepareHaltLinkUsesConsoleEnvVar(t *testing.T) {
 
 func TestPrepareHaltSkipsNonHaltedStates(t *testing.T) {
 	r := &run.Run{ID: "run-1", State: run.StateAccepted}
-	_, dispatch := PrepareHalt(r, t.TempDir())
+	_, dispatch := PrepareHalt(r, t.TempDir(), "")
 	if dispatch {
 		t.Error("dispatch = true for an accepted run, want false")
 	}

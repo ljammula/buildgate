@@ -1238,7 +1238,7 @@ func TestIntegrationDaemonServicesRepositoryWithNoRunInvocation(t *testing.T) {
 	pollCtx, cancelPoll := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelPoll()
 	pollRun := &run.Run{ID: requestID}
-	result, _, err := pollRepositoryOwnerResult(pollCtx, temporalClient, ownerID, requestID, "", pollRun, daemonDataDir, taskQueue+"-run-"+requestID, address, repository)
+	result, _, err := pollRepositoryOwnerResult(newTestDeps(t), pollCtx, temporalClient, ownerID, requestID, "", pollRun, daemonDataDir, taskQueue+"-run-"+requestID, address, repository)
 	if err != nil {
 		t.Fatalf("poll repository owner result: %v (daemon output so far:\n%s)", err, daemonOutput.String())
 	}

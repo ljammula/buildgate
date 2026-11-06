@@ -632,7 +632,7 @@ func recordHandoff(r *run.Run, dataDir string) {
 // unchanged; passing more than one cause is a caller bug, not a runtime
 // one, so only the first is used. A nil or absent cause leaves r.HaltError
 // untouched, preserving whatever the caller already set (or didn't).
-func save(r *run.Run, dataDir string, cause ...error) error {
+func save(dp *deps, r *run.Run, dataDir string, cause ...error) error {
 	if len(cause) > 0 && cause[0] != nil && r.HaltError == "" {
 		r.HaltError = cause[0].Error()
 	}
@@ -662,7 +662,7 @@ func save(r *run.Run, dataDir string, cause ...error) error {
 	// internal/notify (shared with internal/api's overrideRun, a second
 	// halt-producing caller this package cannot itself be imported by)
 	// and why it's split from the Discord dispatch below.
-	haltNotification, dispatchHalt := notify.PrepareHalt(r, dataDir)
+	haltNotification, dispatchHalt := notify.PrepareHalt(r, dataDir, resolveConsoleBaseURL(dp, "", dataDir))
 	// Persist is the one funnel every run-record write goes through (see
 	// its own doc comment, internal/run/run.go): it stamps r.UpdatedAt and
 	// r.FactorydVersion and writes run.json.

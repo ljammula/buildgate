@@ -33,14 +33,14 @@ func EnterResumeReview(dp Deps, dataDir string, r *request.Request, step request
 // the request's lock and loaded r under it (the worker's reclaim, the halt
 // of a lost step): no operator can write between its saves, and the locked
 // reload of saveAndRemind would wait on that lock forever.
-func EnterResumeReviewHoldingLock(dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
+func EnterResumeReviewHoldingLock(dp Deps, dataDir string, r *request.Request, step request.LostStep, now time.Time) error {
 	if err := enterResumeReview(r, step, now); err != nil {
 		return err
 	}
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
-	RemindRequest(dataDir, r, now)
+	RemindRequest(dp, dataDir, r, now)
 	return r.Save(dataDir)
 }
 

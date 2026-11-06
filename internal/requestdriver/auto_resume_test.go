@@ -31,7 +31,7 @@ func autoResumeConfig() requestdriver.WorkerConfig {
 // and the request after it.
 func autoResume(t *testing.T, dataDir, id string, cfg requestdriver.WorkerConfig, now time.Time) (bool, *request.Request) {
 	t.Helper()
-	resumed, err := requestdriver.AutoResumeIfDue(context.Background(), dataDir, id, cfg, now)
+	resumed, err := requestdriver.AutoResumeIfDue(newFakeDeps(t), context.Background(), dataDir, id, cfg, now)
 	if err != nil {
 		t.Fatalf("AutoResumeIfDue: %v", err)
 	}
@@ -52,7 +52,7 @@ func meetQuotaAgain(t *testing.T, dataDir, id string, retryAt, at time.Time) {
 		t.Fatal(err)
 	}
 	step := request.LostStep{Cause: unresolved.ProviderQuota, RetryAt: retryAt.Format(time.RFC3339), ResetAt: retryAt.Format(time.RFC3339), Routes: []string{"codex"}}
-	if err := requestdriver.EnterResumeReviewHoldingLock(dataDir, r, step, at); err != nil {
+	if err := requestdriver.EnterResumeReviewHoldingLock(newFakeDeps(t), dataDir, r, step, at); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -320,7 +320,7 @@ func TestAutoResumeIsMadeOnceByConcurrentPolls(t *testing.T) {
 	errs := make(chan error, callers)
 	for range callers {
 		go func() {
-			resumed, err := requestdriver.AutoResumeIfDue(context.Background(), dataDir, "req-1", autoResumeConfig(), quotaDue)
+			resumed, err := requestdriver.AutoResumeIfDue(newFakeDeps(t), context.Background(), dataDir, "req-1", autoResumeConfig(), quotaDue)
 			results <- resumed
 			errs <- err
 		}()
@@ -472,7 +472,7 @@ func enterWaitAgain(t *testing.T, dataDir, id string, step request.LostStep, at 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdriver.EnterResumeReviewHoldingLock(dataDir, r, step, at); err != nil {
+	if err := requestdriver.EnterResumeReviewHoldingLock(newFakeDeps(t), dataDir, r, step, at); err != nil {
 		t.Fatal(err)
 	}
 }

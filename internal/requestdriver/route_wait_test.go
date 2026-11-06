@@ -145,10 +145,10 @@ func TestARouteWaitRemindsAndLeavesAStackedWaitsRemindersAlone(t *testing.T) {
 	dataDir := savedSpecDraftingRequest(t)
 	r := requestdrivertest.LoadRequest(t, dataDir, "req-1")
 	start := time.Now().Add(-2 * time.Hour)
-	if err := requestdriver.RecordRouteWait(dataDir, r, "waiting for roles.planning's model route", time.Hour, start); err != nil {
+	if err := requestdriver.RecordRouteWait(newFakeDeps(t), dataDir, r, "waiting for roles.planning's model route", time.Hour, start); err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdriver.RecordRouteWait(dataDir, r, "waiting for roles.planning's model route", time.Hour, time.Now()); err != nil {
+	if err := requestdriver.RecordRouteWait(newFakeDeps(t), dataDir, r, "waiting for roles.planning's model route", time.Hour, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := requestdrivertest.LoadRequest(t, dataDir, "req-1"); got.NotifyCount != 1 {

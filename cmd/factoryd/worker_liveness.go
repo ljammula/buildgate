@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/modelrole"
@@ -412,7 +411,7 @@ func workerStaleNotifyMarkerPath(dataDir, requestID string) string {
 // this repository's existing on-demand liveness check. Deliberately a
 // plain marker file, not a request.Request field: it is `factoryd
 // status`'s own bookkeeping, not part of the request's durable record.
-func notifyWorkerStale(dataDir string, requests []*request.Request, now time.Time, staleLine string) {
+func notifyWorkerStale(dp *deps, dataDir string, requests []*request.Request, now time.Time, staleLine string) {
 	if staleLine == "" {
 		return
 	}
@@ -437,7 +436,7 @@ func notifyWorkerStale(dataDir string, requests []*request.Request, now time.Tim
 			SentAt:    now.UTC().Format(time.RFC3339Nano),
 			Delivered: &delivered,
 			Next:      "restart factoryd worker",
-			Link:      consoleRequestURL(consolelink.LocalBaseURL(dataDir), r.ID),
+			Link:      consoleRequestURL(resolveConsoleBaseURL(dp, "", dataDir), r.ID),
 		}
 		if err := (notify.DesktopNotifier{}).Notify(context.Background(), n); err != nil {
 			log.Printf("worker stale notification for %s: %v", r.ID, err)
@@ -492,10 +491,10 @@ func resolveHITLReminderInterval(configPath string) time.Duration {
 // Returns a stop function; the per-tick work is factored into
 // runWorkerStaleCheck/runWorkerStaleWatcherLoop so a test can drive
 // it against an injected tick channel and clock instead of a real ticker.
-func startWorkerStaleWatcher(ctx context.Context, dataDir string, interval time.Duration) (stop func()) {
+func startWorkerStaleWatcher(dp *deps, ctx context.Context, dataDir string, interval time.Duration) (stop func()) {
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
-	go runWorkerStaleWatcherLoop(ctx, done, ticker.C, dataDir, time.Now)
+	go runWorkerStaleWatcherLoop(dp, ctx, done, ticker.C, dataDir, time.Now)
 	return func() {
 		ticker.Stop()
 		close(done)
@@ -506,11 +505,11 @@ func startWorkerStaleWatcher(ctx context.Context, dataDir string, interval time.
 // body, factored out so a test can drive it against a synthetic tick
 // channel and clock instead of waiting on a real interval -- see
 // TestRunWorkerStaleWatcherLoopFiresOnTick.
-func runWorkerStaleWatcherLoop(ctx context.Context, done <-chan struct{}, tick <-chan time.Time, dataDir string, now func() time.Time) {
+func runWorkerStaleWatcherLoop(dp *deps, ctx context.Context, done <-chan struct{}, tick <-chan time.Time, dataDir string, now func() time.Time) {
 	for {
 		select {
 		case <-tick:
-			runWorkerStaleCheck(dataDir, now())
+			runWorkerStaleCheck(dp, dataDir, now())
 		case <-ctx.Done():
 			return
 		case <-done:
@@ -525,13 +524,13 @@ func runWorkerStaleWatcherLoop(ctx context.Context, done <-chan struct{}, tick <
 // implementation. A failure loading requests is logged, not fatal: a
 // single bad tick must never bring down the long-lived serve process
 // supervising it.
-func runWorkerStaleCheck(dataDir string, now time.Time) {
+func runWorkerStaleCheck(dp *deps, dataDir string, now time.Time) {
 	requests, err := request.List(dataDir)
 	if err != nil {
 		log.Printf("worker stale watcher: load requests from %q: %v", dataDir, err)
 		return
 	}
-	notifyWorkerStale(dataDir, requests, now, workerHeartbeatStatusLine(dataDir, now))
+	notifyWorkerStale(dp, dataDir, requests, now, workerHeartbeatStatusLine(dataDir, now))
 }
 
 // githubLoginTimeout bounds the worker's startup check of its GitHub login.

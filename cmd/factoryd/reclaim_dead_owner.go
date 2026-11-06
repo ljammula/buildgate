@@ -137,7 +137,7 @@ func reclaimDeadOwnerRuns(dp *deps, ctx context.Context, dataDir, dockerBinary, 
 				terminatedWorkflow = r.TemporalWorkflowID
 			}
 		}
-		halted, haltErr := haltDeadOwnerRun(dataDir, id)
+		halted, haltErr := haltDeadOwnerRun(dp, dataDir, id)
 		if haltErr != nil {
 			log.Printf("worker: could not halt run %s whose owner is gone: %v", id, haltErr)
 			continue
@@ -189,7 +189,7 @@ func removeFinishedRunContainers(ctx context.Context, dockerBinary, dataDir stri
 // returns the runs it halted and the ids of the requests it halted.
 func reclaimLostWork(dp *deps, ctx context.Context, dataDir, dockerBinary, temporalAddress string) (runs []*run.Run, requestIDs []string) {
 	runs = reclaimDeadOwnerRuns(dp, ctx, dataDir, dockerBinary, temporalAddress)
-	requestIDs = haltRequestsOfLostRuns(dataDir, runs)
+	requestIDs = haltRequestsOfLostRuns(dp, dataDir, runs)
 	reclaimDeadRequestJobs(ctx, dataDir, dockerBinary)
 	return runs, requestIDs
 }
@@ -251,7 +251,7 @@ func terminateRunningWorkflow(ctx context.Context, t workflowTerminator, workflo
 // under the run lock and re-checking terminal state and owner first. It
 // reports false when the run turned terminal or its owner came back in the
 // meantime.
-func haltDeadOwnerRun(dataDir, runID string) (bool, error) {
+func haltDeadOwnerRun(dp *deps, dataDir, runID string) (bool, error) {
 	halted := false
 	err := run.WithLock(dataDir, runID, func() error {
 		fresh, loadErr := run.Load(dataDir, runID)
@@ -266,7 +266,7 @@ func haltDeadOwnerRun(dataDir, runID string) (bool, error) {
 		fresh.Triage = deadOwnerTriage
 		fresh.HaltReasonCode = string(unresolved.WorkerLost)
 		markKeptForResume(dataDir, fresh)
-		if saveErr := save(fresh, dataDir, errors.New(deadOwnerHaltError)); saveErr != nil {
+		if saveErr := save(dp, fresh, dataDir, errors.New(deadOwnerHaltError)); saveErr != nil {
 			return saveErr
 		}
 		halted = true

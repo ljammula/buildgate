@@ -14,25 +14,10 @@ import (
 	"buildgate/internal/run"
 )
 
-// consoleRunEnvVar mirrors cmd/factoryd/console_link.go's
-// consoleLinkEnvVar (FACTORYD_CONSOLE_URL) -- duplicated, not imported,
-// because cmd/factoryd is `package main` and nothing under internal/ may
-// import it, yet PrepareHalt is a halt-notification construction site
-// outside cmd/factoryd (internal/api's overrideRun calls it directly
-// too).
-
-// consoleRunLink returns the console's deep link to run runID, mirroring
-// cmd/factoryd's consoleRunURL/resolveConsoleBaseURL -- duplicated here
-// for the same layering reason as consoleRunEnvVar above. Empty when the
-// env var is unset, same as that pair's own "" fallback.
-func consoleRunLink(dataDir, runID string) string {
-	return consolelink.RunURL(consolelink.LocalBaseURL(dataDir), runID)
-}
-
 // haltNext names the one command an operator should run to move a halted
 // run forward: retrying the owning request when runID belongs to one
 // (mirrors cmd/factoryd/watch.go's findOwningRequest -- duplicated here
-// for the same layering reason as consoleRunEnvVar above), else watching
+// because nothing under internal/ may import cmd/factoryd, yet internal/api's overrideRun calls PrepareHalt too), else watching
 // the run directly.
 func haltNext(dataDir, runID string) string {
 	if requests, err := request.List(dataDir); err == nil {
@@ -122,7 +107,10 @@ func SlackWebhookURLs() []string {
 // PR: an earlier version dispatched Discord before r was durably saved,
 // reopening the exact crash window the accept-or-quarantine junctions
 // elsewhere in this codebase deliberately avoid).
-func PrepareHalt(r *run.Run, dataDir string) (Notification, bool) {
+//
+// consoleBase is the resolved console base URL the caller got through its own
+// boundary; "" means the notification carries no link.
+func PrepareHalt(r *run.Run, dataDir, consoleBase string) (Notification, bool) {
 	if r.State != run.StateHalted {
 		return Notification{}, false
 	}
@@ -162,7 +150,7 @@ func PrepareHalt(r *run.Run, dataDir string) (Notification, bool) {
 		Delivered: &delivered,
 		RunDir:    run.AbsDir(dataDir, r.ID),
 		Next:      haltNext(dataDir, r.ID),
-		Link:      consoleRunLink(dataDir, r.ID),
+		Link:      consolelink.RunURL(consoleBase, r.ID),
 	}
 	// This runs before the caller's own durable save, which is what
 	// actually creates run.Dir(dataDir, r.ID) in the ordinary case (every

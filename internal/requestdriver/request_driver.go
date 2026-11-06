@@ -38,6 +38,9 @@ import (
 // corrective round through.
 type Deps interface {
 	ListReviewComments(ctx context.Context, prURL string) ([]ReviewComment, error)
+	// ConsoleBaseURL is the console base URL for dataDir, "" when there is no
+	// console to link to.
+	ConsoleBaseURL(dataDir string) string
 	MarkPullRequestReady(ctx context.Context, prURL string) error
 	PushExistingBranch(ctx context.Context, workspaceDir string, sha string, branch string) error
 	ReadReviewState(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error)
@@ -256,7 +259,7 @@ func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r 
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 			return false, err
 		} else if check != "" {
-			return false, quarantineRequestWithCheck(dataDir, r, reason, check, now)
+			return false, quarantineRequestWithCheck(dp, dataDir, r, reason, check, now)
 		}
 		specMD, evidence, jobErr = runner(ctx, dataDir, r, cfg)
 	}
@@ -279,13 +282,13 @@ func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r 
 		return false, EnterResumeReview(dp, dataDir, r, step, now)
 	}
 	if jobErr != nil {
-		return false, HaltRequest(dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
+		return false, HaltRequest(dp, dataDir, r, fmt.Sprintf("spec drafting failed: %v", jobErr), now)
 	}
 	// A review that commented on sections redrafts only those: every other
 	// byte of the reviewed spec.md is kept, whatever the model wrote.
 	specMD, spliceErr := spliceScopedSpec(dataDir, r, specMD)
 	if spliceErr != nil {
-		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
+		return false, haltDraftInvalid(dp, dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(spliceErr), fmt.Sprintf("drafted spec.md is invalid: %v", spliceErr), now)
 	}
 	var validationErr error
 	if r.SpecImported {
@@ -315,7 +318,7 @@ func advanceSpecDraftingAttempt(dp Deps, ctx context.Context, dataDir string, r 
 		}
 		// The refusal is the halt's own note (DraftHalt), not also a rejection.
 		dropFactorySpecRejection(r)
-		return false, haltDraftInvalid(dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(validationErr), fmt.Sprintf("drafted spec.md is invalid: %v", validationErr), now)
+		return false, haltDraftInvalid(dp, dataDir, r, request.StateSpecDrafting, importsSpec(r), contentErr(validationErr), fmt.Sprintf("drafted spec.md is invalid: %v", validationErr), now)
 	}
 	// A refusal this pass answered is not feedback for any later redraft.
 	dropFactorySpecRejection(r)
@@ -410,7 +413,7 @@ func saveAndRemind(dp Deps, dataDir string, r *request.Request, now time.Time) e
 	if err := dp.SaveReviewEntry(dataDir, r); err != nil {
 		return err
 	}
-	return remindOnDisk(dataDir, r, now)
+	return remindOnDisk(dp, dataDir, r, now)
 }
 
 // remindOnDisk sends the first reminder of the review r has entered
@@ -419,13 +422,13 @@ func saveAndRemind(dp Deps, dataDir string, r *request.Request, now time.Time) e
 // review, an answer or an approval, since r was saved. A request that has
 // left that review state gets no reminder. r is left equal to the saved
 // record.
-func remindOnDisk(dataDir string, r *request.Request, now time.Time) error {
+func remindOnDisk(dp Deps, dataDir string, r *request.Request, now time.Time) error {
 	state := r.State
 	current, err := updateLocked(dataDir, r.ID, func(current *request.Request) bool {
 		if current.State != state {
 			return false
 		}
-		RemindRequest(dataDir, current, now)
+		RemindRequest(dp, dataDir, current, now)
 		return true
 	})
 	if err != nil {
@@ -521,24 +524,24 @@ type planningInputs struct {
 
 var errPlanningInputsHalted = errors.New("planning inputs halted")
 
-func haltPlanningInputs(dataDir string, r *request.Request, reason string, now time.Time) (planningInputs, error) {
-	if err := HaltRequest(dataDir, r, reason, now); err != nil {
+func haltPlanningInputs(dp Deps, dataDir string, r *request.Request, reason string, now time.Time) (planningInputs, error) {
+	if err := HaltRequest(dp, dataDir, r, reason, now); err != nil {
 		return planningInputs{}, err
 	}
 	return planningInputs{}, errPlanningInputsHalted
 }
 
-func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (planningInputs, error) {
+func loadPlanningInputs(dp Deps, dataDir string, r *request.Request, now time.Time) (planningInputs, error) {
 	cfgFile, _, err := projectconfig.Load(r.Workspace)
 	if err != nil {
-		return haltPlanningInputs(dataDir, r, fmt.Sprintf("read %s: %v", projectconfig.FileName, err), now)
+		return haltPlanningInputs(dp, dataDir, r, fmt.Sprintf("read %s: %v", projectconfig.FileName, err), now)
 	}
 	verifyCommand := r.VerifyCommand
 	if verifyCommand == "" && cfgFile != nil {
 		verifyCommand = cfgFile.VerifyCommand
 	}
 	if verifyCommand == "" {
-		return haltPlanningInputs(dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
+		return haltPlanningInputs(dp, dataDir, r, fmt.Sprintf("planning requires a verify command: either recorded on the request at submit time (-verify-command), or verify_command configured in %s", projectconfig.FileName), now)
 	}
 	// The patterns recorded at submit are the ones the plan review's notes
 	// read; an older record has none, and takes the config's now.
@@ -559,18 +562,18 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 	if importsPlan(r) && r.ImportedPlanCriteria != nil {
 		criteria, criteriaErr := request.SpecAcceptanceCriteria(string(specBytes))
 		if criteriaErr != nil {
-			return haltPlanningInputs(dataDir, r, fmt.Sprintf("approved spec.md: %v", criteriaErr), now)
+			return haltPlanningInputs(dp, dataDir, r, fmt.Sprintf("approved spec.md: %v", criteriaErr), now)
 		}
 		if !slices.Equal(criteria, r.ImportedPlanCriteria) {
-			return haltPlanningInputs(dataDir, r, fmt.Sprintf("the spec's criteria changed after the plan was handed over; send this request back to planning with `factoryd reject -to plan -reason \"...\" %s`, then planning will draft revised tickets instead of taking the imported tickets again", r.ID), now)
+			return haltPlanningInputs(dp, dataDir, r, fmt.Sprintf("the spec's criteria changed after the plan was handed over; send this request back to planning with `factoryd reject -to plan -reason \"...\" %s`, then planning will draft revised tickets instead of taking the imported tickets again", r.ID), now)
 		}
 	}
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
-		return haltPlanningInputs(dataDir, r, err.Error(), now)
+		return haltPlanningInputs(dp, dataDir, r, err.Error(), now)
 	}
 	criteriaCount, err := request.SpecAcceptanceCriteriaCount(string(specBytes))
 	if err != nil {
-		return haltPlanningInputs(dataDir, r, fmt.Sprintf("approved spec.md: %v", err), now)
+		return haltPlanningInputs(dp, dataDir, r, fmt.Sprintf("approved spec.md: %v", err), now)
 	}
 	return planningInputs{
 		verifyCommand: verifyCommand,
@@ -617,7 +620,7 @@ func loadPlanningInputs(dataDir string, r *request.Request, now time.Time) (plan
 // own message; a handed-over plan and an I/O error halt on the first
 // attempt -- see planRedraftable and maxPlanningAttempts.
 func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner PlanTicketsRunner, now time.Time) error {
-	inputs, err := loadPlanningInputs(dataDir, r, now)
+	inputs, err := loadPlanningInputs(dp, dataDir, r, now)
 	if errors.Is(err, errPlanningInputsHalted) {
 		return nil
 	}
@@ -639,7 +642,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	runner = withPlanImport(runner)
 	reviewedTickets, reviewErr := ReviewedTickets(dataDir, r)
 	if reviewErr != nil {
-		return HaltRequest(dataDir, r, reviewErr.Error(), now)
+		return HaltRequest(dp, dataDir, r, reviewErr.Error(), now)
 	}
 	var (
 		requestTickets []request.Ticket
@@ -666,7 +669,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 			return err
 		} else if check != "" {
-			return quarantineRequestWithCheck(dataDir, r, reason, check, now)
+			return quarantineRequestWithCheck(dp, dataDir, r, reason, check, now)
 		}
 		tickets, attemptEvidence, jobErr := runner(ctx, dataDir, r, cfg, verifyCommand)
 		// Re-stamp after the job returns -- see AdvanceSpecDrafting's
@@ -686,7 +689,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			return EnterResumeReview(dp, dataDir, r, step, now)
 		}
 		if jobErr != nil {
-			return HaltRequest(dataDir, r, fmt.Sprintf("plan drafting failed: %v", jobErr), now)
+			return HaltRequest(dp, dataDir, r, fmt.Sprintf("plan drafting failed: %v", jobErr), now)
 		}
 		// Accumulate this attempt's own Spend onto whatever an earlier
 		// attempt within THIS SAME planning pass already spent, before the
@@ -715,7 +718,7 @@ func AdvancePlanning(dp Deps, ctx context.Context, dataDir string, r *request.Re
 			// Keep what every attempt spent: `factoryd cost` reads it from
 			// PlanEvidence, and a halted plan's relay spend was real.
 			recordPlanEvidence(r, evidence)
-			return haltDraftInvalid(dataDir, r, request.StatePlanning, importsPlan(r), validateErr, validateErr.Error(), now)
+			return haltDraftInvalid(dp, dataDir, r, request.StatePlanning, importsPlan(r), validateErr, validateErr.Error(), now)
 		}
 		_ = os.RemoveAll(ticketsDir)
 		r.Rejections = append(r.Rejections, request.Rejection{
@@ -955,7 +958,7 @@ func TicketAt(r *request.Request, idx int) (*request.Ticket, error) {
 // terminal state, unlike A3's own spec_review/plan_review reminders).
 func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Request, cfg WorkerConfig, runner TicketRunner, now time.Time) error {
 	if err := VerifyApprovedHashes(dataDir, r); err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
+		return HaltRequest(dp, dataDir, r, err.Error(), now)
 	}
 	if r.TicketIndex < 1 {
 		r.TicketIndex = 1
@@ -964,7 +967,7 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 
 	ticket, err := TicketAt(r, idx)
 	if err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
+		return HaltRequest(dp, dataDir, r, err.Error(), now)
 	}
 	resumeRunID, moved, err := settlePriorRun(dp, ctx, dataDir, r, ticket, cfg, now)
 	if moved || err != nil {
@@ -976,14 +979,14 @@ func AdvanceBuilding(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	}
 	args, recordOf, onBranch, escalated, err := ticketBuildStart(dp, dataDir, r, ticket, cfg, resumeRunID, escalated)
 	if err != nil {
-		return HaltRequest(dataDir, r, err.Error(), now)
+		return HaltRequest(dp, dataDir, r, err.Error(), now)
 	}
 	stackBase := continuedStackBase(dataDir, ticket, recordOf, resumeRunID, onBranch)
 
 	if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 		return err
 	} else if check != "" {
-		return quarantineRequestWithCheck(dataDir, r, reason, check, now)
+		return quarantineRequestWithCheck(dp, dataDir, r, reason, check, now)
 	}
 
 	// started tracks whether onReady actually fired *this* invocation --
@@ -1112,7 +1115,7 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 	noteChallenge(ticket, runRecord)
 	switch runRecord.State {
 	case run.StateAccepted:
-		if handled, err := handleOversizedRun(dataDir, r, runRecord, now); handled {
+		if handled, err := handleOversizedRun(dp, dataDir, r, runRecord, now); handled {
 			return err
 		}
 		if handled, err := handleMixedRun(dp, ctx, dataDir, r, ticket, runRecord, now); handled {
@@ -1125,7 +1128,7 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		log.Printf("request %s: building -> building (ticket %d/%d accepted, PR %s)", r.ID, idx, r.TicketCount, runRecord.PullRequestURL)
 		return acceptAfterAdvice(dp, ctx, dataDir, r, ticket, runRecord, cfg, now)
 	case run.StateQuarantined:
-		if handled, oErr := carvedRunRefused(dataDir, r, ticket, runRecord, reason, now); handled {
+		if handled, oErr := carvedRunRefused(dp, dataDir, r, ticket, runRecord, reason, now); handled {
 			return oErr
 		}
 		if handled, cErr := tryCorrectiveRound(dp, ctx, dataDir, r, ticket, runRecord, cfg, now); handled {
@@ -1136,9 +1139,9 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		// review that gave no verdict is not here: it left for
 		// resume_review in tryCorrectiveRound.
 		check := quarantineCheckOf(runRecord)
-		return quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
+		return quarantineRequestWithCheck(dp, dataDir, r, fmt.Sprintf("ticket %d/%d quarantined: %s", idx, r.TicketCount, reason), check, now)
 	case run.StateHalted:
-		if handled, oErr := carvedRunRefused(dataDir, r, ticket, runRecord, reason, now); handled {
+		if handled, oErr := carvedRunRefused(dp, dataDir, r, ticket, runRecord, reason, now); handled {
 			return oErr
 		}
 		return afterHaltedTicketRun(dp, dataDir, r, runRecord, fmt.Sprintf("ticket %d/%d halted: %s", idx, r.TicketCount, reason), now)
@@ -1149,13 +1152,13 @@ func handleBuildingRunOutcome(dp Deps, ctx context.Context, dataDir string, r *r
 		// record (see buildQueueStatusEntry's own doc comment for the
 		// legacy-entry equivalent of this same guarantee) -- never
 		// expected to actually reach this branch.
-		return HaltRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
+		return HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: run %s ended in unexpected state %q", idx, r.TicketCount, runRecord.ID, runRecord.State), now)
 	}
 }
 
 // handleOversizedRun sends the first oversized request ticket back to
 // planning only after the run's recorded release decision denied it.
-func handleOversizedRun(dataDir string, r *request.Request, record *run.Run, now time.Time) (bool, error) {
+func handleOversizedRun(dp Deps, dataDir string, r *request.Request, record *run.Run, now time.Time) (bool, error) {
 	if record.ChangeSize == nil || record.ReleasePolicy == nil {
 		return false, nil
 	}
@@ -1166,10 +1169,10 @@ func handleOversizedRun(dataDir string, r *request.Request, record *run.Run, now
 	reason := fmt.Sprintf("run %s exceeded the release size cap: %d source lines, %d source files, %d functions", record.ID, size.SourceLines, size.SourceFiles, size.Functions)
 	decision, err := release.LoadDecision(dataDir, record.Project, record.ID)
 	if err != nil || decision == nil || decision.Allowed || record.PullRequestURL != "" {
-		return true, HaltRequest(dataDir, r, reason+"; the denied release decision or absence of a pull request could not be confirmed", now)
+		return true, HaltRequest(dp, dataDir, r, reason+"; the denied release decision or absence of a pull request could not be confirmed", now)
 	}
 	if r.SizeReplan != nil || r.PlanImported {
-		return true, HaltRequest(dataDir, r, reason+"; this plan cannot be sent to planning for size again", now)
+		return true, HaltRequest(dp, dataDir, r, reason+"; this plan cannot be sent to planning for size again", now)
 	}
 	if err := r.ReturnToPlanningForSize(record.ID, size, now); err != nil {
 		return true, err
@@ -1255,7 +1258,7 @@ func settlePriorRun(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		// whose worktree was kept for a resume decision: reap it, so it does
 		// not outlive the decision. Every kept run of the request: a resumed
 		// run that was kept in turn is no longer the ticket's recorded run.
-		return "", true, HaltRequest(dataDir, r, fmt.Sprintf("ticket %d: could not discard a kept worktree before rebuilding: %v", ticket.Index, err), now)
+		return "", true, HaltRequest(dp, dataDir, r, fmt.Sprintf("ticket %d: could not discard a kept worktree before rebuilding: %v", ticket.Index, err), now)
 	}
 	return "", false, nil
 }
@@ -1308,7 +1311,7 @@ func afterHaltedTicketRun(dp Deps, dataDir string, r *request.Request, runRecord
 	if runRecord.KeptForResume || cause != "" {
 		return EnterResumeReview(dp, dataDir, r, lostStepOf(dataDir, runRecord, cause, runRecord.KeptForResume), now)
 	}
-	return HaltRequest(dataDir, r, reason, now)
+	return HaltRequest(dp, dataDir, r, reason, now)
 }
 
 // ticketStartFailed moves r on after its ticket build failed before its run
@@ -1324,7 +1327,7 @@ func ticketStartFailed(dp Deps, dataDir string, r *request.Request, idx int, run
 		}
 		return EnterResumeReview(dp, dataDir, r, step, now)
 	}
-	return HaltRequest(dataDir, r, startFailedReason(idx, r.TicketCount, runErr, onBranch), now)
+	return HaltRequest(dp, dataDir, r, startFailedReason(idx, r.TicketCount, runErr, onBranch), now)
 }
 
 // startFailedReason is the halt reason of a ticket build that never started.
@@ -1424,20 +1427,20 @@ func refuseResume(dp Deps, dataDir string, r *request.Request, reasons []string,
 // "accepted · awaiting PR", found live 2026-09-24), then the next ticket
 // or pr_review. A missing PR is caught there, by AdvancePRReview's
 // noPullRequestHaltReason, which reads ticket.RunID.
-func acceptTicketRun(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) error {
+func acceptTicketRun(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) error {
 	ticket.Branch = runRecord.Branch
 	ticket.PRURL = runRecord.PullRequestURL
 	if ticket.PRURL != "" {
 		ticket.PRState = "draft"
 	}
-	return advanceAcceptedTicket(dataDir, r, ticket, runRecord, cfg, now)
+	return advanceAcceptedTicket(dp, dataDir, r, ticket, runRecord, cfg, now)
 }
 
 // advanceAcceptedTicket is acceptTicketRun after the ticket's branch and pull
 // request are recorded: an advice round settled after a restart
 // (settleInterruptedAdviceRound) advances here, the branch and pull request
 // being the accepted run's, recorded before its first round.
-func advanceAcceptedTicket(dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) error {
+func advanceAcceptedTicket(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, runRecord *run.Run, cfg WorkerConfig, now time.Time) error {
 	if ticket.PRURL != "" && ticket.PRState == "" {
 		ticket.PRState = "draft"
 	}
@@ -1453,7 +1456,7 @@ func advanceAcceptedTicket(dataDir string, r *request.Request, ticket *request.T
 	// decision is on its record.
 	if cfg.OpenPullRequest && ticket.PRURL == "" && ticket.Index < r.TicketCount {
 		if refusal := releaseRefusal(dataDir, r, ticket, runRecord); refusal != "" {
-			return haltRequestAcceptedNoPR(dataDir, r, refusal, now)
+			return haltRequestAcceptedNoPR(dp, dataDir, r, refusal, now)
 		}
 	}
 	if err := startNextTicketOrFinish(dataDir, r, cfg.advancesOnPRApproval(), now); err != nil {
@@ -1494,8 +1497,8 @@ func reviewUnavailable(runRecord *run.Run) bool {
 // check a first run's quarantine would name (quarantineCheckOf). A round
 // whose review gave no verdict never reaches here: its request went to
 // resume_review (correctiveRoundOutcome's unresolved cause).
-func quarantineAfterRound(dataDir string, r *request.Request, roundRun *run.Run, reason string, now time.Time) error {
-	return quarantineRequestWithCheck(dataDir, r, reason, quarantineCheckOf(roundRun), now)
+func quarantineAfterRound(dp Deps, dataDir string, r *request.Request, roundRun *run.Run, reason string, now time.Time) error {
+	return quarantineRequestWithCheck(dp, dataDir, r, reason, quarantineCheckOf(roundRun), now)
 }
 
 // reviewShapeOnly reports whether code_review is the only check runRecord
@@ -1723,7 +1726,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 		if check, reason, err := CheckLaunchBudget(dataDir, r, cfg.Settings, now); err != nil {
 			return true, err
 		} else if check != "" {
-			return true, quarantineRequestWithCheck(dataDir, r, reason, check, now)
+			return true, quarantineRequestWithCheck(dp, dataDir, r, reason, check, now)
 		}
 
 		diffBase := current.DiffBase()
@@ -1801,7 +1804,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			// design -- see this function's own "never triggered when
 			// the run halted" guard): not eligible for another round
 			// regardless of remaining budget.
-			return true, quarantineRequest(dataDir, r, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
+			return true, quarantineRequest(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
 		}
 		nextRun, err := run.Load(dataDir, loadID)
 		if err != nil {
@@ -1817,7 +1820,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 			if errText == "" {
 				errText = StatusReason(nextRun)
 			}
-			return true, quarantineAfterRound(dataDir, r, nextRun, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
+			return true, quarantineAfterRound(dp, dataDir, r, nextRun, fmt.Sprintf("ticket %d/%d: %s %d/%d %s: %s", ticket.Index, r.TicketCount, plan.label, roundIndex, cfg.ReviewCorrectiveRounds, outcome, errText), now)
 		}
 		current = nextRun
 	}
@@ -1827,7 +1830,7 @@ func runCorrectiveRounds(dp Deps, ctx context.Context, dataDir string, r *reques
 	// why from the banner without opening each run -- found live
 	// 2026-09-26: "rounds exhausted (1/1)" alone named nothing.
 	exhaustedCheck := quarantineCheckOf(current)
-	return true, quarantineRequestWithCheck(dataDir, r, fmt.Sprintf("ticket %d/%d: %ss exhausted (%d/%d); last round: %s", ticket.Index, r.TicketCount, plan.label, countedRounds, cfg.ReviewCorrectiveRounds, StatusReason(current)), exhaustedCheck, now)
+	return true, quarantineRequestWithCheck(dp, dataDir, r, fmt.Sprintf("ticket %d/%d: %ss exhausted (%d/%d); last round: %s", ticket.Index, r.TicketCount, plan.label, countedRounds, cfg.ReviewCorrectiveRounds, StatusReason(current)), exhaustedCheck, now)
 }
 
 // BuildCorrectiveArgs builds one corrective round's runMainWithReady argv
@@ -2136,13 +2139,13 @@ func VerifyApprovedHashes(dataDir string, r *request.Request) error {
 // see that type's own doc comment); r.State is request.State, a distinct
 // named string type from run.State, so it's converted rather than
 // assigned directly.
-func HaltRequest(dataDir string, r *request.Request, reason string, now time.Time) error {
+func HaltRequest(dp Deps, dataDir string, r *request.Request, reason string, now time.Time) error {
 	oldState := r.State
 	if err := r.Halt(reason, now); err != nil {
 		return err
 	}
 	log.Printf("request %s: %s -> halted (%s)", r.ID, oldState, reason)
-	return notifyTerminalRequest(dataDir, r, reason, now)
+	return notifyTerminalRequest(dp, dataDir, r, reason, now)
 }
 
 // maxDraftHaltNoteBytes caps the reason a refused draft hands to the next one.
@@ -2183,9 +2186,9 @@ func DraftHaltNote(reason string) string {
 // haltDraft halts r because the factory's own checks refused a model-produced
 // draft: the reason is recorded as r.DraftHalt (replacing an earlier one) for
 // the next draft of that stage, then the halt runs with the reason unmodified.
-func haltDraft(dataDir string, r *request.Request, stage request.State, reason string, now time.Time) error {
+func haltDraft(dp Deps, dataDir string, r *request.Request, stage request.State, reason string, now time.Time) error {
 	r.DraftHalt = &request.DraftHalt{Stage: stage, Reason: DraftHaltNote(reason), At: now.UTC().Format(time.RFC3339Nano)}
-	return HaltRequest(dataDir, r, reason, now)
+	return HaltRequest(dp, dataDir, r, reason, now)
 }
 
 // haltDraftInvalid halts for a draft failing validation with err. Only a
@@ -2194,12 +2197,12 @@ func haltDraft(dataDir string, r *request.Request, stage request.State, reason s
 // (a note would not change SpecAsHandedOver/PlanAsHandedOver, but a plain
 // retry must not send a handed-over document to the model), and an I/O error
 // says nothing about the draft.
-func haltDraftInvalid(dataDir string, r *request.Request, stage request.State, imported bool, err error, reason string, now time.Time) error {
+func haltDraftInvalid(dp Deps, dataDir string, r *request.Request, stage request.State, imported bool, err error, reason string, now time.Time) error {
 	var content *draftContentError
 	if imported || !errors.As(err, &content) {
-		return HaltRequest(dataDir, r, reason, now)
+		return HaltRequest(dp, dataDir, r, reason, now)
 	}
-	return haltDraft(dataDir, r, stage, reason, now)
+	return haltDraft(dp, dataDir, r, stage, reason, now)
 }
 
 // draftFeedbackText is the feedback file for the next draft of stage: the
@@ -2237,13 +2240,13 @@ func writeDraftFeedback(path, text string) error {
 // haltRequestAcceptedNoPR is HaltRequest for an accepted ticket with no pull
 // request: same halt and notification, plus the typed request.HaltAcceptedNoPR
 // marker so status, watch and the console show it as awaiting a PR.
-func haltRequestAcceptedNoPR(dataDir string, r *request.Request, reason string, now time.Time) error {
+func haltRequestAcceptedNoPR(dp Deps, dataDir string, r *request.Request, reason string, now time.Time) error {
 	oldState := r.State
 	if err := r.HaltAcceptedNoPullRequest(reason, now); err != nil {
 		return err
 	}
 	log.Printf("request %s: %s -> halted, accepted awaiting pull request (%s)", r.ID, oldState, reason)
-	return notifyTerminalRequest(dataDir, r, reason, now)
+	return notifyTerminalRequest(dp, dataDir, r, reason, now)
 }
 
 // quarantineRequest is HaltRequest's own sibling for a request that has
@@ -2255,8 +2258,8 @@ func haltRequestAcceptedNoPR(dataDir string, r *request.Request, reason string, 
 // (unlike a run, which uses one shared "reject" outcome at this layer),
 // so each of these needs its own state-transition call before sharing
 // the notify-then-save-then-dispatch tail.
-func quarantineRequest(dataDir string, r *request.Request, reason string, now time.Time) error {
-	return quarantineRequestWithCheck(dataDir, r, reason, "", now)
+func quarantineRequest(dp Deps, dataDir string, r *request.Request, reason string, now time.Time) error {
+	return quarantineRequestWithCheck(dp, dataDir, r, reason, "", now)
 }
 
 // quarantineRequestWithCheck is quarantineRequest's own extended form:
@@ -2265,14 +2268,14 @@ func quarantineRequest(dataDir string, r *request.Request, reason string, now ti
 // command that actually addresses that cause (Follow-up B) -- set AFTER
 // r.Quarantine, since advance() itself unconditionally clears
 // QuarantineCheck on every transition, the same way it clears HaltKind.
-func quarantineRequestWithCheck(dataDir string, r *request.Request, reason, check string, now time.Time) error {
+func quarantineRequestWithCheck(dp Deps, dataDir string, r *request.Request, reason, check string, now time.Time) error {
 	oldState := r.State
 	if err := r.Quarantine(reason, now); err != nil {
 		return err
 	}
 	r.QuarantineCheck = check
 	log.Printf("request %s: %s -> quarantined (%s)", r.ID, oldState, reason)
-	return notifyTerminalRequest(dataDir, r, reason, now)
+	return notifyTerminalRequest(dp, dataDir, r, reason, now)
 }
 
 // notifyTerminalRequest dispatches a notification for a request that has
@@ -2286,8 +2289,8 @@ func quarantineRequestWithCheck(dataDir string, r *request.Request, reason, chec
 // or might never, reflect). Shared by HaltRequest and quarantineRequest,
 // above, since the state-transition call each makes first is the only
 // part that differs between them.
-func notifyTerminalRequest(dataDir string, r *request.Request, reason string, now time.Time) error {
-	n := prepareRequestNotification(dataDir, r, terminalNotice(r, reason), now)
+func notifyTerminalRequest(dp Deps, dataDir string, r *request.Request, reason string, now time.Time) error {
+	n := prepareRequestNotification(dp, dataDir, r, terminalNotice(r, reason), now)
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
@@ -2852,7 +2855,7 @@ func RequestNotificationLogPath(dataDir, id string) string {
 // It sets r.WaitingSince (only when unset: a wait's clock does not restart
 // on a reminder), r.LastNotifiedAt and r.LastAsk, and increments
 // r.NotifyCount. It does not save r: the caller does.
-func RemindRequest(dataDir string, r *request.Request, now time.Time) {
+func RemindRequest(dp Deps, dataDir string, r *request.Request, now time.Time) {
 	ts := now.UTC().Format(time.RFC3339Nano)
 	if r.WaitingSince == "" {
 		r.WaitingSince = ts
@@ -2861,7 +2864,7 @@ func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 	if since, err := time.Parse(time.RFC3339Nano, r.WaitingSince); err == nil {
 		waited = now.Sub(since)
 	}
-	n := prepareRequestNotification(dataDir, r, reviewNotice(dataDir, r, waited), now)
+	n := prepareRequestNotification(dp, dataDir, r, reviewNotice(dataDir, r, waited), now)
 	notify.DispatchExternal(dataDir, n)
 	r.NotifyCount++
 }
@@ -2869,7 +2872,7 @@ func RemindRequest(dataDir string, r *request.Request, now time.Time) {
 // ExpireIfDue halts the request id when it waits at an expiring review gate
 // (request.ExpireIfDue, the one implementation) and tells the operator. An
 // expiry of 0 is off. It reports whether it halted.
-func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (bool, error) {
+func ExpireIfDue(dp Deps, dataDir, id string, expiry time.Duration, now time.Time) (bool, error) {
 	if expiry <= 0 {
 		return false, nil
 	}
@@ -2877,7 +2880,7 @@ func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (bool,
 	if err != nil || !expired {
 		return false, err
 	}
-	return true, NotifyGateExpired(dataDir, id, now)
+	return true, NotifyGateExpired(dp, dataDir, id, now)
 }
 
 // NotifyGateExpired tells the operator that request id was halted by an expired
@@ -2885,7 +2888,7 @@ func ExpireIfDue(dataDir, id string, expiry time.Duration, now time.Time) (bool,
 // since it entered halted is left alone). Whoever finds a gate expired calls
 // it after request.ExpireIfDue or a refused decision (request.ErrGateExpired):
 // the worker's review wait, the CLI, and the API's notifier option.
-func NotifyGateExpired(dataDir, id string, now time.Time) error {
+func NotifyGateExpired(dp Deps, dataDir, id string, now time.Time) error {
 	unlock, err := request.Lock(dataDir, id)
 	if err != nil {
 		return fmt.Errorf("request %s: %w", id, err)
@@ -2904,7 +2907,7 @@ func NotifyGateExpired(dataDir, id string, now time.Time) error {
 		}
 	}
 	log.Printf("request %s: halted (%s)", r.ID, r.Error)
-	return notifyTerminalRequest(dataDir, r, r.Error, now)
+	return notifyTerminalRequest(dp, dataDir, r, r.Error, now)
 }
 
 // ReviewState reports whether s is one of the states a request waits on the
@@ -2947,7 +2950,7 @@ func reminderDue(r *request.Request, interval time.Duration, now time.Time) (boo
 // operator's `factoryd approve` in another process can move this request
 // out of review before the Save here, and an unlocked stale save would
 // put it back (found by adversarial review).
-func RemindIfDue(dataDir, id string, interval time.Duration, now func() time.Time) error {
+func RemindIfDue(dp Deps, dataDir, id string, interval time.Duration, now func() time.Time) error {
 	unlock, err := request.Lock(dataDir, id)
 	if err != nil {
 		return fmt.Errorf("request %s: %w", id, err)
@@ -2967,7 +2970,7 @@ func RemindIfDue(dataDir, id string, interval time.Duration, now func() time.Tim
 	if !due {
 		return nil
 	}
-	RemindRequest(dataDir, r, now())
+	RemindRequest(dp, dataDir, r, now())
 	if err := r.Save(dataDir); err != nil {
 		return fmt.Errorf("request %s: save after reminder: %w", r.ID, err)
 	}

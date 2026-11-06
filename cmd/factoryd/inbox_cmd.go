@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
@@ -68,11 +67,11 @@ func newInboxFlags() (flags *flag.FlagSet, jsonOutput *bool, configPath, project
 
 // inboxMain implements `factoryd inbox`: everything waiting on the
 // operator, across every profile's data dir, oldest first.
-func inboxMain(args []string) error {
-	return inboxRun(args, os.Stdout, os.Stderr)
+func inboxMain(dp *deps, args []string) error {
+	return inboxRun(dp, args, os.Stdout, os.Stderr)
 }
 
-func inboxRun(args []string, w, warn io.Writer) error {
+func inboxRun(dp *deps, args []string, w, warn io.Writer) error {
 	flags, jsonOutput, configPath, project := newInboxFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -80,7 +79,7 @@ func inboxRun(args []string, w, warn io.Writer) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("inbox takes no arguments, got %q", flags.Arg(0))
 	}
-	entries, err := collectInbox(warn, time.Now(), *configPath, *project)
+	entries, err := collectInbox(dp, warn, time.Now(), *configPath, *project)
 	if err != nil {
 		return err
 	}
@@ -109,7 +108,7 @@ func inboxRun(args []string, w, warn io.Writer) error {
 // the profiles (or of the one resolved data dir when there are no profiles),
 // oldest first. A configArg (a profile name or a config path) narrows it to
 // that config's data dir, a project to that project's requests.
-func collectInbox(warn io.Writer, now time.Time, configArg, project string) ([]inboxEntry, error) {
+func collectInbox(dp *deps, warn io.Writer, now time.Time, configArg, project string) ([]inboxEntry, error) {
 	dirs, label, err := inboxDataDirs(warn, configArg)
 	if err != nil {
 		return nil, err
@@ -121,7 +120,7 @@ func collectInbox(warn io.Writer, now time.Time, configArg, project string) ([]i
 		if err != nil {
 			return nil, fmt.Errorf("load requests from %q: %w", dir, err)
 		}
-		base := consolelink.LocalBaseURL(dir)
+		base := resolveConsoleBaseURL(dp, "", dir)
 		for _, r := range requests {
 			if inboxStates[r.State] && (project == "" || r.Project == project) {
 				entries = append(entries, buildInboxEntry(r, label[dir], dir, base, now))

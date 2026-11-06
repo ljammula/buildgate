@@ -167,7 +167,7 @@ func TestRetryTransientInfraRecoversChainSuccessorCheck(t *testing.T) {
 	dataDir := t.TempDir()
 	ws := testfixture.NewGitRepo(t)
 	prior := &run.Run{ID: "prior-run", State: run.StateAccepted, ProjectPath: ws, ResultSHA: "deadbeef"}
-	if err := save(prior, dataDir); err != nil {
+	if err := save(newTestDeps(t), prior, dataDir); err != nil {
 		t.Fatalf("save prior run fixture: %v", err)
 	}
 

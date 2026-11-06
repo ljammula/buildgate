@@ -96,7 +96,7 @@ func handleCIChecks(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		return false, nil
 	}
 	verdict := forge.ClassifyChecks(state.Checks, state.RequiredUnknown)
-	if err := triageCIChecks(dataDir, r, ticket, verdict.Triage, state.HeadSHA, now); err != nil {
+	if err := triageCIChecks(dp, dataDir, r, ticket, verdict.Triage, state.HeadSHA, now); err != nil {
 		return true, err
 	}
 	var again *forge.Check
@@ -118,7 +118,7 @@ func handleCIChecks(dp Deps, ctx context.Context, dataDir string, r *request.Req
 
 // triageCIChecks sends the operator one triage sentence for each required
 // check in checks whose failure is not the code's, once per check and head.
-func triageCIChecks(dataDir string, r *request.Request, ticket *request.Ticket, checks []forge.Check, headSHA string, now time.Time) error {
+func triageCIChecks(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, checks []forge.Check, headSHA string, now time.Time) error {
 	sent := false
 	for _, c := range checks {
 		key := c.Name + "@" + headSHA
@@ -131,7 +131,7 @@ func triageCIChecks(dataDir string, r *request.Request, ticket *request.Ticket, 
 		if c.IsCLAOrDCO() {
 			why = "is a CLA or DCO check, which runs none of the change's code"
 		}
-		n := prepareRequestNotification(dataDir, r, requestNotice{
+		n := prepareRequestNotification(dp, dataDir, r, requestNotice{
 			Ask:    "Required check needs a person: no corrective round",
 			Detail: fmt.Sprintf("Ticket %d/%d: required check %q on %s %s; no corrective round was started", ticket.Index, r.TicketCount, handoff.CleanSentence(c.Name), ticket.PRURL, why),
 			Next:   fmt.Sprintf("review %s", ticket.PRURL),

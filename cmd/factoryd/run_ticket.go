@@ -2126,7 +2126,7 @@ func (tr *ticketRun) checkScope() error {
 							HaltConfirmed:    true,
 							CreatedAt:        time.Now().Format(time.RFC3339Nano),
 						}
-						if saveErr := save(r, *tr.dataDir); saveErr != nil {
+						if saveErr := save(tr.dp, r, *tr.dataDir); saveErr != nil {
 							log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
 						}
 						return fmt.Errorf(
@@ -2175,7 +2175,7 @@ func (tr *ticketRun) checkScope() error {
 			// of the layout given.
 			CreatedAt: time.Now().Format(time.RFC3339Nano),
 		}
-		if saveErr := save(r, *tr.dataDir); saveErr != nil {
+		if saveErr := save(tr.dp, r, *tr.dataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
 		}
 		return fmt.Errorf("ticket does not declare Allowed-Files: (required by -require-declared-scope)")
@@ -2273,7 +2273,7 @@ func (tr *ticketRun) createRunRecord() error {
 		StackBaseSHA: replayStackBase(tr.replay),
 		TicketIndex:  replayTicketIndex(tr.replay),
 	}
-	if err := save(tr.r, *tr.dataDir); err != nil {
+	if err := save(tr.dp, tr.r, *tr.dataDir); err != nil {
 		return err
 	}
 	if tr.onReady != nil {
@@ -2302,7 +2302,7 @@ func (tr *ticketRun) createRunRecord() error {
 		// for the ambiguous give-up case this is not).
 		tr.r.State = run.StateHalted
 		tr.r.HaltConfirmed = true
-		if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+		if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 		}
 		return fmt.Errorf("capture base SHA: %w", err)
@@ -2344,7 +2344,7 @@ func (tr *ticketRun) createRunRecord() error {
 		if err != nil {
 			tr.r.State = run.StateHalted
 			tr.r.HaltConfirmed = true
-			if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+			if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 				log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 			}
 			return fmt.Errorf("load prior run %q for slice-chain validation: %w", *tr.priorRun, err)
@@ -2362,7 +2362,7 @@ func (tr *ticketRun) createRunRecord() error {
 		if err := run.ValidateSliceChain(prior, prior.ResultSHA, tr.r.ProjectPath); err != nil {
 			tr.r.State = run.StateHalted
 			tr.r.HaltConfirmed = true
-			if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+			if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 				log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 			}
 			return fmt.Errorf("slice-chain validation: %w", err)
@@ -2370,7 +2370,7 @@ func (tr *ticketRun) createRunRecord() error {
 		if _, err := runner.GitResolveCommit(tr.resolvedWorkspace, prior.ResultSHA); err != nil {
 			tr.r.State = run.StateHalted
 			tr.r.HaltConfirmed = true
-			if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+			if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 				log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 			}
 			return fmt.Errorf("verify prior run result SHA: %w", err)
@@ -2394,14 +2394,14 @@ func (tr *ticketRun) createRunRecord() error {
 		}); err != nil {
 			tr.r.State = run.StateHalted
 			tr.r.HaltConfirmed = true
-			if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+			if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 				log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 			}
 			return fmt.Errorf("check whether prior run %q has already been superseded: %w", *tr.priorRun, err)
 		} else if successorID != "" {
 			tr.r.State = run.StateHalted
 			tr.r.HaltConfirmed = true
-			if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+			if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 				log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 			}
 			return fmt.Errorf("slice-chain validation: prior run %q has already been superseded by run %q — declare that as -prior-run instead", *tr.priorRun, successorID)
@@ -2415,7 +2415,7 @@ func (tr *ticketRun) createRunRecord() error {
 		// bisected root cause": a chain that later turns out stale
 		// (rejected by ValidateSliceChainActivity) may still have been
 		// marked drifted here.
-		recordSpecDriftIfDetected(*tr.dataDir, tr.id, tr.r.ProjectPath, prior, tr.productSpecSHA256, tr.contractSHA256)
+		recordSpecDriftIfDetected(tr.dp, *tr.dataDir, tr.id, tr.r.ProjectPath, prior, tr.productSpecSHA256, tr.contractSHA256)
 	}
 	if err := tr.scheduleFullSuite(); err != nil {
 		return err
@@ -2440,12 +2440,12 @@ func (tr *ticketRun) createRunRecord() error {
 	}
 
 	tr.r.State = run.StateSliceRunning
-	if err := save(tr.r, *tr.dataDir); err != nil {
+	if err := save(tr.dp, tr.r, *tr.dataDir); err != nil {
 		// HaltConfirmed: true — local, pre-submission failure; see
 		// GitRevParseHEAD's own failure branch above.
 		tr.r.State = run.StateHalted
 		tr.r.HaltConfirmed = true
-		if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+		if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state after slice-running save failed: %v", tr.id, tr.r.State, saveErr)
 		}
 		return err
@@ -2476,7 +2476,7 @@ func (tr *ticketRun) scheduleFullSuite() error {
 			if cadenceErr != nil {
 				tr.r.State = run.StateHalted
 				tr.r.HaltConfirmed = true
-				if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+				if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 					log.Printf("run %s: additionally failed to persist halted state: %v", tr.id, saveErr)
 				}
 				return cadenceErr
@@ -2486,7 +2486,7 @@ func (tr *ticketRun) scheduleFullSuite() error {
 				tr.effectiveFullSuiteCommand = ""
 			}
 		}
-		if err := save(tr.r, *tr.dataDir); err != nil {
+		if err := save(tr.dp, tr.r, *tr.dataDir); err != nil {
 			return fmt.Errorf("persist full-suite cadence decision: %w", err)
 		}
 	}
@@ -2504,7 +2504,7 @@ func (tr *ticketRun) requireReplayedHead() error {
 	tr.r.HaltConfirmed = true
 	tr.r.HaltReasonCode = run.HaltReasonReplayRefused
 	err := fmt.Errorf("replay run refused: branch %s is at %s, not at the replayed head %s", *tr.onBranch, tr.baseSHA, tr.replay.HeadSHA)
-	if saveErr := save(tr.r, *tr.dataDir, err); saveErr != nil {
+	if saveErr := save(tr.dp, tr.r, *tr.dataDir, err); saveErr != nil {
 		log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 	}
 	return err
@@ -2549,7 +2549,7 @@ func (tr *ticketRun) recordAncestorInputs() error {
 		if err != nil {
 			tr.r.State = run.StateHalted
 			tr.r.HaltConfirmed = true
-			if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+			if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 				log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 			}
 			return err
@@ -2594,7 +2594,7 @@ func (tr *ticketRun) dispatch() error {
 	if err != nil {
 		tr.r.State = run.StateHalted
 		tr.r.HaltConfirmed = true
-		if saveErr := save(tr.r, *tr.dataDir, err); saveErr != nil {
+		if saveErr := save(tr.dp, tr.r, *tr.dataDir, err); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 		}
 		return fmt.Errorf("acquire compose services slot: %w", err)
@@ -2748,7 +2748,7 @@ func (tr *ticketRun) dispatch() error {
 	// only on Temporal, so there is no fallback.
 	tr.r.State = run.StateHalted
 	tr.r.HaltConfirmed = true
-	if saveErr := save(tr.r, *tr.dataDir); saveErr != nil {
+	if saveErr := save(tr.dp, tr.r, *tr.dataDir); saveErr != nil {
 		log.Printf("run %s: additionally failed to persist %s state: %v", tr.id, tr.r.State, saveErr)
 	}
 	return fmt.Errorf("Temporal at %s is unreachable: %w; builds run only on Temporal (factoryd doctor -fix starts it)", *tr.temporalAddress, dialErr)

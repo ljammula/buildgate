@@ -218,7 +218,7 @@ func TestNotifyWorkerStaleFiresOnceForWaitingRequest(t *testing.T) {
 	fresh := &request.Request{ID: "req-fresh", State: request.StateBuilding, UpdatedAt: now.Format(time.RFC3339Nano)}
 
 	staleLine := "worker not running (last heartbeat 1h0m0s ago)"
-	notifyWorkerStale(dataDir, []*request.Request{waiting, reviewing, fresh}, now, staleLine)
+	notifyWorkerStale(newTestDeps(t), dataDir, []*request.Request{waiting, reviewing, fresh}, now, staleLine)
 
 	if _, err := os.Stat(workerStaleNotifyMarkerPath(dataDir, "req-waiting")); err != nil {
 		t.Errorf("req-waiting: marker not written: %v", err)
@@ -239,7 +239,7 @@ func TestNotifyWorkerStaleFiresOnceForWaitingRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notifyWorkerStale(dataDir, []*request.Request{waiting}, now.Add(time.Minute), staleLine)
+	notifyWorkerStale(newTestDeps(t), dataDir, []*request.Request{waiting}, now.Add(time.Minute), staleLine)
 	info2, err := os.Stat(workerStaleNotifyMarkerPath(dataDir, "req-waiting"))
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestNotifyWorkerStaleNoOpsWhenHeartbeatFresh(t *testing.T) {
 	dataDir := t.TempDir()
 	now := time.Now()
 	waiting := &request.Request{ID: "req-waiting", State: request.StateBuilding, UpdatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano)}
-	notifyWorkerStale(dataDir, []*request.Request{waiting}, now, "")
+	notifyWorkerStale(newTestDeps(t), dataDir, []*request.Request{waiting}, now, "")
 	if _, err := os.Stat(workerStaleNotifyMarkerPath(dataDir, "req-waiting")); err == nil {
 		t.Error("marker written despite an empty (fresh-heartbeat) staleLine")
 	}
@@ -298,7 +298,7 @@ func TestRunWorkerStaleWatcherLoopFiresOnTick(t *testing.T) {
 	t.Cleanup(cancel)
 	loopDone := make(chan struct{})
 	go func() {
-		runWorkerStaleWatcherLoop(ctx, done, tick, dataDir, func() time.Time { return now })
+		runWorkerStaleWatcherLoop(newTestDeps(t), ctx, done, tick, dataDir, func() time.Time { return now })
 		close(loopDone)
 	}()
 

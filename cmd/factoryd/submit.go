@@ -438,7 +438,7 @@ func submitMain(dp *deps, args []string) error {
 		fmt.Println(noConsoleLinkHint(dp, *dataDir))
 	}
 	if *watch {
-		return watchRequest(os.Stdout, *dataDir, result.id, false)
+		return watchRequest(dp, os.Stdout, *dataDir, result.id, false)
 	}
 	return nil
 }

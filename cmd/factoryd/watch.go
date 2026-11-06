@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"buildgate/internal/consolelink"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/request"
@@ -545,7 +544,7 @@ func newWatchFlags() (flags *flag.FlagSet, dataDir, configPath *string, noFollow
 	return
 }
 
-func watchMain(args []string) error {
+func watchMain(dp *deps, args []string) error {
 	flags, dataDir, configPath, noFollow := newWatchFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -562,7 +561,7 @@ func watchMain(args []string) error {
 	id := positional[0]
 
 	if isRequestID(*dataDir, id) {
-		return watchRequest(os.Stdout, *dataDir, id, *noFollow)
+		return watchRequest(dp, os.Stdout, *dataDir, id, *noFollow)
 	}
 	return watchRun(os.Stdout, *dataDir, id, *noFollow)
 }
@@ -725,7 +724,7 @@ func watchExitError(r *run.Run) error {
 // (building/pr_review) exactly the way watchRun does, or print the
 // review/retry hint for a request waiting on a human and exit -- never
 // polling a run for a request that has none yet.
-func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
+func watchRequest(dp *deps, out *os.File, dataDir, id string, noFollow bool) error {
 	// lastHeader/lastRunID keep the loop quiet between changes: the
 	// request driver advances a request on its own poll interval, so for
 	// a while after a ticket's run ends the record still names that same
@@ -752,7 +751,7 @@ func watchRequest(out *os.File, dataDir, id string, noFollow bool) error {
 		if header := renderRequestHeader(r); header != lastHeader {
 			sp.Println(header)
 			if lastHeader == "" {
-				if url := consoleRequestURL(consolelink.LocalBaseURL(dataDir), r.ID); url != "" {
+				if url := consoleRequestURL(resolveConsoleBaseURL(dp, "", dataDir), r.ID); url != "" {
 					sp.Println("  console: " + url)
 				}
 			}

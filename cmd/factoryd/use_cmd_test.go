@@ -250,7 +250,7 @@ func TestStatusFirstLineNamesProfileAndDataDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if err := statusMain(nil); err != nil {
+		if err := statusMain(newTestDeps(t), nil); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})
@@ -262,7 +262,7 @@ func TestStatusFirstLineNamesProfileAndDataDir(t *testing.T) {
 
 	// -config as a profile name switches the line and the data dir.
 	out = captureStdout(t, func() {
-		if err := statusMain([]string{"-config", "default"}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-config", "default"}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})
@@ -277,7 +277,7 @@ func TestStatusJSONCarriesProfileAndConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if err := statusMain([]string{"-json"}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-json"}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})

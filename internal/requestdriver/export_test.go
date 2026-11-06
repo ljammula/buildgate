@@ -118,3 +118,14 @@ func SaveObservationForTest(dataDir string, r *request.Request, earlier *request
 func ContinueAfterPRApproval(dataDir string, r *request.Request, now time.Time) error {
 	return continueAfterPRApproval(dataDir, r, now)
 }
+
+// consoleDeps is the Deps of a test in this package that only sends a
+// notification: it names the console base it holds (none by default), so the link is empty without one.
+type consoleDeps struct {
+	Deps
+	base string
+}
+
+func (d consoleDeps) ConsoleBaseURL(string) string { return d.base }
+
+func (ReviewSaveDeps) ConsoleBaseURL(string) string { return "" }

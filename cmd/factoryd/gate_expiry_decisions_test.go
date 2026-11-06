@@ -57,10 +57,10 @@ func TestResumeRefusedAtALapsedGateAndTheOperatorIsToldOnce(t *testing.T) {
 		t.Fatalf("notifications.log = %q (%v), want the expiry told by the refused decision", first, err)
 	}
 	// Another finder (the worker's pass, the API) adds nothing.
-	if err := requestdriver.NotifyGateExpired(dataDir, "req-1", time.Now()); err != nil {
+	if err := requestdriver.NotifyGateExpired(dp, dataDir, "req-1", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if expired, err := requestdriver.ExpireIfDue(dataDir, "req-1", 2*time.Hour, time.Now()); err != nil || expired {
+	if expired, err := requestdriver.ExpireIfDue(dp, dataDir, "req-1", 2*time.Hour, time.Now()); err != nil || expired {
 		t.Errorf("ExpireIfDue on a halted request = %v, %v", expired, err)
 	}
 	if again, _ := os.ReadFile(logPath); string(again) != string(first) {

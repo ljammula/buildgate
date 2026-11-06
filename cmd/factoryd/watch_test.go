@@ -558,7 +558,7 @@ func TestWatchRequestPrintsHistoryOnHeaderChange(t *testing.T) {
 	}
 	defer f.Close()
 
-	if err := watchRequest(f, dataDir, "req-hist", true); err == nil {
+	if err := watchRequest(newTestDeps(t), f, dataDir, "req-hist", true); err == nil {
 		t.Fatal("watchRequest: want error for a quarantined request")
 	}
 	f.Seek(0, 0)
@@ -596,7 +596,7 @@ func TestWatchRequestNoHistoryPrintsNothingExtra(t *testing.T) {
 	}
 	defer f.Close()
 
-	if err := watchRequest(f, dataDir, "req-nohist", true); err != nil {
+	if err := watchRequest(newTestDeps(t), f, dataDir, "req-nohist", true); err != nil {
 		t.Fatalf("watchRequest: %v", err)
 	}
 	f.Seek(0, 0)
@@ -631,7 +631,7 @@ func TestWatchRequestAwaitingPRReleaseDenialNextNeverSuggestsABareRetry(t *testi
 	}
 	defer f.Close()
 
-	_ = watchRequest(f, dataDir, "req-denied", true)
+	_ = watchRequest(newTestDeps(t), f, dataDir, "req-denied", true)
 	f.Seek(0, 0)
 	buf := make([]byte, 4096)
 	n, _ := f.Read(buf)
@@ -688,7 +688,7 @@ func TestWatchReasonCannotForgeANextLine(t *testing.T) {
 		t.Fatalf("temp file: %v", err)
 	}
 	defer f.Close()
-	_ = watchRequest(f, dataDir, "req-forge", true)
+	_ = watchRequest(newTestDeps(t), f, dataDir, "req-forge", true)
 	f.Seek(0, 0)
 	buf := make([]byte, 4096)
 	n, _ := f.Read(buf)
@@ -752,7 +752,7 @@ func TestWatchRequestHints(t *testing.T) {
 			}
 			defer f.Close()
 
-			err = watchRequest(f, dataDir, "req-hint", true)
+			err = watchRequest(newTestDeps(t), f, dataDir, "req-hint", true)
 			if (err != nil) != c.wantErr {
 				t.Fatalf("watchRequest error = %v, wantErr %v", err, c.wantErr)
 			}
@@ -786,7 +786,7 @@ func TestWatchClosedRequestNamesEachPullRequestAndExitsZero(t *testing.T) {
 		t.Fatalf("temp file: %v", err)
 	}
 	defer f.Close()
-	if err := watchRequest(f, dataDir, "req-closed", false); err != nil {
+	if err := watchRequest(newTestDeps(t), f, dataDir, "req-closed", false); err != nil {
 		t.Fatalf("watchRequest: %v", err)
 	}
 	out, err := os.ReadFile(f.Name())
@@ -844,7 +844,7 @@ func TestWatchRunFollowExitsOnFinished(t *testing.T) {
 
 	// Give watchRun a moment to read the initial event and enter its poll
 	// loop, then append the run's own terminal state and progress line --
-	// exactly what save() (sandbox_exec.go) does for a real run reaching
+	// exactly what save(dp, ) (sandbox_exec.go) does for a real run reaching
 	// an accepted state.
 	time.Sleep(50 * time.Millisecond)
 	r.State = run.StateAccepted
@@ -885,7 +885,7 @@ func TestWatchNamesAPullRequestHeldForItsRestack(t *testing.T) {
 		t.Fatalf("temp file: %v", err)
 	}
 	defer f.Close()
-	if err := watchRequest(f, dataDir, "req-held", true); err != nil {
+	if err := watchRequest(newTestDeps(t), f, dataDir, "req-held", true); err != nil {
 		t.Fatalf("watchRequest: %v", err)
 	}
 	out, err := os.ReadFile(f.Name())

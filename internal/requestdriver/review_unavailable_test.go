@@ -236,7 +236,7 @@ func TestARoundWhoseReviewGaveNoVerdictIsUnresolved(t *testing.T) {
 	if got, err := correctiveRoundOutcome(dataDir, otherGate.ID, nil); err != nil || got.unresolved != "" {
 		t.Fatalf("a failed verify: outcome %+v, err %v, want no cause", got, err)
 	}
-	if err := quarantineAfterRound(dataDir, r, otherGate, reason, time.Now()); err != nil {
+	if err := quarantineAfterRound(consoleDeps{}, dataDir, r, otherGate, reason, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if r.State != request.StateQuarantined || r.QuarantineCheck != "" || r.Error != reason {

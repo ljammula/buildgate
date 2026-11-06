@@ -61,7 +61,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		// ambiguous give-up case HaltConfirmed's doc comment describes.
 		r.State = run.StateHalted
 		r.HaltConfirmed = true
-		if saveErr := save(r, opts.DataDir); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return fmt.Errorf("resolve data dir: %w", err)
@@ -75,7 +75,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		// is never reached, so nothing is stranded for this id.
 		r.State = run.StateHalted
 		r.HaltConfirmed = true
-		if saveErr := save(r, opts.DataDir); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return divergeErr
@@ -103,7 +103,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		// nothing to strand for this id specifically.
 		r.State = run.StateHalted
 		r.HaltConfirmed = true
-		if saveErr := save(r, opts.DataDir); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return fmt.Errorf("start repository owner worker: %w", err)
@@ -118,7 +118,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		// failure branch above: SignalWithStartWorkflow is never reached.
 		r.State = run.StateHalted
 		r.HaltConfirmed = true
-		if saveErr := save(r, opts.DataDir); saveErr != nil {
+		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
 		}
 		return fmt.Errorf("start run worker: %w", err)
@@ -201,14 +201,14 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 				*r = *fresh
 				return nil
 			}
-			return save(r, opts.DataDir)
+			return save(dp, r, opts.DataDir)
 		}); lockErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, lockErr)
 		}
 		return fmt.Errorf("signal repository owner workflow: %w", err)
 	}
 
-	result, haltConfirmed, err := pollRepositoryOwnerResult(runCtx, temporalClient, ownerID, opts.ID, checkpointDir, r, opts.DataDir, runTaskQueue, opts.TemporalAddress, opts.Repository)
+	result, haltConfirmed, err := pollRepositoryOwnerResult(dp, runCtx, temporalClient, ownerID, opts.ID, checkpointDir, r, opts.DataDir, runTaskQueue, opts.TemporalAddress, opts.Repository)
 	if err != nil {
 		// pollRepositoryOwnerResult's own terminateOrCancelOwnRequest
 		// already attempted to terminate this run's own child, if the
@@ -282,7 +282,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 				*r = *fresh
 				return nil
 			}
-			return save(r, opts.DataDir)
+			return save(dp, r, opts.DataDir)
 		}); lockErr != nil {
 			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, lockErr)
 		}
@@ -371,7 +371,7 @@ func alreadyReconciledResultError(r *run.Run) error {
 // the first time this poll observes it, so `factoryd status`/the Temporal
 // Web UI can find an in-flight -repository run instead of only a completed
 // one.
-func pollRepositoryOwnerResult(ctx context.Context, temporalClient client.Client, ownerID, requestID, checkpointDir string, r *run.Run, dataDir, runTaskQueue, temporalAddress, repository string) (result workflow.RunWorkflowResult, haltConfirmed bool, err error) {
+func pollRepositoryOwnerResult(dp *deps, ctx context.Context, temporalClient client.Client, ownerID, requestID, checkpointDir string, r *run.Run, dataDir, runTaskQueue, temporalAddress, repository string) (result workflow.RunWorkflowResult, haltConfirmed bool, err error) {
 	recordedChild := false
 	lastQueuePosition := -1
 	for {
@@ -384,7 +384,7 @@ func pollRepositoryOwnerResult(ctx context.Context, temporalClient client.Client
 					r.TemporalRunID = ownerResult.InProgress.ChildRunID
 					r.TemporalTaskQueue = runTaskQueue
 					r.TemporalAddress = temporalAddress
-					if saveErr := save(r, dataDir); saveErr != nil {
+					if saveErr := save(dp, r, dataDir); saveErr != nil {
 						log.Printf("run %s: additionally failed to persist Temporal child workflow ids: %v", requestID, saveErr)
 					}
 					recordedChild = true

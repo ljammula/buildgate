@@ -27,7 +27,7 @@ func waitingAt(t *testing.T, state request.State, waited time.Duration) (dataDir
 func TestExpireIfDueHaltsAReviewPastItsExpiry(t *testing.T) {
 	for _, state := range []request.State{request.StateSpecReview, request.StatePlanReview} {
 		dataDir, id := waitingAt(t, state, 3*time.Hour)
-		expired, err := requestdriver.ExpireIfDue(dataDir, id, 2*time.Hour, time.Now())
+		expired, err := requestdriver.ExpireIfDue(newFakeDeps(t), dataDir, id, 2*time.Hour, time.Now())
 		if err != nil || !expired {
 			t.Fatalf("%s: expired %v err %v, want the halt", state, expired, err)
 		}
@@ -43,14 +43,14 @@ func TestExpireIfDueHaltsAReviewPastItsExpiry(t *testing.T) {
 		}
 	}
 	dataDir, id := waitingAt(t, request.StatePlanReview, time.Hour)
-	if expired, err := requestdriver.ExpireIfDue(dataDir, id, 2*time.Hour, time.Now()); err != nil || expired {
+	if expired, err := requestdriver.ExpireIfDue(newFakeDeps(t), dataDir, id, 2*time.Hour, time.Now()); err != nil || expired {
 		t.Errorf("within the expiry: expired %v err %v, want neither", expired, err)
 	}
 }
 
 func TestExpireIfDueOffByDefault(t *testing.T) {
 	dataDir, id := waitingAt(t, request.StateSpecReview, 1000*time.Hour)
-	if expired, err := requestdriver.ExpireIfDue(dataDir, id, 0, time.Now()); err != nil || expired {
+	if expired, err := requestdriver.ExpireIfDue(newFakeDeps(t), dataDir, id, 0, time.Now()); err != nil || expired {
 		t.Fatalf("expiry 0: expired %v err %v, want a gate that never expires", expired, err)
 	}
 	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != request.StateSpecReview {
@@ -61,7 +61,7 @@ func TestExpireIfDueOffByDefault(t *testing.T) {
 func TestExpiryNeverAppliesToPRReview(t *testing.T) {
 	for _, state := range []request.State{request.StatePRReview, request.StateBuilding, request.StateQuarantined} {
 		dataDir, id := waitingAt(t, state, 1000*time.Hour)
-		if expired, err := requestdriver.ExpireIfDue(dataDir, id, time.Minute, time.Now()); err != nil || expired {
+		if expired, err := requestdriver.ExpireIfDue(newFakeDeps(t), dataDir, id, time.Minute, time.Now()); err != nil || expired {
 			t.Errorf("%s: expired %v err %v, want no expiry", state, expired, err)
 		}
 		if got := requestdrivertest.LoadRequest(t, dataDir, id); got.State != state {
@@ -79,7 +79,7 @@ func TestExpireIfDueLeavesADecisionMadeMeanwhile(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if expired, err := requestdriver.ExpireIfDue(dataDir, id, time.Hour, time.Now()); err != nil || expired {
+	if expired, err := requestdriver.ExpireIfDue(newFakeDeps(t), dataDir, id, time.Hour, time.Now()); err != nil || expired {
 		t.Errorf("a request already halted: expired %v err %v", expired, err)
 	}
 	if got := requestdrivertest.LoadRequest(t, dataDir, id); got.HaltKind != "" {

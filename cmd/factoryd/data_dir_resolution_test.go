@@ -46,7 +46,7 @@ func TestACommandMeansTheSameDataDirFromAnyDirectory(t *testing.T) {
 	for _, dir := range []string{t.TempDir(), t.TempDir()} {
 		t.Chdir(dir)
 		logged.Reset()
-		if err := statusMain(nil); err != nil {
+		if err := statusMain(newTestDeps(t), nil); err != nil {
 			t.Fatalf("status from %s: %v", dir, err)
 		}
 		if !strings.Contains(logged.String(), `data dir: "`+want+`" (source: the default for session config`) {
@@ -71,7 +71,7 @@ func TestTheDefaultDataDirNamesRecordsLeftInTheWorkingDirectory(t *testing.T) {
 	}
 	t.Chdir(dir)
 	logged := captureLog(t)
-	if err := statusMain(nil); err != nil {
+	if err := statusMain(newTestDeps(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	local := filepath.Join(dir, "data")
@@ -85,7 +85,7 @@ func TestTheDefaultDataDirNamesRecordsLeftInTheWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	logged.Reset()
-	if err := statusMain(nil); err != nil || strings.Contains(logged.String(), "note:") {
+	if err := statusMain(newTestDeps(t), nil); err != nil || strings.Contains(logged.String(), "note:") {
 		t.Errorf("with data_dir set: %v, log %q", err, logged.String())
 	}
 }
@@ -120,7 +120,7 @@ func TestWithNoSessionConfigTheRelativeDefaultIsNamed(t *testing.T) {
 	isolateSessionConfig(t)
 	t.Chdir(t.TempDir())
 	logged := captureLog(t)
-	if err := statusMain(nil); err != nil {
+	if err := statusMain(newTestDeps(t), nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(logged.String(), "warning: there is no session config") || !strings.Contains(logged.String(), "follows the directory") {
