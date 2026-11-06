@@ -504,3 +504,23 @@ func TestUpgradeKickstartsLaunchdServicesInsteadOfSpawning(t *testing.T) {
 		t.Errorf("plan lacks the launchd serve:\n%s", out)
 	}
 }
+
+func TestUpgradeStopsNothingWhenAWorkerCouldNotReachItsRouteFromThisShell(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	queuePID, servePID := h.startDefaultProcesses()
+	writeFreshWorkerHeartbeat(t, h.profiles.roots["default"], queuePID, "localhost:7233", 3)
+	t.Setenv("PROFILE_TEST_KEY", "")
+	out, err := h.run(dp, "-yes")
+	if err == nil || !strings.Contains(err.Error(), "PROFILE_TEST_KEY") {
+		t.Fatalf("upgrade = %v, want a refusal naming PROFILE_TEST_KEY\n%s", err, out)
+	}
+	if !alive(queuePID) || !alive(servePID) || len(h.spawned) != 0 {
+		t.Errorf("worker alive %v, console alive %v, spawned %v", alive(queuePID), alive(servePID), h.spawned)
+	}
+	for _, c := range h.calls {
+		if strings.HasPrefix(c, "make ") || strings.Contains(c, " checkout ") {
+			t.Errorf("ran %q before refusing", c)
+		}
+	}
+}
