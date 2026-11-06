@@ -655,7 +655,7 @@ imported-spec redraft refuse a larger document before it is saved or reviewed.
 | You widened the ticket with `factoryd amend-scope` | The widening is yours |
 | The ticket is the one you gave `factoryd run -spec` (no request) | You wrote it |
 
-A one-ticket plan the factory approved itself (no `plan_review`, see `submit -plan-review`) has a list the model guessed: a changed file outside it passes the check and is one line under `## Notes` in the pull request, `changed outside the plan's Allowed-Files: <path>`. The repository's `.factory.yml` `allowed_paths:` is the list a person always wrote: a changed file that matches none of its patterns fails the check whatever the ticket says. `release_protected_paths` and the protection of `.buildgate/` stay separate checks and refuse as before.
+A one-ticket plan the factory approved itself (no `plan_review`, see `submit -plan-review`) has a list the model guessed: a changed file outside it passes the check and is one line under `## Notes` in the pull request, `changed outside the plan's Allowed-Files: <path>`. The repository's `.factory.yml` `allowed_paths:` is the list a person always wrote: a changed file that matches none of its patterns fails the check whatever the ticket says. `factoryd doctor -target-repo <repo>` warns when it is absent and proposes one built from the commit's top-level entries (each directory as `dir/`, each file by name, without the dot-entries such as `.github/`), to review and commit; once committed, a build that adds a new top-level directory or root file fails the check until it is listed. `release_protected_paths` and the protection of `.buildgate/` stay separate checks and refuse as before.
 
 ## Session config
 
