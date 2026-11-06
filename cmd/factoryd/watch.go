@@ -397,7 +397,7 @@ func lastRepoSkills(attempts []run.Attempt) []string {
 }
 
 // shortSHA256 truncates a hex sha256 digest to 12 characters for compact
-// display, matching buildVersion's own vcs.revision truncation (main.go)
+// display, matching buildversion.String's own vcs.revision truncation
 // -- enough to distinguish harness script sets at a glance without
 // printing the full 64-character digest.
 func shortSHA256(hash string) string {

@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"buildgate/internal/buildversion"
 	"buildgate/internal/evidence"
 	"buildgate/internal/meter"
 	"buildgate/internal/sanitize"
@@ -1848,11 +1849,9 @@ type Run struct {
 	// recently persisted this record via Persist -- "last writer", not
 	// "created by": a run touched across a daemon upgrade shows whichever
 	// build wrote it last, the same build whose behavior produced
-	// everything else in the record as of that write. Set from the
-	// package-level FactorydVersion variable (cmd/factoryd's main sets it
-	// once at startup from buildVersion(version, settings)); empty for a
-	// run persisted before this field existed, or in a test that never
-	// sets the package variable.
+	// everything else in the record as of that write. Set from
+	// buildversion.String(); empty for a run persisted before this field
+	// existed.
 	FactorydVersion string `json:"factoryd_version,omitempty"`
 }
 
@@ -2112,15 +2111,6 @@ func DiffPath(dataDir, id string) string {
 	return filepath.Join(Dir(dataDir, id), DiffFileName)
 }
 
-// FactorydVersion is the version of the currently-running factoryd binary.
-// cmd/factoryd's main sets it exactly once, at startup, from
-// buildVersion(version, settings), before any run can be persisted; a test
-// that never sets it gets the zero value "", matching a pre-this-field run
-// record. Persist stamps this package-level value onto every run record it
-// writes -- see Run.FactorydVersion's own doc comment for what the stamped
-// field means.
-var FactorydVersion string
-
 // Persist is the one funnel every write of a run record goes through: it
 // stamps provenance (r.UpdatedAt, r.FactorydVersion), attaches the
 // baseline verify written beside the record, then writes run.json with
@@ -2128,7 +2118,7 @@ var FactorydVersion string
 // whether the record landed.
 func (r *Run) Persist(dataDir string) error {
 	r.UpdatedAt = time.Now().Format(time.RFC3339)
-	r.FactorydVersion = FactorydVersion
+	r.FactorydVersion = buildversion.String()
 	r.AttachBaselineVerify(dataDir)
 	return r.Save(dataDir)
 }

@@ -451,7 +451,7 @@ docker-buildx-check:
 # installed binary reports anything else.
 FACTORYD_VERSION = $(shell git rev-parse --short=12 HEAD)$(shell test -z "$$(git status --porcelain --untracked-files=no)" || echo -dirty)
 install: install-prereqs docker-buildx-check temporal-up local-images openshell-images console-build-optional
-	scripts/with-spinner.sh "installing factoryd" go install -ldflags "-X main.version=$(FACTORYD_VERSION)" ./cmd/factoryd
+	scripts/with-spinner.sh "installing factoryd" go install -ldflags "-X buildgate/internal/buildversion.stamped=$(FACTORYD_VERSION)" ./cmd/factoryd
 	@bindir="$$(go env GOBIN)"; [ -n "$$bindir" ] || bindir="$$(go env GOPATH | cut -d: -f1)/bin"; \
 	installed="$$bindir/factoryd"; \
 	got="$$("$$installed" version)"; \
