@@ -36,7 +36,7 @@ func doctorCheckAllowedPaths(ctx context.Context, root string) doctorCheck {
 			Fix: "commit allowed_paths: in .factory.yml, the directories and files a build may change (\"src/\" allows everything under src)"}
 	}
 	return doctorCheck{Name: name, Err: why, Advisory: true,
-		Fix: "candidate .factory.yml field (review before commit; remove what a build must not change):\nallowed_paths: [" + quotedYAMLList(proposed) + "]"}
+		Fix: "candidate .factory.yml field (review before commit; remove what a build must not change; a build that adds a new top-level directory or root file fails diff_scope until it is listed here):\nallowed_paths: [" + quotedYAMLList(proposed) + "]"}
 }
 
 // proposedAllowedPaths lists root's HEAD top-level entries as allowed_paths
