@@ -23,6 +23,7 @@ Every failure prints one "read_back:" line to stderr.
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import subprocess
@@ -127,7 +128,7 @@ def run_read_back(
 	agents_md_used = build_app.committed_agents_md_blob(workspace) is not None
 	started = time.monotonic()
 	try:
-		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60)
+		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=harness_adapters.child_env(adapter, dict(os.environ)))
 	except subprocess.TimeoutExpired as exc:
 		partial = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
 		draft_spec.write_evidence(

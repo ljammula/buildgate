@@ -9,6 +9,7 @@ copies that output to the repository root after the job exits successfully.
 
 from __future__ import annotations
 
+import os
 import argparse
 import subprocess
 import sys
@@ -95,7 +96,7 @@ def run_draft(
 		thinking=thinking,
 	)
 	try:
-		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60)
+		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=harness_adapters.child_env(adapter, dict(os.environ)))
 	except subprocess.TimeoutExpired as exc:
 		partial_stdout = exc.stdout
 		if isinstance(partial_stdout, bytes):
