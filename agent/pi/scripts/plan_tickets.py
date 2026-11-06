@@ -37,6 +37,7 @@ argument/setup errors.
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import subprocess
@@ -181,7 +182,7 @@ def run_plan(
 
 	started = time.monotonic()
 	try:
-		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60)
+		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=harness_adapters.child_env(adapter, dict(os.environ)))
 	except subprocess.TimeoutExpired as exc:
 		duration_s = time.monotonic() - started
 		partial_stdout = exc.stdout

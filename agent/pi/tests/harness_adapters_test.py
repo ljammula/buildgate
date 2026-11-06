@@ -34,11 +34,96 @@ def clean_env(**extra):
 	"""os.environ without the route pins, plus extra."""
 	env = {k: v for k, v in os.environ.items() if k not in ("PI_HARNESS_PROVIDER", "PI_HARNESS_MODEL")}
 	env.update(extra)
-	return mock.patch.dict(os.environ, env, clear=True)
+	return _isolated(mock.patch.dict(os.environ, env, clear=True))
+
+
+class _isolated:
+	"""Wraps a patch and resets what prepare() left on the shared adapters."""
+
+	def __init__(self, patch):
+		self.patch = patch
+
+	def _reset(self):
+		for adapter in (PI, PIFORK):
+			for name in ("_provider", "_model", "_agent_dir"):
+				adapter.__dict__.pop(name, None)
+
+	def __enter__(self):
+		self._reset()
+		return self.patch.__enter__()
+
+	def __exit__(self, *exc):
+		try:
+			return self.patch.__exit__(*exc)
+		finally:
+			self._reset()
 
 
 def message_end(role="assistant", content="hi", **message):
 	return json.dumps({"type": "message_end", "message": {"role": role, "content": content, **message}})
+
+
+class NoEnvironMutationTests(unittest.TestCase):
+	def argv(self, adapter):
+		return adapter.invocation(
+			Path("/tmp/ws"), prompt="p", session_dir=Path("/tmp/session"),
+			continue_session=False, thinking=None,
+		)
+
+	def test_prepare_and_invocation_leave_environ_alone(self):
+		for adapter in (PI, PIFORK):
+			with tempfile.TemporaryDirectory() as root:
+				env = {"PI_CODING_AGENT_DIR": str(Path(root) / "agent"),
+					"PIFORK_AGENT_SEED": str(Path(root) / "no-seed"), **RELAY_ENV}
+				with clean_env(**env):
+					before = dict(os.environ)
+					adapter.prepare()
+					argv = self.argv(adapter)
+					self.assertEqual(dict(os.environ), before)
+				self.assertEqual(argv[argv.index("--provider") + 1], "factoryd-relay")
+				self.assertEqual(argv[argv.index("--model") + 1], "qwen38-mtplx-quality")
+
+	def test_pifork_default_agent_dir_is_not_exported(self):
+		with tempfile.TemporaryDirectory() as root:
+			default = Path(root) / "default-agent"
+			env = {k: v for k, v in os.environ.items() if k != "PI_CODING_AGENT_DIR"}
+			env["PIFORK_AGENT_SEED"] = str(Path(root) / "no-seed")
+			with mock.patch.dict(os.environ, env, clear=True), \
+					mock.patch.object(Path, "mkdir"), mock.patch.object(Path, "exists", return_value=True):
+				PIFORK.prepare()
+				self.assertNotIn("PI_CODING_AGENT_DIR", os.environ)
+				child = PIFORK.child_env(dict(os.environ))
+		self.assertEqual(child["PI_CODING_AGENT_DIR"], "/tmp/factoryd-pi-agent")
+		self.assertNotIn("PI_CODING_AGENT_DIR", os.environ)
+
+	def test_launched_child_env_carries_agent_dir_for_pifork(self):
+		with tempfile.TemporaryDirectory() as root:
+			agent_dir = Path(root) / "agent"
+			env = {"PI_CODING_AGENT_DIR": str(agent_dir), "PIFORK_AGENT_SEED": str(Path(root) / "no-seed")}
+			with clean_env(**env):
+				PIFORK.prepare()
+				base = {k: v for k, v in os.environ.items() if k != "PI_CODING_AGENT_DIR"}
+				child = harness_adapters.child_env(PIFORK, base)
+			self.assertEqual(child["PI_CODING_AGENT_DIR"], str(agent_dir))
+			self.assertNotIn("PI_CODING_AGENT_DIR", base)
+
+	def test_operator_pin_wins_without_a_route_and_route_wins_with_one(self):
+		with clean_env(PI_HARNESS_PROVIDER="mine", PI_HARNESS_MODEL="m"):
+			PI.prepare()
+			argv = self.argv(PI)
+			self.assertEqual(argv[argv.index("--provider") + 1], "mine")
+			self.assertEqual(argv[argv.index("--model") + 1], "m")
+			self.assertEqual(harness_adapters.route_pin(PI), ("mine", "m"))
+		with tempfile.TemporaryDirectory() as root, clean_env(
+			PI_HARNESS_PROVIDER="mine", PI_HARNESS_MODEL="m", PI_CODING_AGENT_DIR=root, **RELAY_ENV
+		):
+			PI.prepare()
+			argv = self.argv(PI)
+			self.assertEqual(argv[argv.index("--provider") + 1], "factoryd-relay")
+			self.assertEqual(argv[argv.index("--model") + 1], "qwen38-mtplx-quality")
+		with clean_env():
+			PI.prepare()
+			self.assertNotIn("--provider", self.argv(PI))
 
 
 class InvocationTests(unittest.TestCase):
@@ -172,8 +257,9 @@ class PiforkPrepareTests(unittest.TestCase):
 			}
 			with clean_env(**env):
 				PIFORK.prepare()
-				self.assertEqual(os.environ["PI_HARNESS_PROVIDER"], "factoryd-relay")
-				self.assertEqual(os.environ["PI_HARNESS_MODEL"], "qwen38-mtplx-quality")
+				self.assertEqual(PIFORK.route_pin(), ("factoryd-relay", "qwen38-mtplx-quality"))
+				self.assertNotIn("PI_HARNESS_PROVIDER", os.environ)
+				self.assertNotIn("PI_HARNESS_MODEL", os.environ)
 			self.assertEqual(json.loads((agent_dir / "models.json").read_text()), WANT_MODELS_JSON)
 			self.assertEqual((agent_dir / "auth.json").read_text(), "{}\n")
 

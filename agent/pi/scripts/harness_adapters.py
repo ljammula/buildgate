@@ -432,9 +432,16 @@ class PiAdapter:
 	# Lines this CLI prints to stderr on every run that say nothing about a
 	# failure; build_app.stderr_hint skips them when it names a failure's cause.
 	stderr_noise: tuple[str, ...] = ()
+	# What prepare() derived. Kept here, never in os.environ, so no later
+	# subprocess inherits them by accident.
+	_provider: str | None = None
+	_model: str | None = None
+	_agent_dir: Path | None = None
 
 	def agent_dir(self) -> Path:
 		"""Where pi reads its state, models.json included."""
+		if self._agent_dir is not None:
+			return self._agent_dir
 		configured = os.environ.get("PI_CODING_AGENT_DIR")
 		return Path(configured) if configured else Path.home() / ".pi" / "agent"
 
@@ -442,14 +449,28 @@ class PiAdapter:
 		"""Renders pi's models.json from the FACTORY_MODEL_* route facts and
 		points --provider/--model at it. Does nothing without
 		FACTORY_MODEL_ID."""
+		self._provider = None
+		self._model = None
 		config = pi_models_config()
 		if config is None:
 			return
 		agent_dir = self.agent_dir()
 		agent_dir.mkdir(parents=True, exist_ok=True)
 		(agent_dir / "models.json").write_text(json.dumps(config, indent=2) + "\n")
-		os.environ["PI_HARNESS_PROVIDER"] = RELAY_PROVIDER_ID
-		os.environ["PI_HARNESS_MODEL"] = os.environ["FACTORY_MODEL_ID"]
+		self._provider = RELAY_PROVIDER_ID
+		self._model = os.environ["FACTORY_MODEL_ID"]
+
+	def route_pin(self) -> tuple[str | None, str | None]:
+		"""The provider and model passed to pi as --provider/--model: the
+		route prepare() rendered, else an operator's PI_HARNESS_PROVIDER/
+		PI_HARNESS_MODEL, else None (pi's own settings apply)."""
+		provider = self._provider if self._provider is not None else os.environ.get("PI_HARNESS_PROVIDER")
+		model = self._model if self._model is not None else os.environ.get("PI_HARNESS_MODEL")
+		return provider, model
+
+	def child_env(self, env: dict) -> dict:
+		"""`env` plus what a child process of this harness needs from prepare()."""
+		return dict(env)
 
 	def invocation(
 		self,
@@ -470,8 +491,7 @@ class PiAdapter:
 		# `/model` selection made through it) applies. An explicit override remains
 		# available via PI_HARNESS_PROVIDER/PI_HARNESS_MODEL/--thinking for
 		# controlled experiments and reproductions.
-		provider = os.environ.get("PI_HARNESS_PROVIDER")
-		model = os.environ.get("PI_HARNESS_MODEL")
+		provider, model = self.route_pin()
 		if provider is not None:
 			args += ["--provider", provider]
 		if model is not None:
@@ -534,8 +554,8 @@ class PiforkAdapter(PiAdapter):
 	def prepare(self) -> None:
 		# The worker environment sets this too; the default keeps a direct
 		# invocation's state out of a developer's home directory.
-		os.environ.setdefault("PI_CODING_AGENT_DIR", "/tmp/factoryd-pi-agent")
-		agent_dir = Path(os.environ["PI_CODING_AGENT_DIR"])
+		agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or "/tmp/factoryd-pi-agent")
+		self._agent_dir = agent_dir
 		agent_seed = Path(os.environ.get("PIFORK_AGENT_SEED", "/opt/pifork-agent-seed"))
 		agent_dir.mkdir(parents=True, exist_ok=True)
 		if agent_seed.is_dir():
@@ -556,6 +576,12 @@ class PiforkAdapter(PiAdapter):
 			auth_file.write_text("{}\n")
 		# The route goes last, into the same agent directory.
 		super().prepare()
+
+	def child_env(self, env: dict) -> dict:
+		out = super().child_env(env)
+		if self._agent_dir is not None:
+			out["PI_CODING_AGENT_DIR"] = str(self._agent_dir)
+		return out
 
 
 def _jsonl_events(stdout: str):
@@ -1013,6 +1039,21 @@ ADAPTERS = {
 	"codex": CodexAdapter(),
 	"copilot": CopilotAdapter(),
 }
+
+
+def route_pin(adapter) -> tuple[str | None, str | None]:
+	"""The (provider, model) the harness is pinned to, for evidence. Adapters
+	without their own pin report the operator's PI_HARNESS_* variables."""
+	pin = getattr(adapter, "route_pin", None)
+	if pin is not None:
+		return pin()
+	return os.environ.get("PI_HARNESS_PROVIDER"), os.environ.get("PI_HARNESS_MODEL")
+
+
+def child_env(adapter, env: dict) -> dict:
+	"""`env` with whatever the adapter's prepare() says a child needs."""
+	hook = getattr(adapter, "child_env", None)
+	return hook(env) if hook is not None else env
 
 
 def get(name: str):

@@ -39,6 +39,7 @@ convention build_app.py uses for its own argument/setup errors.
 
 from __future__ import annotations
 
+import os
 import argparse
 import ast
 import json
@@ -303,7 +304,7 @@ def model_check(
 			workspace, prompt=check_prompt,
 			session_dir=session_dir, continue_session=False, thinking=EXAMPLE_CHECK_THINKING,
 		)
-		result = build_app.sh(command, cwd=workspace, timeout=EXAMPLE_CHECK_TIMEOUT_S)
+		result = build_app.sh(command, cwd=workspace, timeout=EXAMPLE_CHECK_TIMEOUT_S, env=harness_adapters.child_env(adapter, dict(os.environ)))
 		if result.returncode != 0 or not check_path.is_file():
 			return [], None
 		return parse_example_check(check_path.read_text(), examples), adapter.parse(result.stdout).usage
@@ -476,7 +477,7 @@ def run_draft(
 
 	started = time.monotonic()
 	try:
-		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60)
+		result = build_app.sh(command, cwd=workspace, timeout=timeout_minutes * 60, env=harness_adapters.child_env(adapter, dict(os.environ)))
 	except subprocess.TimeoutExpired as exc:
 		duration_s = time.monotonic() - started
 		partial_stdout = exc.stdout
