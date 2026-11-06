@@ -986,7 +986,7 @@ class SetupCommandTests(unittest.TestCase):
 			stderr = io.StringIO()
 			with (
 				mock.patch.object(sys, "argv", argv),
-				mock.patch.object(harness_adapters, "get"),
+				mock.patch.object(harness_adapters, "get", return_value=mock.Mock(name="adapter", route_pin=lambda: (None, None))),
 				mock.patch.object(build_app, "ensure_git_repo"),
 				mock.patch.object(build_app, "run_agent_streaming") as agent,
 				contextlib.redirect_stderr(stderr),

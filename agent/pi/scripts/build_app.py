@@ -608,7 +608,7 @@ def session_origin(adapter) -> dict:
 	"""The harness and model this process's builds use."""
 	return {
 		"harness": str(adapter.name),
-		"model": os.environ.get("FACTORY_MODEL_ID") or os.environ.get("PI_HARNESS_MODEL") or "",
+		"model": os.environ.get("FACTORY_MODEL_ID") or harness_adapters.route_pin(adapter)[1] or "",
 	}
 
 
@@ -2023,7 +2023,7 @@ def run_review_turn(
 		workspace, prompt=prompt, session_dir=session_dir,
 		continue_session=False, thinking=thinking,
 	)
-	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
+	env = harness_adapters.child_env(adapter, {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")})
 	if review_base_sha:
 		env["AI_REVIEW_BASE_SHA"] = review_base_sha
 	try:
@@ -2707,7 +2707,7 @@ def _run_build(
 	)
 	if resume_session and resume is None:
 		result.session = "resumed" if session_resumed else f"fresh({reason})"
-	env = {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")}
+	env = harness_adapters.child_env(adapter, {**os.environ, "AI_STACK_HOST": os.environ.get("AI_STACK_HOST", "127.0.0.1")})
 	# Anchors the independent reviewer's diff scope to the ticket's true
 	# starting commit (the caller's job to know) instead of cross-model-review.ts's
 	# own default of "HEAD when this OS process happened to start". Without
@@ -3202,7 +3202,7 @@ def write_report(result: BuildResult) -> Path:
 	return report_path
 
 
-def write_evidence_json(result: BuildResult) -> Path:
+def write_evidence_json(result: BuildResult, adapter=None) -> Path:
 	"""Structured counterpart to write_report's own prose: the same
 	per-round data (usage, reviewer verdict/detail, verify outcome,
 	timing), shaped to match buildgate's own run.AgentEvidence/
@@ -3239,12 +3239,13 @@ def write_evidence_json(result: BuildResult) -> Path:
 	"""
 	SCHEMA_VERSION = 2
 	evidence_path = result.workspace / "BUILD_EVIDENCE.json"
+	provider, model = harness_adapters.route_pin(DEFAULT_ADAPTER if adapter is None else adapter)
 	payload = {
 		"schema_version": SCHEMA_VERSION,
 		"generated": datetime.now(timezone.utc).isoformat(),
 		"review_policy": result.review_policy,
-		"provider": os.environ.get("PI_HARNESS_PROVIDER"),
-		"model": os.environ.get("PI_HARNESS_MODEL"),
+		"provider": provider,
+		"model": model,
 		# Additive fields, tolerated by run.AgentEvidence's json.Unmarshal --
 		# whether a committed AGENTS.md guided this build and its
 		# content-addressed git blob id, so the evidence package shows what
@@ -3443,7 +3444,7 @@ def main() -> int:
 		return 2
 	report_path = write_report(result)
 	print(f"Report written to {report_path}")
-	evidence_path = write_evidence_json(result)
+	evidence_path = write_evidence_json(result, adapter)
 	print(f"Evidence written to {evidence_path}")
 	print(f"Outcome: {'SUCCEEDED' if result.succeeded else 'DID NOT SUCCEED'} -- {result.stopped_reason}")
 	if result.succeeded:
