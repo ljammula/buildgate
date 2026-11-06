@@ -291,7 +291,7 @@ func TestRemindRequestForResumeReviewNamesTheLostStepAndTheThreeCommands(t *test
 	if !requestdriver.ReviewState(r.State) {
 		t.Fatal("resume_review is not a reminded state")
 	}
-	requestdriver.RemindRequest(dataDir, r, time.Now())
+	requestdriver.RemindRequest(newFakeDeps(t), dataDir, r, time.Now())
 	log, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, "req-1"))
 	if err != nil {
 		t.Fatalf("read notification log: %v", err)

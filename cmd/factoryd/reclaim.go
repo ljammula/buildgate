@@ -750,7 +750,7 @@ func signalDeliveredToOwner(ctx context.Context, temporalClient client.Client, o
 // actual git-level rollback already ran correctly regardless, but the
 // durable record still showed the shared checkout instead of the
 // isolated one when this parameter was missing.
-func haltReclaimedRunConfirmed(dataDir, requestID, workspacePath, branch string) (bool, error) {
+func haltReclaimedRunConfirmed(dp *deps, dataDir, requestID, workspacePath, branch string) (bool, error) {
 	var terminal bool
 	lockErr := run.WithLock(dataDir, requestID, func() error {
 		fresh, freshErr := run.Load(dataDir, requestID)
@@ -767,7 +767,7 @@ func haltReclaimedRunConfirmed(dataDir, requestID, workspacePath, branch string)
 			fresh.WorkspacePath = workspacePath
 			fresh.Branch = branch
 		}
-		if saveErr := save(fresh, dataDir); saveErr != nil {
+		if saveErr := save(dp, fresh, dataDir); saveErr != nil {
 			return saveErr
 		}
 		terminal = true
@@ -912,7 +912,7 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 					if termErr != nil && !errors.As(termErr, &notFound) {
 						return false, nil
 					}
-					return haltReclaimedRunConfirmed(dataDir, requestID, "", "")
+					return haltReclaimedRunConfirmed(dp, dataDir, requestID, "", "")
 				} else {
 					// Accepted, explicitly tracked residual limitation
 					// (found via review): the cancellation just sent only
@@ -942,7 +942,7 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 					// fundamentally different order of probability than
 					// the sub-second-to-low-minutes settling windows the
 					// rest of this fix closes.
-					return haltReclaimedRunConfirmed(dataDir, requestID, "", "")
+					return haltReclaimedRunConfirmed(dp, dataDir, requestID, "", "")
 				}
 			} else if historyErr != nil || delivered {
 				// A history-read failure (other than errOwnerNeverStarted
@@ -979,7 +979,7 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 				case done2:
 					result = giveUpResult
 				case confirmed:
-					return haltReclaimedRunConfirmed(dataDir, requestID, giveUpResult.WorkspacePath, giveUpResult.Branch)
+					return haltReclaimedRunConfirmed(dp, dataDir, requestID, giveUpResult.WorkspacePath, giveUpResult.Branch)
 				default:
 					return false, nil
 				}
@@ -1035,7 +1035,7 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 			// Activity heartbeat timeout after its worker died -- without
 			// it HaltError stayed empty and the halt alert pointed at logs
 			// that never captured the failure.
-			if saveErr := save(fresh, dataDir, errors.New(result.Err)); saveErr != nil {
+			if saveErr := save(dp, fresh, dataDir, errors.New(result.Err)); saveErr != nil {
 				return saveErr
 			}
 			terminal = true

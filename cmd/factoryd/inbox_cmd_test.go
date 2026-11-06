@@ -61,7 +61,7 @@ func TestInboxListsWaitingRequestsAcrossProfilesOldestFirst(t *testing.T) {
 	saveWaitingRequest(t, work, "done-h", "Finished", request.StateDone, 1*time.Hour, nil)
 
 	var out, warn bytes.Buffer
-	if err := inboxRun(nil, &out, &warn); err != nil {
+	if err := inboxRun(newTestDeps(t), nil, &out, &warn); err != nil {
 		t.Fatalf("inboxRun: %v", err)
 	}
 	text := out.String()
@@ -107,7 +107,7 @@ func TestInboxShowsConsoleLinkWhenOneResolves(t *testing.T) {
 	t.Setenv(consolelink.EnvVar, "http://console.example:8090")
 	saveWaitingRequest(t, f.roots["default"], "spec-a", "Add login", request.StateSpecReview, time.Hour, nil)
 	var out bytes.Buffer
-	if err := inboxRun(nil, &out, &bytes.Buffer{}); err != nil {
+	if err := inboxRun(newTestDeps(t), nil, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "  console: http://console.example:8090/requests/spec-a\n") {
@@ -118,14 +118,14 @@ func TestInboxShowsConsoleLinkWhenOneResolves(t *testing.T) {
 func TestInboxEmpty(t *testing.T) {
 	newProfileFixture(t, "default", "work")
 	var out bytes.Buffer
-	if err := inboxRun(nil, &out, &bytes.Buffer{}); err != nil {
+	if err := inboxRun(newTestDeps(t), nil, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "Nothing is waiting on you.\n" {
 		t.Errorf("output = %q", out.String())
 	}
 	out.Reset()
-	if err := inboxRun([]string{"-json"}, &out, &bytes.Buffer{}); err != nil || strings.TrimSpace(out.String()) != "[]" {
+	if err := inboxRun(newTestDeps(t), []string{"-json"}, &out, &bytes.Buffer{}); err != nil || strings.TrimSpace(out.String()) != "[]" {
 		t.Errorf("-json on an empty inbox = %q, %v; want []", out.String(), err)
 	}
 }
@@ -136,7 +136,7 @@ func TestInboxJSONIsTheSameDataAsAnArray(t *testing.T) {
 	saveWaitingRequest(t, f.roots["work"], "spec-a", "Add login", request.StateSpecReview, 2*time.Hour, nil)
 	saveWaitingRequest(t, f.roots["default"], "halt-b", "Rename", request.StateHalted, time.Hour, func(r *request.Request) { r.Error = "boom" })
 	var out bytes.Buffer
-	if err := inboxRun([]string{"-json"}, &out, &bytes.Buffer{}); err != nil {
+	if err := inboxRun(newTestDeps(t), []string{"-json"}, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var got []inboxEntry
@@ -162,7 +162,7 @@ func TestInboxCountsASharedDataDirOnce(t *testing.T) {
 	writeSessionConfig(t, sessionconfig.ProfilePath("alias"), "data_dir: "+shared+"\n")
 	saveWaitingRequest(t, shared, "spec-a", "Add login", request.StateSpecReview, time.Hour, nil)
 	var out bytes.Buffer
-	if err := inboxRun([]string{"-json"}, &out, &bytes.Buffer{}); err != nil {
+	if err := inboxRun(newTestDeps(t), []string{"-json"}, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	var got []inboxEntry

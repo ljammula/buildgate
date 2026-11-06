@@ -27,7 +27,7 @@ func TestALostRunThatContinuedABranchCannotBeResumed(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if halted, err := haltDeadOwnerRun(dataDir, "req-1-001-corrective1"); err != nil || !halted {
+	if halted, err := haltDeadOwnerRun(newTestDeps(t), dataDir, "req-1-001-corrective1"); err != nil || !halted {
 		t.Fatalf("haltDeadOwnerRun = %v, %v", halted, err)
 	}
 	if got, _ := run.Load(dataDir, "req-1-001-corrective1"); got.KeptForResume {

@@ -65,7 +65,7 @@ func slotWaitFixture(t *testing.T) string {
 func TestStatusSaysARequestWaitsForASlotThePRReviewPassesHold(t *testing.T) {
 	dataDir := slotWaitFixture(t)
 	out := captureStdout(t, func() {
-		if err := statusMain([]string{"-data-dir", dataDir}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})
@@ -82,7 +82,7 @@ func TestStatusSaysARequestWaitsForASlotThePRReviewPassesHold(t *testing.T) {
 	}
 
 	js := captureStdout(t, func() {
-		if err := statusMain([]string{"-data-dir", dataDir, "-json"}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir, "-json"}); err != nil {
 			t.Fatalf("statusMain -json: %v", err)
 		}
 	})
@@ -112,7 +112,7 @@ func TestWatchRequestWhoseFirstTicketHasNotStartedSaysWhatItWaitsFor(t *testing.
 		t.Fatal(err)
 	}
 	defer outFile.Close()
-	if err := watchRequest(outFile, dataDir, "queued", true); err != nil {
+	if err := watchRequest(newTestDeps(t), outFile, dataDir, "queued", true); err != nil {
 		t.Fatalf("watchRequest: %v", err)
 	}
 	got, err := os.ReadFile(outFile.Name())
@@ -150,7 +150,7 @@ func TestInboxNarrowsToOneProfileAndOneProject(t *testing.T) {
 	ids := func(args ...string) string {
 		t.Helper()
 		var out, warn bytes.Buffer
-		if err := inboxRun(args, &out, &warn); err != nil {
+		if err := inboxRun(newTestDeps(t), args, &out, &warn); err != nil {
 			t.Fatalf("inboxRun %v: %v", args, err)
 		}
 		var got []string
@@ -212,7 +212,7 @@ func TestInboxWithAConfigPathPrintsCommandsForThatPath(t *testing.T) {
 	}
 	saveWaitingRequest(t, dataDir, "spec-a", "Add login page", request.StateSpecReview, time.Hour, nil)
 	var out, warn bytes.Buffer
-	if err := inboxRun([]string{"-config", cfg}, &out, &warn); err != nil {
+	if err := inboxRun(newTestDeps(t), []string{"-config", cfg}, &out, &warn); err != nil {
 		t.Fatalf("inboxRun: %v", err)
 	}
 	if want := "factoryd approve -config " + request.ShellPath(cfg) + " spec-a"; !strings.Contains(out.String(), want) {

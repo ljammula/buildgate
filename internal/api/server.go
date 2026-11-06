@@ -457,6 +457,15 @@ func WithTemporalUIURL(url string) Option {
 	}
 }
 
+// WithConsoleBaseURL supplies how the server resolves the console base URL
+// for a data dir (the link a halt notification carries). Without one, a halt
+// notification carries no console link.
+func WithConsoleBaseURL(resolve func(dataDir string) string) Option {
+	return func(s *Server) {
+		s.consoleBaseURL = resolve
+	}
+}
+
 // WithRunStarter supplies the execution implementation used by POST /runs.
 // Without one, the endpoint is unavailable and fails closed rather than
 // pretending a run was started.
@@ -628,6 +637,10 @@ type Server struct {
 	// from, joined with a run's own TemporalWorkflowID. Empty (default)
 	// omits the field entirely; see WithTemporalUIURL.
 	temporalUIURL string
+
+	// consoleBaseURL resolves the console base URL for a data dir; nil means
+	// no console link.
+	consoleBaseURL func(dataDir string) string
 	// sessionTokenCeiling/sessionCostCeilingMicroUSD are the session
 	// config's own effective relay ceilings (sessionconfig.Settings.
 	// EffectiveRelayCeilings), set by WithSessionRelayCeilings and
@@ -2441,7 +2454,7 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		if err := handoff.Sync(loaded, s.dataDir); err != nil {
 			log.Printf("run %s: could not bring its handoff up to date after an override: %v", id, err)
 		}
-		haltNotification, dispatchHalt := notify.PrepareHalt(loaded, s.dataDir)
+		haltNotification, dispatchHalt := notify.PrepareHalt(loaded, s.dataDir, s.consoleBase())
 		// Persist is the one funnel every run-record write goes through
 		// (internal/run/run.go): it stamps UpdatedAt/FactorydVersion and
 		// writes run.json.
@@ -4984,4 +4997,13 @@ func (s *Server) rollbackOverriddenRun(id string, loaded *run.Run) {
 	if err := loaded.Persist(s.dataDir); err != nil {
 		log.Printf("run %s: clear kept-for-resume after override rollback: %v", id, err)
 	}
+}
+
+// consoleBase is the console base URL for the server's data dir, "" when
+// none was supplied.
+func (s *Server) consoleBase() string {
+	if s.consoleBaseURL == nil {
+		return ""
+	}
+	return s.consoleBaseURL(s.dataDir)
 }

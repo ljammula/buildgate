@@ -723,7 +723,7 @@ func TestAHaltMidRoundThenRetryUsesTheAcceptedRun(t *testing.T) {
 	f.stopMidRound(t, 1, true)
 	now := time.Now()
 	r := requestdrivertest.LoadRequest(t, f.dataDir, f.id)
-	if err := requestdriver.HaltRequest(f.dataDir, r, "operator stop", now); err != nil {
+	if err := requestdriver.HaltRequest(newFakeDeps(t), f.dataDir, r, "operator stop", now); err != nil {
 		t.Fatal(err)
 	}
 	r, err := request.Retry(f.dataDir, f.id, "alice", "", now, nil)

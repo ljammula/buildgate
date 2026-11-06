@@ -66,7 +66,7 @@ func resumeMainWith(dp *deps, args []string, gate requestdriver.ResumeGate) erro
 		return reasons, err
 	}, request.WithGateExpiry(settings.ReviewGateExpiry))
 	if err != nil {
-		notifyIfGateExpired(*dataDir, id, err)
+		notifyIfGateExpired(dp, *dataDir, id, err)
 		return err
 	}
 	// A decision that continues no kept build (a drafting or planning rerun,

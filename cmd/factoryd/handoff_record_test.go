@@ -22,7 +22,7 @@ func TestSaveKeepsTheHandoffInStepWithTheRun(t *testing.T) {
 			{Index: 1, VerifyPassed: &failed, Blockers: []string{"canonical verification failed"}, FailureSignature: "aaaa"},
 		}},
 	}
-	if err := save(r, dataDir); err != nil {
+	if err := save(newTestDeps(t), r, dataDir); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	halted := r.HandoffSHA256
@@ -41,7 +41,7 @@ func TestSaveKeepsTheHandoffInStepWithTheRun(t *testing.T) {
 	// The delayed result arrives: the run was in fact quarantined by a check.
 	r.State, r.Triage = run.StateQuarantined, ""
 	r.GateResults = []run.GateResult{{Check: "tests_red_on_base", Passed: false}, {Check: "repo-lint", Passed: false, ExitCode: 2}}
-	if err := save(r, dataDir); err != nil {
+	if err := save(newTestDeps(t), r, dataDir); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
 	if r.HandoffSHA256 == halted {
@@ -57,7 +57,7 @@ func TestSaveKeepsTheHandoffInStepWithTheRun(t *testing.T) {
 
 	// An operator accepts it: nothing is left to hand on.
 	r.State = run.StateAccepted
-	if err := save(r, dataDir); err != nil {
+	if err := save(newTestDeps(t), r, dataDir); err != nil {
 		t.Fatalf("third save: %v", err)
 	}
 	if r.HandoffSHA256 != "" {
@@ -72,7 +72,7 @@ func TestSaveWritesNoHandoffForARunThatIsNotStopped(t *testing.T) {
 	for _, state := range []run.State{run.StateAccepted, run.StateSliceRunning, run.StateVerifying} {
 		dataDir := t.TempDir()
 		r := &run.Run{ID: "run-1", Ticket: "fixture-ticket", State: state}
-		if err := save(r, dataDir); err != nil {
+		if err := save(newTestDeps(t), r, dataDir); err != nil {
 			t.Fatalf("%s: save: %v", state, err)
 		}
 		if r.HandoffSHA256 != "" {
@@ -87,7 +87,7 @@ func TestSaveWritesNoHandoffForARunThatIsNotStopped(t *testing.T) {
 func TestSaveWritesTheHandoffForAHaltWithTheOperatorBin(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &run.Run{ID: "run-h", Ticket: "fixture-ticket", State: run.StateHalted, HaltReasonCode: run.HaltReasonRelayCeilingExceeded}
-	if err := save(r, dataDir); err != nil {
+	if err := save(newTestDeps(t), r, dataDir); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	doc, err := handoff.Load(run.Dir(dataDir, r.ID), r.HandoffSHA256, run.StateHalted)

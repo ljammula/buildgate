@@ -145,7 +145,7 @@ func TestAPlanSentBackFromAHaltWaitsAtPlanReview(t *testing.T) {
 	if _, err := request.Approve(dataDir, id, "alice", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := requestdriver.HaltRequest(dataDir, requestdrivertest.LoadRequest(t, dataDir, id), "stopped", time.Now()); err != nil {
+	if err := requestdriver.HaltRequest(newFakeDeps(t), dataDir, requestdrivertest.LoadRequest(t, dataDir, id), "stopped", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := request.SendBack(dataDir, id, "alice", "one ticket please", request.SendBackToPlan, time.Now()); err != nil {

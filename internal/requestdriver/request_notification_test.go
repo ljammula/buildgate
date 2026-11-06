@@ -56,7 +56,7 @@ func TestAReviewNotificationSaysWhatIsAskedOfWhichRequest(t *testing.T) {
 		dataDir := t.TempDir()
 		r := notifiedRequest(t, dataDir, state)
 		now := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
-		RemindRequest(dataDir, r, now)
+		RemindRequest(consoleDeps{}, dataDir, r, now)
 
 		logged := loggedNotifications(t, dataDir)
 		if len(logged) != 1 {
@@ -79,8 +79,8 @@ func TestAReminderSaysHowLongTheRequestHasWaited(t *testing.T) {
 	dataDir := t.TempDir()
 	r := notifiedRequest(t, dataDir, request.StateSpecReview)
 	start := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
-	RemindRequest(dataDir, r, start)
-	RemindRequest(dataDir, r, start.Add(2*time.Hour))
+	RemindRequest(consoleDeps{}, dataDir, r, start)
+	RemindRequest(consoleDeps{}, dataDir, r, start.Add(2*time.Hour))
 	logged := loggedNotifications(t, dataDir)
 	if len(logged) != 2 || !strings.HasPrefix(logged[1].Reason, "Waiting for you for 2h0m0s. ") || strings.Contains(logged[0].Reason, "Waiting") {
 		t.Errorf("reasons = %q then %q", logged[0].Reason, logged[1].Reason)
@@ -94,7 +94,7 @@ func TestAHaltAndAQuarantineEachNotifyOnceWithTheReason(t *testing.T) {
 	} {
 		dataDir := t.TempDir()
 		r := notifiedRequest(t, dataDir, state)
-		if err := notifyTerminalRequest(dataDir, r, "gate failed: canonical_verify", time.Now()); err != nil {
+		if err := notifyTerminalRequest(consoleDeps{}, dataDir, r, "gate failed: canonical_verify", time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		logged := loggedNotifications(t, dataDir)
@@ -126,7 +126,7 @@ func TestAPullRequestNotifiesOncePerAskAndNeverReviewAfterMerge(t *testing.T) {
 	poll := func(prState string, ready bool, head string, blockers ...string) {
 		ticket.PRState = prState
 		ticket.MergeReadiness = &request.MergeReadiness{Ready: ready, HeadSHA: head, Blockers: blockers}
-		notifyPullRequestWaiting(dataDir, r, ticket, now)
+		notifyPullRequestWaiting(consoleDeps{}, dataDir, r, ticket, now)
 	}
 
 	poll("draft", false, "aaa", "it is still a draft")
@@ -169,7 +169,7 @@ func TestNoNotificationLinkCarriesACredential(t *testing.T) {
 	t.Setenv("FACTORYD_CONSOLE_URL", "http://127.0.0.1:1")
 	t.Setenv("FACTORYD_API_START_TOKEN", "start-secret")
 	t.Setenv("FACTORYD_API_OVERRIDE_TOKEN", "override-secret")
-	RemindRequest(dataDir, r, time.Now())
+	RemindRequest(consoleDeps{base: "http://127.0.0.1:1"}, dataDir, r, time.Now())
 	b, err := os.ReadFile(RequestNotificationLogPath(dataDir, "req-1"))
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestNotificationTextIsOneLineOfPlainText(t *testing.T) {
 	if err := os.WriteFile(request.TextPath(dataDir, r.ID), []byte("Add \x1b[31ma coupon\x1b[0m field\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := notifyTerminalRequest(dataDir, r, "verify failed:\n\x1b]0;title\x07 exit 1", time.Now()); err != nil {
+	if err := notifyTerminalRequest(consoleDeps{}, dataDir, r, "verify failed:\n\x1b]0;title\x07 exit 1", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	n := loggedNotifications(t, dataDir)[0]
@@ -214,7 +214,7 @@ func TestADraftPullRequestThatStaysNotReadyNotifiesOnceAfterTheGrace(t *testing.
 	poll := func(at time.Time, state, head string) {
 		ticket.PRState = state
 		ticket.MergeReadiness = &request.MergeReadiness{HeadSHA: head, Blockers: []string{"its checks are pending or failing"}}
-		notifyPullRequestWaiting(dataDir, r, ticket, at)
+		notifyPullRequestWaiting(consoleDeps{}, dataDir, r, ticket, at)
 	}
 	poll(start, "draft", "aaa")
 	poll(start.Add(pullRequestDraftGrace-time.Second), "draft", "aaa")
@@ -249,7 +249,7 @@ func TestAStackedPullRequestNotifiesOnlyOnceTheOneUnderItHasMerged(t *testing.T)
 	start := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
 	poll := func(at time.Time) {
 		stacked.MergeReadiness = &request.MergeReadiness{HeadSHA: "aaa", Blockers: []string{"it is stacked on an earlier ticket's pull request, which must merge first"}}
-		notifyPullRequestWaiting(dataDir, r, stacked, at)
+		notifyPullRequestWaiting(consoleDeps{}, dataDir, r, stacked, at)
 	}
 	poll(start)
 	poll(start.Add(5 * pullRequestDraftGrace))

@@ -725,6 +725,7 @@ func (sv *serveRun) listenAndServe() error {
 		api.WithProjectStatsProvider(apiProjectStatsProvider(*sv.dataDir)),
 		api.WithProjectMemory(apiProjectMemoryProvider(sv.dp, sv.baseSettings, *sv.dataDir)),
 		api.WithReleasePolicy(sv.releasePolicy),
+		api.WithConsoleBaseURL(func(dataDir string) string { return resolveConsoleBaseURL(sv.dp, "", dataDir) }),
 		// POST /requests/{id}/retry gets the same real PR-open-only retry
 		// path `factoryd retry` already wires (retryPullRequestOpener),
 		// not just the CLI.
@@ -738,7 +739,7 @@ func (sv *serveRun) listenAndServe() error {
 			return settings.ReviewGateExpiry, err
 		}),
 		api.WithGateExpiredNotifier(func(id string) {
-			if err := requestdriver.NotifyGateExpired(*sv.dataDir, id, time.Now()); err != nil {
+			if err := requestdriver.NotifyGateExpired(sv.dp, *sv.dataDir, id, time.Now()); err != nil {
 				log.Printf("request %s: could not send the expiry notification: %v", id, err)
 			}
 		}),
@@ -845,7 +846,7 @@ func (sv *serveRun) listenAndServe() error {
 	// resolution doctorMain already does) rather than adding a second
 	// cadence knob; stopped via defer alongside every other component
 	// this command owns.
-	stopStaleWatcher := startWorkerStaleWatcher(signalCtx, *sv.dataDir, resolveHITLReminderInterval(*sv.sf.configPath))
+	stopStaleWatcher := startWorkerStaleWatcher(sv.dp, signalCtx, *sv.dataDir, resolveHITLReminderInterval(*sv.sf.configPath))
 	defer stopStaleWatcher()
 
 	// Bound before anything else so the console-address record below is

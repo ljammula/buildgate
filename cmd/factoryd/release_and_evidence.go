@@ -1,7 +1,6 @@
 package main
 
 import (
-	"buildgate/internal/consolelink"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/requestsubmit"
 	"context"
@@ -613,8 +612,8 @@ func retryPullRequestOpener(dp *deps, dataDir, runID, stackBase string) request.
 		}
 		return request.PROpenOutcome{Err: errors.New(loaded.PROpenError)}
 	}
-	n := notifyAcceptedRun(dataDir, runID, loaded.Ticket, loaded.RequestID, prURL, "")
-	recordAcceptedRunSideEffects(dataDir, loaded, prURL, n, false)
+	n := notifyAcceptedRun(dp, dataDir, runID, loaded.Ticket, loaded.RequestID, prURL, "")
+	recordAcceptedRunSideEffects(dp, dataDir, loaded, prURL, n, false)
 	return request.PROpenOutcome{PRURL: prURL}
 }
 
@@ -742,7 +741,7 @@ func pullRequestTitle(r *run.Run, id string) string {
 // attempted and failed (also prURL == "", but prWithheldReason == "" in
 // that case), so a human reading this Reason later can tell "fix the
 // policy flags" apart from "check gh/git creds, maybe retry".
-func notifyAcceptedRun(dataDir, id, ticket, requestID, prURL, prWithheldReason string) notify.Notification {
+func notifyAcceptedRun(dp *deps, dataDir, id, ticket, requestID, prURL, prWithheldReason string) notify.Notification {
 	reason := "run accepted"
 	switch {
 	case prURL != "":
@@ -767,7 +766,7 @@ func notifyAcceptedRun(dataDir, id, ticket, requestID, prURL, prWithheldReason s
 		Delivered: &delivered,
 		RunDir:    run.AbsDir(dataDir, id),
 		Next:      next,
-		Link:      consoleRunURL(consolelink.LocalBaseURL(dataDir), id),
+		Link:      consoleRunURL(resolveConsoleBaseURL(dp, "", dataDir), id),
 	}
 	notifyCtx, cancelNotify := context.WithTimeout(context.Background(), 2*time.Second)
 	notifyErr := (notify.LogNotifier{Path: filepath.Join(run.Dir(dataDir, id), "notifications.log")}).Notify(notifyCtx, n)
@@ -824,7 +823,7 @@ func dispatchRunNotification(dataDir, requestID string, n notify.Notification) {
 // against a freshly loaded copy rather than r itself, the same protective
 // shape openEvidencePullRequest used to follow on its own before this
 // split.
-func recordAcceptedRunSideEffects(dataDir string, r *run.Run, prURL string, n notify.Notification, underLock bool) {
+func recordAcceptedRunSideEffects(dp *deps, dataDir string, r *run.Run, prURL string, n notify.Notification, underLock bool) {
 	apply := func(target *run.Run) {
 		if prURL != "" {
 			target.PullRequestURL = prURL
@@ -835,7 +834,7 @@ func recordAcceptedRunSideEffects(dataDir string, r *run.Run, prURL string, n no
 	}
 	if underLock {
 		apply(r)
-		if err := save(r, dataDir); err != nil {
+		if err := save(dp, r, dataDir); err != nil {
 			log.Printf("run %s: record accepted run's pull request/notification: %v", r.ID, err)
 		}
 		return

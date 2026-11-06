@@ -81,7 +81,7 @@ func overrideMain(dp *deps, args []string) error {
 		if newState == run.StateAccepted {
 			recordMemoryEdit(dp, r, *dataDir, overrideObjectsDir(r))
 		}
-		if err := save(r, *dataDir); err != nil {
+		if err := save(dp, r, *dataDir); err != nil {
 			return fmt.Errorf("save overridden run %q: %w", *runID, err)
 		}
 		// Found via Codex review of PR #45: an override to accepted is

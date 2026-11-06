@@ -36,3 +36,5 @@ func TestTagTicketRoundTagsAReplayRunFromItsOnto(t *testing.T) {
 		t.Fatalf("tags = %+v refs = %v, want the replay run at r2, from %s, keeping %s", tags, dp.refs, onto, head)
 	}
 }
+
+func (*refDeps) ConsoleBaseURL(string) string { return "" }

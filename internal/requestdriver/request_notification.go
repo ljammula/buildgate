@@ -55,7 +55,7 @@ func requestSubject(dataDir string, r *request.Request) string {
 //
 // The link is r's own page in the console, and for a channel read elsewhere
 // the same page at the remote console's address. Neither carries a token.
-func prepareRequestNotification(dataDir string, r *request.Request, notice requestNotice, now time.Time) notify.Notification {
+func prepareRequestNotification(dp Deps, dataDir string, r *request.Request, notice requestNotice, now time.Time) notify.Notification {
 	ts := now.UTC().Format(time.RFC3339Nano)
 	delivered := true
 	n := notify.Notification{
@@ -67,7 +67,7 @@ func prepareRequestNotification(dataDir string, r *request.Request, notice reque
 		SentAt:     ts,
 		Delivered:  &delivered,
 		Next:       notice.Next,
-		Link:       consolelink.RequestURL(consolelink.LocalBaseURL(dataDir), r.ID),
+		Link:       consolelink.RequestURL(dp.ConsoleBaseURL(dataDir), r.ID),
 		RemoteLink: consolelink.RequestURL(consolelink.RemoteBaseURL(dataDir), r.ID),
 	}
 	// request.Dir exists since submit; nothing here depends on that.
@@ -164,8 +164,8 @@ func closedNotice(r *request.Request, ticket *request.Ticket) requestNotice {
 }
 
 // notifyClosedRequest saves r, just closed, and tells the operator.
-func notifyClosedRequest(dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) error {
-	n := prepareRequestNotification(dataDir, r, closedNotice(r, ticket), now)
+func notifyClosedRequest(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) error {
+	n := prepareRequestNotification(dp, dataDir, r, closedNotice(r, ticket), now)
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ const pullRequestDraftGrace = 10 * time.Minute
 // they were told to merge is not news to them. It records what it sent, and
 // since when the head has not been ready, on ticket and r; the caller saves
 // r.
-func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) {
+func notifyPullRequestWaiting(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, now time.Time) {
 	mr := ticket.MergeReadiness
 	if mr == nil || ticket.PRURL == "" {
 		return
@@ -240,7 +240,7 @@ func notifyPullRequestWaiting(dataDir string, r *request.Request, ticket *reques
 		notice.Detail = fmt.Sprintf("Ticket %d/%d. %s", ticket.Index, r.TicketCount, notice.Detail)
 	}
 	notice.Next = ticket.PRURL
-	n := prepareRequestNotification(dataDir, r, notice, now)
+	n := prepareRequestNotification(dp, dataDir, r, notice, now)
 	ticket.NotifiedPR = sent
 	notify.DispatchExternal(dataDir, n)
 }

@@ -11,7 +11,7 @@ import (
 // step has not started, keeping the time the wait began, and reminds the
 // operator once the wait has lasted the reminder interval since it began or
 // since the last reminder (stepWaitReminderDue), as at a review gate.
-func recordStepWait(dataDir string, r *request.Request, slot **request.StepWait, reason string, interval time.Duration, now time.Time) error {
+func recordStepWait(dp Deps, dataDir string, r *request.Request, slot **request.StepWait, reason string, interval time.Duration, now time.Time) error {
 	since := now.UTC().Format(time.RFC3339Nano)
 	if *slot != nil && (*slot).Since != "" {
 		since = (*slot).Since
@@ -28,7 +28,7 @@ func recordStepWait(dataDir string, r *request.Request, slot **request.StepWait,
 	}
 	*slot = &request.StepWait{Since: since, On: reason}
 	if stepWaitReminderDue(r, *slot, interval, now) {
-		RemindRequest(dataDir, r, now)
+		RemindRequest(dp, dataDir, r, now)
 	}
 	return r.Save(dataDir)
 }
@@ -52,8 +52,8 @@ func stepWaitReminderDue(r *request.Request, wait *request.StepWait, interval ti
 
 // RecordRouteWait records that r's next step waits for its model route,
 // reason saying which route, why, and what to do (request.Request.RouteWait).
-func RecordRouteWait(dataDir string, r *request.Request, reason string, interval time.Duration, now time.Time) error {
-	return recordStepWait(dataDir, r, &r.RouteWait, reason, interval, now)
+func RecordRouteWait(dp Deps, dataDir string, r *request.Request, reason string, interval time.Duration, now time.Time) error {
+	return recordStepWait(dp, dataDir, r, &r.RouteWait, reason, interval, now)
 }
 
 // EndRouteWait clears r's route wait, and the reminders that came with it,

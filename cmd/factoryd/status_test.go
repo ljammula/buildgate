@@ -385,13 +385,13 @@ func TestStatusMainFiltersByProjectStateAndLimit(t *testing.T) {
 	mustSaveStatusRun(t, dataDir, &run.Run{ID: "run-a2", ProjectPath: "/repos/appa/workspace", Project: "appa", State: run.StateQuarantined, CreatedAt: "2026-09-02T00:00:00Z", UpdatedAt: "2026-09-02T00:01:00Z"})
 	mustSaveStatusRun(t, dataDir, &run.Run{ID: "run-b1", ProjectPath: "/repos/appb/workspace", Project: "appb", State: run.StateAccepted, CreatedAt: "2026-09-03T00:00:00Z", UpdatedAt: "2026-09-03T00:01:00Z"})
 
-	if err := statusMain([]string{"-data-dir", dataDir, "-project", "appa", "-json"}); err != nil {
+	if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir, "-project", "appa", "-json"}); err != nil {
 		t.Fatalf("statusMain -project: %v", err)
 	}
-	if err := statusMain([]string{"-data-dir", dataDir, "-state", "quarantined", "-json"}); err != nil {
+	if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir, "-state", "quarantined", "-json"}); err != nil {
 		t.Fatalf("statusMain -state: %v", err)
 	}
-	if err := statusMain([]string{"-data-dir", dataDir, "-n", "1", "-json"}); err != nil {
+	if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir, "-n", "1", "-json"}); err != nil {
 		t.Fatalf("statusMain -n: %v", err)
 	}
 }
@@ -402,7 +402,7 @@ func TestStatusMainFiltersByProjectStateAndLimit(t *testing.T) {
 func TestStatusMainRejectsNonpositiveN(t *testing.T) {
 	t.Parallel()
 	for _, n := range []string{"0", "-1"} {
-		err := statusMain([]string{"-data-dir", t.TempDir(), "-n", n})
+		err := statusMain(newTestDeps(t), []string{"-data-dir", t.TempDir(), "-n", n})
 		if err == nil {
 			t.Errorf("statusMain -n %s: want error, got nil", n)
 		}
@@ -414,7 +414,7 @@ func TestStatusMainRejectsNonpositiveN(t *testing.T) {
 // result, not a failure.
 func TestStatusMainMissingDataDirIsNotAnError(t *testing.T) {
 	t.Parallel()
-	if err := statusMain([]string{"-data-dir", t.TempDir(), "-json"}); err != nil {
+	if err := statusMain(newTestDeps(t), []string{"-data-dir", t.TempDir(), "-json"}); err != nil {
 		t.Fatalf("statusMain: %v, want no error for a data dir with no runs yet", err)
 	}
 }
@@ -504,10 +504,10 @@ preflight_profile: brownfield
 
 	mustSaveStatusRun(t, dataDir, &run.Run{ID: "run-a", ProjectPath: "/repos/app/workspace", Project: "app", State: run.StateAccepted, CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:01:00Z"})
 
-	if err := statusMain([]string{"-data-dir", dataDir}); err != nil {
+	if err := statusMain(dp, []string{"-data-dir", dataDir}); err != nil {
 		t.Fatalf("statusMain: %v", err)
 	}
-	if err := statusMain([]string{"-data-dir", dataDir, "-json"}); err != nil {
+	if err := statusMain(dp, []string{"-data-dir", dataDir, "-json"}); err != nil {
 		t.Fatalf("statusMain -json: %v", err)
 	}
 
@@ -718,7 +718,7 @@ func TestStatusMainPrintsRouteLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if err := statusMain([]string{"-data-dir", dataDir}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})
@@ -740,7 +740,7 @@ func TestStatusMainJSONIncludesRouteFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if err := statusMain([]string{"-data-dir", dataDir, "-json"}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir, "-json"}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})
@@ -779,7 +779,7 @@ func TestStatusMainStarsTheQueuedRequestsOwnState(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if err := statusMain([]string{"-data-dir", dataDir}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})
@@ -804,7 +804,7 @@ func TestStatusMainPrintsFullRequestIDsThatShareAPrefix(t *testing.T) {
 		}
 	}
 	out := captureStdout(t, func() {
-		if err := statusMain([]string{"-data-dir", dataDir}); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-data-dir", dataDir}); err != nil {
 			t.Fatalf("statusMain: %v", err)
 		}
 	})

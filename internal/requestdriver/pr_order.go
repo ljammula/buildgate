@@ -47,10 +47,10 @@ func handleMixedRun(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		return false, nil
 	}
 	if r.SizeReplan != nil || r.PlanImported {
-		return true, HaltRequest(dataDir, r, fmt.Sprintf("run %s: %s; this plan cannot be sent to planning for order again, and is not carved", record.ID, reasons[0]), now)
+		return true, HaltRequest(dp, dataDir, r, fmt.Sprintf("run %s: %s; this plan cannot be sent to planning for order again, and is not carved", record.ID, reasons[0]), now)
 	}
 	if why := carveTicket(dp, ctx, dataDir, r, ticket, record); why != "" {
-		return true, orderToPlanning(dataDir, r, record, fmt.Sprintf("run %s: %s; it could not be carved: %s", record.ID, reasons[0], why), now)
+		return true, orderToPlanning(dp, dataDir, r, record, fmt.Sprintf("run %s: %s; it could not be carved: %s", record.ID, reasons[0], why), now)
 	}
 	log.Printf("request %s: building -> building (ticket %d/%d carved into %d tickets by pr_order)", r.ID, record.TicketIndex, r.TicketCount, len(r.Tickets))
 	return true, r.Save(dataDir)
@@ -119,7 +119,7 @@ func carveTicket(dp Deps, ctx context.Context, dataDir string, r *request.Reques
 // carvedRunRefused sends a carved ticket's request back to planning when the
 // ticket's replay run was refused by a gate: quarantined, or refused before
 // any gate (replay_refused). handled is false for any other run.
-func carvedRunRefused(dataDir string, r *request.Request, ticket *request.Ticket, record *run.Run, reason string, now time.Time) (handled bool, err error) {
+func carvedRunRefused(dp Deps, dataDir string, r *request.Request, ticket *request.Ticket, record *run.Run, reason string, now time.Time) (handled bool, err error) {
 	if ticket.Order == nil || record.Replay == nil || record.Replay.Carve == nil {
 		return false, nil
 	}
@@ -133,21 +133,21 @@ func carvedRunRefused(dataDir string, r *request.Request, ticket *request.Ticket
 	source, loadErr := run.Load(dataDir, ticket.Order.SourceRunID)
 	why := fmt.Sprintf("the carved commit of pr_order group %d was refused: %s", ticket.Order.Group, reason)
 	if loadErr != nil {
-		return true, HaltRequest(dataDir, r, why+fmt.Sprintf("; the run it was carved from cannot be read: %v", loadErr), now)
+		return true, HaltRequest(dp, dataDir, r, why+fmt.Sprintf("; the run it was carved from cannot be read: %v", loadErr), now)
 	}
-	return true, orderToPlanning(dataDir, r, source, why, now)
+	return true, orderToPlanning(dp, dataDir, r, source, why, now)
 }
 
 // orderToPlanning is the one move to planning for order: the request goes
 // back with source's measurement and the groups, once. A request that was
 // already sent to planning, or whose source run records no measurement or
 // groups, halts with why.
-func orderToPlanning(dataDir string, r *request.Request, source *run.Run, why string, now time.Time) error {
+func orderToPlanning(dp Deps, dataDir string, r *request.Request, source *run.Run, why string, now time.Time) error {
 	if source.PROrder == nil || source.ChangeSize == nil || r.SizeReplan != nil {
-		return HaltRequest(dataDir, r, why+"; the request cannot be sent to planning for order", now)
+		return HaltRequest(dp, dataDir, r, why+"; the request cannot be sent to planning for order", now)
 	}
 	if err := r.ReturnToPlanningForOrder(source.ID, source.ChangeSize, source.PROrder.Groups, why, now); err != nil {
-		return HaltRequest(dataDir, r, why+"; "+err.Error(), now)
+		return HaltRequest(dp, dataDir, r, why+"; "+err.Error(), now)
 	}
 	log.Printf("request %s: building -> planning (%s)", r.ID, why)
 	return r.Save(dataDir)

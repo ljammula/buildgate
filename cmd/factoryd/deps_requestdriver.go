@@ -134,3 +134,7 @@ func (impl realForge) replyToReviewComment(ctx context.Context, prURL string, co
 func (impl realForge) listReviewComments(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error) {
 	return requestdriver.RealListReviewComments(ctx, prURL)
 }
+
+func (dp *deps) ConsoleBaseURL(dataDir string) string {
+	return resolveConsoleBaseURL(dp, "", dataDir)
+}

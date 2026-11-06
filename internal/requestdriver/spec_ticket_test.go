@@ -176,7 +176,7 @@ func TestAPlanSentBackRunsThePlanningJobGivenTheReason(t *testing.T) {
 	if r := requestdrivertest.LoadRequest(t, dataDir, id); r.State != request.StateBuilding {
 		t.Fatalf("state %s, want the first pass to reach building", r.State)
 	}
-	if err := requestdriver.HaltRequest(dataDir, requestdrivertest.LoadRequest(t, dataDir, id), "stopped", time.Now()); err != nil {
+	if err := requestdriver.HaltRequest(newFakeDeps(t), dataDir, requestdrivertest.LoadRequest(t, dataDir, id), "stopped", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := request.SendBack(dataDir, id, "alice", "split the model from the handler", request.SendBackToPlan, time.Now()); err != nil {

@@ -61,7 +61,7 @@ func approveMain(dp *deps, args []string) error {
 	// comment), so it keeps the unconditional behavior.
 	r, err := request.Approve(*dataDir, positional[0], currentOSUser(), time.Now(), nil, opts...)
 	if err != nil {
-		notifyIfGateExpired(*dataDir, positional[0], err)
+		notifyIfGateExpired(dp, *dataDir, positional[0], err)
 		return fmt.Errorf("approve request %q: %w", positional[0], err)
 	}
 	wakeAfterSave(dp, context.Background(), os.Stderr, *dataDir, r.ID)
@@ -159,7 +159,7 @@ func rejectMain(dp *deps, args []string) error {
 	}
 	r, err := request.RejectAnchored(*dataDir, id, by, *reason, anchors, time.Now(), opts...)
 	if err != nil {
-		notifyIfGateExpired(*dataDir, id, err)
+		notifyIfGateExpired(dp, *dataDir, id, err)
 		return fmt.Errorf("reject request %q: %w", id, err)
 	}
 	wakeAfterSave(dp, context.Background(), os.Stderr, *dataDir, r.ID)
@@ -227,11 +227,11 @@ func gateExpiryOptions(configPath string) ([]request.DecisionOption, error) {
 
 // notifyIfGateExpired tells the operator when a refused decision halted its
 // request because the review gate had expired.
-func notifyIfGateExpired(dataDir, id string, err error) {
+func notifyIfGateExpired(dp *deps, dataDir, id string, err error) {
 	if !errors.Is(err, request.ErrGateExpired) {
 		return
 	}
-	if nerr := requestdriver.NotifyGateExpired(dataDir, id, time.Now()); nerr != nil {
+	if nerr := requestdriver.NotifyGateExpired(dp, dataDir, id, time.Now()); nerr != nil {
 		fmt.Fprintf(os.Stderr, "request %s: could not send the expiry notification: %v\n", id, nerr)
 	}
 }

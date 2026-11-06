@@ -102,7 +102,7 @@ func TestHaltRequestNotificationHasRetryNextAndConsoleLink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := requestdriver.HaltRequest(dataDir, r, "spec drafting failed", base); err != nil {
+	if err := requestdriver.HaltRequest(newTestDeps(t), dataDir, r, "spec drafting failed", base); err != nil {
 		t.Fatalf("haltRequest: %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestRemindRequestNotificationHasApproveNextAndConsoleLink(t *testing.T) {
 	r := request.New("req-1", "/repos/app", "app", request.Source{Kind: request.SourceText}, base)
 	r.State = request.StateSpecReview
 
-	requestdriver.RemindRequest(dataDir, r, base)
+	requestdriver.RemindRequest(newTestDeps(t), dataDir, r, base)
 
 	b, err := os.ReadFile(requestdriver.RequestNotificationLogPath(dataDir, "req-1"))
 	if err != nil {

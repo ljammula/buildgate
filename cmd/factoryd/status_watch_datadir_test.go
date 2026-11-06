@@ -33,7 +33,7 @@ func TestStatusMainUsesSessionConfigDataDir(t *testing.T) {
 
 	mustSaveStatusRun(t, dataDir, &run.Run{ID: "run-cfg", Project: "appa", State: run.StateAccepted, CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:01:00Z"})
 
-	if err := statusMain([]string{"-json"}); err != nil {
+	if err := statusMain(newTestDeps(t), []string{"-json"}); err != nil {
 		t.Fatalf("statusMain: %v", err)
 	}
 }
@@ -48,7 +48,7 @@ func TestStatusMainExplicitDataDirWinsOverSessionConfig(t *testing.T) {
 	explicitDir := t.TempDir()
 	mustSaveStatusRun(t, explicitDir, &run.Run{ID: "run-explicit", Project: "appa", State: run.StateAccepted, CreatedAt: "2026-09-01T00:00:00Z", UpdatedAt: "2026-09-01T00:01:00Z"})
 
-	if err := statusMain([]string{"-data-dir", explicitDir, "-json"}); err != nil {
+	if err := statusMain(newTestDeps(t), []string{"-data-dir", explicitDir, "-json"}); err != nil {
 		t.Fatalf("statusMain: %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestWatchMainUsesSessionConfigDataDir(t *testing.T) {
 		t.Fatalf("save run: %v", err)
 	}
 
-	if err := watchMain([]string{"-no-follow", r.ID}); err != nil {
+	if err := watchMain(newTestDeps(t), []string{"-no-follow", r.ID}); err != nil {
 		t.Fatalf("watchMain: %v", err)
 	}
 }
@@ -84,7 +84,7 @@ func TestWatchMainExplicitDataDirWinsOverSessionConfig(t *testing.T) {
 		t.Fatalf("save run: %v", err)
 	}
 
-	if err := watchMain([]string{"-data-dir", explicitDir, "-no-follow", r.ID}); err != nil {
+	if err := watchMain(newTestDeps(t), []string{"-data-dir", explicitDir, "-no-follow", r.ID}); err != nil {
 		t.Fatalf("watchMain: %v", err)
 	}
 }

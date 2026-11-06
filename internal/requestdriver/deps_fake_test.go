@@ -38,6 +38,7 @@ func runTests(m *testing.M) int {
 // sets each to a refusal, so a test reaches no pull request, pushes nothing
 // and launches no build unless it sets the field itself.
 type fakeDeps struct {
+	consoleBaseURLFn              func(dataDir string) string
 	listReviewCommentsFn          func(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error)
 	markPullRequestReadyFn        func(ctx context.Context, prURL string) error
 	pushExistingBranchFn          func(ctx context.Context, workspaceDir string, sha string, branch string) error
@@ -86,6 +87,7 @@ func (f *fakeDeps) ReadReviewState(ctx context.Context, prURL string, policy for
 func (f *fakeDeps) RemoteBranchHeadSHA(ctx context.Context, workspaceDir string, branch string) (string, error) {
 	return f.remoteBranchHeadSHAFn(ctx, workspaceDir, branch)
 }
+func (f *fakeDeps) ConsoleBaseURL(dataDir string) string { return f.consoleBaseURLFn(dataDir) }
 func (f *fakeDeps) ReplyToReviewComment(ctx context.Context, prURL string, commentID int64, body string) error {
 	return f.replyToReviewCommentFn(ctx, prURL, commentID, body)
 }
@@ -173,6 +175,7 @@ func (f *fakeDeps) HostGitVersion(ctx context.Context) (string, error) {
 func newFakeDeps(testing.TB) *fakeDeps {
 	refused := func(what string) error { return errors.New("test deps: " + what + " is not set by this test") }
 	return &fakeDeps{
+		consoleBaseURLFn: func(string) string { return "" },
 		listReviewCommentsFn: func(context.Context, string) ([]requestdriver.ReviewComment, error) {
 			return nil, refused("ListReviewComments")
 		},

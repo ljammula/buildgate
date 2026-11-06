@@ -22,7 +22,7 @@ func TestTheFirstReminderKeepsAnAnswerGivenSinceTheReviewWasEntered(t *testing.T
 	if _, err := request.AnswerReadBack(dataDir, r.ID, "Q1", request.QuestionSHA256("How long?"), "op", "24 hours.", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := remindOnDisk(dataDir, r, time.Now()); err != nil {
+	if err := remindOnDisk(consoleDeps{}, dataDir, r, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := request.Load(dataDir, r.ID)
@@ -52,7 +52,7 @@ func TestTheFirstReminderSkipsARequestThatLeftTheReview(t *testing.T) {
 	if err := moved.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := remindOnDisk(dataDir, r, time.Now()); err != nil {
+	if err := remindOnDisk(consoleDeps{}, dataDir, r, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := request.Load(dataDir, r.ID)

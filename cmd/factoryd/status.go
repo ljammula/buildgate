@@ -638,7 +638,7 @@ func newStatusFlags() (flags *flag.FlagSet, dataDir, project, state, configPath 
 	return
 }
 
-func statusMain(args []string) error {
+func statusMain(dp *deps, args []string) error {
 	flags, dataDir, project, state, configPath, n, jsonOutput := newStatusFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -685,7 +685,7 @@ func statusMain(args []string) error {
 	// -json` (a script or launchd-driven poll) still gets the same
 	// one-time alert a human running the plain command would.
 	heartbeatLine := workerHeartbeatStatusLine(*dataDir, now)
-	notifyWorkerStale(*dataDir, requests, now, heartbeatLine)
+	notifyWorkerStale(dp, *dataDir, requests, now, heartbeatLine)
 	// Route visibility (2026-09-25): which subscription the live worker
 	// bills to. Both "" whenever heartbeatLine is non-empty (worker
 	// isn't running) or the heartbeat predates these fields -- see

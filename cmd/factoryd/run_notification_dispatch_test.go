@@ -29,7 +29,7 @@ func TestARequestsOwnRunDoesNotSendASecondNotification(t *testing.T) {
 
 	dataDir := t.TempDir()
 	owned := &run.Run{ID: "run-owned", Ticket: "req-1-001", RequestID: "req-1", State: run.StateHalted}
-	if err := save(owned, dataDir); err != nil {
+	if err := save(newTestDeps(t), owned, dataDir); err != nil {
 		t.Fatal(err)
 	}
 	notify.WaitForPendingDispatches(2 * time.Second)
@@ -42,7 +42,7 @@ func TestARequestsOwnRunDoesNotSendASecondNotification(t *testing.T) {
 	}
 
 	alone := &run.Run{ID: "run-alone", Ticket: "fixture-ticket", State: run.StateHalted}
-	if err := save(alone, dataDir); err != nil {
+	if err := save(newTestDeps(t), alone, dataDir); err != nil {
 		t.Fatal(err)
 	}
 	notify.WaitForPendingDispatches(2 * time.Second)

@@ -203,7 +203,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 			reason = "run halted before a policy gate decision was reached"
 		}
 		// Factory-authored triage (run.Run.Triage) leads the reason so the
-		// alert says why, not just which gate; save() would compute it
+		// alert says why, not just which gate; save(dp, ) would compute it
 		// later anyway, but this notification is built first.
 		if t := triage.Run(r, dataDir); t != "" {
 			r.Triage = t
@@ -245,7 +245,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		// now the only save in this function — see loadAgentEvidence's
 		// call above for why a second one after the Discord wait would
 		// reopen a lost-update window against a concurrent override.
-		if err := save(r, dataDir); err != nil {
+		if err := save(dp, r, dataDir); err != nil {
 			rollbackIsolatedWorkspaceOnSaveFailure(r)
 			return fmt.Errorf("persist quarantine state: %w", err)
 		}
@@ -256,7 +256,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		// it is called once, here. Writes a different run's file (r.PriorRunID's), never
 		// r's own, so this does not reopen the "only one save of r in this
 		// function" window the comment above protects.
-		invalidatePriorRunOnFullSuiteRegression(dataDir, id, r.PriorRunID, failedChecks)
+		invalidatePriorRunOnFullSuiteRegression(dp, dataDir, id, r.PriorRunID, failedChecks)
 
 		// Found via review: this Temporal-routed path only ever reached
 		// the durable LogNotifier above, never the same best-effort
@@ -269,7 +269,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		// entirely) dispatches on its own goroutine and returns
 		// immediately.
 		dispatchRunNotification(dataDir, r.RequestID, n)
-	} else if err := save(r, dataDir); err != nil {
+	} else if err := save(dp, r, dataDir); err != nil {
 		rollbackIsolatedWorkspaceOnSaveFailure(r)
 		return err
 	} else {
@@ -331,14 +331,14 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 				log.Printf("run %s: -open-pull-request set but release decision denies it: %s", id, prWithheldReason)
 			}
 		}
-		n := notifyAcceptedRun(dataDir, id, ticket, r.RequestID, prURL, prWithheldReason)
+		n := notifyAcceptedRun(dp, dataDir, id, ticket, r.RequestID, prURL, prWithheldReason)
 		// underRunLock: true for runViaRepositoryOwner's and
 		// reconcileReclaimedRun's own callers, which already hold id's
 		// run.WithLock for this entire call -- recordAcceptedRunSideEffects
 		// must not take it again (see its own doc comment on why that
 		// would deadlock). false for runViaTemporal's caller, which holds
 		// no lock here at all.
-		recordAcceptedRunSideEffects(dataDir, r, prURL, n, underRunLock)
+		recordAcceptedRunSideEffects(dp, dataDir, r, prURL, n, underRunLock)
 	}
 	fmt.Printf("run %s: FINAL state=%s (via Temporal, task_queue=%s)\n", id, r.State, taskQueue)
 	fmt.Printf("  base_sha=%s result_sha=%s\n", baseSHA, r.ResultSHA)

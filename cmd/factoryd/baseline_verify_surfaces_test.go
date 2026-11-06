@@ -84,7 +84,7 @@ func TestInboxShowsTheBaselineVerifyOfEachBuiltTicket(t *testing.T) {
 		r.Tickets = []request.Ticket{{Index: 1, RunID: "run-1"}, {Index: 2, RunID: "run-2"}, {Index: 3}}
 	})
 	var out, warn bytes.Buffer
-	if err := inboxRun(nil, &out, &warn); err != nil {
+	if err := inboxRun(newTestDeps(t), nil, &out, &warn); err != nil {
 		t.Fatalf("inboxRun: %v", err)
 	}
 	if want := "  baseline verify: ticket 1 passed; ticket 2 " + unnamedBaselineSummary + "\n"; !strings.Contains(out.String(), want) {
@@ -107,7 +107,7 @@ func TestSaveWordsABaselineHaltForTheOperator(t *testing.T) {
 	r.HaltConfirmed = true
 	r.HaltReasonCode = run.HaltReasonBaselineVerifyFailed
 	r.HaltError = "temporal workflow did not complete: workflow execution error (type: RunWorkflow): baseline verify activity: activity error"
-	if err := save(r, dataDir); err != nil {
+	if err := save(newTestDeps(t), r, dataDir); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := run.Load(dataDir, "r2")

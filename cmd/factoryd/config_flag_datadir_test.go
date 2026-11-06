@@ -23,7 +23,7 @@ func TestRequestCommandsHonourConfigFlagDataDir(t *testing.T) {
 		{"approve", func(c string) error { return approveMain(dp, []string{"-config", c, "req-1"}) }, request.StatePlanning},
 		{"reject", func(c string) error { return rejectMain(dp, []string{"-config", c, "-reason", "redo", "req-1"}) }, request.StateSpecDrafting},
 		{"cancel", func(c string) error { return cancelMain(dp, []string{"-config", c, "req-1"}) }, request.StateCancelled},
-		{"watch", func(c string) error { return watchMain([]string{"-config", c, "-no-follow", "req-1"}) }, request.StateSpecReview},
+		{"watch", func(c string) error { return watchMain(dp, []string{"-config", c, "-no-follow", "req-1"}) }, request.StateSpecReview},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

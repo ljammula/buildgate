@@ -299,7 +299,7 @@ func (a *requestActivities) AdvanceRequest(ctx context.Context, id string) (stri
 			// spent on it.
 			if reason := staleMemoryRequest(ctx, a.dp, a.dataDir, r); reason != "" {
 				a.endRepositoryWait(id)
-				if err := requestdriver.HaltRequest(a.dataDir, r, reason, time.Now()); err != nil {
+				if err := requestdriver.HaltRequest(a.dp, a.dataDir, r, reason, time.Now()); err != nil {
 					return "", err
 				}
 				return string(r.State), nil
@@ -462,13 +462,13 @@ func (a *requestActivities) ticketRunStillLive(r *request.Request, self int) (bo
 func (a *requestActivities) RemindRequest(ctx context.Context, id string) error {
 	a.ensureConsole()
 	// A gate past its review_gate_expiry halts instead of reminding.
-	if expired, err := requestdriver.ExpireIfDue(a.dataDir, id, a.cfg.Settings.ReviewGateExpiry, time.Now()); err != nil || expired {
+	if expired, err := requestdriver.ExpireIfDue(a.dp, a.dataDir, id, a.cfg.Settings.ReviewGateExpiry, time.Now()); err != nil || expired {
 		return err
 	}
-	if resumed, err := requestdriver.AutoResumeIfDue(ctx, a.dataDir, id, a.cfg, time.Now()); err != nil || resumed {
+	if resumed, err := requestdriver.AutoResumeIfDue(a.dp, ctx, a.dataDir, id, a.cfg, time.Now()); err != nil || resumed {
 		return err
 	}
-	return requestdriver.RemindIfDue(a.dataDir, id, a.cfg.HitlReminderInterval, time.Now)
+	return requestdriver.RemindIfDue(a.dp, a.dataDir, id, a.cfg.HitlReminderInterval, time.Now)
 }
 
 // HaltLostRequestStep moves a request whose step stopped without finishing to
@@ -509,7 +509,7 @@ func (a *requestActivities) HaltLostRequestStep(_ context.Context, in workflow.H
 		log.Printf("request %s: its step's heartbeat timed out, but the ticket's run is still live (%s); not moving it to resume_review", r.ID, why)
 		return nil
 	}
-	return requestdriver.EnterResumeReviewHoldingLock(a.dataDir, r, request.LostStep{RunID: lostRunOf(a.dataDir, r), Cause: unresolved.WorkerLost}, time.Now())
+	return requestdriver.EnterResumeReviewHoldingLock(a.dp, a.dataDir, r, request.LostStep{RunID: lostRunOf(a.dataDir, r), Cause: unresolved.WorkerLost}, time.Now())
 }
 
 // countOf is how many entries of ids are id.

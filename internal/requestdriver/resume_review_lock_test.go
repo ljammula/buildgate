@@ -42,7 +42,7 @@ func TestEnteringResumeReviewHoldingTheLockKeepsAResumeThatWaitedOnIt(t *testing
 	}()
 	entered := make(chan error, 1)
 	go func() {
-		entered <- EnterResumeReviewHoldingLock(dataDir, r, request.LostStep{Cause: unresolved.WorkerLost}, time.Now())
+		entered <- EnterResumeReviewHoldingLock(consoleDeps{}, dataDir, r, request.LostStep{Cause: unresolved.WorkerLost}, time.Now())
 	}()
 	select {
 	case err := <-entered:

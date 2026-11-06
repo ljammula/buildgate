@@ -30,7 +30,7 @@ func newAnswerFlags() (flags *flag.FlagSet, dataDir, configPath, question, hash,
 // The answer is for the question text the operator read: -hash names it
 // (request.QuestionShortHash, as `factoryd watch` prints it), and an answer
 // to a question whose text no longer has that hash is refused.
-func answerMain(args []string) error {
+func answerMain(dp *deps, args []string) error {
 	flags, dataDir, configPath, question, hash, text := newAnswerFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -54,7 +54,7 @@ func answerMain(args []string) error {
 	}
 	r, err := request.AnswerReadBack(*dataDir, id, *question, questionSHA, currentOSUser(), *text, time.Now(), opts...)
 	if err != nil {
-		notifyIfGateExpired(*dataDir, id, err)
+		notifyIfGateExpired(dp, *dataDir, id, err)
 		return fmt.Errorf("answer request %q: %w", id, err)
 	}
 	verb := "answered"
