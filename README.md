@@ -165,6 +165,89 @@ Docker VM state ([command reference](USAGE_REFERENCE.md#command-reference)).
 
 A longer live walkthrough is in [`DEMO.md`](DEMO.md).
 
+## Build a new app
+
+You write the spec and the tickets; buildgate builds each ticket in a sandbox
+and opens a stacked draft PR for it; you merge. One request per part of the
+app (for example `backend` and `frontend`), each with its own spec and
+tickets, submitted together.
+
+```text
+ scaffold + contract --> spec + tickets --> submit --> [spec_review] --> [plan_review]
+     (you, on main)        (you, in repo)                answer, approve    approve
+                                                                              |
+     you merge, bottom-up <-- stacked draft PRs <-- each ticket built and checked
+```
+
+1. **Scaffold the repository.** A git checkout under `$HOME` with a GitHub
+   `origin`. Commit to `main` before submitting:
+   - the layout and empty packages, and the contract the parts share (an API
+     document, the domain types);
+   - `AGENTS.md` (how to build, test and lay out code; what not to touch);
+   - one verify command that runs every test, for example `make verify`;
+   - `.factory.yml` with `verify_command`, `required_binaries`, and a
+     `sandbox:` block when the build needs `npm ci` or similar
+     (USAGE_REFERENCE's "Sandbox block").
+2. **Write each part's spec**, for example `spec/backend/spec.md`. Only a
+   numbered `## Acceptance criteria` list is required; the four apps built
+   this way also used Problem, Scope, Non-goals, Affected services and
+   packages, and Risks.
+3. **Write its tickets** as `spec/backend/tickets/001.spec.md`, `002.spec.md`,
+   ... (`factoryd ticket-template` prints the skeleton). Each ticket names
+   `Verify-Command:` (the request's own, exactly), `Allowed-Files:` (its code
+   and test files), `Estimated-Changed-Lines:` (keep it under
+   `pr_budget_lines`, 400 by default), the steps and tests, and the criteria
+   it covers. Together the tickets cover every criterion. Check each one with
+   `factoryd check-ticket <file>`. Write the steps concretely (types, function
+   names, error cases): the build follows them.
+4. **Prepare the machine for the repository:**
+
+   ```sh
+   factoryd sandbox approve -repo ~/code/my-app      # only with a sandbox: block
+   factoryd doctor -target-repo ~/code/my-app        # runs the verify command in the sandbox
+   ```
+
+5. **Submit each part.** When no worker is running for the profile, submit
+   starts one from your shell, so export every route's credentials first; a
+   running worker keeps the environment it started with.
+
+   ```sh
+   cd ~/code/my-app
+   factoryd submit -spec-file spec/backend/spec.md  -plan-dir spec/backend/tickets  ~/code/my-app
+   factoryd submit -spec-file spec/frontend/spec.md -plan-dir spec/frontend/tickets ~/code/my-app
+   ```
+
+6. **Pass the gates.** At `spec_review`, `factoryd watch -no-follow <id>`
+   shows the factory's read-back of your spec and the questions it would
+   otherwise guess at. Answer the ones that matter, then approve:
+
+   ```sh
+   factoryd answer -q Q1 -hash <hash> -text "..." <id>
+   factoryd approve <id>     # spec_review; again at plan_review
+   ```
+
+   `plan_review` comes only for a part with more than one ticket (or with
+   `plan_review: true`); a one-ticket part goes straight to building.
+
+   A question that shows a mistake in the spec: `factoryd reject -reason
+   "..." <id>`, and the model revises your document.
+7. **Follow the build.** `factoryd inbox` lists what waits on you;
+   `factoryd watch <id>` follows one request. Each ticket is built, verified
+   and reviewed in its own sandbox; ticket N's draft PR is stacked on
+   ticket N-1's. A request that halts or is quarantined names its cause;
+   fix it, then `factoryd retry <id>`.
+8. **Merge bottom-up.** Merge ticket 1's PR into `main` (a merge commit
+   needs no restack; a squash or rebase merge restacks the next ticket).
+   Buildgate then retargets the next PR onto `main`, and marks it ready once
+   its checks pass; merge it, and so on. Buildgate never merges.
+
+What makes a first build land: a contract committed before the specs, steps
+that name the types and errors, each ticket listing the earlier tickets'
+tests that touch the same file, and a lockfile that no ticket has to change.
+The whole walkthrough, with each state and command:
+[USAGE.md](USAGE.md); the hand-over rules:
+[USAGE_REFERENCE.md § Handing over a finished spec and plan](USAGE_REFERENCE.md#handing-over-a-finished-spec-and-plan-submit--spec-file--plan-dir).
+
 ## Status
 
 Latest release tag: **`v0.0.23`** (tags are `vX.Y.Z`), cut only after
