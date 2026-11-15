@@ -122,6 +122,7 @@ func RunThroughRuntime(ctx context.Context, rt Runtime, s LaunchSpec, l RuntimeL
 	}
 	// From here a sandbox may exist under name: delete it on every path.
 	defer func() {
+		recordWorkerMemory(rt, s, name)
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), runtimeCleanupTimeout)
 		defer cancel()
 		cleanupErr := rt.Delete(cleanupCtx, name)
@@ -345,4 +346,27 @@ func (t *tailReader) Read(p []byte) (int, error) {
 		case <-time.After(t.pollEvery):
 		}
 	}
+}
+
+// workerMemoryTimeout bounds the reading of a worker's memory before the
+// delete: it is never judged, so it must not hold up the cleanup.
+const workerMemoryTimeout = 10 * time.Second
+
+// recordWorkerMemory appends the worker container's memory reading to the
+// run's memory record when the runtime can read it, on every path that
+// reaches the delete: a launch that timed out or failed is read too, while
+// its container still exists. It sizes the machine and is never judged: an
+// unreadable reading records nothing and fails nothing.
+func recordWorkerMemory(rt Runtime, s LaunchSpec, name string) {
+	reader, ok := rt.(WorkerMemoryReader)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), workerMemoryTimeout)
+	defer cancel()
+	mem, err := reader.WorkerMemory(ctx, name)
+	if err != nil || mem.PeakBytes == 0 {
+		return
+	}
+	_ = RecordWorkerMemory(s.DataDir, s.RunID, name, mem)
 }

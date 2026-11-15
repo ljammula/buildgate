@@ -520,3 +520,27 @@ func TestRestackRunsJoinTheirTicketAndDecideNothing(t *testing.T) {
 		t.Errorf("after a quarantined replay: tickets %d one-shot %d accepted %d, want 1 0 0", m.Tickets, m.OneShot, m.Accepted)
 	}
 }
+
+func TestSandboxPeakMemoryIsOverTheCountedRunsReadings(t *testing.T) {
+	counted := mk("r1", run.StateAccepted, "2026-11-01T10:00:00Z")
+	smoke := mk("live-smoke-r2", run.StateAccepted, "2026-11-01T10:00:00Z")
+	readings := map[string][]SandboxMemory{
+		"r1": {
+			{PeakBytes: 300, StallKnown: true},
+			{PeakBytes: 0},
+			{PeakBytes: 100, StallMicros: 2_500_000, StallKnown: true},
+			{PeakBytes: 200},
+			{PeakBytes: 1000, StallMicros: 40_000, StallKnown: true},
+		},
+		"live-smoke-r2": {{PeakBytes: 9999, StallMicros: 9_000_000, StallKnown: true}},
+	}
+	opts := Options{ExcludeTicketPrefixes: []string{SmokePrefix}, SandboxMemory: func(id string) []SandboxMemory { return readings[id] }}
+	got := Compute([]*run.Run{counted, smoke}, opts).SandboxPeakMemory
+	want := MemoryPeaks{Launches: 4, MedianBytes: 250, P90Bytes: 1000, MaxBytes: 1000, StallKnownLaunches: 3, StalledLaunches: 2, MaxStallMillis: 2500}
+	if got != want {
+		t.Errorf("SandboxPeakMemory = %+v, want %+v (an unrecorded peak and the excluded run left out)", got, want)
+	}
+	if got := Compute([]*run.Run{counted}, Options{}).SandboxPeakMemory; got != (MemoryPeaks{}) {
+		t.Errorf("with no SandboxMemory: %+v, want zero", got)
+	}
+}

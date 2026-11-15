@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/run"
+
 	"buildgate/internal/progress"
 )
 
@@ -409,5 +411,79 @@ func TestRunThroughRuntimeADeadlineBeforeTheOutputIsNotAStartedCommand(t *testin
 	_, _, err := RunThroughRuntime(context.Background(), &workerRuntime{stallBeforeOutput: true, startedAt: "t"}, spec, fastLaunch())
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrCommandStarted) || errors.Is(err, ErrSandboxNotStarted) {
 		t.Errorf("err = %v, want the deadline, neither started nor not-started", err)
+	}
+}
+
+// memoryRuntime is a workerRuntime that can read the worker's memory.
+type memoryRuntime struct {
+	*workerRuntime
+	mem    WorkerMemory
+	memErr error
+}
+
+func (m *memoryRuntime) WorkerMemory(context.Context, string) (WorkerMemory, error) {
+	m.note("memory")
+	return m.mem, m.memErr
+}
+
+func TestRunThroughRuntimeRecordsTheWorkersMemoryBeforeTheDelete(t *testing.T) {
+	spec := runtimeSpec(t)
+	mem := WorkerMemory{PeakBytes: 1_350_000_000, StallMicros: 420, StallKnown: true}
+	rt := &memoryRuntime{workerRuntime: &workerRuntime{lines: []string{"done"}, startedAt: "2026-10-04T10:00:00Z"}, mem: mem}
+	if _, _, err := RunThroughRuntime(context.Background(), rt, spec, fastLaunch()); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := SandboxName(spec.DataDir, spec.RunID, "attempt-1")
+	if want := []string{"create", "status", "wait", "status", "memory", "delete " + name}; !reflect.DeepEqual(rt.calls, want) {
+		t.Errorf("calls = %v, want %v: the memory is read after the exit and before the delete", rt.calls, want)
+	}
+	got, err := RecordedWorkerMemory(spec.DataDir, spec.RunID)
+	if err != nil || !reflect.DeepEqual(got, []WorkerMemory{mem}) {
+		t.Errorf("memory record = %+v, %v; want %+v", got, err, mem)
+	}
+	records, _ := RecordedSandboxes(spec.DataDir, spec.RunID)
+	if want := []SandboxRecord{{Name: name, ID: "sandbox-id-1", StartedAt: "2026-10-04T10:00:00Z"}}; !reflect.DeepEqual(records, want) {
+		t.Errorf("sandbox record = %+v, want %+v: the reading has its own file", records, want)
+	}
+}
+
+func TestRunThroughRuntimeReadsTheMemoryOfALaunchThatTimedOut(t *testing.T) {
+	spec := runtimeSpec(t)
+	spec.Timeout = 50 * time.Millisecond
+	rt := &memoryRuntime{workerRuntime: &workerRuntime{hang: true, startedAt: "t0"}, mem: WorkerMemory{PeakBytes: 4 << 30}}
+	if _, _, err := RunThroughRuntime(context.Background(), rt, spec, fastLaunch()); err == nil {
+		t.Fatal("a hung command did not time out")
+	}
+	got, _ := RecordedWorkerMemory(spec.DataDir, spec.RunID)
+	if !reflect.DeepEqual(got, []WorkerMemory{{PeakBytes: 4 << 30}}) {
+		t.Errorf("memory record = %+v: the launch most likely to have run short of memory went unread", got)
+	}
+}
+
+func TestRunThroughRuntimeIgnoresAnUnreadableMemory(t *testing.T) {
+	spec := runtimeSpec(t)
+	rt := &memoryRuntime{workerRuntime: &workerRuntime{lines: []string{"done"}, startedAt: "2026-10-04T10:00:00Z"}, memErr: errors.New("cgroup gone")}
+	result, _, err := RunThroughRuntime(context.Background(), rt, spec, fastLaunch())
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("result = %+v, err = %v: an unreadable reading must not change the launch", result, err)
+	}
+	if got, err := RecordedWorkerMemory(spec.DataDir, spec.RunID); err != nil || len(got) != 0 {
+		t.Errorf("memory record = %+v, %v; want none", got, err)
+	}
+}
+
+func TestRecordedWorkerMemorySkipsATornLine(t *testing.T) {
+	spec := runtimeSpec(t)
+	if err := os.MkdirAll(run.Dir(spec.DataDir, spec.RunID), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordWorkerMemory(spec.DataDir, spec.RunID, "bg-0123456789abcdef", WorkerMemory{PeakBytes: 9}); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.OpenFile(filepath.Join(run.Dir(spec.DataDir, spec.RunID), workerMemoryFileName), os.O_APPEND|os.O_WRONLY, 0o600)
+	_, _ = f.WriteString(`{"name":"bg-0123456789abcdef","peak_by`)
+	f.Close()
+	if got, err := RecordedWorkerMemory(spec.DataDir, spec.RunID); err != nil || !reflect.DeepEqual(got, []WorkerMemory{{PeakBytes: 9}}) {
+		t.Errorf("RecordedWorkerMemory = %+v, %v", got, err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"buildgate/internal/release"
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/sanitize"
 	"buildgate/internal/stats"
 )
@@ -82,7 +83,7 @@ func statsRun(args []string, w io.Writer, now time.Time) error {
 		}
 		return statsRequest(w, *f.dataDir, *f.request, *f.jsonOutput)
 	}
-	opts := stats.Options{Since: since, BucketDays: *f.bucket, Now: now}
+	opts := stats.Options{Since: since, BucketDays: *f.bucket, Now: now, SandboxMemory: sandbox.WorkerMemoryOf(*f.dataDir)}
 	if !*f.all {
 		opts.ExcludeTicketPrefixes = []string{stats.SmokePrefix}
 	}
@@ -154,6 +155,9 @@ func printStatsOverview(w io.Writer, o stats.Overview) {
 	}
 	row("overall", o.Overall)
 	tw.Flush()
+	if text := memoryPeaksText(o.Overall.SandboxPeakMemory); text != "" {
+		fmt.Fprintf(w, "\nsandbox peak memory: %s\n", text)
+	}
 	printStatsNotes(w, o.Overall)
 }
 
@@ -186,6 +190,9 @@ func printProjectStats(w io.Writer, r stats.Report) {
 	fmt.Fprintf(tw, "round changed no file\t%s of failed-round pairs\n", share(m.NoChangePairs, m.FailedRoundPairs))
 	fmt.Fprintf(tw, "corrective builds\t%d ran, %d accepted\n", m.CorrectiveBuilds.Ran, m.CorrectiveBuilds.Accepted)
 	fmt.Fprintf(tw, "sent back after PR\t%s of tickets that reached a pull request\n", share(m.PullRequests.SentBack, m.PullRequests.Opened))
+	if text := memoryPeaksText(r.SandboxPeakMemory); text != "" {
+		fmt.Fprintf(tw, "sandbox peak memory\t%s\n", text)
+	}
 	fmt.Fprintf(tw, "relay spend\t%d tokens, $%.2f; $%.2f per accepted ticket\n", m.Spend.Tokens, float64(m.Spend.CostMicroUSD)/1e6, float64(m.Spend.PerAcceptedTicketMicroUSD)/1e6)
 	tw.Flush()
 	printBucketTable(w, r)
@@ -232,4 +239,17 @@ func flagWasSet(set *flag.FlagSet, name string) bool {
 	found := false
 	set.Visit(func(f *flag.Flag) { found = found || f.Name == name })
 	return found
+}
+
+// memoryPeaksText is the one-line summary of the sandbox peaks, "" with none.
+func memoryPeaksText(m stats.MemoryPeaks) string {
+	if m.Launches == 0 {
+		return ""
+	}
+	gib := func(b uint64) string { return fmt.Sprintf("%.2f GiB", float64(b)/(1<<30)) }
+	text := fmt.Sprintf("median %s, p90 %s, max %s over %d sandbox(es), page cache included", gib(m.MedianBytes), gib(m.P90Bytes), gib(m.MaxBytes), m.Launches)
+	if m.StallKnownLaunches > 0 {
+		text += fmt.Sprintf("; %d of %d waited for memory (longest %.1f s)", m.StalledLaunches, m.StallKnownLaunches, float64(m.MaxStallMillis)/1000)
+	}
+	return text
 }

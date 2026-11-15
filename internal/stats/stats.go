@@ -84,6 +84,37 @@ type Options struct {
 	// ExcludeTicketPrefixes leaves out every run whose ticket (or, with no
 	// ticket, id) starts with one of them. The count is Report.ExcludedRuns.
 	ExcludeTicketPrefixes []string
+	// SandboxMemory returns the memory reading of each sandbox a run launched
+	// that recorded one; nil reports none. It is how the caller hands in a
+	// reading the run record does not hold.
+	SandboxMemory func(runID string) []SandboxMemory
+}
+
+// SandboxMemory is one sandbox's memory reading, taken from outside the
+// sandbox before its delete: the cgroup's peak, page cache included, and the
+// time in which at least one of its tasks waited for memory (StallKnown
+// false when the kernel did not report it).
+type SandboxMemory struct {
+	PeakBytes   uint64
+	StallMicros uint64
+	StallKnown  bool
+}
+
+// MemoryPeaks summarizes the memory readings of the sandboxes the counted
+// runs launched (build, verify, gates, review, challenger). Launches is how
+// many recorded one; with none, every value is 0. The peaks include page
+// cache, so they reach a sandbox's limit whenever the cache filled it: an
+// upper bound. StalledLaunches, of the StallKnownLaunches whose kernel
+// reported it, is how many waited for memory at all, and MaxStallMillis the
+// longest wait: a limit that is short shows here, not in the peak.
+type MemoryPeaks struct {
+	Launches           int    `json:"launches"`
+	MedianBytes        uint64 `json:"median_bytes"`
+	P90Bytes           uint64 `json:"p90_bytes"`
+	MaxBytes           uint64 `json:"max_bytes"`
+	StallKnownLaunches int    `json:"stall_known_launches"`
+	StalledLaunches    int    `json:"stalled_launches"`
+	MaxStallMillis     uint64 `json:"max_stall_ms"`
 }
 
 // Count is a name and how many runs it stopped.
@@ -209,6 +240,8 @@ type Report struct {
 	// ExcludedRuns is the runs left out for their ticket's prefix.
 	ExcludedRuns int     `json:"excluded_runs"`
 	Overall      Metrics `json:"overall"`
+	// SandboxPeakMemory is over every finished run of the counted tickets.
+	SandboxPeakMemory MemoryPeaks `json:"sandbox_peak_memory"`
 	// Buckets are oldest first, empty ones kept, at most MaxBuckets.
 	Buckets []Bucket `json:"buckets"`
 }
@@ -239,8 +272,47 @@ func Compute(runs []*run.Run, opts Options) Report {
 		report.Runs += len(s.runs)
 	}
 	report.Overall = metricsOf(kept)
+	report.SandboxPeakMemory = sandboxMemoryOf(kept, opts.SandboxMemory)
 	report.Buckets = buckets(kept, opts, days)
 	return report
+}
+
+// sandboxMemoryOf gathers the recorded readings of the series' runs.
+func sandboxMemoryOf(list []series, readingsOf func(string) []SandboxMemory) MemoryPeaks {
+	if readingsOf == nil {
+		return MemoryPeaks{}
+	}
+	var m MemoryPeaks
+	var peaks []uint64
+	for _, s := range list {
+		for _, r := range s.runs {
+			for _, reading := range readingsOf(r.ID) {
+				if reading.PeakBytes == 0 {
+					continue
+				}
+				peaks = append(peaks, reading.PeakBytes)
+				if reading.StallKnown {
+					m.StallKnownLaunches++
+					if reading.StallMicros > 0 {
+						m.StalledLaunches++
+					}
+					m.MaxStallMillis = max(m.MaxStallMillis, reading.StallMicros/1000)
+				}
+			}
+		}
+	}
+	n := len(peaks)
+	if n == 0 {
+		return MemoryPeaks{}
+	}
+	sort.Slice(peaks, func(i, j int) bool { return peaks[i] < peaks[j] })
+	m.Launches, m.MaxBytes = n, peaks[n-1]
+	m.MedianBytes = peaks[n/2]
+	if n%2 == 0 {
+		m.MedianBytes = peaks[n/2-1]/2 + peaks[n/2]/2
+	}
+	m.P90Bytes = peaks[int(math.Ceil(0.9*float64(n)))-1]
+	return m
 }
 
 // admit returns the runs that survive the prefix exclusion, and counts the

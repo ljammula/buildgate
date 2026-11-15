@@ -53,6 +53,15 @@
         "per_accepted_ticket_micro_usd": 750001
       }
     },
+    "sandbox_peak_memory": {
+      "launches": 0,
+      "median_bytes": 0,
+      "p90_bytes": 0,
+      "max_bytes": 0,
+      "stall_known_launches": 0,
+      "stalled_launches": 0,
+      "max_stall_ms": 0
+    },
     "buckets": [
       {
         "start": "2026-09-06T00:00:00Z",
@@ -324,6 +333,15 @@
           "runs_with_spend": 2,
           "per_accepted_ticket_micro_usd": 750001
         }
+      },
+      "sandbox_peak_memory": {
+        "launches": 0,
+        "median_bytes": 0,
+        "p90_bytes": 0,
+        "max_bytes": 0,
+        "stall_known_launches": 0,
+        "stalled_launches": 0,
+        "max_stall_ms": 0
       },
       "buckets": [
         {

@@ -31,6 +31,9 @@ type Containers interface {
 	Present(ctx context.Context, sandboxName string) (bool, error)
 	// Remove force-removes every container of the sandbox.
 	Remove(ctx context.Context, sandboxName string) error
+	// WorkerMemory is what the kernel recorded about the worker container's
+	// memory (its cgroup's peak and stall), read outside the sandbox.
+	WorkerMemory(ctx context.Context, sandboxName string) (sandbox.WorkerMemory, error)
 }
 
 // WorkerState is what Docker reports about a sandbox's worker container.
@@ -257,6 +260,17 @@ func (r *Runtime) DockerDiskFree(ctx context.Context) (sandbox.DiskSpace, error)
 	}
 	return space, nil
 }
+
+// WorkerMemory reads the worker container's memory through Docker.
+func (r *Runtime) WorkerMemory(ctx context.Context, name string) (sandbox.WorkerMemory, error) {
+	mem, err := r.Containers.WorkerMemory(ctx, name)
+	if err != nil {
+		return sandbox.WorkerMemory{}, fmt.Errorf("openshell: read memory of sandbox %s: %w", name, err)
+	}
+	return mem, nil
+}
+
+var _ sandbox.WorkerMemoryReader = (*Runtime)(nil)
 
 // present reports whether the gateway knows the sandbox or Docker still has
 // a container of it.

@@ -28,6 +28,14 @@ type fakeContainers struct {
 	listErr   error
 	sticky    bool // Remove leaves the container
 	removed   []string
+	memory    map[string]sandbox.WorkerMemory
+}
+
+func (f *fakeContainers) WorkerMemory(_ context.Context, name string) (sandbox.WorkerMemory, error) {
+	if mem, ok := f.memory[name]; ok {
+		return mem, nil
+	}
+	return sandbox.WorkerMemory{}, errors.New("no memory reading")
 }
 
 func (f *fakeContainers) WorkerState(_ context.Context, name string) (WorkerState, error) {

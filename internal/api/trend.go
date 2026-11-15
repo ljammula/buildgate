@@ -8,6 +8,7 @@ import (
 
 	"buildgate/internal/release"
 	"buildgate/internal/run"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/stats"
 )
 
@@ -56,7 +57,7 @@ func (s *Server) getProjectTrend(w http.ResponseWriter, r *http.Request) {
 			runs = append(runs, rec)
 		}
 	}
-	opts := stats.Options{Project: project, Since: since, Until: until, BucketDays: days, Now: now}
+	opts := stats.Options{Project: project, Since: since, Until: until, BucketDays: days, Now: now, SandboxMemory: sandbox.WorkerMemoryOf(s.dataDir)}
 	if query.Get("all") == "" || query.Get("all") == "0" || query.Get("all") == "false" {
 		opts.ExcludeTicketPrefixes = []string{stats.SmokePrefix}
 	}
@@ -90,7 +91,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	opts := stats.Options{Now: now, Since: since}
+	opts := stats.Options{Now: now, Since: since, SandboxMemory: sandbox.WorkerMemoryOf(s.dataDir)}
 	if all := r.URL.Query().Get("all"); all == "" || all == "0" || all == "false" {
 		opts.ExcludeTicketPrefixes = []string{stats.SmokePrefix}
 	}

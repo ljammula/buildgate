@@ -55,6 +55,26 @@ type ScratchReporter interface {
 	ScratchVolumeLeft(sandboxName string) bool
 }
 
+// WorkerMemory is what the kernel recorded about a worker container's memory,
+// read from outside the sandbox while the container exists.
+type WorkerMemory struct {
+	// PeakBytes is the cgroup's memory.peak: the highest use, page cache
+	// included, so it reaches the container's limit whenever the cache
+	// filled it. An upper bound on what the command needed.
+	PeakBytes uint64
+	// StallMicros is the cgroup's memory.pressure `some` total: the time in
+	// which at least one task waited for memory. Zero means the limit was
+	// never short. StallKnown is false on a kernel that does not report it.
+	StallMicros uint64
+	StallKnown  bool
+}
+
+// WorkerMemoryReader is implemented by a Runtime that can read WorkerMemory.
+// An error means unknown.
+type WorkerMemoryReader interface {
+	WorkerMemory(ctx context.Context, sandboxName string) (WorkerMemory, error)
+}
+
 // ReadReleased sets the reading taken after everything a launch started is
 // gone; it reads nothing when the launch's own readings are unknown or its
 // scratch volume is still there.

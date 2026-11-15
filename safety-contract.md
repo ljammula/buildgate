@@ -663,6 +663,16 @@ requires a new contract review and an updated machine-checkable test.
   so they only ever hand a failed step to a human and never accept
   anything: an unresolved step accepts nothing, and every gate still runs
   on what a resume produces.
+  Before the delete, the factory reads the worker container's peak
+  memory (the kernel's `memory.peak` of its
+  cgroup, page cache included, and its `memory.pressure` stall total, from
+  inside the meter container, whose cgroup namespace is the Docker host's
+  (the VM on macOS) and read-only to it; `factoryd-meter memory-peak <id>`)
+  on every path that reaches the delete, under its own 10 s bound, and
+  appends it to the run's `sandbox_memory.jsonl`, apart from the sandbox
+  record. It sizes the machine (`factoryd stats`) and is never judged: no
+  gate, cause or handoff reads it, and an unreadable reading records
+  nothing.
   `model_unavailable`, `provider_quota` and `meter_denied` are read from
   the spend meter's ledger of the step's last launch, which the meter
   writes outside the sandbox from each response's head: the model route
