@@ -122,6 +122,16 @@ func (l *Lazy) DockerDiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
 	return l.Containers.DiskFree(ctx)
 }
 
+func (l *Lazy) WorkerMemory(ctx context.Context, name string) (sandbox.WorkerMemory, error) {
+	// Docker alone answers, as for the disk.
+	if l.Containers == nil {
+		return sandbox.WorkerMemory{}, fmt.Errorf("openshell: no Docker containers to read memory through")
+	}
+	return l.Containers.WorkerMemory(ctx, name)
+}
+
+var _ sandbox.WorkerMemoryReader = (*Lazy)(nil)
+
 // ScratchVolumeLeft reports whether the connected runtime's last Delete of
 // the sandbox left its scratch volume behind; false before any connection.
 func (l *Lazy) ScratchVolumeLeft(sandboxName string) bool {

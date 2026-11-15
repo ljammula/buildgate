@@ -525,6 +525,11 @@ configured memory on the host (the VM process's `footprint`; `ps` RSS reads
 higher because it counts shared pages) and keeps it until it stops. A build's
 `sandbox_memory` is a ceiling: a Go build peaked at 1.26 GiB and a small
 Python build at 0.2 GiB; Temporal (server, Postgres, UI) holds 0.3 to 0.4 GiB.
+`factoryd stats` prints what your own runs used (`sandbox peak memory`): the
+peaks include page cache, so they are an upper bound and reach `sandbox_memory`
+when the cache filled it; how many sandboxes waited for memory, and for how
+long, says whether the limit was short. No waits at a lower `sandbox_memory`
+means it is enough.
 
 | `max_parallel_jobs` | VM memory | What the Mac holds |
 |---|---|---|

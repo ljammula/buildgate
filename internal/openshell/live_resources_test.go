@@ -113,3 +113,30 @@ func TestLiveWritingToScratchLowersTheMetersStatfs(t *testing.T) {
 func diskRanOutLikeTheWorkflow(r sandbox.Resources) bool {
 	return r.DiskLow() && r.NotFilledByItself()
 }
+
+// TestLiveTheWorkersPeakMemoryIsRecordedAfterTheExit runs a worker whose
+// child allocates about 300 MiB and exits: the run's memory record must carry
+// a peak at least that high and the kernel's memory stall, read by the meter
+// after the exit and before the delete.
+func TestLiveTheWorkersPeakMemoryIsRecordedAfterTheExit(t *testing.T) {
+	rt, image := liveRuntime(t)
+	spec, _ := liveLaunch(t, image, `python3 -c 'b = bytearray(300 << 20); b[::4096] = b"x" * len(b[::4096])'
+exit 0`)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	_, ref, err := sandbox.RunThroughRuntime(ctx, rt, spec, sandbox.RuntimeLaunch{Nonce: "peak-1"})
+	if err != nil {
+		t.Fatalf("RunThroughRuntime: %v", err)
+	}
+	readings, err := sandbox.RecordedWorkerMemory(spec.DataDir, spec.RunID)
+	if err != nil || len(readings) != 1 {
+		t.Fatalf("memory record of %s = %+v, %v", ref.Name, readings, err)
+	}
+	t.Logf("reading %+v", readings[0])
+	if readings[0].PeakBytes < 300<<20 {
+		t.Errorf("recorded peak %d bytes, want at least %d", readings[0].PeakBytes, 300<<20)
+	}
+	if !readings[0].StallKnown {
+		t.Errorf("the kernel's memory stall was not read: %+v", readings[0])
+	}
+}

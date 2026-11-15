@@ -16,6 +16,9 @@ services:
     security_opt:
       - no-new-privileges:true
     mem_limit: 256m
+    # The VM's cgroup namespace, mounted read-only, so `factoryd-meter
+    # memory-peak` reads a sandbox's peak memory from outside the sandbox.
+    cgroup: host
     command:
       - -listen
       - 0.0.0.0:50051

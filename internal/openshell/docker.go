@@ -27,6 +27,10 @@ const dockerCommandTimeout = 30 * time.Second
 // it never reaches a Docker filter.
 var containerNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
+// containerIDPattern is a full Docker container id, the only form passed to
+// the meter.
+var containerIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 // DockerContainers is Containers over the Docker CLI.
 type DockerContainers struct {
 	// Binary defaults to "docker".
@@ -127,23 +131,32 @@ const (
 	meterBinary         = "/factoryd-meter"
 )
 
-// DiskFree runs the meter's statfs subcommand in the meter container and
-// parses the free and total bytes of its root filesystem, which is the
-// overlay on Docker's data filesystem. MeterProject names the stack's
-// compose project.
-func (d *DockerContainers) DiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+// meterContainer is the id of the stack's one running meter container.
+// MeterProject names the stack's compose project.
+func (d *DockerContainers) meterContainer(ctx context.Context) (string, error) {
 	if d.MeterProject == "" {
-		return sandbox.DiskSpace{}, errors.New("no OpenShell stack project named to find the meter container")
+		return "", errors.New("no OpenShell stack project named to find the meter container")
 	}
 	out, err := d.docker(ctx, "ps", "-q", "--no-trunc", "--filter", "label="+labelComposeProject+"="+d.MeterProject, "--filter", "label="+labelComposeService+"="+meterService)
 	if err != nil {
-		return sandbox.DiskSpace{}, err
+		return "", err
 	}
 	ids := strings.Fields(string(out))
 	if len(ids) != 1 {
-		return sandbox.DiskSpace{}, fmt.Errorf("found %d running meter containers, want 1", len(ids))
+		return "", fmt.Errorf("found %d running meter containers, want 1", len(ids))
 	}
-	out, err = d.docker(ctx, "exec", ids[0], meterBinary, "statfs")
+	return ids[0], nil
+}
+
+// DiskFree runs the meter's statfs subcommand in the meter container and
+// parses the free and total bytes of its root filesystem, which is the
+// overlay on Docker's data filesystem.
+func (d *DockerContainers) DiskFree(ctx context.Context) (sandbox.DiskSpace, error) {
+	meter, err := d.meterContainer(ctx)
+	if err != nil {
+		return sandbox.DiskSpace{}, err
+	}
+	out, err := d.docker(ctx, "exec", meter, meterBinary, "statfs")
 	if err != nil {
 		return sandbox.DiskSpace{}, err
 	}
@@ -152,6 +165,76 @@ func (d *DockerContainers) DiskFree(ctx context.Context) (sandbox.DiskSpace, err
 		return sandbox.DiskSpace{}, fmt.Errorf("unreadable statfs answer %q", strings.TrimSpace(string(out)))
 	}
 	return space, nil
+}
+
+// WorkerMemory runs the meter's memory-peak subcommand on the sandbox's
+// worker container: the kernel's memory.peak and memory stall of the
+// container's cgroup, read from the meter container, outside the sandbox. It
+// is readable only while the worker container's cgroup exists.
+func (d *DockerContainers) WorkerMemory(ctx context.Context, sandboxName string) (sandbox.WorkerMemory, error) {
+	worker, err := d.workerContainer(ctx, sandboxName)
+	if err != nil {
+		return sandbox.WorkerMemory{}, err
+	}
+	meter, err := d.meterContainer(ctx)
+	if err != nil {
+		return sandbox.WorkerMemory{}, err
+	}
+	out, err := d.docker(ctx, "exec", meter, meterBinary, "memory-peak", worker)
+	if err != nil {
+		return sandbox.WorkerMemory{}, err
+	}
+	return parseWorkerMemory(strings.TrimSpace(string(out)))
+}
+
+// parseWorkerMemory reads `peak=<n>`, optionally followed by ` stall_us=<n>`.
+func parseWorkerMemory(answer string) (sandbox.WorkerMemory, error) {
+	var mem sandbox.WorkerMemory
+	fields := strings.Fields(answer)
+	if len(fields) == 0 || len(fields) > 2 {
+		return mem, fmt.Errorf("unreadable memory-peak answer %q", answer)
+	}
+	if n, err := fmt.Sscanf(fields[0], "peak=%d", &mem.PeakBytes); err != nil || n != 1 || mem.PeakBytes == 0 {
+		return sandbox.WorkerMemory{}, fmt.Errorf("unreadable memory-peak answer %q", answer)
+	}
+	if len(fields) == 2 {
+		if n, err := fmt.Sscanf(fields[1], "stall_us=%d", &mem.StallMicros); err != nil || n != 1 {
+			return sandbox.WorkerMemory{}, fmt.Errorf("unreadable memory-peak answer %q", answer)
+		}
+		mem.StallKnown = true
+	}
+	return mem, nil
+}
+
+// workerContainer is the full id of the sandbox's one container that is not
+// the supervisor.
+func (d *DockerContainers) workerContainer(ctx context.Context, sandboxName string) (string, error) {
+	ids, err := d.ids(ctx, sandboxName)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", fmt.Errorf("sandbox %s has no containers", sandboxName)
+	}
+	format := `{{index .Config.Labels "` + labelRole + `"}}|{{.Id}}`
+	out, err := d.docker(ctx, append([]string{"inspect", "--type", "container", "--format", format}, ids...)...)
+	if err != nil {
+		return "", err
+	}
+	var workers []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		role, id, found := strings.Cut(strings.TrimSpace(line), "|")
+		if !found || !containerIDPattern.MatchString(id) {
+			return "", fmt.Errorf("docker inspect of sandbox %s: unreadable line %q", sandboxName, line)
+		}
+		if role != roleSupervisor {
+			workers = append(workers, id)
+		}
+	}
+	if len(workers) != 1 {
+		return "", fmt.Errorf("sandbox %s has %d worker containers, want 1", sandboxName, len(workers))
+	}
+	return workers[0], nil
 }
 
 // Remove force-removes the sandbox's containers. A container that vanished
