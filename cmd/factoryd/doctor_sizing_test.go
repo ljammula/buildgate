@@ -242,7 +242,7 @@ func TestDoctorSizingRowsWarnNeverFail(t *testing.T) {
 func TestIntegrationDoctorPrintsTheDockerSizingRows(t *testing.T) {
 	t.Parallel()
 	docker, _ := sizingFake{memTotal: "8589934592", runOut: "h\noverlay 1 2 99999999 4 /"}.install(t)
-	cmd := factorydCommand(t, "doctor", "-sandbox-image", "worker:1")
+	cmd := factorydCommand(t, "doctor", "-v", "-sandbox-image", "worker:1")
 	cmd.Env = append(os.Environ(), isolatedSessionConfigEnv(t, "sandbox_docker: "+docker+"\nmax_parallel_jobs: 3\nsandbox_memory: 4g\n")...)
 	out, _ := cmd.CombinedOutput()
 	for _, want := range []string{"memory limits: max_parallel_jobs 3 × sandbox_memory 4g within Docker's memory", "Docker disk has room for 3 builds"} {

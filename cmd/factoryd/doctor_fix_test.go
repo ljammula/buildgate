@@ -421,7 +421,7 @@ func TestIntegrationDoctorWithoutFixNamesConfiguredImageRestoration(t *testing.T
 	// (2026-09-10; see sessionconfig.Settings) -- pointed at an isolated
 	// session config (see isolatedSessionConfigEnv) rather than the real
 	// developer one.
-	cmd := factorydCommand(t, "doctor",
+	cmd := factorydCommand(t, "doctor", "-v",
 		"-sandbox-image", "localhost:5050/buildgate-worker:missing",
 		"-registry-proxy-image", "localhost:5050/factoryd-registry-proxy:missing")
 	cmd.Env = append(os.Environ(), isolatedSessionConfigEnv(t, "sandbox_docker: "+fakeDocker+"\n")...)

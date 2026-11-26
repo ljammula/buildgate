@@ -26,6 +26,24 @@ import (
 // launchd GUI session.
 func RealLaunchctlBinary(dp Deps) string { return "launchctl" }
 
+// StableWorkDir is the directory a long-lived worker or serve runs in: its
+// data dir when that is an absolute path to a directory, else $HOME, else
+// the root. Never the directory the command that started it ran in, which
+// can be a worktree removed while the child still runs: a process whose
+// directory is gone cannot start a child that reads it ("Unable to read
+// current working directory").
+func StableWorkDir(dataDir string) string {
+	if filepath.IsAbs(dataDir) {
+		if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
+			return dataDir
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+		return home
+	}
+	return "/"
+}
+
 // QuickstartEnsureDaemon leaves a worker driving -data-dir's requests,
 // skipping straight through when one is already in charge and actually
 // draining the -config/-data-dir this invocation resolved: an
@@ -491,6 +509,7 @@ func RealSpawnServe(dp Deps, w io.Writer, binaryPath, configPath, dataDir, addr 
 	defer errFile.Close()
 
 	cmd := exec.Command(binaryPath, "serve", "-config", configPath, "-data-dir", dataDir, "-addr", addr)
+	cmd.Dir = StableWorkDir(dataDir)
 	cmd.Stdout = outFile
 	cmd.Stderr = errFile
 	cmd.Env = QuickstartServeChildEnv()
@@ -720,6 +739,17 @@ func WorkerSpawnArgs(configPath, dataDir, temporalAddress string) []string {
 	return []string{"worker", "-config", configPath, "-data-dir", dataDir, "-temporal-address", temporalAddress}
 }
 
+// drainerCommand is the detached worker's command: in its own process
+// group, with the child environment, run in StableWorkDir(dataDir) rather
+// than the directory the starting command ran in.
+func drainerCommand(binaryPath string, args []string, dataDir string, credentialEnv []string) *exec.Cmd {
+	cmd := exec.Command(binaryPath, args...)
+	cmd.Dir = StableWorkDir(dataDir)
+	cmd.Env = QuickstartChildEnv(credentialEnv)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
 // quickstartSpawnDrainer starts `factoryd <args>` (the worker) as a detached
 // child; see host.spawnWorker's doc comment.
 func quickstartSpawnDrainer(dp Deps, w io.Writer, what string, args []string, binaryPath, dataDir string, credentialEnv []string, pidPath string) error {
@@ -740,11 +770,9 @@ func quickstartSpawnDrainer(dp Deps, w io.Writer, what string, args []string, bi
 	}
 	defer errFile.Close()
 
-	cmd := exec.Command(binaryPath, args...)
+	cmd := drainerCommand(binaryPath, args, dataDir, credentialEnv)
 	cmd.Stdout = outFile
 	cmd.Stderr = errFile
-	cmd.Env = QuickstartChildEnv(credentialEnv)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", what, err)
 	}

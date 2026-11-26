@@ -20,7 +20,7 @@ another profile:
 - `factoryd help [<command>]` and `factoryd help -json <command>`: the list of
   commands, or one command's arguments and flags (read-only; it takes no
   `-config`). Check here before giving the operator a command you are unsure of
-- `factoryd doctor [-target-repo <repo-path>] [-fix]`
+- `factoryd doctor [-target-repo <repo-path>] [-fix] [-v]`: failures and warnings, then a count; `-v` also lists the passing checks
 - `factoryd status [-n N] [-all] [-v] [-all-profiles] [-json]`
 - `factoryd watch [-no-follow] <id>`
 - `factoryd logs [-list] [-prompt <name>] <id>` (read-only; never `-f`, which blocks; `-prompt` prints a prompt as the build saved it, which may quote repository content)

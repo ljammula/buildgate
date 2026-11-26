@@ -66,6 +66,10 @@ type doctorCheck struct {
 	// Detail, when set, is printed after an ok check's name -- a passing
 	// check that has something worth naming (which harness each role runs).
 	Detail string
+	// NeedsDocker marks a row that cannot pass while the Docker daemon does
+	// not answer (needingDocker): doctor's report then names it on one line
+	// under the docker row instead of as a failure of its own.
+	NeedsDocker bool
 }
 
 // doctorMain is a single command that checks the
@@ -137,6 +141,7 @@ func doctorMain(dp *deps, args []string) error {
 	listModels := doctorRegisterListModelsFlag(flags)
 	targetRepo := doctorRegisterTargetRepoFlag(flags)
 	removeSandbox := doctorRegisterRemoveSandboxFlag(flags)
+	verbose := doctorRegisterVerboseFlag(flags)
 	finishFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -298,15 +303,16 @@ func doctorMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Temporal, the OpenShell stack and Docker's sizing all run in Docker.
 	switch {
 	case fixedTemporal != nil:
-		checks = append(checks, *fixedTemporal)
+		checks = append(checks, needingDocker(*fixedTemporal)...)
 	case in.temporalAddress == "":
 		// An explicit -temporal-address already has its own reachability check.
-		checks = append(checks, doctorCheckTemporal(dp, context.Background(), false, os.Stdout))
+		checks = append(checks, needingDocker(doctorCheckTemporal(dp, context.Background(), false, os.Stdout))...)
 	}
 	checks = append(checks, doctorOpenShellChecks(dp, context.Background(), in, *fix, os.Stdout)...)
-	checks = append(checks, doctorSizingChecksAfterFix(dp, *fix, in, checks)...)
+	checks = append(checks, needingDocker(doctorSizingChecksAfterFix(dp, *fix, in, checks)...)...)
 	checks = append(checks, doctorWorkerBinaryChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorWorkerGitHubLoginChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorGateTokenChecks(in.configPath, time.Now())...)
@@ -384,7 +390,7 @@ func doctorMain(dp *deps, args []string) error {
 			cancel()
 		}
 	}
-	if failed := runDoctorChecks(checks, os.Stdout); failed > 0 {
+	if failed := doctorReport(checks, os.Stdout, *verbose); failed > 0 {
 		return fmt.Errorf("%d doctor check(s) failed", failed)
 	}
 	return nil
@@ -455,10 +461,10 @@ func doctorReplaceChecksWithPrefix(checks []doctorCheck, prefix string, fresh []
 func doctorReevaluateDataDirDependentChecks(ctx context.Context, checks []doctorCheck, in doctorInputs) []doctorCheck {
 	image := in.sandboxImage
 	if in.workspace != "" && !in.noRelay {
-		checks = doctorReplaceCheck(checks, doctorCheckDataDirMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir))
+		checks = doctorReplaceCheck(checks, needingDocker(doctorCheckDataDirMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir))[0])
 	}
 	if in.checkRequestSourceRepos && in.dataDir != "" {
-		checks = doctorReplaceChecksWithPrefix(checks, "mount visibility (request ", doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace))
+		checks = doctorReplaceChecksWithPrefix(checks, "mount visibility (request ", needingDocker(doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace)...))
 	}
 	return checks
 }
@@ -524,7 +530,7 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	in.dockerBackend = backend.Backend
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	checks := append(built, doctorChecksFor(ctx, in)...)
+	checks := append(built, explainDockerUnreachable(ctx, dp, in.sandboxDocker, doctorChecksFor(ctx, in))...)
 	if c, ok := doctorCheckDockerBackend(backend); ok {
 		checks = append(checks, c)
 	}
@@ -934,13 +940,13 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	} else {
 		present := doctorCheckImagePresent(ctx, in.sandboxDocker, "sandbox image", image,
 			"restore the configured image with `make install`, using the same IMAGE_SOURCE and BUILDGATE_IMAGE_TAG that selected it")
-		checks = append(checks, present)
+		checks = append(checks, needingDocker(present)...)
 		// No harness gate here: the image's own buildgate.image
 		// label (read by doctorCheckImageStale itself) says what kind it
 		// actually is -- worker, pifork, or project -- so this
 		// runs the same way regardless of which harnesses the roles use.
 		if c, ok := doctorCheckImageStale(ctx, in.sandboxDocker, "sandbox image", image, in.imageSourceRoot); ok {
-			checks = append(checks, c)
+			checks = append(checks, needingDocker(c)...)
 		}
 		// Every distinct harness the roles use must have its binary in the
 		// one sandbox image; only checked once the image itself is present.
@@ -957,10 +963,10 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 		}
 	}
 	if in.registryProxyImage != "" {
-		checks = append(checks, doctorCheckImagePresent(ctx, in.sandboxDocker, "registry proxy image", in.registryProxyImage,
-			"restore the configured image with `make install`, using the same IMAGE_SOURCE and BUILDGATE_IMAGE_TAG that selected it"))
+		checks = append(checks, needingDocker(doctorCheckImagePresent(ctx, in.sandboxDocker, "registry proxy image", in.registryProxyImage,
+			"restore the configured image with `make install`, using the same IMAGE_SOURCE and BUILDGATE_IMAGE_TAG that selected it"))...)
 		if c, ok := doctorCheckImageStale(ctx, in.sandboxDocker, "registry proxy image", in.registryProxyImage, in.imageSourceRoot); ok {
-			checks = append(checks, c)
+			checks = append(checks, needingDocker(c)...)
 		}
 	}
 	if in.egressCABundle != "" {
@@ -983,7 +989,7 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 	checks = append(checks, doctorCheckSkills(in))
 	checks = append(checks, doctorCheckDesignGuide(in))
 	if in.workspace != "" {
-		checks = append(checks, doctorCheckMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.workspace))
+		checks = append(checks, needingDocker(doctorCheckMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.workspace))...)
 		checks = append(checks, doctorCheckMonorepoModuleRoot(in.workspace))
 		checks = append(checks, doctorCheckDataDirOutsideWorkspace(in.workspace, in.dataDir))
 		checks = append(checks, doctorCheckGitCredentialsNotExposed(in.workspace))
@@ -1005,11 +1011,11 @@ func doctorChecksFor(ctx context.Context, in doctorInputs) []doctorCheck {
 			// doctorCheckDataDirMountVisibility preflight runs
 			// regardless) -- this is advance warning for an operator
 			// running `doctor` directly.
-			checks = append(checks, doctorCheckDataDirMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir))
+			checks = append(checks, needingDocker(doctorCheckDataDirMountVisibility(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir))...)
 		}
 	}
 	if in.checkRequestSourceRepos && in.dataDir != "" {
-		checks = append(checks, doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace)...)
+		checks = append(checks, needingDocker(doctorChecksRequestSourceRepos(ctx, in.dockerBackend, in.sandboxDocker, image, in.dataDir, in.workspace)...)...)
 	}
 	if in.temporalAddress != "" {
 		checks = append(checks, doctorCheckTemporalReachable(ctx, in.temporalAddress))
@@ -1375,11 +1381,16 @@ const doctorPriceStaleAfter = 90 * 24 * time.Hour
 // price removed from the table after the config was written). A found
 // price with a stale or missing as_of warns rather than fails: the price
 // itself may still be correct, but nothing here can prove that from the
-// as_of date alone.
+// as_of date alone. Only the models some role can run on (its model, its
+// escalation model or an allowed one, doctorModelsRolesUse) have a row: a declared model no role
+// names costs nothing.
 func doctorPriceChecks(settings sessionconfig.Settings) []doctorCheck {
+	used := doctorModelsRolesUse(settings)
 	names := make([]string, 0, len(settings.Models))
 	for name := range settings.Models {
-		names = append(names, name)
+		if used[name] {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 
@@ -1413,6 +1424,28 @@ func doctorPriceChecks(settings sessionconfig.Settings) []doctorCheck {
 		})
 	}
 	return checks
+}
+
+// doctorModelsRolesUse is the set of models: keys a configured role can
+// run on: each role's model, its escalation model and its allowed list.
+func doctorModelsRolesUse(settings sessionconfig.Settings) map[string]bool {
+	used := map[string]bool{}
+	if settings.Roles == nil {
+		return used
+	}
+	for _, rc := range []*sessionconfig.RoleConfig{settings.Roles.Planning, settings.Roles.Execution, settings.Roles.Review, settings.Roles.Challenger} {
+		if rc == nil {
+			continue
+		}
+		used[rc.Model] = true
+		if m := rc.EscalationModel(); m != "" {
+			used[m] = true
+		}
+		for _, name := range rc.Allowed {
+			used[name] = true
+		}
+	}
+	return used
 }
 
 // formatUSDPerMTok renders a prices.USDPerMTok (micro-USD per 1M tokens)
@@ -1550,36 +1583,9 @@ func doctorChecksFailed(checks []doctorCheck) int {
 func runDoctorChecks(checks []doctorCheck, w io.Writer) (failed int) {
 	var warned int
 	for _, c := range checks {
-		switch {
-		case c.Err == nil && c.Detail != "":
-			fmt.Fprintf(w, "ok    %s (%s)\n", c.Name, c.Detail)
-		case c.Err == nil:
-			fmt.Fprintf(w, "ok    %s\n", c.Name)
-		case c.Advisory:
-			// Never counted in failed below -- mirrors
-			// project_check.go's own "Advisory failures ... never fail the
-			// overall check" rule for ProjectCheckResult.Advisory. Counted
-			// in warned, though (found via Codex review of PR #142, P2):
-			// the summary line below used to count every non-failed check
-			// as "passed", including one that had just printed "warn" --
-			// an operator or output consumer reading only the summary
-			// would see e.g. "3/3 checks passed" and never learn a warning
-			// was even printed above it.
-			warned++
-			fmt.Fprintf(w, "warn  %s: %s\n", c.Name, c.Err)
-			if c.Fix != "" {
-				fmt.Fprintf(w, "      fix: %s\n", c.Fix)
-			}
-		default:
-			failed++
-			fmt.Fprintf(w, "FAIL  %s: %s\n", c.Name, c.Err)
-			if c.Fix != "" {
-				fmt.Fprintf(w, "      fix: %s\n", c.Fix)
-			}
-		}
-		if c.Use != "" {
-			fmt.Fprintf(w, "      use: %s\n", c.Use)
-		}
+		f, wr := printDoctorRow(w, c)
+		failed += f
+		warned += wr
 	}
 	passed := len(checks) - failed - warned
 	if warned > 0 {
@@ -1590,6 +1596,37 @@ func runDoctorChecks(checks []doctorCheck, w io.Writer) (failed int) {
 	return failed
 }
 
+// printDoctorRow prints one check's ok/warn/FAIL line, its fix and its use,
+// and says whether it failed or warned.
+func printDoctorRow(w io.Writer, c doctorCheck) (failed, warned int) {
+	switch {
+	case c.Err == nil && c.Detail != "":
+		fmt.Fprintf(w, "ok    %s (%s)\n", c.Name, c.Detail)
+	case c.Err == nil:
+		fmt.Fprintf(w, "ok    %s\n", c.Name)
+	case c.Advisory:
+		// Never counted as failed -- mirrors project_check.go's own
+		// "Advisory failures ... never fail the overall check" rule for
+		// ProjectCheckResult.Advisory -- but counted as warned, so a
+		// summary line never counts a row that printed "warn" as passed.
+		warned = 1
+		fmt.Fprintf(w, "warn  %s: %s\n", c.Name, c.Err)
+		if c.Fix != "" {
+			fmt.Fprintf(w, "      fix: %s\n", c.Fix)
+		}
+	default:
+		failed = 1
+		fmt.Fprintf(w, "FAIL  %s: %s\n", c.Name, c.Err)
+		if c.Fix != "" {
+			fmt.Fprintf(w, "      fix: %s\n", c.Fix)
+		}
+	}
+	if c.Use != "" {
+		fmt.Fprintf(w, "      use: %s\n", c.Use)
+	}
+	return failed, warned
+}
+
 // initChecks builds the environment preflight initMain and
 // onboardMain run before writing anything: Docker reachable, the sandbox image present, and --
 // the colima trap a new Mac engineer actually hits -- dir visible from
@@ -1597,7 +1634,7 @@ func runDoctorChecks(checks []doctorCheck, w io.Writer) (failed int) {
 // tests can stub it instead of needing a live Docker daemon.
 func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir string) []doctorCheck {
 	backend := impl.backend(ctx, dockerBinary).Backend
-	checks := []doctorCheck{doctorCheckDockerReachable(ctx, dockerBinary)}
+	checks := explainDockerUnreachable(ctx, impl.dp, dockerBinary, []doctorCheck{doctorCheckDockerReachable(ctx, dockerBinary)})
 	if image == "" {
 		return append(checks, doctorCheck{
 			Name: "sandbox image",
@@ -1626,7 +1663,7 @@ func runInitDoctorPreflight(dp *deps, dockerBinary, image, dir string) error {
 }
 
 func doctorCheckDockerReachable(ctx context.Context, dockerBinary string) doctorCheck {
-	name := "docker daemon reachable"
+	name := doctorDockerReachableName
 	cmd := exec.CommandContext(ctx, dockerBinary, "version", "--format", "{{.Server.Version}}")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return doctorCheck{Name: name, Err: fmt.Errorf("%s version: %s", dockerBinary, strings.TrimSpace(string(out))),

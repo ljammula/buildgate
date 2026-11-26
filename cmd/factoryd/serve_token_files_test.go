@@ -39,6 +39,12 @@ func serveTokenFilesHome(t *testing.T) (cfgDir, dataDir string) {
 // stops after resolving its tokens, and returns its log and error.
 func serveMainUntilBind(t *testing.T, dataDir string) (string, error) {
 	t.Helper()
+	return serveMainUntilBindWith(t, newTestDeps(t), dataDir)
+}
+
+// serveMainUntilBindWith is serveMainUntilBind with the caller's deps.
+func serveMainUntilBindWith(t *testing.T, dp *deps, dataDir string) (string, error) {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve a test listener: %v", err)
@@ -48,7 +54,7 @@ func serveMainUntilBind(t *testing.T, dataDir string) (string, error) {
 	previousOutput := log.Writer()
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(previousOutput) })
-	err = serveMain(newTestDeps(t), []string{"-data-dir", dataDir, "-addr", listener.Addr().String(), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID())})
+	err = serveMain(dp, []string{"-data-dir", dataDir, "-addr", listener.Addr().String(), "-sandbox-worker-uid", strconv.Itoa(testSandboxWorkerUID())})
 	return logBuf.String(), err
 }
 

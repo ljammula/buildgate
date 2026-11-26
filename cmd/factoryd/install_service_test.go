@@ -649,6 +649,24 @@ func TestBuildServicePlistIncludesUmask(t *testing.T) {
 	}
 }
 
+// TestServicesRunInTheirDataDir proves the worker and serve services run in
+// their data dir, under launchd and systemd alike, never in the directory
+// install-service ran in.
+func TestServicesRunInTheirDataDir(t *testing.T) {
+	worker := workerPlistConfig{BinaryPath: "/usr/local/bin/factoryd", ConfigPath: "/Users/op/.config/factoryd/config.yml", DataDir: "/Users/op/buildgate/data", HomeDir: "/Users/op"}
+	serve := servePlistConfig{BinaryPath: worker.BinaryPath, ConfigPath: worker.ConfigPath, DataDir: worker.DataDir, HomeDir: worker.HomeDir}
+	for name, plist := range map[string][]byte{"worker": buildWorkerPlist(worker), "serve": buildServePlist(serve)} {
+		if !strings.Contains(string(plist), "<key>WorkingDirectory</key>\n\t<string>/Users/op/buildgate/data</string>") {
+			t.Errorf("%s plist has no WorkingDirectory of its data dir:\n%s", name, plist)
+		}
+	}
+	for name, unit := range map[string][]byte{"worker": buildSystemdWorkerUnit(worker, nil), "serve": buildSystemdServeUnit(serve, nil)} {
+		if !strings.Contains(string(unit), "\nWorkingDirectory=-/Users/op/buildgate/data\n") {
+			t.Errorf("%s unit has no WorkingDirectory of its data dir:\n%s", name, unit)
+		}
+	}
+}
+
 // TestInstallServeServicePassesResolvedConfigPathToPlist is the
 // end-to-end regression test for the -config-flag adversarial-review
 // finding above: a plain `factoryd install-service` must produce a

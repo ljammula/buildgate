@@ -79,13 +79,39 @@ func (impl realHost) processUID(pid int) (int, bool) { return hostcontrol.RealPr
 func (impl realHost) serveVerifiedOurs(dataDir, addr string) (int, bool) {
 	return hostcontrol.RealServeVerifiedOurs(impl.dp, dataDir, addr)
 }
+
+// spawnServe and spawnWorker pass the child absolute -config and -data-dir
+// values: it runs in its data dir (hostcontrol.StableWorkDir), not in the
+// directory this command was started in.
 func (impl realHost) spawnServe(w io.Writer, binaryPath, configPath, dataDir, addr string) error {
+	configPath, dataDir, err := spawnPaths(configPath, dataDir)
+	if err != nil {
+		return err
+	}
 	return hostcontrol.RealSpawnServe(impl.dp, w, binaryPath, configPath, dataDir, addr)
+}
+
+// spawnPaths is a spawned worker's or serve's -config and -data-dir, each
+// absolute (absoluteConfigArg, absolutePaths).
+func spawnPaths(configPath, dataDir string) (string, string, error) {
+	configPath, err := absoluteConfigArg(configPath)
+	if err != nil {
+		return "", "", err
+	}
+	err = absolutePaths(&dataDir)
+	return configPath, dataDir, err
 }
 func (impl realHost) pidLooksLikeWorker(pid int) bool {
 	return hostcontrol.RealPidLooksLikeWorker(impl.dp, pid)
 }
 func (impl realHost) spawnWorker(w io.Writer, binaryPath, configPath, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error {
+	configPath, dataDir, err := spawnPaths(configPath, dataDir)
+	if err != nil {
+		return err
+	}
+	if err := absolutePaths(&pidPath); err != nil {
+		return err
+	}
 	return hostcontrol.RealSpawnWorker(impl.dp, w, binaryPath, configPath, dataDir, credentialEnv, pidPath, temporalAddress)
 }
 func (impl realHost) sleep(d time.Duration) { hostcontrol.RealSleep(impl.dp, d) }

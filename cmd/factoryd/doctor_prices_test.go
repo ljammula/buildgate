@@ -27,6 +27,7 @@ func TestDoctorPriceChecksPassesForATableModel(t *testing.T) {
 		Models: map[string]sessionconfig.Model{
 			"luna": {ID: "gpt-5.6-luna", Routes: []string{"local"}},
 		},
+		Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "luna"}},
 	}
 	checks := doctorPriceChecks(settings)
 	if len(checks) != 1 {
@@ -51,6 +52,7 @@ func TestDoctorPriceChecksWarnsForAnUnknownModelID(t *testing.T) {
 		Models: map[string]sessionconfig.Model{
 			"local-model": {ID: "my-local-model", Routes: []string{"local"}},
 		},
+		Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "local-model"}},
 	}
 	checks := doctorPriceChecks(settings)
 	if len(checks) != 1 {
@@ -80,10 +82,35 @@ func TestDoctorPriceChecksWarnsOnStaleAsOf(t *testing.T) {
 		Models: map[string]sessionconfig.Model{
 			"luna": {ID: "gpt-5.6-luna", Routes: []string{"local"}},
 		},
+		Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "luna"}},
 	}
 	checks := doctorPriceChecks(settings)
 	if len(checks) != 1 || checks[0].Err != nil {
 		t.Fatalf("doctorPriceChecks = %+v, want one clean pass for a fresh as_of", checks)
+	}
+}
+
+// TestDoctorPriceChecksListOnlyModelsARoleUses proves a declared model no
+// role names (its model, allowed list or escalation) has no price row,
+// while the ones a role can run on each have one.
+func TestDoctorPriceChecksListOnlyModelsARoleUses(t *testing.T) {
+	settings := sessionconfig.Settings{
+		Models: map[string]sessionconfig.Model{
+			"luna":   {ID: "gpt-5.6-luna", Routes: []string{"local"}},
+			"terra":  {ID: "gpt-5.6-terra", Routes: []string{"local"}},
+			"unused": {ID: "gpt-5.6-sol", Routes: []string{"local"}},
+		},
+		Roles: &sessionconfig.Roles{
+			Execution: &sessionconfig.RoleConfig{Model: "luna", Allowed: []string{"luna", "terra"}},
+		},
+	}
+	checks := doctorPriceChecks(settings)
+	var names []string
+	for _, c := range checks {
+		names = append(names, c.Name)
+	}
+	if len(checks) != 2 || !strings.HasPrefix(names[0], "models.luna: price") || !strings.HasPrefix(names[1], "models.terra: price") {
+		t.Fatalf("price rows = %q, want luna and terra only", names)
 	}
 }
 

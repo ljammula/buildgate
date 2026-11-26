@@ -49,6 +49,9 @@ func workerMain(dp *deps, args []string) error {
 		return err
 	}
 	defer unlock()
+	if err := enterStableWorkDir(dp, dataDir); err != nil {
+		return err
+	}
 	// The same liveness heartbeat worker writes, so status, stop, use,
 	// upgrade and the console see the worker and the requests it runs.
 	heartbeatMode, heartbeatModel := heartbeatRoute(cfg)

@@ -25,6 +25,7 @@ import (
 type fakeDocker struct {
 	backendFn          func(ctx context.Context, dockerBinary string) dockerbackend.Detection
 	colimaBinaryFn     func() string
+	contextFactsFn     func(ctx context.Context, dockerBinary string) dockerContextFacts
 	dockerBinaryFn     func() string
 	imageToolsFn       func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
 	initChecksFn       func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
@@ -59,6 +60,9 @@ func (refusingInstallImages) SweepRunLocal(context.Context, string, func(string)
 }
 
 func (f *fakeDocker) colimaBinary() string { return f.colimaBinaryFn() }
+func (f *fakeDocker) contextFacts(ctx context.Context, dockerBinary string) dockerContextFacts {
+	return f.contextFactsFn(ctx, dockerBinary)
+}
 func (f *fakeDocker) backend(ctx context.Context, dockerBinary string) dockerbackend.Detection {
 	return f.backendFn(ctx, dockerBinary)
 }
@@ -222,6 +226,7 @@ type fakeHost struct {
 	blobAtCommitFn       func(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommandFn     func(target string) *exec.Cmd
 	browserRedirectDirFn func() (string, error)
+	chdirFn              func(dir string) error
 	executableFn         func() (string, error)
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
@@ -258,6 +263,7 @@ func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit 
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
 func (f *fakeHost) browserRedirectDir() (string, error)    { return f.browserRedirectDirFn() }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
+func (f *fakeHost) chdir(dir string) error                 { return f.chdirFn(dir) }
 func (f *fakeHost) baselineCheck(args []string) error      { return f.baselineCheckFn(args) }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	return f.goCommandFn(ctx, dir, env, args...)
@@ -361,7 +367,7 @@ func (f *fakeTemporal) wakeRequest(ctx context.Context, dataDir string, requestI
 func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal) }
 
 // newTestDeps returns the deps of one test: every boundary is a fake whose
-// methods call the real ones, except the eleven below, where a real call
+// methods call the real ones, except those below, where a real call
 // would leave the test process. A test that needs another answer sets the
 // field (fakeHostOf(dp).spawnWorkerFn = ...); a test of a real method calls
 // it on realHost{dp: dp} and its siblings.
@@ -369,6 +375,8 @@ func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal)
 //	docker.memTotal      reads Docker's memory: an error (review and challenger in turn)
 //	docker.initChecks    needs a live Docker daemon: all-pass
 //	docker.docker.colimaBinary  the operator's Colima VM: a binary that does not exist
+//	docker.contextFacts  asks the operator's docker contexts: none listed
+//	host.chdir           changes the test process's directory: recorded, not changed
 //	temporal.ensure      starts containers: no address
 //	temporal.healthy     dials a server: unhealthy
 //	host.spawnWorker     starts a process: refused
@@ -550,6 +558,11 @@ func newTestDeps(t testing.TB) *deps {
 	fakeDockerOf(dp).backendFn = func(context.Context, string) dockerbackend.Detection {
 		return dockerbackend.Detection{Err: errors.New("test docker: no backend is read")}
 	}
+	// The test process stays where it is: a worker or serve run in-process
+	// only records the directory it would move to.
+	fakeHostOf(dp).chdirFn = func(string) error { return nil }
+	// Nor its contexts: none are listed, so doctor's generic fix applies.
+	fakeDockerOf(dp).contextFactsFn = func(context.Context, string) dockerContextFacts { return dockerContextFacts{} }
 	fakeTemporalOf(dp).ensureFn = func(context.Context, io.Writer) string { return "" }
 	fakeTemporalOf(dp).healthyFn = func(context.Context, string) error { return errors.New("stubbed in tests") }
 	fakeHostOf(dp).spawnWorkerFn = func(io.Writer, string, string, string, []string, string, string) error {

@@ -238,10 +238,8 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 		return requestdriver.WorkerConfig{}, "", fmt.Errorf("-registry-proxy requires -sandbox-image")
 	}
 	defaultEgressCABundle(egressCABundle)
-	if *egressCABundle != "" {
-		if err := sandbox.ValidateEgressCABundle(*egressCABundle); err != nil {
-			return requestdriver.WorkerConfig{}, "", fmt.Errorf("-egress-ca-bundle: %w", err)
-		}
+	if err := settleWorkerPaths(egressCABundle, dataDir, &sessionConfigPath, buildAppScript, draftSpecScript, planTicketsScript); err != nil {
+		return requestdriver.WorkerConfig{}, "", err
 	}
 	if *prPollInterval < time.Minute {
 		return requestdriver.WorkerConfig{}, "", fmt.Errorf("-pr-poll-interval must be at least 1m, got %s", prPollInterval.String())
@@ -330,6 +328,18 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	})
 
 	return cfg, *dataDir, nil
+}
+
+// settleWorkerPaths checks -egress-ca-bundle parses, then makes it and
+// every other path the worker keeps absolute: the worker leaves the
+// directory it was started in (enterStableWorkDir).
+func settleWorkerPaths(egressCABundle *string, paths ...*string) error {
+	if *egressCABundle != "" {
+		if err := sandbox.ValidateEgressCABundle(*egressCABundle); err != nil {
+			return fmt.Errorf("-egress-ca-bundle: %w", err)
+		}
+	}
+	return absolutePaths(append(paths, egressCABundle)...)
 }
 
 // workerDriverDeps is the worker's requestdriver.Deps: a build it starts
@@ -506,7 +516,7 @@ func applySessionConfig(flags *flag.FlagSet, configPath string) (sessionconfig.S
 // calls; a boundary method so tests can stub it the same way
 // docker.initChecks is stubbed, instead of needing a live Docker daemon.
 func (impl realDocker) workerChecks(ctx context.Context, in doctorInputs) []doctorCheck {
-	return doctorChecksFor(ctx, in)
+	return explainDockerUnreachable(ctx, impl.dp, in.sandboxDocker, doctorChecksFor(ctx, in))
 }
 
 // runWorkerDoctorPreflight runs the same checks `factoryd doctor` would
