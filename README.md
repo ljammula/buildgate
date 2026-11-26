@@ -114,6 +114,45 @@ OpenShell gateway and meter, a worker and the console, then stops at
 `spec_review` and prints the exact `factoryd approve` command. The Docker VM
 cannot see repositories under `/tmp`.
 
+### A new Mac, start to finish
+
+Sandboxes run in colima's VM; Docker Desktop is refused
+([Known limits](#known-limits)). `make install` uses Homebrew for what is
+missing and starts colima for you.
+
+1. Install [Homebrew](https://brew.sh), then `git` and `make` (Xcode command
+   line tools: `xcode-select --install`) and clone:
+   `git clone https://github.com/ljammula/buildgate.git && cd buildgate`.
+2. `make install`. With Homebrew it installs what is missing of `go`,
+   `python`, `git`, `gh`, `node` (optional, console only), `docker`,
+   `docker-buildx`, `colima` and `terminal-notifier`; a machine that already
+   has a docker CLI keeps its own daemon. It starts colima (`colima start
+   --memory 4`, or `colima start` for an existing VM), builds the images,
+   installs `factoryd`, links it into `~/.local/bin`, adds that directory to
+   `~/.zshrc` and runs `gh auth login`, `factoryd setup` and `factoryd doctor
+   -fix`. Whatever it could not finish is the numbered "Left for you" list
+   printed last. Open a new terminal afterwards.
+3. Narrow colima's mounts: it shares all of `$HOME` read-write by default.
+   Edit `~/.colima/default/colima.yaml` to share `~/buildgate` read-write and
+   your repositories (for example `~/code`) read-only, keep `mountType` at
+   `sshfs` or `virtiofs` (not `9p`), then `colima restart`
+   ([USAGE.md § Data directory and colima](USAGE.md#quick-start-existing-repo)).
+   A repository must live under `$HOME` and inside a shared folder: the VM
+   cannot see `/tmp`.
+4. A model route, if `make install` could not ask (no terminal) or you want
+   another: `factoryd setup` (`-route chatgpt-codex|copilot|anthropic|openai`;
+   [Model routes](USAGE_REFERENCE.md#model-routes)).
+5. `factoryd doctor -fix` until every row is ok (it starts Temporal, the
+   OpenShell gateway and meter, and builds a missing image). `factoryd doctor
+   -target-repo ~/code/your-repo` also checks the repository.
+6. `factoryd quickstart ~/code/your-repo "Add X to Y"`: the repository needs a
+   committed `AGENTS.md` ([above](#install)). It stops at `spec_review` and
+   prints the `factoryd approve` command.
+7. To keep the worker and console running as launchd services:
+   `factoryd install-service`.
+
+Start over with `factoryd uninstall -purge`.
+
 ### A new Linux machine, start to finish
 
 Ubuntu 24.04 is the Linux host this is written for; it is not live-proven

@@ -234,22 +234,19 @@ then merge (USAGE_REFERENCE has the rule). Check its base first. Review each PR 
 shows ticket N-1's changes (it shares ticket N-1's original commit), but
 merging it lands only ticket N's own change.
 
-## The 5 flags that matter
+## What you set once
 
-Everything else has a working default. These 5 don't:
+`submit` and `quickstart` take everything else from these three places, so no
+per-request flag is needed for them:
 
-| Flag | What it's for | Where it belongs |
+| What | Where | How |
 |---|---|---|
-| `-verify-command` | Canonical pass/fail check for a run | `.factory.yml`'s `verify_command` — commit it once per repo |
-| `routes:`/`models:`/`roles:` | The model route; nothing builds without it | Session config, one value for the whole machine — [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-routes) |
-| `-spec` (+ `-ticket`) | Which ticket to build — **`-spec`'s content, not `-ticket-file`'s, is what `build_app.py` builds from** | Stays per-invocation (`submit`/`worker` thread it for you) |
-| `-data-dir` | Where run/queue state lives; wrong value silently halts on a colima mount-visibility check | Session config's `data_dir` — set once |
-| `-preflight-profile` | Strict default refuses a run on a repo missing `spec/spec.md`/`spec/contract.md`/`ARCHITECTURE.md` | `.factory.yml`'s `preflight_profile: brownfield` — `factoryd onboard -write-factory-yml` writes it |
+| The repo's checks: `verify_command`, `required_binaries`, `preflight_profile: brownfield`, and a `sandbox:` block when the build needs `npm ci` or similar | `.factory.yml` at the repo root, committed | `factoryd onboard -write-factory-yml` drafts it ([`.factory.yml`](#factoryyml--commit-per-repo-defaults-once), [reference](USAGE_REFERENCE.md#factoryyml-reference)) |
+| The model route, model and coding agent, for the whole machine | Session config (`routes:`/`models:`/`roles:`, `data_dir`) | `factoryd setup`, or the prompts of `quickstart` ([Model routes](USAGE_REFERENCE.md#model-routes)) |
+| Which session config (profile) a command reads | `-config <profile>` on one command, or the active profile | `factoryd use <profile>` lists the profiles and makes one active |
 
-`factoryd quickstart` prompts for the model-route/data-dir pieces and
-defaults `-preflight-profile` to `brownfield` for you. To pick a
-different model per request (once the route above is set up), see
-"Per-request model choice" below.
+A flag on a command always wins over these. To pick a different model per
+request, see "Per-request model choice" below.
 
 ## Quick start (existing repo)
 
@@ -312,8 +309,7 @@ installs missing prerequisites with Homebrew on macOS (on Linux it installs
 nothing and names each missing tool, Docker from Docker's own apt
 repository), pulls the matching worker,
 meter and registry-proxy images, and runs `factoryd doctor -fix`. It needs
-`bash`, `curl`, `make`, and `git` (or, on macOS, Homebrew to install Git). GHCR packages
-must be public for anonymous pulls.
+`bash`, `curl`, `make`, and `git` (or, on macOS, Homebrew to install Git).
 
 For development, clone the repository and build `factoryd` plus its images
 from `main`:
@@ -340,57 +336,15 @@ worker image is out of date. For matching release code and images, check out
 automatically. GHCR image references are pinned by digest in every session
 profile by default. `FACTORYD_CONFIG` can target specific profiles, and
 existing project-specific sandbox images are retained.
-GitHub creates each package as private on its first publish. After the first
-tagged release, open each package's settings and change visibility to Public,
-then rerun the release workflow to complete its anonymous-pull check. GitHub
-does not allow a public package to be made private again.
-
 `make install` -> `$(go env GOPATH)/bin/factoryd`, and that directory onto
 `PATH` in your shell profile when a new shell would not find `factoryd`
 (open a new terminal). A stale build earlier on
 `PATH` silently shadows a fresh one — `which -a factoryd` after `make
 install` to confirm which one resolves.
 
-On a network that intercepts TLS (a corporate proxy that re-signs HTTPS),
-local image builds and the console's `npm ci` need the proxy's CA. GHCR image
-installs skip the image builds, but still run the console build when Node is
-available. Without the CA, `npm ci` cannot verify the registry and, under
-some Node versions, fails with `Exit handler never called!` instead of a
-certificate error. `make install` finds the CA:
-
-```text
-make install
-  |
-  BUILD_CA_BUNDLE given? -- yes --> use that file
-  | no
-  registry.npmjs.org signed by a public root? -- yes --> no bundle
-  | no
-  that root trusted by this machine? -- no --> warning: pass BUILD_CA_BUNDLE yourself
-  | yes
-  write it and the public roots to ~/.config/factoryd/build-ca.pem, use that
-```
-
-A public root is one in the Mozilla root bundle compiled into `factoryd`, so
-the lookup is the same on macOS and Linux; "trusted by this machine" is the
-operating system's own trust store (the keychain on macOS, the system CA
-bundle on Linux).
-
-| Consumer | How it reads the bundle |
-|---|---|
-| Local image builds | A BuildKit secret, mounted only for the dependency downloads and never stored in an image |
-| GHCR image pulls | The selected release's published images; their version tags are resolved to registry digests before being written to config |
-| pip (project images) | In place of its own roots, so a bundle you pass yourself must include any public roots the proxy does not cover |
-| Console `npm ci` | `NODE_EXTRA_CA_CERTS`, beside Node's own roots |
-
-`factoryd doctor` has the same lookup as its `build CA bundle` row:
-
-| Row | Meaning |
-|---|---|
-| `ok ... (not intercepted, none needed)` | No bundle is used |
-| `ok ... (intercepted by <CA>; make install uses this bundle)` with `use: BUILD_CA_BUNDLE=...` | The bundle is written |
-| `warn ... signed by "<CA>"` | Intercepted, bundle not written yet: `make install` or `doctor -fix` writes it |
-| `warn ... a CA this machine does not trust` | The proxy's CA is not in the machine's trust store: get it as a PEM file and run `BUILD_CA_BUNDLE=/path/to/ca.pem make install` |
-| no row | The registry is unreachable |
+On a network that intercepts TLS, `make install` finds the proxy's CA itself;
+[USAGE_REFERENCE.md § Install: release images and the build CA](USAGE_REFERENCE.md#install-release-images-and-the-build-ca)
+has the lookup and the `factoryd doctor` row.
 
 **Upgrade.** `factoryd upgrade [-to <tag|ref>] [-source <checkout>] [-yes]
 [-wait]` takes this machine to the newest release tag (or `-to`) in one
