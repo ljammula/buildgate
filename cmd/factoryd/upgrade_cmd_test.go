@@ -505,12 +505,12 @@ func TestUpgradeKickstartsLaunchdServicesInsteadOfSpawning(t *testing.T) {
 	}
 }
 
-func TestUpgradeStopsNothingWhenAWorkerCouldNotReachItsRouteFromThisShell(t *testing.T) {
+func TestUpgradeStopsNothingWhenAWorkerCouldNotReadItsRouteKey(t *testing.T) {
 	dp := newTestDeps(t)
 	h := newUpgradeHarness(dp, t)
 	queuePID, servePID := h.startDefaultProcesses()
 	writeFreshWorkerHeartbeat(t, h.profiles.roots["default"], queuePID, "localhost:7233", 3)
-	t.Setenv("PROFILE_TEST_KEY", "")
+	setTestRouteKey(t, "PROFILE_TEST_KEY", "")
 	out, err := h.run(dp, "-yes")
 	if err == nil || !strings.Contains(err.Error(), "PROFILE_TEST_KEY") {
 		t.Fatalf("upgrade = %v, want a refusal naming PROFILE_TEST_KEY\n%s", err, out)

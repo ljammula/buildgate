@@ -8,13 +8,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"buildgate/internal/meter"
 	"buildgate/internal/modelrole"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sessionconfig"
 )
 
 // copilotModelsFailureNextStep keeps Doctor's advice tied to the stage
@@ -255,29 +255,14 @@ func doctorListModels(ctx context.Context, w io.Writer, in doctorInputs) error {
 		printURL := redactUserinfo(listURL)
 
 		// Sent only when this route's own credential is actually configured
-		// (resolveRouteCredentials(sel.Route) -- the same resolver a real
-		// launch uses, reading routes.<name>.credential_env, not a
-		// hard-coded ANTHROPIC_API_KEY: a route naming a different env var
-		// must never have this listing call fall back to Anthropic's,
-		// found via review) AND the selected route's own
-		// allow_no_credential is not set: that setting means a real run
-		// would send NO credential at all (quickstart's own -route openai
-		// "no credential" path even scrubs ANTHROPIC_API_KEY from the
-		// daemon's environment), so this listing call must not send one
-		// either just because the operator's shell happens to still have
-		// it set.
-		var headerName, headerValue string
-		credentialPresent := false
-		if creds, credErr := resolveRouteCredentials(sel.Route); credErr == nil && creds.apiKey.Configured() && !in.relayAllowNoCredential {
-			credentialPresent = true
-			headerName = in.relayCredentialHeader
-			if headerName == "" {
-				headerName = meter.CredentialHeaderXAPIKey
-			}
-			// The resolver read sel.Route.CredentialEnv, so it names the
-			// variable that holds the key.
-			headerValue = meter.CredentialHeaderValue(headerName, os.Getenv(sel.Route.CredentialEnv))
-		}
+		// (resolveStaticRouteKey(sel.Route) -- the same resolver a real
+		// launch uses, reading routes.<name>.credential_file and nothing
+		// else: no other route's key, no environment variable) AND the
+		// selected route's own allow_no_credential is not set: that setting
+		// means a real run would send NO credential at all, so this listing
+		// call must not send one either.
+		headerName, headerValue := doctorListingCredentialHeader(sel.Route, in.relayCredentialHeader, in.relayAllowNoCredential)
+		credentialPresent := headerName != ""
 
 		// A round-3 review found this must apply exactly the scheme/plaintext-vs-
 		// credential rules a real relay launch would (RouteSpec.Validate,
@@ -355,4 +340,22 @@ func doctorValidateCopilotUpstream(effectiveUpstream string, allowPlaintextUpstr
 		return fmt.Errorf("the route's upstream %s is not valid for github-copilot: %w", redactUserinfo(effectiveUpstream), err)
 	}
 	return nil
+}
+
+// doctorListingCredentialHeader is the credential header a model listing over
+// route sends: its key from its credential_file (resolveStaticRouteKey) in
+// header (x-api-key when empty), or none ("", "") for a route that is not
+// static, has allow_no_credential set, or has no key that resolves.
+func doctorListingCredentialHeader(route sessionconfig.Route, header string, allowNoCredential bool) (name, value string) {
+	if route.EffectiveCredentialMode() != meter.CredentialModeStatic || allowNoCredential {
+		return "", ""
+	}
+	key, err := resolveStaticRouteKey(route)
+	if err != nil || key == "" {
+		return "", ""
+	}
+	if header == "" {
+		header = meter.CredentialHeaderXAPIKey
+	}
+	return header, meter.CredentialHeaderValue(header, key)
 }

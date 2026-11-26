@@ -110,10 +110,10 @@ func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer
 		fmt.Fprintln(w, "restart: no worker or console is running")
 		return nil
 	}
-	// A detached worker is started again with this process's credential
-	// variables: one whose route reads a variable this shell does not set
-	// would exit on its start check, and the next restart would see no
-	// worker to start. Nothing is stopped then.
+	// A worker whose route credential cannot be read (a credential_file
+	// that is missing or not mode 0600, an expired login) would exit on its
+	// start check, and the next restart would see no worker to start.
+	// Nothing is stopped then.
 	if err := refuseCredentialGaps(running); err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func doctorCheckWorkerBinary(dp *deps, dataDir string, now time.Time) (check doc
 }
 
 // workerCredentialGap names the route credentials a worker started with
-// configPath's profile from this process could not resolve: one
+// configPath's profile could not resolve: one
 // "roles.<role>: <reasons>" per configured role no route can serve, joined
 // with "; ". "" when every role resolves, no model route is needed, or the
 // config does not load (the worker's own start reports that).
@@ -280,7 +280,7 @@ func refuseCredentialGaps(running []upgradeProcess) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	return fmt.Errorf("nothing was stopped: a worker started from this shell could not reach its model route, so it would exit on start: %s; set what it names (export the variable, or refresh the credential file, e.g. codex login) and run this again", strings.Join(lines, "; "))
+	return fmt.Errorf("nothing was stopped: a restarted worker could not reach its model route, so it would exit on start: %s; fix what it names (the route's credential_file, or refresh the login, e.g. codex login) and run this again", strings.Join(lines, "; "))
 }
 
 // restartSayWorkerless prints one line for each data dir with a running

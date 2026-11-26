@@ -21,7 +21,7 @@ type profileFixture struct {
 	roots map[string]string // profile name -> data dir
 }
 
-const profileRoutesYAML = "roles:\n  execution:\n    model: m\n    harness: pifork\nmodels:\n  m:\n    id: gpt-x\n    routes: [r]\nroutes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_env: PROFILE_TEST_KEY\n"
+var profileRoutesYAML = "roles:\n  execution:\n    model: m\n    harness: pifork\nmodels:\n  m:\n    id: gpt-x\n    routes: [r]\nroutes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_file: " + testRouteKeyPath("PROFILE_TEST_KEY") + "\n"
 
 // newProfileFixture writes one profile per name (config.yml for "default")
 // under a fresh temp XDG dir, each with a distinct data dir, and clears
@@ -32,7 +32,7 @@ func newProfileFixture(t *testing.T, names ...string) *profileFixture {
 	t.Setenv(sessionconfig.ProfileEnv, "")
 	// The key profileRoutesYAML's route reads: a worker started from this
 	// test process resolves it (restart and upgrade check that).
-	t.Setenv("PROFILE_TEST_KEY", "test-key")
+	setTestRouteKey(t, "PROFILE_TEST_KEY", "test-key")
 	f := &profileFixture{dir: sessionconfig.ConfigDir(), roots: map[string]string{}}
 	root := t.TempDir()
 	for _, name := range names {

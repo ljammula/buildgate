@@ -26,6 +26,7 @@ var quickstartLegacyRouteKeys = []string{
 	"relay_worker_model_id",
 	"relay_worker_model_extra_json",
 	"model_aliases",
+	"credential_env",
 }
 
 // quickstartBuildWriteReload drives quickstartBuildConfig non-
@@ -37,17 +38,23 @@ var quickstartLegacyRouteKeys = []string{
 func quickstartBuildWriteReload(dp *deps, t *testing.T, opts *quickstartOptions) (*sessionconfig.Config, sessionconfig.Settings, string) {
 	t.Helper()
 	var out bytes.Buffer
+	configPath := filepath.Join(t.TempDir(), "config.yml")
+	if opts.credentialConfigPath == "" {
+		opts.credentialConfigPath = configPath
+	}
 	cfg, _, err := quickstartBuildConfig(dp, opts, newQuickstartPrompter(strings.NewReader("")), &out, t.TempDir())
 	if err != nil {
 		t.Fatalf("quickstartBuildConfig: %v", err)
 	}
-	configPath := filepath.Join(t.TempDir(), "config.yml")
 	if err := quickstartWriteConfig(configPath, cfg); err != nil {
 		t.Fatalf("quickstartWriteConfig: %v", err)
 	}
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read written config: %v", err)
+	}
+	if opts.Credential != "" && strings.Contains(string(raw), opts.Credential) {
+		t.Errorf("written config holds the -credential value:\n%s", raw)
 	}
 	for _, key := range quickstartLegacyRouteKeys {
 		if strings.Contains(string(raw), key+":") {

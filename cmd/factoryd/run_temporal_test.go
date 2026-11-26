@@ -164,10 +164,10 @@ func TestBuildRunWorkflowInputCarriesGateCommandsForAnyGateID(t *testing.T) {
 // the refusal comes from modelrole.CheckRouteBinding itself, not merely
 // from this test's own stub.
 func TestInProcessRoutesWorkerRefusesARoutelessPolicy(t *testing.T) {
-	t.Setenv("IPRW_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "IPRW_TEST_KEY", "sk-test")
 	s := sessionconfig.DefaultSettings()
 	s.Routes = map[string]sessionconfig.Route{
-		"primary": {CredentialMode: "static", Upstream: "https://primary.example.invalid", CredentialEnv: "IPRW_TEST_KEY"},
+		"primary": {CredentialMode: "static", Upstream: "https://primary.example.invalid", CredentialFile: testRouteKeyPath("IPRW_TEST_KEY")},
 	}
 	s.Models = map[string]sessionconfig.Model{
 		"m": {ID: "test-model", Routes: []string{"primary"}},

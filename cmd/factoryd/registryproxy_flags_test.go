@@ -77,9 +77,10 @@ func TestRegistryProxyComposesWithRelay(t *testing.T) {
 		"-registry-proxy",
 		"-registry-proxy-image", "registry.example/registry-proxy@sha256:"+strings.Repeat("c", 64),
 	)
-	cmd.Env = append(os.Environ(), "ANTHROPIC_API_KEY=test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "test-key")
+	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, "sandbox_docker: "+filepath.Join(t.TempDir(), "docker-does-not-exist")+"\n"+
-		"routes:\n  anthropic:\n    upstream: https://api.anthropic.com\n    credential_env: ANTHROPIC_API_KEY\n"+
+		"routes:\n  anthropic:\n    upstream: https://api.anthropic.com\n    credential_file: "+testRouteKeyPath("ANTHROPIC_API_KEY")+"\n"+
 		"models:\n  m:\n    id: claude\n    routes: [anthropic]\n"+
 		"roles:\n  execution:\n    model: m\n")...)
 	out, err := cmd.CombinedOutput()

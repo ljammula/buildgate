@@ -46,8 +46,7 @@ var version = buildversion.Stamped()
 // the bearer token `serve`'s POST /runs/{id}/override endpoint requires —
 // see api.WithOverrideToken's own doc comment for why that endpoint is
 // disabled by default. An env var, not a flag, so it never appears in a
-// process listing (e.g. `ps`) -- the same reasoning
-// notify.DiscordWebhookURLsEnvironmentVariable's own doc comment gives.
+// process listing (e.g. `ps`).
 // Its literal value is duplicated (not imported) in internal/runner's own
 // subprocessEnvExclude — see that var's doc comment for why a
 // build/verify subprocess must never inherit this credential even when

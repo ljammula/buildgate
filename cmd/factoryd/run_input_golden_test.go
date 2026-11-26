@@ -32,8 +32,8 @@ func runInputGoldenConfig(t *testing.T) string {
 	return "sandbox_docker: " + filepath.Join(testdataDir(t), "fake_docker.sh") + "\n" +
 		"sandbox_user: \"1234:5678\"\n" +
 		"routes:\n" +
-		"  golden-route:\n    credential_mode: static\n    upstream: https://golden.example.invalid\n    credential_env: RUN_INPUT_GOLDEN_KEY\n" +
-		"  review-route:\n    credential_mode: static\n    upstream: https://review.example.invalid\n    credential_env: RUN_INPUT_GOLDEN_KEY\n" +
+		"  golden-route:\n    credential_mode: static\n    upstream: https://golden.example.invalid\n    credential_file: " + testRouteKeyPath("RUN_INPUT_GOLDEN_KEY") + "\n" +
+		"  review-route:\n    credential_mode: static\n    upstream: https://review.example.invalid\n    credential_file: " + testRouteKeyPath("RUN_INPUT_GOLDEN_KEY") + "\n" +
 		"models:\n" +
 		"  builder:\n    id: builder-model-id\n    api: openai-completions\n    routes: [golden-route]\n    reasoning: true\n" +
 		"  reviewer:\n    id: reviewer-model-id\n    api: openai-responses\n    routes: [review-route]\n    reasoning: true\n" +
@@ -232,7 +232,8 @@ func runInputGoldenRunWith(t *testing.T, runID string, prepare func(workspace, i
 	dataDir, inputs := t.TempDir(), t.TempDir()
 	flags, own := prepare(workspace, inputs, runInputGoldenFlags(t, workspace, dataDir, inputs, runID, address))
 	cmd := factorydCommand(t, flags...)
-	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "RUN_INPUT_GOLDEN_KEY=sk-test", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	setTestRouteKey(t, "RUN_INPUT_GOLDEN_KEY", "sk-test")
+	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t))...)
 	out, _ := cmd.CombinedOutput()
 	t.Logf("factoryd output:\n%s", out)

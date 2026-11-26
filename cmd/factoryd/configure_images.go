@@ -5,12 +5,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"buildgate/internal/sanitize"
 	"buildgate/internal/sessionconfig"
 )
 
@@ -79,16 +81,56 @@ func configureImagesMain(args []string) error {
 			}
 		}
 	}
+	selected := ""
+	if !*f.allProfiles {
+		selected = paths[0]
+	} else if active, found := resolveEffectiveConfigPath(""); found {
+		selected = active
+	}
+	return configureImagesPaths(paths, selected, f, os.Stdout)
+}
+
+// configureImagesPaths runs configureImagesAt on each of paths. A config
+// whose retired route key cannot be converted is left as it was and named
+// in one line on w, and the others still get their images; the command then
+// fails only when that config is selected (the -config one, or the active
+// profile under -all-profiles), with that config's error.
+func configureImagesPaths(paths []string, selected string, f configureImagesFlags, w io.Writer) error {
+	var selectedErr error
 	for _, path := range paths {
-		if err := configureImagesAt(path, f); err != nil {
+		err := configureImagesAt(path, f, w)
+		if errors.Is(err, errConfigNotConverted) {
+			fmt.Fprintln(w, sanitize.Line(err.Error()))
+			if samePath(path, selected) {
+				selectedErr = err
+			}
+			continue
+		}
+		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return selectedErr
+}
+
+// samePath reports whether a and b name one file, comparing their absolute
+// forms; false when either is empty.
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && absA == absB
 }
 
 // configureImagesAt writes f's image refs into the session config at path.
-func configureImagesAt(path string, f configureImagesFlags) error {
+// A config whose retired route key cannot be converted is left as it was:
+// the error wraps errConfigNotConverted.
+func configureImagesAt(path string, f configureImagesFlags, w io.Writer) error {
+	if err := convertCredentialEnvRoutes(path, w); err != nil {
+		return err
+	}
 	cfg, err := sessionconfig.Load(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -100,7 +142,7 @@ func configureImagesAt(path string, f configureImagesFlags) error {
 	if *f.sandboxImage != "" {
 		notice, keep := nonWorkerSandboxImageAdvice(cfg)
 		if notice != "" {
-			fmt.Println(notice)
+			fmt.Fprintln(w, notice)
 		}
 		if !keep {
 			cfg.SandboxImage = f.sandboxImage
@@ -137,10 +179,18 @@ func configureImagesAt(path string, f configureImagesFlags) error {
 	// it appears exactly once regardless of how many times this command
 	// runs against the same path.
 	header := "# factoryd session config. Each key mirrors a `factoryd worker` flag; edit freely -- see `factoryd init-config`'s own scaffold and USAGE.md for the full key reference.\n"
-	if err := os.WriteFile(path, append([]byte(header), data...), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	// Atomic (a reader never sees a part-written config), keeping the
+	// config's own mode; a new config is 0600. A config writeFileAtomic
+	// refuses (a symlink) is left as it was and named, like one whose route
+	// key cannot be converted.
+	perm := os.FileMode(0o600)
+	if info, err := os.Lstat(path); err == nil {
+		perm = info.Mode().Perm()
 	}
-	fmt.Printf("updated %s\n", path)
+	if err := writeFileAtomic(path, append([]byte(header), data...), perm); err != nil {
+		return fmt.Errorf("profile %s (%s): %w: write the config: %v", configProfileName(path), path, errConfigNotConverted, err)
+	}
+	fmt.Fprintf(w, "updated %s\n", path)
 	return nil
 }
 

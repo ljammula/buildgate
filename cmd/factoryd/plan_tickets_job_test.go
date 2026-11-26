@@ -103,9 +103,9 @@ func TestPlanTicketsArgsIncludesThinkingWhenGiven(t *testing.T) {
 // TestResolveSpecDraftRelaySpecAppliesRoleOverride for the shared relay
 // helper plan drafting calls directly.
 func TestResolveRequestJobRelaySpecAppliesRoleOverride(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "test-key")
 	cfg := requestdriver.WorkerConfig{Settings: sessionconfig.DefaultSettings()}
-	route := sessionconfig.Route{Upstream: "https://api.anthropic.com", AllowedPathPrefix: "/v1/messages", CredentialHeader: meter.CredentialHeaderXAPIKey, CredentialEnv: "ANTHROPIC_API_KEY"}
+	route := sessionconfig.Route{Upstream: "https://api.anthropic.com", AllowedPathPrefix: "/v1/messages", CredentialHeader: meter.CredentialHeaderXAPIKey, CredentialFile: testRouteKeyPath("ANTHROPIC_API_KEY")}
 	sel := modelrole.Selection{
 		RouteName: "primary",
 		Route:     route,

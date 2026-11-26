@@ -63,10 +63,10 @@ func TestAPIStartStarterRunsInRoutesModeWithNoModelFields(t *testing.T) {
 	path := isolateSessionConfig(t)
 	writeSessionConfig(t, path, "sandbox_docker: "+dockerBinary+"\n"+
 		"registry_proxy: false\n"+
-		"routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_env: API_START_ROUTES_TEST_KEY\n"+
+		"routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_file: "+testRouteKeyPath("API_START_ROUTES_TEST_KEY")+"\n"+
 		"models:\n  luna:\n    id: gpt-5.6-luna\n    routes: [litellm]\n"+
 		"roles:\n  execution:\n    model: luna\n")
-	t.Setenv("API_START_ROUTES_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "API_START_ROUTES_TEST_KEY", "sk-test")
 
 	workspace := newFixtureRepo(t)
 	spec := filepath.Join(t.TempDir(), "spec.md")

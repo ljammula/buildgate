@@ -171,6 +171,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	if err != nil {
 		return requestdriver.WorkerConfig{}, "", err
 	}
+	dp.useWebhookFiles(settings, os.Getenv)
 	// codeReviewPolicyExplicit is checked after applySessionConfig:
 	// applySessionConfig's own strFlag helper calls flags.Set("code-review-policy", ...) when the
 	// session config supplies a value and the operator didn't already

@@ -176,7 +176,7 @@ func TestDoctorListModelsCopilotAcceptsResponsesOnlyModelAndLabelsEndpoints(t *t
 // each id, against an httptest server standing in for the upstream --
 // never a real model host.
 func TestDoctorListModelsOpenAIListsFromUpstream(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "")
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -216,7 +216,7 @@ func TestDoctorListModelsOpenAIListsFromUpstream(t *testing.T) {
 // bare probe that could see a different (or no) catalog than a real run
 // does.
 func TestDoctorListModelsOpenAISendsConfiguredCredentialHeader(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "sk-test-key")
 	var gotHeader string
 	// A real credential requires https:// -- sandbox.RoutePolicy.
 	// ValidateUpstreamScheme (the same round-3 review plaintext-upstream
@@ -235,7 +235,7 @@ func TestDoctorListModelsOpenAISendsConfiguredCredentialHeader(t *testing.T) {
 
 	var out bytes.Buffer
 	basePath := "/v1"
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialHeader: "Authorization", CredentialEnv: "ANTHROPIC_API_KEY"}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialHeader: "Authorization", CredentialFile: testRouteKeyPath("ANTHROPIC_API_KEY")}, "model-a")
 	in.egressCABundle = caBundle
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
@@ -245,19 +245,19 @@ func TestDoctorListModelsOpenAISendsConfiguredCredentialHeader(t *testing.T) {
 	}
 }
 
-// TestDoctorListModelsUsesSelectedRouteCredentialEnv is the regression
+// TestDoctorListModelsUsesSelectedRouteCredentialFile is the regression
 // test for a real finding: doctorListModels' own static-mode branch read
 // a hard-coded ANTHROPIC_API_KEY regardless of the resolved route's own
-// credential_env, so a route naming a different variable (e.g. a
+// key source, so a route naming a different key (e.g. a
 // non-Anthropic OpenAI-compatible endpoint keyed on its own API key) had
 // that other key silently ignored and, worse, could leak whatever
 // ANTHROPIC_API_KEY happened to be set to in the operator's shell to an
 // unrelated host. ANTHROPIC_API_KEY is deliberately set to a DIFFERENT
-// value here than the route's own OTHER_KEY, so the assertion fails if
+// value here than the route's own credential_file, so the assertion fails if
 // the Anthropic one is ever the one actually sent.
-func TestDoctorListModelsUsesSelectedRouteCredentialEnv(t *testing.T) {
+func TestDoctorListModelsUsesSelectedRouteCredentialFile(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-wrong-anthropic-key")
-	t.Setenv("OTHER_KEY", "sk-other-key")
+	setTestRouteKey(t, "OTHER_KEY", "sk-other-key")
 	var gotHeader string
 	// https:// (not a plaintext + AllowPlaintextUpstream combination):
 	// resolveRouteCredentials' own CredentialSafeForUpstream check
@@ -275,7 +275,7 @@ func TestDoctorListModelsUsesSelectedRouteCredentialEnv(t *testing.T) {
 
 	var out bytes.Buffer
 	basePath := "/v1"
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialEnv: "OTHER_KEY"}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialFile: testRouteKeyPath("OTHER_KEY")}, "model-a")
 	in.egressCABundle = caBundle
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
@@ -295,7 +295,7 @@ func TestDoctorListModelsUsesSelectedRouteCredentialEnv(t *testing.T) {
 // modelrole.ErrNoRouteAvailable, not a printed "Not listing models"
 // message.
 func TestDoctorListModelsOpenAIRefusesCredentialOverPlaintext(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "sk-test-key")
 	requestReached := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestReached = true
@@ -306,7 +306,7 @@ func TestDoctorListModelsOpenAIRefusesCredentialOverPlaintext(t *testing.T) {
 
 	var out bytes.Buffer
 	basePath := "/v1"
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, CredentialFile: testRouteKeyPath("ANTHROPIC_API_KEY")}, "model-a")
 	if err := doctorListModels(context.Background(), &out, in); !errors.Is(err, modelrole.ErrNoRouteAvailable) {
 		t.Fatalf("doctorListModels = %v, want modelrole.ErrNoRouteAvailable (a plaintext upstream with no allow_plaintext_upstream opt-in is unusable)", err)
 	}
@@ -327,7 +327,7 @@ func TestDoctorListModelsOpenAIRefusesCredentialOverPlaintext(t *testing.T) {
 // doctorListModels' own later "Not listing models" diagnostic -- either
 // way, the listing request must never reach the upstream.
 func TestDoctorListModelsOpenAIRefusesCredentialOverPlaintextEvenWhenAllowed(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "sk-test-key")
 	requestReached := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestReached = true
@@ -336,7 +336,7 @@ func TestDoctorListModelsOpenAIRefusesCredentialOverPlaintextEvenWhenAllowed(t *
 
 	var out bytes.Buffer
 	basePath := "/v1"
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, AllowPlaintextUpstream: true}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, AllowPlaintextUpstream: true, CredentialFile: testRouteKeyPath("ANTHROPIC_API_KEY")}, "model-a")
 	if err := doctorListModels(context.Background(), &out, in); !errors.Is(err, modelrole.ErrNoRouteAvailable) {
 		t.Fatalf("doctorListModels = %v, want modelrole.ErrNoRouteAvailable (a real credential over a plaintext upstream makes the route unusable)", err)
 	}
@@ -353,7 +353,7 @@ func TestDoctorListModelsOpenAIRefusesCredentialOverPlaintextEvenWhenAllowed(t *
 // match, even though the operator's own shell still has
 // ANTHROPIC_API_KEY set.
 func TestDoctorListModelsOpenAINeverSendsCredentialWhenAllowNoCredentialSet(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "sk-test-key")
 	var gotHeader string
 	sawHeader := false
 	// An https:// server, not a plaintext one with AllowPlaintextUpstream:
@@ -376,7 +376,7 @@ func TestDoctorListModelsOpenAINeverSendsCredentialWhenAllowNoCredentialSet(t *t
 
 	var out bytes.Buffer
 	basePath := "/v1"
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, AllowNoCredential: true}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: server.URL, WorkerBasePath: &basePath, AllowNoCredential: true, CredentialFile: testRouteKeyPath("ANTHROPIC_API_KEY")}, "model-a")
 	in.egressCABundle = caBundle
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
@@ -435,9 +435,9 @@ func TestRedactUserinfoStripsCredentials(t *testing.T) {
 // unusable (sandbox.RoutePolicy.Validate's own required-upstream check),
 // never a silent fallback to Anthropic.
 func TestDoctorListModelsExplicitAnthropicUpstreamAlsoSkipsListing(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "sk-test-key")
 	var out bytes.Buffer
-	in := doctorInputsForRoute(sessionconfig.Route{Upstream: "https://api.anthropic.com", CredentialEnv: "ANTHROPIC_API_KEY"}, "model-a")
+	in := doctorInputsForRoute(sessionconfig.Route{Upstream: "https://api.anthropic.com", CredentialFile: testRouteKeyPath("ANTHROPIC_API_KEY")}, "model-a")
 	if err := doctorListModels(context.Background(), &out, in); err != nil {
 		t.Fatalf("doctorListModels: %v", err)
 	}

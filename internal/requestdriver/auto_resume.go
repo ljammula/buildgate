@@ -84,7 +84,7 @@ func notifyAutoResumed(dp Deps, dataDir, id string, now time.Time) error {
 		return err
 	}
 	if sent != nil {
-		notify.DispatchExternal(dataDir, *sent)
+		notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), *sent)
 	}
 	return nil
 }

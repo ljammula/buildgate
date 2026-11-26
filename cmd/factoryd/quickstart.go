@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -242,9 +243,16 @@ type quickstartOptions struct {
 	ContextWindowExplicit    bool
 	Credential               string
 	CredentialProvided       bool
-	EgressCABundle           string
-	PollInterval             time.Duration
-	PollTimeout              time.Duration
+	// credentialConfigPath is the session config the key of a static route
+	// this run writes is kept beside (routeCredentialFilePath), set by
+	// quickstartEnsureConfig once the config path is resolved.
+	credentialConfigPath string
+	// pendingRouteKeys are the key files quickstartWriteRouteKey decided,
+	// written by quickstartWritePendingRouteKeys after the config.
+	pendingRouteKeys []routeKeyWrite
+	EgressCABundle   string
+	PollInterval     time.Duration
+	PollTimeout      time.Duration
 	// NoServe skips
 	// quickstartEnsureServe entirely (no reuse probe, no spawned/kickstarted
 	// serve), leaving quickstart exactly as before -- a worker
@@ -333,7 +341,7 @@ func newQuickstartFlags() (flags *flag.FlagSet, f quickstartFlags) {
 	f.modelHost = flags.String("model-host", "", "bare API root (no /v1) of an OpenAI-compatible model endpoint; only used with -route openai")
 	f.modelID = flags.String("model-id", "", "model id to configure, without a slash; required under -non-interactive for -route openai and -route copilot")
 	f.contextWindow = flags.Int("context-window", 0, "the model's context window in tokens; needed when the route cannot supply it, as with -route openai")
-	f.credential = flags.String("credential", "", "API key or token for the route, kept in the worker's environment, never in config; empty reads the route's own: $ANTHROPIC_API_KEY, $OPENAI_API_KEY (openai) or $GITHUB_COPILOT_TOKEN")
+	f.credential = flags.String("credential", "", "API key or token for the route, written to a mode-0600 file beside the config (copilot: the worker's environment); empty reads $ANTHROPIC_API_KEY, $OPENAI_API_KEY or $GITHUB_COPILOT_TOKEN")
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file trusted, besides the system store, for quickstart's own outbound TLS calls and written to the config as egress_ca_bundle so builds trust it too")
 	f.pollInterval = flags.Duration("poll-interval", 3*time.Second, "how often to re-check the submitted request's state")
 	f.pollTimeout = flags.Duration("poll-timeout", 5*time.Minute, "how long to watch the request before printing how to keep watching; reaching it is not a failure")
@@ -1245,58 +1253,138 @@ func quickstartFirstExistingDefaultPath() (string, bool) {
 	return p, err == nil && found
 }
 
-// openAIRouteCredentialEnv is the variable quickstart's OpenAI-compatible
-// route reads its key from: its own name, never ANTHROPIC_API_KEY, so a
-// shell that holds an Anthropic key for another route never sends it to
-// this route's upstream (a route reads only the variable it names).
-const openAIRouteCredentialEnv = "OPENAI_API_KEY"
+// openAIRouteKeyEnv is the variable quickstart's OpenAI-compatible route
+// takes its key from when no -credential is given, before writing it to the
+// route's credential_file: its own name, never ANTHROPIC_API_KEY, so a shell
+// that holds an Anthropic key for another provider never sends it to this
+// route's upstream.
+const openAIRouteKeyEnv = "OPENAI_API_KEY"
 
-// quickstartCredentialEnvForReusedConfig derives the credential
-// environment variable a reused config's own relay_credential_mode
-// implies (see quickstartBuildConfig's own copilot/openai/anthropic
-// branches for why those are the only two names this ever produces),
-// when the operator passed -credential alongside a config being reused
-// rather than freshly built. Without this, an explicit -credential was
-// silently discarded on the reuse path (a Codex review on this PR),
-// so a subsequently spawned worker had no credential in its
-// environment at all and failed its own relay preflight.
-func quickstartCredentialEnvForReusedConfig(opts *quickstartOptions, existing *sessionconfig.Config) []string {
+// quickstartCredentialForReusedConfig puts an explicit -credential given
+// alongside a reused config where the route roles.execution selects reads
+// it: a static route's credential_file (written, mode 0600), or for a
+// github-copilot route with no token file the GITHUB_COPILOT_TOKEN the
+// spawned worker's environment carries (returned). A chatgpt-codex route
+// reads its own auth file and takes none. A -credential no route can use is
+// refused rather than dropped.
+func quickstartCredentialForReusedConfig(opts *quickstartOptions, p *quickstartPrompter, existing *sessionconfig.Config, w io.Writer) ([]string, error) {
 	if !opts.CredentialProvided {
-		return nil
+		return nil, nil
 	}
-	// existing.Routes is a map -- iterating it directly and returning on
-	// the first static route found put the credential in a random env
-	// var whenever more than one static route was configured. Resolve
-	// the SAME route roles.execution would actually select instead
-	// (modelrole.SelectRoute, probe discarded -- this is about which env
-	// var name to use, not whether the route's credential already
-	// resolves) and read that one route's own credential_env. A
-	// resolution failure (unusable settings, no routes: at all, ...)
-	// falls through to ANTHROPIC_API_KEY below, the name quickstart's own
-	// static routes are written with.
-	if settings, err := existing.ApplySettings(sessionconfig.DefaultSettings()); err == nil {
-		probe := func(string, sessionconfig.Route) error { return nil }
-		if sel, err := modelrole.SelectRoute(settings, modelrole.RoleExecution, "", "", "", probe); err == nil {
-			switch sel.Route.EffectiveCredentialMode() {
-			case meter.CredentialModeGitHubCopilot:
-				return []string{"GITHUB_COPILOT_TOKEN=" + opts.Credential}
-			case meter.CredentialModeChatGPTCodex:
-				// No daemon-env credential for this mode at all -- the
-				// ChatGPT access token is read fresh from its own auth
-				// file at relay-launch time (see quickstartBuildConfig's
-				// own "chatgpt-codex" case).
-				return nil
-			default:
-				// A static route reads only the variable it names; a
-				// no-credential route names none, so nothing carries the key.
-				if sel.Route.CredentialEnv == "" {
-					return nil
-				}
-				return []string{sel.Route.CredentialEnv + "=" + opts.Credential}
-			}
+	// The route roles.execution selects (probe discarded: this is about
+	// where the credential goes, not whether it already resolves), never
+	// the first of a map of routes.
+	settings, err := existing.ApplySettings(sessionconfig.DefaultSettings())
+	if err != nil {
+		return nil, fmt.Errorf("-credential: %w", err)
+	}
+	probe := func(string, sessionconfig.Route) error { return nil }
+	sel, err := modelrole.SelectRoute(settings, modelrole.RoleExecution, "", "", "", probe)
+	if err != nil {
+		return nil, fmt.Errorf("-credential: no route for roles.execution to give it to: %w", err)
+	}
+	switch sel.Route.EffectiveCredentialMode() {
+	case meter.CredentialModeGitHubCopilot:
+		return []string{"GITHUB_COPILOT_TOKEN=" + opts.Credential}, nil
+	case meter.CredentialModeChatGPTCodex:
+		return nil, errors.New("-credential: the chatgpt-codex route reads its token from the codex login (codex login), not from -credential")
+	}
+	if sel.Route.CredentialFile == "" {
+		return nil, fmt.Errorf("-credential: route %s names no credential_file to write it to", sel.RouteName)
+	}
+	replace, err := quickstartMayReplaceKeyFile(opts, p, w, sel.Route.CredentialFile, opts.Credential)
+	if err != nil {
+		return nil, fmt.Errorf("-credential: %w", err)
+	}
+	put := writeSecretFile
+	if replace {
+		put = replaceSecretFile
+	}
+	if err := put(sel.Route.CredentialFile, opts.Credential); err != nil {
+		return nil, fmt.Errorf("-credential: %w", err)
+	}
+	fmt.Fprintf(w, "Wrote the key to %s (mode 0600), route %s's credential_file.\n", sel.Route.CredentialFile, sel.RouteName)
+	return nil, nil
+}
+
+// quickstartWriteRouteKey decides the file a new static route named route
+// reads key from (routeCredentialFilePath, beside the session config) and
+// returns that path for the route's credential_file. The key is not written
+// yet: it is queued on opts and written by quickstartWritePendingRouteKeys
+// once the config naming it is written, so a failed or declined config
+// leaves no key file behind. Asked first unless -non-interactive: declining
+// refuses. A file there holding another key is replaced only with leave
+// (quickstartMayReplaceKeyFile).
+func (b *quickstartConfigBuild) quickstartWriteRouteKey(route, key string) (string, error) {
+	if b.opts.credentialConfigPath == "" {
+		return "", errors.New("no session config path to keep the route's key beside")
+	}
+	path := routeCredentialFilePath(b.opts.credentialConfigPath, route)
+	if !b.opts.NonInteractive {
+		ok, err := b.p.confirm(b.w, fmt.Sprintf("Write the key to %s (mode 0600; the config names the file, never the key)? [Y/n] ", path), true)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("a static route reads its key from a file: write it to a file of mode 0600 and set routes.%s.credential_file to its path", route)
 		}
 	}
-	return []string{"ANTHROPIC_API_KEY=" + opts.Credential}
+	replace, err := quickstartMayReplaceKeyFile(b.opts, b.p, b.w, path, key)
+	if err != nil {
+		return "", err
+	}
+	b.opts.pendingRouteKeys = append(b.opts.pendingRouteKeys, routeKeyWrite{path: path, value: key, replace: replace})
+	return path, nil
+}
+
+// quickstartMayReplaceKeyFile reports whether writing key to the key file at
+// path replaces another key, after checking the operator's leave to: false
+// with no error when the file is absent or already holds key; true when it
+// holds another key and the operator gave leave, saying so. Asked (p not
+// nil and not -non-interactive), only a yes is leave, -credential or not.
+// Not asked, only a -credential that is this key is leave, and the write is
+// otherwise refused, naming the path. A symlink at path is refused.
+func quickstartMayReplaceKeyFile(opts *quickstartOptions, p *quickstartPrompter, w io.Writer, path, key string) (bool, error) {
+	holdsOther, err := keyFileHoldsOther(path, key)
+	if err != nil {
+		return false, err
+	}
+	if !holdsOther {
+		return false, nil
+	}
+	if opts.NonInteractive || p == nil {
+		if opts.CredentialProvided && strings.TrimSpace(opts.Credential) == strings.TrimSpace(key) {
+			fmt.Fprintf(w, "%s holds another key: replacing it with the -credential given.\n", path)
+			return true, nil
+		}
+		return false, fmt.Errorf("%s already holds another key: pass -credential to replace it, or remove the file", path)
+	}
+	ok, err := p.confirm(w, fmt.Sprintf("%s already holds another key. Replace it? [y/N] ", path), false)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("%s already holds another key: kept it; remove it or name another file in credential_file", path)
+	}
+	fmt.Fprintf(w, "Replacing the key in %s.\n", path)
+	return true, nil
+}
+
+// quickstartWritePendingRouteKeys writes the key files quickstartWriteRouteKey
+// queued, after the config that names them is written.
+func quickstartWritePendingRouteKeys(opts *quickstartOptions, w io.Writer) error {
+	for _, kw := range opts.pendingRouteKeys {
+		put := writeSecretFile
+		if kw.replace {
+			put = replaceSecretFile
+		}
+		if err := put(kw.path, kw.value); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "Wrote the key to %s (mode 0600).\n", kw.path)
+	}
+	opts.pendingRouteKeys = nil
+	return nil
 }
 
 // quickstartEnsureConfig reuses existing (already resolved by
@@ -1305,8 +1393,9 @@ func quickstartCredentialEnvForReusedConfig(opts *quickstartOptions, existing *s
 // exists and looks valid, reuse it"), otherwise builds and writes a fresh
 // one interactively or from flags. Returns the data directory a later
 // worker/submit should use, any credential environment variables the
-// daemon's own process needs (never written to config -- see the plan's
-// "Does not write credentials to disk"), and whether quickstartEnsureDaemon
+// daemon's own process needs (a github-copilot token given with -credential;
+// a static route's key goes to its credential_file, and no key is ever
+// written to the config), and whether quickstartEnsureDaemon
 // must restart an already-running daemon to pick up a change
 // (restartNeeded) -- true not only when a fresh config was written, but
 // also when the reused config's own image refs were just updated
@@ -1315,6 +1404,7 @@ func quickstartCredentialEnvForReusedConfig(opts *quickstartOptions, existing *s
 // cases leave a live daemon running against stale settings otherwise,
 // same as a config rewrite would).
 func quickstartEnsureConfig(dp *deps, opts *quickstartOptions, p *quickstartPrompter, w io.Writer, configPath string, existing *sessionconfig.Config) (dataDir string, credentialEnv []string, restartNeeded bool, err error) {
+	opts.credentialConfigPath = configPath
 	if existing != nil && !quickstartConfigHasExecutionRole(existing) {
 		// An images-only config, e.g. the one `make install`'s
 		// configure-images step creates on a fresh machine: it names no
@@ -1420,7 +1510,10 @@ func quickstartEnsureConfig(dp *deps, opts *quickstartOptions, p *quickstartProm
 			}
 			fmt.Fprintf(w, "Updated %s with the image(s) just built locally.\n", configPath)
 		}
-		credentialEnv := quickstartCredentialEnvForReusedConfig(opts, existing)
+		credentialEnv, err := quickstartCredentialForReusedConfig(opts, p, existing, w)
+		if err != nil {
+			return "", nil, false, err
+		}
 		return resolvedDataDir, credentialEnv, imagesUpdated || len(releaseDefaultsAdded) > 0 || dataDirAdded || opts.CredentialProvided, nil
 	}
 
@@ -1467,6 +1560,9 @@ func quickstartWriteNewConfig(dp *deps, opts *quickstartOptions, p *quickstartPr
 		return "", nil, false, err
 	}
 	fmt.Fprintf(w, "Wrote session config to %s.\n", configPath)
+	if err := quickstartWritePendingRouteKeys(opts, w); err != nil {
+		return "", nil, false, err
+	}
 	return dataDir, credentialEnv, true, nil
 }
 
@@ -2063,17 +2159,18 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 	// usually wants Authorization instead (sessionconfig.Example's own
 	// documented guidance for this same key).
 	header := "Authorization"
+	var key string
 	if needsCredential {
 		allowNoCredential = false
-		key := b.opts.Credential
+		key = b.opts.Credential
 		if key == "" {
-			key = os.Getenv(openAIRouteCredentialEnv)
+			key = os.Getenv(openAIRouteKeyEnv)
 		}
 		if key == "" {
 			if b.opts.NonInteractive {
-				return nil, nil, fmt.Errorf("a credential is required for this route: pass -credential, or set %s", openAIRouteCredentialEnv)
+				return nil, nil, fmt.Errorf("a credential is required for this route: pass -credential, or set %s", openAIRouteKeyEnv)
 			}
-			key, err = b.p.askSecret(b.w, "Credential (kept only in the daemon process's own environment, never written to config): ")
+			key, err = b.p.askSecret(b.w, "Credential (written to a file of mode 0600 beside the session config, never to the config): ")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2081,7 +2178,6 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 				return nil, nil, fmt.Errorf("a credential is required for this route")
 			}
 		}
-		b.credentialEnv = append(b.credentialEnv, openAIRouteCredentialEnv+"="+key)
 	} else {
 		header = meter.CredentialHeaderXAPIKey
 	}
@@ -2099,7 +2195,9 @@ func (b *quickstartConfigBuild) openAIRoute() (*sessionconfig.Config, []string, 
 		AllowNoCredential:      allowNoCredential,
 	}
 	if needsCredential {
-		localRoute.CredentialEnv = openAIRouteCredentialEnv
+		if localRoute.CredentialFile, err = b.quickstartWriteRouteKey(routeName, key); err != nil {
+			return nil, nil, err
+		}
 	}
 	b.cfg.Routes = map[string]sessionconfig.Route{routeName: localRoute}
 	b.cfg.Models = map[string]sessionconfig.Model{
@@ -2124,7 +2222,7 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 		if b.opts.NonInteractive {
 			return nil, nil, fmt.Errorf("-credential is required under -non-interactive for -route anthropic (or set ANTHROPIC_API_KEY)")
 		}
-		key, err = b.p.askSecret(b.w, "Anthropic API key (kept only in the daemon process's own environment, never written to config): ")
+		key, err = b.p.askSecret(b.w, "Anthropic API key (written to a file of mode 0600 beside the session config, never to the config): ")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2132,7 +2230,6 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 			return nil, nil, fmt.Errorf("an API key is required for -route anthropic")
 		}
 	}
-	b.credentialEnv = append(b.credentialEnv, "ANTHROPIC_API_KEY="+key)
 
 	modelID := b.opts.ModelID
 	if modelID == "" {
@@ -2153,6 +2250,10 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 
 	routeName := "anthropic"
 	modelKey := modelID
+	keyFile, err := b.quickstartWriteRouteKey(routeName, key)
+	if err != nil {
+		return nil, nil, err
+	}
 	// Anthropic's native Messages API: the worker's client is given the bare
 	// API root and appends /v1/messages itself, and sends the key as
 	// X-Api-Key (the default credential_header).
@@ -2161,7 +2262,7 @@ func (b *quickstartConfigBuild) anthropicRoute() (*sessionconfig.Config, []strin
 			CredentialMode:    meter.CredentialModeStatic,
 			Upstream:          anthropicDefaultUpstream,
 			AllowedPathPrefix: "/v1/messages",
-			CredentialEnv:     "ANTHROPIC_API_KEY",
+			CredentialFile:    keyFile,
 		},
 	}
 	b.cfg.Models = map[string]sessionconfig.Model{

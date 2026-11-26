@@ -235,7 +235,7 @@ func holdRestack(dp Deps, dataDir string, r *request.Request, ticket *request.Ti
 		Detail: on,
 		Next:   fmt.Sprintf("fix what it names; the worker checks again every PR poll (or `factoryd cancel %s`)", r.ID),
 	}, now)
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 	ticket.RestackHold.RemindedAt = ts
 }
 

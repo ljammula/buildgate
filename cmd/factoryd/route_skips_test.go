@@ -47,11 +47,11 @@ func TestIntegrationRouteFallbackRecordsSkipOnBuildAttempt(t *testing.T) {
 		t.Fatalf("resolve fake docker path: %v", err)
 	}
 	path := isolateSessionConfig(t)
-	t.Setenv("ROUTE_SKIP_TEST_GOOD_KEY", "sk-test")
+	setTestRouteKey(t, "ROUTE_SKIP_TEST_GOOD_KEY", "sk-test")
 	writeSessionConfig(t, path, "sandbox_docker: "+fakeDockerPath+"\n"+
 		"routes:\n"+
-		"  broken:\n    credential_mode: static\n    upstream: https://broken.example.invalid\n    credential_env: ROUTE_SKIP_TEST_UNSET_KEY\n"+
-		"  good:\n    credential_mode: static\n    upstream: https://good.example.invalid\n    credential_env: ROUTE_SKIP_TEST_GOOD_KEY\n"+
+		"  broken:\n    credential_mode: static\n    upstream: https://broken.example.invalid\n    credential_file: "+testRouteKeyPath("ROUTE_SKIP_TEST_UNSET_KEY")+"\n"+
+		"  good:\n    credential_mode: static\n    upstream: https://good.example.invalid\n    credential_file: "+testRouteKeyPath("ROUTE_SKIP_TEST_GOOD_KEY")+"\n"+
 		"models:\n  luna:\n    id: gpt-9000\n    api: openai-completions\n    routes: [broken, good]\n"+
 		"roles:\n  execution:\n    model: luna\n")
 	r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# Ticket: fixture\n", "5m0s", nil, nil)

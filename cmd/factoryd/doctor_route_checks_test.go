@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -237,22 +239,20 @@ func TestQuickstartPullDoctorInputsSkipsRouteChecks(t *testing.T) {
 	}
 }
 
-// TestQuickstartCredentialEnvUsesExecutionRoleRoute proves
-// quickstartCredentialEnvForReusedConfig resolves the SAME route
-// roles.execution would actually select (modelrole.SelectRoute) instead
-// of iterating existing.Routes (a map: found in review, returning on
-// the first static route found put the credential in a random env var
-// whenever more than one static route was configured). Two static
-// routes with different credential_env values, only one of them named
-// by roles.execution's own model -- the OTHER route's credential_env
-// (belonging to roles.review's model here) must never be picked. Run
-// with -count=20 to prove this is deterministic, not accidentally
-// correct on map iteration order.
-func TestQuickstartCredentialEnvUsesExecutionRoleRoute(t *testing.T) {
+// TestQuickstartCredentialForReusedConfigUsesExecutionRoleRoute proves
+// quickstartCredentialForReusedConfig writes an explicit -credential to the
+// credential_file of the SAME route roles.execution would select
+// (modelrole.SelectRoute), never another route's: two static routes, only
+// one named by roles.execution's model; the other route's file (belonging
+// to roles.review's model here) must stay untouched. Deterministic, not
+// accidentally correct on map iteration order (run with -count=20).
+func TestQuickstartCredentialForReusedConfigUsesExecutionRoleRoute(t *testing.T) {
+	dir := t.TempDir()
+	otherFile, execFile := filepath.Join(dir, "other"), filepath.Join(dir, "exec")
 	existing := &sessionconfig.Config{
 		Routes: map[string]sessionconfig.Route{
-			"other": {Upstream: "https://other.example.invalid", CredentialEnv: "OTHER_API_KEY"},
-			"exec":  {Upstream: "https://exec.example.invalid", CredentialEnv: "EXEC_API_KEY"},
+			"other": {Upstream: "https://other.example.invalid", CredentialFile: otherFile},
+			"exec":  {Upstream: "https://exec.example.invalid", CredentialFile: execFile},
 		},
 		Models: map[string]sessionconfig.Model{
 			"other-model": {ID: "other-model-id", Routes: []string{"other"}, ContextWindow: 131072},
@@ -264,10 +264,15 @@ func TestQuickstartCredentialEnvUsesExecutionRoleRoute(t *testing.T) {
 		},
 	}
 	opts := &quickstartOptions{Credential: "sk-test", CredentialProvided: true}
-	got := quickstartCredentialEnvForReusedConfig(opts, existing)
-	want := []string{"EXEC_API_KEY=sk-test"}
-	if len(got) != 1 || got[0] != want[0] {
-		t.Fatalf("quickstartCredentialEnvForReusedConfig = %v, want %v", got, want)
+	env, err := quickstartCredentialForReusedConfig(opts, nil, existing, io.Discard)
+	if err != nil || env != nil {
+		t.Fatalf("quickstartCredentialForReusedConfig = %v, %v; want no environment and no error", env, err)
+	}
+	if got, err := readSecretFile(execFile); err != nil || got != "sk-test" {
+		t.Fatalf("exec route's credential_file = %q, %v; want the -credential", got, err)
+	}
+	if _, err := os.Stat(otherFile); !os.IsNotExist(err) {
+		t.Fatalf("the other route's credential_file was written (stat: %v)", err)
 	}
 }
 

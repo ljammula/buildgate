@@ -2,7 +2,7 @@
 33 cmd/factoryd/cost_cmd_test.go TestBuildCostReportAggregatesAcrossRequests
 31 cmd/factoryd/daemon_cmd.go (*daemonRun).serviceRepository
 42 cmd/factoryd/doctor.go doctorMain
-31 cmd/factoryd/doctor_list_models.go doctorListModels
+27 cmd/factoryd/doctor_list_models.go doctorListModels
 27 cmd/factoryd/integration_direct_and_serve_test.go TestIntegrationServeDrainsAPIStartedRunBeforeExiting
 28 cmd/factoryd/integration_isolate_and_deps_test.go TestIntegrationSignalCancellationHaltsAndReapsBuild
 28 cmd/factoryd/integration_misc_test.go TestIntegrationReconcileNormalizesRelativeWorkspace

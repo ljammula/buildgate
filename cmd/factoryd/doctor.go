@@ -317,6 +317,7 @@ func doctorMain(dp *deps, args []string) error {
 	checks = append(checks, doctorWorkerGitHubLoginChecks(dp, in.dataDir, time.Now())...)
 	checks = append(checks, doctorGateTokenChecks(in.configPath, time.Now())...)
 	checks = append(checks, doctorRemoteConsoleChecks(dp, in.configPath, in.dataDir)...)
+	checks = append(checks, webhookChecks(webhookFilesOf(in.settings), os.Getenv)...)
 	// -fix also offers to fix the first-run blockers doctorFixAbsentImages
 	// (inside doctorRunChecks above) doesn't cover -- see doctorApplyFixes'
 	// own doc comment. Runs after checks are collected (so it can see, e.g.,

@@ -385,13 +385,13 @@ func TestRestartWaitsForAPRReviewPassThatOnlyHoldsASlot(t *testing.T) {
 	}
 }
 
-func TestRestartStopsNothingWhenAWorkerCouldNotReachItsRouteFromThisShell(t *testing.T) {
+func TestRestartStopsNothingWhenAWorkerCouldNotReadItsRouteKey(t *testing.T) {
 	dp := newTestDeps(t)
 	h := restartHarness(dp, t)
 	queuePID, servePID := h.startDefaultProcesses()
 	dir := h.profiles.roots["default"]
 	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
-	t.Setenv("PROFILE_TEST_KEY", "")
+	setTestRouteKey(t, "PROFILE_TEST_KEY", "")
 	var out bytes.Buffer
 	err := restartRunContext(context.Background(), dp, nil, &out, false)
 	if err == nil || !strings.Contains(err.Error(), "PROFILE_TEST_KEY") || !strings.Contains(err.Error(), "nothing was stopped") {

@@ -427,6 +427,7 @@ func (sv *serveRun) loadConfig() error {
 	if err := validateRoles(sv.baseSettings); err != nil {
 		return err
 	}
+	sv.dp.useWebhookFiles(sv.baseSettings, os.Getenv)
 	if *daemonTemporalAddress != "" {
 		// Resolved here, not unconditionally at flag parse: this daemon
 		// supervisor path is the only thing on this command that ever
@@ -737,6 +738,7 @@ func (sv *serveRun) listenAndServe() error {
 		api.WithProjectMemory(apiProjectMemoryProvider(sv.dp, sv.baseSettings, *sv.dataDir)),
 		api.WithReleasePolicy(sv.releasePolicy),
 		api.WithConsoleBaseURL(func(dataDir string) string { return resolveConsoleBaseURL(sv.dp, "", dataDir) }),
+		api.WithNotifyWebhooks(sv.dp.NotifyWebhooks),
 		// POST /requests/{id}/retry gets the same real PR-open-only retry
 		// path `factoryd retry` already wires (retryPullRequestOpener),
 		// not just the CLI.

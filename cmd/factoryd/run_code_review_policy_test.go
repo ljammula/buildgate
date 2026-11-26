@@ -29,7 +29,8 @@ func codeReviewPolicyOfRun(t *testing.T, extraFlags ...string) string {
 	}
 	// Not factorydCommand, which turns the review off for a run that names no policy.
 	cmd := exec.Command(binPath, append(flags, extraFlags...)...)
-	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "RUN_INPUT_GOLDEN_KEY=sk-test", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	setTestRouteKey(t, "RUN_INPUT_GOLDEN_KEY", "sk-test")
+	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, runInputGoldenConfig(t)+"code_review_policy: required\n")...)
 	out, _ := cmd.CombinedOutput()
 	t.Logf("factoryd output:\n%s", out)

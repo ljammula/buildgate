@@ -267,7 +267,7 @@ preflight_profile: brownfield
 func routesModeConfigWithAllowedSonnet(t *testing.T) string {
 	t.Helper()
 	configPath := filepath.Join(t.TempDir(), "config.yml")
-	content := "routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_env: SUBMIT_MODEL_TEST_KEY\n" +
+	content := "routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_file: " + testRouteKeyPath("SUBMIT_MODEL_TEST_KEY") + "\n" +
 		"models:\n  luna:\n    id: gpt-5.6-luna\n    routes: [litellm]\n  sonnet:\n    id: sonnet-4\n    routes: [litellm]\n" +
 		"roles:\n  execution:\n    model: luna\n    allowed: [luna, sonnet]\n    allowed_harnesses: [pi, pifork]\n  planning:\n    model: luna\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {

@@ -32,41 +32,25 @@ func haltNext(dataDir, runID string) string {
 	return fmt.Sprintf("factoryd watch %s", runID)
 }
 
-// DiscordWebhookURLsEnvironmentVariable names the environment variable
-// holding factoryd's optional Discord paging channel(s): a comma-separated
-// list of incoming-webhook URLs, so the set can be swapped or extended
-// without a code change. Unset or empty disables Discord notification
-// entirely. An env var, not a flag, so the webhook URL(s) never appear in
-// a process listing (e.g. `ps`).
-const DiscordWebhookURLsEnvironmentVariable = "FACTORYD_DISCORD_WEBHOOK_URLS"
-
-// DiscordWebhookURLs parses DiscordWebhookURLsEnvironmentVariable into its
-// individual webhook URLs, trimming whitespace and dropping empty entries.
-func DiscordWebhookURLs() []string {
-	var urls []string
-	for _, u := range strings.Split(os.Getenv(DiscordWebhookURLsEnvironmentVariable), ",") {
-		if u = strings.TrimSpace(u); u != "" {
-			urls = append(urls, u)
-		}
-	}
-	return urls
+// Webhooks are the incoming-webhook URLs a notification is posted to, per
+// channel. The caller reads them from the files the session config names
+// (slack_webhook_urls_file, discord_webhook_urls_file) each time it
+// dispatches; this package never reads a file or the environment for them.
+// Empty sends nothing to that channel.
+type Webhooks struct {
+	Discord []string
+	Slack   []string
 }
 
-// SlackWebhookURLsEnvironmentVariable names the environment variable
-// holding factoryd's optional Slack paging channel(s): a comma-separated
-// list of incoming-webhook URLs, mirroring
-// DiscordWebhookURLsEnvironmentVariable. Unset or empty disables Slack
-// notification entirely. An env var, not a flag, so the webhook URL(s)
-// never appear in a process listing (e.g. `ps`).
-const SlackWebhookURLsEnvironmentVariable = "FACTORYD_SLACK_WEBHOOK_URLS"
-
-// SlackWebhookURLs parses SlackWebhookURLsEnvironmentVariable into its
-// individual webhook URLs, trimming whitespace and dropping empty entries.
-func SlackWebhookURLs() []string {
+// ParseWebhookURLs splits a webhook URL file's content into its URLs: one per
+// line or comma-separated, whitespace trimmed and empty entries dropped.
+func ParseWebhookURLs(content string) []string {
 	var urls []string
-	for _, u := range strings.Split(os.Getenv(SlackWebhookURLsEnvironmentVariable), ",") {
-		if u = strings.TrimSpace(u); u != "" {
-			urls = append(urls, u)
+	for _, line := range strings.Split(content, "\n") {
+		for _, u := range strings.Split(line, ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				urls = append(urls, u)
+			}
 		}
 	}
 	return urls
@@ -171,23 +155,23 @@ func PrepareHalt(r *run.Run, dataDir, consoleBase string) (Notification, bool) {
 	return n, true
 }
 
-// DispatchDiscord best-effort pages every configured Discord webhook with
-// n. Always called only after the notification it carries is already
-// durably persisted, never before -- see PrepareHalt's own doc comment.
-func DispatchDiscord(n Notification) {
-	for _, webhookURL := range DiscordWebhookURLs() {
+// DispatchDiscord best-effort pages every Discord webhook in urls with n.
+// Always called only after the notification it carries is already durably
+// persisted, never before -- see PrepareHalt's own doc comment.
+func DispatchDiscord(urls []string, n Notification) {
+	for _, webhookURL := range urls {
 		discordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = (DiscordNotifier{WebhookURL: webhookURL}).Notify(discordCtx, n)
 		cancel()
 	}
 }
 
-// DispatchSlack best-effort pages every configured Slack webhook with n.
+// DispatchSlack best-effort pages every Slack webhook in urls with n.
 // Mirrors DispatchDiscord's fan-out shape; see PrepareHalt's own doc
 // comment for why this must only ever be called after n is already
 // durably persisted.
-func DispatchSlack(n Notification) {
-	for _, webhookURL := range SlackWebhookURLs() {
+func DispatchSlack(urls []string, n Notification) {
+	for _, webhookURL := range urls {
 		slackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = (SlackNotifier{WebhookURL: webhookURL}).Notify(slackCtx, n)
 		cancel()
@@ -294,19 +278,19 @@ func (p *pendingCounter) zeroReached() <-chan struct{} {
 // chance to fire before the flush gave up, defeating them as fallback
 // channels entirely. Concurrent, the worst case is ~5s: the slowest
 // single channel, not their sum.
-func DispatchExternal(dataDir string, n Notification) {
-	dispatchExternal(DesktopNotifier{}, dataDir, n)
+func DispatchExternal(dataDir string, hooks Webhooks, n Notification) {
+	dispatchExternal(DesktopNotifier{}, dataDir, hooks, n)
 }
 
 // dispatchExternal is DispatchExternal with its desktop channel desktop.
-func dispatchExternal(desktop DesktopNotifier, dataDir string, n Notification) {
+func dispatchExternal(desktop DesktopNotifier, dataDir string, hooks Webhooks, n Notification) {
 	pendingDispatches.add()
 	go func() {
 		defer pendingDispatches.done()
 		var channels sync.WaitGroup
 		channels.Add(3)
-		go func() { defer channels.Done(); DispatchDiscord(n) }()
-		go func() { defer channels.Done(); DispatchSlack(n) }()
+		go func() { defer channels.Done(); DispatchDiscord(hooks.Discord, n) }()
+		go func() { defer channels.Done(); DispatchSlack(hooks.Slack, n) }()
 		go func() { defer channels.Done(); dispatchDesktop(desktop, dataDir, n) }()
 		channels.Wait()
 	}()

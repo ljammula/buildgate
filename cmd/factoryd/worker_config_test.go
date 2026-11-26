@@ -121,7 +121,7 @@ func TestWorkerConfigHasNoEngineFlag(t *testing.T) {
 func TestWorkerConfigRequiresSandboxImageForARoleHarnessThatNeedsOne(t *testing.T) {
 	dp := newTestDeps(t)
 	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, "roles:\n  execution:\n    model: m\n    harness: pifork\nmodels:\n  m:\n    id: gpt-x\n    routes: [r]\nroutes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_env: QR_TEST_KEY\n")
+	writeSessionConfig(t, path, "roles:\n  execution:\n    model: m\n    harness: pifork\nmodels:\n  m:\n    id: gpt-x\n    routes: [r]\nroutes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_file: "+testRouteKeyPath("QR_TEST_KEY")+"\n")
 	_, _, err := loadTestWorkerConfig(dp, []string{"-data-dir", t.TempDir(), "-skip-doctor", "-max-review-rounds", "0"})
 	if err == nil || !strings.Contains(err.Error(), "roles.execution: harness pifork requires an explicit digest-pinned sandbox_image") {
 		t.Fatalf("workerMain = %v, want the role-naming sandbox image refusal", err)

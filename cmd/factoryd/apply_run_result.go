@@ -268,7 +268,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 		// this called DiscordNotifier directly, bypassing Slack/desktop
 		// entirely) dispatches on its own goroutine and returns
 		// immediately.
-		dispatchRunNotification(dataDir, r.RequestID, n)
+		dispatchRunNotification(dp, dataDir, r.RequestID, n)
 	} else if err := save(dp, r, dataDir); err != nil {
 		rollbackIsolatedWorkspaceOnSaveFailure(r)
 		return err

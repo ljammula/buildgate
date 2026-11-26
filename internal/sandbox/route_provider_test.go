@@ -59,8 +59,8 @@ func TestRouteAccessForChatGPTAdmitsOnlyTheResponsesPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := RouteAccess{
-		Provider:      "bg-" + dataDirPrefix(t, dataDir) + "-chatgpt",
-		CredentialEnv: []string{"BG_CHATGPT_TOKEN", "BG_CHATGPT_ACCOUNT"},
+		Provider:               "bg-" + dataDirPrefix(t, dataDir) + "-chatgpt",
+		CredentialPlaceholders: []string{"BG_CHATGPT_TOKEN", "BG_CHATGPT_ACCOUNT"},
 		Endpoint: RouteEndpoint{
 			Host: "chatgpt.com", Port: 443, TLS: true, Method: "POST",
 			Path: "/backend-api/codex/responses", Binaries: []string{"/usr/local/bin/node"},
@@ -114,8 +114,8 @@ func TestRouteAccessForAStaticKeyRoute(t *testing.T) {
 	if want := "bg-" + dataDirPrefix(t, dataDir) + "-test-route"; access.Provider != want {
 		t.Errorf("Provider = %q, want %q", access.Provider, want)
 	}
-	if want := []string{"BG_MODEL_KEY"}; !reflect.DeepEqual(access.CredentialEnv, want) {
-		t.Errorf("CredentialEnv = %v", access.CredentialEnv)
+	if want := []string{"BG_MODEL_KEY"}; !reflect.DeepEqual(access.CredentialPlaceholders, want) {
+		t.Errorf("CredentialPlaceholders = %v", access.CredentialPlaceholders)
 	}
 	wantEndpoint := RouteEndpoint{Host: "openrouter.example", Port: 8443, TLS: true, Method: "POST", Path: "/api/v1/chat", PathIsPrefix: true, Binaries: piBinaries}
 	if !reflect.DeepEqual(access.Endpoint, wantEndpoint) {
@@ -142,7 +142,7 @@ func TestRouteAccessEnvironmentPassesLaunchSpecValidate(t *testing.T) {
 	if err := spec.Validate(); err != nil {
 		t.Fatalf("Validate refused the route environment: %v", err)
 	}
-	for _, name := range access.CredentialEnv {
+	for _, name := range access.CredentialPlaceholders {
 		if IsForbiddenCredentialEnvKey(name) {
 			t.Errorf("%s is a forbidden credential key, so the provider could not supply it", name)
 		}
@@ -258,7 +258,7 @@ func TestRouteCredentialRefuses(t *testing.T) {
 		"a different key": {EnvModelKey, EnvChatGPTAccount},
 	} {
 		mismatched := access
-		mismatched.CredentialEnv = env
+		mismatched.CredentialPlaceholders = env
 		for _, tok := range []RouteSecret{token, {}} {
 			if _, err := p.RouteCredential(mismatched, RouteSecret{}, RouteSecret{}, tok, account, time.Time{}, now, time.Hour); err == nil || !strings.Contains(err.Error(), "does not match") || errors.Is(err, ErrRouteCredential) {
 				t.Errorf("%s (token set %v): err = %v, want an untagged mismatch", name, tok.Configured(), err)

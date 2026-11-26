@@ -39,6 +39,7 @@ func runTests(m *testing.M) int {
 // and launches no build unless it sets the field itself.
 type fakeDeps struct {
 	consoleBaseURLFn              func(dataDir string) string
+	notifyWebhooksFn              func() notify.Webhooks
 	listReviewCommentsFn          func(ctx context.Context, prURL string) ([]requestdriver.ReviewComment, error)
 	markPullRequestReadyFn        func(ctx context.Context, prURL string) error
 	pushExistingBranchFn          func(ctx context.Context, workspaceDir string, sha string, branch string) error
@@ -88,6 +89,9 @@ func (f *fakeDeps) RemoteBranchHeadSHA(ctx context.Context, workspaceDir string,
 	return f.remoteBranchHeadSHAFn(ctx, workspaceDir, branch)
 }
 func (f *fakeDeps) ConsoleBaseURL(dataDir string) string { return f.consoleBaseURLFn(dataDir) }
+func (f *fakeDeps) NotifyWebhooks() notify.Webhooks {
+	return f.notifyWebhooksFn()
+}
 func (f *fakeDeps) ReplyToReviewComment(ctx context.Context, prURL string, commentID int64, body string) error {
 	return f.replyToReviewCommentFn(ctx, prURL, commentID, body)
 }
@@ -176,6 +180,7 @@ func newFakeDeps(testing.TB) *fakeDeps {
 	refused := func(what string) error { return errors.New("test deps: " + what + " is not set by this test") }
 	return &fakeDeps{
 		consoleBaseURLFn: func(string) string { return "" },
+		notifyWebhooksFn: func() notify.Webhooks { return notify.Webhooks{} },
 		listReviewCommentsFn: func(context.Context, string) ([]requestdriver.ReviewComment, error) {
 			return nil, refused("ListReviewComments")
 		},

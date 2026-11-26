@@ -29,9 +29,9 @@ func TestIntegrationExecutionRoleThinkingReachesBuildAppArgv(t *testing.T) {
 		t.Fatalf("resolve fake docker path: %v", err)
 	}
 	path := isolateSessionConfig(t)
-	t.Setenv("INTEGRATION_EXECUTION_THINKING_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "INTEGRATION_EXECUTION_THINKING_TEST_KEY", "sk-test")
 	writeSessionConfig(t, path, "sandbox_docker: "+fakeDockerPath+"\n"+
-		"routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_env: INTEGRATION_EXECUTION_THINKING_TEST_KEY\n"+
+		"routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_file: "+testRouteKeyPath("INTEGRATION_EXECUTION_THINKING_TEST_KEY")+"\n"+
 		"models:\n  luna:\n    id: gpt-9000\n    api: openai-completions\n    routes: [litellm]\n    reasoning: true\n"+
 		"roles:\n  execution:\n    model: luna\n    thinking: medium\n")
 

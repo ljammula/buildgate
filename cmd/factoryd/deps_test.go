@@ -5,6 +5,7 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/meter"
+	"buildgate/internal/notify"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
 	"buildgate/internal/toolchain"
@@ -249,6 +250,7 @@ type fakeHost struct {
 	browserRedirectDirFn func() (string, error)
 	chdirFn              func(dir string) error
 	executableFn         func() (string, error)
+	notifyWebhooksFn     func(files webhookFiles) notify.Webhooks
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
 	launchctlFn          func(args ...string) ([]byte, error)
@@ -305,10 +307,13 @@ func (f *fakeHost) pidLooksLikeWorker(pid int) bool                { return f.pi
 func (f *fakeHost) processUID(pid int) (int, bool)                 { return f.processUIDFn(pid) }
 func (f *fakeHost) runUpgradeCommand(c upgradeCmd) ([]byte, error) { return f.runUpgradeCommandFn(c) }
 func (f *fakeHost) serveHealthzOK(addr string) bool                { return f.serveHealthzOKFn(addr) }
-func (f *fakeHost) terminalNotifierOnPath() bool                   { return f.terminalNotifierFn() }
-func (f *fakeHost) serviceManager() hostcontrol.ServiceManager     { return f.serviceManagerFn() }
-func (f *fakeHost) systemctl(args ...string) ([]byte, error)       { return f.systemctlFn(args...) }
-func (f *fakeHost) loginctl(args ...string) ([]byte, error)        { return f.loginctlFn(args...) }
+func (f *fakeHost) notifyWebhooks(files webhookFiles) notify.Webhooks {
+	return f.notifyWebhooksFn(files)
+}
+func (f *fakeHost) terminalNotifierOnPath() bool               { return f.terminalNotifierFn() }
+func (f *fakeHost) serviceManager() hostcontrol.ServiceManager { return f.serviceManagerFn() }
+func (f *fakeHost) systemctl(args ...string) ([]byte, error)   { return f.systemctlFn(args...) }
+func (f *fakeHost) loginctl(args ...string) ([]byte, error)    { return f.loginctlFn(args...) }
 func (f *fakeHost) tailscale(ctx context.Context, args ...string) ([]byte, error) {
 	return f.tailscaleFn(ctx, args...)
 }
@@ -408,7 +413,7 @@ func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal)
 //	sandbox.runtime      the gateway runtime: none, in either build variant
 //	sandbox.startStack   starts containers: refused
 func newTestDeps(t testing.TB) *deps {
-	dp := &deps{backends: &backendMemo{}, releaseWarning: &releasePolicyWarning{}, ghLogins: &forge.SelfLogins{}}
+	dp := &deps{backends: &backendMemo{}, releaseWarning: &releasePolicyWarning{}, ghLogins: &forge.SelfLogins{}, webhooks: &webhookSettings{}}
 	realDocker := realDocker{dp: dp}
 	dp.docker = &fakeDocker{
 		colimaBinaryFn: realDocker.colimaBinary,
@@ -541,6 +546,8 @@ func newTestDeps(t testing.TB) *deps {
 		processUIDFn:         realHost.processUID,
 		runUpgradeCommandFn:  realHost.runUpgradeCommand,
 		serveHealthzOKFn:     realHost.serveHealthzOK,
+		// No test reads the operator's session configs for webhooks.
+		notifyWebhooksFn: func(webhookFiles) notify.Webhooks { return notify.Webhooks{} },
 		// The same answer on every machine the tests run on.
 		terminalNotifierFn: func() bool { return true },
 		// No test touches the developer's own tailnet.

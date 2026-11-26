@@ -2119,17 +2119,15 @@ func TestQuickstartResolveExistingConfigPrefersLegacyPathWhenXDGAbsent(t *testin
 	}
 }
 
-// TestQuickstartCredentialEnvForReusedConfigPreservesExplicitCredential is
-// the regression test for the Codex finding that an operator's explicit
-// -credential was silently discarded when quickstart reused an existing
-// config, leaving a subsequently spawned worker with no credential in
-// its environment at all.
-func TestQuickstartCredentialEnvForReusedConfigPreservesExplicitCredential(t *testing.T) {
+// TestQuickstartCredentialForReusedConfigPreservesExplicitCredential proves
+// an explicit -credential given with a reused config reaches where the
+// selected route reads it (never dropped): a Copilot route's token goes to
+// the worker's environment, and a config with no route for it is refused.
+func TestQuickstartCredentialForReusedConfigPreservesExplicitCredential(t *testing.T) {
 	opts := &quickstartOptions{Credential: "secret-value", CredentialProvided: true}
 
-	env := quickstartCredentialEnvForReusedConfig(opts, &sessionconfig.Config{})
-	if len(env) != 1 || env[0] != "ANTHROPIC_API_KEY=secret-value" {
-		t.Errorf("env = %v, want [ANTHROPIC_API_KEY=secret-value] for a non-Copilot config", env)
+	if env, err := quickstartCredentialForReusedConfig(opts, nil, &sessionconfig.Config{}, io.Discard); err == nil {
+		t.Errorf("env = %v, want a refusal for a config with no route to take -credential", env)
 	}
 
 	copilotCfg := &sessionconfig.Config{
@@ -2141,13 +2139,13 @@ func TestQuickstartCredentialEnvForReusedConfigPreservesExplicitCredential(t *te
 		},
 		Roles: &sessionconfig.Roles{Execution: &sessionconfig.RoleConfig{Model: "copilot-model"}},
 	}
-	env = quickstartCredentialEnvForReusedConfig(opts, copilotCfg)
-	if len(env) != 1 || env[0] != "GITHUB_COPILOT_TOKEN=secret-value" {
-		t.Errorf("env = %v, want [GITHUB_COPILOT_TOKEN=secret-value] for a Copilot config", env)
+	env, err := quickstartCredentialForReusedConfig(opts, nil, copilotCfg, io.Discard)
+	if err != nil || len(env) != 1 || env[0] != "GITHUB_COPILOT_TOKEN=secret-value" {
+		t.Errorf("env = %v, %v; want [GITHUB_COPILOT_TOKEN=secret-value] for a Copilot config", env, err)
 	}
 
-	if env := quickstartCredentialEnvForReusedConfig(&quickstartOptions{}, &sessionconfig.Config{}); env != nil {
-		t.Errorf("env = %v, want nil when no -credential was provided", env)
+	if env, err := quickstartCredentialForReusedConfig(&quickstartOptions{}, nil, &sessionconfig.Config{}, io.Discard); env != nil || err != nil {
+		t.Errorf("env = %v, %v; want nothing when no -credential was provided", env, err)
 	}
 }
 
@@ -2580,17 +2578,11 @@ func TestQuickstartEnsureConfigReuseSignalsRestartNeeded(t *testing.T) {
 		if err != nil {
 			t.Fatalf("quickstartResolveExistingConfig: %v", err)
 		}
-		_, credentialEnv, restartNeeded, err := quickstartEnsureConfig(dp, opts, newQuickstartPrompter(strings.NewReader("")), &bytes.Buffer{}, configPath, existing)
-		if err != nil {
-			t.Fatalf("quickstartEnsureConfig: %v", err)
-		}
-		if !restartNeeded {
-			t.Error("restartNeeded = false, want true: an explicit -credential was supplied alongside the reused config")
-		}
-		// The reused route is allow_no_credential with no credential_env: it
-		// names no variable, so the supplied key is carried by none.
-		if len(credentialEnv) != 0 {
-			t.Errorf("credentialEnv = %v, want none for a route that names no credential_env", credentialEnv)
+		// The reused route is allow_no_credential with no credential_file:
+		// there is nowhere for the key to go, so it is refused, not dropped.
+		_, _, _, err = quickstartEnsureConfig(dp, opts, newQuickstartPrompter(strings.NewReader("")), &bytes.Buffer{}, configPath, existing)
+		if err == nil || !strings.Contains(err.Error(), "names no credential_file") {
+			t.Fatalf("quickstartEnsureConfig = %v, want a refusal: the route names no credential_file", err)
 		}
 	})
 

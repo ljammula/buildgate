@@ -19,7 +19,7 @@ import (
 func routeGateSettings(env string, withReview bool) sessionconfig.Settings {
 	s := sessionconfig.DefaultSettings()
 	s.Routes = map[string]sessionconfig.Route{
-		"keyed": {CredentialMode: "static", Upstream: "https://model.example.invalid", CredentialEnv: env},
+		"keyed": {CredentialMode: "static", Upstream: "https://model.example.invalid", CredentialFile: testRouteKeyPath(env)},
 	}
 	s.Models = map[string]sessionconfig.Model{"m": {ID: "m-1", Routes: []string{"keyed"}}}
 	s.Roles = &sessionconfig.Roles{
@@ -34,20 +34,20 @@ func routeGateSettings(env string, withReview bool) sessionconfig.Settings {
 
 // TestRouteWaitReasonNamesTheRouteItsCauseAndTheRestart proves a role whose
 // route has no usable static key is named with the role, the route, the
-// resolver's own cause and the restart that picks a new key up, and that a
-// usable key gives no reason.
-func TestRouteWaitReasonNamesTheRouteItsCauseAndTheRestart(t *testing.T) {
+// resolver's own cause and that the worker checks the file again (no restart),
+// and that a usable key gives no reason.
+func TestRouteWaitReasonNamesTheRouteItsCauseAndTheRecheck(t *testing.T) {
 	s := routeGateSettings("RG_TEST_KEY", true)
 	for _, role := range []string{"planning", "execution", "review"} {
 		need := requestdriver.RouteNeed{Role: role}
-		t.Setenv("RG_TEST_KEY", "")
+		setTestRouteKey(t, "RG_TEST_KEY", "")
 		got := routeWaitReason(t.TempDir(), s, need, time.Now())
-		for _, want := range []string{"roles." + role, "route keyed", "RG_TEST_KEY", "factoryd restart"} {
+		for _, want := range []string{"roles." + role, "route keyed", "RG_TEST_KEY", "checks again every"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s with no key: reason = %q, want %q in it", role, got, want)
 			}
 		}
-		t.Setenv("RG_TEST_KEY", "sk-test")
+		setTestRouteKey(t, "RG_TEST_KEY", "sk-test")
 		if got := routeWaitReason(t.TempDir(), s, need, time.Now()); got != "" {
 			t.Fatalf("%s with a key: reason = %q, want none", role, got)
 		}
@@ -57,7 +57,7 @@ func TestRouteWaitReasonNamesTheRouteItsCauseAndTheRestart(t *testing.T) {
 // TestRouteWaitReasonFallsBackFromAnUnsetPlanningRole proves a drafting job's
 // planning role, when unset, is checked as execution, as the job runs.
 func TestRouteWaitReasonFallsBackFromAnUnsetPlanningRole(t *testing.T) {
-	t.Setenv("RG_FALLBACK_KEY", "")
+	setTestRouteKey(t, "RG_FALLBACK_KEY", "")
 	s := routeGateSettings("RG_FALLBACK_KEY", false)
 	s.Roles.Planning = nil
 	if got := routeWaitReason(t.TempDir(), s, requestdriver.RouteNeed{Role: "planning", Model: "not-a-model"}, time.Now()); !strings.Contains(got, "roles.execution") {
@@ -74,15 +74,15 @@ func TestRouteWaitReasonIsSilentWithoutRoutes(t *testing.T) {
 }
 
 // TestCredentialFromWorkerEnvSaysWhenARestartIsNeeded proves the wait names a
-// restart only for a key read from the worker's own environment: a static
-// key, or a github-copilot route with no token file. A credential read from a
-// file is read again on every check.
+// restart only for a key read from the worker's own environment: a
+// github-copilot route with no token file. A credential read from a file, a
+// static route's credential_file included, is read again on every check.
 func TestCredentialFromWorkerEnvSaysWhenARestartIsNeeded(t *testing.T) {
 	cases := []struct {
 		route sessionconfig.Route
 		want  bool
 	}{
-		{sessionconfig.Route{CredentialMode: "static", CredentialEnv: "K"}, true},
+		{sessionconfig.Route{CredentialMode: "static", CredentialFile: testRouteKeyPath("K")}, false},
 		{sessionconfig.Route{CredentialMode: "github-copilot"}, true},
 		{sessionconfig.Route{CredentialMode: "github-copilot", GitHubTokenFile: "~/.pi/agent/auth.json"}, false},
 		{sessionconfig.Route{CredentialMode: "chatgpt-codex", CodexAuthFile: "~/.codex/auth.json"}, false},
@@ -114,7 +114,7 @@ func TestAdvanceRequestWaitsForARouteThenRunsTheStep(t *testing.T) {
 		},
 	}
 
-	t.Setenv("RG_STEP_KEY", "")
+	setTestRouteKey(t, "RG_STEP_KEY", "")
 	after, err := acts.AdvanceRequest(context.Background(), "req-route")
 	if err != nil || after != string(request.StateSpecDrafting) {
 		t.Fatalf("AdvanceRequest without a key = %q, %v; want spec_drafting and no error", after, err)
@@ -140,7 +140,7 @@ func TestAdvanceRequestWaitsForARouteThenRunsTheStep(t *testing.T) {
 		t.Fatalf("LoadRequestStep = %+v, %v; want the step paced by routeWaitRecheck", step, err)
 	}
 
-	t.Setenv("RG_STEP_KEY", "sk-test")
+	setTestRouteKey(t, "RG_STEP_KEY", "sk-test")
 	_, _ = acts.AdvanceRequest(context.Background(), "req-route")
 	if ran != 1 {
 		t.Fatalf("the drafting job ran %d times once the key was set, want 1", ran)
@@ -155,7 +155,7 @@ func TestAdvanceRequestWaitsForARouteThenRunsTheStep(t *testing.T) {
 // waits, naming that request and its resume, and launches once the holder
 // leaves resume_review.
 func TestRouteWaitReasonWaitsWhileAQuotaRefusalHoldsTheRoute(t *testing.T) {
-	t.Setenv("RG_HOLD_KEY", "sk-test")
+	setTestRouteKey(t, "RG_HOLD_KEY", "sk-test")
 	s := routeGateSettings("RG_HOLD_KEY", false)
 	dataDir := t.TempDir()
 	holder := request.New("req-refused", "/repos/app", "app", request.Source{Kind: request.SourceText}, time.Now())

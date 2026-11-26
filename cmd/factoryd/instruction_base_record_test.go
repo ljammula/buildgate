@@ -33,7 +33,7 @@ func gitHead(t *testing.T, repo string) string {
 
 func recordedInstructionBase(t *testing.T, workspace, dataDir, base, diffBase, instructionBase string, resumeFrom *workflow.ResumeFrom) (string, error) {
 	t.Helper()
-	tr := &ticketRun{id: "run-1", workspace: &workspace, dataDir: &dataDir, diffBase: &diffBase, instructionBase: &instructionBase, baseSHA: base, resumeFrom: resumeFrom, r: &run.Run{ID: "run-1"}}
+	tr := &ticketRun{dp: newTestDeps(t), id: "run-1", workspace: &workspace, dataDir: &dataDir, diffBase: &diffBase, instructionBase: &instructionBase, baseSHA: base, resumeFrom: resumeFrom, r: &run.Run{ID: "run-1"}}
 	err := tr.recordAncestorInputs()
 	return tr.r.InstructionBaseSHA, err
 }

@@ -11,11 +11,11 @@ import (
 
 // routesModeSessionConfigNoRelayImage is a routes:/models:/roles: block
 // whose one route names a credential variable no test sets.
-const routesModeSessionConfigNoRelayImage = `routes:
+var routesModeSessionConfigNoRelayImage = `routes:
   litellm:
     credential_mode: static
     upstream: https://litellm.example.invalid
-    credential_env: RELAY_IMAGE_TEST_KEY
+    credential_file: ` + testRouteKeyPath("RELAY_IMAGE_TEST_KEY") + `
 models:
   luna:
     id: gpt-5.6-luna
@@ -29,11 +29,11 @@ roles:
 // routesModeSessionConfigNoRelayImage plus a second execution-role
 // model, "sonnet", in roles.execution.allowed -- the fixture the
 // -execution-model tests below choose within.
-const routesModeSessionConfigNoRelayImageWithAllowedSonnet = `routes:
+var routesModeSessionConfigNoRelayImageWithAllowedSonnet = `routes:
   litellm:
     credential_mode: static
     upstream: https://litellm.example.invalid
-    credential_env: RELAY_IMAGE_TEST_KEY
+    credential_file: ` + testRouteKeyPath("RELAY_IMAGE_TEST_KEY") + `
 models:
   luna:
     id: gpt-5.6-luna
@@ -93,11 +93,11 @@ func TestRunMainWithReadyExecutionModelRefusedInLegacyMode(t *testing.T) {
 // routesModeSessionConfigWithEscalation is
 // routesModeSessionConfigNoRelayImage plus a second allowed model, "sol", as
 // the role's escalation at high.
-const routesModeSessionConfigWithEscalation = `routes:
+var routesModeSessionConfigWithEscalation = `routes:
   litellm:
     credential_mode: static
     upstream: https://litellm.example.invalid
-    credential_env: RELAY_IMAGE_TEST_KEY
+    credential_file: ` + testRouteKeyPath("RELAY_IMAGE_TEST_KEY") + `
 models:
   luna:
     id: gpt-5.6-luna

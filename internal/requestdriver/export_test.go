@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"buildgate/internal/forge"
+	"buildgate/internal/notify"
 	"buildgate/internal/request"
 )
 
@@ -128,4 +129,8 @@ type consoleDeps struct {
 
 func (d consoleDeps) ConsoleBaseURL(string) string { return d.base }
 
+func (consoleDeps) NotifyWebhooks() notify.Webhooks { return notify.Webhooks{} }
+
 func (ReviewSaveDeps) ConsoleBaseURL(string) string { return "" }
+
+func (ReviewSaveDeps) NotifyWebhooks() notify.Webhooks { return notify.Webhooks{} }

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"buildgate/internal/daemonheartbeat"
+	"buildgate/internal/notify"
 	"buildgate/internal/progress"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
@@ -1418,13 +1419,12 @@ func TestOverrideRunReturnsWithoutWaitingOnSlowWebhook(t *testing.T) {
 	}))
 	defer webhook.Close()
 	defer close(blockCh)
-	t.Setenv("FACTORYD_DISCORD_WEBHOOK_URLS", webhook.URL)
 
 	dataDir := t.TempDir()
 	seedRun(t, dataDir, run.Run{
 		ID: "run-1", Ticket: "ticket-1", State: run.StateQuarantined, CreatedAt: "2026-08-26T10:00:00Z",
 	})
-	server := NewServer(dataDir, WithOverrideToken("test-token"))
+	server := NewServer(dataDir, WithOverrideToken("test-token"), WithNotifyWebhooks(func() notify.Webhooks { return notify.Webhooks{Discord: []string{webhook.URL}} }))
 
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {

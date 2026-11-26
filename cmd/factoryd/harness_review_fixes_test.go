@@ -45,7 +45,7 @@ func TestQuickstartPiforkImagePassKeepsReusedConfigRoles(t *testing.T) {
 	docker := writeDockerPresentFor(t, testPiforkImage)
 	configPath := filepath.Join(t.TempDir(), "proj.yml")
 	writeSessionConfig(t, configPath, "sandbox_image: "+testPiforkImage+"\n"+
-		"routes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_env: QS_TEST_KEY\n"+
+		"routes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_file: "+testRouteKeyPath("QS_TEST_KEY")+"\n"+
 		"models:\n  m:\n    id: gpt-x\n    routes: [r]\n"+
 		"  n:\n    id: gpt-y\n    routes: [r]\n"+
 		"roles:\n  planning: {model: m, harness: pifork}\n  execution: {model: m, harness: pifork}\n  review: {model: n, harness: pifork}\n")

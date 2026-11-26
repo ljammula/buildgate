@@ -79,8 +79,8 @@ func testRequest() sandbox.SandboxRequest {
 
 func testRoute() *sandbox.RouteAccess {
 	return &sandbox.RouteAccess{
-		Provider:      "bg-12345678-chatgpt",
-		CredentialEnv: []string{"BG_CHATGPT_TOKEN", "BG_CHATGPT_ACCOUNT"},
+		Provider:               "bg-12345678-chatgpt",
+		CredentialPlaceholders: []string{"BG_CHATGPT_TOKEN", "BG_CHATGPT_ACCOUNT"},
 		Endpoint: sandbox.RouteEndpoint{
 			Host: "chatgpt.com", Port: 443, TLS: true, Method: "POST",
 			Path: "/backend-api/codex/responses", Binaries: []string{"/usr/local/bin/node"},

@@ -279,7 +279,7 @@ request sits in a queue nobody drains.
   (`stacked_ticket`, whose sentence names what the operator does: relay
   it), or a model route whose credential is missing or expires too soon
   (`route`: the sentence names the role, the route and the fix, such as
-  `codex login`, or setting the key's variable and `factoryd restart`;
+  `codex login`, or writing the key to the route's `credential_file`;
   relay it); `-json` has it as `wait.kind`.
 - Spend: `factoryd cost [-request <id>]`, by role and model.
   On a subscription route (ChatGPT, Copilot) the dollars are an API-price

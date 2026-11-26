@@ -12,7 +12,7 @@ import (
 func routesModeSettings() Settings {
 	return Settings{
 		Routes: map[string]Route{
-			"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ANTHROPIC_API_KEY"},
+			"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialFile: "~/.config/factoryd/credentials/litellm"},
 		},
 		Models: map[string]Model{
 			"luna": {ID: "gpt-5.6-luna", Routes: []string{"litellm"}},
@@ -171,14 +171,14 @@ func TestValidateRoutingRejectsStaticRouteWithoutUpstream(t *testing.T) {
 	}
 }
 
-// TestValidateRoutingRejectsCredentialEnvOnNonStaticRoute proves
-// credential_env is refused outside a static route.
-func TestValidateRoutingRejectsCredentialEnvOnNonStaticRoute(t *testing.T) {
+// TestValidateRoutingRejectsCredentialFileOnNonStaticRoute proves
+// credential_file is refused outside a static route.
+func TestValidateRoutingRejectsCredentialFileOnNonStaticRoute(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm"] = Route{CredentialMode: "chatgpt-codex", CredentialEnv: "FOO"}
+	s.Routes["litellm"] = Route{CredentialMode: "chatgpt-codex", CredentialFile: "/keys/foo"}
 	err := ValidateRouting(s)
-	if err == nil || !strings.Contains(err.Error(), "credential_env") {
-		t.Errorf("ValidateRouting = %v, want a refusal naming credential_env", err)
+	if err == nil || !strings.Contains(err.Error(), "credential_file") {
+		t.Errorf("ValidateRouting = %v, want a refusal naming credential_file", err)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestValidateRoutingRejectsCredentialEnvOnNonStaticRoute(t *testing.T) {
 // route.
 func TestValidateRoutingRejectsGitHubTokenFieldsOnNonCopilotRoute(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CredentialEnv: "ANTHROPIC_API_KEY", GitHubTokenFile: "~/.pi/agent/auth.json"}
+	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CredentialFile: "~/.config/factoryd/credentials/litellm", GitHubTokenFile: "~/.pi/agent/auth.json"}
 	err := ValidateRouting(s)
 	if err == nil || !strings.Contains(err.Error(), "github_token_file") {
 		t.Errorf("ValidateRouting = %v, want a refusal naming github_token_file", err)
@@ -198,7 +198,7 @@ func TestValidateRoutingRejectsGitHubTokenFieldsOnNonCopilotRoute(t *testing.T) 
 // codex_auth_file is refused outside a chatgpt-codex route.
 func TestValidateRoutingRejectsCodexAuthFileOnNonCodexRoute(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CredentialEnv: "ANTHROPIC_API_KEY", CodexAuthFile: "~/.codex/auth.json"}
+	s.Routes["litellm"] = Route{CredentialMode: "static", Upstream: "https://x.invalid", CredentialFile: "~/.config/factoryd/credentials/litellm", CodexAuthFile: "~/.codex/auth.json"}
 	err := ValidateRouting(s)
 	if err == nil || !strings.Contains(err.Error(), "codex_auth_file") {
 		t.Errorf("ValidateRouting = %v, want a refusal naming codex_auth_file", err)
@@ -394,7 +394,7 @@ func TestValidateRolesIndependenceOverWholeReviewAllowedSet(t *testing.T) {
 // same backend two different route names.
 func TestValidateRolesIndependenceComparesByBackendNotRouteName(t *testing.T) {
 	s := routesModeSettings()
-	s.Routes["litellm-b"] = Route{CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ANTHROPIC_API_KEY"} // same upstream as "litellm", different name
+	s.Routes["litellm-b"] = Route{CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialFile: "~/.config/factoryd/credentials/litellm"} // same upstream as "litellm", different name
 	s.Models["luna"] = Model{ID: "gpt-5.6-luna", Routes: []string{"litellm"}}
 	s.Models["luna-via-b"] = Model{ID: "gpt-5.6-luna", Routes: []string{"litellm-b"}}
 	s.Roles.Execution.Allowed = []string{"luna"}
