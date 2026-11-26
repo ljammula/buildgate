@@ -380,6 +380,12 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd stats [flags]
 stderr:   Show whether builds are getting better, per project
 
+$ factoryd prune -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage: factoryd prune [flags]
+stderr:   Free the disk finished requests and old buildgate images hold; lists first
+
 $ factoryd build-ca-bundle -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag

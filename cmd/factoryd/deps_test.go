@@ -35,6 +35,19 @@ type fakeDocker struct {
 	requiredBinariesFn func(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
 	workerChecksFn     func(ctx context.Context, in doctorInputs) []doctorCheck
 	installImagesFn    func() workflow.InstallImages
+	buildgateImagesFn  func(ctx context.Context, dockerBinary string) ([]dockerImage, error)
+	removeImageFn      func(ctx context.Context, dockerBinary string, refs []string) error
+	imagesBytesFn      func(ctx context.Context, dockerBinary string) (int64, error)
+}
+
+func (f *fakeDocker) buildgateImages(ctx context.Context, dockerBinary string) ([]dockerImage, error) {
+	return f.buildgateImagesFn(ctx, dockerBinary)
+}
+func (f *fakeDocker) removeImage(ctx context.Context, dockerBinary string, refs []string) error {
+	return f.removeImageFn(ctx, dockerBinary, refs)
+}
+func (f *fakeDocker) imagesBytes(ctx context.Context, dockerBinary string) (int64, error) {
+	return f.imagesBytesFn(ctx, dockerBinary)
 }
 
 func (f *fakeDocker) installImages() workflow.InstallImages { return f.installImagesFn() }
@@ -113,6 +126,8 @@ type fakeForge struct {
 	createRefFn                   func(dir string, ref string, sha string) error
 	createBranchAtFn              func(dir string, branch string, sha string) error
 	pruneRoundRefsFn              func(dir string, id string, keepPrefixes []string) error
+	removeWorktreeOnlyFn          func(repoDir string, worktreePath string) error
+	deleteRoundRefsFn             func(repoDir string, requestID string) error
 	fetchBranchCommitFn           func(ctx context.Context, dir, branch, sha string) error
 	revListRangeFn                func(dir, from, to string) ([]string, []string, error)
 	patchIDFn                     func(dir, sha string) (string, error)
@@ -174,6 +189,12 @@ func (f *fakeForge) createRef(dir string, ref string, sha string) error {
 }
 func (f *fakeForge) pruneRoundRefs(dir string, id string, keepPrefixes []string) error {
 	return f.pruneRoundRefsFn(dir, id, keepPrefixes)
+}
+func (f *fakeForge) deleteRoundRefs(repoDir string, requestID string) error {
+	return f.deleteRoundRefsFn(repoDir, requestID)
+}
+func (f *fakeForge) removeWorktreeOnly(repoDir string, worktreePath string) error {
+	return f.removeWorktreeOnlyFn(repoDir, worktreePath)
 }
 func (f *fakeForge) createBranchAt(dir string, branch string, sha string) error {
 	return f.createBranchAtFn(dir, branch, sha)
@@ -409,6 +430,15 @@ func newTestDeps(t testing.TB) *deps {
 		},
 		workerChecksFn:  realDocker.workerChecks,
 		installImagesFn: func() workflow.InstallImages { return refusingInstallImages{} },
+		buildgateImagesFn: func(context.Context, string) ([]dockerImage, error) {
+			return nil, errors.New("test docker: no image is listed")
+		},
+		removeImageFn: func(context.Context, string, []string) error {
+			return errors.New("test docker: no image is removed")
+		},
+		imagesBytesFn: func(context.Context, string) (int64, error) {
+			return 0, errors.New("test docker: Docker's disk use is not read")
+		},
 	}
 	realForge := realForge{dp: dp}
 	dp.forge = &fakeForge{
@@ -434,6 +464,9 @@ func newTestDeps(t testing.TB) *deps {
 		createRefFn:                realForge.createRef,
 		createBranchAtFn:           realForge.createBranchAt,
 		pruneRoundRefsFn:           realForge.pruneRoundRefs,
+		// Git on the test's own temp repository, as pruneRoundRefs.
+		removeWorktreeOnlyFn: realForge.removeWorktreeOnly,
+		deleteRoundRefsFn:    realForge.deleteRoundRefs,
 		// A restack's git calls are refused: a test that restacks sets the
 		// ones it needs (realForge's, on its own temp repositories).
 		fetchBranchCommitFn: func(context.Context, string, string, string) error {

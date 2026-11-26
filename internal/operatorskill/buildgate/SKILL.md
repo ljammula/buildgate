@@ -59,6 +59,11 @@ another profile:
   show`, give them the `factoryd sandbox approve -repo <repo-path>` command
   and let them run it. `factoryd sandbox evict` is the operator's too: never
   run it.
+- `factoryd prune [-all-profiles] [-older-than 14d]`: lists the worktrees,
+  scratch and old buildgate images finished work still holds (`-older-than` is at least 24h), with their
+  sizes. Without a terminal it only lists. Never pass `-yes` and never answer
+  its question: removing is the operator's decision. Relay the list and give
+  them the command to run themselves
 - `factoryd console`
 - `factoryd submit [-verify-command '<cmd>'] -request-file <file> <repo-path>`,
   after the operator confirms the request text. Add

@@ -89,6 +89,13 @@ type dockerBoundary interface {
 	// within timeout; the rule for running a build's review and challenger
 	// together (reviewAndChallengerTogether) and doctor's memory row use it.
 	memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
+	// buildgateImages lists the images that carry a buildgate kind label,
+	// with the containers that use each and the bytes only it holds;
+	// removeImage runs `docker image rm` (no force) on refs; imagesBytes is
+	// the total size of every image. `factoryd prune` uses the three.
+	buildgateImages(ctx context.Context, dockerBinary string) ([]dockerImage, error)
+	removeImage(ctx context.Context, dockerBinary string, refs []string) error
+	imagesBytes(ctx context.Context, dockerBinary string) (int64, error)
 }
 
 // realDocker is the real dockerBoundary; its methods are beside the code that uses them.
@@ -117,6 +124,12 @@ type forgeBoundary interface {
 	createRef(dir string, ref string, sha string) error
 	createBranchAt(dir string, branch string, sha string) error
 	pruneRoundRefs(dir string, id string, keepPrefixes []string) error
+	// removeWorktreeOnly removes a worktree registered in repoDir and keeps
+	// its branch: `factoryd prune`'s removal of a finished run's worktree.
+	removeWorktreeOnly(repoDir string, worktreePath string) error
+	// deleteRoundRefs deletes a request's refs/buildgate/rounds/<id>/ refs
+	// and nothing else (never a branch): `factoryd prune`.
+	deleteRoundRefs(repoDir string, requestID string) error
 	// The git calls of a restack: fetchBranchCommit fetches origin's tip of
 	// a branch when it is not in dir, pushWithLease is the restack's leased
 	// forced push, and revListRange, patchID, replayCommits and moveBranch

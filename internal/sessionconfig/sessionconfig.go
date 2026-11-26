@@ -218,6 +218,13 @@ type Config struct {
 	// expiry: merging is a human act and a long-open pull request is normal.
 	ReviewGateExpiry *string `yaml:"review_gate_expiry,omitempty"`
 
+	// PruneAfter, when set, has `factoryd worker` prune its own data dir at
+	// most once a day: the worktrees, scratch directories, build sessions and
+	// round refs of requests finished longer than this ago (a number of days
+	// such as 14d, or a duration such as 36h; ParseAge). Absent: the worker
+	// prunes nothing, and only `factoryd prune` does.
+	PruneAfter *string `yaml:"prune_after,omitempty"`
+
 	// PRBudgetLines is the source-line threshold for a pull request size note
 	// and the target when a planning job drafts tickets. Default 400; 0 disables
 	// the line threshold; negative is refused. The release size limits are
@@ -531,6 +538,9 @@ type Settings struct {
 	// ReviewGateExpiry mirrors Config.ReviewGateExpiry; 0 is off.
 	ReviewGateExpiry time.Duration
 
+	// PruneAfter mirrors Config.PruneAfter; 0 is off.
+	PruneAfter time.Duration
+
 	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
 	PRBudgetLines int
 
@@ -841,6 +851,13 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	integer64(&s.MeterCostCeilingMicroUSD, c.MeterCostCeilingMicroUSD)
 	if err := c.applyLimits(&s); err != nil {
 		return s, err
+	}
+	if c.PruneAfter != nil {
+		d, err := ParseAge(*c.PruneAfter)
+		if err != nil {
+			return s, fmt.Errorf("prune_after: %w", err)
+		}
+		s.PruneAfter = d
 	}
 
 	boolean(&s.RegistryProxy, c.RegistryProxy)
