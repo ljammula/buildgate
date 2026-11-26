@@ -161,14 +161,16 @@ const (
 	// type existed holds InfrastructureFailureType for the same failure and
 	// replays with the rollback it recorded.
 	SandboxLaunchFailureType = "SandboxLaunch"
-	// ModelUnavailableFailureType, ProviderQuotaFailureType and
-	// MeterDeniedFailureType mark a build that did not succeed while the
-	// meter's ledger shows its model route was not serving it
-	// (run.ModelRouteCause): the build's failure is no verdict on the work,
-	// so the worktree is kept for a resume decision and no corrective build
-	// is spent against the same route. Not retried by Temporal.
+	// ModelUnavailableFailureType, ProviderQuotaFailureType,
+	// ModelRejectedFailureType and MeterDeniedFailureType mark a build that
+	// did not succeed while the meter's ledger shows its model route was not
+	// serving it (run.ModelRouteCause): the build's failure is no verdict on
+	// the work, so the worktree is kept for a resume decision and no
+	// corrective build is spent against the same route. Not retried by
+	// Temporal.
 	ModelUnavailableFailureType = "ModelUnavailable"
 	ProviderQuotaFailureType    = "ProviderQuota"
+	ModelRejectedFailureType    = "ModelRejected"
 	MeterDeniedFailureType      = "MeterDenied"
 	// DependencyFetchFailureType marks a verify, baseline verify, full-suite
 	// or repository-gate step whose command failed, was run again in the same

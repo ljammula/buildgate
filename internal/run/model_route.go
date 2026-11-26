@@ -17,16 +17,18 @@ import (
 // or when the requests since the last answered one were refused by the
 // provider or by the meter. Who refused names the cause: the meter
 // (meter_denied), the provider's limit (provider_quota), anything else
-// (model_unavailable).
+// (model_unavailable). A step none of whose requests was served, and some of
+// which the upstream answered with a 4xx other than 429 (the rest
+// unanswered), is model_rejected (a provider's usage limit sent as a 400
+// reads so), and the same request would meet it again. A rejection after an
+// answered request refuses nothing: the step was served.
 //
 // The counts are the meter's, but the requests are the worker's: a worker
 // can provoke each of these. So this is only ever a reason to hand a step
 // that did not pass to a human; it accepts nothing and rejects nothing.
 func ModelRouteCause(calls *meter.Calls) unresolved.Cause {
-	if calls == nil || calls.Legacy || calls.Recorded() == calls.Rejected {
-		// No record, a ledger that cannot say, or nothing but requests
-		// the upstream rejected as malformed (a 4xx other than 429): that
-		// last is the client's doing, and a second try would meet it again.
+	if calls == nil || calls.Legacy || calls.Recorded() == 0 {
+		// No record, a ledger that cannot say, or no model request.
 		return ""
 	}
 	if calls.Served() && calls.RefusedAtEnd == 0 {
@@ -41,20 +43,31 @@ func ModelRouteCause(calls *meter.Calls) unresolved.Cause {
 		return unresolved.MeterDenied
 	case meter.RefusedByProviderLimit:
 		return unresolved.ProviderQuota
+	case refusedByRejection:
+		return unresolved.ModelRejected
 	}
 	return unresolved.ModelUnavailable
 }
 
+// refusedByRejection is refusedBy's answer for a step the upstream rejected
+// with a 4xx other than 429: the meter records no such kind, since a
+// rejection ends no count (meter.Calls.RefusedAtEnd).
+const refusedByRejection = "rejected"
+
 // refusedBy is who refused a step none of whose requests was served and
 // none refused at the end (they went unanswered or were rejected): the
 // meter when it refused any, else the provider's limit when it answered
-// 429, else nobody in particular.
+// 429, else the upstream's rejection when it rejected any (the rest went
+// unanswered: the same request meets the rejection again), else nobody in
+// particular.
 func refusedBy(calls meter.Calls) string {
 	switch {
 	case calls.Denied() > 0:
 		return meter.RefusedByMeter
 	case calls.RateLimited > 0:
 		return meter.RefusedByProviderLimit
+	case calls.Rejected > 0:
+		return refusedByRejection
 	}
 	return ""
 }
