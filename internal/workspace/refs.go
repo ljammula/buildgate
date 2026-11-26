@@ -107,6 +107,39 @@ func PruneRoundRefs(repoDir, id string, keepPrefixes []string) error {
 	return nil
 }
 
+// DeleteRoundRefs deletes only the round refs of request id
+// (refs/buildgate/rounds/<id>/) from repoDir, under the git metadata lock.
+// It never deletes a branch: a retry-from branch may hold work nothing else
+// has.
+func DeleteRoundRefs(repoDir, id string) error {
+	if id == "" || strings.ContainsAny(id, " \t\n/") {
+		return fmt.Errorf("delete round refs: %q is not a request id", id)
+	}
+	unlock, err := lockGitMetadata(repoDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	prefix := "refs/buildgate/rounds/" + id + "/"
+	out, err := exec.Command("git", "-C", repoDir, "for-each-ref", "--format=%(refname)", prefix).Output()
+	if err != nil {
+		return fmt.Errorf("git for-each-ref %s: %w", prefix, err)
+	}
+	var failed []string
+	for _, ref := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(ref, prefix) {
+			continue
+		}
+		if msg, err := gitMutate(repoDir, "update-ref", "-d", ref); err != nil {
+			failed = append(failed, ref+": "+strings.TrimSpace(string(msg)))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("delete round refs: could not delete %s", strings.Join(failed, "; "))
+	}
+	return nil
+}
+
 func keptBranch(branch string, keepPrefixes []string) bool {
 	for _, prefix := range keepPrefixes {
 		if strings.HasPrefix(branch, prefix) {

@@ -805,6 +805,9 @@ verification, then records the
 run's evaluation (accepted/quarantined) plus a release decision (recorded
 only — nothing merges or deploys automatically). The worktree/branch are
 **not** cleaned up on acceptance (only a rejected run's are auto-discarded).
+`factoryd prune` removes them once the request is finished, and
+`prune_after` has the worker do so on its own: USAGE_REFERENCE.md,
+[Freeing disk](USAGE_REFERENCE.md#freeing-disk-factoryd-prune).
 
 **Docker containment is unconditional** — no host-execution opt-out
 anywhere, and no built-in default image either: `-sandbox-image`/

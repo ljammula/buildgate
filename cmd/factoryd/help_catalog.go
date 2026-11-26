@@ -71,6 +71,7 @@ func commandCatalog() []commandInfo {
 		{"worker", "", "Drive every request of the data dir (submit and quickstart start it)", groupMachine, func() *flag.FlagSet { fs, _ := newWorkerFlags(); return fs }},
 		{"serve", "", "Serve the console and the API", groupMachine, func() *flag.FlagSet { fs, _ := newServeFlags(); return fs }},
 		{"stop", "", "Stop the worker and the console of a data dir", groupMachine, func() *flag.FlagSet { fs, _ := newStopFlags(); return fs }},
+		{"prune", "", "Free the disk finished requests and old buildgate images hold; lists first", groupMachine, func() *flag.FlagSet { return newPruneFlags().set }},
 		{"restart", "", "Restart every profile's worker and console with this binary", groupMachine, newRestartFlags},
 		{"use", "[<profile>]", "List the profiles, or make one active", groupMachine, newUseFlags},
 		{"upgrade", "", "Upgrade this machine to a release", groupMachine, func() *flag.FlagSet { fs, _ := newUpgradeFlags(); return fs }},

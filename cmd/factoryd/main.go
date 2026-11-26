@@ -451,6 +451,7 @@ func subcommands() map[string]subcommand {
 		"reject":            rejectMain,
 		"answer":            answerMain,
 		"cancel":            cancelMain,
+		"prune":             pruneMain,
 		"worker":            workerMain,
 		"retry":             retryMain,
 		"resume":            resumeMain,

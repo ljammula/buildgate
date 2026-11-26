@@ -63,6 +63,7 @@ depends on whether the command only reads.
 | `factoryd use [<name>]` | With no argument, lists the profiles (`*` marks the active one): name, data dir, execution route · model · harness, worker and serve liveness. With a name, validates that profile loads and makes it active by writing `active-profile` (`use default` is `config.yml`). |
 | `factoryd uninstall` | Removes what `make install` put on this machine: stops `worker`/`serve`/Temporal, removes the `install-service` services, the Temporal containers, the local registry container, the locally built images, the `buildgate` skill, the `factoryd` binary and the `factoryd` links on `PATH` that point at it (`~/.local/bin/factoryd`). Lists the plan and asks first. Keeps `~/.config/factoryd` and `~/buildgate` (requests, runs, evidence) unless `-purge`, which also deletes the Temporal volumes and the OpenShell gateway's state on the Docker VM, and asks you to type `purge`. Never touches Docker/colima, Go, Node, `gh`, packages Homebrew or apt installed, or git config. |
 | `factoryd kill-switch -project <p>` | Durably engages or disengages a project's release kill switch; without `-state`, prints its state and history. Engaged = every release decision fails closed. CLI-only so it works without `serve`; file-locked; no merge, deploy or run side effect. |
+| `factoryd prune` | Frees the disk finished work still holds; lists what would go and its size, then asks on a terminal (`-yes` acts without asking; no terminal and no `-yes` lists only). See [Freeing disk](#freeing-disk-factoryd-prune) |
 | `factoryd reconcile` | Reaps a stranded isolation marker, worktree or branch from a killed run. Refuses if a live run holds the repo lock; preserves anything still resumable. |
 
 ### Upgrading with requests in flight
@@ -2125,6 +2126,64 @@ nothing; the console's Memory tab of a project reads it. There is no MCP tool
 for memory.
 
 
+## Freeing disk (`factoryd prune`)
+
+`factoryd prune` lists, then removes after a yes on a terminal (or with
+`-yes`), what finished work still holds. No terminal and no `-yes`: it lists
+and exits. After a removal it prints the bytes freed.
+
+| Flag | What it changes |
+|---|---|
+| `-config <profile>` | Whose data dir: the active profile's by default. The data dir comes only from a session config. A config file given here pins its images too, whether or not it is in `~/.config/factoryd/` |
+| `-all-profiles` | Every profile's data dir under `~/.config/factoryd/` |
+| `-older-than <age>` | `14d` by default, `24h` at least (a smaller age is refused): a request counts once it has been finished longer than this |
+| `-images=false` | Leave Docker alone |
+| `-yes` | Remove without asking |
+
+What goes, per data dir:
+
+| Removed | When |
+|---|---|
+| A run's worktree under `<data dir>/workspaces/` (`git worktree remove`; the branch stays) | Its request is `done`, `closed` or `cancelled`, entered longer than `-older-than` ago, and every run of it is confirmed terminal; every run is the request's by its `request_id`, its replay record or a ticket naming it. A run no record ties to a request is never pruned. Only a directory inside `<data dir>/workspaces/` that holds a linked worktree (a `.git` file) is removed, and never one that an isolation marker or the record of a run not being pruned names as its workspace |
+| `<data dir>/scratch/<run>` and the run's kept build session | The same runs |
+| The request's round refs (`refs/buildgate/rounds/<id>/`) | The same requests. No branch is ever deleted, a `retry -from` branch included |
+
+What stays, and who reads it:
+
+| Kept | Read by |
+|---|---|
+| `run.json`, `request.json` | `factoryd stats`, `status`, `watch`, `inspect`, `cost`, `scripts/baseline.py`, the console API, evidence |
+| Activity logs, `progress.jsonl`, `BUILD_EVIDENCE.json`, `diff.patch` | `logs`, `watch`, `inspect`'s triage sentence, the console |
+| `prompts/` | `factoryd logs -list`, the console's prompts view |
+| Every branch | The commits are the work; a pushed one is its pull request's, an unpushed retry branch may hold work nothing else has |
+| `quarantined` and `halted` requests | Retry, send back and amend scope can still revive them: `factoryd cancel` one first to let prune take it |
+
+Before a worktree goes, the agent's report and failed rounds' output a
+rollback would have kept are copied into the run's directory when it has
+neither yet. Each request is removed under its lock, with its request and runs
+read again there: one no longer finished and old enough is left. A request
+directory whose `request.json` cannot be read or names another request is
+listed as skipped and left.
+
+Docker: an image goes only when it carries buildgate's `buildgate.image` label
+(or the pre-rename `software-factory.image`) and is in a repository (its name
+without tag or digest) that some profile's `sandbox_image`, `meter_image` or
+`registry_proxy_image` names, so it is an older build of buildgate's own
+image: an image built `FROM` one inherits the label and stays. It must also be
+created longer than `-older-than` ago, named by no profile (every profile in
+`~/.config/factoryd/` and the `-config` file, by tag, repo digest or image id)
+and by no run still in flight, and used by no container. An untagged image has
+no repository and stays. Install images stay with their own store (`factoryd
+sandbox evict`). Docker and the pins are read again right before removal, and
+an image that changed is left; each goes by its image id with `docker image rm`
+and no force (an image with several tags goes by the tags just read).
+An unlabelled image, a volume, a container and the build cache are never
+touched: Docker records no owner for a build-cache entry and the VM is shared
+with other projects.
+
+`prune_after` in the session config has the worker do the data-dir part on its
+own, at most once a day; absent, it does nothing.
+
 ## Is it getting better (`factoryd stats`)
 
 `factoryd stats` and `GET /projects/{project}/trend` (read token; query
@@ -2358,6 +2417,7 @@ limits for API-started runs.
 | `monthly_cost_budget_micro_usd` | `0` (unlimited) -- same scope as `monthly_token_budget`, in micro-USD |
 | `pr_budget_lines` | `400` -- the source-line threshold for a PR size note and the planning job's target when it drafts a plan. `0` disables the line threshold; the 25-function note threshold still applies. A negative value is refused. The planner may declare an `Estimated-Changed-Lines:` header, and `plan_review` notes estimates over its recorded budget. `release_max_changed_lines` and `release_max_files_changed` are the hard limits. A running `worker` reads the key at its next start (`factoryd restart`). |
 | `review_gate_expiry` | `0` (off) -- a duration such as `72h`. A request that waits this long at `spec_review`, `plan_review` or `resume_review` is halted with halt kind `gate_expired` (`<state> expired: no decision in <duration> (review_gate_expiry)`) and notified; `approve` and `reject` refuse a gate past it; `factoryd retry <id>` returns it to the same review with a fresh clock, nothing redrafted. Never applies to `pr_review`. Checked inside `approve`, `reject`, `resume`, and the console's in-place spec and ticket edits, under the request's lock; `serve` reads the key afresh for every decision, and a config that cannot be read refuses the decision |
+| `prune_after` | absent (off) -- days such as `14d`, or a duration such as `36h`, at least `24h` (a smaller one is refused). The worker prunes its own data dir at most once a day, as `factoryd prune -older-than <value> -images=false` would, and logs each removal. It never removes a Docker image: [Freeing disk](#freeing-disk-factoryd-prune) |
 | `round_session_continuity` | `true` -- a corrective or advice round's build continues the harness session of the build of the run it follows; `false` starts it fresh with only the written record of that run. The build session of a request's ticket build is kept in its run directory (`build-session/`, at most 64 MiB, 10,000 entries and 32 levels, without its saved prompts, round output, notes, harness configuration, skills or credential-named files; a session not kept leaves only the reason, which the round reports); the round's build continues it only when it was made by the same harness and model and holds at most 32 MiB of session state, and starts fresh with the record otherwise. `session` in the round's `BUILD_EVIDENCE.json` is `resumed` or `fresh(<reason>)`. Only a later round of the same ticket gets it; never a review. The kept copy is removed after a worker step or a cancel once no round can follow it: a settled ticket's when the request moves on to a later ticket, and all of them when the request leaves `building` and `resume_review` (`pr_review`, a terminal state), except one a round still in flight follows. A running `worker` reads it at its next start (`factoryd restart`). |
 | `review_advice_rounds` | `3` -- `1` to `3` follows a request's accepted ticket run with an open item (a `high` review finding or a red held challenge test) with up to that many advice rounds: each a build on its pull request's branch given those items, pushed only when accepted again, never refusing anything; the next follows only a pushed round whose result still has an open item. `0` turns them off except the one round a red held test always gets (the advice rounds, beside `-code-review-policy`). Outside `0` to `3` is refused. A running `worker` reads it at its next start (`factoryd restart`). |
 | `registry_proxy_npm_upstream` | `https://registry.npmjs.org` |

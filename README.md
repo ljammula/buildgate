@@ -470,6 +470,7 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 | Keep the worker and console alive across reboots (launchd on macOS, systemd user units on Linux) | `factoryd install-service` |
 | Fail closed every release for a project | `factoryd kill-switch -project <p> -state engaged -by <who> -reason <why>` |
 | Clean up after a killed run | `factoryd reconcile -workspace <path> -data-dir <dir>` |
+| Free the disk finished requests and old buildgate images hold (lists first) | `factoryd prune [-all-profiles]` |
 
 Every command, and the flags used most: [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
 Watching, costs, budgets and notifications:

@@ -128,6 +128,9 @@ func workerMain(dp *deps, args []string) error {
 	if err := startRequestWorkflows(ctx, temporalClient, dataDir, queueID, jobsQueue, lightQueue); err != nil {
 		return err
 	}
+	pruneTicker := time.NewTicker(autoPruneCheck)
+	defer pruneTicker.Stop()
+	go autoPruneLoop(ctx, dp, dataDir, cfg.Settings.PruneAfter, pruneTicker.C)
 	retryPendingWakes(ctx, temporalClient, time.NewTicker(workerAdoptInterval), dataDir, queueID, jobsQueue, lightQueue)
 	log.Printf("factoryd worker: stopping")
 	return nil
