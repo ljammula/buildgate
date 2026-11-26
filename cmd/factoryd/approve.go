@@ -52,17 +52,21 @@ func approveMain(dp *deps, args []string) error {
 		return err
 	}
 
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, positional[0], idRequest)
+	if err != nil {
+		return err
+	}
 	opts, err := gateExpiryOptions(*configPath)
 	if err != nil {
-		return fmt.Errorf("approve request %q: %w", positional[0], err)
+		return fmt.Errorf("approve request %q: %w", id, err)
 	}
 	// nil expectedSHA256: this CLI has no prior fetch of its own to bind
 	// the approval to (unlike the console, see Approve's own doc
 	// comment), so it keeps the unconditional behavior.
-	r, err := request.Approve(*dataDir, positional[0], currentOSUser(), time.Now(), nil, opts...)
+	r, err := request.Approve(*dataDir, id, currentOSUser(), time.Now(), nil, opts...)
 	if err != nil {
-		notifyIfGateExpired(dp, *dataDir, positional[0], err)
-		return fmt.Errorf("approve request %q: %w", positional[0], err)
+		notifyIfGateExpired(dp, *dataDir, id, err)
+		return fmt.Errorf("approve request %q: %w", id, err)
 	}
 	wakeAfterSave(dp, context.Background(), os.Stderr, *dataDir, r.ID)
 	if _, err := fmt.Fprintf(os.Stdout, "request %s: state=%s\n", r.ID, r.State); err != nil {
@@ -128,7 +132,10 @@ func rejectMain(dp *deps, args []string) error {
 		return err
 	}
 
-	id := positional[0]
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, positional[0], idRequest)
+	if err != nil {
+		return err
+	}
 	by := currentOSUser()
 	if *to != "" {
 		target := request.SendBackTarget(*to)

@@ -75,7 +75,7 @@ func TestStatusSaysARequestWaitsForASlotThePRReviewPassesHold(t *testing.T) {
 			line = l
 		}
 	}
-	for _, want := range []string{"building*", "0/3", "waiting for a job slot (all 2 in use), #1 in line", "7m0"} {
+	for _, want := range []string{"building*", "0/3", "waiting for a job slot (all 2 in use), #1 in line", " 7m "} {
 		if !strings.Contains(line, want) {
 			t.Errorf("queued's row lacks %q: %q\n%s", want, line, out)
 		}

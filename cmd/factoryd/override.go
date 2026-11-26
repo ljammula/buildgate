@@ -49,6 +49,12 @@ func overrideMain(dp *deps, args []string) error {
 		return fmt.Errorf("-run, -by, -reason, and -state are required")
 	}
 
+	resolved, err := resolveDecisionIDArg(flags, *dataDir, "", *runID, idRun)
+	if err != nil {
+		return err
+	}
+	*runID = resolved
+
 	var newState run.State
 	switch *state {
 	case string(run.StateAccepted):

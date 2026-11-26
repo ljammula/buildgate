@@ -558,7 +558,10 @@ func watchMain(dp *deps, args []string) error {
 		flags.Usage()
 		return fmt.Errorf("usage: factoryd watch [flags] <run-id-or-request-id>")
 	}
-	id := positional[0]
+	id, err := resolveIDArg(flags, *dataDir, *configPath, positional[0], idRequestOrRun)
+	if err != nil {
+		return err
+	}
 
 	if isRequestID(*dataDir, id) {
 		return watchRequest(dp, os.Stdout, *dataDir, id, *noFollow)

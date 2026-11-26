@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,7 @@ func TestRepositoryWaitReachesStatus(t *testing.T) {
 	}
 	want := "waiting for the repository (another build holds it), 27m0s"
 	out := captureStdout(t, func() {
-		if err := printRequestStatusRows(entries, now); err != nil {
+		if _, err := printRequestStatusRows(os.Stdout, entries, now, true); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"buildgate/internal/modelrole"
@@ -626,29 +629,53 @@ func statusProfileLine(name, path, dataDir string) string {
 	return fmt.Sprintf("profile: %s (%s) · data dir %s", name, path, dataDir)
 }
 
-func newStatusFlags() (flags *flag.FlagSet, dataDir, project, state, configPath *string, n *int, jsonOutput *bool) {
-	flags = flag.NewFlagSet("status", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
-	project = flags.String("project", "", "only show runs and requests of this project id, which is the name of the repository's root directory")
-	state = flags.String("state", "", "only show runs in this state (e.g. ready, slice_running, verifying, accepted, halted, quarantined)")
-	n = flags.Int("n", 20, "maximum number of runs to show")
-	jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of a table")
-	configPath = flags.String("config", "", "session config path or profile name, for the data dir and the roles summary; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+// statusFlags are `factoryd status`'s flags.
+type statusFlags struct {
+	set         *flag.FlagSet
+	dataDir     *string
+	project     *string
+	state       *string
+	configPath  *string
+	n           *int
+	jsonOutput  *bool
+	all         *bool
+	verbose     *bool
+	allProfiles *bool
+}
+
+func newStatusFlags() statusFlags {
+	flags := flag.NewFlagSet("status", flag.ContinueOnError)
+	f := statusFlags{set: flags}
+	f.dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	f.project = flags.String("project", "", "only show runs and requests of this project id, which is the name of the repository's root directory")
+	f.state = flags.String("state", "", "only show runs in this state (e.g. ready, slice_running, verifying, accepted, halted, quarantined), finished ones included")
+	f.n = flags.Int("n", 20, "maximum number of runs to show")
+	f.jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of a table: every request, finished ones included, with whole reasons")
+	f.configPath = flags.String("config", "", "session config path or profile name, for the data dir and the roles summary; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
+	f.all = flags.Bool("all", false, "also list finished requests (done, closed, cancelled) and the finished runs of no open request, which the table leaves out")
+	f.verbose = flags.Bool("v", false, "print whole reasons instead of cutting them short, each run's baseline result and Temporal link, and where the data dir came from")
+	f.allProfiles = flags.Bool("all-profiles", false, "list the open requests of every profile's data dir in one table, with no runs; add -all for finished ones")
 	finishFlags(flags)
-	return
+	return f
 }
 
 func statusMain(dp *deps, args []string) error {
-	flags, dataDir, project, state, configPath, n, jsonOutput := newStatusFlags()
+	f := newStatusFlags()
+	flags, dataDir, project, state, configPath, n, jsonOutput := f.set, f.dataDir, f.project, f.state, f.configPath, f.n, f.jsonOutput
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *f.allProfiles {
+		return statusAllProfiles(os.Stdout, os.Stderr, f, time.Now())
 	}
 	// *configPath, not "": status now has its own -config flag (for the
 	// roles: summary below), and an operator who names one almost
 	// certainly also wants -data-dir resolved from it, the same
 	// "-config wins" precedence every other -config-bearing command
 	// already gives that flag (applySessionConfig, doctorMain, ...).
-	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
+	// The line naming the data dir's source is -v's: the profile line
+	// below already names the profile and the data dir.
+	if err := resolveDataDir(flags, dataDir, *configPath, *f.verbose); err != nil {
 		return err
 	}
 	if *n <= 0 {
@@ -674,8 +701,6 @@ func statusMain(dp *deps, args []string) error {
 	// speculative ahead of any caller needing it), so requests are only
 	// ever filtered by -project here.
 	requestEntries := buildRequestStatusEntries(requests, request.NewWaitContext(*dataDir, requests, now), *project, now)
-	entries := buildStatusEntries(runs, *project, *state, *n, now)
-	applyProgressStatus(entries, runs, *dataDir, now)
 
 	// worker liveness. heartbeatLine is "" whenever worker has
 	// never run against this data dir, or its heartbeat is still fresh --
@@ -707,6 +732,8 @@ func statusMain(dp *deps, args []string) error {
 	profileName, profilePath := statusProfile(*configPath)
 
 	if *jsonOutput {
+		entries := buildStatusEntries(runs, *project, *state, *n, now)
+		applyProgressStatus(entries, runs, *dataDir, now)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(struct {
@@ -730,81 +757,198 @@ func statusMain(dp *deps, args []string) error {
 		})
 	}
 
-	fmt.Fprintln(os.Stdout, statusProfileLine(profileName, profilePath, *dataDir))
+	// The table is what is open: a finished request, and a finished run of
+	// no open request, are left out unless -all (or, for runs, -state)
+	// asks for them, and counted in a closing line.
+	shownRequests, shownRuns := requestEntries, runs
+	if !*f.all {
+		shownRequests = openRequestEntries(requestEntries)
+		if *state == "" {
+			shownRuns = runsWorthShowing(runs, requests)
+		}
+	}
+	entries := buildStatusEntries(shownRuns, *project, *state, *n, now)
+	applyProgressStatus(entries, runs, *dataDir, now)
 
-	// Requests are printed above runs (the plan's own "console shows the
-	// state of every request", here its CLI equivalent) -- a request has
-	// no run record of its own yet in this WP, so it would otherwise be
-	// invisible to `factoryd status` entirely.
-	// Request rows print the full id, padded to the longest one shown:
-	// approve/reject/retry take only a full id, and ids generated from
-	// similar titles share long prefixes, so a short id was ambiguous and
-	// unusable (two "add-get-" rows in the 2026-09-26 Flutter + Go app run).
-	if err := printRequestStatusRows(requestEntries, now); err != nil {
+	fmt.Fprintln(os.Stdout, statusProfileLine(profileName, profilePath, *dataDir))
+	cut, err := printRequestStatusRows(os.Stdout, shownRequests, now, *f.verbose)
+	if err != nil {
 		return err
 	}
-	if len(requestEntries) > 0 && len(entries) > 0 {
+	if len(shownRequests) > 0 && len(entries) > 0 {
 		fmt.Fprintln(os.Stdout)
 	}
-
-	if err := printRunStatusRows(entries); err != nil {
+	runsCut, err := printRunStatusRows(os.Stdout, entries, *f.verbose)
+	if err != nil {
 		return err
 	}
-	return printStatusFooter(len(requestEntries) > 0 || len(entries) > 0, heartbeatLine, routeLine, roleLines)
+	anyRows := len(shownRequests) > 0 || len(entries) > 0
+	hiddenRequests := len(requestEntries) - len(shownRequests)
+	// Counted over the same -project and -state the rows passed: finished
+	// runs left out, and rows past -n.
+	listable := countStatusRuns(shownRuns, *project, *state)
+	hiddenRuns := countStatusRuns(runs, *project, *state) - listable
+	printStatusNotes(os.Stdout, anyRows, hiddenRequests, hiddenRuns, listable-len(entries), *n, cut || runsCut)
+	return printStatusFooter(true, workerHeartbeatLine(*dataDir, now, humanAge), routeLine, roleLines)
 }
 
-// printRequestStatusRows prints one line per request, ids padded to the
-// widest: id, project, state, age since submitted, time in this state,
-// ticket, and the PR, reason or wait.
-func printRequestStatusRows(requestEntries []requestStatusEntry, now time.Time) error {
-	idWidth := 0
-	for _, r := range requestEntries {
-		idWidth = max(idWidth, len(r.ID))
-	}
-	for _, r := range requestEntries {
-		id := r.ID
-		ticketOrDash := r.Ticket
-		if ticketOrDash == "" {
-			ticketOrDash = "-"
-		}
-		// A ticket's PR URL, once it has one, is more actionable to show
-		// than the request's own Error (which is empty in building/
-		// pr_review anyway -- those are non-terminal states) -- the same
-		// "PR URL takes priority over a reason" rule buildStatusEntry's
-		// own run rendering already follows.
-		prOrError := r.PullRequestURL
-		if prOrError == "" {
-			// Untrusted error text: one line, so it can't split this row.
-			prOrError = sanitize.Line(r.Error)
-		}
-		if prOrError == "" {
-			prOrError = "-"
-		}
-		stateCol := r.State
-		if r.AwaitingPullRequest {
-			// Calm, distinct label instead of an alarming "halted" plus a
-			// retry hint: the work is accepted, only the PR is missing.
-			stateCol = "accepted*"
-			prOrError = r.Label
-		} else if r.Wait != nil {
-			// A request that waits looked identical to one that runs: its
-			// state starred plus the sentence naming the wait, the same
-			// "asterisk marks a state this factory annotates" convention
-			// accepted* above uses.
-			stateCol = r.State + "*"
-			prOrError = r.Wait.Sentence(now)
-		}
-		inState := r.InState
-		if inState == "" {
-			inState = "-"
-		}
-		line := fmt.Sprintf("%-*s  %-24s  %-13s  %-10s  %-10s  %-7s  %s", idWidth, id, r.Project, stateCol, r.Age, inState, ticketOrDash, prOrError)
-		line += requestRowSuffix(r)
-		if _, err := fmt.Fprintln(os.Stdout, line); err != nil {
-			return fmt.Errorf("print request status line: %w", err)
+// openRequestEntries are the entries of requests that can still move: not
+// done, closed or cancelled (request.State.Finished).
+func openRequestEntries(entries []requestStatusEntry) []requestStatusEntry {
+	open := make([]requestStatusEntry, 0, len(entries))
+	for _, e := range entries {
+		if !request.State(e.State).Finished() {
+			open = append(open, e)
 		}
 	}
-	return nil
+	return open
+}
+
+// runsWorthShowing are the runs the table lists without -all: one still
+// running, and every run of a request that is not finished (a halted or
+// quarantined request's runs say why).
+func runsWorthShowing(runs []*run.Run, requests []*request.Request) []*run.Run {
+	open := map[string]bool{}
+	for _, r := range requests {
+		if !r.State.Finished() {
+			open[r.ID] = true
+		}
+	}
+	var shown []*run.Run
+	for _, r := range runs {
+		if !runTerminalConfirmed(r) || (r.RequestID != "" && open[r.RequestID]) {
+			shown = append(shown, r)
+		}
+	}
+	return shown
+}
+
+// countStatusRuns counts the runs buildStatusEntries lists before its cap:
+// those of project and in state, each filter off when "".
+func countStatusRuns(runs []*run.Run, project, state string) int {
+	n := 0
+	for _, r := range runs {
+		if (project == "" || release.ProjectOf(r) == project) && (state == "" || string(r.State) == state) {
+			n++
+		}
+	}
+	return n
+}
+
+// printStatusNotes prints what the table left out or cut short, and how to
+// see it. With no rows it says so, since an empty table reads as a failure.
+// pastLimit is how many runs the table would list but for -n, which is limit.
+func printStatusNotes(w io.Writer, anyRows bool, hiddenRequests, hiddenRuns, pastLimit, limit int, cut bool) {
+	if !anyRows {
+		fmt.Fprintln(w, "No open requests or runs.")
+	}
+	if hiddenRequests > 0 || hiddenRuns > 0 {
+		fmt.Fprintf(w, "%d finished requests and %d finished runs not shown: factoryd status -all\n", hiddenRequests, hiddenRuns)
+	}
+	if pastLimit > 0 {
+		fmt.Fprintf(w, "%d more runs past the newest %d: factoryd status -n %d\n", pastLimit, limit, limit+pastLimit)
+	}
+	if cut {
+		fmt.Fprintln(w, "A reason ending in … is cut short: factoryd watch -no-follow <id> or factoryd status -v prints it whole.")
+	}
+}
+
+// statusDetailWidth is how many characters of a reason the table prints
+// without -v. A pull request URL and a line naming a command are never cut.
+const statusDetailWidth = 80
+
+// cutStatusDetail returns text cut to statusDetailWidth characters with a
+// closing "…", and whether it was cut. Unchanged when whole is set.
+func cutStatusDetail(text string, whole bool) (string, bool) {
+	runes := []rune(text)
+	if whole || len(runes) <= statusDetailWidth {
+		return text, false
+	}
+	return strings.TrimRight(string(runes[:statusDetailWidth-1]), " ") + "…", true
+}
+
+// compactAge renders a duration string of a status entry (Go's "591h35m52s")
+// as the table prints it: its largest unit alone ("24d", "3h", "5m", "40s").
+// A string that is not a duration is returned as it is; "" is "-".
+func compactAge(d string) string {
+	if d == "" {
+		return "-"
+	}
+	parsed, err := time.ParseDuration(d)
+	if err != nil {
+		return d
+	}
+	return humanAge(parsed)
+}
+
+// The header rows of the request table, the run table and -all-profiles'.
+const (
+	requestStatusHeader = "REQUEST\tPROJECT\tSTATE\tAGE\tIN STATE\tTICKET\tDETAIL"
+	runStatusHeader     = "RUN\tPROJECT\tSTATE\tTIME\tCOST\tDETAIL"
+)
+
+func newStatusTable(w io.Writer) *tabwriter.Writer {
+	return tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+}
+
+// requestStatusCells are one request's cells after its id: project, state,
+// age since submitted, time in this state, ticket, and the PR, reason or
+// wait with the row's suffix. cut reports a reason cut short (whole unset).
+func requestStatusCells(r requestStatusEntry, now time.Time, whole bool) (cells string, cut bool) {
+	ticketOrDash := r.Ticket
+	if ticketOrDash == "" {
+		ticketOrDash = "-"
+	}
+	// A ticket's PR URL, once it has one, is more actionable to show
+	// than the request's own Error (which is empty in building/
+	// pr_review anyway -- those are non-terminal states) -- the same
+	// "PR URL takes priority over a reason" rule buildStatusEntry's
+	// own run rendering already follows.
+	detail := r.PullRequestURL
+	if detail == "" {
+		// Untrusted error text: one line, so it can't split this row.
+		detail, cut = cutStatusDetail(sanitize.Line(r.Error), whole)
+	}
+	if detail == "" {
+		detail = "-"
+	}
+	stateCol := r.State
+	if r.AwaitingPullRequest {
+		// Calm, distinct label instead of an alarming "halted" plus a
+		// retry hint: the work is accepted, only the PR is missing.
+		stateCol = "accepted*"
+		detail, cut = r.Label, false
+	} else if r.Wait != nil {
+		// A request that waits looked identical to one that runs: its
+		// state starred plus the sentence naming the wait, the same
+		// "asterisk marks a state this factory annotates" convention
+		// accepted* above uses.
+		stateCol = r.State + "*"
+		detail, cut = cutStatusDetail(r.Wait.Sentence(now), whole)
+	}
+	cells = fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s%s", r.Project, stateCol, compactAge(r.Age), compactAge(r.InState), ticketOrDash, detail, requestRowSuffix(r))
+	return cells, cut
+}
+
+// printRequestStatusRows prints the request table under its header: one row
+// per request with its full id (any unique part of which the other commands
+// take). Nothing for no requests. cut reports a reason cut short, which
+// whole (-v) prevents.
+func printRequestStatusRows(w io.Writer, requestEntries []requestStatusEntry, now time.Time, whole bool) (cut bool, err error) {
+	if len(requestEntries) == 0 {
+		return false, nil
+	}
+	tw := newStatusTable(w)
+	fmt.Fprintln(tw, requestStatusHeader)
+	for _, r := range requestEntries {
+		cells, rowCut := requestStatusCells(r, now, whole)
+		cut = cut || rowCut
+		fmt.Fprintf(tw, "%s\t%s\n", r.ID, cells)
+	}
+	if err := tw.Flush(); err != nil {
+		return cut, fmt.Errorf("print request status rows: %w", err)
+	}
+	return cut, nil
 }
 
 // runIDColumn is a run's id as the table prints it: its ticket, then the
@@ -817,13 +961,20 @@ func runIDColumn(e statusEntry) string {
 	return e.ID
 }
 
-// printRunStatusRows prints one line per run (its ticket and launch, its
-// project, state, time, cost and PR or reason), then its detail lines.
-func printRunStatusRows(entries []statusEntry) error {
-	idWidth := 0
-	for _, e := range entries {
-		idWidth = max(idWidth, len(runIDColumn(e)))
+// printRunStatusRows prints the run table under its header: one row per run
+// (its ticket and launch, its project, state, time, cost and PR or reason).
+// With whole (-v) no reason is cut and each row is followed by its detail
+// lines. Nothing for no runs. cut reports a reason cut short.
+func printRunStatusRows(w io.Writer, entries []statusEntry, whole bool) (cut bool, err error) {
+	if len(entries) == 0 {
+		return false, nil
 	}
+	// The table is laid out in memory, then printed a row at a time with
+	// the row's detail lines after it: a detail line written into the
+	// table would end the block of rows the columns are aligned over.
+	var table bytes.Buffer
+	tw := newStatusTable(&table)
+	fmt.Fprintln(tw, runStatusHeader)
 	for _, e := range entries {
 		project := e.Project
 		if e.Repository != "" && e.Repository != e.Project {
@@ -839,22 +990,85 @@ func printRunStatusRows(entries []statusEntry) error {
 		} else {
 			cost = "-"
 		}
-		prOrReason := e.PullRequestURL
-		if prOrReason == "" {
-			prOrReason = sanitize.Line(e.Reason)
-		}
-		if e.nonTerminalRun {
-			prOrReason = statusProgressColumn(e)
-		}
-		if _, err := fmt.Fprintf(os.Stdout, "%-*s  %-24s  %-13s  %-10s  %-10s  %s\n",
-			idWidth, runIDColumn(e), project, e.State, elapsedOrDuration, cost, prOrReason); err != nil {
-			return fmt.Errorf("print status line: %w", err)
-		}
-		for _, line := range statusRunDetailLines(e) {
-			if _, err := fmt.Fprintf(os.Stdout, "  %s\n", line); err != nil {
-				return fmt.Errorf("print status detail line: %w", err)
+		detail := e.PullRequestURL
+		if detail == "" {
+			reason := sanitize.Line(e.Reason)
+			if e.nonTerminalRun {
+				reason = statusProgressColumn(e)
 			}
+			var rowCut bool
+			detail, rowCut = cutStatusDetail(reason, whole)
+			cut = cut || rowCut
 		}
+		if detail == "" {
+			detail = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", runIDColumn(e), project, e.State, compactAge(elapsedOrDuration), cost, detail)
+	}
+	if err := tw.Flush(); err != nil {
+		return cut, fmt.Errorf("print run status rows: %w", err)
+	}
+	for i, row := range strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n") {
+		if _, err := fmt.Fprintln(w, row); err != nil {
+			return cut, fmt.Errorf("print run status rows: %w", err)
+		}
+		if !whole || i == 0 {
+			continue
+		}
+		for _, line := range statusRunDetailLines(entries[i-1]) {
+			fmt.Fprintf(w, "  %s\n", line)
+		}
+	}
+	return cut, nil
+}
+
+// statusAllProfiles implements `factoryd status -all-profiles`: the open
+// requests (every request with -all) of each distinct data dir among the
+// profiles, the dirs `factoryd inbox` reads, in one table whose first column
+// names the profile. It lists no runs and starts nothing.
+func statusAllProfiles(w, warn io.Writer, f statusFlags, now time.Time) error {
+	for _, name := range []string{"data-dir", "config", "json", "state", "n"} {
+		if flagWasSet(f.set, name) {
+			return fmt.Errorf("-all-profiles lists every profile's requests and cannot be combined with -%s", name)
+		}
+	}
+	dirs, label, err := inboxDataDirs(warn, "")
+	if err != nil {
+		return err
+	}
+	tw := newStatusTable(w)
+	fmt.Fprintln(tw, "PROFILE\t"+requestStatusHeader)
+	rows, hidden, cut := 0, 0, false
+	for _, dir := range dirs {
+		requests, err := request.List(dir)
+		if err != nil {
+			return fmt.Errorf("load requests from %q: %w", dir, err)
+		}
+		entries := buildRequestStatusEntries(requests, request.NewWaitContext(dir, requests, now), *f.project, now)
+		shown := entries
+		if !*f.all {
+			shown = openRequestEntries(entries)
+		}
+		hidden += len(entries) - len(shown)
+		for _, r := range shown {
+			cells, rowCut := requestStatusCells(r, now, *f.verbose)
+			cut = cut || rowCut
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", label[dir], r.ID, cells)
+			rows++
+		}
+	}
+	if rows > 0 {
+		if err := tw.Flush(); err != nil {
+			return fmt.Errorf("print request status rows: %w", err)
+		}
+	} else {
+		fmt.Fprintf(w, "No open requests in %d data dirs.\n", len(dirs))
+	}
+	if hidden > 0 {
+		fmt.Fprintf(w, "%d finished requests not shown: factoryd status -all-profiles -all\n", hidden)
+	}
+	if cut {
+		fmt.Fprintln(w, "A reason ending in … is cut short: factoryd status -all-profiles -v prints it whole.")
 	}
 	return nil
 }

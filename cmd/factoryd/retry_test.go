@@ -48,8 +48,8 @@ func TestRetryRefusesARequestThatIsNotRetryable(t *testing.T) {
 func TestRetryUnknownID(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Parallel()
-	err := retryMain(dp, []string{"-data-dir", t.TempDir(), "nope"})
-	if err == nil || !strings.Contains(err.Error(), `no request "nope"`) {
+	err := retryMain(dp, []string{"-data-dir", t.TempDir(), "nope-request"})
+	if err == nil || !strings.Contains(err.Error(), `no request matches "nope-request"`) {
 		t.Fatalf("retry err = %v, want unknown-id error", err)
 	}
 }
@@ -61,8 +61,8 @@ func TestRetryRejectsPathShapedID(t *testing.T) {
 	t.Parallel()
 	for _, id := range []string{"../evil", "a/b", ".."} {
 		err := retryMain(dp, []string{"-data-dir", t.TempDir(), id})
-		if err == nil || !strings.Contains(err.Error(), "single path component") {
-			t.Errorf("retry %q: err = %v, want the single-path-component rejection", id, err)
+		if err == nil || !strings.Contains(err.Error(), "is not a request id") {
+			t.Errorf("retry %q: err = %v, want it refused as no request id", id, err)
 		}
 	}
 }

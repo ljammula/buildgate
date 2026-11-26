@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 
-	"buildgate/internal/release"
 	"buildgate/internal/request"
 )
 
@@ -57,18 +55,12 @@ func retryMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
-	id := flags.Arg(0)
-	// The id is joined beneath <data-dir>/requests; a path-shaped one could
-	// read an entry outside it. Same rule every other id in this data
-	// directory follows.
-	if err := release.SinglePathComponent("request id", id); err != nil {
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, flags.Arg(0), idRequest)
+	if err != nil {
 		return err
 	}
 	req, err := request.Load(*dataDir, id)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("no request %q under %s", id, *dataDir)
-		}
 		return err
 	}
 	handled, err := retryRequestFrom(dp, *dataDir, req, *reason, choice, time.Now())

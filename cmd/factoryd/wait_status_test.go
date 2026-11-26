@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestStatusShowsEachWaitKind(t *testing.T) {
 		byID[e.ID] = e
 	}
 	out := captureStdout(t, func() {
-		if err := printRequestStatusRows(entries, now); err != nil {
+		if _, err := printRequestStatusRows(os.Stdout, entries, now, true); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -85,7 +86,7 @@ func TestStatusShowsEachWaitKind(t *testing.T) {
 	idle := &request.WaitContext{DataDir: dataDir, Slots: 1}
 	idle.Number(requests)
 	noWorker := captureStdout(t, func() {
-		if err := printRequestStatusRows(buildRequestStatusEntries(requests, idle, "", now), now); err != nil {
+		if _, err := printRequestStatusRows(os.Stdout, buildRequestStatusEntries(requests, idle, "", now), now, true); err != nil {
 			t.Fatal(err)
 		}
 	})

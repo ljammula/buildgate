@@ -289,6 +289,13 @@ const workerStaleAfter = daemonheartbeat.WorkerStaleAfter
 // or when its heartbeat is still fresh; otherwise a one-line summary
 // `factoryd status` prints.
 func workerHeartbeatStatusLine(dataDir string, now time.Time) string {
+	return workerHeartbeatLine(dataDir, now, func(d time.Duration) string { return d.Round(time.Second).String() })
+}
+
+// workerHeartbeatLine is workerHeartbeatStatusLine with the heartbeat's age
+// written by age: `factoryd status`'s table prints it in one unit, like its
+// other ages, while -json and the notification keep the Go duration.
+func workerHeartbeatLine(dataDir string, now time.Time, age func(time.Duration) string) string {
 	hb, err := daemonheartbeat.Read(workerHeartbeatPath(dataDir))
 	if err != nil {
 		return ""
@@ -296,11 +303,11 @@ func workerHeartbeatStatusLine(dataDir string, now time.Time) string {
 	if !daemonheartbeat.Stale(hb, now, workerStaleAfter) {
 		return ""
 	}
-	age := "unknown"
+	since := "unknown"
 	if updatedAt, parseErr := time.Parse(time.RFC3339Nano, hb.UpdatedAt); parseErr == nil {
-		age = now.Sub(updatedAt).Round(time.Second).String()
+		since = age(now.Sub(updatedAt))
 	}
-	return fmt.Sprintf("worker not running (last heartbeat %s ago)", age)
+	return fmt.Sprintf("worker not running (last heartbeat %s ago)", since)
 }
 
 // workerAlive reports whether dataDir's worker heartbeat is fresh.

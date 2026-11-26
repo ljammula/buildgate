@@ -81,7 +81,11 @@ func statsRun(args []string, w io.Writer, now time.Time) error {
 				return fmt.Errorf("-request shows one request and cannot be combined with -%s", name)
 			}
 		}
-		return statsRequest(w, *f.dataDir, *f.request, *f.jsonOutput)
+		id, err := resolveIDArg(f.set, *f.dataDir, *f.configPath, *f.request, idRequest)
+		if err != nil {
+			return err
+		}
+		return statsRequest(w, *f.dataDir, id, *f.jsonOutput)
 	}
 	opts := stats.Options{Since: since, BucketDays: *f.bucket, Now: now, SandboxMemory: sandbox.WorkerMemoryOf(*f.dataDir)}
 	if !*f.all {

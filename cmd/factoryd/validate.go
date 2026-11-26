@@ -215,6 +215,18 @@ func dataDirInsideWorkspace(workspace, dataDir string) (inside bool, workspaceAb
 // configPath, when non-empty, is the config to load (a -config value); ""
 // searches the default paths, which is all a command without -config can do.
 func resolveDataDirFromSessionConfig(flags *flag.FlagSet, dataDir *string, configPath string) error {
+	return resolveDataDir(flags, dataDir, configPath, true)
+}
+
+// resolveDataDir is resolveDataDirFromSessionConfig, logging the data dir and
+// its source only when announce is set: `factoryd status` prints both in its
+// own first line. Its warnings are logged either way.
+func resolveDataDir(flags *flag.FlagSet, dataDir *string, configPath string, announce bool) error {
+	logSource := func(source string) {
+		if announce {
+			log.Printf("data dir: %q (source: %s)", *dataDir, source)
+		}
+	}
 	explicit := false
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name == "data-dir" {
@@ -222,7 +234,7 @@ func resolveDataDirFromSessionConfig(flags *flag.FlagSet, dataDir *string, confi
 		}
 	})
 	if explicit {
-		log.Printf("data dir: %q (source: -data-dir)", *dataDir)
+		logSource("-data-dir")
 		return nil
 	}
 	cfg, path, found, err := loadConfigForPath(configPath)
@@ -230,7 +242,7 @@ func resolveDataDirFromSessionConfig(flags *flag.FlagSet, dataDir *string, confi
 		return fmt.Errorf("session config: %w", err)
 	}
 	if !found {
-		log.Printf("data dir: %q (source: default)", *dataDir)
+		logSource("default")
 		if !filepath.IsAbs(*dataDir) {
 			abs, _ := filepath.Abs(*dataDir)
 			log.Printf("warning: there is no session config, so the data dir is %s: it follows the directory a command runs in. `factoryd setup` writes a config", abs)
@@ -238,7 +250,7 @@ func resolveDataDirFromSessionConfig(flags *flag.FlagSet, dataDir *string, confi
 		return nil
 	}
 	*dataDir = cfg.EffectiveDataDir()
-	log.Printf("data dir: %q (source: %s)", *dataDir, dataDirSource(cfg, path))
+	logSource(dataDirSource(cfg, path))
 	if cfg.DataDirIsDefault() {
 		noticeUnusedCwdRecords(*dataDir, path)
 	}

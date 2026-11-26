@@ -91,12 +91,19 @@ func logsMain(args []string) error {
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err
 	}
+	id := flags.Arg(0)
+	if id != "queue-run" && id != "serve" {
+		var err error
+		if id, err = resolveIDArg(flags, *dataDir, *configPath, id, idRequestOrRun); err != nil {
+			return err
+		}
+	}
 	if prompt := flags.Lookup("prompt").Value.String(); prompt != "" {
-		return runLogsPrompt(os.Stdout, *dataDir, flags.Arg(0), prompt)
+		return runLogsPrompt(os.Stdout, *dataDir, id, prompt)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return runLogs(ctx, os.Stdout, *dataDir, flags.Arg(0), *list, *follow, *lines)
+	return runLogs(ctx, os.Stdout, *dataDir, id, *list, *follow, *lines)
 }
 
 // runLogs is logsMain after flag parsing, split out for tests.
