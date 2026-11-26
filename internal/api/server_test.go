@@ -147,118 +147,6 @@ func TestConsoleDeepLinkCoversRunsListAndProjectStats(t *testing.T) {
 	}
 }
 
-type daemonControllerStub struct {
-	mu       sync.Mutex
-	statuses []DaemonStatus
-	starts   []string
-	stops    []string
-	stopErr  error
-}
-
-func (c *daemonControllerStub) List(context.Context) ([]DaemonStatus, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]DaemonStatus(nil), c.statuses...), nil
-}
-
-func (c *daemonControllerStub) Start(_ context.Context, repository string) (DaemonStatus, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, started := range c.starts {
-		if started == repository {
-			return DaemonStatus{}, ErrDaemonConflict
-		}
-	}
-	c.starts = append(c.starts, repository)
-	status := DaemonStatus{Repository: repository, State: "running", PID: 42}
-	c.statuses = append(c.statuses, status)
-	return status, nil
-}
-
-func (c *daemonControllerStub) Stop(_ context.Context, repository string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.stopErr != nil {
-		return c.stopErr
-	}
-	for i, started := range c.starts {
-		if started == repository {
-			c.starts = append(c.starts[:i], c.starts[i+1:]...)
-			c.stops = append(c.stops, repository)
-			return nil
-		}
-	}
-	return ErrDaemonNotFound
-}
-
-func daemonRequestForTest(t *testing.T, method, path, token, body string) *http.Request {
-	t.Helper()
-	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request.Header.Set("Authorization", "Bearer "+token)
-	return request
-}
-
-func TestDaemonLifecycleRoutesAuthenticateAndControl(t *testing.T) {
-	controller := &daemonControllerStub{statuses: []DaemonStatus{{Repository: "repo/a b", State: "running", PID: 42}}}
-	server := NewServer(t.TempDir(), WithStartToken("control"), WithDaemonController(controller))
-
-	unauthorized := httptest.NewRecorder()
-	server.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/daemons", nil))
-	if unauthorized.Code != http.StatusForbidden {
-		t.Fatalf("unauthorized GET /daemons status = %d, want 403", unauthorized.Code)
-	}
-
-	list := httptest.NewRecorder()
-	server.ServeHTTP(list, daemonRequestForTest(t, http.MethodGet, "/daemons", "control", ""))
-	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "repo/a b") {
-		t.Fatalf("GET /daemons = %d %s, want status list", list.Code, list.Body.String())
-	}
-
-	start := httptest.NewRecorder()
-	server.ServeHTTP(start, daemonRequestForTest(t, http.MethodPost, "/daemons/start", "control", `{"repository":"new/repo"}`))
-	if start.Code != http.StatusAccepted {
-		t.Fatalf("POST /daemons/start status = %d, want 202: %s", start.Code, start.Body.String())
-	}
-
-	duplicate := httptest.NewRecorder()
-	server.ServeHTTP(duplicate, daemonRequestForTest(t, http.MethodPost, "/daemons/start", "control", `{"repository":"new/repo"}`))
-	if duplicate.Code != http.StatusConflict {
-		t.Fatalf("duplicate start status = %d, want 409", duplicate.Code)
-	}
-
-	stop := httptest.NewRecorder()
-	server.ServeHTTP(stop, daemonRequestForTest(t, http.MethodPost, "/daemons/stop", "control", `{"repository":"new/repo"}`))
-	if stop.Code != http.StatusOK {
-		t.Fatalf("POST /daemons/stop status = %d, want 200: %s", stop.Code, stop.Body.String())
-	}
-
-	missing := httptest.NewRecorder()
-	server.ServeHTTP(missing, daemonRequestForTest(t, http.MethodPost, "/daemons/stop", "control", `{"repository":"missing"}`))
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("missing stop status = %d, want 404", missing.Code)
-	}
-}
-
-func TestDaemonLifecycleRoutesRequireOneStrictJSONObject(t *testing.T) {
-	server := NewServer(t.TempDir(), WithStartToken("control"), WithDaemonController(&daemonControllerStub{}))
-	for _, body := range []string{`{"repository":"repo"}{"repository":"other"}`, `{"repository":"repo","extra":true}`} {
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, daemonRequestForTest(t, http.MethodPost, "/daemons/start", "control", body))
-		if recorder.Code != http.StatusBadRequest {
-			t.Errorf("body %q status = %d, want 400", body, recorder.Code)
-		}
-	}
-}
-
-func TestDaemonStopMapsControllerConflictToHTTPConflict(t *testing.T) {
-	server := NewServer(t.TempDir(), WithStartToken("control"), WithDaemonController(&daemonControllerStub{stopErr: ErrDaemonConflict}))
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, daemonRequestForTest(t, http.MethodPost, "/daemons/stop", "control", `{"repository":"repo"}`))
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("POST /daemons/stop conflict status = %d, want 409: %s", recorder.Code, recorder.Body.String())
-	}
-}
-
 func TestListRunsNewestFirst(t *testing.T) {
 	dataDir := t.TempDir()
 	seedRun(t, dataDir, run.Run{ID: "middle", Ticket: "ticket-2", State: run.StateReady, CreatedAt: "2026-08-26T11:00:00Z"})
@@ -383,7 +271,7 @@ func TestGetWorkerStatusRequiresReadTokenWhenConfigured(t *testing.T) {
 	}
 
 	authorized := httptest.NewRecorder()
-	server.ServeHTTP(authorized, daemonRequestForTest(t, http.MethodGet, "/queue-run", "readsecret", ""))
+	server.ServeHTTP(authorized, bearerRequestForTest(t, http.MethodGet, "/queue-run", "readsecret", ""))
 	if authorized.Code != http.StatusOK {
 		t.Errorf("authorized GET /queue-run status = %d, want %d: %s", authorized.Code, http.StatusOK, authorized.Body.String())
 	}
@@ -620,13 +508,13 @@ func TestReadRoutesRequireReadTokenWhenConfigured(t *testing.T) {
 		}
 
 		wrongToken := httptest.NewRecorder()
-		server.ServeHTTP(wrongToken, daemonRequestForTest(t, http.MethodGet, path, "wrong", ""))
+		server.ServeHTTP(wrongToken, bearerRequestForTest(t, http.MethodGet, path, "wrong", ""))
 		if wrongToken.Code != http.StatusForbidden {
 			t.Errorf("wrong-token GET %s status = %d, want %d", path, wrongToken.Code, http.StatusForbidden)
 		}
 
 		authorized := httptest.NewRecorder()
-		server.ServeHTTP(authorized, daemonRequestForTest(t, http.MethodGet, path, "readsecret", ""))
+		server.ServeHTTP(authorized, bearerRequestForTest(t, http.MethodGet, path, "readsecret", ""))
 		if authorized.Code != http.StatusOK {
 			t.Errorf("authorized GET %s status = %d, want %d: %s", path, authorized.Code, http.StatusOK, authorized.Body.String())
 		}
@@ -1567,7 +1455,7 @@ func TestTerminal(t *testing.T) {
 
 // TestStreamRunEventsKeepsPollingOnUnconfirmedHalt is the regression test
 // for a real finding from review: an SSE client must not disconnect on an
-// unconfirmed halt, since a daemon reclaim scan can still reconcile it to
+// unconfirmed halt, since a worker reclaim scan can still reconcile it to
 // a different terminal state (accepted, or a confirmed halt) later — a
 // client that already gave up on the first, unconfirmed halt event would
 // never learn the real outcome. Proven against a real HTTP round trip
@@ -1685,7 +1573,7 @@ func TestStreamRunEventsKeepsPollingOnUnconfirmedHalt(t *testing.T) {
 	defer resp.Body.Close()
 
 	// Reconcile to a confirmed terminal state shortly after connecting,
-	// the way a daemon reclaim scan would — the stream must observe this
+	// the way a worker reclaim scan would — the stream must observe this
 	// second event, proving it kept polling past the first, unconfirmed
 	// one instead of closing immediately.
 	go func() {
@@ -2101,7 +1989,7 @@ func TestGetRunReleaseReturnsDecisionAndKillSwitchHistory(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, daemonRequestForTest(t, http.MethodGet, "/runs/run-1/release", "control", ""))
+	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, bearerRequestForTest(t, http.MethodGet, "/runs/run-1/release", "control", ""))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
@@ -2140,7 +2028,7 @@ func TestGetRunReleaseReportsNoDecisionRatherThanAllowing(t *testing.T) {
 	})
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, daemonRequestForTest(t, http.MethodGet, "/runs/run-1/release", "control", ""))
+	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, bearerRequestForTest(t, http.MethodGet, "/runs/run-1/release", "control", ""))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
@@ -2166,13 +2054,13 @@ func TestGetRunReleaseFailsClosedWithoutToken(t *testing.T) {
 	seedRun(t, dataDir, run.Run{ID: "run-1", Ticket: "ticket-1", State: run.StateAccepted, ProjectPath: "/checkouts/app", CreatedAt: "2026-09-03T10:00:00Z"})
 
 	unconfigured := httptest.NewRecorder()
-	NewServer(dataDir).ServeHTTP(unconfigured, daemonRequestForTest(t, http.MethodGet, "/runs/run-1/release", "", ""))
+	NewServer(dataDir).ServeHTTP(unconfigured, bearerRequestForTest(t, http.MethodGet, "/runs/run-1/release", "", ""))
 	if unconfigured.Code != http.StatusForbidden {
 		t.Fatalf("unconfigured status = %d, want 403", unconfigured.Code)
 	}
 
 	wrongToken := httptest.NewRecorder()
-	NewServer(dataDir, WithStartToken("control")).ServeHTTP(wrongToken, daemonRequestForTest(t, http.MethodGet, "/runs/run-1/release", "guess", ""))
+	NewServer(dataDir, WithStartToken("control")).ServeHTTP(wrongToken, bearerRequestForTest(t, http.MethodGet, "/runs/run-1/release", "guess", ""))
 	if wrongToken.Code != http.StatusForbidden {
 		t.Fatalf("wrong-token status = %d, want 403", wrongToken.Code)
 	}
@@ -2188,13 +2076,13 @@ func TestGetRunReleaseRejectsUnknownRunAndUnprojectedRun(t *testing.T) {
 	server := NewServer(dataDir, WithStartToken("control"))
 
 	missing := httptest.NewRecorder()
-	server.ServeHTTP(missing, daemonRequestForTest(t, http.MethodGet, "/runs/absent/release", "control", ""))
+	server.ServeHTTP(missing, bearerRequestForTest(t, http.MethodGet, "/runs/absent/release", "control", ""))
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing-run status = %d, want 404", missing.Code)
 	}
 
 	unprojected := httptest.NewRecorder()
-	server.ServeHTTP(unprojected, daemonRequestForTest(t, http.MethodGet, "/runs/run-1/release", "control", ""))
+	server.ServeHTTP(unprojected, bearerRequestForTest(t, http.MethodGet, "/runs/run-1/release", "control", ""))
 	if unprojected.Code != http.StatusConflict {
 		t.Fatalf("unprojected-run status = %d, want 409: %s", unprojected.Code, unprojected.Body.String())
 	}
@@ -2211,7 +2099,7 @@ func TestGetProjectReleaseReturnsKillSwitchWithNoRunsRequired(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, daemonRequestForTest(t, http.MethodGet, "/projects/checkouts/release", "control", ""))
+	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, bearerRequestForTest(t, http.MethodGet, "/projects/checkouts/release", "control", ""))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
@@ -2239,7 +2127,7 @@ func TestGetProjectReleaseReportsDisengagedForAProjectWithNoRecord(t *testing.T)
 	dataDir := t.TempDir()
 
 	recorder := httptest.NewRecorder()
-	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, daemonRequestForTest(t, http.MethodGet, "/projects/unseen/release", "control", ""))
+	NewServer(dataDir, WithStartToken("control")).ServeHTTP(recorder, bearerRequestForTest(t, http.MethodGet, "/projects/unseen/release", "control", ""))
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
@@ -2261,13 +2149,13 @@ func TestGetProjectReleaseFailsClosedWithoutToken(t *testing.T) {
 	dataDir := t.TempDir()
 
 	unconfigured := httptest.NewRecorder()
-	NewServer(dataDir).ServeHTTP(unconfigured, daemonRequestForTest(t, http.MethodGet, "/projects/checkouts/release", "", ""))
+	NewServer(dataDir).ServeHTTP(unconfigured, bearerRequestForTest(t, http.MethodGet, "/projects/checkouts/release", "", ""))
 	if unconfigured.Code != http.StatusForbidden {
 		t.Fatalf("unconfigured status = %d, want 403", unconfigured.Code)
 	}
 
 	wrongToken := httptest.NewRecorder()
-	NewServer(dataDir, WithStartToken("control")).ServeHTTP(wrongToken, daemonRequestForTest(t, http.MethodGet, "/projects/checkouts/release", "guess", ""))
+	NewServer(dataDir, WithStartToken("control")).ServeHTTP(wrongToken, bearerRequestForTest(t, http.MethodGet, "/projects/checkouts/release", "guess", ""))
 	if wrongToken.Code != http.StatusForbidden {
 		t.Fatalf("wrong-token status = %d, want 403", wrongToken.Code)
 	}
@@ -2283,7 +2171,7 @@ func TestGetProjectReleaseRejectsPathTraversal(t *testing.T) {
 	server := NewServer(dataDir, WithStartToken("control"))
 
 	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, daemonRequestForTest(t, http.MethodGet, "/projects/../etc/release", "control", ""))
+	server.ServeHTTP(recorder, bearerRequestForTest(t, http.MethodGet, "/projects/../etc/release", "control", ""))
 	// net/http's ServeMux cleans a ".."-bearing path and 307-redirects to
 	// the cleaned form before this handler (or its own validRunID check)
 	// ever runs; that redirect target is itself a "/etc/release" request no
@@ -2771,4 +2659,12 @@ func TestCORSPreflightReplies204WithoutReachingRoute(t *testing.T) {
 func engageKillSwitch(dir, project, by, reason string, now func() string) error {
 	_, err := release.SetKillSwitch(dir, project, by, reason, true, now)
 	return err
+}
+
+// bearerRequestForTest is a request carrying token as its bearer credential.
+func bearerRequestForTest(t *testing.T, method, path, token, body string) *http.Request {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+token)
+	return request
 }

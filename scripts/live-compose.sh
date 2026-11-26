@@ -89,7 +89,7 @@ EOF_GH
 chmod +x "$SCRATCH/bin/gh"
 
 set -- -ticket "$ticket_id" -spec "$SPEC_FILE" -workspace "$clone_dir" \
-	-data-dir "$data_dir" -preflight-profile brownfield -open-pull-request \
+	-data-dir "$data_dir" -open-pull-request \
 	-verify-command "$VERIFY_COMMAND"
 [ -n "${LIVE_COMPOSE_CONFIG:-}" ] && set -- "$@" -config "$LIVE_COMPOSE_CONFIG"
 [ -n "${LIVE_COMPOSE_TEMPORAL:-}" ] && set -- "$@" -temporal-address "$LIVE_COMPOSE_TEMPORAL"

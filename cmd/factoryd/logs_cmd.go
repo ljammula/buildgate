@@ -64,7 +64,7 @@ type logsTarget struct {
 
 func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, follow *bool, lines *int) {
 	flags = flag.NewFlagSet("logs", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request and run records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	list = flags.Bool("list", false, "list every log for the id (oldest first) instead of showing the newest")
 	follow = flags.Bool("f", false, "follow: print appended bytes and switch to newer log files until the request or run finishes (Ctrl-C to stop)")
@@ -74,7 +74,7 @@ func newLogsFlags() (flags *flag.FlagSet, dataDir, configPath *string, list, fol
 	return
 }
 
-const logsUsage = `usage: factoryd logs [-config <path>] [-data-dir <path>] [-list] [-f] [-n N] [-prompt <name>] <request-id | run-id | queue-run | serve>`
+const logsUsage = `usage: factoryd logs [-config <path>] [-list] [-f] [-n N] [-prompt <name>] <request-id | run-id | queue-run | serve>`
 
 func logsMain(args []string) error {
 	flags, dataDir, configPath, list, follow, lines := newLogsFlags()

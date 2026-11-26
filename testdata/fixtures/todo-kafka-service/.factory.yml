@@ -1,5 +1,4 @@
 verify_command: "make verify-integration"
-preflight_profile: brownfield
 setup:
   - make db-migrate up
 # gates:

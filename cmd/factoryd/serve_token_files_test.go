@@ -116,7 +116,7 @@ func TestServeRefusesToStartOnATokenFileItCannotUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := serveMainUntilBind(t, dataDir)
-	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "install-service -force -require-tokens") {
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "service install -force -require-tokens") {
 		t.Fatalf("serveMain = %v, want a refusal naming %s and how to write a new one", err, path)
 	}
 }

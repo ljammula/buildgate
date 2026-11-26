@@ -48,7 +48,7 @@ func commandCatalog() []commandInfo {
 		{"doctor", "", "Check this machine's setup; -fix repairs what it can", groupStart, doctorFlagSet},
 		{"setup", "", "Choose the model and coding agent every run uses", groupStart, func() *flag.FlagSet { fs, _ := newSetupFlags(); return fs }},
 
-		{"submit", "<workspace> [text]", "Record a request for a repository; the worker drafts, plans and builds it", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newSubmitFlags(); return fs }},
+		{"submit", "<workspace> [text]", "Record a request for a repository; the worker drafts, plans and builds it", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _, _ := newSubmitFlags(); return fs }},
 		{"approve", "<request-id>", "Release a request from its spec or plan review", groupRequests, func() *flag.FlagSet { fs, _, _ := newApproveFlags(); return fs }},
 		{"reject", "<request-id>", "Send a review back for a redraft, with the reason", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newRejectFlags(); return fs }},
 		{"answer", "<request-id>", "Answer a question of a handed-over spec's read-back at spec review", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newAnswerFlags(); return fs }},
@@ -76,12 +76,9 @@ func commandCatalog() []commandInfo {
 		{"use", "[<profile>]", "List the profiles, or make one active", groupMachine, newUseFlags},
 		{"upgrade", "", "Upgrade this machine to a release", groupMachine, func() *flag.FlagSet { fs, _ := newUpgradeFlags(); return fs }},
 		{"uninstall", "", "Remove what make install put on this machine", groupMachine, func() *flag.FlagSet { fs, _, _, _, _ := newUninstallFlags(); return fs }},
-		{"install-service", "", "Keep the worker and the console running under launchd (macOS)", groupMachine, func() *flag.FlagSet { fs, _ := newInstallServiceFlags(); return fs }},
-		{"uninstall-service", "", "Remove the launchd services", groupMachine, newUninstallServiceFlags},
+		{"service", "factoryd service <install|remove> [flags]", "Keep the worker and the console running under launchd or systemd, or remove those services", groupMachine, func() *flag.FlagSet { fs, _ := newInstallServiceFlags(); return fs }},
 		{"install-skill", "", "Install the buildgate skill for your coding agent", groupMachine, func() *flag.FlagSet { fs, _ := newInstallSkillFlags(); return fs }},
-		{"mcp", "", "Turn the console's MCP endpoint on, and print its token", groupMachine, func() *flag.FlagSet { fs, _ := newMCPFlags(); return fs }},
-		{"remote-console", "", "Open this profile's console to another machine on the tailnet", groupMachine, func() *flag.FlagSet { fs, _ := newRemoteConsoleFlags(); return fs }},
-		{"gate-token", "", "Write the token a remote console, or any once tokens are required, needs", groupMachine, func() *flag.FlagSet { fs, _ := newGateTokenFlags(); return fs }},
+		{"remote", "factoryd remote <on|off|token|mcp> [flags]", "Open this profile's console or its MCP endpoint to another machine, or close it", groupMachine, func() *flag.FlagSet { return newRemoteFlags().set }},
 		{"version", "", "Print the version of this binary", groupMachine, noFlags("version")},
 
 		{runCommandName, "factoryd -ticket <id> -workspace <dir> -spec <file> [flags]", "Build one ticket directly, with no request (its help: factoryd help run)", groupAdvanced, func() *flag.FlagSet { fs, _ := newRunFlags(); return fs }},
@@ -94,13 +91,8 @@ func commandCatalog() []commandInfo {
 		{"reconcile", "", "Remove the worktree, branch or marker a killed run left", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _ := newReconcileFlags(); return fs }},
 		{"init-config", "", "Write the example session config", groupAdvanced, func() *flag.FlagSet { fs, _ := newInitConfigFlags(); return fs }},
 		{"configure-images", "", "Record the image refs in a session config (make install runs it)", groupAdvanced, func() *flag.FlagSet { fs, _ := newConfigureImagesFlags(); return fs }},
-		{"init", "", "Scaffold a new project", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _ := newInitFlags(); return fs }},
-		{"onboard", "", "Scaffold the onboarding docs of an existing repository", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _ := newOnboardFlags(); return fs }},
 		{"ticket-template", "", "Print a skeleton ticket", groupAdvanced, func() *flag.FlagSet { fs, _ := newTicketTemplateFlags(); return fs }},
 		{"check-ticket", "<ticket-file>", "Validate a ticket's header lines", groupAdvanced, newCheckTicketFlags},
-		{"check-project", "", "Run the project-bootstrap checks on the files you name", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _ := newCheckProjectFlags(); return fs }},
-		{"daemon", "", "Service one repository's task queue", groupAdvanced, func() *flag.FlagSet { fs, _, _, _, _, _, _, _, _, _, _ := newDaemonFlags(); return fs }},
-		{"supervise", "", "Run one daemon per repository and restart it", groupAdvanced, func() *flag.FlagSet { fs, _, _ := newSuperviseFlags(); return fs }},
 	}
 }
 

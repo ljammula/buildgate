@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"buildgate/internal/codereview"
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/evidence"
 	"buildgate/internal/forge"
 	"buildgate/internal/notify"
@@ -93,7 +92,7 @@ func applyRunWorkflowResult(dp *deps, r *run.Run, dataDir, id, ticket, workspace
 	// comment), so it must always mark that here rather than leave
 	// whatever r.HaltConfirmed happened to already be. Left stale false, a
 	// later operator override to StateHalted would still read as
-	// unconfirmed, and the daemon's reclaim scan would call this function
+	// unconfirmed, and the worker's reclaim scan would call this function
 	// on it again — silently overwriting the override with this same
 	// owner result, including re-sending its quarantine notification.
 	r.HaltConfirmed = true
@@ -363,106 +362,3 @@ const repositoryOwnerPollInterval = 500 * time.Millisecond
 // why this is a fixed, short duration rather than
 // workflow.ActivityStartToCloseTimeout.
 const workerStopTimeout = 30 * time.Second
-
-// daemonHeartbeatInterval controls how often `factoryd daemon` refreshes
-// its on-disk liveness signal (see internal/daemonheartbeat). Short enough
-// that a supervisor polling every few tens of seconds can distinguish "hung"
-// from "still alive" within one or two of its own checks; long enough not
-// to matter as meaningful disk I/O for a process expected to run
-// indefinitely. Sourced from daemonheartbeat.Interval, not a second,
-// independently chosen local constant — that package's own
-// SandboxStaleAfter is derived from the same value, specifically so the
-// two can never silently drift out of sync with each other.
-const daemonHeartbeatInterval = daemonheartbeat.Interval
-
-// checkSandboxDockerAgainstDaemonHeartbeat closes the reachable half of a
-// real finding from GitHub Codex review of PR #37, round 6 (the
-// unreachable half — a submitter's -data-dir itself diverging from the
-// daemon's — is a separate, already-broken deployment shape: reclaim
-// itself (runsNeedingReclaim/reconcileReclaimedRun) already depends on
-// every -repository invocation for one repository sharing one -data-dir,
-// independent of sandboxing, so it is not this function's job to detect
-// that too). Within a shared -data-dir,
-// though, a submitter's own -sandbox-docker can still diverge from the
-// long-lived daemon's — and internal/workflow's own divergence guard in
-// runSandboxWithRetries cannot catch that: it compares an execution's
-// input against whichever Worker is *currently* executing it, which for
-// this submitter's own short-lived Worker is always self-consistent (both
-// its own Activities and this call's own RunWorkflowInput are built from
-// the same local sandboxDocker value below) — the mismatch, if any, is
-// against the *daemon's* Worker instead, which this function has no
-// direct way to ask.
-//
-// daemonheartbeat.Path(dataDir, ownerID) closes that gap: it is a file the
-// daemon servicing this exact repository writes into this exact
-// -data-dir, so successfully reading a fresh one here is proof by
-// construction (not merely a guess) that hb.SandboxDocker names the
-// binary the daemon's own reconciliation actually shells out to. A
-// missing, unreadable, or stale heartbeat, or one predating this field,
-// means "unknown, not "matches" — this only ever rejects a positively
-// confirmed divergence, never merely an absent signal, so a standalone
-// deployment with no daemon running yet (a supported, pre-existing shape)
-// is never blocked by this check.
-//
-// A matching -sandbox-docker string alone is not sufficient (found via a
-// further codex review round): internal/sandbox's own dockerClientEnv()
-// passes the full host environment through to that executable, so the
-// identical string can still resolve to two different real Docker
-// endpoints when DOCKER_HOST/DOCKER_CONTEXT differ between this process
-// and the daemon's — checked here too, once the executable string itself
-// is confirmed to match. These two are the standard endpoint-selecting
-// variables, not an exhaustive list of everything that could in principle
-// affect Docker CLI resolution (see Heartbeat.DockerHost's own doc
-// comment) — this closes the common cases, not every conceivable one.
-//
-// This is a submission-time check only — it proves no divergence existed
-// at this exact moment, not that none can develop later (found via a
-// still-further codex review round, round 8): a request that sits queued,
-// or a daemon that restarts with a different configuration, between
-// submission and actual dispatch could still diverge by the time a
-// container is really launched. runSandboxWithRetries (internal/workflow)
-// re-runs the same comparison synchronously at actual launch time, using
-// RunWorkflowInput.RepositoryOwnerID (set below) to find the same
-// heartbeat file — that re-check, not this one, is the authoritative
-// gate; this one exists only to fail fast, before ever queueing a request
-// already known to be doomed.
-func checkSandboxDockerAgainstDaemonHeartbeat(dataDir, ownerID, id, repository, sandboxImage, sandboxDocker string) error {
-	// Reads the heartbeat file twice on the common path (once here just
-	// for the missing-heartbeat warning below, again inside
-	// SandboxDockerDiverges for the actual comparison) — harmless: a file
-	// removed in between the two reads just degrades to "unknown, no
-	// rejection" via SandboxDockerDiverges' own conservative default, and
-	// this split is what lets that shared helper's collapsed ok=false
-	// (covering missing/stale/pre-field alike) coexist with this
-	// function's own narrower "specifically missing" warning message.
-	if _, err := daemonheartbeat.Read(daemonheartbeat.Path(dataDir, ownerID)); err != nil {
-		// Warn-only, and regardless of sandboxImage: a crash of this
-		// submitting process is unrecoverable without a live daemon for
-		// this repository at all, sandboxed or not — but a standalone
-		// `-repository` submission with no daemon yet running is
-		// legitimate and predates the daemon, so this is informational,
-		// never a rejection.
-		log.Printf("run %s: no daemon heartbeat visible for repository %q under %q — a crash of this submitting process will not be recovered until a `factoryd daemon` is running against this same -data-dir", id, repository, dataDir)
-		return nil
-	}
-	if sandboxImage == "" {
-		return nil
-	}
-	// Resolved via exec.LookPath, not the raw flag string (round 9): two
-	// processes both configured with the identical relative name
-	// "docker" can still resolve to two different real executables when
-	// their own $PATH values differ — see ResolveSandboxDocker's own doc
-	// comment. The error messages below name both the original flag
-	// value (what the operator actually typed) and the resolved path
-	// (what actually diverged).
-	resolvedSandboxDocker := daemonheartbeat.ResolveSandboxDocker(sandboxDocker)
-	dockerHost, dockerContext := os.Getenv("DOCKER_HOST"), os.Getenv("DOCKER_CONTEXT")
-	hb, ok, diverges := daemonheartbeat.SandboxDockerDiverges(dataDir, ownerID, resolvedSandboxDocker, dockerHost, dockerContext)
-	if !ok || !diverges {
-		return nil
-	}
-	if hb.SandboxDocker != resolvedSandboxDocker {
-		return fmt.Errorf("this request's -sandbox-docker (%q, resolving to %q) diverges from repository %q's daemon (resolving to %q, from its own heartbeat): a container this request launches would be invisible to that daemon's own orphan reconciliation", sandboxDocker, resolvedSandboxDocker, repository, hb.SandboxDocker)
-	}
-	return fmt.Errorf("this request's Docker endpoint (DOCKER_HOST=%q DOCKER_CONTEXT=%q) diverges from repository %q's daemon (DOCKER_HOST=%q DOCKER_CONTEXT=%q, from its own heartbeat) even though -sandbox-docker (%q) matches: a container this request launches would be invisible to that daemon's own orphan reconciliation", dockerHost, dockerContext, repository, hb.DockerHost, hb.DockerContext, sandboxDocker)
-}

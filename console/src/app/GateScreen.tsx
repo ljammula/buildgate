@@ -17,7 +17,7 @@ export interface GateScreenProps {
 
 const problems: Record<Exclude<TokenOffer, "accepted">, string> = {
   refused:
-    "That token was not accepted. It may have expired or been replaced: run `factoryd gate-token` on the host again.",
+    "That token was not accepted. It may have expired or been replaced: run `factoryd remote token` on the host again.",
   "no-answer":
     "The server did not answer. The token was not checked: try again, or reload the page.",
   "not-kept":
@@ -63,7 +63,7 @@ export function GateScreen({ tokenRefused, offerToken, onAccepted }: GateScreenP
         <CardBody className="flex flex-col gap-3 text-sm text-fg">
           <p>
             This console needs its gate token. On the host, run{" "}
-            <TextWithCode text="`factoryd gate-token`" /> and paste the token it prints here. For
+            <TextWithCode text="`factoryd remote token`" /> and paste the token it prints here. For
             the console on the host itself, run <TextWithCode text="`factoryd console`" /> instead:
             the link it opens carries a token that does not expire.
           </p>

@@ -59,7 +59,6 @@ test_patterns:
 required_binaries:
   - cargo
   - rustc
-preflight_profile: brownfield
 protected_paths:
   - "README.md"
   - "go.mod"
@@ -94,9 +93,6 @@ cost_ceiling_micro_usd: 5000000
 	}
 	if want := []string{"cargo", "rustc"}; len(cfg.RequiredBinaries) != len(want) || cfg.RequiredBinaries[0] != want[0] || cfg.RequiredBinaries[1] != want[1] {
 		t.Errorf("RequiredBinaries = %v, want %v", cfg.RequiredBinaries, want)
-	}
-	if cfg.PreflightProfile != "brownfield" {
-		t.Errorf("PreflightProfile = %q", cfg.PreflightProfile)
 	}
 	if len(cfg.ProtectedPaths) != 2 {
 		t.Errorf("ProtectedPaths = %v", cfg.ProtectedPaths)
@@ -225,21 +221,22 @@ func TestLoadAcceptsEmptyFile(t *testing.T) {
 	if !found {
 		t.Fatal("expected found=true for an existing, empty file")
 	}
-	if cfg.VerifyCommand != "" || cfg.FastCheckCommand != "" || cfg.PreflightProfile != "" ||
+	if cfg.VerifyCommand != "" || cfg.FastCheckCommand != "" ||
 		len(cfg.ProtectedPaths) != 0 || cfg.TokenCeiling != 0 || cfg.CostCeilingMicroUSD != 0 {
 		t.Errorf("Load returned non-zero Config for an empty file: %+v", cfg)
 	}
 }
 
-func TestLoadRejectsBadPreflightProfile(t *testing.T) {
+// A removed key is refused with what to do instead, not as an unknown field.
+func TestLoadRefusesTheRemovedPreflightProfileKey(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
-	if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte("preflight_profile: strict\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".factory.yml"), []byte("verify_command: make test\npreflight_profile: brownfield\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := Load(root)
-	if err == nil {
-		t.Fatal("expected error for invalid preflight_profile")
+	if err == nil || !strings.Contains(err.Error(), "preflight_profile") {
+		t.Fatalf("Load error = %v, want the strict decode to name the removed key", err)
 	}
 }
 

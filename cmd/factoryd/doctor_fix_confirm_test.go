@@ -28,7 +28,7 @@ func TestDoctorCheckFactoryYMLReportsMissingAndPresent(t *testing.T) {
 		t.Error("want a non-empty Fix")
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, projectconfig.FileName), []byte("preflight_profile: brownfield\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, projectconfig.FileName), []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	check = doctorCheckFactoryYML(dir)

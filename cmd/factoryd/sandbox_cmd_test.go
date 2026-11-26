@@ -311,7 +311,7 @@ func TestSandboxBlockDraftComesFromTheLanguageProfile(t *testing.T) {
 	if note := sandboxDraftNote(node); !strings.Contains(note, "factoryd sandbox approve -repo") {
 		t.Errorf("note = %q", note)
 	}
-	if got := factoryYMLWithSandbox(node, "npm test", "brownfield"); !strings.HasPrefix(got, factoryYMLContent("npm test", "brownfield")) || !strings.HasSuffix(got, draft) {
+	if got := factoryYMLWithSandbox(node, "npm test"); !strings.HasPrefix(got, factoryYMLContent("npm test")) || !strings.HasSuffix(got, draft) {
 		t.Errorf("factoryYMLWithSandbox = %q", got)
 	}
 	py := commitFiles(t, map[string]string{"requirements.txt": "flask\n"})
@@ -327,7 +327,7 @@ func TestSandboxBlockDraftComesFromTheLanguageProfile(t *testing.T) {
 		if got := sandboxBlockDraft(commitFiles(t, files)); got != "" {
 			t.Errorf("%s: draft = %q, want none", name, got)
 		}
-		if got := factoryYMLWithSandbox(commitFiles(t, files), "x", "brownfield"); got != factoryYMLContent("x", "brownfield") {
+		if got := factoryYMLWithSandbox(commitFiles(t, files), "x"); got != factoryYMLContent("x") {
 			t.Errorf("%s: .factory.yml changed", name)
 		}
 	}

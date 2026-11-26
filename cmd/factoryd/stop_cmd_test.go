@@ -231,7 +231,7 @@ func TestStopLeavesALaunchdSupervisedWorkerAlone(t *testing.T) {
 	if err := stopRun(dp, []string{"-data-dir", dir}, &out); err != nil {
 		t.Fatalf("stopRun: %v", err)
 	}
-	if !strings.Contains(out.String(), "supervised by launchd") || !strings.Contains(out.String(), "factoryd uninstall-service") {
+	if !strings.Contains(out.String(), "supervised by launchd") || !strings.Contains(out.String(), "factoryd service remove") {
 		t.Errorf("output = %q, want the launchd note and the removal command", out.String())
 	}
 	time.Sleep(100 * time.Millisecond)

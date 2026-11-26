@@ -36,7 +36,6 @@ func TestSubmitMainWritesRequest(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -96,10 +95,7 @@ func TestSubmitMainRecordsExplicitVerifyCommandFlag(t *testing.T) {
 	dataDir := t.TempDir()
 	testfixture.CommitAgentsFile(t, workspace)
 
-	// -preflight-profile brownfield: this fixture workspace has no
-	// spec/spec.md/contract.md/ARCHITECTURE.md, unrelated to what this
-	// test actually exercises (verify-command resolution).
-	if err := submitMain(dp, []string{"-verify-command", "python3 -m unittest tests/test_product_lab.py", "-preflight-profile", "brownfield", "-data-dir", dataDir, workspace, "Add a new func"}); err != nil {
+	if err := submitMain(dp, []string{"-verify-command", "python3 -m unittest tests/test_product_lab.py", "-data-dir", dataDir, workspace, "Add a new func"}); err != nil {
 		t.Fatalf("submitMain: %v", err)
 	}
 
@@ -115,35 +111,6 @@ func TestSubmitMainRecordsExplicitVerifyCommandFlag(t *testing.T) {
 	}
 }
 
-// TestSubmitMainRecordsExplicitPreflightProfileFlag mirrors
-// TestSubmitMainRecordsExplicitVerifyCommandFlag for -preflight-profile:
-// the same live bug (validated at submit time, then discarded) applied
-// to this flag too -- a ticket's build later fell back to the strict
-// default profile and halted a brownfield workspace's preflight on
-// artifacts convention was never asked to produce.
-func TestSubmitMainRecordsExplicitPreflightProfileFlag(t *testing.T) {
-	dp := newTestDeps(t)
-	workspace := t.TempDir()
-	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-`)
-	dataDir := t.TempDir()
-
-	if err := submitMain(dp, []string{"-preflight-profile", "brownfield", "-data-dir", dataDir, workspace, "Add a new func"}); err != nil {
-		t.Fatalf("submitMain: %v", err)
-	}
-
-	requests, err := request.List(dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(requests) != 1 {
-		t.Fatalf("len(requests) = %d, want 1", len(requests))
-	}
-	if got, want := requests[0].PreflightProfile, "brownfield"; got != want {
-		t.Errorf("req.PreflightProfile = %q, want %q (the explicit -preflight-profile flag)", got, want)
-	}
-}
-
 // TestSubmitMainRecordsFullSuiteCommandFlag: the default release policy
 // requires the full_suite_verify gate, and the request path had no per-
 // request way to configure one, so a repository without a committed
@@ -153,7 +120,6 @@ func TestSubmitMainRecordsFullSuiteCommandFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -180,7 +146,6 @@ func TestSubmitDefaultsFullSuiteToVerifyCommand(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -210,7 +175,6 @@ func TestSubmitFullSuiteCommandNoneOptsOut(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -236,7 +200,6 @@ func TestSubmitMainRecordsTheBugFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	for _, tc := range []struct {
 		args []string
@@ -283,7 +246,6 @@ func TestSubmitMainModelFlagAcceptsAllowedChoice(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
 	dataDir := t.TempDir()
@@ -307,7 +269,6 @@ func TestSubmitMainModelFlagRejectsModelOutsideAllowed(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
 	dataDir := t.TempDir()
@@ -331,7 +292,6 @@ func TestSubmitMainModelFlagRejectsReviewRole(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
 	dataDir := t.TempDir()
@@ -352,7 +312,6 @@ func TestSubmitMainModelFlagRejectsMalformedPair(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
 
@@ -372,7 +331,6 @@ func TestSubmitMainModelFlagRejectedInLegacyMode(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	err := submitMain(dp, []string{"-model", "execution=sonnet", "-data-dir", t.TempDir(), workspace, "Add a new func"})
 	if err == nil {
@@ -388,7 +346,6 @@ func TestSubmitMainRefusesInvalidRolesBlock(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := filepath.Join(t.TempDir(), "config.yml")
 	if err := os.WriteFile(configPath, []byte("roles:\n  execution:\n    model: does-not-exist\n"), 0o644); err != nil {
@@ -494,8 +451,8 @@ func TestSubmitMainRefusesDataDirInsideWorkspace(t *testing.T) {
 	if err == nil {
 		t.Fatal("submitMain with a workspace-relative default -data-dir = nil, want an error")
 	}
-	if !strings.Contains(err.Error(), "-data-dir") || !strings.Contains(err.Error(), "-workspace") {
-		t.Fatalf("err = %v, want it to name -data-dir and -workspace", err)
+	if !strings.Contains(err.Error(), "data_dir") || !strings.Contains(err.Error(), "workspace") {
+		t.Fatalf("err = %v, want it to name data_dir and the workspace", err)
 	}
 	// The whole default -data-dir must be absent, not just requests/: the
 	// refusal has to run before release.RejectProjectCollision, whose own
@@ -535,7 +492,6 @@ func TestSubmitMainRequestFile(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 	requestFile := filepath.Join(t.TempDir(), "request.txt")
@@ -812,7 +768,6 @@ func TestSubmitMainIssueBeforeWorkspaceReachesFetchPath(t *testing.T) {
 
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -862,7 +817,6 @@ func TestSubmitMainIssueRequestIDSlugsTitleOnly(t *testing.T) {
 
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -898,7 +852,6 @@ func TestSubmitMainRecordsProjectAsWorkspaceBasename(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestSubmitRepo(t, workspace, `verify_command: "true"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -924,7 +877,6 @@ func TestSubmitMainHarnessFlagAcceptsAllowedChoice(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
 	dataDir := t.TempDir()
@@ -950,7 +902,6 @@ func TestSubmitMainHarnessFlagRejections(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestFactoryYML(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := routesModeConfigWithAllowedSonnet(t)
 	for name, tc := range map[string]struct {
@@ -980,7 +931,6 @@ func TestSubmitMainRecordsPlanReviewFlag(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	for _, tc := range []struct {
 		args []string

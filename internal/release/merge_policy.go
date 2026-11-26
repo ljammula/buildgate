@@ -63,10 +63,9 @@ type MergePolicy struct {
 	// AllowSkippedProjectCheck is deliberately false by default, same
 	// restrictive-by-default reasoning as AllowOverrides:
 	// a run recorded with SkipProjectCheck bypassed the mandatory
-	// project-bootstrap preflight (product_spec_frozen/
-	// program_design_structure/architecture_structure), so its acceptance
-	// evidence was never checked against spec/spec.md, spec/contract.md,
-	// or ARCHITECTURE.md. Silently treating that run as merge-eligible
+	// project-bootstrap preflight (architecture_structure and
+	// ticket_structure), so its ticket was never checked against the
+	// structure the preflight requires. Silently treating that run as merge-eligible
 	// would discard exactly the signal SkipProjectCheck exists to record.
 	AllowSkippedProjectCheck bool
 }

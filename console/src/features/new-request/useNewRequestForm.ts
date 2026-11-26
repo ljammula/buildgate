@@ -10,7 +10,6 @@ export interface NewRequestValues {
   readonly text: string;
   readonly verifyCommand: string;
   readonly fullSuiteCommand: string;
-  readonly preflightProfile: string;
   readonly planReview: boolean;
 }
 
@@ -19,7 +18,6 @@ const emptyValues: NewRequestValues = {
   text: "",
   verifyCommand: "",
   fullSuiteCommand: "",
-  preflightProfile: "",
   planReview: false,
 };
 
@@ -53,7 +51,6 @@ export function useNewRequestForm() {
         text: values.text.trim(),
         verifyCommand: values.verifyCommand.trim(),
         fullSuiteCommand: values.fullSuiteCommand.trim(),
-        preflightProfile: values.preflightProfile.trim(),
         planReview: values.planReview,
         by,
       },

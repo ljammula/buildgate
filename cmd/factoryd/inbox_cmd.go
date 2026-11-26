@@ -201,7 +201,7 @@ func buildInboxEntry(r *request.Request, profile, dataDir, consoleBase string, n
 		}
 	}
 	e.Baseline = inboxBaseline(dataDir, r)
-	if !request.Inspect(dataDir, r).Empty() {
+	if !request.Inspect(dataDir, "", r).Empty() {
 		e.Inspect = fmt.Sprintf("factoryd inspect -config %s %s", profile, r.ID)
 	}
 	switch r.State {

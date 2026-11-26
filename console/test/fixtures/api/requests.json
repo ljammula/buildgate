@@ -508,7 +508,6 @@
     "verify_command": "every-field verify_command",
     "full_suite_command": "every-field full_suite_command",
     "full_suite_source": "every-field full_suite_source",
-    "preflight_profile": "every-field preflight_profile",
     "test_patterns": [
       "every-field test_patterns"
     ],

@@ -141,7 +141,7 @@ func AliveFactoryd(dp Deps, pid int) bool {
 func stopProcess(dp Deps, w io.Writer, what, dir string, out *StopOutcome, sources []pidSource, svc Service) {
 	if ServiceSupervises(dp, svc, dir) {
 		m := dp.ServiceManager()
-		fmt.Fprintf(w, "%s (%s): supervised by %s (%s), left running; `factoryd uninstall-service` removes it\n", what, dir, m, m.Name(svc))
+		fmt.Fprintf(w, "%s (%s): supervised by %s (%s), left running; `factoryd service remove` removes it\n", what, dir, m, m.Name(svc))
 		if what != "serve" {
 			out.QueueLive = true
 		}

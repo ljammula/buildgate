@@ -32,13 +32,6 @@ func TestSubmitWritesRequest(t *testing.T) {
 		DataDir:      dataDir,
 		RequestText:  "Add idempotency keys to POST /refunds",
 		Source:       request.Source{Kind: request.SourceText},
-		// This fixture workspace has no spec/spec.md/contract.md/
-		// ARCHITECTURE.md -- brownfield, so the new
-		// submitProjectBootstrapPreflight check below (which this test
-		// predates) has nothing to check, matching this test's own,
-		// unrelated intent (verify-command resolution from .factory.yml).
-		PreflightProfile:         "brownfield",
-		PreflightProfileExplicit: true,
 	})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -69,12 +62,10 @@ func TestSubmitRecordsTheTestPatternsOfFactoryYML(t *testing.T) {
 	dataDir := t.TempDir()
 	testfixture.CommitAgentsFile(t, workspace)
 	result, err := Submit(Params{
-		WorkspaceArg:             workspace,
-		DataDir:                  dataDir,
-		RequestText:              "Add a thing",
-		Source:                   request.Source{Kind: request.SourceText},
-		PreflightProfile:         "brownfield",
-		PreflightProfileExplicit: true,
+		WorkspaceArg: workspace,
+		DataDir:      dataDir,
+		RequestText:  "Add a thing",
+		Source:       request.Source{Kind: request.SourceText},
 	})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -102,13 +93,11 @@ func TestSubmitUsesIDTextForRequestIDWhenSet(t *testing.T) {
 
 	testfixture.CommitAgentsFile(t, workspace)
 	result, err := Submit(Params{
-		WorkspaceArg:             workspace,
-		DataDir:                  dataDir,
-		RequestText:              "Reading time endpoint\n\nIncludes zzqqxxbodyword nowhere near the title.",
-		IDText:                   "Reading time endpoint",
-		Source:                   request.Source{Kind: request.SourceIssue},
-		PreflightProfile:         "brownfield",
-		PreflightProfileExplicit: true,
+		WorkspaceArg: workspace,
+		DataDir:      dataDir,
+		RequestText:  "Reading time endpoint\n\nIncludes zzqqxxbodyword nowhere near the title.",
+		IDText:       "Reading time endpoint",
+		Source:       request.Source{Kind: request.SourceIssue},
 	})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -193,8 +182,6 @@ func TestSubmitSubstitutesFullSuiteForEveryCaller(t *testing.T) {
 				// See TestSubmitWritesRequest's identical comment: this
 				// fixture has no bootstrap scaffold, unrelated to what this
 				// test actually exercises (full-suite-command resolution).
-				PreflightProfile:         "brownfield",
-				PreflightProfileExplicit: true,
 			})
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
@@ -207,43 +194,6 @@ func TestSubmitSubstitutesFullSuiteForEveryCaller(t *testing.T) {
 				t.Errorf("full suite = (%q, %q), want (%q, %q)", req.FullSuiteCommand, req.FullSuiteSource, tc.wantCmd, tc.wantSource)
 			}
 		})
-	}
-}
-
-// TestSubmitRejectsIncompleteBootstrapUnderStrictProfile is the regression
-// test for the live bug found 2026-09-25: a strict-profile submission used
-// to be accepted (and sit through spec_review/plan_review) even when the
-// workspace's own ARCHITECTURE.md was missing, only halting much later at
-// ticket 1's own run-time preflight. Submit must now refuse it immediately,
-// naming the failing check and the same fix text runProjectBootstrapCheck
-// gives a real run.
-func TestSubmitRejectsIncompleteBootstrapUnderStrictProfile(t *testing.T) {
-	workspace := testfixture.NewGitRepo(t)
-	root := filepath.Dir(workspace)
-	if err := os.Remove(filepath.Join(root, "ARCHITECTURE.md")); err != nil {
-		t.Fatalf("remove ARCHITECTURE.md: %v", err)
-	}
-	dataDir := t.TempDir()
-
-	_, err := Submit(Params{
-		WorkspaceArg:          workspace,
-		DataDir:               dataDir,
-		RequestText:           "Add idempotency keys to POST /refunds",
-		Source:                request.Source{Kind: request.SourceText},
-		VerifyCommand:         "true",
-		VerifyCommandExplicit: true,
-	})
-	if err == nil {
-		t.Fatal("Submit against a workspace missing ARCHITECTURE.md under the strict profile succeeded, want it rejected")
-	}
-	if !strings.Contains(err.Error(), "project-bootstrap preflight failed") {
-		t.Errorf("err = %v, want it to name the project-bootstrap preflight failure", err)
-	}
-	if !strings.Contains(err.Error(), "architecture_structure") {
-		t.Errorf("err = %v, want it to name the failing architecture_structure check", err)
-	}
-	if !strings.Contains(err.Error(), "factoryd onboard") {
-		t.Errorf("err = %v, want the same onboarding fix text a real run's preflight gives", err)
 	}
 }
 
@@ -274,17 +224,11 @@ func TestSubmitAcceptsConformingRepoUnderStrictProfile(t *testing.T) {
 	}
 }
 
-// TestSubmitBrownfieldRepoWithoutArtifactsStillSubmits proves
-// submitProjectBootstrapPreflight is a no-op under
-// preflight_profile: brownfield: a repo with none of
-// spec/spec.md/spec/contract.md/ARCHITECTURE.md -- the documented,
-// legitimate brownfield layout -- must still submit cleanly, matching a
-// real run's own preflight (evaluateProjectBootstrapChecks skips
-// product_spec_frozen/program_design_structure entirely and marks
-// architecture_structure advisory under this profile).
-func TestSubmitBrownfieldRepoWithoutArtifactsStillSubmits(t *testing.T) {
+// TestSubmitRepoWithoutArtifactsStillSubmits: a repo with none of
+// spec/spec.md, spec/contract.md or ARCHITECTURE.md submits cleanly.
+func TestSubmitRepoWithoutArtifactsStillSubmits(t *testing.T) {
 	workspace := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"true\"\npreflight_profile: brownfield\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"true\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dataDir := t.TempDir()
@@ -297,7 +241,7 @@ func TestSubmitBrownfieldRepoWithoutArtifactsStillSubmits(t *testing.T) {
 		Source:       request.Source{Kind: request.SourceText},
 	})
 	if err != nil {
-		t.Fatalf("Submit against a brownfield repo with no bootstrap artifacts: %v", err)
+		t.Fatalf("Submit against a repo with no bootstrap artifacts: %v", err)
 	}
 	if result.ID == "" {
 		t.Fatal("Submit returned empty ID")
@@ -339,13 +283,13 @@ func TestApplyProjectConfigDefaultsCeilingTightenOnly(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, ".factory.yml"), []byte(tc.yaml), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			var verifyCommand, fastCheckCommand, preflightProfile, releaseProtectedPaths string
+			var verifyCommand, fastCheckCommand, releaseProtectedPaths string
 			var testPatterns []string
 			var meterTokenCeiling int
 			var meterCostCeilingMicroUSD int64
 			gateCommands := map[string]*string{}
 
-			err := ApplyProjectConfigDefaults(map[string]bool{}, dir, &verifyCommand, &fastCheckCommand, gateCommands, &preflightProfile, &releaseProtectedPaths, &testPatterns, &meterTokenCeiling, &meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget)
+			err := ApplyProjectConfigDefaults(map[string]bool{}, dir, &verifyCommand, &fastCheckCommand, gateCommands, &releaseProtectedPaths, &testPatterns, &meterTokenCeiling, &meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget)
 
 			if len(tc.wantErrHas) > 0 {
 				if err == nil {
@@ -410,13 +354,11 @@ func TestSubmitRefusesAnUnresolvableDesignGuide(t *testing.T) {
 	}
 	guides := t.TempDir()
 	params := Params{
-		WorkspaceArg:             workspace,
-		DataDir:                  t.TempDir(),
-		RequestText:              "Add an endpoint",
-		Source:                   request.Source{Kind: request.SourceText},
-		PreflightProfile:         "brownfield",
-		PreflightProfileExplicit: true,
-		Settings:                 sessionconfig.Settings{DesignGuideDirs: []string{guides}},
+		WorkspaceArg: workspace,
+		DataDir:      t.TempDir(),
+		RequestText:  "Add an endpoint",
+		Source:       request.Source{Kind: request.SourceText},
+		Settings:     sessionconfig.Settings{DesignGuideDirs: []string{guides}},
 	}
 	testfixture.CommitAgentsFile(t, workspace)
 	_, err := Submit(params)
@@ -457,7 +399,7 @@ func TestSubmitAcceptsAnOperatorShapedSpecWithAndWithoutPlan(t *testing.T) {
 			}
 			params := Params{
 				WorkspaceArg: workspace, DataDir: t.TempDir(), RequestText: "multiline strings",
-				Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+				Source:       request.Source{Kind: request.SourceText},
 				ImportedSpec: operatorShapedSpec,
 			}
 			if withPlan {
@@ -488,11 +430,10 @@ func TestSubmitRefusesAnOversizedHandedOverSpecBeforeRecordingIt(t *testing.T) {
 	dataDir := t.TempDir()
 	testfixture.CommitAgentsFile(t, workspace)
 	_, err := Submit(Params{
-		WorkspaceArg:     workspace,
-		DataDir:          dataDir,
-		RequestText:      "oversized spec",
-		Source:           request.Source{Kind: request.SourceText},
-		PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+		WorkspaceArg: workspace,
+		DataDir:      dataDir,
+		RequestText:  "oversized spec",
+		Source:       request.Source{Kind: request.SourceText},
 		ImportedSpec: strings.Repeat("x", request.MaxHandedOverSpecBytes+1),
 	})
 	if err == nil || !strings.Contains(err.Error(), "spec is") || !strings.Contains(err.Error(), "over the") {
@@ -511,13 +452,11 @@ func TestSubmitStoresAHandedOverSpecAndRefusesAnInvalidOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	params := Params{
-		WorkspaceArg:             workspace,
-		DataDir:                  t.TempDir(),
-		RequestText:              "Idempotent refunds",
-		Source:                   request.Source{Kind: request.SourceText},
-		PreflightProfile:         "brownfield",
-		PreflightProfileExplicit: true,
-		ImportedSpec:             strings.Replace(handedOverSpec, "1. A retried POST returns the original result.", "No numbered criterion.", 1),
+		WorkspaceArg: workspace,
+		DataDir:      t.TempDir(),
+		RequestText:  "Idempotent refunds",
+		Source:       request.Source{Kind: request.SourceText},
+		ImportedSpec: strings.Replace(handedOverSpec, "1. A retried POST returns the original result.", "No numbered criterion.", 1),
 	}
 	testfixture.CommitAgentsFile(t, workspace)
 	if _, err := Submit(params); err == nil || !strings.Contains(err.Error(), `-spec-file: spec's "## Acceptance criteria" section has no list items`) {
@@ -556,7 +495,7 @@ func TestSubmitStoresAHandedOverPlanAndRefusesAMalformedOne(t *testing.T) {
 	params := func(spec string, tickets ...ImportedTicket) Params {
 		return Params{
 			WorkspaceArg: workspace, DataDir: t.TempDir(), RequestText: "Idempotent refunds",
-			Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+			Source:       request.Source{Kind: request.SourceText},
 			ImportedSpec: spec, ImportedTickets: tickets,
 		}
 	}
@@ -693,13 +632,12 @@ func TestRequireAgentsFileRefusesALinkAndADirectoryWithoutCommits(t *testing.T) 
 // The refusal comes before the request exists: no request id is claimed and
 // no document saved, whatever flags the request carries.
 func TestSubmitRefusesARepositoryWithoutAgentsFileBeforeRecording(t *testing.T) {
-	workspace := agentsRepo(t, map[string]string{".factory.yml": "verify_command: \"make test\"\npreflight_profile: brownfield\n"}, map[string]string{"AGENTS.md": "# AGENTS.md\n"})
+	workspace := agentsRepo(t, map[string]string{".factory.yml": "verify_command: \"make test\"\n"}, map[string]string{"AGENTS.md": "# AGENTS.md\n"})
 	dataDir := t.TempDir()
 	_, err := Submit(Params{
 		WorkspaceArg: workspace, DataDir: dataDir, RequestText: "Add idempotency keys",
 		Source:        request.Source{Kind: request.SourceText},
 		VerifyCommand: "make test", VerifyCommandExplicit: true,
-		PreflightProfile: "brownfield", PreflightProfileExplicit: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "request not submitted") || !strings.Contains(err.Error(), "has no AGENTS.md committed at its root") {
 		t.Fatalf("Submit = %v, want the AGENTS.md refusal", err)
@@ -747,7 +685,7 @@ func TestSubmitRecordsThePlanReviewOptIn(t *testing.T) {
 			settings.PlanReview = tc.session
 			result, err := Submit(Params{
 				WorkspaceArg: workspace, DataDir: dataDir, RequestText: "Add idempotency keys",
-				Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true,
+				Source:     request.Source{Kind: request.SourceText},
 				PlanReview: tc.flag, Settings: settings,
 			})
 			if err != nil {

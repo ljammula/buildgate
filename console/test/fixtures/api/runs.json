@@ -314,6 +314,9 @@
     "pr_closes": "every-field pr_closes",
     "pr_base": "every-field pr_base",
     "repository": "every-field repository",
+    "sandbox_docker": "every-field sandbox_docker",
+    "docker_host": "every-field docker_host",
+    "docker_context": "every-field docker_context",
     "temporal_workflow_id": "every-field temporal_workflow_id",
     "temporal_run_id": "every-field temporal_run_id",
     "temporal_task_queue": "every-field temporal_task_queue",
@@ -321,8 +324,6 @@
     "spec_sha256": "every-field spec_sha256",
     "project_config_sha256": "every-field project_config_sha256",
     "project_config_commit_sha": "every-field project_config_commit_sha",
-    "product_spec_sha256": "every-field product_spec_sha256",
-    "contract_sha256": "every-field contract_sha256",
     "skip_project_check": true,
     "spec_ticket_scope_mismatch_fields": [
       "every-field spec_ticket_scope_mismatch_fields"

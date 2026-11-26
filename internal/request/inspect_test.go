@@ -59,7 +59,7 @@ func command(t *testing.T, cmds []InspectCommand, label string) string {
 func TestInspectDraftGatesOpenTheirFiles(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &Request{ID: "req-1", State: StateSpecReview}
-	got := Inspect(dataDir, r)
+	got := Inspect(dataDir, "", r)
 	if len(got.Tickets) != 0 || got.Note != InspectDraftNote {
 		t.Fatalf("spec review: %+v", got)
 	}
@@ -72,13 +72,13 @@ func TestInspectDraftGatesOpenTheirFiles(t *testing.T) {
 	if err := os.MkdirAll(tickets, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := labels(Inspect(dataDir, r).Commands); strings.Join(got, "|") != "The spec|The drafted tickets" {
+	if got := labels(Inspect(dataDir, "", r).Commands); strings.Join(got, "|") != "The spec|The drafted tickets" {
 		t.Errorf("plan review without a ticket file: %v", got)
 	}
 	if err := os.WriteFile(filepath.Join(tickets, "001.spec.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c := command(t, Inspect(dataDir, r).Commands, "The first ticket"); !strings.HasSuffix(c, "/tickets/001.spec.md") {
+	if c := command(t, Inspect(dataDir, "", r).Commands, "The first ticket"); !strings.HasSuffix(c, "/tickets/001.spec.md") {
 		t.Errorf("first ticket command = %q", c)
 	}
 }
@@ -96,7 +96,7 @@ func TestInspectBuiltTicketReadsTheCheckedCommitsFromTheRepository(t *testing.T)
 	}
 	r := &Request{ID: "req-1", State: StateQuarantined, Tickets: []Ticket{{Index: 1, RunID: "run-1"}, {Index: 2}}}
 
-	got := Inspect(dataDir, r)
+	got := Inspect(dataDir, "", r)
 	if len(got.Tickets) != 1 || got.Note != InspectNoteFor(StateQuarantined, false, true) {
 		t.Fatalf("inspection: %+v", got)
 	}
@@ -129,7 +129,7 @@ func TestInspectDiffBaseWinsAndAGoneWorktreeIsNotNamed(t *testing.T) {
 	dataDir := t.TempDir()
 	repo, base, result := gitRepoWithTwoCommits(t)
 	built := &run.Run{ID: "run-1", Ticket: "t", RepositoryRoot: repo, WorkspacePath: filepath.Join(dataDir, "gone"), BaseSHA: "aaaa", DiffBaseSHA: base, ResultSHA: result}
-	ticket := InspectRun(dataDir, built)
+	ticket := InspectRun(dataDir, "", built)
 	if ticket.Worktree != "" || ticket.Base != base {
 		t.Errorf("ticket = %+v, want no worktree and the diff base", ticket)
 	}
@@ -138,7 +138,7 @@ func TestInspectDiffBaseWinsAndAGoneWorktreeIsNotNamed(t *testing.T) {
 func TestInspectWithNoResultReadsTheWorktreeHeadAndOffersNoCopy(t *testing.T) {
 	dataDir := t.TempDir()
 	repo, base, _ := gitRepoWithTwoCommits(t)
-	ticket := InspectRun(dataDir, &run.Run{ID: "run-1", RepositoryRoot: "/elsewhere", WorkspacePath: repo, BaseSHA: base})
+	ticket := InspectRun(dataDir, "", &run.Run{ID: "run-1", RepositoryRoot: "/elsewhere", WorkspacePath: repo, BaseSHA: base})
 	if c := command(t, ticket.Commands, "The worktree's change now (not checked)"); c != "git -C "+ShellPath(repo)+" diff "+base+"..HEAD --" {
 		t.Errorf("worktree change = %q", c)
 	}
@@ -147,7 +147,7 @@ func TestInspectWithNoResultReadsTheWorktreeHeadAndOffersNoCopy(t *testing.T) {
 			t.Errorf("an own-copy line at HEAD of a worktree the factory may reuse")
 		}
 	}
-	none := InspectRun(dataDir, &run.Run{ID: "run-2", RepositoryRoot: repo, WorkspacePath: filepath.Join(dataDir, "gone")})
+	none := InspectRun(dataDir, "", &run.Run{ID: "run-2", RepositoryRoot: repo, WorkspacePath: filepath.Join(dataDir, "gone")})
 	if got := labels(none.Commands); strings.Join(got, "|") != "The newest log|Every log and saved prompt" {
 		t.Errorf("a run with no base or result: %v", got)
 	}
@@ -155,7 +155,7 @@ func TestInspectWithNoResultReadsTheWorktreeHeadAndOffersNoCopy(t *testing.T) {
 
 func TestInspectOtherStatesShowNothing(t *testing.T) {
 	for _, s := range []State{StateSubmitted, StateBuilding, StateDone, StateCancelled} {
-		if got := Inspect(t.TempDir(), &Request{ID: "r", State: s}); !got.Empty() {
+		if got := Inspect(t.TempDir(), "", &Request{ID: "r", State: s}); !got.Empty() {
 			t.Errorf("%s: %+v", s, got)
 		}
 	}
@@ -200,7 +200,7 @@ func TestInspectShowsATicketsLatestRoundAgainstItsOwnBase(t *testing.T) {
 			{Index: 3, RunID: "run-1-round3", Outcome: RoundQuarantined},
 		},
 	}}}
-	got := Inspect(dataDir, r)
+	got := Inspect(dataDir, "", r)
 	if len(got.Tickets) != 1 {
 		t.Fatalf("tickets: %+v", got.Tickets)
 	}
@@ -209,7 +209,7 @@ func TestInspectShowsATicketsLatestRoundAgainstItsOwnBase(t *testing.T) {
 		t.Errorf("ticket = %+v, want the last pushed round with a result, against the first run's base", ticket)
 	}
 	r.State = StateQuarantined
-	if got := Inspect(dataDir, r).Tickets[0].RunID; got != "run-1-round3" {
+	if got := Inspect(dataDir, "", r).Tickets[0].RunID; got != "run-1-round3" {
 		t.Errorf("quarantined: run = %s, want the last round with a result, pushed or not", got)
 	}
 	if !strings.Contains(got.Note, "comment on the pull request") {
@@ -245,14 +245,14 @@ func TestInspectPutsNoRecordedValueIntoACommandUnchecked(t *testing.T) {
 		{base + ";id", result},
 		{"", result},
 	} {
-		got := InspectRun(dataDir, &run.Run{ID: "run-1", RepositoryRoot: repo, BaseSHA: bad.base, ResultSHA: bad.result})
+		got := InspectRun(dataDir, "", &run.Run{ID: "run-1", RepositoryRoot: repo, BaseSHA: bad.base, ResultSHA: bad.result})
 		for _, c := range got.Commands {
 			if strings.HasPrefix(c.Command, "git ") {
 				t.Errorf("base %q result %q: a git line was built: %q", bad.base, bad.result, c.Command)
 			}
 		}
 	}
-	got := InspectRun(dataDir, &run.Run{ID: "run 1;id", RepositoryRoot: repo, BaseSHA: base, ResultSHA: result})
+	got := InspectRun(dataDir, "", &run.Run{ID: "run 1;id", RepositoryRoot: repo, BaseSHA: base, ResultSHA: result})
 	if c := command(t, got.Commands, "The newest log"); !strings.HasSuffix(c, " 'run 1;id'") {
 		t.Errorf("logs line = %q, want the run id quoted", c)
 	}

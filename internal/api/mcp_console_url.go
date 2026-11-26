@@ -14,7 +14,7 @@ import (
 // console_url, the console page of that request. It is built from the
 // address the MCP call came in on, and only when that address is one this
 // server accepts (hostAllowed: its own loopback address, or an -allowed-host
-// name such as `factoryd remote-console`'s), so it names a console the
+// name such as `factoryd remote on`'s), so it names a console the
 // caller's side can reach and a caller cannot plant another host in it; on
 // a wider -addr, where ServeHTTP checks no Host, any other Host gets no
 // link. It never carries a token: the console on another machine asks for

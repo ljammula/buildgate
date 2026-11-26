@@ -342,7 +342,7 @@ class Round:
 	def submit(self):
 		out = self.factoryd(
 			"submit", "-spec-file", str(self.dir / "spec.md"), "-plan-dir", str(self.dir / "plan"),
-			"-verify-command", self.fixture["verify_command"], "-preflight-profile", self.fixture.get("preflight_profile", ""), self.repo,
+			"-verify-command", self.fixture["verify_command"], self.repo,
 		)
 		ids = [line.strip() for line in out.splitlines() if re.fullmatch(r"[a-z0-9][a-z0-9-]+-\d{8}-\d{6}", line.strip())]
 		if not ids:

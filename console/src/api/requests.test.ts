@@ -140,7 +140,6 @@ describe("writes", () => {
         text: "add a thing",
         verifyCommand: "make verify",
         fullSuiteCommand: "make test",
-        preflightProfile: "go",
         planReview: true,
         by: "jane",
       }),
@@ -150,7 +149,7 @@ describe("writes", () => {
     expect(sent.headers).toEqual(WRITE);
     expect(sent.body).toBe(
       '{"workspace":"/repos/app","text":"add a thing","verify_command":"make verify",' +
-        '"full_suite_command":"make test","preflight_profile":"go","plan_review":true,"by":"jane"}',
+        '"full_suite_command":"make test","plan_review":true,"by":"jane"}',
     );
 
     const minimal = await sentBy((http) =>

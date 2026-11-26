@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/harness"
 	"buildgate/internal/meter"
 	"buildgate/internal/modelhost"
@@ -217,69 +216,10 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 	// or remove. Fail closed rather than accept an orphan reconciliation
 	// can never see.
 	//
-	// Scope, corrected after a later review round found the claim above
-	// overstated: this only catches an execution whose input has already
-	// diverged from whichever Worker is *currently* executing it — real
-	// (and the only case this specific check can see) for a request
-	// redispatched to a Worker configured differently than whoever
-	// originally submitted it, e.g. a daemon's own recovery worker after a
-	// crashed submitter. It is a no-op by construction for a
-	// `-repository` submitter's own short-lived Worker, which always
-	// builds both its own Activities and this same RunWorkflowInput from
-	// the same local flags — so on its own it never protects against
-	// *that* process simply being configured differently than the
-	// long-lived daemon servicing the same repository. The
-	// RepositoryOwnerID-based re-check below closes that. The -data-dir
-	// half is not closed anywhere: a submitter's -data-dir itself
-	// diverging from the daemon's already breaks reclaim
-	// (runsNeedingReclaim/reconcileReclaimedRun) independent of sandboxing,
-	// so it is an unsupported deployment shape, not a
-	// sandbox-reconciliation bug.
+	// Scope: this only catches an execution whose input has diverged from
+	// the Worker currently executing it, such as a request redispatched to a
+	// Worker configured differently than the one that submitted it.
 	if err := a.checkSandboxScope(input); err != nil {
-		return runner.Result{}, err
-	}
-	// checkDaemonHeartbeatDivergence closes the reachable half of a real
-	// finding from GitHub Codex review of PR #37, round 8: cmd/factoryd's
-	// own submission-time check (checkSandboxDockerAgainstDaemonHeartbeat)
-	// only proves no divergence existed at submission — a request that
-	// sits queued, or a daemon that restarts with a different
-	// -sandbox-docker/DOCKER_HOST/DOCKER_CONTEXT, between submission and
-	// actual dispatch could still diverge by the time a container is
-	// really launched. Called twice below, not once: here (before any
-	// staging or Docker contact, matching this function's existing
-	// fail-fast contract for the two self-consistency checks above — see
-	// TestRunBuildActivityRejectsDivergentSandboxDataDir's own doc
-	// comment) for the common single-attempt case, and again at the top
-	// of the retry loop below so a daemon restart *between* retries (an
-	// earlier version of this fix, found via an Opus-assisted review,
-	// checked only once here — a single attempt can run for up to an
-	// hour, so a retry could still launch against a since-changed daemon)
-	// is caught too, not just a change before the first attempt.
-	// RepositoryOwnerID empty (no repository-owner submission, or one
-	// from before this field existed) skips this the same way a missing
-	// heartbeat does: unknown, not diverging.
-	checkDaemonHeartbeatDivergence := func() error {
-		if input.RepositoryOwnerID == "" {
-			return nil
-		}
-		sandboxDocker := a.sandboxDockerFor(input)
-		// Resolved via exec.LookPath, not the raw configured value (round
-		// 9): two processes both configured with the identical relative
-		// name "docker" can still resolve to two different real
-		// executables when their own $PATH values differ — see
-		// daemonheartbeat.ResolveSandboxDocker's own doc comment. The
-		// error message below names both the unresolved value (what
-		// actually appears in configuration/logs) and the resolved path
-		// (what actually diverged).
-		resolvedSandboxDocker := daemonheartbeat.ResolveSandboxDocker(sandboxDocker)
-		dockerHost, dockerContext := os.Getenv("DOCKER_HOST"), os.Getenv("DOCKER_CONTEXT")
-		hb, ok, diverges := daemonheartbeat.SandboxDockerDiverges(a.dataDirFor(input), input.RepositoryOwnerID, resolvedSandboxDocker, dockerHost, dockerContext)
-		if !ok || !diverges {
-			return nil
-		}
-		return fmt.Errorf("this launch's sandbox Docker configuration (executable %q, resolving to %q, DOCKER_HOST=%q, DOCKER_CONTEXT=%q) diverges from repository %s's daemon (resolving to %q, DOCKER_HOST=%q, DOCKER_CONTEXT=%q, from its own current heartbeat): the container this launch is about to create would be invisible to that daemon's own orphan reconciliation", sandboxDocker, resolvedSandboxDocker, dockerHost, dockerContext, input.RepositoryOwnerID, hb.SandboxDocker, hb.DockerHost, hb.DockerContext)
-	}
-	if err := checkDaemonHeartbeatDivergence(); err != nil {
 		return runner.Result{}, err
 	}
 	// See sandbox.ResolveDefaultWorkerIdentity's own doc comment for the
@@ -476,17 +416,8 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 				return last, fmt.Errorf("before attempt %d hook: %w", attempt, err)
 			}
 		}
-		// Re-checked on every attempt, not just once before the loop
-		// above (found via an Opus-assisted review after the codex
-		// round-8 finding: an earlier version of this fix checked only
-		// once, before staging — correct for fail-fast, but a single
-		// attempt can run for up to an hour, so a daemon that restarts
-		// with a different -sandbox-docker between attempt 1 and a retry
-		// would still have launched an unreconcilable container on that
-		// retry, the same TOCTOU the finding described, just narrower).
-		// See checkDaemonHeartbeatDivergence's own doc comment above for
-		// why this needs to run in both places, not just one.
-		if checked, err := a.checkBeforeAttempt(ctx, last, checkDaemonHeartbeatDivergence, afterAttempt, attempt, command); err != nil {
+		// Checked on every attempt: a retry can start an hour after the first.
+		if checked, err := a.checkBeforeAttempt(ctx, last, afterAttempt, attempt, command); err != nil {
 			return checked, err
 		}
 		// margin reserves not just this attempt's own container teardown
@@ -695,8 +626,7 @@ func (a *Activities) runSandboxWithRetries(ctx context.Context, input RunWorkflo
 }
 
 // checkBeforeAttempt is what an attempt checks before anything is pulled or
-// started for it: the daemon the run belongs to has not changed, and Docker's
-// disk has the room a launch needs, so a registry proxy or compose services
+// started for it: Docker's disk has the room a launch needs, so a registry proxy or compose services
 // are never brought up onto a full disk. A refused disk is an attempt that
 // never ran (sandbox.ErrSandboxDiskLow); a retry would find the same disk.
 // beginSidecars refuses the launch when Docker's disk is below the launch
@@ -733,10 +663,7 @@ func (a *Activities) refuseLowDisk(ctx context.Context) (uint64, bool, error) {
 	return sandbox.RefuseLowDisk(ctx, a.Sandboxes)
 }
 
-func (a *Activities) checkBeforeAttempt(ctx context.Context, last runner.Result, checkDaemon func() error, afterAttempt func(int, runner.Result, error) error, attempt int, command []string) (runner.Result, error) {
-	if err := checkDaemon(); err != nil {
-		return last, err
-	}
+func (a *Activities) checkBeforeAttempt(ctx context.Context, last runner.Result, afterAttempt func(int, runner.Result, error) error, attempt int, command []string) (runner.Result, error) {
 	if a.Sandboxes == nil {
 		return last, nil
 	}

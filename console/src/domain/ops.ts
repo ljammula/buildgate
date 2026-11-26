@@ -1,5 +1,5 @@
-// Operational shapes: workspace hints, the console's own config, daemon and
-// worker liveness, the health probe and the server's error body.
+// Operational shapes: workspace hints, the console's own config, worker
+// liveness, the health probe and the server's error body.
 import type { StatusTone } from "@/domain/status";
 import {
   type JsonObject,
@@ -88,38 +88,9 @@ export function decodeConsoleConfig(o: JsonObject, at: string): ConsoleConfig {
 }
 
 /**
- * internal/api.DaemonStatus: one entry of GET /daemons, a serve-managed
- * supervisor child. A best-effort operational signal, never gated on.
- */
-export interface DaemonStatus {
-  readonly repository: string;
-  readonly state: string;
-  /** 0 when the server omits it. */
-  readonly pid: number;
-  readonly startedAt: string;
-  readonly heartbeatUpdatedAt: string;
-}
-
-function decodeDaemonStatus(o: JsonObject, at: string): DaemonStatus {
-  return {
-    repository: optString(o, "repository", at),
-    state: optString(o, "state", at),
-    pid: numberOr(o, "pid", at, 0),
-    startedAt: optString(o, "started_at", at),
-    heartbeatUpdatedAt: optString(o, "heartbeat_updated_at", at),
-  };
-}
-
-export function decodeDaemonList(value: unknown, at: string): DaemonStatus[] {
-  return decodeList(value, at, decodeDaemonStatus);
-}
-
-/**
  * GET /queue-run: whether a live `factoryd worker` is draining this data
- * directory, from the on-disk heartbeat file. Unlike GET /daemons (start-token
- * gated, and 404 whenever the server is not managing a daemon lifecycle, the
- * common setup), this route is read-token gated like every other read route
- * and always answers when the server supports it, so the board's "worker
+ * directory, from the on-disk heartbeat file. Read-token gated like every
+ * other read route, and always answers when the server supports it, so the board's "worker
  * isn't running" strip fires however the worker was started. `state` is
  * "absent" (no heartbeat file was ever written), "stale" (older than the
  * server's staleness threshold) or "alive".

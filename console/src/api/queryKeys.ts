@@ -35,7 +35,6 @@ export const queryKeys = {
     release: (project: string) => ["projects", project, "release"] as const,
   },
   ops: {
-    daemons: () => ["ops", "daemons"] as const,
     queueRun: () => ["ops", "queue-run"] as const,
     workspaces: () => ["ops", "workspaces"] as const,
     /** One entry per window: `since` is "7d", "30d" or null for all time. */

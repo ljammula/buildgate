@@ -267,7 +267,7 @@ Its diff may only remove lines, lower numbers, or rename a moved function.
 The package-variable baseline regenerates the same way, with
 `CLAIMS_UPDATE_PACKAGE_GLOBALS_BASELINE=1 go test ./internal/claims -run TestNoFunctionAssignsAPackageVariable`.
 
-`internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `install-service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
+`internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
 
 `internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `resume`, `approve`, `reject`, `cancel`, `worker`, the spec and plan jobs, the real ticket build), which use the same fixtures.
 

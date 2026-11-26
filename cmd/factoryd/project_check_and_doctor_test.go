@@ -10,89 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"buildgate/internal/api"
-	"buildgate/internal/projectconfig"
-	"buildgate/internal/release"
-	"buildgate/internal/requestsubmit"
 	"buildgate/internal/run"
 )
-
-// TestProjectBootstrapArtifactPathsParityWithRequestSubmit proves
-// cmd/factoryd's own projectBootstrapArtifactPaths and
-// internal/requestsubmit.ProjectBootstrapArtifactPaths -- two standalone
-// copies of the identical resolution logic, kept in sync only by each
-// one's own doc comment saying so (see requestsubmit's own comment on why
-// a second copy exists at all, rather than importing cmd/factoryd's
-// unimportable main package) -- resolve identical paths across every
-// layout repoRootForWorkspace's doc comment (project_check.go) enumerates:
-// the historical placeholder-subdirectory convention (parent has
-// spec/spec.md), the direct -root convention (workspace itself has
-// spec/spec.md), a real, non-empty, never-onboarded repo (neither has
-// spec.md, but workspace is non-empty), and an empty/nonexistent
-// workspace (neither has spec.md, workspace itself is empty). A change to
-// either implementation that silently drifts from the other -- exactly
-// the class of bug this project's own repo-root resolution has hit twice
-// before (PR #142's two review rounds) -- fails this test instead of
-// surfacing only much later as submit-time accepting a repo run-time then
-// rejects, or vice versa.
-func TestProjectBootstrapArtifactPathsParityWithRequestSubmit(t *testing.T) {
-	dp := newTestDeps(t)
-	assertParity := func(t *testing.T, workspace string) {
-		t.Helper()
-		wantSpec, wantContract, wantArchitecture := projectBootstrapArtifactPaths(workspace)
-		gotSpec, gotContract, gotArchitecture := requestsubmit.ProjectBootstrapArtifactPaths(workspace)
-		if gotSpec != wantSpec {
-			t.Errorf("spec: requestsubmit = %q, cmd/factoryd = %q", gotSpec, wantSpec)
-		}
-		if gotContract != wantContract {
-			t.Errorf("contract: requestsubmit = %q, cmd/factoryd = %q", gotContract, wantContract)
-		}
-		if gotArchitecture != wantArchitecture {
-			t.Errorf("architecture: requestsubmit = %q, cmd/factoryd = %q", gotArchitecture, wantArchitecture)
-		}
-	}
-
-	t.Run("historical parent spec.md", func(t *testing.T) {
-		root := t.TempDir()
-		workspace := filepath.Join(root, "workspace")
-		if err := os.MkdirAll(workspace, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := onboardMain(dp, []string{"-project", "widget", "-workspace", workspace, "-skip-doctor"}); err != nil {
-			t.Fatalf("onboardMain: %v", err)
-		}
-		assertParity(t, workspace)
-	})
-
-	t.Run("workspace spec.md (direct -root)", func(t *testing.T) {
-		root := t.TempDir()
-		if err := onboardMain(dp, []string{"-project", "widget", "-root", root, "-skip-doctor"}); err != nil {
-			t.Fatalf("onboardMain: %v", err)
-		}
-		assertParity(t, root)
-	})
-
-	t.Run("non-empty never-onboarded", func(t *testing.T) {
-		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module widget\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		assertParity(t, root)
-	})
-
-	t.Run("empty/nonexistent workspace", func(t *testing.T) {
-		root := t.TempDir()
-		workspace := filepath.Join(root, "workspace")
-		if err := os.MkdirAll(workspace, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		assertParity(t, workspace)
-	})
-}
 
 // TestAPIProjectCheckerReportsPassingProject is apiProjectChecker's happy
 // path: a fixture repo with an already-passing project-bootstrap scaffold
@@ -117,7 +40,7 @@ func TestAPIProjectCheckerReportsPassingProject(t *testing.T) {
 	if !result.Passed {
 		t.Fatalf("result.Passed = false, want true: %+v", result)
 	}
-	wantChecks := []string{"product_spec_frozen", "program_design_structure", "architecture_structure", "ticket_structure"}
+	wantChecks := []string{"architecture_structure", "ticket_structure"}
 	if len(result.Checks) != len(wantChecks) {
 		t.Fatalf("got %d checks, want %d: %+v", len(result.Checks), len(wantChecks), result.Checks)
 	}
@@ -145,9 +68,7 @@ func TestAPIProjectCheckerReportsPassingProject(t *testing.T) {
 
 // TestAPIProjectCheckerWithoutTicketSkipsTicketStructure proves Ticket is
 // genuinely optional: an operator checking a project before any ticket is
-// drafted still gets a verdict on the three project-level artifacts alone,
-// matching cmd/factoryd's own `check-project` CLI subcommand where -ticket
-// is one of several independently optional flags.
+// drafted still gets a verdict on ARCHITECTURE.md alone.
 func TestAPIProjectCheckerWithoutTicketSkipsTicketStructure(t *testing.T) {
 	// No t.Parallel(): newFixtureRepo -> testfixture.NewGitRepo calls
 	// t.Setenv, which panics if the test has already called t.Parallel().
@@ -161,8 +82,8 @@ func TestAPIProjectCheckerWithoutTicketSkipsTicketStructure(t *testing.T) {
 	if !result.Passed {
 		t.Fatalf("result.Passed = false, want true: %+v", result)
 	}
-	if len(result.Checks) != 3 {
-		t.Fatalf("got %d checks, want 3 (no ticket_structure): %+v", len(result.Checks), result.Checks)
+	if len(result.Checks) != 1 {
+		t.Fatalf("got %d checks, want 1 (no ticket_structure): %+v", len(result.Checks), result.Checks)
 	}
 	for _, check := range result.Checks {
 		if check.Check == "ticket_structure" {
@@ -171,12 +92,10 @@ func TestAPIProjectCheckerWithoutTicketSkipsTicketStructure(t *testing.T) {
 	}
 }
 
-// TestAPIProjectCheckerReportsEveryFailingArtifact is the exact preview
-// scenario this whole mechanism exists for: a project that hasn't adopted
-// the spec/contract/architecture convention yet gets a real, itemized
-// answer -- every missing artifact named, not a generic failure -- instead
-// of only discovering this by starting (and quarantining) a real run.
-func TestAPIProjectCheckerReportsEveryFailingArtifact(t *testing.T) {
+// TestAPIProjectCheckerReportsAMissingArchitectureAsAdvisory: a project
+// with no ARCHITECTURE.md passes the preview, and the check names what is
+// missing.
+func TestAPIProjectCheckerReportsAMissingArchitectureAsAdvisory(t *testing.T) {
 	// No t.Parallel(): newFixtureRepoWithoutBootstrapScaffold calls
 	// t.Setenv, which panics if the test has already called t.Parallel().
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
@@ -186,100 +105,15 @@ func TestAPIProjectCheckerReportsEveryFailingArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apiProjectChecker: %v", err)
 	}
-	if result.Passed {
-		t.Fatalf("result.Passed = true, want false against a workspace with no bootstrap scaffold: %+v", result)
-	}
-	if len(result.Checks) != 3 {
-		t.Fatalf("got %d checks, want 3: %+v", len(result.Checks), result.Checks)
-	}
-	for _, check := range result.Checks {
-		if check.Passed {
-			t.Errorf("check %q passed against a workspace with no scaffold at all: %+v", check.Check, check)
-		}
-		if len(check.Reasons) == 0 {
-			t.Errorf("check %q failed with no reasons -- an operator can't act on that", check.Check)
-		}
-	}
-}
-
-func TestEffectivePreflightProfile(t *testing.T) {
-	brownfieldCfg := &projectconfig.Config{PreflightProfile: "brownfield"}
-
-	cases := []struct {
-		name     string
-		explicit string
-		cfg      *projectconfig.Config
-		want     string
-		wantErr  bool
-	}{
-		{"explicit wins over config", "brownfield", nil, "brownfield", false},
-		{"no config, empty explicit stays strict", "", nil, "", false},
-		{"config supplies default when explicit is empty", "", brownfieldCfg, "brownfield", false},
-		{"config with no profile set stays strict", "", &projectconfig.Config{}, "", false},
-		{"invalid explicit is rejected even with a config present", "strict", brownfieldCfg, "", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := effectivePreflightProfile(tc.explicit, tc.cfg)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected an error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("effectivePreflightProfile: %v", err)
-			}
-			if got != tc.want {
-				t.Errorf("effectivePreflightProfile(%q, %+v) = %q, want %q", tc.explicit, tc.cfg, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestAPIProjectCheckerUsesFactoryYMLBrownfieldProfileWhenRequestOmitsOne
-// is the regression test for a Codex review finding on PR #84:
-// apiProjectChecker (the POST /projects/check preview) must resolve the
-// same effective preflight profile a real run against this workspace
-// would (via applyProjectConfigDefaults), not evaluate an empty request
-// profile as strict while the config it never consulted says brownfield.
-func TestAPIProjectCheckerUsesFactoryYMLBrownfieldProfileWhenRequestOmitsOne(t *testing.T) {
-	// No t.Parallel(): newFixtureRepoWithoutBootstrapScaffold calls
-	// t.Setenv, which panics if the test has already called t.Parallel().
-	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
-	if out, err := exec.Command("git", "-C", workspace, "add", "-A").CombinedOutput(); err != nil {
-		t.Fatalf("git add: %v\n%s", err, out)
-	}
-	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("preflight_profile: brownfield\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("git", "-C", workspace, "add", ".factory.yml").CombinedOutput(); err != nil {
-		t.Fatalf("git add .factory.yml: %v\n%s", err, out)
-	}
-	if out, err := exec.Command("git", "-C", workspace, "commit", "-q", "-m", "add .factory.yml").CombinedOutput(); err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
-
-	checker := apiProjectChecker()
-	result, err := checker(context.Background(), api.ProjectCheckRequest{Workspace: workspace})
-	if err != nil {
-		t.Fatalf("apiProjectChecker: %v", err)
-	}
-	// Brownfield skips product_spec_frozen/program_design_structure
-	// entirely and makes architecture_structure advisory -- against this
-	// scaffold-free workspace, a strict evaluation would report Passed:
-	// false with three failing checks (see
-	// TestAPIProjectCheckerReportsEveryFailingArtifact above).
 	if !result.Passed {
-		t.Fatalf("result.Passed = false, want true under the repo's own brownfield profile: %+v", result)
+		t.Fatalf("result.Passed = false, want true: a missing ARCHITECTURE.md is advisory: %+v", result)
 	}
-	for _, check := range result.Checks {
-		if check.Check == "product_spec_frozen" || check.Check == "program_design_structure" {
-			t.Errorf("check %q should not run under brownfield, got %+v", check.Check, check)
-		}
-		if check.Check == "architecture_structure" && !check.Advisory {
-			t.Errorf("architecture_structure should be advisory under brownfield: %+v", check)
-		}
+	if len(result.Checks) != 1 {
+		t.Fatalf("got %d checks, want 1: %+v", len(result.Checks), result.Checks)
+	}
+	check := result.Checks[0]
+	if check.Passed || !check.Advisory || len(check.Reasons) == 0 {
+		t.Errorf("architecture check = %+v, want an advisory failure with reasons", check)
 	}
 }
 
@@ -305,8 +139,8 @@ func TestAPIProjectCheckerReportsNonexistentTicketAsFailedCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apiProjectChecker: %v", err)
 	}
-	if result.Passed {
-		t.Fatalf("result.Passed = true, want false: a nonexistent ticket should fail ticket_structure: %+v", result)
+	if !result.Passed {
+		t.Fatalf("result.Passed = false, want true: a nonexistent auto-discovered ticket is advisory: %+v", result)
 	}
 	var found bool
 	for _, check := range result.Checks {
@@ -314,8 +148,8 @@ func TestAPIProjectCheckerReportsNonexistentTicketAsFailedCheck(t *testing.T) {
 			continue
 		}
 		found = true
-		if check.Passed {
-			t.Errorf("ticket_structure passed against a nonexistent ticket file: %+v", check)
+		if check.Passed || !check.Advisory {
+			t.Errorf("ticket_structure = %+v, want an advisory failure against a nonexistent ticket file", check)
 		}
 		if len(check.Reasons) == 0 || !strings.Contains(check.Reasons[0], "could not read artifact") {
 			t.Errorf("ticket_structure reasons = %v, want it to name the unreadable artifact", check.Reasons)
@@ -670,55 +504,44 @@ func TestAPIProjectStatsProviderReportsEmptyProject(t *testing.T) {
 	}
 }
 
-// TestEvaluateProjectBootstrapChecksBrownfieldProfileSkipsSpecAndContract
-// proves -preflight-profile=brownfield's own core promise: product_spec_
-// frozen and program_design_structure are omitted entirely (not run, not
-// reported as failed) when neither spec.md nor contract.md exists at all
-// -- the exact shape of a real existing repo new to this convention.
-func TestEvaluateProjectBootstrapChecksBrownfieldProfileSkipsSpecAndContract(t *testing.T) {
+// TestEvaluateProjectBootstrapChecksRunsOnlyArchitectureAdvisory: with no
+// ticket, the preflight checks ARCHITECTURE.md only, and its failure is
+// advisory -- the shape of an existing repository with no factory docs.
+func TestEvaluateProjectBootstrapChecksRunsOnlyArchitectureAdvisory(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	// Neither spec.md nor contract.md exists; architecturePath points at a
-	// nonexistent file too, so its own check fails -- but advisory-only.
-	specPath := filepath.Join(root, "spec", "spec.md")
-	contractPath := filepath.Join(root, "spec", "contract.md")
-	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
+	architecturePath := filepath.Join(t.TempDir(), "ARCHITECTURE.md")
 
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, "", 0, nil, preflightProfileBrownfield, nil)
+	results, allPassed := evaluateProjectBootstrapChecks(architecturePath, "", 0, nil, nil)
 
 	if !allPassed {
-		t.Fatalf("allPassed = false under brownfield profile with no ticket declared, want true (only architecture_structure ran, and it's advisory): %+v", results)
+		t.Fatalf("allPassed = false with no ticket declared, want true (only architecture_structure ran, and it's advisory): %+v", results)
 	}
 	if len(results) != 1 || results[0].Check != "architecture_structure" {
-		t.Fatalf("results = %+v, want exactly one architecture_structure entry (product_spec_frozen/program_design_structure omitted entirely)", results)
+		t.Fatalf("results = %+v, want exactly one architecture_structure entry", results)
 	}
 	if !results[0].Advisory {
-		t.Error("architecture_structure result not marked Advisory under brownfield profile")
+		t.Error("architecture_structure result not marked Advisory")
 	}
 	if results[0].Passed {
 		t.Error("architecture_structure passed against a nonexistent file -- fixture is wrong")
 	}
 }
 
-// TestEvaluateProjectBootstrapChecksBrownfieldMissingTicketIsAdvisory is
-// the regression test for the first live submit-then-worker against a
-// real repo under ~/code (2026-09-10): brownfield skipped spec/contract
-// but still hard-failed on the discovery convention's hypothetical
-// ~/code/spec/tickets/<id>.md, so no submit-queued run could pass the
-// preflight. A missing auto-discovered ticket is advisory under
-// brownfield; a ticket that exists is still checked for real, and the
-// strict profile is unchanged.
-func TestEvaluateProjectBootstrapChecksBrownfieldMissingTicketIsAdvisory(t *testing.T) {
+// TestEvaluateProjectBootstrapChecksMissingTicketIsAdvisory is the
+// regression test for the first live submit-then-worker against a real
+// repo under ~/code (2026-09-10): the preflight hard-failed on the
+// discovery convention's hypothetical ~/code/spec/tickets/<id>.md, so no
+// submit-queued run could pass it. A missing auto-discovered ticket is
+// advisory; a ticket that exists is still checked for real.
+func TestEvaluateProjectBootstrapChecksMissingTicketIsAdvisory(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	specPath := filepath.Join(root, "spec", "spec.md")
-	contractPath := filepath.Join(root, "spec", "contract.md")
 	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
 	missingTicket := filepath.Join(root, "spec", "tickets", "001-missing.md")
 
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, missingTicket, 1, nil, preflightProfileBrownfield, nil)
+	results, allPassed := evaluateProjectBootstrapChecks(architecturePath, missingTicket, 1, nil, nil)
 	if !allPassed {
-		t.Fatalf("allPassed = false under brownfield with a missing auto-discovered ticket, want true: %+v", results)
+		t.Fatalf("allPassed = false with a missing auto-discovered ticket, want true: %+v", results)
 	}
 	var ticket *ProjectCheckResult
 	for i := range results {
@@ -741,49 +564,31 @@ func TestEvaluateProjectBootstrapChecksBrownfieldMissingTicketIsAdvisory(t *test
 	if err := os.WriteFile(presentTicket, []byte("# not a ticket\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	results, allPassed = evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, presentTicket, 2, nil, preflightProfileBrownfield, nil)
+	results, allPassed = evaluateProjectBootstrapChecks(architecturePath, presentTicket, 2, nil, nil)
 	if allPassed {
-		t.Fatalf("allPassed = true under brownfield with a malformed ticket that exists, want false: %+v", results)
-	}
-
-	// Strict profile: a missing ticket still fails.
-	_, allPassed = evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, missingTicket, 1, nil, "", nil)
-	if allPassed {
-		t.Fatal("allPassed = true under the strict profile with a missing ticket, want false")
+		t.Fatalf("allPassed = true with a malformed ticket that exists, want false: %+v", results)
 	}
 }
 
 // TestTemporalPreflightTicketPathMatchesLocalAdvisoryTreatment covers a
 // real divergence found live (2026-09-13) between this process's own local
 // project-bootstrap preflight (evaluateProjectBootstrapChecks, tested just
-// above) and the Temporal path's PreflightActivity, which has no
-// -preflight-profile concept at all and hard-fails on any non-empty
-// TicketPath it can't read. Under brownfield with no adopted pi-harness
-// convention, resolvePiTicketPath's auto-discovered candidate never exists;
-// the local check already treats that as advisory (see the test above),
-// but the same path used to be forwarded to the Temporal workflow
-// unconditionally, so an identical run that passed locally halted the
-// moment it reached PreflightActivity -- a real live run against
-// todo-service, not a synthetic case.
+// above) and the Temporal path's PreflightActivity, which hard-fails on any
+// non-empty TicketPath it can't read. resolvePiTicketPath's auto-discovered
+// candidate usually does not exist; the local check treats that as
+// advisory, so the path is not forwarded either.
 func TestTemporalPreflightTicketPathMatchesLocalAdvisoryTreatment(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	missingTicket := filepath.Join(root, "spec", "tickets", "001-missing.md")
 
-	if got := temporalPreflightTicketPath(missingTicket, preflightProfileBrownfield); got != "" {
-		t.Errorf("temporalPreflightTicketPath(missing, brownfield) = %q, want empty (advisory case, matches evaluateProjectBootstrapChecks)", got)
+	if got := temporalPreflightTicketPath(missingTicket); got != "" {
+		t.Errorf("temporalPreflightTicketPath(missing) = %q, want empty (advisory case, matches evaluateProjectBootstrapChecks)", got)
 	}
 
-	// Strict profile: still forwarded, so a genuine missing ticket still
-	// fails PreflightActivity, matching evaluateProjectBootstrapChecks'
-	// own unaffected strict-profile behavior.
-	if got := temporalPreflightTicketPath(missingTicket, ""); got != missingTicket {
-		t.Errorf("temporalPreflightTicketPath(missing, strict) = %q, want %q (strict profile forwards it, matching the local check's own failure)", got, missingTicket)
-	}
-
-	// A ticket that actually exists is always forwarded, regardless of
-	// profile -- PreflightActivity's own real structural validation must
-	// still run against it.
+	// A ticket that actually exists is always forwarded --
+	// PreflightActivity's own real structural validation must still run
+	// against it.
 	presentTicket := filepath.Join(root, "spec", "tickets", "002-present.md")
 	if err := os.MkdirAll(filepath.Dir(presentTicket), 0o755); err != nil {
 		t.Fatal(err)
@@ -791,48 +596,20 @@ func TestTemporalPreflightTicketPathMatchesLocalAdvisoryTreatment(t *testing.T) 
 	if err := os.WriteFile(presentTicket, []byte("# not a ticket\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := temporalPreflightTicketPath(presentTicket, preflightProfileBrownfield); got != presentTicket {
-		t.Errorf("temporalPreflightTicketPath(present, brownfield) = %q, want %q (an existing ticket is always forwarded)", got, presentTicket)
+	if got := temporalPreflightTicketPath(presentTicket); got != presentTicket {
+		t.Errorf("temporalPreflightTicketPath(present) = %q, want %q (an existing ticket is always forwarded)", got, presentTicket)
 	}
 
-	if got := temporalPreflightTicketPath("", preflightProfileBrownfield); got != "" {
-		t.Errorf("temporalPreflightTicketPath(\"\", brownfield) = %q, want empty (-skip-project-check leaves piTicketPath empty; nothing to forward)", got)
-	}
-}
-
-// TestEvaluateProjectBootstrapChecksStrictProfileUnaffected proves the
-// default ("" ) profile's behavior is byte-for-byte unchanged: still
-// three-or-four checks, still gates on all of them, matching this
-// function's behavior before -preflight-profile existed.
-func TestEvaluateProjectBootstrapChecksStrictProfileUnaffected(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	specPath := filepath.Join(root, "spec", "spec.md")
-	contractPath := filepath.Join(root, "spec", "contract.md")
-	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
-
-	results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, "", 0, nil, "", nil)
-
-	if allPassed {
-		t.Fatal("allPassed = true against three nonexistent artifacts under the strict profile, want false")
-	}
-	if len(results) != 3 {
-		t.Fatalf("results = %+v, want exactly three checks (product_spec_frozen, program_design_structure, architecture_structure) under the strict profile", results)
-	}
-	for _, r := range results {
-		if r.Advisory {
-			t.Errorf("check %q marked Advisory under the strict (\"\") profile, want none", r.Check)
-		}
+	if got := temporalPreflightTicketPath(""); got != "" {
+		t.Errorf("temporalPreflightTicketPath(\"\") = %q, want empty (-skip-project-check leaves piTicketPath empty; nothing to forward)", got)
 	}
 }
 
-// TestRunProjectBootstrapCheckBrownfieldProfileAcceptsRealRepoLayout is an
-// end-to-end proof against real files on disk (not just the pure
-// evaluate function): a repo with a real ticket but no spec/contract, and
-// an ARCHITECTURE.md missing a required heading, passes under the
-// brownfield profile and is rejected under the strict one -- the exact
-// before/after this flag exists to produce.
-func TestRunProjectBootstrapCheckBrownfieldProfileAcceptsRealRepoLayout(t *testing.T) {
+// TestRunProjectBootstrapCheckAcceptsRealRepoLayout is an end-to-end proof
+// against real files on disk: a repo with a real ticket and an
+// ARCHITECTURE.md missing a required heading passes, and a malformed ticket
+// is rejected with errProjectBootstrapCheckFailed.
+func TestRunProjectBootstrapCheckAcceptsRealRepoLayout(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	ticketsDir := filepath.Join(root, "spec", "tickets")
@@ -841,230 +618,35 @@ func TestRunProjectBootstrapCheckBrownfieldProfileAcceptsRealRepoLayout(t *testi
 	}
 	ticketPath := filepath.Join(ticketsDir, "001-fixture.md")
 	ticketContent := "This is a brand-new, empty, already-git-init-ed repo.\n\n" +
-		"## Goal\nexercise the brownfield preflight profile\n\n" +
+		"## Goal\nexercise the project-bootstrap preflight\n\n" +
 		"## Required changes\nUpdate `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.\n\n" +
 		"## Verification\n`make verify` must pass.\n\n" +
 		"## Commit\nticket(001): fixture\n"
 	if err := os.WriteFile(ticketPath, []byte(ticketContent), 0o644); err != nil {
 		t.Fatalf("write ticket: %v", err)
 	}
-	// Deliberately missing spec.md/contract.md; ARCHITECTURE.md exists but
-	// has none of policy.DefaultArchitectureRequiredSections' own headings
-	// -- the real shape of an existing repo's own real docs.
 	architecturePath := filepath.Join(root, "ARCHITECTURE.md")
 	if err := os.WriteFile(architecturePath, []byte("# My Real Project\n\nSome real docs, not factory-shaped.\n"), 0o644); err != nil {
 		t.Fatalf("write architecture doc: %v", err)
 	}
-	specPath := filepath.Join(root, "spec", "spec.md")
-	contractPath := filepath.Join(root, "spec", "contract.md")
 	dataDir := t.TempDir()
 
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, ticketPath, 1, nil, preflightProfileBrownfield, nil)
-	if err != nil {
-		t.Fatalf("runProjectBootstrapCheck under brownfield profile: %v", err)
+	if err := runProjectBootstrapCheck(dataDir, false, root, "fixture-project", architecturePath, ticketPath, 1, nil, nil); err != nil {
+		t.Fatalf("runProjectBootstrapCheck: %v", err)
 	}
 
-	_, _, strictErr := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project-strict", specPath, contractPath, architecturePath, ticketPath, 1, nil, "", nil)
-	if strictErr == nil {
-		t.Fatal("runProjectBootstrapCheck under the strict profile succeeded against the same layout, want it rejected (no spec.md/contract.md at all)")
+	badTicket := filepath.Join(ticketsDir, "002-bad.md")
+	if err := os.WriteFile(badTicket, []byte("# not a ticket\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(strictErr, errProjectBootstrapCheckFailed) {
-		t.Errorf("strict-profile err = %v, want it to wrap errProjectBootstrapCheckFailed", strictErr)
+	badErr := runProjectBootstrapCheck(dataDir, false, root, "fixture-project-bad", architecturePath, badTicket, 2, nil, nil)
+	if !errors.Is(badErr, errProjectBootstrapCheckFailed) {
+		t.Errorf("malformed-ticket err = %v, want it to wrap errProjectBootstrapCheckFailed", badErr)
 	}
 }
 
-// TestRunProjectBootstrapCheckNeverOnboardedNamesTheOnboardCommand covers
-// the "this repo has never been pointed at factoryd onboard/init at all"
-// case (none of spec.md/contract.md/ARCHITECTURE.md exist on disk):
-// runProjectBootstrapCheck's failure message must name the exact `factoryd
-// onboard` command to run, not just the generic
-// "-skip-project-check bypasses this" pointer -- the point of
-// onboardingNotDone.
-func TestRunProjectBootstrapCheckNeverOnboardedNamesTheOnboardCommand(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(root)
-	dataDir := t.TempDir()
-
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, "", 0, nil, "", nil)
-	if err == nil {
-		t.Fatal("runProjectBootstrapCheck against a never-onboarded repo succeeded, want it rejected")
-	}
-	if !errors.Is(err, errProjectBootstrapCheckFailed) {
-		t.Errorf("err = %v, want it to wrap errProjectBootstrapCheckFailed", err)
-	}
-	wantCommand := fmt.Sprintf("factoryd onboard -project fixture-project -root %s -write-factory-yml", root)
-	if !strings.Contains(err.Error(), wantCommand) {
-		t.Errorf("err = %v, want it to contain %q", err, wantCommand)
-	}
-}
-
-// TestRunProjectBootstrapCheckPartiallyOnboardedDoesNotSuggestOnboard
-// covers the other side of onboardingNotDone: a repo that has adopted the
-// convention (at least one of the three artifacts exists) but still fails
-// -- e.g. an unfrozen spec.md -- must get the ordinary per-check failure
-// message, not the onboard-command hint, which would send an operator who
-// already has real docs to redo scaffolding that isn't the actual problem.
-func TestRunProjectBootstrapCheckPartiallyOnboardedDoesNotSuggestOnboard(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(root)
-	if err := os.MkdirAll(filepath.Dir(specPath), 0o750); err != nil {
-		t.Fatalf("mkdir spec dir: %v", err)
-	}
-	// Unfrozen spec.md: exists, but policy.ProductSpecFrozen still fails it.
-	if err := os.WriteFile(specPath, []byte("# Spec\n\nSTATUS: DRAFT\n"), 0o644); err != nil {
-		t.Fatalf("write spec.md: %v", err)
-	}
-	dataDir := t.TempDir()
-
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, "", 0, nil, "", nil)
-	if err == nil {
-		t.Fatal("runProjectBootstrapCheck against an unfrozen spec succeeded, want it rejected")
-	}
-	if strings.Contains(err.Error(), "factoryd onboard") {
-		t.Errorf("err = %v, should not suggest `factoryd onboard` when the repo already has some bootstrap artifacts", err)
-	}
-}
-
-// TestRunProjectBootstrapCheckBrownfieldNeverSuggestsOnboard pins the
-// brownfield side of onboardingNotDone: under -preflight-profile=brownfield
-// a repo with no spec/contract/architecture at all is the documented,
-// legitimate layout (that is what the profile exists for), so the only way
-// the preflight can still fail there is a malformed ticket -- and the
-// failure message must name that ticket failure, not tell the operator to
-// re-scaffold artifacts the profile never required.
-func TestRunProjectBootstrapCheckBrownfieldNeverSuggestsOnboard(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(root)
-	ticketsDir := filepath.Join(root, "spec", "tickets")
-	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
-		t.Fatalf("mkdir tickets dir: %v", err)
-	}
-	ticketPath := filepath.Join(ticketsDir, "001-fixture.md")
-	// No "## Goal" (or any other required heading): policy.TicketStructure fails it.
-	if err := os.WriteFile(ticketPath, []byte("just some prose, no headings at all\n"), 0o644); err != nil {
-		t.Fatalf("write ticket: %v", err)
-	}
-	dataDir := t.TempDir()
-
-	_, _, err := runProjectBootstrapCheck(dataDir, false, root, root, "fixture-project", specPath, contractPath, architecturePath, ticketPath, 1, nil, preflightProfileBrownfield, nil)
-	if err == nil {
-		t.Fatal("runProjectBootstrapCheck under brownfield with a malformed ticket succeeded, want it rejected")
-	}
-	if strings.Contains(err.Error(), "factoryd onboard") {
-		t.Errorf("err = %v, should not suggest `factoryd onboard` under the brownfield profile, where missing artifacts are the expected layout", err)
-	}
-	if !strings.Contains(err.Error(), "ticket_structure") {
-		t.Errorf("err = %v, want the actual ticket_structure failure named", err)
-	}
-}
-
-// TestAPIStartStarterPlumbsPreflightProfileFlag mirrors
-// TestAPIStartStarterPlumbsSkipProjectCheckFlag: a fixture repo with no
-// bootstrap scaffold but a real ticket reaches `accepted` when the API
-// request declares PreflightProfile: "brownfield", proving the field
-// actually reaches the spawned run's own -preflight-profile flag rather
-// than being silently ignored (the exact class of gap this repo has
-// repeatedly found in flag-forwarding code).
-func TestAPIStartStarterPlumbsPreflightProfileFlag(t *testing.T) {
-	dp := newTestDeps(t)
-	settings := fakeSandboxSettings(t)
-	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
-	ticketsDir := filepath.Join(filepath.Dir(workspace), "spec", "tickets")
-	if err := os.MkdirAll(ticketsDir, 0o750); err != nil {
-		t.Fatalf("mkdir tickets dir: %v", err)
-	}
-	ticketContent := "This is a brand-new, empty, already-git-init-ed repo.\n\n" +
-		"## Goal\nexercise -preflight-profile through the API adapter\n\n" +
-		"## Required changes\nUpdate `ARCHITECTURE.md` and append a `PROGRESS.md` entry before finishing.\n\n" +
-		"## Verification\n`make verify` must pass.\n\n" +
-		"## Commit\nticket(001): fixture\n"
-	if err := os.WriteFile(filepath.Join(ticketsDir, "001-api-brownfield-ticket.md"), []byte(ticketContent), 0o644); err != nil {
-		t.Fatalf("write ticket: %v", err)
-	}
-	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-	script, err := filepath.Abs("testdata/fake_build_app.sh")
-	if err != nil {
-		t.Fatalf("resolve build script: %v", err)
-	}
-	t.Setenv("FAKE_BUILD_APP_MODE", "commit")
-
-	dataDir := t.TempDir()
-	var inFlight sync.WaitGroup
-	defer inFlight.Wait()
-	started, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
-		TemporalAddress:     sharedTemporalAddress(t),
-		ID:                  "api-preflight-profile-1",
-		Ticket:              "api-brownfield-ticket",
-		Workspace:           workspace,
-		Spec:                spec,
-		BuildAppInterpreter: "/bin/sh",
-		BuildAppScript:      script,
-		Timeout:             "30s",
-		VerifyCommand:       "true",
-		PreflightProfile:    preflightProfileBrownfield,
-	})
-	if err != nil {
-		t.Fatalf("start through API adapter: %v", err)
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		loaded, loadErr := run.Load(dataDir, started.ID)
-		if loadErr == nil && loaded.State == run.StateAccepted {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run did not reach accepted despite PreflightProfile: brownfield, want the missing spec/contract to have been skipped: loaded=%+v err=%v", loaded, loadErr)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-// TestAPIStartStarterRejectsInvalidPreflightProfile proves a malformed
-// preflight_profile value is reported as api.ErrInvalidStartRequest (a
-// 400, real message intact) rather than falling through to a generic
-// 500 -- the same reasoning errProjectBootstrapCheckFailed's own
-// re-wrapping exists for, applied to this field's own validation
-// instead.
-func TestAPIStartStarterRejectsInvalidPreflightProfile(t *testing.T) {
-	dp := newTestDeps(t)
-	settings := fakeSandboxSettings(t)
-	// No t.Parallel(): newFixtureRepo -> testfixture.NewGitRepo calls
-	// t.Setenv, which panics if the test has already called t.Parallel().
-	workspace := newFixtureRepo(t)
-	spec := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-	dataDir := t.TempDir()
-	var inFlight sync.WaitGroup
-	defer inFlight.Wait()
-	_, err := apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
-		TemporalAddress:  sharedTemporalAddress(t),
-		ID:               "api-preflight-profile-invalid",
-		Ticket:           "api-ticket",
-		Workspace:        workspace,
-		Spec:             spec,
-		Timeout:          "30s",
-		VerifyCommand:    "true",
-		PreflightProfile: "not-a-real-profile",
-	})
-	if err == nil {
-		t.Fatal("start with an invalid preflight_profile succeeded, want it rejected")
-	}
-	if !errors.Is(err, api.ErrInvalidStartRequest) {
-		t.Errorf("err = %v, want it to wrap api.ErrInvalidStartRequest", err)
-	}
-}
-
-// TestDetectVerifyCommand covers every branch onboardMain's own
-// verify-command detection can take, in priority order (Makefile verify
+// TestDetectVerifyCommand covers every branch the verify-command
+// detection can take, in priority order (Makefile verify
 // target > Makefile test target > go.mod > package.json test script >
 // nothing detected).
 func TestDetectVerifyCommand(t *testing.T) {

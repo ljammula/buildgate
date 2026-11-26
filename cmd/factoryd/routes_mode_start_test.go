@@ -59,7 +59,6 @@ func TestSubmitMainAcceptsValidRoutesModeConfig(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	configPath := filepath.Join(t.TempDir(), "config.yml")
 	if err := os.WriteFile(configPath, []byte(validRoutesModeSessionConfig), 0o644); err != nil {
@@ -132,86 +131,6 @@ func TestRunMainWithReadyRoutesModeRefusesLegacyRouteFlags(t *testing.T) {
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "relay-upstream") {
 		t.Fatalf("runMainWithReady with -relay-upstream and a routes: config: err = %v, want a refusal naming relay-upstream", err)
-	}
-}
-
-// TestDaemonMainNoLongerRefusesValidRoutesModeConfig is `factoryd
-// daemon`'s own start-site counterpart: since Phase 2D the daemon (the
-// Temporal Worker process itself) binds a submitted route to its own
-// session config (modelrole.CheckRouteBinding, Activities.CheckRoute/ResolveRouteCredentials)
-// instead of refusing routes: mode outright -- a schema-valid routes:
-// config now gets all the way past config loading/validateRoles to
-// daemonMain's own next requirement, the required -temporal-address/
-// -repository check, exactly like a legacy config always has.
-func TestDaemonMainNoLongerRefusesValidRoutesModeConfig(t *testing.T) {
-	dp := newTestDeps(t)
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, validRoutesModeSessionConfig)
-	err := daemonMain(dp, []string{"-data-dir", t.TempDir()})
-	if err == nil {
-		t.Fatal("daemonMain with a valid routes: config and no -temporal-address/-repository: want error, got nil")
-	}
-	if strings.Contains(err.Error(), "cannot dispatch to the Temporal Worker") {
-		t.Errorf("err = %v, must not refuse routes: mode any more (2D)", err)
-	}
-	if !strings.Contains(err.Error(), "-temporal-address and -repository are required") {
-		t.Fatalf("error = %q, want the required-flag error (proving routes: mode got all the way past config loading)", err.Error())
-	}
-}
-
-// TestDaemonMainRoutesModeRefusesLegacyCredentialFlags proves
-// daemonMain refuses the same legacy -relay-* flags runMainWithReady
-// refuses once routes:/models: are configured -- specifically
-// -relay-github-token-file/-relay-github-token-key/-relay-codex-auth-file,
-// since a routes:-mode daemon never resolves either legacy credential
-// at startup at all (its own routes:-mode branch resolves every
-// route's own credential fresh, per submitted run, instead).
-func TestDaemonMainRoutesModeRefusesLegacyCredentialFlags(t *testing.T) {
-	dp := newTestDeps(t)
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, validRoutesModeSessionConfig)
-	err := daemonMain(dp, []string{"-data-dir", t.TempDir(), "-relay-github-token-file", "/does/not/matter"})
-	if err == nil {
-		t.Fatal("daemonMain with -relay-github-token-file and a routes: config: want error, got nil")
-	}
-	if !strings.Contains(err.Error(), "relay-github-token-file") {
-		t.Fatalf("error = %q, want it to name relay-github-token-file", err.Error())
-	}
-}
-
-// TestDaemonMainRoutesModeSkipsLegacyGitHubCopilotTokenResolution proves
-// a routes:-mode daemon with a github-copilot route configured, and NO
-// GITHUB_COPILOT_TOKEN/discovered auth file/-relay-github-token-file at
-// all, still gets past its own startup credential resolution (the
-// legacy resolveGitHubCopilotToken call this daemon's own routes:-mode
-// branch now skips entirely) to its next requirement, the required
-// -temporal-address/-repository check -- exactly like
-// TestDaemonMainNoLongerRefusesValidRoutesModeConfig already proves for
-// the non-copilot fixture.
-func TestDaemonMainRoutesModeSkipsLegacyGitHubCopilotTokenResolution(t *testing.T) {
-	dp := newTestDeps(t)
-	t.Setenv("GITHUB_COPILOT_TOKEN", "")
-	path := isolateSessionConfig(t)
-	writeSessionConfig(t, path, `routes:
-  copilot:
-    credential_mode: github-copilot
-models:
-  luna:
-    id: gpt-5.6-luna
-    routes: [copilot]
-roles:
-  execution:
-    model: luna
-`)
-	err := daemonMain(dp, []string{"-data-dir", t.TempDir()})
-	if err == nil {
-		t.Fatal("daemonMain with a copilot routes: config and no -temporal-address/-repository: want error, got nil")
-	}
-	if strings.Contains(err.Error(), "GitHub OAuth token") {
-		t.Errorf("err = %v, must never resolve the legacy GitHub Copilot token at startup in routes: mode", err)
-	}
-	if !strings.Contains(err.Error(), "-temporal-address and -repository are required") {
-		t.Fatalf("error = %q, want the required-flag error (proving routes: mode got past credential resolution)", err.Error())
 	}
 }
 

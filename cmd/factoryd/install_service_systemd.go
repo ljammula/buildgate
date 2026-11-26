@@ -16,7 +16,7 @@ import (
 // systemdServicePATH is the PATH a systemd user unit runs with: a user
 // manager does not read the operator's shell profile, so the tools a build
 // runs (gh, docker, colima, git, python3, go) must be on this list. toolDirs
-// (where install-service found them) come first, then the user's own bin
+// (where service install found them) come first, then the user's own bin
 // directories, Go's tarball install, Linuxbrew's, the system directories
 // and snap's, each once.
 func systemdServicePATH(home string, toolDirs []string) string {
@@ -143,7 +143,7 @@ func buildSystemdServeUnit(cfg servePlistConfig, toolDirs []string) []byte {
 	})
 }
 
-// systemdUnitFile is one unit install-service writes.
+// systemdUnitFile is one unit service install writes.
 type systemdUnitFile struct {
 	svc  hostcontrol.Service
 	path string
@@ -154,7 +154,7 @@ type systemdUnitFile struct {
 // user manager answers (a shell under su or sudo -u has none).
 func systemdServiceReady(dp *deps) error {
 	if out, err := dp.host.systemctl("--user", "show-environment"); err != nil {
-		return fmt.Errorf("install-service: no systemd user manager answers (%v: %s); log in as this user directly (ssh or a desktop session), not through su or sudo -u, and rerun", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("service install: no systemd user manager answers (%v: %s); log in as this user directly (ssh or a desktop session), not through su or sudo -u, and rerun", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -231,7 +231,7 @@ func installSystemdServices(dp *deps, worker workerPlistConfig, serve *servePlis
 	return nil
 }
 
-// printSystemdUnits is install-service -print under systemd: each unit
+// printSystemdUnits is service install -print under systemd: each unit
 // under a comment naming where it would be written.
 func printSystemdUnits(worker workerPlistConfig, serve *servePlistConfig) error {
 	units := []systemdUnitFile{{svc: hostcontrol.WorkerService, body: buildSystemdWorkerUnit(worker, systemdToolDirs())}}
@@ -280,20 +280,20 @@ func doctorCheckSystemdWorkerService(dp *deps, unitPath string) doctorCheck {
 	unit, err := os.ReadFile(unitPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return doctorCheck{Name: "worker systemd service: absent (run `factoryd install-service` to enable)"}
+			return doctorCheck{Name: "worker systemd service: absent (run `factoryd service install` to enable)"}
 		}
 		return doctorCheck{Name: "worker systemd service", Err: fmt.Errorf("read %s: %w", unitPath, err)}
 	}
 	if args := hostcontrol.SystemdExecStartArgs(unit); len(args) > 0 {
 		if _, statErr := os.Stat(args[0]); statErr != nil {
 			return doctorCheck{Name: "worker systemd service", Err: fmt.Errorf("unit at %s points at %s, which no longer exists", unitPath, args[0]),
-				Fix: "reinstall with `factoryd install-service -force`"}
+				Fix: "reinstall with `factoryd service install -force`"}
 		}
 	}
 	out, err := dp.host.systemctl("--user", "show", "--property=LoadState,ActiveState", hostcontrol.WorkerService.Unit)
 	props := hostcontrol.SystemdProperties(out)
 	if err != nil || props["LoadState"] != "loaded" {
-		return doctorCheck{Name: "worker systemd service: present, not loaded (run `factoryd install-service -force` to load it)"}
+		return doctorCheck{Name: "worker systemd service: present, not loaded (run `factoryd service install -force` to load it)"}
 	}
 	if props["ActiveState"] == "active" {
 		return doctorCheck{Name: "worker systemd service: present, loaded, running"}

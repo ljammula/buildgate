@@ -155,7 +155,7 @@ func anyRunRecordedUnderProject(dataDir, project string) (bool, error) {
 // executing the command.
 func newKillSwitchFlags() (flags *flag.FlagSet, dataDir, project, state, by, reason *string) {
 	flags = flag.NewFlagSet("kill-switch", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable project records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	project = flags.String("project", "", "project whose kill switch to read or change (required); the name its release decisions are recorded under")
 	state = flags.String("state", "", "new state: engaged or disengaged. Omit to report the current state and history without changing anything")
 	by = flags.String("by", "", "name of the human changing the switch (required with -state)")

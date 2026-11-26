@@ -44,10 +44,6 @@ type QueueEntry struct {
 	// Bug is forwarded as -bug when set: ticket 1 of a request submitted with
 	// `factoryd submit -bug`.
 	Bug bool `json:"bug,omitempty"`
-	// PreflightProfile is passed through to runMainWithReady's own
-	// -preflight-profile verbatim; empty means "let it resolve its own
-	// default" (its .factory.yml/strict-default precedence).
-	PreflightProfile string `json:"preflight_profile,omitempty"`
 	// RequestTicket is forwarded as runMainWithReady's own -request-ticket
 	// when true, and is set unconditionally by both QueueEntry construction
 	// sites (request_driver.go's BuildRequestBuildArgs, pr_review_driver.go's
@@ -59,12 +55,9 @@ type QueueEntry struct {
 	// spec/tickets/ -- so its own project-bootstrap preflight must validate
 	// -spec itself in that format instead of resolving/requiring a
 	// repo-native ticket that never exists for a request-driven run. Found
-	// live (2026-09-25): a strict-profile repo with no spec/tickets/
-	// directory halted every request-driven run at preflight's
-	// ticket_structure check ("could not read artifact ... no such file or
-	// directory") even though product_spec_frozen/program_design_structure/
-	// architecture_structure all passed -- strict + the request pipeline
-	// could never pass together.
+	// live (2026-09-25): a repo with no spec/tickets/ directory halted
+	// every request-driven run at preflight's ticket_structure check
+	// ("could not read artifact ... no such file or directory").
 	RequestTicket bool `json:"request_ticket,omitempty"`
 	// ScopeUnapproved is forwarded as -scope-approval unapproved (approved
 	// when false): no person approved this ticket's Allowed-Files list

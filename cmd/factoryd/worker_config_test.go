@@ -53,7 +53,7 @@ func TestBuildTicketRunArgsIsAcceptedByRunMainWithReadysOwnFlagSet(t *testing.T)
 	// Empty ID/Workspace/SpecPath, but Project, PreflightProfile and
 	// IssueRef set, so -project, -preflight-profile and -pr-closes-issue
 	// are all in the argv.
-	entry := &requestdriver.QueueEntry{Project: "payments", PreflightProfile: "brownfield", IssueRef: "acme/widgets#42"}
+	entry := &requestdriver.QueueEntry{Project: "payments", IssueRef: "acme/widgets#42"}
 
 	err := runMainWithReady(dp, context.Background(), requestdriver.BuildTicketRunArgs("data", entry, cfg), nil)
 	if err == nil {
@@ -244,7 +244,7 @@ func TestWorkerConfigRefusesWithoutConfigFileOrFlags(t *testing.T) {
 // TestWorkerConfigRefusesForbiddenAPITokenInEnvironment: worker must
 // refuse to start at all when a FACTORYD_API_* control-plane token is
 // set in its own environment, the same refuseAPITokensInEnvironment
-// guard realMain and daemonMain already apply -- not discover it only
+// guard realMain and workerMain already apply -- not discover it only
 // once the first ticket reaches build, 17 minutes into a live run (see
 // TestRefuseAPITokensInEnvironment for the guard's own unit test).
 func TestWorkerConfigRefusesForbiddenAPITokenInEnvironment(t *testing.T) {

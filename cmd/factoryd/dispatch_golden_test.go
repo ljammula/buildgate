@@ -17,14 +17,14 @@ import (
 // the command does anything, so the first lines it prints name the command
 // that was reached.
 var dispatchGoldenSubcommands = []string{
-	"override", "serve", "daemon", "supervise", "reset-stop-line", "override-rate",
-	"check-project", "check-ticket", "ticket-template", "init", "onboard", "doctor",
+	"override", "serve", "reset-stop-line", "override-rate",
+	"check-ticket", "ticket-template", "doctor",
 	"kill-switch", "reconcile", "status", "inbox", "inspect", "stop", "uninstall",
 	"upgrade", "use", "watch", "logs", "cost", "submit", "approve", "reject", "answer", "cancel",
-	"worker", "retry", "rounds", "resume", "amend-scope", "init-config", "install-service",
-	"uninstall-service", "quickstart", "console", "install-skill", "configure-images",
+	"worker", "retry", "rounds", "resume", "amend-scope", "init-config", "service",
+	"quickstart", "console", "install-skill", "configure-images",
 	"image-inputs-hash", "restart", "project-image-args", "image-reuse", "setup",
-	"mcp", "memory", "sandbox", "content", "stats", "prune", "build-ca-bundle", "gate-token", "remote-console", "help",
+	"memory", "sandbox", "content", "stats", "prune", "build-ca-bundle", "remote", "help",
 }
 
 // dispatchGoldenUndefinedFlag is the flag no command defines.

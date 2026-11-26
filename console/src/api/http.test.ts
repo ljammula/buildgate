@@ -37,7 +37,7 @@ test("each route's token goes in the Authorization header, never the URL", async
   const { fetch, calls } = recording(() => new Response("[]"));
   const http = createHttp({ baseUrl: "", ...tokens, fetch });
   await http.getJson("/runs", "read");
-  await http.getJson("/daemons", "start");
+  await http.getJson("/projects/app/stats", "start");
   await http.sendJson("POST", "/runs/run-1/override", "override", { by: "alice" });
   await http.sendJson("POST", "/requests/req-1/approve", "gate", { by: "alice" });
   await http.getBytes("/requests/req-1/files/x", "read");
@@ -125,7 +125,7 @@ test("every method reports a 403 to the hook for a call the gate token was sent 
       http.sendJson("POST", "/requests", "gate", {}),
       http.openStream("/requests/stream", "read", new AbortController().signal),
       // Routes the gate token is not sent to say nothing about it: not reported.
-      http.getJson("/daemons", "start"),
+      http.getJson("/projects/app/stats", "start"),
       http.sendJson("POST", "/runs/run-1/override", "override", {}),
     ].map((call) => call.catch((e: unknown) => e)),
   );

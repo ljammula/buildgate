@@ -84,7 +84,7 @@ func TestConsoleMainPrintsStableTokenLink(t *testing.T) {
 		t.Errorf("output = %q, carries a console token with no console token file", out)
 	}
 
-	// With the console token `install-service -require-tokens` writes, the
+	// With the console token `service install -require-tokens` writes, the
 	// link carries it beside the start token.
 	consoleToken, _, err := ensureTokenFile(dp, filepath.Join(cfgDir, serveConsoleTokenFileName))
 	if err != nil {
@@ -112,14 +112,14 @@ func TestConsoleMainPrintsStableTokenLink(t *testing.T) {
 			t.Fatalf("consoleMain: %v", err)
 		}
 	})
-	if strings.Contains(out, "&c=") || !strings.Contains(out, "install-service -force -require-tokens") {
+	if strings.Contains(out, "&c=") || !strings.Contains(out, "service install -force -require-tokens") {
 		t.Errorf("output = %q, want no console token and the command that writes one", out)
 	}
 	if err := os.Remove(filepath.Join(cfgDir, serveReadTokenFileName)); err != nil {
 		t.Fatal(err)
 	}
 
-	// A serve on another data dir than the config's (install-service
+	// A serve on another data dir than the config's (service install
 	// -data-dir) is found through -data-dir.
 	otherDataDir := filepath.Join(home, "serve-data")
 	removeOther, err := consolelink.RecordServeAddress(otherDataDir, "127.0.0.1:8093")

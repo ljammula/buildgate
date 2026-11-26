@@ -13,7 +13,7 @@
 //
 // Steps (each PASS/FAIL, screenshot in <scratch>/shots):
 //   submit         New request form (workspace, request.md text, draft
-//                  verify command + preflight profile in Advanced) submits and lands on the new request's own
+//                  verify command in Advanced) submits and lands on the new request's own
 //                  /requests/<id> detail page -- the id used by every
 //                  later step is derived from that URL, not passed in
 //   board          request row visible with a short title, no "queue-run is
@@ -49,11 +49,10 @@ if (!base || !workspace || !scratch) {
 let requestId = '';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REQUEST_TEXT = fs.readFileSync(path.join(HERE, 'request.md'), 'utf8').trim();
-// The same fixed verify command/preflight profile run.sh used to pass to
+// The same fixed verify command run.sh used to pass to
 // `factoryd submit` directly -- now typed into the New request form's
 // own Advanced section instead.
 const VERIFY_COMMAND = "python3 -m unittest discover -s . -p 'test_*.py'";
-const PREFLIGHT_PROFILE = 'brownfield';
 const shots = path.join(scratch, 'shots');
 fs.mkdirSync(shots, { recursive: true });
 const results = [];
@@ -126,7 +125,6 @@ try {
     await page.getByLabel('Request', { exact: true }).fill(REQUEST_TEXT);
     await page.getByRole('button', { name: 'Advanced' }).click();
     await page.getByLabel(/Verify command/).fill(VERIFY_COMMAND);
-    await page.getByLabel(/Preflight profile/).fill(PREFLIGHT_PROFILE);
 
     const before = page.url();
     await page.getByRole('button', { name: 'Submit request', exact: true }).click();

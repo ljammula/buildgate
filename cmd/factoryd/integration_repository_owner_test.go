@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -26,107 +25,6 @@ import (
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
 )
-
-// TestIntegrationRepositoryOwnerResolvesRelativeWorkspaceAbsolute is the
-// regression test for a real P1 finding from codex review of the new
-// `factoryd daemon` subcommand: a relative -workspace flag was carried
-// into RunWorkflowInput.WorkspacePath unresolved, which happened to work
-// by coincidence whenever the process executing the resulting Activities
-// was the same one that submitted the run (its own relative path
-// resolves against its own CWD either way) — but -repository's shared
-// task queue can dispatch those Activities to any Worker polling it, and
-// a `factoryd daemon` in particular is an independently launched process
-// with its own working directory, unrelated to whichever `factoryd`
-// invocation happens to submit a given run. This starts a real daemon
-// with its CWD set to an unrelated directory, then submits a run with a
-// *relative* -workspace flag from a completely different CWD (the fixture
-// workspace's own parent) — if the fix weren't in place, the daemon would
-// resolve that relative path against its own unrelated CWD and either
-// fail outright or silently operate on the wrong directory; with the fix,
-// the path is already absolute by the time the daemon ever sees it.
-func TestIntegrationRepositoryOwnerResolvesRelativeWorkspaceAbsolute(t *testing.T) {
-	// not parallel-safe: depends on the run-wide test Temporal server (sharedTemporalAddress), not a private per-test one.
-	address := sharedTemporalAddress(t)
-
-	ws := newFixtureRepo(t)
-	wsParent := filepath.Dir(ws)
-	wsBase := filepath.Base(ws)
-	daemonDataDir := t.TempDir()
-	// Deliberately unrelated to wsParent — if the daemon ever resolved a
-	// relative workspace path itself, it would do so against this
-	// directory, not wsParent.
-	daemonCWD := t.TempDir()
-	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
-	if err != nil {
-		t.Fatalf("abs script path: %v", err)
-	}
-	specPath, err := filepath.Abs(filepath.Join(t.TempDir(), "spec.md"))
-	if err != nil {
-		t.Fatalf("abs spec path: %v", err)
-	}
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-	repository := fmt.Sprintf("fixture/repo-%d", time.Now().UnixNano())
-	terminateRepositoryOwnerAtCleanup(t, address, workflow.RepositoryOwnerWorkflowID(repository))
-
-	daemonCmd := factorydCommand(t, "daemon",
-		"-temporal-address", address,
-		"-repository", repository,
-		"-data-dir", daemonDataDir,
-	)
-	daemonCmd.Dir = daemonCWD
-	daemonCmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	var daemonOutput bytes.Buffer
-	daemonCmd.Stdout = &daemonOutput
-	daemonCmd.Stderr = &daemonOutput
-	if err := daemonCmd.Start(); err != nil {
-		t.Fatalf("start factoryd daemon: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = daemonCmd.Process.Signal(syscall.SIGTERM)
-		_ = daemonCmd.Wait()
-		t.Logf("daemon output:\n%s", daemonOutput.String())
-	})
-
-	runDataDir := filepath.Join(t.TempDir(), "data")
-	runCmd := factorydCommand(t,
-		"-ticket", "fixture-ticket",
-		"-sandbox-image", fakeSandboxImage,
-		"-workspace", wsBase, // relative — resolved against runCmd.Dir (wsParent) below
-		"-spec", specPath,
-		"-build-app-interpreter", "/bin/sh",
-		"-build-app-script", scriptPath,
-		"-timeout", "30s",
-		"-verify-command", "true",
-		"-data-dir", runDataDir,
-		"-temporal-address", address,
-		"-repository", repository,
-	)
-	runCmd.Dir = wsParent
-	runCmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	out, err := runCmd.CombinedOutput()
-	t.Logf("submitting factoryd output:\n%s", out)
-	if err != nil {
-		t.Fatalf("factoryd -repository (relative -workspace): %v", err)
-	}
-
-	dataDirEntries, readErr := os.ReadDir(filepath.Join(runDataDir, "runs"))
-	if readErr != nil || len(dataDirEntries) != 1 {
-		t.Fatalf("expected exactly 1 run directory under %s: entries=%v err=%v", runDataDir, dataDirEntries, readErr)
-	}
-	b, err := os.ReadFile(filepath.Join(runDataDir, "runs", dataDirEntries[0].Name(), "run.json"))
-	if err != nil {
-		t.Fatalf("read run.json: %v", err)
-	}
-	var r run.Run
-	if err := json.Unmarshal(b, &r); err != nil {
-		t.Fatalf("unmarshal run.json: %v", err)
-	}
-	if r.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q — the daemon must have operated on the correct workspace despite its own unrelated CWD", r.State, run.StateAccepted)
-	}
-}
 
 // TestIntegrationTemporalRepositoryOwnerSerializesTwoInvocations is the
 // core proof for the plan's "at most one worker owns a slice at a time"
@@ -454,26 +352,19 @@ func TestIntegrationSliceChainAcceptsMatchingPriorRunViaRepositoryOwner(t *testi
 	}
 }
 
-// TestIntegrationSliceChainDoesNotRecordDriftOnMismatchedProjectViaRepositoryOwner
-// is the regression test for a real finding from a local codex review
-// round: on the -repository path, recordSpecDriftIfDetected's own
-// state/project-path guard is the *only* thing standing between a
-// -prior-run naming another project entirely and a false drift
-// attribution — unlike a bare run (TestIntegrationSliceChainRejects
-// MismatchedPriorRun's own equivalent assertion), there is no local
-// ValidateSliceChain call here to have already rejected the chain first;
-// this process's own recordSpecDriftIfDetected call runs unconditionally,
-// before ValidateSliceChainActivity ever gets a chance to reject the
-// chain deep inside the Workflow.
-func TestIntegrationSliceChainDoesNotRecordDriftOnMismatchedProjectViaRepositoryOwner(t *testing.T) {
+// TestIntegrationSliceChainRejectsMismatchedProjectViaRepositoryOwner proves
+// the -repository path refuses a -prior-run from another project: there is
+// no local ValidateSliceChain call on this path, so the refusal is
+// ValidateSliceChainActivity's, deep inside the workflow, and the run halts.
+func TestIntegrationSliceChainRejectsMismatchedProjectViaRepositoryOwner(t *testing.T) {
 	// not parallel-safe: depends on the run-wide test Temporal server (sharedTemporalAddress), not a private per-test one.
 	address := sharedTemporalAddress(t)
 
 	wsA := newFixtureRepo(t)
 	wsB := newFixtureRepo(t) // a different project entirely
 	dataDir := t.TempDir()
-	repoA := fmt.Sprintf("fixture/spec-drift-mismatch-a-%d", time.Now().UnixNano())
-	repoB := fmt.Sprintf("fixture/spec-drift-mismatch-b-%d", time.Now().UnixNano())
+	repoA := fmt.Sprintf("fixture/chain-mismatch-a-%d", time.Now().UnixNano())
+	repoB := fmt.Sprintf("fixture/chain-mismatch-b-%d", time.Now().UnixNano())
 
 	first := runFactorydWithSpecFlagsAndDataDir(t, wsA, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address, "-repository", repoA}, dataDir)
@@ -481,28 +372,13 @@ func TestIntegrationSliceChainDoesNotRecordDriftOnMismatchedProjectViaRepository
 		t.Fatalf("first run state = %q, want %q", first.State, run.StateAccepted)
 	}
 
-	// Revise project B's own spec.md so its hash genuinely differs from
-	// project A's recorded ProductSpecSHA256 — without the project-path
-	// guard, this difference alone would be enough to wrongly mark drift
-	// on an entirely unrelated project's run.
-	specPathB := filepath.Join(filepath.Dir(wsB), "spec", "spec.md")
-	revised := "STATUS: FROZEN -- test fixture (project B)\n\n# Fixture Project — Product Spec\n\nDifferent project.\n"
-	if err := os.WriteFile(specPathB, []byte(revised), 0o644); err != nil {
-		t.Fatalf("revise project B spec.md: %v", err)
-	}
-
 	second := runFactorydWithSpecFlagsAndDataDir(t, wsB, "commit", "true", "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s", nil,
 		[]string{"-temporal-address", address, "-repository", repoB, "-prior-run", first.ID}, dataDir)
 	if second.State != run.StateHalted {
 		t.Fatalf("second run state = %q, want %q (ValidateSliceChainActivity should reject a chain declared against a different project)", second.State, run.StateHalted)
 	}
-
-	reloadedFirst, err := run.Load(dataDir, first.ID)
-	if err != nil {
-		t.Fatalf("reload first run: %v", err)
-	}
-	if reloadedFirst.SpecDriftDetectedByRunID != "" {
-		t.Errorf("first run SpecDriftDetectedByRunID = %q, want empty — a chain declared against a different project must never record drift", reloadedFirst.SpecDriftDetectedByRunID)
+	if second.ResultSHA != "" {
+		t.Errorf("second run ResultSHA = %q, want empty: a refused chain builds nothing", second.ResultSHA)
 	}
 }
 
@@ -1302,5 +1178,264 @@ func TestIntegrationTemporalRepositoryOwnerTerminatesOwnChildOnTimeout(t *testin
 	}
 	if status == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		t.Fatalf("child workflow execution %s is still RUNNING after the submitting factoryd gave up — it was orphaned, not terminated", childID)
+	}
+}
+
+// TestIntegrationRepositoryOwnerResolvesRelativeWorkspaceAbsolute is the
+// regression test for a real P1 finding: a relative -workspace flag was
+// carried into RunWorkflowInput.WorkspacePath unresolved, which worked by
+// coincidence whenever the process executing the resulting Activities was
+// the one that submitted the run (its own relative path resolves against its
+// own CWD either way). -repository's shared task queue can dispatch those
+// Activities to any Worker polling it, such as a recovery worker of
+// `factoryd worker`, an independently launched process with its own working
+// directory. This runs a worker whose CWD is unrelated to the submitter's,
+// then submits a run with a *relative* -workspace flag from the fixture
+// workspace's own parent: with the fix, the path is already absolute by the
+// time any worker sees it.
+func TestIntegrationRepositoryOwnerResolvesRelativeWorkspaceAbsolute(t *testing.T) {
+	// not parallel-safe: depends on the run-wide test Temporal server (sharedTemporalAddress), not a private per-test one.
+	address := sharedTemporalAddress(t)
+
+	ws := newFixtureRepo(t)
+	wsParent := filepath.Dir(ws)
+	wsBase := filepath.Base(ws)
+	workerDataDir := t.TempDir()
+	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
+	if err != nil {
+		t.Fatalf("abs script path: %v", err)
+	}
+	specPath, err := filepath.Abs(filepath.Join(t.TempDir(), "spec.md"))
+	if err != nil {
+		t.Fatalf("abs spec path: %v", err)
+	}
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	repository := fmt.Sprintf("fixture/repo-%d", time.Now().UnixNano())
+	terminateRepositoryOwnerAtCleanup(t, address, workflow.RepositoryOwnerWorkflowID(repository))
+
+	startRepositoryWorker(t, address, repository, workerDataDir)
+
+	runDataDir := filepath.Join(t.TempDir(), "data")
+	runCmd := factorydCommand(t,
+		"-ticket", "fixture-ticket",
+		"-sandbox-image", fakeSandboxImage,
+		"-workspace", wsBase, // relative — resolved against runCmd.Dir (wsParent) below
+		"-spec", specPath,
+		"-build-app-interpreter", "/bin/sh",
+		"-build-app-script", scriptPath,
+		"-timeout", "30s",
+		"-verify-command", "true",
+		"-data-dir", runDataDir,
+		"-temporal-address", address,
+		"-repository", repository,
+	)
+	runCmd.Dir = wsParent
+	runCmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	out, err := runCmd.CombinedOutput()
+	t.Logf("submitting factoryd output:\n%s", out)
+	if err != nil {
+		t.Fatalf("factoryd -repository (relative -workspace): %v", err)
+	}
+
+	dataDirEntries, readErr := os.ReadDir(filepath.Join(runDataDir, "runs"))
+	if readErr != nil || len(dataDirEntries) != 1 {
+		t.Fatalf("expected exactly 1 run directory under %s: entries=%v err=%v", runDataDir, dataDirEntries, readErr)
+	}
+	b, err := os.ReadFile(filepath.Join(runDataDir, "runs", dataDirEntries[0].Name(), "run.json"))
+	if err != nil {
+		t.Fatalf("read run.json: %v", err)
+	}
+	var r run.Run
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatalf("unmarshal run.json: %v", err)
+	}
+	if r.State != run.StateAccepted {
+		t.Fatalf("state = %q, want %q — the worker must have operated on the correct workspace despite its own unrelated CWD", r.State, run.StateAccepted)
+	}
+}
+
+// TestIntegrationTerminateOrCancelOwnRequestCancelsQueuedRequest is the
+// regression test for two real findings from codex review of the merged
+// terminateOrCancelOwnRequest (formerly two separate best-effort calls,
+// cancelQueuedRepositoryOwnerRequest and terminateOwnInProgressChild):
+//
+//  1. A request that is still queued behind another one in progress —
+//     neither InProgress nor done — first reported confirmed=true from the
+//     mere absence of an in-progress match, without checking whether its
+//     cancellation signal was actually delivered.
+//  2. Fixing that by sending CancelRunSignal and then re-querying once
+//     still wasn't enough: the owner does not consume queued signals while
+//     blocked awaiting its current child's childFuture.Get, so a single
+//     snapshot right after sending the signal can just as easily observe
+//     "not yet processed" and wrongly conclude the same thing.
+//
+// Both versions could record a confirmed halt for a request that might
+// still run to completion later with nothing waiting on it. This test
+// keeps the owner genuinely blocked on a hung first request for the
+// queued second request's entire cancellation attempt — the one scenario
+// neither buggy version handled honestly — and proves the fixed function
+// reports confirmed=false rather than guessing true, while the
+// cancellation it already sent still takes effect once the owner actually
+// gets to it (proven by terminating the hung first request afterward and
+// polling for the second's real, canceled-before-execution result).
+func TestIntegrationTerminateOrCancelOwnRequestCancelsQueuedRequest(t *testing.T) {
+	address := sharedTemporalAddress(t)
+
+	ws := newFixtureRepo(t)
+	workerDataDir := t.TempDir()
+	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
+	if err != nil {
+		t.Fatalf("abs script path: %v", err)
+	}
+	repository := fmt.Sprintf("fixture/repo-queued-cancel-%d", time.Now().UnixNano())
+
+	startRepositoryWorker(t, address, repository, workerDataDir, "FAKE_BUILD_APP_MODE=hang")
+
+	baseSHABytes, err := exec.Command("git", "-C", ws, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseSHABytes))
+	specPath := filepath.Join(t.TempDir(), "spec.md")
+	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+
+	temporalClient, err := temporalclient.Dial(temporalclient.Options{HostPort: address})
+	if err != nil {
+		t.Fatalf("dial Temporal: %v", err)
+	}
+	defer temporalClient.Close()
+
+	ownerID := workflow.RepositoryOwnerWorkflowID(repository)
+	terminateRepositoryOwnerAtCleanup(t, address, ownerID)
+	taskQueue := "factoryd-repo-" + ownerID
+	runningRequestID := fmt.Sprintf("fixture-hung-run-%d", time.Now().UnixNano())
+	queuedRequestID := fmt.Sprintf("fixture-queued-run-%d", time.Now().UnixNano())
+
+	newRunInput := func(ticket string) workflow.RunWorkflowInput {
+		logDir := filepath.Join(t.TempDir(), "logs")
+		checkpointDir := filepath.Join(t.TempDir(), "checkpoints")
+		if err := os.MkdirAll(logDir, 0o750); err != nil {
+			t.Fatalf("create log dir: %v", err)
+		}
+		if err := os.MkdirAll(checkpointDir, 0o750); err != nil {
+			t.Fatalf("create checkpoint dir: %v", err)
+		}
+		return workflow.RunWorkflowInput{
+			Ticket:              ticket,
+			WorkspacePath:       ws,
+			IsolateWorkspace:    true,
+			IsolatedRepoDir:     ws,
+			IsolatedParentDir:   t.TempDir(),
+			SpecPath:            specPath,
+			BaseSHA:             baseSHA,
+			LogDir:              logDir,
+			CheckpointDir:       checkpointDir,
+			SandboxImage:        fakeSandboxImage,
+			BuildAppInterpreter: "/bin/sh",
+			BuildAppScript:      scriptPath,
+			MaxRounds:           3,
+			TimeoutMinutes:      45,
+			BuildMaxAttempts:    1,
+			VerifyCommand:       "true",
+			VerifyMaxAttempts:   1,
+			TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if _, err := temporalClient.SignalWithStartWorkflow(ctx, ownerID, workflow.SubmitRunSignalName,
+		workflow.SubmitRunSignal{RequestID: runningRequestID, Input: newRunInput("fixture-hung-ticket")},
+		temporalclient.StartWorkflowOptions{ID: ownerID, TaskQueue: taskQueue},
+		workflow.RepositoryOwnerWorkflow, workflow.RepositoryOwnerWorkflowInput{Repository: repository},
+	); err != nil {
+		cancel()
+		t.Fatalf("signal repository owner workflow (hung run): %v", err)
+	}
+	cancel()
+
+	// Wait for the owner to actually start the hung request before
+	// queuing the second one behind it — otherwise both could race to be
+	// "first" and this test would not reliably exercise the queued path.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		queryResp, err := temporalClient.QueryWorkflow(context.Background(), ownerID, "", workflow.RepositoryOwnerQueryName)
+		if err == nil {
+			var ownerResult workflow.RepositoryOwnerResult
+			if err := queryResp.Get(&ownerResult); err == nil && ownerResult.InProgress != nil && ownerResult.InProgress.RequestID == runningRequestID {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	if _, err := temporalClient.SignalWithStartWorkflow(ctx2, ownerID, workflow.SubmitRunSignalName,
+		workflow.SubmitRunSignal{RequestID: queuedRequestID, Input: newRunInput("fixture-queued-ticket")},
+		temporalclient.StartWorkflowOptions{ID: ownerID, TaskQueue: taskQueue},
+		workflow.RepositoryOwnerWorkflow, workflow.RepositoryOwnerWorkflowInput{Repository: repository},
+	); err != nil {
+		cancel2()
+		t.Fatalf("signal repository owner workflow (queued run): %v", err)
+	}
+	cancel2()
+
+	// The owner is still blocked on the hung first request's childFuture.Get
+	// for this entire call, so it cannot have processed the cancellation
+	// signal yet — confirmed=false is the honest answer here, not true.
+	if _, done, confirmed := terminateOrCancelOwnRequest(temporalClient, ownerID, queuedRequestID, ""); done || confirmed {
+		t.Fatalf("terminateOrCancelOwnRequest(queued request, owner still blocked) = done=%v confirmed=%v, want both false: the owner cannot have processed the cancellation yet", done, confirmed)
+	}
+
+	// Unblock the owner so it can move past the (still-hung) first request
+	// and actually process the cancellation for the second — otherwise the
+	// owner would never advance far enough to prove the queued request was
+	// genuinely dropped rather than merely intended to be.
+	var childID, childRunID string
+	iter := temporalClient.GetWorkflowHistory(context.Background(), ownerID, "", false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
+	for iter.HasNext() {
+		event, err := iter.Next()
+		if err != nil {
+			t.Fatalf("read owner workflow history: %v", err)
+		}
+		if attrs := event.GetChildWorkflowExecutionStartedEventAttributes(); attrs != nil {
+			childID = attrs.WorkflowExecution.WorkflowId
+			childRunID = attrs.WorkflowExecution.RunId
+		}
+	}
+	if childID == "" {
+		t.Fatal("owner workflow history has no ChildWorkflowExecutionStarted event for the hung request")
+	}
+	termCtx, cancelTerm := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := temporalClient.TerminateWorkflow(termCtx, childID, childRunID, "test cleanup: unblock hung child so the owner can process the queued cancellation"); err != nil {
+		t.Fatalf("terminate hung child: %v", err)
+	}
+	cancelTerm()
+
+	deadline = time.Now().Add(20 * time.Second)
+	var queuedResult workflow.RunWorkflowResult
+	var found bool
+	for time.Now().Before(deadline) {
+		queryResp, err := temporalClient.QueryWorkflow(context.Background(), ownerID, "", workflow.RepositoryOwnerQueryName)
+		if err == nil {
+			var ownerResult workflow.RepositoryOwnerResult
+			if err := queryResp.Get(&ownerResult); err == nil {
+				if r, done := ownerResult.Runs[queuedRequestID]; done {
+					queuedResult = r
+					found = true
+					break
+				}
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !found {
+		t.Fatalf("owner never recorded a result for the queued (and canceled) request %s within the deadline", queuedRequestID)
+	}
+	if queuedResult.Err != "repository owner request canceled before execution" {
+		t.Fatalf("queued request result = %+v, want a canceled-before-execution halt — it ran instead of being dropped, meaning the cancellation this test's confirmed=true relied on never actually took effect", queuedResult)
 	}
 }

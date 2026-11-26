@@ -191,12 +191,8 @@ for fx in $(python3 "$LIB" labels "$FIXTURES_FILE" --repo-root "$REPO_ROOT" --on
 		git -C "$clone_dir" checkout --quiet -B proving-ground-base "$(field "$fx" base_ref)"
 
 		echo "=== $label ($run_path): running ticket $ticket_id (expect $expect) ==="
-		# -preflight-profile brownfield: these fixture repos are fresh
-		# disposable clones with no spec/spec.md, spec/contract.md, or
-		# ARCHITECTURE.md the strict default preflight requires -- same
-		# reasoning as live-smoke.sh's own use of this flag.
 		set -- -ticket "$ticket_id" -spec "$spec" -workspace "$clone_dir" \
-			-data-dir "$data_dir" -preflight-profile brownfield -open-pull-request=false
+			-data-dir "$data_dir" -open-pull-request=false
 		if [ -n "${PROVING_GROUND_TEMPORAL:-}" ]; then
 			set -- "$@" -temporal-address "$PROVING_GROUND_TEMPORAL"
 		fi

@@ -108,9 +108,9 @@ distinct flows live here and must not be conflated: the bare
 `factoryd <run>` invocation (§6) and the `submit`/`worker` request
 pipeline (§11), which drafts spec and tickets itself and opens a draft PR.
 
-1. **Scaffold** (`USAGE.md` "New app from scratch", steps 1–3): fresh
-   repository, `factoryd init`, spec, contract, architecture and ticket
-   001 written and frozen by hand; `factoryd check-project` passes.
+1. **Scaffold** (`USAGE.md` "New app from scratch", steps 1–2): fresh
+   repository with a committed `AGENTS.md` and verify command, ticket 001
+   written by hand; `factoryd check-ticket` passes on it.
 2. **Accepted run** via bare `factoryd <run>` (§6) for ticket 001, with
    `-spec`/`-ticket-file` both pointing at the ticket, default
    the per-run worktree, the gateway and meter running (`factoryd doctor -fix`), `-registry-proxy` on,
@@ -147,7 +147,7 @@ pipeline (§11), which drafts spec and tickets itself and opens a draft PR.
    cancellation is `SIGINT`/`SIGTERM` to the `factoryd` process
    mid-build. Acceptance: `docker ps -a` shows no worker, supervisor, or
    registry-proxy container of the run (`openshell.ai/sandbox-name` for each
-   name in the run's `sandboxes.jsonl`, the `-data-dir` label for sidecars);
+   name in the run's `sandboxes.jsonl`, the data-dir label for sidecars);
    `docker network ls` shows no per-run network; `run.json` is
    `halted` with the interrupted attempt recorded; a halt notification
    is logged; `factoryd reconcile` afterwards reports nothing to reap
@@ -189,11 +189,11 @@ clean `SIGINT` cancellation, one `SIGKILL` reconciliation, one real
 ceiling halt, one request driven to `pr_review`, all with the evidence
 audit in step 3 matching what `factoryd status` and the API report.
 
-## Phase 2 — Repository-owner and daemon flows, live end to end
+## Phase 2 — Repository-owner flows, live end to end
 
-Same shape as Phase 1, run through the `-repository` and daemon flows of
-`USAGE_REFERENCE.md` ("Temporal: repository owners, daemons, observing"),
-because exclusivity, reclaim and the daemon control plane exist only there:
+Same shape as Phase 1, run through the `-repository` flows of
+`USAGE_REFERENCE.md` ("Temporal: repository owners, observing"),
+because per-repository exclusivity exists only there:
 
 0. Local Temporal server up (`docker-compose.temporal.yml`); `factoryd
    doctor -temporal-address localhost:7233` green. Cheap fail-closed
@@ -202,11 +202,11 @@ because exclusivity, reclaim and the daemon control plane exist only there:
    Temporal as the cause, never a build anywhere else
    (`USAGE.md`, "The default address").
 1. Plain `-temporal-address` accepted run (independent `RunWorkflow`),
-   then a `-repository` run serviced by a long-lived `factoryd daemon`
-   (§3–4), the latter being the path everything below uses.
+   then a `-repository` run (§3–4), the latter being the path everything
+   below uses.
 2. Repeat Phase 1's accepted / two-quarantine / override / ceiling
    matrix. Cancellation on this path has two shapes, both required:
-   `SIGTERM` to `factoryd daemon` mid-build (graceful drain), and
+   `SIGTERM` to the `-repository` invocation mid-build, and
    cancelling the `RunWorkflow` from Temporal's Web UI. Same `docker
    ps`/`docker network ls`/`reconcile` acceptance as Phase 1.5.
 3. **Concurrency / exclusivity (SC-011):** submit two runs against the
@@ -218,9 +218,8 @@ because exclusivity, reclaim and the daemon control plane exist only there:
    the flock — expect "repository is busy" refusal or bounded waiting,
    never two workers in one workspace.
 4. **Hard termination + recovery**, three shapes: (a) `SIGKILL` the
-   daemon mid-build, restart it, confirm the daemon's startup reclaim
-   finds the run and either rolls back or resumes it under the
-   ownership markers, with no stranded worktree left after it settles;
+   `-repository` invocation mid-build, then `factoryd reconcile`, and
+   confirm no stranded worktree, branch or marker is left after it settles;
    (b) restart the Temporal *server* mid-run (`down` then `up`, keeping
    the volume) and confirm the workflow resumes and the run's attempts
    are recovered from the checkpoint journal, not duplicated — this is
@@ -234,11 +233,7 @@ because exclusivity, reclaim and the daemon control plane exist only there:
    pass/fail count. 5/5 confirms the accepted "only flakes under shared
    load" characterization; any standalone failure is a real bug, not
    the accepted class. Do not chase the flake itself.
-6. **Daemon control plane** (`USAGE_REFERENCE.md`, "Daemons and lifecycle control"): `factoryd serve
-   -daemon-temporal-address`, `GET /daemons`, `POST /daemons/stop` then
-   `start` for the repository, confirm the child is replaced and a run
-   submitted meanwhile is picked up after restart.
-7. Idle-owner reconciliation race: accepted risk per `CLAIMS.md`, not
+6. Idle-owner reconciliation race: accepted risk per `CLAIMS.md`, not
    reconstructed here (see non-goals).
 
 Acceptance: same evidence bar as Phase 1, plus a demonstrated exclusivity
@@ -256,14 +251,14 @@ expected outcome is the same either way.
 
 | Fault | What it proves | Expected safe outcome |
 |---|---|---|
-| Pre-launch free space below `minFreeBytesForLaunch` on the workspace or `-data-dir` mount (fill with a large file first) | The launch guard in the Filesystem row refuses before any container starts | No container launched; run halted with a reason naming the guard; nothing to reap |
+| Pre-launch free space below `minFreeBytesForLaunch` on the workspace or data dir mount (fill with a large file first) | The launch guard in the Filesystem row refuses before any container starts | No container launched; run halted with a reason naming the guard; nothing to reap |
 | Disk fills *mid-run* (between saves) | Characterizes the accepted mid-save residual (`CLAIMS.md`: structurally unrecordable), nothing more | Never an `accepted` record; whatever is left is reconciled to halted/ambiguous by `factoryd reconcile` after space is freed. Record what happened; do not open a ticket unless the outcome is a false `accepted` |
 | Docker engine (colima) stopped mid-build, then restarted | SC-008/SC-009: an infrastructure failure is classified as such, never as success | Attempt recorded as infrastructure failure or the run halted; after `colima start`, `reconcile` leaves nothing stranded |
 | Model host unreachable mid-build (firewall the upstream, or stop ai-stack) | SC-009: bounded retries, infrastructure classification | Retries bounded by `build_app_max_attempts`; run halts/quarantines with a reason naming the route; each retry's ceilings are the configured ones minus the spend already in the run's ledgers |
 | `-timeout-minutes` set below the build's real duration | SC-009/SC-010 forced teardown and the `docker exec` permission reclaim | Attempt recorded with the timeout; worker gone; worker-created paths still writable by factoryd for rollback |
 | factoryd killed mid-request (SIGKILL while the worker is mid-call) | The meter's ledger outlives factoryd; a request with no completion record is charged its estimate | Sandbox reaped by the next reconciliation; run never `accepted`; the ledger holds the admitted request, and a resume lowers its ceilings by it |
 | Worker network probes: `curl` an internet host; dial the model upstream's IP:port directly; DNS lookup of anything; a request to the model host outside the route's admitted path; a request to the model host from a binary the policy does not name; `CONNECT`/`POST` through the registry proxy; reach a sibling container by name | SC-005 deny-by-default against an actively adversarial worker, plus the supervisor's policy and the proxy's path allowlist | Every probe fails (the supervisor answers 403 `policy_denied`; the proxy logs its own rejections); no host or upstream reached except allow-listed GET/HEAD via the proxy and the admitted model path via the supervisor |
-| Worker filesystem probes: write to `/`, to `/workspace/..`, to the Git common dir, rewrite the linked worktree's `.git` pointer file, set `core.hooksPath`/a `filter` in the worktree's git config (the git-hooks host-RCE shape), symlink out of the worktree, `chmod 000` a created dir, look for `-data-dir` | SC-004 confinement and the closed git-hooks host-RCE path, against deliberate attempts | Every write outside the worktree fails; a later factoryd-side `git` call in that worktree runs no attacker-authored config; the `chmod`'d path is reclaimed on teardown; `-data-dir` is not visible inside the container |
+| Worker filesystem probes: write to `/`, to `/workspace/..`, to the Git common dir, rewrite the linked worktree's `.git` pointer file, set `core.hooksPath`/a `filter` in the worktree's git config (the git-hooks host-RCE shape), symlink out of the worktree, `chmod 000` a created dir, look for the data dir | SC-004 confinement and the closed git-hooks host-RCE path, against deliberate attempts | Every write outside the worktree fails; a later factoryd-side `git` call in that worktree runs no attacker-authored config; the `chmod`'d path is reclaimed on teardown; the data dir is not visible inside the container |
 | Worker credential/Docker probes: dump `env`; look for `/var/run/docker.sock`; run `docker ps` | SC-002/SC-003 | `env` contains only the fixed `--env` allowlist — no `ANTHROPIC_API_KEY`, no GitHub/Copilot token, no `FACTORYD_*` token; no socket; no Docker control |
 | Worker rewrites its own history (`git reset --hard <older>` in the worktree) mid-run | T-12: base revision must remain an ancestor | Run halts before gates are evaluated, nothing committed by the safety net |
 | Worker replaces `BUILD_EVIDENCE.json`/`BUILD_REPORT.md` with a symlink to a host-shaped path, a FIFO, and an oversized file (one run each) | The hostile-evidence read/retain path stays closed | Each refused; the run's outcome is unaffected (evidence is never a gate input); factoryd does not block or archive a foreign file |

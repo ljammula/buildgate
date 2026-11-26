@@ -60,7 +60,6 @@ func TestDoctorLanguageProfileOffersReviewableFactoryYMLFields(t *testing.T) {
 	for _, want := range []string{
 		"warn  language profile Java / Maven",
 		`verify_command: "mvn test"`,
-		"preflight_profile: brownfield",
 		`full_suite_command: "mvn test"`,
 		`required_binaries: ["java", "mvn"]`,
 		`test_patterns: ["*Test.java"]`,
@@ -76,7 +75,7 @@ func TestDoctorLanguageProfileOffersReviewableFactoryYMLFields(t *testing.T) {
 		t.Fatal("output did not include a candidate .factory.yml block")
 	}
 	block := strings.SplitN(out.String()[start+len("candidate .factory.yml fields (review before commit):\n"):], "; review the command", 2)[0]
-	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.VerifyCommand != "mvn test" || cfg.FullSuiteCommand != "mvn test" || cfg.PreflightProfile != projectconfig.PreflightProfileBrownfield || !slices.Contains(cfg.RequiredBinaries, "mvn") || !slices.Contains(cfg.TestPatterns, "*Test.java") {
+	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.VerifyCommand != "mvn test" || cfg.FullSuiteCommand != "mvn test" || !slices.Contains(cfg.RequiredBinaries, "mvn") || !slices.Contains(cfg.TestPatterns, "*Test.java") {
 		t.Fatalf("candidate .factory.yml does not parse or lost its values: config=%+v err=%v\n%s", cfg, err, block)
 	}
 }
@@ -96,8 +95,8 @@ func TestDoctorLanguageProfileCandidatePassesSubmitPreflightWhenAdopted(t *testi
 		t.Fatalf("language profile output did not include a candidate:\n%s", out.String())
 	}
 	block := strings.SplitN(out.String()[start+len("candidate .factory.yml fields (review before commit):\n"):], "; review the command", 2)[0]
-	if cfg, err := projectconfig.Parse([]byte(block)); err != nil || cfg.PreflightProfile != projectconfig.PreflightProfileBrownfield {
-		t.Fatalf("candidate config = %+v, err = %v; want brownfield preflight:\n%s", cfg, err, block)
+	if _, err := projectconfig.Parse([]byte(block)); err != nil {
+		t.Fatalf("candidate config does not parse: %v:\n%s", err, block)
 	}
 	path := filepath.Join(repo, projectconfig.FileName)
 	if err := os.WriteFile(path, []byte(block), 0o644); err != nil {
@@ -112,25 +111,6 @@ func TestDoctorLanguageProfileCandidatePassesSubmitPreflightWhenAdopted(t *testi
 		if c.Err != nil {
 			t.Errorf("adopted candidate check %q failed: %v", c.Name, c.Err)
 		}
-	}
-}
-
-func TestDoctorLanguageProfileCandidateKeepsStrictPreflightForExistingOnboardingArtifacts(t *testing.T) {
-	for _, artifact := range []string{"spec/spec.md", "spec/contract.md", "ARCHITECTURE.md"} {
-		t.Run(artifact, func(t *testing.T) {
-			repo := commitFiles(t, map[string]string{
-				"pom.xml": "<project/>\n",
-				artifact:  "# existing onboarding artifact\n",
-			})
-			check := doctorCheckLanguageProfile(repo)
-			var out strings.Builder
-			if failed := runDoctorChecks([]doctorCheck{check}, &out); failed != 0 {
-				t.Fatalf("language profile check failed = %d:\n%s", failed, out.String())
-			}
-			if strings.Contains(out.String(), "preflight_profile: brownfield") {
-				t.Fatalf("candidate for %s changes the existing strict preflight to brownfield:\n%s", artifact, out.String())
-			}
-		})
 	}
 }
 
@@ -453,29 +433,23 @@ func commitFiles(t *testing.T, files map[string]string) string {
 func TestDoctorTargetRepoFailsWhereSubmitWouldRefuse(t *testing.T) {
 	repo := commitFiles(t, map[string]string{"add.py": "def add(a, b):\n    return a + b\n"})
 	checks := doctorTargetRepoSubmitChecks(repo)
-	if len(checks) != 3 {
-		t.Fatalf("want an AGENTS.md check, a verify check and a preflight check, got %+v", checks)
+	if len(checks) != 2 {
+		t.Fatalf("want an AGENTS.md check and a verify check, got %+v", checks)
 	}
-	agents, verify, preflight := checks[0], checks[1], checks[2]
+	agents, verify := checks[0], checks[1]
 	if agents.Err == nil || agents.Advisory || !strings.Contains(agents.Err.Error(), "has no AGENTS.md committed at its root") || !strings.Contains(agents.Err.Error(), "setup, test, build and lint commands") {
 		t.Errorf("AGENTS.md check = %+v, want a FAIL saying what is missing and how to fix it", agents)
 	}
 	if verify.Err == nil || !verify.Advisory || !strings.Contains(verify.Fix, "-verify-command") {
 		t.Errorf("verify check = %+v, want an advisory warning pointing at -verify-command", verify)
 	}
-	if preflight.Err == nil || preflight.Advisory {
-		t.Fatalf("preflight check = %+v, want a FAIL", preflight)
-	}
-	if !strings.Contains(preflight.Err.Error(), "product_spec_frozen") || !strings.Contains(preflight.Fix, "preflight_profile: brownfield") {
-		t.Errorf("preflight check = %+v, want submit's failure and the brownfield fix", preflight)
-	}
 }
 
-func TestDoctorTargetRepoPassesABrownfieldRepoWithAVerifyCommand(t *testing.T) {
+func TestDoctorTargetRepoPassesARepoWithAVerifyCommand(t *testing.T) {
 	repo := commitFiles(t, map[string]string{
 		"add.py":       "def add(a, b):\n    return a + b\n",
 		"AGENTS.md":    "# AGENTS.md\n\n- Test: `python3 -m unittest`\n",
-		".factory.yml": "verify_command: \"python3 -m unittest\"\npreflight_profile: brownfield\n",
+		".factory.yml": "verify_command: \"python3 -m unittest\"\n",
 	})
 	for _, c := range doctorTargetRepoSubmitChecks(repo) {
 		if c.Err != nil {
@@ -489,7 +463,7 @@ func TestDoctorTargetRepoPassesABrownfieldRepoWithAVerifyCommand(t *testing.T) {
 func TestDoctorTargetRepoFailsAnAgentsFileEmptyAtHead(t *testing.T) {
 	repo := commitFiles(t, map[string]string{
 		"AGENTS.md":    "\n  \n",
-		".factory.yml": "verify_command: \"python3 -m unittest\"\npreflight_profile: brownfield\n",
+		".factory.yml": "verify_command: \"python3 -m unittest\"\n",
 	})
 	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("# AGENTS.md\n\n- Test: `python3 -m unittest`\n"), 0o644); err != nil {
 		t.Fatal(err)

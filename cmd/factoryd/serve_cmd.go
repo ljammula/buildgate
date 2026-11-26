@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -178,12 +177,6 @@ type serveFlags struct {
 	dataDir                               *string
 	addr                                  *string
 	corsAllowOrigin                       *string
-	daemonTemporalAddress                 *string
-	daemonBuildAppInterpreter             *string
-	daemonBuildAppScript                  *string
-	daemonMaxRounds                       *int
-	daemonTimeoutMinutes                  *int
-	daemonVerifyCommand                   *string
 	sandboxMemory                         *string
 	sandboxCPUs                           *string
 	sandboxTmpfsSize                      *string
@@ -226,39 +219,17 @@ func newServeFlags() (flags *flag.FlagSet, f serveFlags) {
 	// console started -- worse when it doesn't crash: an API-started run
 	// would silently use the other config's route/model/images.
 	f.configPath = flags.String("config", "", "session config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
-	f.dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	f.dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.addr = flags.String("addr", defaultServeAddr, "HTTP listen address. Beyond loopback, set FACTORYD_API_READ_TOKEN: without it anyone who can reach the port reads every run's source diff, host paths and model identity.")
 	f.corsAllowOrigin = flags.String("cors-allow-origin", "", "exact browser origin (scheme://host[:port]) allowed to read responses cross-origin, for a console served from another port; \"*\" is refused. Empty keeps CORS off.")
-	f.daemonTemporalAddress = flags.String("daemon-temporal-address", "", "Temporal server address for the daemons this server manages; empty turns the /daemons routes off")
-	f.daemonBuildAppInterpreter = flags.String("daemon-build-app-interpreter", "python3", "internal: the interpreter a managed daemon runs its build script with; tests point it at a stand-in")
-	f.daemonBuildAppScript = flags.String("daemon-build-app-script", "", "for managed daemons: path to a build_app.py to run in place of the built-in one")
-	f.daemonMaxRounds = flags.Int("daemon-max-rounds", 3, "for managed daemons: most rounds the build loop may take on one ticket")
-	f.daemonTimeoutMinutes = flags.Int("daemon-timeout-minutes", 45, "for managed daemons: minutes the coding agent may run in one build round")
-	f.daemonVerifyCommand = flags.String("daemon-verify-command", "make verify", "for managed daemons: the canonical verification command, run in the workspace")
-	// -daemon-build-app-max-attempts/-daemon-verify-max-attempts and the
-	// whole -daemon-sandbox-* resource surface are gone as of
-	// flags-consolidate (2026-09-10): `factoryd daemon` -- the child this
-	// supervisor spawns -- no longer defines a CLI flag for any of them and
-	// resolves them from the session config instead (see daemonMain's own
-	// resolveSettings call), so a flag here could only ever be forwarded
-	// into a child that rejects it at flag.Parse, or be accepted here and
-	// silently dropped. Set sandbox_docker/sandbox_memory/sandbox_cpus/
-	// sandbox_tmpfs_size/sandbox_worker_uid/
-	// build_app_max_attempts/verify_max_attempts in
-	// ~/.config/factoryd/config.yml instead: the supervised child reads the
-	// same file this process would.
-	//
-	// Distinct from the -daemon-* flags above: those configure the
-	// long-lived supervised daemon (factoryd daemon, started via
-	// daemonConfig below); these configure the `factoryd <run>` run
-	// apiStartStarter starts for every API-started request, the same way
-	// -daemon-temporal-address is unrelated to -temporal-address. Found
+	// These configure the `factoryd <run>` run apiStartStarter starts for
+	// every API-started request. Found
 	// missing entirely by a real
 	// GitHub Codex App review of this PR (P1): without these,
 	// apiStartStarter's spawned subprocess used runMainWithReady's own flag
 	// defaults (4g/2/256m) regardless of what an operator configured
 	// here, so an API-started run's actual resource ceiling silently
-	// diverged from a daemon-recovered run's -- e.g. an operator
+	// diverged from the configured one -- e.g. an operator
 	// configuring a 1g ceiling would still see ordinary API runs consume
 	// up to 4g.
 	f.sandboxMemory = flags.String("sandbox-memory", "4g", "memory limit, in Docker --memory syntax, for the sandbox of a run started through the API; also caps swap")
@@ -341,7 +312,6 @@ type serveRun struct {
 	args                     []string
 	corsAllowOriginCanonical string
 	baseSettings             sessionconfig.Settings
-	daemonController         *serveDaemonController
 	overrideToken            string
 	startToken               string
 	readToken                string
@@ -372,17 +342,13 @@ func serveMain(dp *deps, args []string) error {
 	return sv.listenAndServe()
 }
 
-// loadConfig parses the flags, loads the session config and builds the daemon controller.
+// loadConfig parses the flags and loads the session config.
 func (sv *serveRun) loadConfig() error {
 	var err error
 	sv.flags, sv.sf = newServeFlags()
-	var daemonTemporalAddress *string
 	var corsAllowOrigin *string
-	sv.dataDir, sv.addr, corsAllowOrigin, daemonTemporalAddress = sv.sf.dataDir, sv.sf.addr, sv.sf.corsAllowOrigin, sv.sf.daemonTemporalAddress
-	daemonBuildAppInterpreter, daemonBuildAppScript, daemonMaxRounds := sv.sf.daemonBuildAppInterpreter, sv.sf.daemonBuildAppScript, sv.sf.daemonMaxRounds
-	var daemonVerifyCommand *string
-	var daemonTimeoutMinutes *int
-	daemonTimeoutMinutes, daemonVerifyCommand, sv.sandboxMemory, sv.sandboxCPUs = sv.sf.daemonTimeoutMinutes, sv.sf.daemonVerifyCommand, sv.sf.sandboxMemory, sv.sf.sandboxCPUs
+	sv.dataDir, sv.addr, corsAllowOrigin = sv.sf.dataDir, sv.sf.addr, sv.sf.corsAllowOrigin
+	sv.sandboxMemory, sv.sandboxCPUs = sv.sf.sandboxMemory, sv.sf.sandboxCPUs
 	sv.sandboxTmpfsSize, sv.sandboxWorkerUID = sv.sf.sandboxTmpfsSize, sv.sf.sandboxWorkerUID
 	// The -release-* flags themselves are read only through sf now, via
 	// resolveServeReleasePolicy below -- see that function's own doc
@@ -407,7 +373,7 @@ func (sv *serveRun) loadConfig() error {
 	if *sv.sf.configPath, err = absoluteConfigArg(*sv.sf.configPath); err != nil {
 		return err
 	}
-	if err := absolutePaths(sv.dataDir, sv.egressCABundle, daemonBuildAppScript); err != nil {
+	if err := absolutePaths(sv.dataDir, sv.egressCABundle); err != nil {
 		return err
 	}
 	if err := validateSandboxResourceLimitFlags("-sandbox", *sv.sandboxMemory, *sv.sandboxCPUs, *sv.sandboxTmpfsSize); err != nil {
@@ -421,52 +387,13 @@ func (sv *serveRun) loadConfig() error {
 		return err
 	}
 	// Once, at serve's own process start -- not inside loadSettingsForConfig
-	// itself, which doctor and init/onboard's sandbox-image prefill also
-	// call and must never fail (or print) over roles: (see
+	// itself, which doctor also
+	// calls and must never fail (or print) over roles: (see
 	// loadSettingsForConfig's own doc comment).
 	if err := validateRoles(sv.baseSettings); err != nil {
 		return err
 	}
 	sv.dp.useWebhookFiles(sv.baseSettings, os.Getenv)
-	if *daemonTemporalAddress != "" {
-		// Resolved here, not unconditionally at flag parse: this daemon
-		// supervisor path is the only thing on this command that ever
-		// touches build_app.py, so a read-only/API-only serve deployment
-		// (or a request that always supplies its own -build-app-script)
-		// with no -daemon-temporal-address must never fail to start over
-		// an unwritable harness cache it was never going to use (found
-		// via Codex review of PR #83, round 2).
-		if *daemonBuildAppScript != "" {
-			resolvedDaemonBuildAppScript, err := resolveHarnessScript(*daemonBuildAppScript, "build_app.py")
-			if err != nil {
-				return err
-			}
-			*daemonBuildAppScript = resolvedDaemonBuildAppScript
-		}
-		daemonConfig := superviseConfig{
-			temporalAddress: *daemonTemporalAddress,
-			// An adversarial review of Phase A found that without this, the
-			// daemon this supervisor spawns for every Temporal-path run
-			// always resolved its own settings (sandbox/relay budgets,
-			// release policy) from the default session-config search path,
-			// regardless of what -config this `serve` process itself uses
-			// for every other path (the same -config-not-honored class of
-			// bug fixed elsewhere on `serve`'s own -data-dir resolution) --
-			// so a Temporal-path run could silently build against a
-			// different config entirely.
-			configPath:          *sv.sf.configPath,
-			dataDir:             *sv.dataDir,
-			buildAppInterpreter: *daemonBuildAppInterpreter,
-			buildAppScript:      *daemonBuildAppScript,
-			maxRounds:           *daemonMaxRounds,
-			timeoutMinutes:      *daemonTimeoutMinutes,
-			verifyCommand:       *daemonVerifyCommand,
-			restartBackoff:      time.Second,
-			restartBackoffMax:   time.Minute,
-			stopTimeout:         10 * time.Second,
-		}
-		sv.daemonController = newServeDaemonController(sv.dp, daemonConfig)
-	}
 	return nil
 }
 
@@ -519,7 +446,7 @@ func (sv *serveRun) resolveTokens() error {
 	// this only fills the gap when they left it unset.
 	// usingStableStartTokenFile records which of the two fallbacks (below)
 	// actually supplied startToken, purely for this startup log's wording
-	// just below -- an operator running the install-service-managed serve
+	// just below -- an operator running the service install-managed serve
 	// LaunchAgent should see that their already-stored browser token survives a
 	// restart, not the same "generated a per-process token" wording that
 	// implies it won't.
@@ -579,9 +506,9 @@ func (sv *serveRun) resolveTokens() error {
 	case operatorSetStartToken:
 		log.Printf("start-run endpoint enabled (using configured %s)", startTokenEnvironmentVariable)
 	case usingStableStartTokenFile:
-		log.Printf("start-run endpoint enabled (using this session's stable %s file -- stable across restarts, e.g. a launchd `factoryd install-service` restart)", serveStableStartTokenFileName)
+		log.Printf("start-run endpoint enabled (using this session's stable %s file -- stable across restarts, e.g. a launchd `factoryd service install` restart)", serveStableStartTokenFileName)
 	default:
-		log.Printf("start-run endpoint enabled (no %s configured -- generated a per-process token; open the console link below once to use New run/release/stats/daemon screens, or set %s yourself, or run `factoryd install-service` for a token stable across restarts)", startTokenEnvironmentVariable, startTokenEnvironmentVariable)
+		log.Printf("start-run endpoint enabled (no %s configured -- generated a per-process token; open the console link below once to use New run/release/stats/daemon screens, or set %s yourself, or run `factoryd service install` for a token stable across restarts)", startTokenEnvironmentVariable, startTokenEnvironmentVariable)
 	}
 	if sv.readToken == "" {
 		if addrIsLoopback {
@@ -616,7 +543,7 @@ func (sv *serveRun) resolveTokens() error {
 		// (POST /runs, daemon lifecycle, release/stats), not a per-
 		// process secret -- printing it here would put it in this
 		// process's own stdout/log file (0644 by default, and
-		// `install-service`'s own StandardOutPath/StandardErrorPath
+		// `service install`'s own StandardOutPath/StandardErrorPath
 		// plist entries land in `-data-dir/logs/`, readable by anyone who
 		// can read that directory) for as long as that log survives
 		// (an adversarial review, 2026-09-24). The stable-token
@@ -734,6 +661,7 @@ func (sv *serveRun) listenAndServe() error {
 		api.WithConsoleToken(sv.consoleToken),
 		api.WithRunStarter(repositoryAPIStarter(apiStartStarter(sv.dp, *sv.dataDir, &sv.inFlightRuns, sv.releasePolicy, sv.sandboxLimits, sv.sandboxPolicy))),
 		api.WithProjectChecker(apiProjectChecker()),
+		api.WithInspectConfigArg(profileConfigArg(*sv.sf.configPath)),
 		api.WithProjectStatsProvider(apiProjectStatsProvider(*sv.dataDir)),
 		api.WithProjectMemory(apiProjectMemoryProvider(sv.dp, sv.baseSettings, *sv.dataDir)),
 		api.WithReleasePolicy(sv.releasePolicy),
@@ -772,7 +700,7 @@ func (sv *serveRun) listenAndServe() error {
 		// name it.
 		api.WithListenAddr(*sv.addr),
 	}
-	// POST /mcp is on only while the token file `factoryd mcp` creates
+	// POST /mcp is on only while the token file `factoryd remote mcp` creates
 	// exists beside this serve's session config; with no config there is
 	// nowhere for that file to be, so the endpoint stays off.
 	if configPath, ok := resolveEffectiveConfigPath(*sv.sf.configPath); ok {
@@ -780,17 +708,17 @@ func (sv *serveRun) listenAndServe() error {
 		source := mcpTokenSource(tokenPath)
 		serverOptions = append(serverOptions, api.WithMCPToken(source))
 		if source() != "" {
-			log.Printf("MCP endpoint enabled at /mcp (token file %s; `factoryd mcp -disable` turns it off)", tokenPath)
+			log.Printf("MCP endpoint enabled at /mcp (token file %s; `factoryd remote mcp -remove` turns it off)", tokenPath)
 		}
 		// The gate token is read from its file beside the config the same
 		// way; with no config there is nowhere for that file to be, so the
 		// gate stays off.
-		// The host `factoryd remote-console` recorded is allowed while its
+		// The host `factoryd remote on` recorded is allowed while its
 		// file exists, read the same way.
 		remotePath := remoteConsolePathFor(configPath)
 		serverOptions = append(serverOptions, api.WithAllowedHostSource(remoteConsoleHostSource(remotePath)))
 		if rc, ok := readRemoteConsole(remotePath); ok {
-			log.Printf("remote console on: Host %s is accepted (file %s; `factoryd remote-console -off` turns it off)", rc.Host, remotePath)
+			log.Printf("remote console on: Host %s is accepted (file %s; `factoryd remote off` turns it off)", rc.Host, remotePath)
 		}
 		gatePath := gateTokenPathFor(configPath)
 		serverOptions = append(serverOptions, api.WithGateToken(gateTokenSource(gatePath)))
@@ -805,9 +733,6 @@ func (sv *serveRun) listenAndServe() error {
 	}
 	if sv.corsAllowOriginCanonical != "" {
 		serverOptions = append(serverOptions, api.WithCORSAllowOrigin(sv.corsAllowOriginCanonical))
-	}
-	if sv.daemonController != nil {
-		serverOptions = append(serverOptions, api.WithDaemonController(sv.daemonController))
 	}
 	if len(sv.sf.allowedHosts.values) > 0 {
 		serverOptions = append(serverOptions, api.WithAllowedHosts(sv.sf.allowedHosts.values))
@@ -890,24 +815,12 @@ func (sv *serveRun) listenAndServe() error {
 
 	select {
 	case err := <-serveErr:
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		return drainServeComponents(shutdownCtx, func(context.Context) error { return err }, func(context.Context) error {
-			if sv.daemonController != nil {
-				return sv.daemonController.StopAll(shutdownCtx)
-			}
-			return nil
-		}, &sv.inFlightRuns)
+		return drainAfterShutdown(err, &sv.inFlightRuns)
 	case <-signalCtx.Done():
 		log.Printf("serve: received shutdown signal, draining in-flight requests")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return drainServeComponents(shutdownCtx, server.Shutdown, func(ctx context.Context) error {
-			if sv.daemonController != nil {
-				return sv.daemonController.StopAll(ctx)
-			}
-			return nil
-		}, &sv.inFlightRuns)
+		return drainAfterShutdown(server.Shutdown(shutdownCtx), &sv.inFlightRuns)
 	}
 }
 
@@ -933,12 +846,6 @@ func endReadsOnShutdown(next http.Handler, shutdown context.Context) http.Handle
 		defer context.AfterFunc(shutdown, cancel)()
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func drainServeComponents(ctx context.Context, shutdownHTTP func(context.Context) error, stopDaemons func(context.Context) error, inFlight *sync.WaitGroup) error {
-	shutdownErr := shutdownHTTP(ctx)
-	daemonErr := stopDaemons(ctx)
-	return errors.Join(drainAfterShutdown(shutdownErr, inFlight), daemonErr)
 }
 
 // drainAfterShutdown waits out every in-flight API-started run

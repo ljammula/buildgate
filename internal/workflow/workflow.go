@@ -845,8 +845,8 @@ func RunWorkflow(ctx temporalworkflow.Context, input RunWorkflowInput) (result R
 		// reasoning the Temporal SDK's own documented cleanup-after-
 		// cancellation pattern uses. This matters specifically for
 		// -repository: the *submitting* factoryd process can give up and
-		// stop its own Worker while RepositoryOwnerWorkflow's shared,
-		// long-lived Worker (a `factoryd daemon`) keeps running and can
+		// stop its own Worker while another Worker polling
+		// RepositoryOwnerWorkflow's shared queue keeps running and can
 		// still service this Activity once the Workflow itself decides to
 		// call it — rollback must not depend on the original CLI process
 		// still being alive.

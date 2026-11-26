@@ -90,17 +90,15 @@ type submitParams struct {
 	planReview bool
 	// bug is `factoryd submit -bug`; see request.Request.Bug.
 	bug bool
-	// verifyCommandExplicit/preflightProfileExplicit record whether the
-	// caller is treating verifyCommand/preflightProfile as an explicit
+	// verifyCommandExplicit records whether the
+	// caller is treating verifyCommand as an explicit
 	// choice (e.g. a flag the operator actually typed) rather than an
 	// unset default -- requestsubmit.ApplyProjectConfigDefaults's
 	// "explicit flag wins, otherwise .factory.yml" precedence needs that
 	// distinction even though this struct carries no flag.FlagSet of its
 	// own.
-	verifyCommandExplicit    bool
-	preflightProfile         string
-	preflightProfileExplicit bool
-	dataDir                  string
+	verifyCommandExplicit bool
+	dataDir               string
 	// harnesses is `factoryd submit -harness role=name` (repeatable): a
 	// per-request coding-agent harness pick for "planning" and/or
 	// "execution", checked by requestsubmit.Submit against settings' own
@@ -200,8 +198,6 @@ func submitRequest(dp *deps, ctx context.Context, p submitParams) (submitResult,
 		Bug:                        p.bug,
 		ImportedSpec:               importedSpec,
 		ImportedTickets:            importedTickets,
-		PreflightProfile:           p.preflightProfile,
-		PreflightProfileExplicit:   p.preflightProfileExplicit,
 		Harnesses:                  p.harnesses,
 		SessionTokenCeiling:        p.sessionTokenCeiling,
 		SessionCostCeilingMicroUSD: p.sessionCostCeilingMicroUSD,
@@ -331,17 +327,16 @@ func specSection(spec, heading string) string {
 // silently treats "-issue" and "<url>" as literal trailing request text
 // rather than the -issue flag -- this is documented flag.Parse behavior,
 // not specific to any one flag here, so it applies to -request-file/
-// -verify-command/-preflight-profile/-data-dir too.
+// -verify-command/-data-dir too.
 // newSubmitFlags builds `factoryd submit`'s FlagSet in isolation from
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
-func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, preflightProfile, dataDir, consoleBaseURL *string, watch *bool) {
+func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, dataDir, consoleBaseURL *string, watch *bool) {
 	flags = flag.NewFlagSet("submit", flag.ContinueOnError)
 	requestFile = flags.String("request-file", "", "Read the request text from this file. Cannot be combined with -issue or a request text on the command line.")
 	issue = flags.String("issue", "", "Take the request text from this GitHub issue URL's title and body. gh must be installed and authenticated. The request's pull request closes the issue on merge.")
 	verifyCommand = flags.String("verify-command", "", "Verification command for this request's tickets. Empty uses verify_command from the workspace's .factory.yml.")
-	preflightProfile = flags.String("preflight-profile", "", "Preflight strictness: \"brownfield\" does not require the repository's spec/spec.md, spec/contract.md and ARCHITECTURE.md. Unset uses preflight_profile from the workspace's .factory.yml, else strict.")
 	flags.String("full-suite-command", "", "Repo-wide regression command that must pass before a pull request opens. Empty uses .factory.yml's full_suite_command, else the verify command. \"none\" runs no full suite, which denies release.")
 	flags.String("spec-file", "", "Hand over your own spec instead of drafting one. Without an acceptance criteria section, its top-level list items become the criteria. The request text is optional.")
 	flags.String("plan-dir", "", "With -spec-file (required), hand over the plan too: a directory of tickets 001.spec.md, 002.spec.md, ... in dependency order, in the ticket format, covering every acceptance criterion of the spec.")
@@ -350,7 +345,7 @@ func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, p
 	flags.Var(&roleChoiceFlag{name: "harness", example: "pifork"}, "harness", "Coding-agent harness for one role of this request, as role=name (e.g. -harness execution=pifork), within roles.<role>.allowed_harnesses. The role is planning or execution. Repeatable.")
 	flags.Var(&roleChoiceFlag{name: "model", example: "sonnet"}, "model", "Model for one role of this request, as role=model (e.g. -model execution=sonnet), within roles.<role>.allowed. The role is planning or execution. Repeatable.")
 	flags.String("config", "", "Session config file or profile name. Empty uses the active profile, then the default paths. Its roles block is validated and bounds -model and -harness.")
-	dataDir = flags.String("data-dir", "data", "Directory for durable request and run records. Must be the one the worker uses. Unset uses the session config's data_dir.")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	consoleBaseURL = flags.String("console-base-url", "", "Base URL of the console web app (not the API address), used for the link printed after the request id. Empty uses $FACTORYD_CONSOLE_URL, then the address of the running serve.")
 	watch = flags.Bool("watch", false, "After submitting, follow the request as `factoryd watch <id>` does instead of exiting.")
 	finishFlags(flags)
@@ -358,7 +353,7 @@ func newSubmitFlags() (flags *flag.FlagSet, requestFile, issue, verifyCommand, p
 }
 
 func submitMain(dp *deps, args []string) error {
-	flags, requestFile, issue, verifyCommand, preflightProfile, dataDir, consoleBaseURL, watch := newSubmitFlags()
+	flags, requestFile, issue, verifyCommand, dataDir, consoleBaseURL, watch := newSubmitFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -416,8 +411,6 @@ func submitMain(dp *deps, args []string) error {
 		planReview:                 flags.Lookup("plan-review").Value.String() == "true",
 		bug:                        flags.Lookup("bug").Value.String() == "true",
 		verifyCommandExplicit:      explicit["verify-command"],
-		preflightProfile:           *preflightProfile,
-		preflightProfileExplicit:   explicit["preflight-profile"],
 		dataDir:                    *dataDir,
 		harnesses:                  flags.Lookup("harness").Value.(*roleChoiceFlag).values,
 		sessionTokenCeiling:        sessionTokenCeiling,

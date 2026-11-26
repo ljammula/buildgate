@@ -334,7 +334,7 @@ func TestUninstallRemovesLaunchAgentsWhenPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if f.serviceN != 1 {
-		t.Errorf("uninstall-service ran %d times, want 1", f.serviceN)
+		t.Errorf("service remove ran %d times, want 1", f.serviceN)
 	}
 }
 
@@ -418,6 +418,6 @@ func TestUninstallRemovesSystemdUnitsWhenPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if f.serviceN != 1 || !strings.Contains(f.out.String(), "remove systemd service(s): "+filepath.Join(dir, hostcontrol.ServeService.Unit)) {
-		t.Errorf("uninstall-service ran %d times; plan:\n%s", f.serviceN, f.out.String())
+		t.Errorf("service remove ran %d times; plan:\n%s", f.serviceN, f.out.String())
 	}
 }

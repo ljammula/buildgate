@@ -38,7 +38,7 @@ function rawText(error: unknown): string {
  * checked first and takes priority over the connection-level text match.
  *
  * `startClass` marks a call to a start-token-gated route (starting a run,
- * the daemon lifecycle routes, the release and stats views), so a 401/403
+ * the release and stats views), so a 401/403
  * can name the one concrete fix (open serve's own printed console link)
  * instead of the generic three-token guidance, which is still used for a
  * plain read or override 401/403 since the server's error body cannot
@@ -75,7 +75,7 @@ export function describeError(error: unknown, { startClass = false } = {}): Erro
           "This request's token doesn't match what factoryd expects " +
           "(FACTORYD_API_READ_TOKEN for run/request reads, " +
           "FACTORYD_API_START_TOKEN for starting runs and the " +
-          "release/stats/daemon views, or FACTORYD_API_OVERRIDE_TOKEN " +
+          "release/stats views, or FACTORYD_API_OVERRIDE_TOKEN " +
           "for approve/reject/override), or none is configured on one " +
           "side. Check the token for this action and reload.",
         raw,

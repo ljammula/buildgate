@@ -610,51 +610,6 @@ func TestRunCorrectiveRoundSetsRunRequestID(t *testing.T) {
 	}
 }
 
-// TestRunCorrectiveRoundCarriesRequestPreflightProfile pins the
-// corrective-round half of the same live bug
-// TestBuildRequestBuildArgsCarriesRequestPreflightProfile covers for a
-// ticket's first build: r.PreflightProfile must reach the corrective
-// round's own argv too, not just the initial build, since a corrective
-// round is another QueueEntry-driven run of the same workspace.
-func TestRunCorrectiveRoundCarriesRequestPreflightProfile(t *testing.T) {
-	dp := newFakeDeps(t)
-	threads := []forge.Thread{
-		{ID: "thread-1", Path: "a.go", Line: 10, Author: "alice", Body: "please rename this", CommentID: 111},
-	}
-	r, dataDir := requestdrivertest.StubPRReviewTestFixture(t, 1)
-	r.PreflightProfile = "brownfield"
-	pushed := stubPRReviewDeps(dp, t, forge.ReviewState{State: "OPEN", BlocksReadyThreads: threads, ActionableThreads: threads}, nil)
-
-	var capturedArgs []string
-	dp.runTicketFn = func(ctx context.Context, args []string, onReady func(*run.Run)) error {
-		capturedArgs = args
-		runID := requestdrivertest.ArgValue(args, "-ticket")
-		accepted := &run.Run{ID: runID, State: run.StateAccepted, WorkspacePath: t.TempDir(), ResultSHA: "cafef00d", Branch: requestdrivertest.ArgValue(args, "-on-branch")}
-		return saveAcceptedRoundRun(t, dataDir, accepted)
-	}
-	dp.pushExistingBranchFn = func(ctx context.Context, workspaceDir, sha, branch string) error {
-		pushed[branch] = sha
-		return nil
-	}
-	dp.remoteBranchHeadSHAFn = func(ctx context.Context, workspaceDir, branch string) (string, error) {
-		if sha, ok := pushed[branch]; ok {
-			return sha, nil
-		}
-		return strings.Repeat("0", 40), nil
-	}
-	dp.roundResultDescendsFromHeadFn = func(dir, ancestor, descendant string) (bool, error) { return true, nil }
-	dp.replyToReviewCommentFn = func(ctx context.Context, prURL string, commentID int64, body string) error { return nil }
-
-	cfg := requestdriver.WorkerConfig{PrPollInterval: time.Minute, MaxReviewRounds: 3}
-	if err := requestdriver.AdvancePRReview(dp, context.Background(), dataDir, r, cfg, time.Now()); err != nil {
-		t.Fatalf("advancePRReview: %v", err)
-	}
-
-	if got := requestdrivertest.ArgValue(capturedArgs, "-preflight-profile"); got != "brownfield" {
-		t.Errorf("-preflight-profile = %q, want %q (from r.PreflightProfile)", got, "brownfield")
-	}
-}
-
 // TestRunCorrectiveRoundCarriesFullSuiteSource pins the corrective-round
 // half of the fix in runCorrectiveRound (the QueueEntry it builds now sets
 // FullSuiteSource: r.FullSuiteSource, not just FullSuiteCommand): without

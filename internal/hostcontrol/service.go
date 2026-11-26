@@ -10,7 +10,7 @@ import (
 )
 
 // ServiceManager is what supervises the worker and serve `factoryd
-// install-service` installs: launchd LaunchAgents on macOS, systemd user
+// service install` installs: launchd LaunchAgents on macOS, systemd user
 // units on Linux, nothing elsewhere. It is chosen from the OS once
 // (ServiceManagerFor) and reaches the code as a value through Deps, so the
 // tests of each run on every OS.
@@ -34,7 +34,7 @@ func ServiceManagerFor(goos string) ServiceManager {
 	return NoServiceManager
 }
 
-// Service is one of the two services install-service installs, with its
+// Service is one of the two services service install installs, with its
 // name under each manager.
 type Service struct {
 	// Kind is "worker" or "serve".
@@ -58,7 +58,7 @@ func (m ServiceManager) Name(s Service) string {
 	return s.Label
 }
 
-// DefinitionPath is the file install-service writes for s: the plist under
+// DefinitionPath is the file service install writes for s: the plist under
 // ~/Library/LaunchAgents, or the unit under ~/.config/systemd/user
 // (SystemdUserUnitDir). An error with no service manager.
 func (m ServiceManager) DefinitionPath(s Service) (string, error) {
@@ -107,7 +107,7 @@ func launchdDomain(s Service) string {
 }
 
 // ServiceFor returns the definition path of s when s is installed and serves
-// dataDir: install-service pins each service to one data dir, and another
+// dataDir: service install pins each service to one data dir, and another
 // data dir's service is neither this data dir's nor one to restart on its
 // behalf.
 func ServiceFor(dp Deps, s Service, dataDir string) (string, bool) {

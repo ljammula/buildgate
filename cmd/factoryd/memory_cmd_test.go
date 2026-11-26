@@ -50,7 +50,7 @@ func strPtr(s string) *string { return &s }
 func newMemFix(t *testing.T, files map[string]string) *memFix {
 	t.Helper()
 	repo := newMemRepo(t)
-	commit := map[string]*string{".factory.yml": strPtr("verify_command: make test\npreflight_profile: brownfield\n")}
+	commit := map[string]*string{".factory.yml": strPtr("verify_command: make test\n")}
 	for name, body := range files {
 		commit[name] = strPtr(body)
 	}

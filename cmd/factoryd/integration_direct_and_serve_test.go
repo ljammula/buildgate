@@ -64,18 +64,26 @@ func TestIntegrationInvalidDirectRunDoesNotCreateOwnershipLock(t *testing.T) {
 	}
 }
 
-// TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold is the
-// regression test for the mandatory project-bootstrap preflight itself
-// (converted from opt-in to required, 2026-08-29): a project whose
-// filepath.Dir(-workspace) doesn't carry spec/spec.md, spec/contract.md,
-// and ARCHITECTURE.md (the same convention `factoryd init` scaffolds and
-// `factoryd check-project` has always validated, now actually gating
-// `factoryd <run>`) must halt before build_app.py ever starts, rather than
-// silently proceed against an unbootstrapped project.
-func TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold(t *testing.T) {
+// TestIntegrationProjectBootstrapPreflightHaltsOnAMalformedTicket is the
+// regression test for the project-bootstrap preflight itself: a run whose
+// repository holds a native ticket for -ticket that is not ticket-shaped
+// halts before build_app.py ever starts.
+func TestIntegrationProjectBootstrapPreflightHaltsOnAMalformedTicket(t *testing.T) {
 	// not parallel-safe: newFixtureRepoWithoutBootstrapScaffold calls
 	// t.Setenv, which panics if called after t.Parallel().
 	ws := newFixtureRepoWithoutBootstrapScaffold(t)
+	ticketPath := filepath.Join(ws, "spec", "tickets", "001-fixture-ticket.md")
+	if err := os.MkdirAll(filepath.Dir(ticketPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ticketPath, []byte("# not a ticket\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "spec"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "a malformed ticket"}} {
+		if out, err := runGit(t, ws, args...); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
 	specPath := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -87,7 +95,7 @@ func TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold(t *testing.T) 
 	dataDir := t.TempDir()
 
 	cmd := factorydCommand(t,
-		"-ticket", "fixture-ticket",
+		"-ticket", "001-fixture-ticket",
 		"-sandbox-image", fakeSandboxImage,
 		"-workspace", ws,
 		"-spec", specPath,
@@ -99,13 +107,13 @@ func TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold(t *testing.T) 
 	cmd.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected a nonzero exit for a project missing its bootstrap scaffold, got success: %s", out)
+		t.Fatalf("expected a nonzero exit for a malformed ticket, got success: %s", out)
 	}
 	if !strings.Contains(string(out), "project-bootstrap preflight failed") {
 		t.Errorf("output = %q, want it to name the project-bootstrap preflight failure", out)
 	}
 	if strings.Contains(string(out), "fake_build_app: mode=") {
-		t.Error("factoryd output contains fake_build_app marker, but build_app.py should never have been invoked before an unbootstrapped project's preflight failure")
+		t.Error("factoryd output contains fake_build_app marker, but build_app.py should never have been invoked before the preflight failure")
 	}
 }
 
@@ -371,19 +379,13 @@ func TestIntegrationProjectBootstrapPreflightAcceptsCustomArchitectureSections(t
 
 	// Without the flag: the repo's own real heading names ("System
 	// overview"/"Running tests"/"Open issues") do not satisfy the default
-	// "Repo layout"/"Verification"/"Known deviations" convention, so the
-	// preflight fails before any run record is even created -- matching
-	// TestIntegrationProjectBootstrapPreflightHaltsWithoutScaffold's own
-	// raw-subprocess-output assertion style, not runFactorydWithSpecAndFlags
-	// (which assumes a run record always exists to read back).
+	// "Repo layout"/"Verification"/"Known deviations" convention, which the
+	// preflight reports as advisory: the run still goes ahead.
 	cmdWithout := factorydCommand(t, append(append([]string{}, baseArgs...), "-data-dir", t.TempDir())...)
 	cmdWithout.Env = append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	out, err := cmdWithout.CombinedOutput()
-	if err == nil {
-		t.Fatalf("expected a nonzero exit without -architecture-required-sections, got success: %s", out)
-	}
-	if !strings.Contains(string(out), "architecture is missing the Repo layout section") {
-		t.Errorf("output = %q, want it to name the missing default architecture sections", out)
+	if err != nil {
+		t.Fatalf("run without -architecture-required-sections failed: %v: %s", err, out)
 	}
 
 	// With the flag: the same repo, same architecture doc, now passes.

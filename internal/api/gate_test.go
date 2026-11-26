@@ -144,7 +144,7 @@ func TestGateTokenOpensReadsAndRequestWritesOnly(t *testing.T) {
 		submit   = "POST /requests"
 		override = "POST /runs/none/override"
 		start    = "POST /runs"
-		daemons  = "GET /daemons"
+		stats    = "GET /projects/none/stats"
 	)
 	off, on, closed := GateToken{}, GateToken{On: true, Token: gateTestToken}, GateToken{On: true}
 	refused := http.StatusForbidden
@@ -178,7 +178,7 @@ func TestGateTokenOpensReadsAndRequestWritesOnly(t *testing.T) {
 		{"remote override, gate token", on, false, gateTestToken, override, true},
 		{"remote override, override token", on, false, gateTestOverride, override, false},
 		{"remote start, gate token", on, false, gateTestToken, start, true},
-		{"remote daemons, gate token", on, false, gateTestToken, daemons, true},
+		{"remote stats, gate token", on, false, gateTestToken, stats, true},
 		// The gate on, on the machine itself: nothing changes (an override
 		// token is set on this server, so a local write needs a token).
 		{"local read, no token", on, true, "", read, false},
@@ -640,7 +640,7 @@ func TestConsoleTokenOpensWhatTheGateTokenOpensOnThisMachineOnly(t *testing.T) {
 		edit     = "PUT /requests/none/spec"
 		override = "POST /runs/none/override"
 		start    = "POST /runs"
-		daemons  = "GET /daemons"
+		stats    = "GET /projects/none/stats"
 	)
 	off, on := GateToken{}, GateToken{On: true, Token: gateTestToken}
 	cases := []struct {
@@ -656,7 +656,7 @@ func TestConsoleTokenOpensWhatTheGateTokenOpensOnThisMachineOnly(t *testing.T) {
 		{"local edit", off, true, edit, false},
 		{"local override", off, true, override, true},
 		{"local start", off, true, start, true},
-		{"local daemons", off, true, daemons, true},
+		{"local stats", off, true, stats, true},
 		{"remote read", on, false, read, true},
 		{"remote write", on, false, write, true},
 	}

@@ -211,38 +211,35 @@ func quickstartNoticeCwdDataDirRecords(w io.Writer, resolvedDataDir, configPath 
 	if !quickstartDataDirHasRecords(cwdDataDir) {
 		return
 	}
-	fmt.Fprintf(w, "Note: earlier records found at %s were not moved; to keep using them, pass -data-dir %s (or set data_dir in %s).\n", cwdDataDir, cwdDataDir, configPath)
+	fmt.Fprintf(w, "Note: earlier records found at %s were not moved; to keep using them, set data_dir to %s in %s.\n", cwdDataDir, cwdDataDir, configPath)
 }
 
 // quickstartOptions bundles quickstartMain's own flags, plus derived
 // values a later step fills in (builtImageRefs), as explicit fields
-// instead of a FlagSet -- the same shape submitParams/onboardOptions
-// already establish for a caller that wants to drive this logic directly
+// instead of a FlagSet -- the same shape submitParams
+// already establishes for a caller that wants to drive this logic directly
 // (tests, here) rather than through flag parsing.
 type quickstartOptions struct {
-	NonInteractive           bool
-	Goal                     string
-	Issue                    string
-	RequestFile              string
-	VerifyCommand            string
-	VerifyCommandExplicit    bool
-	PreflightProfile         string
-	PreflightProfileExplicit bool
-	Scaffold                 bool
-	Reconfigure              bool
-	BuildImages              bool
-	DataDir                  string
-	DataDirExplicit          bool
-	ConfigPath               string
-	SandboxDocker            string
-	RepoRootFlag             string
-	Route                    string
-	ModelHost                string
-	ModelID                  string
-	ContextWindow            int
-	ContextWindowExplicit    bool
-	Credential               string
-	CredentialProvided       bool
+	NonInteractive        bool
+	Goal                  string
+	Issue                 string
+	RequestFile           string
+	VerifyCommand         string
+	VerifyCommandExplicit bool
+	Reconfigure           bool
+	BuildImages           bool
+	DataDir               string
+	DataDirExplicit       bool
+	ConfigPath            string
+	SandboxDocker         string
+	RepoRootFlag          string
+	Route                 string
+	ModelHost             string
+	ModelID               string
+	ContextWindow         int
+	ContextWindowExplicit bool
+	Credential            string
+	CredentialProvided    bool
 	// credentialConfigPath is the session config the key of a static route
 	// this run writes is kept beside (routeCredentialFilePath), set by
 	// quickstartEnsureConfig once the config path is resolved.
@@ -291,31 +288,29 @@ type quickstartOptions struct {
 // unwieldy multi-value return list. Field names match the flag's own local
 // variable name at every existing call site.
 type quickstartFlags struct {
-	nonInteractive   *bool
-	goal             *string
-	issue            *string
-	requestFile      *string
-	verifyCommand    *string
-	preflightProfile *string
-	scaffold         *bool
-	reconfigure      *bool
-	buildImages      *bool
-	dataDir          *string
-	configPath       *string
-	sandboxDocker    *string
-	repoRootFlag     *string
-	route            *string
-	modelHost        *string
-	modelID          *string
-	contextWindow    *int
-	credential       *string
-	egressCABundle   *string
-	pollInterval     *time.Duration
-	pollTimeout      *time.Duration
-	noServe          *bool
-	noOpen           *bool
-	harness          *string
-	sandboxImage     *string
+	nonInteractive *bool
+	goal           *string
+	issue          *string
+	requestFile    *string
+	verifyCommand  *string
+	reconfigure    *bool
+	buildImages    *bool
+	dataDir        *string
+	configPath     *string
+	sandboxDocker  *string
+	repoRootFlag   *string
+	route          *string
+	modelHost      *string
+	modelID        *string
+	contextWindow  *int
+	credential     *string
+	egressCABundle *string
+	pollInterval   *time.Duration
+	pollTimeout    *time.Duration
+	noServe        *bool
+	noOpen         *bool
+	harness        *string
+	sandboxImage   *string
 }
 
 // newQuickstartFlags builds `factoryd quickstart`'s FlagSet in isolation
@@ -329,8 +324,6 @@ func newQuickstartFlags() (flags *flag.FlagSet, f quickstartFlags) {
 	f.issue = flags.String("issue", "", "GitHub issue URL whose title and body become the request (needs an authenticated gh); the pull request closes it on merge. Must precede <repo-path>")
 	f.requestFile = flags.String("request-file", "", "file holding the request text; an alternative to -goal, trailing request text and -issue. Must precede <repo-path>")
 	f.verifyCommand = flags.String("verify-command", "", "command that verifies the repo; empty means the verify_command in its .factory.yml, else one detected from its Makefile, go.mod or package.json")
-	f.preflightProfile = flags.String("preflight-profile", "brownfield", "preflight strictness of the request: \"brownfield\" or \"\" (strict); when not passed, preflight_profile in the repo's .factory.yml wins")
-	f.scaffold = flags.Bool("scaffold", false, "also write starter spec/spec.md, spec/contract.md and ARCHITECTURE.md into the repo; files that already exist are kept")
 	f.reconfigure = flags.Bool("reconfigure", false, "rewrite the session config even if a valid one already exists at the resolved path, instead of reusing it")
 	f.buildImages = flags.Bool("build-images", false, "build missing or out-of-date images from the buildgate checkout without asking; under -non-interactive a missing image fails the command unless this is set")
 	f.dataDir = flags.String("data-dir", "", "directory for request and run records; empty means the session config's data_dir, or for a new config ~/buildgate/data (a profile) or <config-dir>/data")
@@ -356,7 +349,7 @@ func newQuickstartFlags() (flags *flag.FlagSet, f quickstartFlags) {
 func quickstartMain(dp *deps, args []string) error {
 	flags, qf := newQuickstartFlags()
 	nonInteractive, goal, issue, requestFile := qf.nonInteractive, qf.goal, qf.issue, qf.requestFile
-	verifyCommand, preflightProfile, scaffold := qf.verifyCommand, qf.preflightProfile, qf.scaffold
+	verifyCommand := qf.verifyCommand
 	reconfigure, buildImages, dataDir, configPath, sandboxDocker := qf.reconfigure, qf.buildImages, qf.dataDir, qf.configPath, qf.sandboxDocker
 	repoRootFlag, route, modelHost, modelID, contextWindow := qf.repoRootFlag, qf.route, qf.modelHost, qf.modelID, qf.contextWindow
 	credential, egressCABundle, pollInterval, pollTimeout := qf.credential, qf.egressCABundle, qf.pollInterval, qf.pollTimeout
@@ -384,37 +377,34 @@ func quickstartMain(dp *deps, args []string) error {
 	}
 
 	opts := &quickstartOptions{
-		NonInteractive:           *nonInteractive || !quickstartStdinIsInteractive(os.Stdin),
-		Goal:                     resolvedGoal,
-		Issue:                    *issue,
-		RequestFile:              *requestFile,
-		VerifyCommand:            *verifyCommand,
-		VerifyCommandExplicit:    explicit["verify-command"],
-		PreflightProfile:         *preflightProfile,
-		PreflightProfileExplicit: explicit["preflight-profile"],
-		Scaffold:                 *scaffold,
-		Reconfigure:              *reconfigure,
-		BuildImages:              *buildImages,
-		DataDir:                  *dataDir,
-		DataDirExplicit:          explicit["data-dir"],
-		ConfigPath:               *configPath,
-		SandboxDocker:            *sandboxDocker,
-		RepoRootFlag:             *repoRootFlag,
-		Route:                    *route,
-		ModelHost:                *modelHost,
-		ModelID:                  *modelID,
-		ContextWindow:            *contextWindow,
-		ContextWindowExplicit:    explicit["context-window"],
-		Credential:               *credential,
-		CredentialProvided:       explicit["credential"],
-		EgressCABundle:           *egressCABundle,
-		PollInterval:             *pollInterval,
-		PollTimeout:              *pollTimeout,
-		NoServe:                  *noServe,
-		NoOpen:                   *noOpen,
-		Harness:                  *harnessName,
-		HarnessExplicit:          explicit["harness"],
-		SandboxImage:             *sandboxImage,
+		NonInteractive:        *nonInteractive || !quickstartStdinIsInteractive(os.Stdin),
+		Goal:                  resolvedGoal,
+		Issue:                 *issue,
+		RequestFile:           *requestFile,
+		VerifyCommand:         *verifyCommand,
+		VerifyCommandExplicit: explicit["verify-command"],
+		Reconfigure:           *reconfigure,
+		BuildImages:           *buildImages,
+		DataDir:               *dataDir,
+		DataDirExplicit:       explicit["data-dir"],
+		ConfigPath:            *configPath,
+		SandboxDocker:         *sandboxDocker,
+		RepoRootFlag:          *repoRootFlag,
+		Route:                 *route,
+		ModelHost:             *modelHost,
+		ModelID:               *modelID,
+		ContextWindow:         *contextWindow,
+		ContextWindowExplicit: explicit["context-window"],
+		Credential:            *credential,
+		CredentialProvided:    explicit["credential"],
+		EgressCABundle:        *egressCABundle,
+		PollInterval:          *pollInterval,
+		PollTimeout:           *pollTimeout,
+		NoServe:               *noServe,
+		NoOpen:                *noOpen,
+		Harness:               *harnessName,
+		HarnessExplicit:       explicit["harness"],
+		SandboxImage:          *sandboxImage,
 	}
 	if err := quickstartValidateHarness(opts); err != nil {
 		return err
@@ -556,7 +546,7 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 		return err
 	}
 
-	verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, err := quickstartEnsureRepoReady(dp, opts, p, w, repoRoot)
+	verifyCommand, verifyExplicit, err := quickstartEnsureRepoReady(opts, p, w, repoRoot)
 	if err != nil {
 		return err
 	}
@@ -613,7 +603,7 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 		}
 	}
 
-	return quickstartSubmitAndWatch(dp, w, settings, repoRoot, dataDir, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, opts.PollInterval, opts.PollTimeout, link, !opts.NoOpen)
+	return quickstartSubmitAndWatch(dp, w, settings, repoRoot, dataDir, configPath, goal, opts.Issue, opts.RequestFile, verifyCommand, verifyExplicit, opts.PollInterval, opts.PollTimeout, link, !opts.NoOpen)
 }
 
 // quickstartBaselineCheck runs the baseline check (factoryd -baseline-check)
@@ -659,8 +649,7 @@ func (impl realForge) gitToplevel(dir string) (string, error) {
 // resolveQuickstartRepoRoot resolves quickstart's own <repo-path>
 // positional argument (or "." when omitted) to an absolute git repository
 // root, refusing anything not inside one -- quickstart's own target is
-// exactly an existing checkout ("a non-repo path is refused with a
-// pointer to factoryd init"), never a from-scratch app.
+// exactly an existing checkout, never a from-scratch app.
 func resolveQuickstartRepoRoot(pathArg string, toplevel func(dir string) (string, error)) (string, error) {
 	if pathArg == "" {
 		pathArg = "."
@@ -676,7 +665,7 @@ func resolveQuickstartRepoRoot(pathArg string, toplevel func(dir string) (string
 	}
 	root, err := toplevel(abs)
 	if err != nil {
-		return "", fmt.Errorf("%q is not inside a git repository -- factoryd quickstart works against an existing checkout with a real history; for a brand-new app run `factoryd init` to scaffold a fresh repo first", pathArg)
+		return "", fmt.Errorf("%q is not inside a git repository -- factoryd quickstart works against an existing checkout with a real history; for a brand-new app, `git init` and commit a first file", pathArg)
 	}
 	return root, nil
 }
@@ -2854,14 +2843,11 @@ func quickstartCopilotContextWindowFor(models []meter.CopilotModel, modelID stri
 
 // ---- step 3: repo readiness (verify command, onboarding scaffold) ----
 
-// quickstartEnsureRepoReady resolves the verify command and preflight
-// profile the submission will use, and, only when explicitly authorized
-// (-scaffold, or an interactive confirmation), scaffolds onboarding docs
-// via `factoryd onboard` -- never silently, and only after checking
-// onboardGuardFileStatus so an already-scaffolded repo is skipped rather
-// than hitting onboard's own refuse-to-overwrite error (plan's "New app
-// vs. existing repo" row).
-func quickstartEnsureRepoReady(dp *deps, opts *quickstartOptions, p *quickstartPrompter, w io.Writer, repoRoot string) (verifyCommand string, verifyExplicit bool, preflightProfile string, preflightExplicit bool, err error) {
+// quickstartEnsureRepoReady resolves the verify command the submission will
+// use, and writes a .factory.yml holding it into a repository that has
+// commits and no .factory.yml yet, so a later quickstart or worker run
+// against it needs no -verify-command.
+func quickstartEnsureRepoReady(opts *quickstartOptions, p *quickstartPrompter, w io.Writer, repoRoot string) (verifyCommand string, verifyExplicit bool, err error) {
 	verifyCommand = opts.VerifyCommand
 	verifyExplicit = opts.VerifyCommandExplicit
 	source := "flag"
@@ -2885,14 +2871,14 @@ func quickstartEnsureRepoReady(dp *deps, opts *quickstartOptions, p *quickstartP
 	case verifyCommand != "":
 		fmt.Fprintf(w, "Verify command (%s): %s\n", source, verifyCommand)
 	case opts.NonInteractive:
-		return "", false, "", false, fmt.Errorf("no verify command could be detected in %s; pass -verify-command under -non-interactive", repoRoot)
+		return "", false, fmt.Errorf("no verify command could be detected in %s; pass -verify-command under -non-interactive", repoRoot)
 	default:
 		verifyCommand, err = p.ask(w, "No verify command detected -- what command verifies this repo (e.g. `make test`)? ")
 		if err != nil {
-			return "", false, "", false, err
+			return "", false, err
 		}
 		if verifyCommand == "" {
-			return "", false, "", false, fmt.Errorf("a verify command is required")
+			return "", false, fmt.Errorf("a verify command is required")
 		}
 		// Typed interactively because nothing else resolved one at all --
 		// there is no committed/detected value it could ever lose to, so
@@ -2900,121 +2886,36 @@ func quickstartEnsureRepoReady(dp *deps, opts *quickstartOptions, p *quickstartP
 		verifyExplicit = true
 	}
 
-	preflightProfile = opts.PreflightProfile
-	preflightExplicit = opts.PreflightProfileExplicit
-
-	if opts.Scaffold {
-		if err := quickstartScaffoldOnboarding(dp, w, repoRoot); err != nil {
-			return "", false, "", false, err
-		}
-	} else {
-		existingArtifacts, err := onboardGuardFileStatus(repoRoot, false)
-		if err != nil {
-			return "", false, "", false, fmt.Errorf("check existing onboarding scaffold: %w", err)
-		}
-		if len(existingArtifacts) == 0 && quickstartRepoHasCommits(repoRoot) {
-			// Brownfield auto-detection (plan 2.2): a real, pre-existing
-			// repo with none of the three onboarding docs is exactly the
-			// case -preflight-profile already defaults to "brownfield"
-			// for, so there is no decision left to ask about here -- the
-			// old y/N "scaffold onboarding docs now?" prompt below was
-			// the last question standing between an operator and a repo
-			// this confident a detection already covers. Print what was
-			// decided (and the override) instead of asking, and persist
-			// the one piece of it worth keeping across runs: a
-			// .factory.yml an operator can commit so a later
-			// quickstart/worker invocation against this repo doesn't
-			// need -verify-command or -preflight-profile at all. Pass
-			// -scaffold to also get spec/spec.md, spec/contract.md, and
-			// ARCHITECTURE.md themselves.
-			fmt.Fprintf(w, "Detected an existing repo (has commits) with no onboarding docs -- treating it as brownfield (preflight profile: %s) without asking; pass -scaffold to generate spec/spec.md, spec/contract.md, and ARCHITECTURE.md instead.\n", preflightProfile)
-			factoryYMLPath := filepath.Join(repoRoot, projectconfig.FileName)
-			if _, statErr := os.Lstat(factoryYMLPath); os.IsNotExist(statErr) {
-				if err := writeScaffoldFiles(repoRoot, map[string]string{factoryYMLPath: factoryYMLWithSandbox(repoRoot, verifyCommand, preflightProfile)}); err != nil {
-					return "", false, "", false, err
-				}
-				fmt.Fprintln(w, factoryYMLQuickstartNote())
-				if note := sandboxDraftNote(repoRoot); note != "" {
-					fmt.Fprintln(w, note)
-				}
-				// The reminder just printed already told the operator this
-				// file isn't committed yet -- suppress projectconfig's own
-				// identical warning the very next Load (submitRequest,
-				// moments later) would otherwise print twice.
-				projectconfig.NoteReminderShown(factoryYMLPath)
-			} else if statErr != nil {
-				return "", false, "", false, fmt.Errorf("check %s: %w", factoryYMLPath, statErr)
-			}
-		} else if !opts.NonInteractive {
-			// Found via Codex review of PR #173: this used to check only
-			// os.Stat(ARCHITECTURE.md), so a repo with a hand-written
-			// ARCHITECTURE.md but no spec/ yet (existingArtifacts non-empty,
-			// so the brownfield auto-detect branch above is skipped) was
-			// never offered scaffolding for the two files it's actually
-			// missing -- exactly the "has ARCHITECTURE.md, missing spec/"
-			// case this PR's own doOnboard change (scaffold only what's
-			// missing) was built to handle. Use the same existingArtifacts
-			// count computed above instead of re-deriving it from a single
-			// file.
-			if len(existingArtifacts) < 3 {
-				ok, err := p.confirm(w, "Onboarding docs missing -- scaffold onboarding docs (spec/spec.md, spec/contract.md, ARCHITECTURE.md; only what's missing is written) now? [y/N] ", false)
-				if err != nil {
-					return "", false, "", false, err
-				}
-				if ok {
-					if err := quickstartScaffoldOnboarding(dp, w, repoRoot); err != nil {
-						return "", false, "", false, err
-					}
-				}
-			}
-		}
+	if !quickstartRepoHasCommits(repoRoot) {
+		return verifyCommand, verifyExplicit, nil
 	}
-
-	return verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, nil
+	factoryYMLPath := filepath.Join(repoRoot, projectconfig.FileName)
+	if _, statErr := os.Lstat(factoryYMLPath); os.IsNotExist(statErr) {
+		if err := writeNewFiles(repoRoot, map[string]string{factoryYMLPath: factoryYMLWithSandbox(repoRoot, verifyCommand)}); err != nil {
+			return "", false, err
+		}
+		fmt.Fprintln(w, factoryYMLQuickstartNote())
+		if note := sandboxDraftNote(repoRoot); note != "" {
+			fmt.Fprintln(w, note)
+		}
+		// The reminder just printed already told the operator this file
+		// isn't committed yet -- suppress projectconfig's own identical
+		// warning the very next Load (submitRequest, moments later) would
+		// otherwise print twice.
+		projectconfig.NoteReminderShown(factoryYMLPath)
+	} else if statErr != nil {
+		return "", false, fmt.Errorf("check %s: %w", factoryYMLPath, statErr)
+	}
+	return verifyCommand, verifyExplicit, nil
 }
 
 // quickstartRepoHasCommits reports whether repoRoot's git repository has at
-// least one commit -- the other half of quickstart's own brownfield
-// auto-detection alongside onboardGuardFileStatus (see
-// quickstartEnsureRepoReady): a freshly `git init`'d repo with no history
-// yet is genuinely greenfield even if it happens to have no onboarding
-// docs either, and still gets the interactive scaffold prompt rather than
-// a silent brownfield default. Mirrors projectconfig's own
-// readCommitted check (internal/projectconfig/projectconfig.go). A
+// least one commit: a .factory.yml is read from the committed HEAD, so one
+// written into a repository with no history yet would never be read. A
 // git-command failure (not a git repo, git not installed) is treated as
-// "no commits" -- resolveQuickstartRepoRoot has already confirmed
-// repoRoot is inside a git repository by the time this runs, so in
-// practice this only ever returns false here for the no-HEAD-yet case.
+// "no commits".
 func quickstartRepoHasCommits(repoRoot string) bool {
 	return exec.Command("git", "-C", repoRoot, "rev-parse", "--verify", "-q", "HEAD").Run() == nil
-}
-
-// quickstartScaffoldOnboarding runs onboard's own doOnboard directly
-// against repoRoot. It used to pre-check onboardGuardFileStatus and skip
-// entirely whenever any of the three guard files already existed, since
-// onboard itself used to hard-refuse to scaffold anything at all in that
-// case -- which meant a typical existing repo (hand-written
-// ARCHITECTURE.md, no spec/ yet) got nothing scaffolded via quickstart
-// either. Now that doOnboard itself only scaffolds whichever of the three
-// are actually missing and leaves the rest untouched, that pre-check is
-// redundant: it's simplest, and strictly more useful, to just let
-// doOnboard decide. SkipDoctor is set: quickstart's own pull-focused
-// doctor step has already run by the time this is reached, and
-// re-running onboard's mount-visibility preflight here would just repeat
-// work with no new information.
-func quickstartScaffoldOnboarding(dp *deps, w io.Writer, repoRoot string) error {
-	result, err := doOnboard(dp, onboardOptions{
-		Project:    filepath.Base(repoRoot),
-		Root:       repoRoot,
-		SkipDoctor: true,
-	})
-	if err != nil {
-		return fmt.Errorf("scaffold onboarding docs: %w", err)
-	}
-	if len(result.Written) == 0 {
-		fmt.Fprintln(w, "Onboarding scaffold already present -- nothing to add.")
-	}
-	return nil
 }
 
 // ---- step 4: daemon ----------------------------------------------------
@@ -3080,13 +2981,13 @@ func (impl realForge) fetchIssue(ctx context.Context, issueURL string) (title, b
 // "Idempotency" row). Checks quickstartFindInFlightRequest first so a
 // rerun against a repo that already has a request in flight reports that
 // request instead of submitting a second one.
-func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Settings, repoRoot, dataDir, goal, issue, requestFile, verifyCommand string, verifyCommandExplicit bool, preflightProfile string, preflightProfileExplicit bool, pollInterval, pollTimeout time.Duration, link consoleLinkTokens, autoOpen bool) error {
+func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Settings, repoRoot, dataDir, configPath, goal, issue, requestFile, verifyCommand string, verifyCommandExplicit bool, pollInterval, pollTimeout time.Duration, link consoleLinkTokens, autoOpen bool) error {
 	if inFlight, err := quickstartFindInFlightRequest(dataDir, repoRoot); err != nil {
 		return err
 	} else if inFlight != nil {
 		fmt.Fprintf(w, "Request %s against this repo is already in flight (%s) -- not submitting a duplicate.\n", inFlight.ID, inFlight.State)
 		quickstartPrintAndOpenConsoleLink(dp, w, dataDir, inFlight.ID, link, autoOpen)
-		return quickstartWatchRequest(dp, dataDir, inFlight.ID, w, pollInterval, pollTimeout)
+		return quickstartWatchRequest(dp, dataDir, configPath, inFlight.ID, w, pollInterval, pollTimeout)
 	}
 
 	var trailingText []string
@@ -3095,15 +2996,13 @@ func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Sett
 	}
 	tokenCeiling, costCeilingMicroUSD := settings.EffectiveRelayCeilings()
 	result, err := submitRequest(dp, context.Background(), submitParams{
-		workspaceArg:             repoRoot,
-		requestFile:              requestFile,
-		issue:                    issue,
-		trailingText:             trailingText,
-		verifyCommand:            verifyCommand,
-		verifyCommandExplicit:    verifyCommandExplicit,
-		preflightProfile:         preflightProfile,
-		preflightProfileExplicit: preflightProfileExplicit,
-		dataDir:                  dataDir,
+		workspaceArg:          repoRoot,
+		requestFile:           requestFile,
+		issue:                 issue,
+		trailingText:          trailingText,
+		verifyCommand:         verifyCommand,
+		verifyCommandExplicit: verifyCommandExplicit,
+		dataDir:               dataDir,
 		// The session's settings and ceilings, as `factoryd submit` passes
 		// them: without them a repository's design_guide resolves against
 		// no design_guide_dirs and its ceilings against built-in defaults.
@@ -3117,8 +3016,8 @@ func quickstartSubmitAndWatch(dp *deps, w io.Writer, settings sessionconfig.Sett
 	}
 	fmt.Fprintf(w, "Submitted request %s (project %s).\n", result.id, result.project)
 	quickstartPrintAndOpenConsoleLink(dp, w, dataDir, result.id, link, autoOpen)
-	fmt.Fprintf(w, "Follow along: factoryd watch%s %s\n", quickstartDataDirArg(dataDir), result.id)
-	return quickstartWatchRequest(dp, dataDir, result.id, w, pollInterval, pollTimeout)
+	fmt.Fprintf(w, "Follow along: factoryd watch%s %s\n", quickstartConfigArg(configPath), result.id)
+	return quickstartWatchRequest(dp, dataDir, configPath, result.id, w, pollInterval, pollTimeout)
 }
 
 // consoleLinkTokens are the tokens a console link to this machine's own
@@ -3171,19 +3070,17 @@ func quickstartPrintAndOpenConsoleLink(dp *deps, w io.Writer, dataDir, requestID
 	}
 }
 
-// quickstartDataDirArg is the " -data-dir <dataDir>" fragment every
-// command quickstart itself prints (approve/reject/retry/watch/status)
-// splices in before the request/run id: quickstart always resolves
-// an absolute data dir (quickstartEnsureConfig), which need not be any of
-// those commands' own "data" default, so the bare command it used to
-// print (e.g. "factoryd approve <id>") could fail with a "no such file"
-// against the wrong directory. Always including the flag -- rather than
-// only when dataDir differs from the literal default -- means the printed
-// command is correct regardless of what a later `factoryd approve`'s own
-// default happens to resolve to, without this function needing to
-// duplicate that resolution to decide when to omit it.
-func quickstartDataDirArg(dataDir string) string {
-	return " -data-dir " + quickstartShellQuote(dataDir)
+// quickstartConfigArg is the " -config <profile>" a printed command carries so
+// it reads the data dir quickstart used: the profile's name, or the quoted path
+// of a session config that is not a profile. Empty when no config is known.
+func quickstartConfigArg(configPath string) string {
+	if configPath == "" {
+		return ""
+	}
+	if name := sessionconfig.ProfileNameOfPath(configPath); name != "" {
+		return " -config " + name
+	}
+	return " -config " + quickstartShellQuote(configPath)
 }
 
 // quickstartShellQuote formats s for splicing into a literal shell command
@@ -3230,7 +3127,7 @@ func quickstartShellSafe(s string) bool {
 // hitting pollTimeout while still in-flight -- that just means the work
 // is still running, not that anything went wrong; `factoryd status`
 // remains the way to keep watching.
-func quickstartWatchRequest(dp *deps, dataDir, id string, w io.Writer, pollInterval, pollTimeout time.Duration) error {
+func quickstartWatchRequest(dp *deps, dataDir, configPath, id string, w io.Writer, pollInterval, pollTimeout time.Duration) error {
 	deadline := time.Now().Add(pollTimeout)
 	// On a terminal, one working line names what the request waits on;
 	// elsewhere the wait stays silent, as before.
@@ -3247,13 +3144,13 @@ func quickstartWatchRequest(dp *deps, dataDir, id string, w io.Writer, pollInter
 			if sp != nil {
 				sp.Stop("")
 			}
-			return quickstartReportRequestState(dataDir, r, w)
+			return quickstartReportRequestState(dataDir, configPath, r, w)
 		}
 		if time.Now().After(deadline) {
 			if sp != nil {
 				sp.Stop("")
 			}
-			fmt.Fprintf(w, "Request %s is still %s after %s -- it's still working; keep watching with: factoryd watch%s %s (or factoryd status%s for a one-shot snapshot).\n", id, r.State, pollTimeout, quickstartDataDirArg(dataDir), id, quickstartDataDirArg(dataDir))
+			fmt.Fprintf(w, "Request %s is still %s after %s -- it's still working; keep watching with: factoryd watch%s %s (or factoryd status%s for a one-shot snapshot).\n", id, r.State, pollTimeout, quickstartConfigArg(configPath), id, quickstartConfigArg(configPath))
 			return nil
 		}
 		if sp != nil {
@@ -3277,8 +3174,8 @@ func quickstartWatchRequest(dp *deps, dataDir, id string, w io.Writer, pollInter
 // Takes only a *request.Request and an io.Writer -- no queue, no Docker,
 // no daemon -- so this is fully testable against a hand-built Request
 // value.
-func quickstartReportRequestState(dataDir string, r *request.Request, w io.Writer) error {
-	arg := quickstartDataDirArg(dataDir)
+func quickstartReportRequestState(dataDir, configPath string, r *request.Request, w io.Writer) error {
+	arg := quickstartConfigArg(configPath)
 	switch r.State {
 	case request.StateSpecReview:
 		fmt.Fprintf(w, "Spec drafted for request %s: %s\nReview it, then run: factoryd approve%s %s\n", r.ID, request.SpecPath(dataDir, r.ID), arg, r.ID)

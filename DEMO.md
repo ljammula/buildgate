@@ -65,14 +65,15 @@ EOF
 git add -A && git commit -qm "initial"
 ```
 
-Onboard it (scaffolds `spec/spec.md`, `spec/contract.md`, `ARCHITECTURE.md`
-and writes `.factory.yml` with the detected `verify_command` and
-`preflight_profile: brownfield`), check it, commit:
+Give it the two files a request reads from the repo, and commit: a root
+`AGENTS.md` (a run is refused without one) and a `.factory.yml` with the
+verify command (`quickstart` would write that file itself in a repo that has
+none):
 
 ```sh
-factoryd onboard -project mathops -root ~/demo/mathops -write-factory-yml
-cat .factory.yml          # confirm verify_command is: go test ./... (edit if not)
-git add -A && git commit -qm "onboard buildgate"
+printf '# mathops\n\nGo package. Test with `go test ./...`.\n' > AGENTS.md
+printf 'verify_command: "go test ./..."\n' > .factory.yml
+git add -A && git commit -qm "buildgate: AGENTS.md and .factory.yml"
 ```
 
 Say: "The verify command is the canonical pass/fail. The agent's own claim of success counts for nothing."
@@ -86,13 +87,13 @@ Ticket (one sentence, well specified so the spec drafts cleanly):
 | # | Do | Say |
 |---|---|---|
 | 1 | `factoryd quickstart ~/demo/mathops "Add an exported function Multiply(a, b int) int to package mathops in mathops.go, returning a*b, with a table-driven test"` | "One command: doctor checks, session config, starts Temporal, the gateway and meter, the worker and the console, submits the request, and stops at the first human gate." Answer the route/model prompts the first time. Flags go **before** `<repo-path>`. |
-| 2 | Note the `-data-dir` in the `factoryd watch -data-dir ...` line it prints and run `DATA=<that path>` in each terminal you'll use. | "The factory is drafting a spec from the request and the repo's own docs." |
+| 2 | `factoryd status`: its first line names the profile and the data dir quickstart wrote into the session config, which every later command reads. | "The factory is drafting a spec from the request and the repo's own docs." |
 | 3 | The console opens in your browser on the request (lost the tab? `factoryd console -open`). | "This is the operator console. Waiting-on-you items sort first. The Pipeline stepper shows where it is and who did what." |
 | 4 | Read the spec and its acceptance criteria. Optionally click Edit, change a word, Save. | "This is the human gate. Nothing is built from a spec nobody approved: approval records who and the SHA-256 of the file, and a later edit is refused." |
-| 5 | Click Approve (or `factoryd approve -data-dir "$DATA" <request-id>`). Wait 1-3 min for `plan_review`. | "Now it drafts ticket plans, and checks every criterion is claimed by a ticket." |
+| 5 | Click Approve (or `factoryd approve <request-id>`). Wait 1-3 min for `plan_review`. | "Now it drafts ticket plans, and checks every criterion is claimed by a ticket." |
 | 6 | Review the plan (files to touch, steps, tests to add), Approve. | "Second gate. Approving the plan re-checks the spec hash first." |
-| 7 | `factoryd watch -data-dir "$DATA" <request-id>` (or the console Runs view) while it builds. | "Sandboxed build: a Docker container created by the OpenShell gateway, no network, model only through its supervisor and our meter. Then verify and the gates." |
-| 8 | When done: `factoryd status -data-dir "$DATA"`. Open the run in the console; show gate results and evidence. | "Accepted means the factory's own checks passed against durable evidence: canonical verify, diff scope, tests added, full suite, and the code review." |
+| 7 | `factoryd watch <request-id>` (or the console Runs view) while it builds. | "Sandboxed build: a Docker container created by the OpenShell gateway, no network, model only through its supervisor and our meter. Then verify and the gates." |
+| 8 | When done: `factoryd status`. Open the run in the console; show gate results and evidence. | "Accepted means the factory's own checks passed against durable evidence: canonical verify, diff scope, tests added, full suite, and the code review." |
 | 9 | Point out: nothing was merged, and with no remote no PR was opened (the request reads "accepted, awaiting pull request"). | "On a real repo the factory opens a *draft* PR when the release policy allows, and marks it ready for review once checks pass and no review thread blocks it. Merge and deploy are permanently human, by design." |
 
 If the run's cost shows up on a ChatGPT or Copilot route, it's labelled
@@ -101,13 +102,14 @@ If the run's cost shows up on a ChatGPT or Copilot route, it's labelled
 ## If something goes wrong
 
 Commands that read a request (`status`, `watch`, `approve`, `reject`,
-`retry`) need `-data-dir "$DATA"`.
+`retry`) read the active profile's data dir; add `-config <profile>` when the
+demo runs under another profile.
 
 | Symptom | Fix |
 |---|---|
 | Halted at planning, over a cap | `factoryd retry <request-id>` (check the state with `factoryd status` first) |
 | No PR opened | Expected with no remote, a release-policy denial, or `worker -open-pull-request=false`. If the run was accepted but the PR didn't open (e.g. `gh` not logged in), fix that and `factoryd retry <id>`: it re-opens only the PR, no rebuild |
-| Want to be sure no PR opens | Use the remote-less demo clone, or stop the daemon (`factoryd stop -data-dir "$DATA"`) and restart it with `factoryd worker -open-pull-request=false -config <config-path> -data-dir "$DATA"` |
+| Want to be sure no PR opens | Use the remote-less demo clone, or stop the worker (`factoryd stop`) and restart it with `factoryd worker -open-pull-request=false -config <profile>` |
 | "does not appear to share ... into its containers" | Docker on macOS not sharing `/private/tmp`. Put the repo, data dir and config under `$HOME` |
 | `doctor` warnings or failures | Read the fix line it prints. Missing images: `factoryd doctor -fix -repo-root <buildgate checkout>` builds them locally |
 | Behaviour differs from these docs | Stale `factoryd` on PATH: `which -a factoryd`; use the full path or `make install` |
@@ -117,7 +119,7 @@ Commands that read a request (`status`, `watch`, `approve`, `reject`,
 ## Cleanup
 
 ```sh
-factoryd stop -data-dir "$DATA"   # worker and console for the demo's data dir
+factoryd stop                       # worker and console of the active profile
 factoryd stop -all                  # or: every profile's, then Temporal
 rm -rf ~/demo/mathops ~/demo/check
 docker ps                           # confirm no leftover worker/supervisor containers

@@ -1,15 +1,11 @@
-// Package daemonheartbeat gives `factoryd daemon` — a Worker process meant
-// to run indefinitely, servicing one repository's shared Temporal task
-// queue (see internal/workflow's RepositoryOwnerWorkflow) — a durable,
-// on-disk liveness signal an external process supervisor can poll without
-// depending on Temporal itself being reachable. Closes part of the plan's
-// own named Phase 6 gap: "one process per repository, with no supervisor,
-// health-check endpoint, or internal/api-driven lifecycle management yet".
-// A supervisor (systemd, launchd, a small watchdog script, or a future
-// internal/api endpoint) reads the file this package writes and decides
-// for itself, via Stale, whether the daemon needs restarting — this
-// package makes no restart decision and holds no supervisory state of its
-// own.
+// Package daemonheartbeat is the on-disk liveness record `factoryd worker`
+// writes into its data dir and refreshes every Interval, so `status`,
+// `doctor`, `restart`, serve's GET /queue-run and the console can tell a
+// live worker from a stale or absent one without asking Temporal. It also
+// holds the drain request `restart` and `upgrade` leave for a worker, and
+// the Docker endpoint the worker uses, which a `-repository` submitter
+// compares with its own (SandboxDockerDiverges). This package makes no
+// restart decision of its own.
 package daemonheartbeat
 
 import (
@@ -22,19 +18,12 @@ import (
 	"time"
 )
 
-// WorkerID is the fixed daemonheartbeat identity `factoryd worker`
-// writes under (the id keeps its historical value "queue-run") -- fixed, not repository-derived like `factoryd daemon`'s
-// own RepositoryOwnerWorkflowID-based id, because exactly one worker
-// drains a given -data-dir at a time (cmd/factoryd's own
-// acquireWorkerLock already enforces that), across every
-// repository/request it happens to be servicing. Exported so
-// internal/api's GET /queue-run read route (added for the console's
-// "worker is not running" strip, which previously relied on GET
-// /daemons -- a route that 404s whenever `factoryd serve` isn't itself
-// managing the daemon lifecycle, the common setup where an operator runs
-// `factoryd worker` by hand) can read the same heartbeat file
-// cmd/factoryd writes, without either side hardcoding a string the other
-// could drift out of sync with.
+// WorkerID is the fixed identity `factoryd worker` writes its heartbeat
+// under (the id keeps its historical value "queue-run"): exactly one worker
+// drains a given data dir at a time (cmd/factoryd's acquireWorkerLock
+// enforces that), across every repository and request. Exported so
+// internal/api's GET /queue-run read route reads the same file cmd/factoryd
+// writes.
 const WorkerID = "queue-run"
 
 // WorkerPath is where a data directory's worker writes its liveness
@@ -44,31 +33,17 @@ func WorkerPath(dataDir string) string {
 	return Path(dataDir, WorkerID)
 }
 
-// WorkerStaleAfter mirrors SandboxStaleAfter's three-missed-refreshes
-// staleness rule under its own name (rather than callers referencing
-// SandboxStaleAfter directly), since that constant's own doc comment
-// scopes it to sandbox-divergence callers specifically -- worker
-// liveness is a separate use of the identical cadence.
-const WorkerStaleAfter = SandboxStaleAfter
+// WorkerStaleAfter is how old a worker heartbeat may be before it is stale:
+// three missed refreshes, derived from Interval so the two cannot disagree.
+const WorkerStaleAfter = 3 * Interval
 
-// Path returns where a daemon servicing dataDir writes its heartbeat. id
-// must be an already filesystem-safe, per-daemon identity distinct across
-// every daemon that could ever share dataDir — cmd/factoryd passes its own
-// repository-owner Workflow ID (already a safe `repo-owner-<hex>` string,
-// per RepositoryOwnerWorkflowID), not the raw repository identity, which
-// can contain `/` or other path-unsafe characters. Found via review: an
-// earlier version used one fixed filename per dataDir with no id at all,
-// so the supported one-daemon-per-repository deployment — multiple
-// `factoryd daemon` processes pointed at the same `-data-dir` — had every
-// one of them overwrite the same file. Their ticker loops raced on the
-// same path, and a crashed repository's daemon could appear healthy
-// forever because a *different*, still-live repository's daemon kept
-// refreshing the shared heartbeat.
+// Path is the heartbeat file named id in dataDir. id must be filesystem
+// safe.
 func Path(dataDir, id string) string {
 	return filepath.Join(dataDir, fmt.Sprintf("daemon-heartbeat-%s.json", id))
 }
 
-// Heartbeat is one daemon process's liveness record. All timestamps are
+// Heartbeat is one worker process's liveness record. All timestamps are
 // RFC3339Nano — real sub-second resolution, the same convention run.Run's
 // own CreatedAt now uses and for the same reason (see its own doc
 // comment): a supervisor computing "how long since the last heartbeat"
@@ -86,37 +61,10 @@ type Heartbeat struct {
 	// `factoryd restart` compare this with the installed binary's. Empty
 	// from a process older than the field.
 	Version string `json:"version,omitempty"`
-	// SandboxDocker is the daemon's own -sandbox-docker flag value, always
-	// through ResolveSandboxDocker first (round 9) rather than the raw
-	// flag string — see that function's own doc comment for why. Found
-	// via GitHub Codex review of PR #37, round 6: a submitter and the
-	// daemon servicing the same repository already have to share one
-	// -data-dir for reclaim to work at all (see cmd/factoryd's own
-	// runsNeedingReclaim/reconcileReclaimedRun, both keyed on that shared
-	// directory) — this heartbeat file, read from that same shared
-	// directory, is therefore proof-by-construction that the daemon
-	// reading it back is the one servicing this exact repository, letting
-	// a submitter detect a diverging -sandbox-docker before ever
-	// launching a container the daemon's own reconciliation could never
-	// find. Empty for a heartbeat written before this field existed —
-	// callers must treat that as "unknown", not "matches".
-	SandboxDocker string `json:"sandbox_docker,omitempty"`
-	// DockerHost/DockerContext are the daemon process's own DOCKER_HOST/
-	// DOCKER_CONTEXT environment values (found via GitHub Codex review of
-	// PR #37, round 7): SandboxDocker alone names an executable, but
-	// internal/sandbox's own dockerClientEnv() passes the full host
-	// environment through to that executable, so two processes both using
-	// the identical -sandbox-docker string can still resolve to two
-	// different real Docker endpoints — a matching SandboxDocker string is
-	// not proof of a matching endpoint. These name the two standard
-	// environment variables that select a non-default endpoint; they are
-	// not an exhaustive list of every variable that could in principle
-	// affect Docker CLI resolution (e.g. DOCKER_TLS_VERIFY,
-	// DOCKER_CERT_PATH), only the ones common enough to be worth this
-	// explicit check. Both empty is the ordinary, unremarkable case (no
-	// endpoint override in effect on either side).
-	DockerHost    string `json:"docker_host,omitempty"`
-	DockerContext string `json:"docker_context,omitempty"`
+	// DockerEndpoint is the Docker executable and endpoint the worker
+	// launches and reconciles sandboxes through. Empty in a heartbeat written
+	// before the fields existed, which callers read as unknown.
+	DockerEndpoint
 	// DockerBackend is the Docker backend the worker launches sandboxes on
 	// (colima, native-linux), read once at its start; "" when Docker did
 	// not answer then.
@@ -318,32 +266,9 @@ func Stale(hb Heartbeat, now time.Time, maxAge time.Duration) bool {
 	return now.Sub(updatedAt) > maxAge
 }
 
-// Interval is how often a live `factoryd daemon` refreshes its own
-// heartbeat file (cmd/factoryd's own writeHeartbeat ticker uses this
-// directly, rather than a locally duplicated value, specifically so it
-// can never drift out of sync with SandboxStaleAfter below — found via an
-// Opus-assisted review: an earlier version of SandboxStaleAfter was a
-// bare hardcoded duration with no code-level tie back to the writer's own
-// cadence, so changing one without the other would have silently changed
-// what "fresh" means without either side's own doc comment or type system
-// catching it).
+// Interval is how often a live worker refreshes its heartbeat file; the
+// writer's ticker and WorkerStaleAfter both derive from it.
 const Interval = 30 * time.Second
-
-// SandboxStaleAfter is the shared staleness threshold every
-// SandboxDockerDiverges caller uses — deliberately smaller than
-// internal/sandbox's own container-reap staleness window (which guards a
-// destructive action and so tolerates a generous grace period): a false
-// negative here only means a caller proceeds without this extra check,
-// never that anything gets removed, so a tighter window that stops
-// trusting a heartbeat sooner after the daemon actually goes quiet is the
-// safer default. Three refresh intervals' worth of grace, derived from
-// Interval above rather than a second independent duration, so the two
-// can never silently disagree about how many missed refreshes count as
-// stale. One shared constant, not a value each caller picks for itself,
-// so cmd/factoryd's submission-time check and internal/workflow's
-// launch-time re-check can never silently disagree about what "fresh"
-// means either.
-const SandboxStaleAfter = 3 * Interval
 
 // ResolveSandboxDocker resolves a -sandbox-docker flag value (often a bare
 // relative name like "docker") to the absolute executable exec.Command
@@ -387,34 +312,40 @@ func ResolveSandboxDocker(sandboxDocker string) string {
 	return resolved
 }
 
-// SandboxDockerDiverges reports whether a fresh heartbeat at
-// Path(dataDir, ownerID) positively proves the daemon servicing this
-// repository's own sandbox Docker configuration diverges from
-// sandboxDocker/dockerHost/dockerContext — the shared comparison both
-// cmd/factoryd's submission-time check and internal/workflow's
-// launch-time re-check use (found via GitHub Codex review of PR #37,
-// rounds 6-8), factored out here so the two callers can never drift out
-// of sync with each other. sandboxDocker here, and the value written into
-// the heartbeat this reads, must already be ResolveSandboxDocker's
-// output, not a raw flag value — this function does no resolution of its
-// own. A missing, unreadable, or stale heartbeat, or one predating the
-// SandboxDocker field, is "unknown", not "matches" — diverges is false in
-// every such case (ok is false too, so a caller can distinguish "checked
-// and it's fine" from "couldn't check at all" if it wants to log the
-// difference), never a false positive from an absent signal. Once ok is
-// true, DockerHost/DockerContext are compared even when SandboxDocker
-// itself matches, since dockerClientEnv() lets an identical executable
-// resolve to a different real Docker endpoint.
-func SandboxDockerDiverges(dataDir, ownerID, sandboxDocker, dockerHost, dockerContext string) (daemon Heartbeat, ok, diverges bool) {
-	hb, err := Read(Path(dataDir, ownerID))
-	if err != nil || hb.SandboxDocker == "" {
-		return Heartbeat{}, false, false
+// DockerEndpoint is the Docker a process launches sandboxes through: the
+// resolved -sandbox-docker executable (ResolveSandboxDocker) and the
+// DOCKER_HOST and DOCKER_CONTEXT it passes on to it. The same executable can
+// reach a different Docker under a different DOCKER_HOST or DOCKER_CONTEXT,
+// so all three are compared. Other variables that can steer the Docker CLI
+// (DOCKER_CERT_PATH, DOCKER_TLS_VERIFY) are not.
+type DockerEndpoint struct {
+	SandboxDocker string `json:"sandbox_docker,omitempty"`
+	DockerHost    string `json:"docker_host,omitempty"`
+	DockerContext string `json:"docker_context,omitempty"`
+}
+
+// LocalDockerEndpoint is this process's DockerEndpoint for sandboxDocker.
+func LocalDockerEndpoint(sandboxDocker string) DockerEndpoint {
+	return DockerEndpoint{
+		SandboxDocker: ResolveSandboxDocker(sandboxDocker),
+		DockerHost:    os.Getenv("DOCKER_HOST"),
+		DockerContext: os.Getenv("DOCKER_CONTEXT"),
 	}
-	if Stale(hb, time.Now(), SandboxStaleAfter) {
-		return Heartbeat{}, false, false
+}
+
+// Known reports whether e records an endpoint at all: a record written before
+// the fields existed has none, which is unknown, never a match or a mismatch.
+func (e DockerEndpoint) Known() bool { return e.SandboxDocker != "" }
+
+// SandboxDockerDiverges reports whether dataDir's worker, by a fresh
+// heartbeat that records its endpoint, uses a Docker other than local. A
+// missing, unreadable or stale heartbeat, or one without an endpoint, is
+// unknown: ok and diverges are both false, so an absent worker never refuses
+// anything. worker is the heartbeat's endpoint when ok.
+func SandboxDockerDiverges(dataDir string, local DockerEndpoint) (worker DockerEndpoint, ok, diverges bool) {
+	hb, err := Read(WorkerPath(dataDir))
+	if err != nil || !hb.DockerEndpoint.Known() || Stale(hb, time.Now(), WorkerStaleAfter) {
+		return DockerEndpoint{}, false, false
 	}
-	if hb.SandboxDocker != sandboxDocker || hb.DockerHost != dockerHost || hb.DockerContext != dockerContext {
-		return hb, true, true
-	}
-	return hb, true, false
+	return hb.DockerEndpoint, true, hb.DockerEndpoint != local
 }

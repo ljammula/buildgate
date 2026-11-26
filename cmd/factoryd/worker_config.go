@@ -82,7 +82,7 @@ func newWorkerFlags() (flags *flag.FlagSet, f workerFlags) {
 	flags = flag.NewFlagSet("worker", flag.ContinueOnError)
 	f.configPath = flags.String("config", "", "config path or profile name, for flags not given; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	f.skipDoctor = flags.Bool("skip-doctor", false, "skip the doctor preflight, which otherwise runs first and refuses to start the worker on any failed check")
-	f.dataDir = flags.String("data-dir", "data", "directory holding queue and run records; must match what `factoryd submit` used")
+	f.dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.openPullRequest = flags.Bool("open-pull-request", true, "push each accepted run's branch and open a draft pull request; pass -open-pull-request=false to keep accepted runs local")
 
 	// Everything below is copied verbatim (name, default, help text) from
@@ -158,7 +158,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 		return requestdriver.WorkerConfig{}, "", err
 	}
 	// worker drains requests through the same build_app.py/canonical-verify
-	// subprocess path realMain and daemonMain already guard with this same
+	// subprocess path realMain and workerMain already guard with this same
 	// call (see refuseAPITokensInEnvironment's own doc comment) -- checked
 	// here, before any drafting/planning/building work starts, not just
 	// once a ticket actually reaches build. Found live: a worker started
@@ -224,7 +224,7 @@ func loadWorkerConfig(dp *deps, args []string) (requestdriver.WorkerConfig, stri
 	// Rejected here, at startup, rather than left for run_ticket.go's own
 	// identical check to reject every drained entry one at a time -- the
 	// same fail-fast-on-a-session-wide-misconfiguration reasoning
-	// -preflight-profile and -pr-closes-issue already get (found by a local
+	// -pr-closes-issue already gets (found by a local
 	// ai-stack code-review pass on PR #93: without it,
 	// `worker -registry-proxy` with no -sandbox-image passed worker's
 	// own startup check cleanly and only failed deep inside run_ticket.go,

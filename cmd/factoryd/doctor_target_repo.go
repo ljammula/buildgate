@@ -28,7 +28,7 @@ import (
 // doctorRegisterTargetRepoFlag registers -target-repo directly on flags,
 // like doctorRegisterListModelsFlag.
 func doctorRegisterTargetRepoFlag(flags *flag.FlagSet) *string {
-	return flags.String("target-repo", "", "A repository checkout to check as a run and a submit would: its verify command, root AGENTS.md, preflight, compose file and declared Go, Python and Node versions. Empty skips these checks.")
+	return flags.String("target-repo", "", "A repository checkout to check as a run and a submit would: its verify command, root AGENTS.md, compose file and declared Go, Python and Node versions. Empty skips these checks.")
 }
 
 // composeServicesSpecAtCommit loads the compose spec a run against dir at
@@ -161,9 +161,7 @@ func formatGiB(b int64) string {
 // doctorTargetRepoSubmitChecks reports what `factoryd submit` would refuse
 // against repo with no per-request flags: a missing verify command (a
 // warning, since -verify-command supplies one), a root AGENTS.md that is
-// missing or empty at HEAD (a FAIL) and the project-bootstrap
-// preflight under the repo's own .factory.yml profile (a FAIL, the same
-// checks submit runs). Without it, doctor -target-repo passed a repo that
+// missing or empty at HEAD (a FAIL). Without it, doctor -target-repo passed a repo that
 // submit then refused.
 func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 	abs, err := filepath.Abs(repo)
@@ -192,16 +190,7 @@ func doctorTargetRepoSubmitChecks(repo string) []doctorCheck {
 	} else {
 		checks = append(checks, doctorCheck{Name: fmt.Sprintf("verify command for %s: %s", repo, cfg.VerifyCommand)})
 	}
-
-	name := "submit preflight for " + repo
-	if cfg.PreflightProfile == projectconfig.PreflightProfileBrownfield {
-		return append(checks, doctorCheck{Name: name + ": preflight_profile brownfield"})
-	}
-	if failures := requestsubmit.ProjectBootstrapFailures(abs, cfg.PreflightProfile); len(failures) > 0 {
-		return append(checks, doctorCheck{Name: name, Err: fmt.Errorf("%s", strings.Join(failures, " | ")),
-			Fix: fmt.Sprintf("commit preflight_profile: brownfield in %s (or submit with -preflight-profile brownfield) if this repo has not adopted spec/spec.md, spec/contract.md and ARCHITECTURE.md", projectconfig.FileName)})
-	}
-	return append(checks, doctorCheck{Name: name + ": spec/spec.md, spec/contract.md and ARCHITECTURE.md pass"})
+	return checks
 }
 
 // doctorCheckRequiredBinaries checks a repo's committed required_binaries

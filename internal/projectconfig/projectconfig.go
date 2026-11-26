@@ -35,11 +35,6 @@ const FileName = ".factory.yml"
 // FileName commands call in. Like FileName it is protected at release.
 const DirName = ".factory"
 
-// PreflightProfileBrownfield mirrors cmd/factoryd's own preflightProfileBrownfield
-// constant. Duplicated rather than imported: cmd/factoryd is a main package
-// and internal/projectconfig must not depend on it.
-const PreflightProfileBrownfield = "brownfield"
-
 // Config is .factory.yml's schema. Every field is optional.
 //
 // sandbox_image is deliberately not a field: the API path's own
@@ -86,7 +81,6 @@ type Config struct {
 	// RequiredBinaries names executables the operator-selected worker image
 	// must provide for this repository's verify/setup commands.
 	RequiredBinaries    []string `yaml:"required_binaries"`
-	PreflightProfile    string   `yaml:"preflight_profile"`
 	ProtectedPaths      []string `yaml:"protected_paths"`
 	TokenCeiling        int64    `yaml:"token_ceiling"`
 	CostCeilingMicroUSD int64    `yaml:"cost_ceiling_micro_usd"`
@@ -231,9 +225,6 @@ var designGuideNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 // config, so a bad .factory.yml fails at load time with an actionable
 // message instead of surfacing as a confusing failure downstream.
 func (c *Config) Validate() error {
-	if c.PreflightProfile != "" && c.PreflightProfile != PreflightProfileBrownfield {
-		return fmt.Errorf("preflight_profile must be \"\" or %q, got %q", PreflightProfileBrownfield, c.PreflightProfile)
-	}
 	for _, p := range c.ProtectedPaths {
 		if p == "" {
 			return errors.New("protected_paths must not contain an empty entry")

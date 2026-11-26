@@ -1295,23 +1295,6 @@ func renderReviewerAdviceMarkdown(cr *run.CodeReviewResult) string {
 // silently dropped). Best-effort and non-fatal, like every other
 // cross-run attribution write in this file: the run record itself (not
 // this stored decision) is the attribution's real source of truth.
-//
-// Deliberately NOT called from recordSpecDriftIfDetected (found via the
-// same review round): unlike a full-suite regression, which is only ever
-// attributed after the successor run has itself fully completed (already
-// past any chain validation that could reject it), spec-drift detection
-// runs *before* the -repository path's own chain validation
-// (ValidateSliceChainActivity) confirms the declared successor is even a
-// legitimate one -- recordSpecDriftIfDetected's own doc comment already
-// documented this as an accepted approximation ("a chain that later
-// turns out stale... may still have been marked drifted here") back when
-// spec drift was purely advisory and never gated anything. Immediately
-// flipping an already-published Allowed: true decision to denied on that
-// same speculative signal would make a previously-harmless approximation
-// actively wrong. release.MergePolicyCheck still denies on
-// SpecDriftDetectedByRunID for any future fresh evaluation, per the
-// original review's own request; only the eager retroactive flip is
-// withheld here.
 func invalidateStoredReleaseDecision(dataDir, project, runID, reason string) {
 	if err := release.InvalidateDecision(dataDir, project, runID, reason, time.Now().Format(time.RFC3339)); err != nil {
 		log.Printf("run %s: warning: could not invalidate release decision: %v", runID, err)

@@ -102,7 +102,7 @@ func (impl realForge) insideGitWorkTree(dir string) bool {
 // Refuses outright if path's own directory is inside a git working tree
 // (forge.insideGitWorkTree) -- point -config somewhere outside any repo
 // instead. Creates the file with O_EXCL|O_NOFOLLOW: O_EXCL means a
-// concurrent creator (a second `install-service`/`quickstart` racing this
+// concurrent creator (a second `service install`/`quickstart` racing this
 // one) fails closed instead of one silently clobbering the other's token,
 // and O_NOFOLLOW refuses to write through a symlink some other local
 // process may have planted at this exact path ahead of us. A plist never
@@ -134,7 +134,7 @@ func generateTokenFile(dp *deps, path string) (string, error) {
 
 // ensureTokenFile returns the token at path, reusing it unchanged if the
 // file already exists and passes every inspectTokenFile check (a reinstall
-// or `install-service -force` must never rotate a token an operator's
+// or `service install -force` must never rotate a token an operator's
 // browser or client may already hold), and generating a fresh one only if
 // it does not exist at all. An existing file that fails inspection (bad
 // permissions, a symlink, wrong owner, empty) is refused loudly -- returned

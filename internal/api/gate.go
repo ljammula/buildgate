@@ -148,7 +148,7 @@ func (s *Server) consoleBearer(r *http.Request) bool {
 // given as the gate token or, on this machine, the console token: the gate is
 // on and r is not local, or a read token is set, which no console holds.
 // With a read token, the gate off and no console token, no console can read
-// until `factoryd gate-token` writes one; the console asks for it all the
+// until `factoryd remote token` writes one; the console asks for it all the
 // same.
 func (s *Server) gateRequired(r *http.Request) bool {
 	return (!s.local(r) && s.gate().On) || s.readToken != ""

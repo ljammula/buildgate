@@ -7,23 +7,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/modelhost"
 	"buildgate/internal/run"
-	"buildgate/internal/workflow"
 )
 
-// TestIntegrationDaemonReclaimWaitsForComposeServicesSlot: the daemon's
+// TestIntegrationWorkerReclaimWaitsForComposeServicesSlot: the worker's
 // recovery Worker runs a crashed submitter's remaining phases, which
 // launch sidecars, so reclaiming a run whose compose file has services
 // needs the host-wide compose slot the submitter held. While another run
 // holds it, the reclaim is deferred to a later scan; once released, the
 // run is reclaimed.
-func TestIntegrationDaemonReclaimWaitsForComposeServicesSlot(t *testing.T) {
+func TestIntegrationWorkerReclaimWaitsForComposeServicesSlot(t *testing.T) {
 	// not parallel-safe: isolatedTemporalAddress calls t.Setenv.
 	address := isolatedTemporalAddress(t)
 	ws := newFixtureRepo(t)
@@ -45,12 +42,11 @@ func TestIntegrationDaemonReclaimWaitsForComposeServicesSlot(t *testing.T) {
 	}
 	repository := fmt.Sprintf("fixture/reclaim-compose-%d", time.Now().UnixNano())
 
-	env := isolatedSessionConfigEnv(t, "sandbox_docker: "+fakeSandboxDockerBinary(t)+"\nsandbox_image: "+fakeSandboxImage+"\nregistry_proxy: false\n")
-	for _, kv := range env {
-		if home, ok := strings.CutPrefix(kv, "HOME="); ok {
-			t.Setenv("HOME", home) // the slot below and the daemon's share one locks dir
-		}
-	}
+	// The slot below and the worker's reclaim share one locks dir.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("FAKE_BUILD_APP_MODE", "commit")
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 	held, err := modelhost.AcquireNamed(context.Background(), "compose-services", "run-holding-the-slot", 1, nil)
 	if err != nil {
 		t.Fatalf("hold the compose slot: %v", err)
@@ -62,20 +58,11 @@ func TestIntegrationDaemonReclaimWaitsForComposeServicesSlot(t *testing.T) {
 		}
 	}()
 
-	daemonCmd := factorydCommand(t, "daemon", "-temporal-address", address, "-repository", repository, "-data-dir", dataDir)
-	daemonCmd.Env = append(append(os.Environ(), "FAKE_BUILD_APP_MODE=commit", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null"), env...)
-	var out synchronizedBuffer
-	daemonCmd.Stdout, daemonCmd.Stderr = &out, &out
-	if err := daemonCmd.Start(); err != nil {
-		t.Fatalf("start factoryd daemon: %v", err)
+	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = daemonCmd.Process.Signal(syscall.SIGTERM)
-		_ = daemonCmd.Wait()
-		t.Logf("daemon output:\n%s", out.String())
-	})
-	heartbeatPath := daemonheartbeat.Path(dataDir, workflow.RepositoryOwnerWorkflowID(repository))
-	waitFor(t, 15*time.Second, "daemon heartbeat", func() bool { _, err := daemonheartbeat.Read(heartbeatPath); return err == nil })
+	out := startWorkerReclaim(t, address, dataDir, scriptPath)
 
 	runID := fmt.Sprintf("fixture-crashed-compose-run-%d", time.Now().UnixNano())
 	seeded := &run.Run{ID: runID, Ticket: "fixture-ticket", WorkspacePath: ws, ProjectPath: ws, Repository: repository,
@@ -88,7 +75,7 @@ func TestIntegrationDaemonReclaimWaitsForComposeServicesSlot(t *testing.T) {
 		return strings.Contains(out.String(), "recovery for run "+runID+" deferred until the compose sidecars slot is free")
 	})
 	if strings.Contains(out.String(), "reclaiming nonterminal run "+runID) {
-		t.Fatalf("daemon reclaimed %s while another run held the compose slot:\n%s", runID, out.String())
+		t.Fatalf("worker reclaimed %s while another run held the compose slot:\n%s", runID, out.String())
 	}
 
 	if err := held.Release(); err != nil {
@@ -98,15 +85,4 @@ func TestIntegrationDaemonReclaimWaitsForComposeServicesSlot(t *testing.T) {
 	waitFor(t, 90*time.Second, "reclaim after the slot freed", func() bool {
 		return strings.Contains(out.String(), "reclaiming nonterminal run "+runID)
 	})
-}
-
-func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 }

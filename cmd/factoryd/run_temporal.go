@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"slices"
-	"strings"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
@@ -317,7 +316,7 @@ func (impl realTemporal) stillRunning(temporalClient client.Client, execution cl
 
 // workflowInput is the RunWorkflowInput of the run: the one place a run's
 // options become workflow input. runViaRepositoryOwner then sets its own
-// Project, RepositoryOwnerID and TaskQueue on the result. The parity suite
+// Project and TaskQueue on the result. The parity suite
 // (parity_direct_temporal_test.go) builds its input through this function
 // too, so a change to how a real run's input is built shows up there, and
 // run_input_golden_test.go compares the result for a full flag set with a
@@ -519,7 +518,7 @@ func startRunWorkflow(dp *deps, runCtx context.Context, temporalClient client.Cl
 	// runOptions.workflowInput is shared with runViaRepositoryOwner and with
 	// the Temporal-parity test's own runTemporalPathFixture (see that
 	// function's doc comment) -- unlike runViaRepositoryOwner, this path
-	// never sets RunWorkflowInput.Project/RepositoryOwnerID/TaskQueue
+	// never sets RunWorkflowInput.Project/TaskQueue
 	// (this Worker always polls its own run-unique task queue, set via
 	// startOpts.TaskQueue above instead).
 	runInput := opts.workflowInput()
@@ -1002,7 +1001,7 @@ func rollbackIsolatedWorkspaceOnSaveFailure(r *run.Run) {
 // durable terminal state, so wiring it in here — rather than as a new
 // Activity — closes the gap for all three without depending on the
 // original submitting process still being alive (reconcileReclaimedRun in
-// particular may run in a different process, the daemon, well after that
+// particular may run in a different process, the worker, well after that
 // process gave up). Callers must invoke this only after their own run's
 // terminal quarantine state is already durably saved, for this
 // crash-window reason: a crash
@@ -1047,81 +1046,6 @@ func invalidatePriorRunOnFullSuiteRegression(dp *deps, dataDir, runID, priorRunI
 	})
 	if lockErr != nil {
 		log.Printf("run %s: warning: could not record full-suite invalidation on prior run %q: %v", runID, priorRunID, lockErr)
-	}
-}
-
-// recordSpecDriftIfDetected is gap 5's cross-run attribution (the plan's
-// 2026-08-28 Opus review, "spec drift across a long build is unmanaged"):
-// compares this run's freshly-read product-level spec/contract hashes
-// against what the declared predecessor recorded when it went through the
-// same project-bootstrap preflight. A mismatch means the project's root
-// spec.md/contract.md changed sometime between the two runs — not
-// necessarily wrong, a deliberate mid-build revision is legitimate — so
-// this never halts or blocks either run. It only durably flags the
-// predecessor for a human later auditing its acceptance evidence: the
-// requirements it was judged against may since have changed. Skipped
-// entirely (both sides empty) when either run's own preflight was
-// bypassed via -skip-project-check, or ran against a project that hadn't
-// adopted the spec/spec.md-spec/contract.md convention — empty means
-// "unknown", never treated as "matches".
-//
-// prior.State == run.StateAccepted && prior.ProjectPath == thisProjectPath
-// are checked first (found via a local codex review round): without this,
-// a -prior-run declaration naming another project entirely, or a
-// non-accepted run, would still get durably marked drifted here — before
-// ValidateSliceChain/ValidateSliceChainActivity ever rejects the chain as
-// invalid — producing a false attribution against a predecessor this run
-// was never actually validated to continue from. Every call site is
-// additionally responsible for calling this only once its own path's
-// strongest available chain validation has passed (see each call site's
-// own comment): a plain run's ValidateSliceChain/GitIsClean confirm
-// base_sha/result_sha and workspace cleanliness too; -repository has no
-// local equivalent to wait for, so its call site relies on these two
-// cheap invariants alone.
-//
-// Loads and saves the predecessor under run.WithLock's real cross-process
-// flock, reloading fresh inside the lock (found via the same review
-// round, mirroring invalidatePriorRunOnFullSuiteRegression's own fix) —
-// prior (the caller's already-loaded copy) is read only for its
-// ProductSpecSHA256/ContractSHA256, ID, State, and ProjectPath, never
-// passed into the locked section itself, so a concurrent override landing
-// between the caller's own load and this call can't be silently
-// overwritten by a stale copy.
-func recordSpecDriftIfDetected(dp *deps, dataDir, thisRunID, thisProjectPath string, prior *run.Run, productSpecSHA256, contractSHA256 string) {
-	if prior.State != run.StateAccepted || prior.ProjectPath != thisProjectPath {
-		return
-	}
-	specDrifted := prior.ProductSpecSHA256 != "" && productSpecSHA256 != "" && prior.ProductSpecSHA256 != productSpecSHA256
-	contractDrifted := prior.ContractSHA256 != "" && contractSHA256 != "" && prior.ContractSHA256 != contractSHA256
-	if !specDrifted && !contractDrifted {
-		return
-	}
-	var changed []string
-	if specDrifted {
-		changed = append(changed, "spec/spec.md")
-	}
-	if contractDrifted {
-		changed = append(changed, "spec/contract.md")
-	}
-	priorID := prior.ID
-	lockErr := run.WithLock(dataDir, priorID, func() error {
-		fresh, err := run.Load(dataDir, priorID)
-		if err != nil {
-			return err
-		}
-		fresh.SpecDriftDetectedByRunID = thisRunID
-		fresh.SpecDriftDetectedAt = time.Now().Format(time.RFC3339)
-		fresh.SpecDriftReason = fmt.Sprintf("run %q (its declared successor) observed %s changed since this run's own project-bootstrap preflight recorded it — this run's acceptance evidence may have been judged against requirements that have since changed", thisRunID, strings.Join(changed, " and "))
-		// Deliberately does not also call invalidateStoredReleaseDecision
-		// -- see its own doc comment for why spec drift, unlike a proven
-		// full-suite regression, is too speculative a signal at the point
-		// this function runs (before the -repository path's own chain
-		// validation confirms thisRunID is even a legitimate successor)
-		// to retroactively flip an already-published decision on.
-		return save(dp, fresh, dataDir)
-	})
-	if lockErr != nil {
-		log.Printf("run %s: warning: could not record spec/contract drift on prior run %q: %v", thisRunID, priorID, lockErr)
 	}
 }
 

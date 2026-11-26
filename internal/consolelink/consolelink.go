@@ -212,7 +212,7 @@ func join(base, segment, id string) string {
 	return strings.TrimRight(base, "/") + "/" + segment + "/" + id
 }
 
-// remoteAddressFile is where `factoryd remote-console` records, inside the
+// remoteAddressFile is where `factoryd remote on` records, inside the
 // data dir, the base URL its console is reached at from another machine,
 // and under it the path of the record that makes `serve` accept that host.
 const remoteAddressFile = "console-remote-address"

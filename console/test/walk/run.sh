@@ -95,7 +95,7 @@ if [ ! -d "$walk_dir/workspace/.git" ]; then
 fi
 
 # Its own empty config directory: with the operator's, a machine that has a
-# stable start token (quickstart, install-service) prints no "#t=" link, and
+# stable start token (quickstart, service install) prints no "#t=" link, and
 # the walk would run under that operator's session config.
 mkdir -p "$walk_dir/config"
 if [ "${WALK_SEED:-}" = demo ]; then

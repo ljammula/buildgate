@@ -19,12 +19,11 @@ import (
 // ceiling-vs-budget interaction still exercises the real 5x-budget
 // default resolution. gateCommands starts empty: applyProjectConfigDefaults
 // adds the repository gates the file defines under policy.RepoGateCheck(id).
-func newProjectConfigTestFlags() (fs *flag.FlagSet, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, preflightProfile, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget *int, meterCostBudget *int64) {
+func newProjectConfigTestFlags() (fs *flag.FlagSet, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget *int, meterCostBudget *int64) {
 	fs = flag.NewFlagSet("test", flag.ContinueOnError)
 	verifyCommand = fs.String("verify-command", "make verify", "")
 	fastCheckCommand = fs.String("fast-check-command", "", "")
 	gateCommands = map[string]*string{}
-	preflightProfile = fs.String("preflight-profile", "", "")
 	releaseProtectedPaths = fs.String("release-protected-paths", "", "")
 	testPatterns = new([]string)
 	meterTokenCeiling = fs.Int("meter-token-ceiling", 0, "")
@@ -71,18 +70,17 @@ func TestApplyProjectConfigDefaultsFillsUnsetFlags(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFactoryYML(t, dir, `verify_command: "make ci-verify"
 fast_check_command: "make fast-check"
-preflight_profile: brownfield
 protected_paths:
   - "go.mod"
 token_ceiling: 42
 cost_ceiling_micro_usd: 99
 `)
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 
@@ -91,9 +89,6 @@ cost_ceiling_micro_usd: 99
 	}
 	if *fastCheckCommand != "make fast-check" {
 		t.Errorf("fastCheckCommand = %q", *fastCheckCommand)
-	}
-	if *preflightProfile != "brownfield" {
-		t.Errorf("preflightProfile = %q", *preflightProfile)
 	}
 	if *releaseProtectedPaths != "go.mod" {
 		t.Errorf("releaseProtectedPaths = %q", *releaseProtectedPaths)
@@ -113,8 +108,8 @@ cost_ceiling_micro_usd: 99
 func TestApplyProjectConfigDefaultsAddsTheRepositorysOwnGates(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFactoryYML(t, dir, "gates:\n  - id: lint\n    command: \"golangci-lint run ./...\"\n  - id: audit\n    command: \"govulncheck ./...\"\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 	if len(gateCommands) != 2 || *gateCommands["repo-lint"] != "golangci-lint run ./..." || *gateCommands["repo-audit"] != "govulncheck ./..." {
@@ -133,14 +128,13 @@ func TestApplyProjectConfigDefaultsExplicitFlagAlwaysWins(t *testing.T) {
 	// contract for verify-command/fast-check-command.
 	writeTestFactoryYML(t, dir, `verify_command: "make ci-verify"
 fast_check_command: "make ci-fast-check"
-preflight_profile: brownfield
 `)
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse([]string{"-verify-command", "make my-own-verify", "-fast-check-command", "make my-own-fast-check", "-meter-token-ceiling", "7"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 
@@ -155,10 +149,6 @@ preflight_profile: brownfield
 	if *meterTokenCeiling != 7 {
 		t.Errorf("explicit meter-token-ceiling must survive with no config ceiling, got %d", *meterTokenCeiling)
 	}
-	// preflight-profile was never named explicitly, so the config value applies.
-	if *preflightProfile != "brownfield" {
-		t.Errorf("preflightProfile = %q, want config default to apply", *preflightProfile)
-	}
 }
 
 // TestApplyProjectConfigDefaultsCeilingConfigCanTightenAnExplicitFlag is
@@ -170,11 +160,11 @@ preflight_profile: brownfield
 func TestApplyProjectConfigDefaultsCeilingConfigCanTightenAnExplicitFlag(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFactoryYML(t, dir, "token_ceiling: 10\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse([]string{"-meter-token-ceiling", "1000"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 	if *meterTokenCeiling != 10 {
@@ -192,11 +182,11 @@ func TestApplyProjectConfigDefaultsCeilingConfigCanTightenAnExplicitFlag(t *test
 func TestApplyProjectConfigDefaultsCeilingConfigCannotRaiseAboveOperatorSet(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFactoryYML(t, dir, "cost_ceiling_micro_usd: 999999999\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse([]string{"-meter-cost-ceiling-micro-usd", "5"}); err != nil {
 		t.Fatal(err)
 	}
-	err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget)
+	err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget)
 	if err == nil {
 		t.Fatal("expected an error: a repo's cost_ceiling_micro_usd may only lower the session ceiling")
 	}
@@ -213,11 +203,11 @@ func TestApplyProjectConfigDefaultsCeilingConfigCannotRaiseAboveOperatorSet(t *t
 func TestApplyProjectConfigDefaultsCeilingZeroConfigNeverApplies(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFactoryYML(t, dir, "verify_command: \"make verify\"\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 	if *meterTokenCeiling != 0 {
@@ -258,11 +248,11 @@ func TestApplyProjectConfigDefaultsCeilingComparesAgainstEffectiveNotRawZero(t *
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			writeTestFactoryYML(t, dir, tc.yaml)
-			fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+			fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 			if err := fs.Parse(nil); err != nil {
 				t.Fatal(err)
 			}
-			err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget)
+			err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected an error for a looser-than-effective config ceiling")
@@ -292,14 +282,14 @@ func TestApplyProjectConfigDefaultsCeilingEqualToDefaultLeftAtZero(t *testing.T)
 	dir := t.TempDir()
 	// Default token ceiling resolves to 5 * 1,000,000 = 5,000,000.
 	writeTestFactoryYML(t, dir, "token_ceiling: 5000000\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	// Explicit, looser than the config's tightened value, so the
 	// tightening rule does apply -- the only question is what value it
 	// writes.
 	if err := fs.Parse([]string{"-meter-token-ceiling", "20000000"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 	if *meterTokenCeiling != 0 {
@@ -312,31 +302,28 @@ func TestApplyProjectConfigDefaultsNoFactoryYMLIsNoop(t *testing.T) {
 	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
 		t.Fatal(err)
 	}
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 
 	if *verifyCommand != "make verify" {
 		t.Errorf("verifyCommand should keep its flag default, got %q", *verifyCommand)
 	}
-	if *preflightProfile != "" {
-		t.Errorf("preflightProfile should keep its flag default, got %q", *preflightProfile)
-	}
 }
 
 func TestApplyProjectConfigDefaultsRejectsInvalidConfig(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFactoryYML(t, dir, "preflight_profile: strict\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	writeTestFactoryYML(t, dir, "protected_paths:\n  - \"\"\n")
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err == nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err == nil {
 		t.Fatal("expected error for invalid .factory.yml")
 	}
 }
@@ -349,11 +336,11 @@ func TestApplyProjectConfigDefaultsRejectsInvalidConfig(t *testing.T) {
 func TestApplyProjectConfigDefaultsRejectsSandboxImageKey(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFactoryYML(t, dir, "sandbox_image: \"registry.example/org/img@sha256:deadbeef\"\n")
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err == nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err == nil {
 		t.Fatal("expected error: sandbox_image is not a recognized key")
 	}
 }

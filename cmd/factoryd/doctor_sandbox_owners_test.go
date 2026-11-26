@@ -96,8 +96,8 @@ func TestDoctorSandboxRowWarnsForALostOrUnknownSandboxOnly(t *testing.T) {
 		t.Errorf("a lost sandbox must warn, name its run and data dir, and name the fix: %+v", lost)
 	}
 	unknown := doctorCheckSandboxOwners([]sandboxOwner{{name: "sb-stranger"}})
-	if unknown.Err == nil || !unknown.Advisory || !strings.Contains(unknown.Fix, "-data-dir") {
-		t.Errorf("a sandbox of no known run must warn and say how to point doctor at its data dir: %+v", unknown)
+	if unknown.Err == nil || !unknown.Advisory || !strings.Contains(unknown.Fix, "-remove-sandbox") {
+		t.Errorf("a sandbox of no known run must warn and name the way to remove it: %+v", unknown)
 	}
 }
 

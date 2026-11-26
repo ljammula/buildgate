@@ -679,16 +679,6 @@ type Request struct {
 	// own Verify-Command as the full suite instead of FullSuiteCommand, the
 	// verify command as it was at submit (ticketQueueEntry).
 	FullSuiteSource string `json:"full_suite_source,omitempty"`
-	// PreflightProfile mirrors VerifyCommand's own reasoning exactly, for
-	// `factoryd submit`'s -preflight-profile flag instead of
-	// -verify-command: recorded here so an operator who passed it
-	// explicitly (rather than committing preflight_profile to
-	// .factory.yml) has it survive to each ticket's build, which is where
-	// it is actually consumed (buildRequestBuildArgs/runCorrectiveRound
-	// via QueueEntry.PreflightProfile). Empty otherwise, which leaves a
-	// build to fall back to whatever -preflight-profile/.factory.yml the
-	// eventual `factoryd run` invocation resolves on its own.
-	PreflightProfile string `json:"preflight_profile,omitempty"`
 
 	// TestPatterns are the workspace .factory.yml's test_patterns as they
 	// were at submit: which files count as tests when the plan review reads

@@ -109,11 +109,11 @@
           },
           {
             "label": "The newest log",
-            "command": "factoryd logs -data-dir /data run-quarantined"
+            "command": "factoryd logs run-quarantined"
           },
           {
             "label": "Every log and saved prompt",
-            "command": "factoryd logs -data-dir /data -list run-quarantined"
+            "command": "factoryd logs -list run-quarantined"
           }
         ]
       }

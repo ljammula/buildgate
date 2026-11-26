@@ -1270,7 +1270,7 @@ type NotificationRecord struct {
 	// Subject names the request Ask is about, as the console does: its
 	// project and title.
 	Subject string `json:"subject,omitempty"`
-	// RemoteLink is Link through the address `factoryd remote-console`
+	// RemoteLink is Link through the address `factoryd remote on`
 	// recorded, for a channel read on another machine (Slack, Discord).
 	// Empty while the remote console is off. It carries no token.
 	RemoteLink string `json:"remote_link,omitempty"`
@@ -1398,6 +1398,16 @@ type Run struct {
 	// all, and every repeat run against a known project still required
 	// retyping it (found via review).
 	Repository string `json:"repository,omitempty"`
+	// SandboxDocker/DockerHost/DockerContext are the Docker a `-repository`
+	// submitter launches this run's sandboxes through: its resolved
+	// -sandbox-docker executable and its DOCKER_HOST and DOCKER_CONTEXT
+	// (daemonheartbeat.DockerEndpoint). The worker's reclaim recovers the run
+	// only on the same Docker, so it never relaunches a run's sandboxes where
+	// its earlier containers are invisible. Empty for any other run, and for a
+	// record written before the fields existed, which reads as unknown.
+	SandboxDocker string `json:"sandbox_docker,omitempty"`
+	DockerHost    string `json:"docker_host,omitempty"`
+	DockerContext string `json:"docker_context,omitempty"`
 	// TemporalWorkflowID/TemporalRunID/TemporalTaskQueue/TemporalAddress
 	// link this run's own record to the Temporal Web UI
 	// (http://localhost:8233 locally) so an operator can look up the
@@ -1427,19 +1437,6 @@ type Run struct {
 	// a repository command sees `.factory/` as this commit holds it
 	// (Attempt.FactoryDirSHA256).
 	ProjectConfigCommitSHA string `json:"project_config_commit_sha,omitempty"`
-	// ProductSpecSHA256/ContractSHA256 are the hashes of the *project's*
-	// root spec/spec.md and spec/contract.md content at the moment this
-	// run's mandatory project-bootstrap preflight read them — distinct
-	// from SpecSHA256 above, which pins the per-ticket spec, not the
-	// product-level spec/contract a whole multi-slice build is judged
-	// against. Empty when the preflight was skipped (-skip-project-check)
-	// or a project hasn't adopted the spec/spec.md-spec/contract.md
-	// convention. Exists to make gap 5 of the plan's 2026-08-28 Opus
-	// review checkable ("spec drift across a long build is unmanaged"):
-	// see SpecDriftDetectedByRunID below for how a later chained run
-	// compares its own freshly-read values against these.
-	ProductSpecSHA256 string `json:"product_spec_sha256,omitempty"`
-	ContractSHA256    string `json:"contract_sha256,omitempty"`
 	// SkipProjectCheck records whether this run's mandatory
 	// project-bootstrap preflight was bypassed via -skip-project-check
 	// (converted from opt-in to required, 2026-08-29). Before this field
@@ -1447,10 +1444,7 @@ type Run struct {
 	// whether the preflight ran or was bypassed for a project that hadn't
 	// adopted the spec/contract/architecture convention -- the durable
 	// record looked identical to a run that never needed the escape hatch
-	// at all, indistinguishable from ProductSpecSHA256/ContractSHA256
-	// alone (both are also empty for a project that simply has no
-	// spec/spec.md yet, not only for a skipped preflight). Found via the
-	// 2026-09-03 Opus factory-pipeline review.
+	// at all. Found via the 2026-09-03 Opus factory-pipeline review.
 	SkipProjectCheck bool `json:"skip_project_check,omitempty"`
 	// SpecTicketScopeMismatchFields records which of
 	// Allowed-Files:/Verify-Command: -ticket-file declared differently (or not at all)
@@ -1465,21 +1459,19 @@ type Run struct {
 	// agreed, silently defeating the opt-out's own "explicit, logged"
 	// design (found via review).
 	SpecTicketScopeMismatchFields []string `json:"spec_ticket_scope_mismatch_fields,omitempty"`
-	// SpecDriftDetectedByRunID/SpecDriftDetectedAt/SpecDriftReason are gap
-	// 5's cross-run attribution: set on THIS run's record when a later
-	// chained run (one that declared this run as its -prior-run) found
-	// that the project's root spec.md/contract.md no longer hashes the
-	// same as what this run's own ProductSpecSHA256/ContractSHA256 above
-	// recorded. Unlike InvalidatedByRunID below (a proven full-suite
+	// SpecDriftDetectedByRunID/SpecDriftDetectedAt/SpecDriftReason are a
+	// cross-run attribution a run record may carry: a later chained run
+	// found that the project's root spec.md/contract.md no longer hashed the
+	// same as when this run was judged. Nothing writes them now (the
+	// preflight no longer reads those files); the release decision still
+	// denies a record that carries one. Unlike InvalidatedByRunID below (a proven full-suite
 	// regression), a spec/contract edit is not inherently wrong — it may
 	// be a deliberate, planned revision mid-build — so detecting it never
 	// halts or quarantines either run and never changes State. It is
 	// purely a durable, attributable flag for a human later auditing this
 	// run's acceptance evidence: the requirements it was judged against
 	// may since have changed. Empty/zero means no drift was observed
-	// relative to any later chained run. See runProjectBootstrapCheck and
-	// its -prior-run comparison call site (cmd/factoryd/main.go) for where
-	// this is set.
+	// relative to any later chained run.
 	SpecDriftDetectedByRunID string `json:"spec_drift_detected_by_run_id,omitempty"`
 	SpecDriftDetectedAt      string `json:"spec_drift_detected_at,omitempty"`
 	SpecDriftReason          string `json:"spec_drift_reason,omitempty"`
@@ -1523,7 +1515,7 @@ type Run struct {
 	// succeeded, or the repository owner's own durable result later
 	// confirmed it via reconciliation. Found via review: treating every
 	// StateHalted record as proof the underlying Temporal execution
-	// stopped let a daemon's reclaim scan retire that run's recovery
+	// stopped let a worker's reclaim scan retire that run's recovery
 	// Worker (or never start one at all) while the child could still
 	// genuinely be running, stranding it with no poller.
 	//
@@ -1829,7 +1821,7 @@ type Run struct {
 	// cmd/factoryd, since internal/release already imports this package
 	// and internal/run cannot import it back without a cycle), recorded
 	// once when the run starts so a LATER reconciliation of this same run
-	// -- Temporal reconcileReclaimedRun, or a daemon-restart reclaim --
+	// -- Temporal reconcileReclaimedRun, or a worker-restart reclaim --
 	// evaluates the release decision against the policy that was actually
 	// configured, not against a zero-value release.MergePolicy{} that
 	// denies every PR unconditionally (found via review: both
@@ -1921,7 +1913,7 @@ func (r *Run) ApplyOverride(by, reason string, newState State, now func() string
 	// confirmed as HaltConfirmed's underlying question ("is this run
 	// genuinely done, not possibly still running unattended") can get, not
 	// the ambiguous give-up case that field otherwise guards against.
-	// Leaving it false here would make a `factoryd daemon` reclaim scan
+	// Leaving it false here would make a reclaim (reconcileReclaimedRun)
 	// treat an intentionally-halted run as still needing recovery.
 	if newState == StateHalted {
 		r.HaltConfirmed = true

@@ -231,9 +231,6 @@ func BuildTicketRunArgs(dataDir string, entry *QueueEntry, cfg WorkerConfig) []s
 	if entry.Bug {
 		args = append(args, "-bug")
 	}
-	if entry.PreflightProfile != "" {
-		args = append(args, "-preflight-profile", entry.PreflightProfile)
-	}
 	if entry.RequestTicket {
 		scope := "approved"
 		if entry.NoTicketScope {

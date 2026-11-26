@@ -163,15 +163,6 @@ export function NewRequestScreen() {
                     }}
                   />
                 </Field>
-                <Field label="Preflight profile">
-                  <Input
-                    placeholder={'Empty (strict), or "brownfield"'}
-                    value={values.preflightProfile}
-                    onChange={(event) => {
-                      set({ preflightProfile: event.target.value });
-                    }}
-                  />
-                </Field>
               </Disclosure>
             </div>
             <div className="flex flex-col gap-3 bg-surface-sunken/50 p-4">

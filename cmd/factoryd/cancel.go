@@ -24,7 +24,7 @@ import (
 // executing the command.
 func newCancelFlags() (flags *flag.FlagSet, dataDir, reason, configPath *string) {
 	flags = flag.NewFlagSet("cancel", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	reason = flags.String("reason", "", "why the request is being cancelled (optional); recorded on the request's history")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
@@ -39,7 +39,7 @@ func cancelMain(dp *deps, args []string) error {
 	positional := flags.Args()
 	if len(positional) != 1 {
 		flags.Usage()
-		return fmt.Errorf(`usage: factoryd cancel [-reason "<text>"] [-config <path>] [-data-dir <path>] <request-id>`)
+		return fmt.Errorf(`usage: factoryd cancel [-reason "<text>"] [-config <path>] <request-id>`)
 	}
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err

@@ -31,8 +31,8 @@ func mcpTestConfig(t *testing.T) (cfgDir, dataDir string) {
 func runMCP(t *testing.T, dp *deps, args ...string) string {
 	t.Helper()
 	var out bytes.Buffer
-	if err := mcpMain(dp, &out, args); err != nil {
-		t.Fatalf("mcpMain %v: %v", args, err)
+	if err := remoteMain(dp, &out, append([]string{"mcp"}, args...)); err != nil {
+		t.Fatalf("remote mcp %v: %v", args, err)
 	}
 	return out.String()
 }
@@ -49,13 +49,13 @@ func TestMCPMainCreatesRotatesAndRemovesTheToken(t *testing.T) {
 	}
 	source := mcpTokenSource(tokenPath)
 	if got := source(); got != "" {
-		t.Fatalf("before `factoryd mcp`: token source = %q, want the endpoint off", got)
+		t.Fatalf("before `factoryd remote mcp`: token source = %q, want the endpoint off", got)
 	}
 
 	out := runMCP(t, dp)
 	first := source()
 	if first == "" {
-		t.Fatalf("after `factoryd mcp`: no usable token at %s", tokenPath)
+		t.Fatalf("after `factoryd remote mcp`: no usable token at %s", tokenPath)
 	}
 	info, err := os.Stat(tokenPath)
 	if err != nil || info.Mode().Perm() != 0o600 {
@@ -68,7 +68,7 @@ func TestMCPMainCreatesRotatesAndRemovesTheToken(t *testing.T) {
 	}
 
 	if runMCP(t, dp); source() != first {
-		t.Errorf("a second `factoryd mcp` changed the token")
+		t.Errorf("a second `factoryd remote mcp` changed the token")
 	}
 
 	fakeHostOf(dp).tcpListeningFn = func(string) bool { return true }
@@ -89,7 +89,7 @@ func TestMCPMainCreatesRotatesAndRemovesTheToken(t *testing.T) {
 	// A rotation that cannot write the new token leaves the old one working.
 	dp.forge.(*fakeForge).insideGitWorkTreeFn = func(string) bool { return true }
 	var discard bytes.Buffer
-	if err := mcpMain(dp, &discard, []string{"-rotate"}); err == nil {
+	if err := remoteMain(dp, &discard, []string{"mcp", "-rotate"}); err == nil {
 		t.Error("-rotate with the token directory unwritable: want an error")
 	}
 	if got := source(); got != second {
@@ -97,11 +97,11 @@ func TestMCPMainCreatesRotatesAndRemovesTheToken(t *testing.T) {
 	}
 	dp.forge.(*fakeForge).insideGitWorkTreeFn = func(string) bool { return false }
 
-	runMCP(t, dp, "-disable")
+	runMCP(t, dp, "-remove")
 	if got := source(); got != "" {
-		t.Errorf("after -disable: token source = %q, want the endpoint off", got)
+		t.Errorf("after -remove: token source = %q, want the endpoint off", got)
 	}
-	runMCP(t, dp, "-disable")
+	runMCP(t, dp, "-remove")
 }
 
 // TestMCPTokenIsPerProfile: profiles share one directory, and the endpoint
@@ -115,7 +115,7 @@ func TestMCPTokenIsPerProfile(t *testing.T) {
 	}
 	runMCP(t, dp, "-config", other)
 	if got := mcpTokenSource(mcpTokenPathFor(other))(); got == "" {
-		t.Error("the profile `factoryd mcp -config` named has no token")
+		t.Error("the profile `factoryd remote mcp -config` named has no token")
 	}
 	if got := mcpTokenSource(mcpTokenPathFor(filepath.Join(cfgDir, "config.yml")))(); got != "" {
 		t.Errorf("the default profile's endpoint was turned on too (token %q)", got)
@@ -127,16 +127,16 @@ func TestMCPMainRefusesBadInvocations(t *testing.T) {
 	cfgDir, _ := mcpTestConfig(t)
 	var out bytes.Buffer
 	missing := filepath.Join(cfgDir, "typo", "config.yml")
-	if err := mcpMain(dp, &out, []string{"-config", missing}); err == nil {
+	if err := remoteMain(dp, &out, []string{"mcp", "-config", missing}); err == nil {
 		t.Error("-config naming no file: want an error")
 	}
 	if _, err := os.Stat(filepath.Dir(missing)); err == nil {
 		t.Error("-config naming no file created its directory")
 	}
-	if err := mcpMain(dp, &out, []string{"-rotate", "-disable"}); err == nil {
-		t.Error("-rotate -disable: want an error")
+	if err := remoteMain(dp, &out, []string{"mcp", "-rotate", "-remove"}); err == nil {
+		t.Error("-rotate -remove: want an error")
 	}
-	if err := mcpMain(dp, &out, []string{"extra"}); err == nil {
+	if err := remoteMain(dp, &out, []string{"mcp", "extra"}); err == nil {
 		t.Error("a positional argument: want an error")
 	}
 }
@@ -150,5 +150,15 @@ func TestMCPTokenSourceRefusesAnExposedFile(t *testing.T) {
 	}
 	if got := mcpTokenSource(path)(); got != "" {
 		t.Errorf("token source = %q for a 0644 file, want the endpoint off", got)
+	}
+}
+
+// TestRemoteMCPRefusesATokenOnlyFlag: -disable belongs to `remote token`.
+func TestRemoteMCPRefusesATokenOnlyFlag(t *testing.T) {
+	dp := newTestDeps(t)
+	mcpTestConfig(t)
+	var out bytes.Buffer
+	if err := remoteMain(dp, &out, []string{"mcp", "-disable"}); err == nil || !strings.Contains(err.Error(), "takes no -disable") {
+		t.Errorf("remote mcp -disable: err = %v, want it refused", err)
 	}
 }

@@ -85,15 +85,11 @@ func loadConfigForPath(configPath string) (cfg *sessionconfig.Config, path strin
 // had no -config flag at all until this same fix added one.
 // loadSettingsForConfig deliberately does NOT validate roles: --
 // resolving settings must never fail (or print) on its own, since it is
-// also `doctor`'s and `init`/`onboard`'s own sandbox-image-prefill route
-// (loadDefaultSettings): an early version of this function called
+// also `doctor`'s route (loadDefaultSettings): an early version of this function called
 // validateRoles here, which made `doctor` abort before ever printing its
 // check table on an invalid roles: block (instead of reporting it
-// through the "roles resolve" check row like every other diagnosis) and
-// silently broke init/onboard's own
-// `if settings, err := loadDefaultSettings(); err == nil && ...`
-// sandbox-image fallback (init.go/onboard.go), which have nothing to do
-// with roles: at all. Each caller that actually needs roles: enforced
+// through the "roles resolve" check row like every other diagnosis). Each
+// caller that actually needs roles: enforced
 // calls validateRoles explicitly, once, itself: applySessionConfig
 // (worker), serveMain (serve), submitMain (submit), and
 // runMainWithReady (`factoryd run -config`, silently -- see

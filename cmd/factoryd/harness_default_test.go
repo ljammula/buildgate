@@ -65,17 +65,11 @@ func TestVersionMainPrintsVersion(t *testing.T) {
 	}
 }
 
-// TestServeMainWithoutDaemonStartsWithUnwritableHarnessCache is the
-// regression for Codex review of PR #83, round 2: serveMain used to
-// resolve -daemon-build-app-script unconditionally at flag parse, so a
-// read-only/API-only serve deployment with no -daemon-temporal-address
-// (the daemon supervisor path is the only thing on this command that
-// ever touches build_app.py) failed to start over a harness cache it was
-// never going to use. This proves serveMain gets past flag resolution
-// fine with an unwritable XDG_CACHE_HOME as long as -daemon-temporal-
-// address is left unset -- it only needs to fail for an unrelated reason
-// (an already-occupied -addr, so it never actually serves) to prove that.
-func TestServeMainWithoutDaemonStartsWithUnwritableHarnessCache(t *testing.T) {
+// TestServeMainStartsWithUnwritableHarnessCache: serve never runs
+// build_app.py itself, so it must start with an unwritable XDG_CACHE_HOME.
+// It only needs to fail for an unrelated reason (an already-occupied
+// -addr, so it never actually serves) to prove that.
+func TestServeMainStartsWithUnwritableHarnessCache(t *testing.T) {
 	dp := newTestDeps(t)
 	// serveMain now loads the default session config (loadDefaultSettings,
 	// via its own baseSettings assignment) unconditionally on every call --
@@ -108,6 +102,6 @@ func TestServeMainWithoutDaemonStartsWithUnwritableHarnessCache(t *testing.T) {
 		t.Fatal("serveMain unexpectedly succeeded (it should have failed to bind the already-occupied address)")
 	}
 	if strings.Contains(err.Error(), "resolve embedded") {
-		t.Fatalf("serveMain failed resolving the embedded harness even though -daemon-temporal-address was never set: %v", err)
+		t.Fatalf("serveMain failed resolving the embedded harness: %v", err)
 	}
 }

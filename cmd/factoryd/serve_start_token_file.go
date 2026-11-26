@@ -6,7 +6,7 @@ import (
 	"buildgate/internal/sessionconfig"
 )
 
-// serveStableStartTokenFileName is the file `factoryd install-service`
+// serveStableStartTokenFileName is the file `factoryd service install`
 // writes the serve LaunchAgent's stable start token into
 // (<effective config dir>/serve-start-token, mode 0600), and the one
 // `serveMain` reads from -- before ever generating a fresh per-process
@@ -26,19 +26,19 @@ const serveStableStartTokenFileName = "serve-start-token"
 // sessionconfig.DefaultPaths() that already exists on disk. Mirrors
 // resolveServiceConfigPath's own algorithm (install_service.go) but never
 // errors on "nothing found" -- a caller here (serveMain,
-// quickstartEnsureServe, consoleMain, install-service) treats that as
+// quickstartEnsureServe, consoleMain, service install) treats that as
 // simply "no stable token file possible", falling back to an ephemeral
-// per-process token, not a fatal condition the way install-service's own
+// per-process token, not a fatal condition the way service install's own
 // LaunchAgent setup must treat it.
 //
 // Every one of `serve` (-config), `factoryd quickstart` (its own already-
 // resolved session config path), `factoryd console` (-config), and
-// `factoryd install-service` (its own -config) now call this exact same
+// `factoryd service install` (its own -config) now call this exact same
 // function so they can never derive four different token-file locations
 // for what is supposed to be one shared, stable secret (an adversarial
 // review, 2026-09-24): before this fix `serve` had no -config
 // flag at all and always used sessionconfig.LoadDefault()'s fixed
-// default-path search, while install-service's plist could point -config
+// default-path search, while service install's plist could point -config
 // at a non-default path -- a supervised serve LaunchAgent's own token
 // file (keyed off that resolution) would then silently disagree with
 // what a bare `factoryd serve`/`console` invocation (the default search)

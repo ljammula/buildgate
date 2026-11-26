@@ -620,6 +620,15 @@ func statusProfile(configFlag string) (name, path string) {
 	return name, path
 }
 
+// profileConfigArg is the " -config <profile>" a printed command carries so it
+// reads the data dir of the session config in effect (configFlag, else the one
+// resolved): the profile's name, or the quoted path of a config that is not a
+// profile. Empty when no config resolves.
+func profileConfigArg(configFlag string) string {
+	_, path := statusProfile(configFlag)
+	return quickstartConfigArg(path)
+}
+
 // statusProfileLine is `factoryd status`'s first line, so an operator or
 // agent sees which profile and data dir every following row comes from.
 func statusProfileLine(name, path, dataDir string) string {
@@ -646,7 +655,7 @@ type statusFlags struct {
 func newStatusFlags() statusFlags {
 	flags := flag.NewFlagSet("status", flag.ContinueOnError)
 	f := statusFlags{set: flags}
-	f.dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	f.dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.project = flags.String("project", "", "only show runs and requests of this project id, which is the name of the repository's root directory")
 	f.state = flags.String("state", "", "only show runs in this state (e.g. ready, slice_running, verifying, accepted, halted, quarantined), finished ones included")
 	f.n = flags.Int("n", 20, "maximum number of runs to show")

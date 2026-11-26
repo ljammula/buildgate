@@ -16,7 +16,7 @@ import (
 	"buildgate/internal/requestdriver"
 )
 
-// approveMain implements `factoryd approve [-data-dir <path>]
+// approveMain implements `factoryd approve
 // <request-id>` (USAGE.md §11): advances a request out of spec_review
 // (to planning) or plan_review (to building). Shares its actual approval
 // logic -- internal/request.Approve -- with POST /requests/{id}/approve
@@ -28,7 +28,7 @@ import (
 // executing the command.
 func newApproveFlags() (flags *flag.FlagSet, dataDir, configPath *string) {
 	flags = flag.NewFlagSet("approve", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
 	return
@@ -42,7 +42,7 @@ func approveMain(dp *deps, args []string) error {
 	positional := flags.Args()
 	if len(positional) != 1 {
 		flags.Usage()
-		return fmt.Errorf("usage: factoryd approve [-config <path>] [-data-dir <path>] <request-id>")
+		return fmt.Errorf("usage: factoryd approve [-config <path>] <request-id>")
 	}
 	// The session config's data_dir, as submit/retry/status/watch already
 	// honour:
@@ -76,7 +76,7 @@ func approveMain(dp *deps, args []string) error {
 }
 
 // rejectMain implements `factoryd reject -reason "<text>" [-to plan|spec]
-// [-data-dir <path>] <request-id>` (USAGE.md §11): sends a request in
+// <request-id>` (USAGE.md §11): sends a request in
 // spec_review or plan_review back to the prior drafting
 // state, recording -reason on the request's Rejections so the redraft sees it
 // (never in request.md). Shares internal/request.Reject with POST
@@ -101,7 +101,7 @@ func approveMain(dp *deps, args []string) error {
 // executing the command.
 func newRejectFlags() (flags *flag.FlagSet, dataDir, reason, to, configPath, commentsFile *string) {
 	flags = flag.NewFlagSet("reject", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	reason = flags.String("reason", "", "why the request is being rejected; the next redraft is given it")
 	to = flags.String("to", "", "Send a quarantined or halted request back to \"plan\" or \"spec\" to be redrafted. Refused in a review state and once any ticket is accepted. Empty rejects the document at the current review gate.")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
@@ -125,7 +125,7 @@ func rejectMain(dp *deps, args []string) error {
 	positional := flags.Args()
 	if len(positional) != 1 {
 		flags.Usage()
-		return fmt.Errorf(`usage: factoryd reject -reason "<text>" [-to plan|spec] [-config <path>] [-data-dir <path>] <request-id>`)
+		return fmt.Errorf(`usage: factoryd reject -reason "<text>" [-to plan|spec] [-config <path>] <request-id>`)
 	}
 	// See approveMain's matching comment.
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {

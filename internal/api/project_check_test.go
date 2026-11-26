@@ -165,25 +165,3 @@ func TestCheckProjectCheckerErrorReturnsBadRequest(t *testing.T) {
 		t.Errorf("body = %s, want it to name the checker's own error", recorder.Body.String())
 	}
 }
-
-// TestCheckProjectForwardsPreflightProfile proves preflight_profile in the
-// request body reaches the injected ProjectChecker verbatim -- the
-// console's preview must reflect the same profile a real run would use,
-// not always the default strict profile regardless of what the caller
-// intends to start.
-func TestCheckProjectForwardsPreflightProfile(t *testing.T) {
-	var got ProjectCheckRequest
-	server := NewServer(t.TempDir(), WithStartToken("test-token"), WithProjectChecker(func(_ context.Context, req ProjectCheckRequest) (ProjectCheckResponse, error) {
-		got = req
-		return ProjectCheckResponse{Passed: true}, nil
-	}))
-	recorder := httptest.NewRecorder()
-	server.ServeHTTP(recorder, checkProjectRequestFor(t, `{"workspace":"/workspace","preflight_profile":"brownfield"}`))
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	if got.PreflightProfile != "brownfield" {
-		t.Errorf("PreflightProfile = %q, want %q", got.PreflightProfile, "brownfield")
-	}
-}

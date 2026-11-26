@@ -347,48 +347,6 @@ func TestBuildRequestBuildArgsEmitsPrClosesIssueForIssueSource(t *testing.T) {
 	}
 }
 
-// TestBuildRequestBuildArgsCarriesRequestPreflightProfile pins the live
-// bug this guards against: a request submitted with -preflight-profile
-// set (explicitly, or via .factory.yml) must have that profile reach the
-// ticket's own build argv, exactly like its verify command does --
-// otherwise the build silently falls back to the strict default profile
-// and halts a brownfield workspace's preflight on artifacts convention
-// never asked it to produce. Covers both the present and absent cases in
-// one test, table-style, since they're the same code path with only
-// r.PreflightProfile varying.
-func TestBuildRequestBuildArgsCarriesRequestPreflightProfile(t *testing.T) {
-	specPath := filepath.Join(t.TempDir(), "001.spec.md")
-	if err := os.WriteFile(specPath, []byte("Verify-Command: pytest\n\n## Goal\n\ndo the thing\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ticket := request.Ticket{Index: 1, SpecPath: specPath}
-
-	for _, profile := range []string{"brownfield", ""} {
-		r := &request.Request{ID: "req-1", Workspace: "/repos/app", Project: "app", PreflightProfile: profile}
-		args, err := requestdriver.BuildRequestBuildArgs("data", r, ticket, requestdriver.WorkerConfig{})
-		if err != nil {
-			t.Fatalf("buildRequestBuildArgs(PreflightProfile=%q): %v", profile, err)
-		}
-		var got string
-		var found bool
-		for i, a := range args {
-			if a == "-preflight-profile" {
-				found = true
-				got = args[i+1]
-			}
-		}
-		if profile == "" {
-			if found {
-				t.Errorf("PreflightProfile=%q: argv unexpectedly carries -preflight-profile %q", profile, got)
-			}
-			continue
-		}
-		if !found || got != profile {
-			t.Errorf("PreflightProfile=%q: -preflight-profile = %q (found=%v), want %q", profile, got, found, profile)
-		}
-	}
-}
-
 // TestTicketQueueEntryCarriesExecutionModel proves r.Models["execution"]
 // (`factoryd submit -model execution=...`, already validated at submit
 // time against roles.execution.allowed) reaches the ticket's own

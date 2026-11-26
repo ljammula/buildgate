@@ -14,11 +14,11 @@ import (
 const WorkerServiceLabel = "dev.factoryd.worker"
 
 // ServeServiceLabel is the LaunchAgent label for the serve half of
-// `install-service`: a loopback `factoryd serve` an operator no longer needs a dedicated
+// `service install`: a loopback `factoryd serve` an operator no longer needs a dedicated
 // terminal for either, alongside dev.factoryd.worker.
 const ServeServiceLabel = "dev.factoryd.serve"
 
-// WorkerPlistPath returns where install-service writes the LaunchAgent
+// WorkerPlistPath returns where service install writes the LaunchAgent
 // plist: ~/Library/LaunchAgents/dev.factoryd.worker.plist.
 func WorkerPlistPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -28,7 +28,7 @@ func WorkerPlistPath() (string, error) {
 	return filepath.Join(home, "Library", "LaunchAgents", WorkerServiceLabel+".plist"), nil
 }
 
-// ServePlistPath returns where install-service writes the serve
+// ServePlistPath returns where service install writes the serve
 // LaunchAgent plist: ~/Library/LaunchAgents/dev.factoryd.serve.plist.
 func ServePlistPath() (string, error) {
 	home, err := os.UserHomeDir()

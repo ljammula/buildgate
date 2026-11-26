@@ -52,7 +52,7 @@ func newSandboxFlags() sandboxFlags {
 	f := sandboxFlags{set: flag.NewFlagSet("sandbox", flag.ContinueOnError)}
 	f.repo = f.set.String("repo", "", "the repository: its root, or any directory inside it (required)")
 	f.config = f.set.String("config", "", "session config file or profile name; empty uses the active profile, then the default paths")
-	f.dataDir = f.set.String("data-dir", "data", "directory for durable records; must match what 'factoryd worker' uses")
+	f.dataDir = f.set.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.sha256 = f.set.String("sha256", "", "approve: the hash 'sandbox show' printed; required when there is no terminal to ask on")
 	f.revoke = f.set.String("revoke", "", "approve: remove the approval of this hash instead of approving")
 	finishFlags(f.set)

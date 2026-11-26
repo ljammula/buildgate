@@ -19,7 +19,7 @@ func TestServiceManagerFor(t *testing.T) {
 	}
 }
 
-// TestSystemdQuoteRoundTrips: every word install-service writes into a unit
+// TestSystemdQuoteRoundTrips: every word service install writes into a unit
 // reads back as written, whatever it holds.
 func TestSystemdQuoteRoundTrips(t *testing.T) {
 	words := []string{"/home/op/.local/bin/factoryd", "worker", "-config", `/home/op/my "dir"/c.yml`, `a\b`, "50%", "$HOME", "with space", ""}

@@ -71,7 +71,7 @@ func writeCreateTestFactoryYML(t *testing.T, workspace, content string) {
 func TestCreateRequestSuccess(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 
 	server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}))
 
@@ -116,7 +116,7 @@ func TestCreateRequestSuccess(t *testing.T) {
 func TestCreateRequestMatchesSubmit(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 
 	server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}))
 	body := `{"workspace":` + jsonString(workspace) + `,"text":"parity check"}`
@@ -131,9 +131,6 @@ func TestCreateRequestMatchesSubmit(t *testing.T) {
 	}
 	if got.VerifyCommand != "make ci-verify" {
 		t.Errorf("VerifyCommand = %q, want %q", got.VerifyCommand, "make ci-verify")
-	}
-	if got.PreflightProfile != "brownfield" {
-		t.Errorf("PreflightProfile = %q, want %q", got.PreflightProfile, "brownfield")
 	}
 	if got.Source.Kind != request.SourceText {
 		t.Errorf("Source.Kind = %q, want %q", got.Source.Kind, request.SourceText)
@@ -173,7 +170,7 @@ func TestCreateRequestRejectsUnknownWorkspace(t *testing.T) {
 func TestCreateRequestAllowsWorkspaceOfExistingRequest(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 	seedApprovableRequest(t, dataDir, "existing", request.StateSpecReview, false)
 	// seedApprovableRequest hardcodes "/repos/app" as the workspace; move
 	// this fixture's own existing request onto our real git repo instead so
@@ -227,7 +224,7 @@ func TestCreateRequestRefusesARepositoryWithoutAgentsFile(t *testing.T) {
 	if out, err := exec.Command("git", "init", "-q", "-b", "main", workspace).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "files"}} {
@@ -302,7 +299,7 @@ func TestCreateRequestRequiresAuth(t *testing.T) {
 func TestCreateRequestLoopbackSameOriginOnly(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 	server := NewServer(dataDir, WithListenAddr("127.0.0.1:8090"), WithWorkspaces([]string{workspace}))
 
 	body := `{"workspace":` + jsonString(workspace) + `,"text":"loopback same-origin"}`
@@ -405,7 +402,7 @@ func TestCreateRequestNeverRunsGitOnUnlistedWorkspace(t *testing.T) {
 func TestAPICreateRequestAcceptsModelsField(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 
 	server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}), WithSessionRoles(createTestRoutesModeSettingsWithAllowedSonnet()))
 
@@ -441,7 +438,7 @@ func TestAPICreateRequestAcceptsModelsField(t *testing.T) {
 func TestAPICreateRequestRejectsModelOutsideAllowed(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 
 	server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}), WithSessionRoles(createTestRoutesModeSettingsWithAllowedSonnet()))
 
@@ -466,7 +463,7 @@ func TestAPICreateRequestRejectsModelOutsideAllowed(t *testing.T) {
 func TestAPICreateRequestHarnessesField(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 	settings := createTestRoutesModeSettingsWithAllowedSonnet()
 	settings.Roles.Execution.AllowedHarnesses = []string{"pi", "pifork"}
 	server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}), WithSessionRoles(settings))
@@ -508,7 +505,7 @@ func TestCreateRequestRecordsThePlanReviewOptIn(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dataDir := t.TempDir()
 			workspace := initGitWorkspace(t, "app")
-			writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+			writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 			settings := sessionconfig.DefaultSettings()
 			settings.PlanReview = tc.session
 			server := NewServer(dataDir, WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}), WithSessionRoles(settings))

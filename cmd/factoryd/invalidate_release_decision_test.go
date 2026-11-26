@@ -43,60 +43,6 @@ func TestInvalidatePriorRunOnFullSuiteRegressionInvalidatesStoredDecision(t *tes
 	}
 }
 
-// TestRecordSpecDriftIfDetectedDoesNotInvalidateStoredDecision is the
-// regression test for a real GitHub Codex App review finding on this PR:
-// an earlier version of this fix also had recordSpecDriftIfDetected
-// invalidate the prior run's stored release.Decision, exactly like a
-// proven full-suite regression does. But recordSpecDriftIfDetected runs
-// *before* the -repository path's own chain validation
-// (ValidateSliceChainActivity) confirms the declared successor is even a
-// legitimate one (see this function's own doc comment: "a chain that
-// later turns out stale... may still have been marked drifted here" was
-// already an accepted approximation before this PR, back when spec drift
-// was purely advisory). Immediately flipping an already-published
-// Allowed: true decision to denied on that same speculative signal would
-// have made a previously-harmless approximation actively wrong. Only the
-// run.json field write is unconditional; the stored decision must be
-// left untouched.
-func TestRecordSpecDriftIfDetectedDoesNotInvalidateStoredDecision(t *testing.T) {
-	t.Parallel()
-	dataDir := t.TempDir()
-	prior := &run.Run{
-		ID: "run-prior", State: run.StateAccepted, ProjectPath: "/repos/myapp/workspace", Project: "myapp",
-		ProductSpecSHA256: "base-hash",
-	}
-	if err := prior.Save(dataDir); err != nil {
-		t.Fatalf("seed prior run: %v", err)
-	}
-	if err := release.SaveDecision(dataDir, release.Decision{RunID: prior.ID, Project: "myapp", Allowed: true, Evaluated: "2026-09-05T00:00:00Z"}); err != nil {
-		t.Fatalf("seed prior decision: %v", err)
-	}
-
-	recordSpecDriftIfDetected(newTestDeps(t), dataDir, "run-successor", prior.ProjectPath, prior, "different-hash", "")
-
-	reloaded, err := run.Load(dataDir, prior.ID)
-	if err != nil {
-		t.Fatalf("load prior run: %v", err)
-	}
-	if reloaded.SpecDriftDetectedByRunID != "run-successor" {
-		t.Errorf("SpecDriftDetectedByRunID = %q, want %q", reloaded.SpecDriftDetectedByRunID, "run-successor")
-	}
-
-	decision, err := release.LoadDecision(dataDir, "myapp", prior.ID)
-	if err != nil {
-		t.Fatalf("LoadDecision: %v", err)
-	}
-	if decision == nil {
-		t.Fatal("decision = nil, want the previously-saved decision to still exist")
-	}
-	if !decision.Allowed {
-		t.Error("decision.Allowed = false after spec drift was recorded, want true (unchanged) -- spec drift must not retroactively invalidate an already-published decision")
-	}
-	if decision.Invalidated {
-		t.Error("decision.Invalidated = true after spec drift was recorded, want false")
-	}
-}
-
 // TestInvalidatePriorRunOnFullSuiteRegressionWritesATombstoneWhenNoDecisionExistsYet
 // is the regression test for the other half of the same review finding:
 // an earlier version silently dropped the invalidation entirely when no

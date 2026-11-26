@@ -17,13 +17,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
 	temporalclient "go.temporal.io/sdk/client"
 
-	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/release"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -995,259 +993,6 @@ func TestIntegrationTemporalRepositoryOwnerRoutesRun(t *testing.T) {
 	}
 }
 
-// TestIntegrationDaemonServicesRepositoryWithNoRunInvocation is the
-// regression test for the plan's own "no genuine multi-run daemon" gap
-// (see CLAIMS.md's Phase 6 entry): every prior -repository path only ever
-// had a Worker polling a repository's shared task queue for as long as
-// some `factoryd -repository ...` run invocation was itself in flight —
-// a repository with none running had nothing servicing it at all. This
-// starts a real `factoryd daemon` process for a repository, then submits
-// a run against that repository's RepositoryOwnerWorkflow directly via a
-// raw Temporal client with NO worker of its own anywhere in this test
-// process — the only thing that can possibly execute the resulting
-// RunWorkflow/RunBuildActivity/etc. is the daemon subprocess's own
-// long-lived Worker, proving it services the queue independent of any
-// run invocation ever existing.
-// TestIntegrationDaemonWritesHeartbeat proves a real `factoryd daemon`
-// subprocess writes a durable liveness heartbeat (internal/daemonheartbeat)
-// an external supervisor could poll — closing part of the plan's own named
-// Phase 6 gap ("no supervisor, health-check endpoint, or internal/api-driven
-// lifecycle management yet"). No run is ever submitted; this only proves
-// the daemon's own background heartbeat loop runs and is immediately fresh.
-func TestIntegrationDaemonWritesHeartbeat(t *testing.T) {
-	t.Parallel()
-	address := sharedTemporalAddress(t)
-
-	daemonDataDir := t.TempDir()
-	repository := fmt.Sprintf("fixture/repo-heartbeat-%d", time.Now().UnixNano())
-	daemonCmd := factorydCommand(t, "daemon",
-		"-temporal-address", address,
-		"-repository", repository,
-		"-data-dir", daemonDataDir,
-	)
-	var daemonOutput synchronizedBuffer
-	daemonCmd.Stdout = &daemonOutput
-	daemonCmd.Stderr = &daemonOutput
-	if err := daemonCmd.Start(); err != nil {
-		t.Fatalf("start factoryd daemon: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = daemonCmd.Process.Signal(syscall.SIGTERM)
-		_ = daemonCmd.Wait()
-		t.Logf("daemon output:\n%s", daemonOutput.String())
-	})
-
-	heartbeatPath := daemonheartbeat.Path(daemonDataDir, workflow.RepositoryOwnerWorkflowID(repository))
-	deadline := time.Now().Add(5 * time.Second)
-	var hb daemonheartbeat.Heartbeat
-	var readErr error
-	for {
-		hb, readErr = daemonheartbeat.Read(heartbeatPath)
-		if readErr == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("heartbeat file never appeared at %s: %v (daemon output:\n%s)", heartbeatPath, readErr, daemonOutput.String())
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	if hb.Repository != repository {
-		t.Errorf("hb.Repository = %q, want %q", hb.Repository, repository)
-	}
-	if hb.PID != daemonCmd.Process.Pid {
-		t.Errorf("hb.PID = %d, want %d", hb.PID, daemonCmd.Process.Pid)
-	}
-	if hb.StartedAt == "" || hb.UpdatedAt == "" {
-		t.Errorf("hb = %+v, want non-empty StartedAt/UpdatedAt", hb)
-	}
-	if daemonheartbeat.Stale(hb, time.Now(), 10*time.Second) {
-		t.Errorf("heartbeat reported stale immediately after being written: %+v", hb)
-	}
-}
-
-// TestIntegrationDaemonHeartbeatsAreIsolatedPerRepository is the
-// regression test for a real P1 finding from codex review: an earlier
-// version wrote one fixed heartbeat filename per data directory, so the
-// supported one-daemon-per-repository deployment — multiple `factoryd
-// daemon` processes sharing the same `-data-dir` — had every daemon
-// overwrite the same file. Starts two real daemon subprocesses for two
-// different repositories against one shared data directory and proves
-// each produces its own distinct, independently fresh heartbeat.
-func TestIntegrationDaemonHeartbeatsAreIsolatedPerRepository(t *testing.T) {
-	t.Parallel()
-	address := sharedTemporalAddress(t)
-
-	sharedDataDir := t.TempDir()
-	unique := time.Now().UnixNano()
-	repoA := fmt.Sprintf("fixture/repo-heartbeat-a-%d", unique)
-	repoB := fmt.Sprintf("fixture/repo-heartbeat-b-%d", unique)
-
-	startDaemon := func(repository string) *exec.Cmd {
-		cmd := factorydCommand(t, "daemon",
-			"-temporal-address", address,
-			"-repository", repository,
-			"-data-dir", sharedDataDir,
-		)
-		var output bytes.Buffer
-		cmd.Stdout = &output
-		cmd.Stderr = &output
-		if err := cmd.Start(); err != nil {
-			t.Fatalf("start factoryd daemon for %q: %v", repository, err)
-		}
-		t.Cleanup(func() {
-			_ = cmd.Process.Signal(syscall.SIGTERM)
-			_ = cmd.Wait()
-			t.Logf("daemon output (%s):\n%s", repository, output.String())
-		})
-		return cmd
-	}
-
-	daemonA := startDaemon(repoA)
-	daemonB := startDaemon(repoB)
-
-	readHeartbeat := func(repository string, cmd *exec.Cmd) daemonheartbeat.Heartbeat {
-		t.Helper()
-		path := daemonheartbeat.Path(sharedDataDir, workflow.RepositoryOwnerWorkflowID(repository))
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			hb, err := daemonheartbeat.Read(path)
-			if err == nil {
-				return hb
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("heartbeat file for %q never appeared at %s: %v", repository, path, err)
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	hbA := readHeartbeat(repoA, daemonA)
-	hbB := readHeartbeat(repoB, daemonB)
-
-	if hbA.Repository != repoA || hbA.PID != daemonA.Process.Pid {
-		t.Errorf("hbA = %+v, want Repository=%q PID=%d", hbA, repoA, daemonA.Process.Pid)
-	}
-	if hbB.Repository != repoB || hbB.PID != daemonB.Process.Pid {
-		t.Errorf("hbB = %+v, want Repository=%q PID=%d", hbB, repoB, daemonB.Process.Pid)
-	}
-	if daemonheartbeat.Stale(hbA, time.Now(), 10*time.Second) || daemonheartbeat.Stale(hbB, time.Now(), 10*time.Second) {
-		t.Errorf("one or both heartbeats reported stale immediately after being written: hbA=%+v hbB=%+v", hbA, hbB)
-	}
-}
-
-func TestIntegrationDaemonServicesRepositoryWithNoRunInvocation(t *testing.T) {
-	// not parallel-safe: newFixtureRepo (below) calls t.Setenv, which
-	// panics if the test also calls t.Parallel.
-	address := sharedTemporalAddress(t)
-
-	ws := newFixtureRepo(t)
-	daemonDataDir := t.TempDir()
-	scriptPath, err := filepath.Abs("testdata/fake_build_app.sh")
-	if err != nil {
-		t.Fatalf("abs script path: %v", err)
-	}
-	repository := fmt.Sprintf("fixture/repo-%d", time.Now().UnixNano())
-
-	daemonCmd := factorydCommand(t, "daemon",
-		"-temporal-address", address,
-		"-repository", repository,
-		"-data-dir", daemonDataDir,
-	)
-	daemonCmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	// -sandbox-docker/-sandbox-image are session-config only on `factoryd
-	// daemon` (flags-consolidate, 2026-09-10); sandboxing is unconditional,
-	// so this daemon needs the same fake docker every other sandboxed test
-	// in this package uses, configured the only way this subcommand
-	// accepts it.
-	daemonCmd.Env = append(daemonCmd.Env, isolatedSessionConfigEnv(t, "sandbox_docker: "+fakeSandboxDockerBinary(t)+"\nsandbox_image: "+fakeSandboxImage+"\nregistry_proxy: false\n")...)
-	var daemonOutput synchronizedBuffer
-	daemonCmd.Stdout = &daemonOutput
-	daemonCmd.Stderr = &daemonOutput
-	if err := daemonCmd.Start(); err != nil {
-		t.Fatalf("start factoryd daemon: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = daemonCmd.Process.Signal(syscall.SIGTERM)
-		_ = daemonCmd.Wait()
-		t.Logf("daemon output:\n%s", daemonOutput.String())
-	})
-
-	baseSHABytes, err := exec.Command("git", "-C", ws, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("git rev-parse HEAD: %v", err)
-	}
-	baseSHA := strings.TrimSpace(string(baseSHABytes))
-	specPath := filepath.Join(t.TempDir(), "spec.md")
-	if err := os.WriteFile(specPath, []byte("# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
-		t.Fatalf("write spec: %v", err)
-	}
-
-	temporalClient, err := temporalclient.Dial(temporalclient.Options{HostPort: address})
-	if err != nil {
-		t.Fatalf("dial Temporal: %v", err)
-	}
-	defer temporalClient.Close()
-
-	ownerID := workflow.RepositoryOwnerWorkflowID(repository)
-	terminateRepositoryOwnerAtCleanup(t, address, ownerID)
-	taskQueue := "factoryd-repo-" + ownerID
-	requestID := fmt.Sprintf("fixture-daemon-run-%d", time.Now().UnixNano())
-	logDir := filepath.Join(t.TempDir(), "logs")
-	checkpointDir := filepath.Join(t.TempDir(), "checkpoints")
-	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		t.Fatalf("create log dir: %v", err)
-	}
-	if err := os.MkdirAll(checkpointDir, 0o750); err != nil {
-		t.Fatalf("create checkpoint dir: %v", err)
-	}
-	runInput := workflow.RunWorkflowInput{
-		Ticket:              "fixture-ticket",
-		WorkspacePath:       ws,
-		IsolateWorkspace:    true,
-		IsolatedRepoDir:     ws,
-		IsolatedParentDir:   t.TempDir(),
-		SpecPath:            specPath,
-		BaseSHA:             baseSHA,
-		LogDir:              logDir,
-		CheckpointDir:       checkpointDir,
-		SandboxImage:        fakeSandboxImage,
-		BuildAppInterpreter: "/bin/sh",
-		BuildAppScript:      scriptPath,
-		MaxRounds:           3,
-		TimeoutMinutes:      45,
-		BuildMaxAttempts:    1,
-		VerifyCommand:       "true",
-		VerifyMaxAttempts:   1,
-		TestsRequiredOptOut: "not exercising tests_red_on_base in this fixture",
-	}
-	// This test process registers no Worker at all — SignalWithStartWorkflow
-	// only ever creates/signals the Workflow Execution server-side; the
-	// only Worker that can ever pick up and execute it is the daemon
-	// subprocess's own, on the task queue it's servicing.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if _, err := temporalClient.SignalWithStartWorkflow(ctx, ownerID, workflow.SubmitRunSignalName,
-		workflow.SubmitRunSignal{RequestID: requestID, Input: runInput},
-		temporalclient.StartWorkflowOptions{ID: ownerID, TaskQueue: taskQueue},
-		workflow.RepositoryOwnerWorkflow, workflow.RepositoryOwnerWorkflowInput{Repository: repository},
-	); err != nil {
-		cancel()
-		t.Fatalf("signal repository owner workflow: %v", err)
-	}
-	cancel()
-
-	pollCtx, cancelPoll := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelPoll()
-	pollRun := &run.Run{ID: requestID}
-	result, _, err := pollRepositoryOwnerResult(newTestDeps(t), pollCtx, temporalClient, ownerID, requestID, "", pollRun, daemonDataDir, taskQueue+"-run-"+requestID, address, repository)
-	if err != nil {
-		t.Fatalf("poll repository owner result: %v (daemon output so far:\n%s)", err, daemonOutput.String())
-	}
-	if result.State != run.StateAccepted {
-		t.Fatalf("state = %q, want %q — the daemon's own Worker must have executed this run with no run invocation of its own ever existing", result.State, run.StateAccepted)
-	}
-}
-
 // TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter is the
 // regression test for a real P2 finding from codex review: when the
 // submitting process crashes outright, nothing else ever calls
@@ -1257,7 +1002,7 @@ func TestIntegrationDaemonServicesRepositoryWithNoRunInvocation(t *testing.T) {
 // a run.json is seeded at StateSliceRunning (its "initial durable record
 // exists" point) and then never touched again by anything this test
 // controls — and proves reconcileReclaimedRun alone, querying only the
-// real repository owner (serviced by a real `factoryd daemon` subprocess,
+// real repository owner (serviced by an in-process worker on its task queue,
 // with no submitting invocation of its own ever running), brings it to a
 // terminal, correct state.
 func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) {
@@ -1273,29 +1018,7 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 	}
 	repository := fmt.Sprintf("fixture/repo-reconcile-%d", time.Now().UnixNano())
 
-	daemonCmd := factorydCommand(t, "daemon",
-		"-temporal-address", address,
-		"-repository", repository,
-		"-data-dir", daemonDataDir,
-	)
-	daemonCmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	// -sandbox-docker/-sandbox-image are session-config only on `factoryd
-	// daemon` (flags-consolidate, 2026-09-10); sandboxing is unconditional,
-	// so this daemon needs the same fake docker every other sandboxed test
-	// in this package uses, configured the only way this subcommand
-	// accepts it.
-	daemonCmd.Env = append(daemonCmd.Env, isolatedSessionConfigEnv(t, "sandbox_docker: "+fakeSandboxDockerBinary(t)+"\nsandbox_image: "+fakeSandboxImage+"\nregistry_proxy: false\n")...)
-	var daemonOutput synchronizedBuffer
-	daemonCmd.Stdout = &daemonOutput
-	daemonCmd.Stderr = &daemonOutput
-	if err := daemonCmd.Start(); err != nil {
-		t.Fatalf("start factoryd daemon: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = daemonCmd.Process.Signal(syscall.SIGTERM)
-		_ = daemonCmd.Wait()
-		t.Logf("daemon output:\n%s", daemonOutput.String())
-	})
+	daemonOutput := startRepositoryWorker(t, address, repository, daemonDataDir)
 
 	baseSHABytes, err := exec.Command("git", "-C", ws, "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -1381,7 +1104,7 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 	cancel()
 
 	// No submitter of this test's own ever polls or writes run.json again
-	// from here — only reconcileReclaimedRun, exactly as daemonMain's own
+	// from here — only reconcileReclaimedRun, exactly as workerMain's own
 	// periodic reclaim scan would call it, standing in for the crashed
 	// submitter's process.
 	deadline := time.Now().Add(30 * time.Second)
@@ -1408,14 +1131,6 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 		t.Fatalf("state = %q, want %q — reconcileReclaimedRun must bring a crashed submitter's run.json to the owner's own real result, not leave it at %q", reconciled.State, run.StateAccepted, run.StateSliceRunning)
 	}
 }
-
-// TestIntegrationDaemonReclaimHoldsRepositoryOwnershipAfterSubmitterCrash
-// proves the daemon's recovery Worker cannot execute a crashed repository run
-// without the same Git-common-dir ownership a live submission would hold. A
-// durable running record and delivered child stand in for a submitter killed
-// immediately afterward; the daemon adopts that request, and a concurrent
-// direct invocation is rejected until the recovered child finishes and its
-// lock is released.
 
 // webhookSessionConfigEnv is the environment of a factoryd subprocess whose
 // session config (an isolated one, data_dir dataDir) names files holding the

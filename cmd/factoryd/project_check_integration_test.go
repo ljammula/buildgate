@@ -26,6 +26,7 @@ func TestIntegrationServeChecksProjectBootstrapEndToEnd(t *testing.T) {
 	dataDir := t.TempDir()
 	passingWorkspace := testfixture.NewGitRepo(t)
 	failingWorkspace := newFixtureRepoWithoutBootstrapScaffold(t)
+	malformedTicket := commitMalformedTicket(t, failingWorkspace)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -50,9 +51,9 @@ func TestIntegrationServeChecksProjectBootstrapEndToEnd(t *testing.T) {
 	}()
 
 	client := &http.Client{Timeout: time.Second}
-	check := func(workspace string) (int, api.ProjectCheckResponse) {
+	check := func(workspace, ticket string) (int, api.ProjectCheckResponse) {
 		t.Helper()
-		body, err := json.Marshal(api.ProjectCheckRequest{Workspace: workspace})
+		body, err := json.Marshal(api.ProjectCheckRequest{Workspace: workspace, Ticket: ticket})
 		if err != nil {
 			t.Fatalf("marshal request: %v", err)
 		}
@@ -84,7 +85,7 @@ func TestIntegrationServeChecksProjectBootstrapEndToEnd(t *testing.T) {
 		return response.StatusCode, decoded
 	}
 
-	status, result := check(passingWorkspace)
+	status, result := check(passingWorkspace, "")
 	if status != http.StatusOK {
 		t.Fatalf("passing workspace status = %d, want %d (serve output:\n%s)", status, http.StatusOK, output.String())
 	}
@@ -92,7 +93,7 @@ func TestIntegrationServeChecksProjectBootstrapEndToEnd(t *testing.T) {
 		t.Fatalf("passing workspace result.Passed = false, want true: %+v", result)
 	}
 
-	status, result = check(failingWorkspace)
+	status, result = check(failingWorkspace, malformedTicket)
 	if status != http.StatusOK {
 		t.Fatalf("failing workspace status = %d, want %d (serve output:\n%s)", status, http.StatusOK, output.String())
 	}

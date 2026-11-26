@@ -17,7 +17,7 @@ import (
 // format, e.g. data/tickets/*.spec.md) that an operator or agent runs
 // before ever starting a real sandboxed `factoryd <run>` against it.
 //
-// Unlike `check-project`, this writes no durable evidence record -- it
+// Unlike the project-bootstrap preflight, this writes no durable evidence record -- it
 // exists purely to catch an authoring mistake before a real run burns a
 // build round discovering it the hard way. It runs every
 // ticketspec.Parse* call run_ticket.go itself runs against the ticket
@@ -222,8 +222,8 @@ func ticketTemplateMain(args []string) error {
 		return err
 	}
 
-	// Same defensive check writeScaffoldFiles (init.go) uses before
-	// creating a scaffold file: Lstat, not Stat, so a dangling symlink at
+	// Same defensive check writeNewFiles (factoryyml.go) uses before
+	// creating a file: Lstat, not Stat, so a dangling symlink at
 	// -o is refused rather than silently followed and overwritten.
 	if _, err := os.Lstat(*out); err == nil {
 		return fmt.Errorf("refusing to overwrite existing file %s", *out)

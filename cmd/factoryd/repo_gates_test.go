@@ -20,11 +20,11 @@ func TestRepoDefinedGatesReachTheRunsGateCommands(t *testing.T) {
   - id: licenses
     command: "scripts/check-licenses.sh"
 `)
-	fs, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
+	fs, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget := newProjectConfigTestFlags()
 	if err := fs.Parse(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlagNames(fs), dir, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, *meterTokenBudget, *meterCostBudget); err != nil {
 		t.Fatalf("applyProjectConfigDefaults: %v", err)
 	}
 	got := resolvedGateCommands(gateCommands)

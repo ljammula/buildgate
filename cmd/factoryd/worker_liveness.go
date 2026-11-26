@@ -23,12 +23,9 @@ import (
 )
 
 // workerHeartbeatPath is where this data directory's worker writes
-// its liveness signal (see internal/daemonheartbeat's own doc comment
-// for why this exists at all -- `factoryd daemon` already has one of
-// these; this is its worker counterpart, closing the other half of
-// the gap where nothing supervises worker, so a crash or a reboot silently
-// stops the factory with no on-disk signal an operator or `factoryd
-// status` can see). Delegates to daemonheartbeat.WorkerPath/WorkerID
+// its liveness signal (see internal/daemonheartbeat's own doc comment):
+// without it a crash or a reboot silently stops the factory with no
+// on-disk signal an operator or `factoryd status` can see. Delegates to daemonheartbeat.WorkerPath/WorkerID
 // (moved there so internal/api's GET /queue-run read route can read the
 // identical path without duplicating the id) rather than redefining them
 // here.
@@ -217,8 +214,9 @@ func heartbeatRoute(cfg requestdriver.WorkerConfig) (credentialMode, workerModel
 // once (1 for worker); temporalAddress is set only by `factoryd worker`.
 // githubLogin is forge.githubLogin's answer for this process, and
 // dockerBackend the Docker backend it launches on ("" when Docker did not
-// answer at its start).
-func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin, dockerBackend string, slots int) (stop func(), err error) {
+// answer at its start); docker the Docker endpoint it launches through,
+// which a `-repository` submitter compares with its own.
+func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerModel, temporalAddress, githubLogin, dockerBackend string, docker daemonheartbeat.DockerEndpoint, slots int) (stop func(), err error) {
 	path := workerHeartbeatPath(dataDir)
 	startedAt := time.Now().Format(time.RFC3339Nano)
 	write := func() error {
@@ -239,6 +237,7 @@ func startWorkerHeartbeat(ctx context.Context, dataDir, credentialMode, workerMo
 			JobSlots:            slots,
 			TemporalAddress:     temporalAddress,
 			DockerBackend:       dockerBackend,
+			DockerEndpoint:      docker,
 		})
 	}
 	if err := write(); err != nil {
@@ -577,7 +576,7 @@ func workerGitHubLoginFix(m hostcontrol.ServiceManager) string {
 	if m == hostcontrol.Systemd {
 		return "a systemd user service or an ssh session has no unlocked keyring, where `gh auth login` keeps the token by default: in a terminal as this user, run `gh auth login --insecure-storage`, which keeps it in ~/.config/gh/hosts.yml (mode 0600), then restart the worker (`factoryd restart`)." + retry
 	}
-	return "start the worker from a session that has the login: a desktop terminal, or `factoryd install-service`. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token; if this session should have its own login, run `gh auth login` in it." + retry
+	return "start the worker from a session that has the login: a desktop terminal, or `factoryd service install`. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token; if this session should have its own login, run `gh auth login` in it." + retry
 }
 
 // doctorWorkerGitHubLoginChecks is the row for a running worker of dataDir

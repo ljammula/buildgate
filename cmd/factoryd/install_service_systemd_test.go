@@ -122,7 +122,7 @@ func TestInstallServiceSystemdWritesEnablesAndStartsBothUnits(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := installServiceMain(dp, []string{"-config", configPath, "-data-dir", dataDir}); err != nil {
-			t.Fatalf("install-service: %v", err)
+			t.Fatalf("service install: %v", err)
 		}
 	})
 	for _, svc := range []hostcontrol.Service{hostcontrol.WorkerService, hostcontrol.ServeService} {
@@ -162,7 +162,7 @@ func TestInstallServiceSystemdWritesEnablesAndStartsBothUnits(t *testing.T) {
 	h.calls = nil
 	captureStdout(t, func() {
 		if err := installServiceMain(dp, []string{"-config", configPath, "-data-dir", dataDir, "-force", "-no-serve"}); err != nil {
-			t.Fatalf("install-service -force: %v", err)
+			t.Fatalf("service install -force: %v", err)
 		}
 	})
 	if got := strings.Join(h.calls, "\n"); !strings.Contains(got, "--user restart factoryd-worker.service") || strings.Contains(got, "factoryd-serve") {
@@ -172,7 +172,7 @@ func TestInstallServiceSystemdWritesEnablesAndStartsBothUnits(t *testing.T) {
 	h.calls = nil
 	captureStdout(t, func() {
 		if err := uninstallServiceMain(dp, nil); err != nil {
-			t.Fatalf("uninstall-service: %v", err)
+			t.Fatalf("service remove: %v", err)
 		}
 	})
 	for _, svc := range []hostcontrol.Service{hostcontrol.WorkerService, hostcontrol.ServeService} {
@@ -211,7 +211,7 @@ func TestInstallServiceSystemdWarnsWithoutLinger(t *testing.T) {
 			fakeHostOf(dp).loginctlFn = loginctl
 			out := captureStdout(t, func() {
 				if err := installServiceMain(dp, []string{"-config", writeServiceTestConfig(t), "-data-dir", t.TempDir()}); err != nil {
-					t.Fatalf("install-service: %v", err)
+					t.Fatalf("service install: %v", err)
 				}
 			})
 			if !strings.Contains(out, "sudo loginctl enable-linger $USER") {
@@ -303,7 +303,7 @@ func TestDoctorCheckSystemdWorkerServiceNamesEachState(t *testing.T) {
 	if err := os.Remove(binary); err != nil {
 		t.Fatal(err)
 	}
-	if c := doctorCheckSystemdWorkerService(dp, unitPath); c.Err == nil || !strings.Contains(c.Fix, "install-service -force") {
+	if c := doctorCheckSystemdWorkerService(dp, unitPath); c.Err == nil || !strings.Contains(c.Fix, "service install -force") {
 		t.Errorf("a unit naming a removed binary = %+v, want a failure with the reinstall fix", c)
 	}
 }

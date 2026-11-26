@@ -39,7 +39,7 @@ func TestSubmitRefusesASandboxBlockWithTheRegistryProxyOff(t *testing.T) {
 	if err := projectconfig.OpenApprovals(dataDir).Approve(memory.StoreKey(filepath.Base(root), root), approval); err != nil {
 		t.Fatal(err)
 	}
-	params := Params{WorkspaceArg: workspace, DataDir: dataDir, RequestText: "do a thing", Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true}
+	params := Params{WorkspaceArg: workspace, DataDir: dataDir, RequestText: "do a thing", Source: request.Source{Kind: request.SourceText}}
 	params.Settings.RegistryProxyConfigured, params.Settings.RegistryProxy = true, false
 	if _, err := Submit(params); err == nil || !strings.HasPrefix(err.Error(), projectconfig.SandboxNeedsRegistryProxy) {
 		t.Fatalf("Submit error = %v, want the registry proxy refusal", err)
@@ -66,7 +66,7 @@ func TestSubmitRefusesAnUnapprovedSandboxBlock(t *testing.T) {
 	}
 	testfixture.CommitAgentsFile(t, workspace)
 	dataDir := t.TempDir()
-	params := Params{WorkspaceArg: workspace, DataDir: dataDir, RequestText: "do a thing", Source: request.Source{Kind: request.SourceText}, PreflightProfile: "brownfield", PreflightProfileExplicit: true}
+	params := Params{WorkspaceArg: workspace, DataDir: dataDir, RequestText: "do a thing", Source: request.Source{Kind: request.SourceText}}
 	_, err := Submit(params)
 	var refusal *Refusal
 	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "): factoryd sandbox approve -repo ") || !strings.Contains(err.Error(), "is not approved (approvals are read from ") {

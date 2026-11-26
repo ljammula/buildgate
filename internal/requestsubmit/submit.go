@@ -185,9 +185,6 @@ type Params struct {
 	// rest of a drafted plan's checks. Empty: the plan is drafted.
 	ImportedTickets []ImportedTicket
 
-	PreflightProfile         string
-	PreflightProfileExplicit bool
-
 	// Harnesses is `factoryd submit -harness role=name` / POST /requests' own
 	// "harnesses" body field: a per-request coding-agent CLI pick for "planning"
 	// and/or "execution", validated below
@@ -266,132 +263,6 @@ func DataDirInsideWorkspace(workspace, dataDir string) (inside bool, workspaceAb
 	return pathWithin(workspaceAbs, dataAbs), workspaceAbs, dataAbs, nil
 }
 
-// effectivePreflightProfile is a standalone copy of cmd/factoryd's own
-// project_check.go function of the same name -- see that copy's doc
-// comment for the shared reasoning (a preview must never validate
-// against a looser profile than the run it previews). Small and pure
-// enough that, like pathWithin/canonicalPath above, a second copy is an
-// acceptable, explicitly-flagged tradeoff against pulling in the rest of
-// cmd/factoryd's unimportable main package.
-const preflightProfileBrownfield = "brownfield"
-
-// repoRootForWorkspace and ProjectBootstrapArtifactPaths are standalone
-// copies of cmd/factoryd/project_check.go's own functions of the same
-// name (the latter exported here, unlike its cmd/factoryd twin, so
-// cmd/factoryd's own parity test --
-// TestProjectBootstrapArtifactPathsParityWithRequestSubmit,
-// project_check_and_doctor_test.go -- can call this copy directly and
-// assert both resolve identical paths, rather than the two silently
-// drifting apart) -- see effectivePreflightProfile's doc comment just
-// above for why a second copy of a small, pure resolution helper is an
-// acceptable, explicitly-flagged tradeoff here rather than importing
-// cmd/factoryd's unimportable main package. Needed so
-// submitProjectBootstrapPreflight below can resolve the exact same
-// spec.md/contract.md/ARCHITECTURE.md paths a real run's own
-// project-bootstrap preflight would check, so a request this function
-// accepts never fails those same three checks later, at run time, for a
-// reason its own inputs (workspace + resolved preflight profile) already
-// fully determined at submission time.
-func repoRootForWorkspace(workspaceAbs string) string {
-	historicalRoot := filepath.Dir(workspaceAbs)
-	if _, err := os.Stat(filepath.Join(historicalRoot, "spec", "spec.md")); err == nil {
-		return historicalRoot
-	}
-	if _, err := os.Stat(filepath.Join(workspaceAbs, "spec", "spec.md")); err == nil {
-		return workspaceAbs
-	}
-	if entries, err := os.ReadDir(workspaceAbs); err == nil && len(entries) > 0 {
-		return workspaceAbs
-	}
-	return historicalRoot
-}
-
-func ProjectBootstrapArtifactPaths(workspaceAbs string) (specPath, contractPath, architecturePath string) {
-	root := repoRootForWorkspace(workspaceAbs)
-	return filepath.Join(root, "spec", "spec.md"), filepath.Join(root, "spec", "contract.md"), filepath.Join(root, "ARCHITECTURE.md")
-}
-
-// submitProjectBootstrapPreflight runs the same product_spec_frozen/
-// program_design_structure/architecture_structure checks a real run's own
-// project-bootstrap preflight (runProjectBootstrapCheck,
-// evaluateProjectBootstrapChecks) would run for the resolved profile --
-// EXCEPT ticket_structure, which has no ticket to check yet at submission
-// time (the request pipeline cuts one per ticket only once spec/plan
-// review approves, long after Submit returns). Under
-// preflightProfileBrownfield this is a no-op: that profile skips
-// product_spec_frozen/program_design_structure entirely and only ever
-// marks architecture_structure advisory (never blocking), so there is
-// nothing new for a brownfield submission to fail here that a real
-// brownfield run wouldn't already tolerate.
-//
-// Found live (2026-09-25): a strict-profile request accepted by Submit
-// with an unfrozen spec.md, a malformed contract.md, or no ARCHITECTURE.md
-// at all sat through spec_review and plan_review -- both purely textual
-// approvals with no artifact check of their own -- before halting at
-// ticket 1's own run-time preflight, discarding two rounds of human review
-// on a request that could never have passed. Running these three checks
-// up front, before Submit ever records the request, refuses it
-// immediately with the same diagnostic runProjectBootstrapCheck would give
-// at run time instead.
-func submitProjectBootstrapPreflight(workspaceAbs, preflightProfile string) error {
-	failures := ProjectBootstrapFailures(workspaceAbs, preflightProfile)
-	if len(failures) == 0 {
-		return nil
-	}
-	return &Refusal{
-		Reason:     "project-bootstrap preflight failed, request not submitted (this would halt every ticket's own run-time preflight identically, after spec/plan review already spent human attention on it): " + strings.Join(failures, " | "),
-		Remedy:     "fix these before submitting, or set preflight_profile: brownfield in the workspace's " + projectconfig.FileName + " if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention",
-		FlagRemedy: "fix these before submitting, or set preflight_profile: brownfield in the workspace's " + projectconfig.FileName + " (or pass -preflight-profile brownfield / preflight_profile \"brownfield\" on this request) if this repo hasn't adopted the spec/contract/ARCHITECTURE.md convention (see `factoryd onboard`)",
-	}
-}
-
-// ProjectBootstrapFailures returns one line per project-bootstrap check
-// a submission against workspaceAbs under preflightProfile fails (none
-// under brownfield). submit refuses on any; doctor -target-repo reports
-// them before the operator submits.
-func ProjectBootstrapFailures(workspaceAbs, preflightProfile string) []string {
-	if preflightProfile == preflightProfileBrownfield {
-		return nil
-	}
-	specPath, contractPath, architecturePath := ProjectBootstrapArtifactPaths(workspaceAbs)
-	var failures []string
-	checkFile := func(name, path string, check func(string) (bool, []string)) {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s (%s): could not read artifact: %s", name, path, err))
-			return
-		}
-		if passed, reasons := check(string(b)); !passed {
-			failures = append(failures, fmt.Sprintf("%s (%s): %s", name, path, strings.Join(reasons, "; ")))
-		}
-	}
-	checkFile("product_spec_frozen", specPath, func(content string) (bool, []string) {
-		passed, reason := policy.ProductSpecFrozen(content)
-		if reason == "" {
-			return passed, nil
-		}
-		return passed, []string{reason}
-	})
-	checkFile("program_design_structure", contractPath, policy.ProgramDesignStructure)
-	checkFile("architecture_structure", architecturePath, func(content string) (bool, []string) {
-		return policy.ArchitectureStructure(content, nil)
-	})
-	return failures
-}
-
-func effectivePreflightProfile(explicit string, cfg *projectconfig.Config) (string, error) {
-	if explicit != "" {
-		if explicit != preflightProfileBrownfield {
-			return "", fmt.Errorf("preflight_profile must be \"\" or %q, got %q", preflightProfileBrownfield, explicit)
-		}
-		return explicit, nil
-	}
-	if cfg != nil {
-		return cfg.PreflightProfile, nil
-	}
-	return "", nil
-}
-
 // addRepoGates puts the gates cfg defines for its own repository (`gates:`)
 // into gateCommands under their "repo-<id>" names, and returns those names
 // for the "applied" line. They have no flag, so nothing can be explicit
@@ -414,16 +285,15 @@ func addRepoGates(gateCommands map[string]*string, cfg *projectconfig.Config) []
 // applyProjectConfigDefaults (validate.go), which now delegates to this
 // function -- see that copy's doc comment for the full "explicit flag
 // wins, otherwise .factory.yml, relay ceilings are tighten-only"
-// contract this preserves verbatim. Only the two fields `submit`/POST
-// /requests actually surface (verifyCommand/preflightProfile) are ever
-// read back by this package's own Submit; the rest exist purely so the
+// contract this preserves verbatim. Only verifyCommand and testPatterns
+// are ever read back by this package's own Submit; the rest exist purely so the
 // same .factory.yml read and the same precedence rules apply here as in
 // every other caller of this logic.
 // gateCommands receives the repository gates the committed .factory.yml
 // defines (`gates:`), keyed by policy.RepoGateCheck(id); a caller
 // uninterested in their values (requestsubmit's own Submit) passes an empty
 // map. nil takes none.
-func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, preflightProfile, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget int, meterCostBudget int64) error {
+func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget int, meterCostBudget int64) error {
 	cfg, found, err := projectconfig.Load(workspaceDir)
 	if err != nil {
 		return fmt.Errorf("load %s: %w", projectconfig.FileName, err)
@@ -445,16 +315,6 @@ func ApplyProjectConfigDefaults(explicit map[string]bool, workspaceDir string, v
 	if len(cfg.TestPatterns) > 0 {
 		*testPatterns = cfg.TestPatterns
 		applied = append(applied, "test-patterns")
-	}
-	if !explicit["preflight-profile"] {
-		resolved, err := effectivePreflightProfile(*preflightProfile, cfg)
-		if err != nil {
-			return err
-		}
-		if resolved != *preflightProfile {
-			*preflightProfile = resolved
-			applied = append(applied, "preflight-profile")
-		}
 	}
 	if !explicit["release-protected-paths"] && len(cfg.ProtectedPaths) > 0 {
 		*releaseProtectedPaths = strings.Join(cfg.ProtectedPaths, ",")
@@ -708,13 +568,9 @@ func Submit(p Params) (Result, error) {
 	}
 
 	verifyCommand := p.VerifyCommand
-	preflightProfile := p.PreflightProfile
 	explicit := map[string]bool{}
 	if p.VerifyCommandExplicit {
 		explicit["verify-command"] = true
-	}
-	if p.PreflightProfileExplicit {
-		explicit["preflight-profile"] = true
 	}
 	var discardedFastCheckCommand string
 	discardedGateCommands := map[string]*string{}
@@ -729,7 +585,7 @@ func Submit(p Params) (Result, error) {
 	// Params.SessionTokenCeiling's own doc comment.
 	discardedTokenCeiling := int(p.SessionTokenCeiling)
 	discardedCostCeiling := p.SessionCostCeilingMicroUSD
-	if err := ApplyProjectConfigDefaults(explicit, workspaceAbs, &verifyCommand, &discardedFastCheckCommand, discardedGateCommands, &preflightProfile, &discardedProtectedPaths, &testPatterns, &discardedTokenCeiling, &discardedCostCeiling, submitDefaultMeterTokenBudget, submitDefaultMeterCostBudget); err != nil {
+	if err := ApplyProjectConfigDefaults(explicit, workspaceAbs, &verifyCommand, &discardedFastCheckCommand, discardedGateCommands, &discardedProtectedPaths, &testPatterns, &discardedTokenCeiling, &discardedCostCeiling, submitDefaultMeterTokenBudget, submitDefaultMeterCostBudget); err != nil {
 		return Result{}, err
 	}
 	if verifyCommand == "" {
@@ -739,9 +595,6 @@ func Submit(p Params) (Result, error) {
 			FlagRemedy: "pass -verify-command, or commit a verify_command in the workspace's " + projectconfig.FileName,
 			Kind:       ErrNoVerifyCommand,
 		}
-	}
-	if err := submitProjectBootstrapPreflight(workspaceAbs, preflightProfile); err != nil {
-		return Result{}, err
 	}
 
 	if err := RequireAgentsFile(workspaceAbs); err != nil {
@@ -776,7 +629,6 @@ func Submit(p Params) (Result, error) {
 	if err := recordHandedOverPlanCriteria(req, p.ImportedSpec); err != nil {
 		return Result{}, err
 	}
-	req.PreflightProfile = preflightProfile
 	req.TestPatterns = testPatterns
 	req.Harnesses = p.Harnesses
 	req.Models = p.Models
@@ -798,7 +650,7 @@ func dataDirOutsideWorkspace(workspaceAbs, dataDir string) (string, error) {
 		return "", &Refusal{
 			Reason:     fmt.Sprintf("the data dir (%q, resolving to %q) is inside the workspace %q; Docker containment is unconditional and a later worker will refuse to drain this entry once queued here, with no way to re-home it", dataDir, dataAbs, workspaceAbs),
 			Remedy:     "the operator has to keep the data dir outside the workspace",
-			FlagRemedy: "pass -data-dir <path outside -workspace>",
+			FlagRemedy: "set data_dir in the session config to a directory outside the workspace",
 		}
 	}
 	return dataAbs, nil

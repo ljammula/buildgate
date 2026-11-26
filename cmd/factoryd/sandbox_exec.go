@@ -758,7 +758,7 @@ func acquireComposeServicesGate(ctx context.Context, dataDir, runID string, sett
 	return handle, err
 }
 
-// acquireReclaimComposeServicesSlot is the daemon reclaim's slot: taken
+// acquireReclaimComposeServicesSlot is the worker reclaim's slot: taken
 // whenever the run's base commit in dir has a compose file at all (see its
 // call site for why no finer check is possible there).
 func acquireReclaimComposeServicesSlot(ctx context.Context, dataDir, runID string, concurrency int, dir, baseSHA string) (*modelhost.Handle, error) {
@@ -782,7 +782,7 @@ func composeServicesLockWaiting(dataDir, runID string) func(holder string) {
 }
 
 // composeServicesLockAcquired records every slot actually taken, not only
-// one taken after a wait in the same call: a daemon reclaim that waited on
+// one taken after a wait in the same call: a worker reclaim that waited on
 // an earlier scan gets the slot on a later one without waiting, and its
 // "queued behind" reason must still clear.
 func composeServicesLockAcquired(dataDir, runID string, handle *modelhost.Handle) {

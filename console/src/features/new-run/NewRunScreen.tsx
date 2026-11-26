@@ -80,10 +80,9 @@ export function NewRunScreen() {
                     }}
                   />
                 </Field>
-                {/* The project-bootstrap preflight looks for spec/spec.md, spec/contract.md and ARCHITECTURE.md next to this path's PARENT directory, not inside it: the most common cause of a rejected run against a project new to the convention (found live, 2026-09-08). */}
                 <Field
                   label={newRunFieldLabels.workspace}
-                  hint="A git checkout; its own parent directory must hold spec/spec.md, spec/contract.md, and ARCHITECTURE.md"
+                  hint="A git checkout of the repository"
                   error={form.errorFor("workspace")}
                 >
                   <Input

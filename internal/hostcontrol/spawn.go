@@ -20,7 +20,7 @@ import (
 )
 
 // launchctlBinary is the launchctl binary QuickstartEnsureDaemon
-// checks/restarts an install-service-managed worker through -- a
+// checks/restarts an service install-managed worker through -- a
 // boundary method, like doctorCheckWorkerService's own launchctlBinary
 // parameter, so a test can point it at a fake script instead of a real
 // launchd GUI session.
@@ -47,7 +47,7 @@ func StableWorkDir(dataDir string) string {
 // QuickstartEnsureDaemon leaves a worker driving -data-dir's requests,
 // skipping straight through when one is already in charge and actually
 // draining the -config/-data-dir this invocation resolved: an
-// install-service-managed service (launchd on macOS, systemd on Linux;
+// service install-managed service (launchd on macOS, systemd on Linux;
 // detected the same way
 // `factoryd doctor` reports it, and only trusted once
 // QuickstartServiceDrainsSelectedQueue confirms its own -config/-data-dir
@@ -85,7 +85,7 @@ func QuickstartEnsureDaemon(dp Deps, w io.Writer, binaryPath, configPath, dataDi
 	return dp.SpawnWorker(w, binaryPath, configPath, dataDir, credentialEnv, pidPath, temporalAddress)
 }
 
-// quickstartWorkerServiceInCharge settles the case where install-service's
+// quickstartWorkerServiceInCharge settles the case where service install's
 // worker service is running: it is in charge when it drains this
 // invocation's -config/-data-dir (QuickstartServiceDrainsSelectedQueue: the
 // running state alone says nothing about which queue), and is restarted
@@ -113,10 +113,10 @@ func quickstartWorkerServiceInCharge(dp Deps, w io.Writer, configPath, dataDir s
 		return false, nil
 	case matches && restartNeeded && len(credentialEnv) > 0:
 		// A restart re-execs the worker from the same definition, whose
-		// environment carries only what install-service wrote: a credential
+		// environment carries only what service install wrote: a credential
 		// given to this invocation cannot reach it that way. Refuse rather
 		// than restart and claim the credential is in use.
-		return true, fmt.Errorf("the worker is managed by %s (%s) and cannot pick up a credential this way -- run `factoryd uninstall-service`, or drop -credential and let quickstart's own spawned-child path handle this run instead", m, checkName)
+		return true, fmt.Errorf("the worker is managed by %s (%s) and cannot pick up a credential this way -- run `factoryd service remove`, or drop -credential and let quickstart's own spawned-child path handle this run instead", m, checkName)
 	case matches && restartNeeded:
 		// The service resolved its settings when it last started, and its
 		// manager brings it back by itself once stopped: a restart through
@@ -127,10 +127,10 @@ func quickstartWorkerServiceInCharge(dp Deps, w io.Writer, configPath, dataDir s
 		fmt.Fprintf(w, "the worker is managed by %s (%s); restarted it to pick up the rewritten configuration.\n", m, checkName)
 		return true, nil
 	case matches:
-		fmt.Fprintf(w, "the worker is already managed by %s (%s) -- skipping. Stop it with `factoryd uninstall-service` if needed.\n", m, checkName)
+		fmt.Fprintf(w, "the worker is already managed by %s (%s) -- skipping. Stop it with `factoryd service remove` if needed.\n", m, checkName)
 		return true, nil
 	}
-	fmt.Fprintf(w, "A %s worker service is running, but it drains a different -config/-data-dir than this invocation resolved -- not skipping it. Run `factoryd install-service -force` first if you want the service itself to pick up this configuration instead.\n", m)
+	fmt.Fprintf(w, "A %s worker service is running, but it drains a different -config/-data-dir than this invocation resolved -- not skipping it. Run `factoryd service install -force` first if you want the service itself to pick up this configuration instead.\n", m)
 	return false, nil
 }
 
@@ -276,7 +276,7 @@ func RealProcessUID(dp Deps, pid int) (int, bool) {
 // print <domain>`'s own output, or (0, false) if the service isn't
 // loaded/running or the output doesn't parse -- the launchd half of
 // host.serveVerifiedOurs' "which process actually holds this port"
-// check for a serve managed by `factoryd install-service` rather than a
+// check for a serve managed by `factoryd service install` rather than a
 // quickstart-spawned child.
 var launchctlServicePIDPattern = regexp.MustCompile(`(?m)^\s*"?pid"?\s*=\s*(\d+)`)
 
@@ -306,7 +306,7 @@ func LaunchctlServicePID(dp Deps, domain string) (int, bool) {
 // healthz-answering serve as "ours" and hands it a start-class credential
 // (an adversarial review, 2026-09-24): a bare 200 from
 // GET /healthz proves only that SOMETHING answers HTTP on that port --
-// never that it is a serve this operator's own quickstart/install-service
+// never that it is a serve this operator's own quickstart/service install
 // actually started, as opposed to an unrelated local process, a
 // forwarded port, or (in principle) something hostile that happened to
 // bind first. Returns the verified pid and true only when every check
@@ -322,7 +322,7 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 	if pid, alive := QuickstartReadAlivePID(dp, filepath.Join(dataDir, "quickstart-serve.pid")); alive {
 		candidates = append(candidates, pid)
 	}
-	// The serve LaunchAgent serves one data dir (install-service pins its
+	// The serve LaunchAgent serves one data dir (service install pins its
 	// -data-dir): it is this data dir's serve only when that is the one.
 	if _, ok := ServiceFor(dp, ServeService, dataDir); ok {
 		if pid, ok := ServicePID(dp, ServeService); ok {
@@ -353,15 +353,15 @@ func RealServeVerifiedOurs(dp Deps, dataDir, addr string) (int, bool) {
 // for this session's own config/data-dir, at consolelink.DefaultServeAddr
 // unless another process holds it,
 // resolving (or generating, via ensureTokenFile) the same
-// stable start token file `factoryd install-service`'s own serve
+// stable start token file `factoryd service install`'s own serve
 // LaunchAgent uses -- so a browser that visits the printed console link
-// once keeps working across a later `factoryd install-service` or a
+// once keeps working across a later `factoryd service install` or a
 // service restart, and so a quickstart re-run against the same config
 // reuses the exact same token rather than rotating it.
 //
 // Reuses, in order: (1) anything already answering GET /healthz at that
 // address AND provably attributable to this operator's own quickstart-
-// spawned child or install-service LaunchAgent (host.serveVerifiedOurs
+// spawned child or service install LaunchAgent (host.serveVerifiedOurs
 // -- an adversarial review, 2026-09-24, found a bare 200 from
 // GET /healthz alone proves nothing about WHO is listening, so it must
 // never by itself earn a caller the start-class token); (2) on macOS, an
@@ -530,7 +530,7 @@ func RealSpawnServe(dp Deps, w io.Writer, binaryPath, configPath, dataDir, addr 
 		fmt.Fprintf(w, "serve started (pid %d) but did not answer /healthz within %s yet -- it may still be starting; logs at %s and %s.\n", cmd.Process.Pid, quickstartServeReadyTimeout, outPath, errPath)
 		return nil
 	}
-	fmt.Fprintf(w, "serve started (pid %d); logs at %s and %s. Stop it with `factoryd stop` (or `factoryd install-service` for a supervised, reboot-surviving alternative).\n", cmd.Process.Pid, outPath, errPath)
+	fmt.Fprintf(w, "serve started (pid %d); logs at %s and %s. Stop it with `factoryd stop` (or `factoryd service install` for a supervised, reboot-surviving alternative).\n", cmd.Process.Pid, outPath, errPath)
 	return nil
 }
 
@@ -717,9 +717,9 @@ func QuickstartChildEnv(credentialEnv []string) []string {
 // quickstart owns both here. `factoryd upgrade` restarts a stopped worker
 // through it too.
 //
-// A macOS install-service (launchd) path exists separately;
+// A macOS service install (launchd) path exists separately;
 // QuickstartEnsureDaemon's doctorCheckWorkerService check means an operator
-// who already ran `factoryd install-service` still gets that path honored
+// who already ran `factoryd service install` still gets that path honored
 // (skipped here, not overridden).
 //
 // a boundary method, like docker.makeImage/host.launchctl elsewhere in this
@@ -792,7 +792,7 @@ func quickstartSpawnDrainer(dp Deps, w io.Writer, what string, args []string, bi
 	if readyErr != nil {
 		return readyErr
 	}
-	fmt.Fprintf(w, "%s started (pid %d); logs at %s and %s. Stop it with `factoryd stop` (or `factoryd install-service` for a supervised, reboot-surviving alternative).\n", what, cmd.Process.Pid, outPath, errPath)
+	fmt.Fprintf(w, "%s started (pid %d); logs at %s and %s. Stop it with `factoryd stop` (or `factoryd service install` for a supervised, reboot-surviving alternative).\n", what, cmd.Process.Pid, outPath, errPath)
 	return nil
 }
 

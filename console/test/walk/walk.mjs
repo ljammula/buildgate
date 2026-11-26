@@ -815,9 +815,6 @@ step("new-request", async () => {
     .fill("Add a healthz endpoint\n\nIt returns 200 and the build SHA.");
   await button("Advanced").click();
   await page.getByLabel(/Verify command/).fill("go test ./...");
-  // An empty repository has none of the project artifacts the default
-  // preflight requires.
-  await page.getByLabel(/Preflight profile/).fill("brownfield");
   await button("Submit request").click();
   await nameIfAsked();
   await page.waitForURL(/\/requests\/(?!new$)[^/]+$/);

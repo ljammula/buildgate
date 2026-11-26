@@ -156,7 +156,8 @@ func sandboxOwners(names, dataDirs []string) []sandboxOwner {
 
 // sandboxRunLost reports whether the run or request job recorded under
 // runID will never remove its own sandbox: the run is confirmed terminal, or
-// the factoryd process that owned it is provably gone. A drafting or
+// the factoryd process that owned it is provably gone, unless it is a
+// `-repository` run, which the worker's repository reclaim recovers. A drafting or
 // planning job records its sandbox under its request's id and has no run
 // record; its owner alone decides. A record that cannot be read is not
 // lost: it is left alone.
@@ -168,7 +169,7 @@ func sandboxRunLost(dataDir, runID string) bool {
 	case err != nil:
 		return false
 	}
-	return runTerminalConfirmed(r) || runOwnerDead(dataDir, runID)
+	return runTerminalConfirmed(r) || (!leftToRepositoryReclaim(r) && runOwnerDead(dataDir, runID))
 }
 
 // sandboxRemovable reports whether the sandbox recorded under runID may be
@@ -211,7 +212,7 @@ func doctorCheckSandboxOwners(owners []sandboxOwner) doctorCheck {
 		check.Fix = "run `factoryd doctor -fix`: it halts the run, puts its request in resume_review and removes the sandbox"
 	case len(unknown) > 0:
 		check.Err = fmt.Errorf("%s: no run in a data dir doctor knows (each profile's, and those within %d levels under %s) started it", strings.Join(unknown, "; "), sandboxDataDirDepth, sessionconfig.DataRoot())
-		check.Fix = "if a build is running from another data dir, leave it; otherwise run `factoryd doctor -data-dir <that data dir> -fix`, or, when that data dir was deleted, `factoryd doctor -fix -remove-sandbox <name>`"
+		check.Fix = "if a build is running from another data dir, leave it; otherwise run `factoryd doctor -fix`, or, when that data dir was deleted, `factoryd doctor -fix -remove-sandbox <name>`"
 	case len(building) > 0:
 		check.Detail = strings.Join(building, "; ")
 	}
@@ -424,14 +425,14 @@ func lostRunOfSandbox(dp *deps, ctx context.Context, name string, owners []sandb
 		return sandbox.LostRun{}, "the gateway holds no sandbox of that name"
 	}
 	if o := owners[i]; o.runID != "" {
-		return sandbox.LostRun{}, fmt.Sprintf("it belongs to run %s in %s; `factoryd doctor -data-dir %s -fix` reclaims it once that build is gone", sanitize.Line(o.runID), o.dataDir, o.dataDir)
+		return sandbox.LostRun{}, fmt.Sprintf("it belongs to run %s in %s; `factoryd doctor -fix` reclaims it once that build is gone", sanitize.Line(o.runID), o.dataDir)
 	}
 	lost, err := gatewayLostRun(dp, ctx, name)
 	if err != nil {
 		return sandbox.LostRun{}, err.Error()
 	}
 	if dataDir, known := knownDataDirOfLabel(lost.DataDir, dataDirs); known {
-		return sandbox.LostRun{}, fmt.Sprintf("its data dir %s still exists, but doctor could not read the record of its run; `factoryd doctor -data-dir %s -fix` reclaims it once its build is gone", dataDir, dataDir)
+		return sandbox.LostRun{}, fmt.Sprintf("its data dir %s still exists, but doctor could not read the record of its run; `factoryd doctor -fix` reclaims it once its build is gone", dataDir)
 	}
 	for _, o := range owners {
 		if o.name == name {
