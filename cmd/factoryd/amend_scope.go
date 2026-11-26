@@ -50,7 +50,10 @@ func amendScopeMain(dp *deps, args []string) error {
 		return err
 	}
 
-	id := positional[0]
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, positional[0], idRequest)
+	if err != nil {
+		return err
+	}
 	files := positional[1:]
 	r, err := request.AmendScope(*dataDir, id, currentOSUser(), *reason, files, time.Now())
 	if err != nil {

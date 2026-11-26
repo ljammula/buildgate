@@ -46,7 +46,7 @@ func TestACommandMeansTheSameDataDirFromAnyDirectory(t *testing.T) {
 	for _, dir := range []string{t.TempDir(), t.TempDir()} {
 		t.Chdir(dir)
 		logged.Reset()
-		if err := statusMain(newTestDeps(t), nil); err != nil {
+		if err := statusMain(newTestDeps(t), []string{"-v"}); err != nil {
 			t.Fatalf("status from %s: %v", dir, err)
 		}
 		if !strings.Contains(logged.String(), `data dir: "`+want+`" (source: the default for session config`) {

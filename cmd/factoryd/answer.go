@@ -43,7 +43,10 @@ func answerMain(dp *deps, args []string) error {
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err
 	}
-	id := positional[0]
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, positional[0], idRequest)
+	if err != nil {
+		return err
+	}
 	opts, err := gateExpiryOptions(*configPath)
 	if err != nil {
 		return fmt.Errorf("answer request %q: %w", id, err)

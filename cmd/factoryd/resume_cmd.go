@@ -56,7 +56,10 @@ func resumeMainWith(dp *deps, args []string, gate requestdriver.ResumeGate) erro
 	if err != nil {
 		return err
 	}
-	id := flags.Arg(0)
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, flags.Arg(0), idRequest)
+	if err != nil {
+		return err
+	}
 	checked := ""
 	updated, err := request.ResumeRequest(*dataDir, id, *from, currentOSUser(), time.Now(), func(r *request.Request) ([]string, error) {
 		reasons, err := gate.RequestResumeRefusals(context.Background(), *dataDir, settings.SandboxDocker, r)

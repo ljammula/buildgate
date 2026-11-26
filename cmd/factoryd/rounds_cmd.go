@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"text/tabwriter"
 
 	"buildgate/internal/request"
-	"buildgate/internal/run"
 	"buildgate/internal/sanitize"
 )
 
@@ -41,14 +39,11 @@ func roundsRun(args []string, w io.Writer) error {
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err
 	}
-	id := flags.Arg(0)
-	if !run.ValidID(id) {
-		return fmt.Errorf("%q is not a request id", id)
+	id, err := resolveIDArg(flags, *dataDir, *configPath, flags.Arg(0), idRequest)
+	if err != nil {
+		return err
 	}
 	r, err := request.Load(*dataDir, id)
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("no request %q under %s", id, *dataDir)
-	}
 	if err != nil {
 		return err
 	}

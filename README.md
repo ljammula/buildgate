@@ -459,6 +459,8 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 | To | Run |
 |---|---|
 | See everything waiting on you, across profiles | `factoryd inbox` |
+| See every open request, across profiles | `factoryd status -all-profiles` |
+| Name a request or run | Its full id, or a part only one id has: the trailing timestamp, say. A part several share is refused with them listed; a command that decides (`approve`, `reject`, `cancel`, ...) takes only the start or end of an id, 6 characters or more |
 | Follow a run, read its log | `factoryd watch <id>`, `factoryd logs [-f] <id\|queue-run\|serve>`; the prompts its launches saved: `factoryd logs -list <id>`, `-prompt <name>` |
 | Drop a request | `factoryd cancel <request-id>` |
 | Stop what factoryd started | `factoryd stop [-all] [-force]` |

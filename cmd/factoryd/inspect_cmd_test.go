@@ -26,6 +26,50 @@ func TestInspectPrintsADraftGatesFilesAndItsNote(t *testing.T) {
 	}
 }
 
+// inspect shows a run's work from its record: the change's size and files,
+// each gate's result and the review's findings. The commands to copy, and
+// the note about using them, are -commands' alone.
+func TestInspectShowsTheChangeGatesAndFindingsAndCommandsOnlyWhenAsked(t *testing.T) {
+	f := newProfileFixture(t, "default")
+	root := f.roots["default"]
+	built := &run.Run{
+		ID: "run-1", Ticket: "t", State: run.StateQuarantined, RepositoryRoot: "/repos/app", BaseSHA: "1111abc", ResultSHA: "2222abc",
+		DiffStat:     &run.DiffStat{FilesChanged: 2, Insertions: 40, Deletions: 3},
+		ChangedFiles: []string{"cmd/app/main.go", "cmd/app/main_test.go"},
+		GateResults:  []run.GateResult{{Check: "canonical_verify", Passed: true}, {Check: "full_suite_verify", ExitCode: 2}},
+		CodeReview: &run.CodeReviewResult{Policy: "required", Available: true, Findings: []run.CodeReviewFinding{
+			{Severity: "high", File: "cmd/app/main.go", Line: 12, Summary: "the handler\x1b[31m drops the error"},
+		}},
+	}
+	if err := built.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := inspectRun([]string{"-data-dir", root, "run-1"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		"run run-1\n",
+		"  state      quarantined",
+		"  change     2 files, +40 -3\n               cmd/app/main.go\n               cmd/app/main_test.go\n",
+		"  gates      1 passed, 1 failed\n",
+		"canonical_verify       passed\n",
+		"full_suite_verify      FAILED (exit 2)\n",
+		"  review     1 findings (policy required)\n               high  cmd/app/main.go:12  the handler",
+		"factoryd inspect -commands run-1 prints the commands",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("output lacks %q:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{"git -C", request.InspectRunNote, "\x1b"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("output without -commands has %q:\n%s", unwanted, text)
+		}
+	}
+}
+
 func TestInspectTakesARunIDAndPrintsItsCommandsAndTheNote(t *testing.T) {
 	f := newProfileFixture(t, "default")
 	root := f.roots["default"]
@@ -34,7 +78,7 @@ func TestInspectTakesARunIDAndPrintsItsCommandsAndTheNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := inspectRun([]string{"-data-dir", root, "run-1"}, &out); err != nil {
+	if err := inspectRun([]string{"-data-dir", root, "-commands", "run-1"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -68,7 +112,7 @@ func TestInspectSaysWhenThereIsNothingToShowAndRefusesAnUnknownID(t *testing.T) 
 	if !strings.HasPrefix(out.String(), "Nothing to inspect for busy") {
 		t.Errorf("output = %q", out.String())
 	}
-	if err := inspectRun([]string{"-data-dir", root, "nope"}, &out); err == nil || !strings.Contains(err.Error(), `no request or run "nope"`) {
+	if err := inspectRun([]string{"-data-dir", root, "nope"}, &out); err == nil || !strings.Contains(err.Error(), `no request or run matches "nope" in `+root) {
 		t.Errorf("unknown id: err = %v", err)
 	}
 	if err := inspectRun([]string{"-data-dir", root, "../x"}, &out); err == nil || !strings.Contains(err.Error(), "is not a request or run id") {

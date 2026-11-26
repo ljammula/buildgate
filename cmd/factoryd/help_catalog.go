@@ -58,10 +58,10 @@ func commandCatalog() []commandInfo {
 		{"amend-scope", "<request-id> <file>...", "Add files to a quarantined ticket's allowed scope", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newAmendScopeFlags(); return fs }},
 
 		{"inbox", "", "List every request waiting on you, across profiles or for one", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newInboxFlags(); return fs }},
-		{"status", "", "List requests and runs with their state", groupWatch, func() *flag.FlagSet { fs, _, _, _, _, _, _ := newStatusFlags(); return fs }},
+		{"status", "", "List requests and runs with their state", groupWatch, func() *flag.FlagSet { return newStatusFlags().set }},
 		{"watch", "<run-or-request-id>", "Follow a run's or a request's progress", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newWatchFlags(); return fs }},
 		{"rounds", "<request-id>", "List the rounds a request's builds ended in, to retry a ticket from one", groupWatch, func() *flag.FlagSet { fs, _, _ := newRoundsFlags(); return fs }},
-		{"inspect", "<request-id | run-id>", "Print the commands that show a request's or a run's work before you decide", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newInspectFlags(); return fs }},
+		{"inspect", "<request-id | run-id>", "Show a request's or a run's change, gate results and review findings", groupWatch, func() *flag.FlagSet { fs, _, _, _, _ := newInspectFlags(); return fs }},
 		{"logs", "<request-id | run-id | queue-run | serve>", "Print the newest log for an id", groupWatch, func() *flag.FlagSet { fs, _, _, _, _, _ := newLogsFlags(); return fs }},
 		{"console", "", "Print the link to the web console, starting it if needed", groupWatch, func() *flag.FlagSet { fs, _, _, _ := newConsoleFlags(); return fs }},
 		{"cost", "", "Show model spend per accepted ticket", groupWatch, func() *flag.FlagSet { fs, _, _, _, _, _ := newCostFlags(); return fs }},

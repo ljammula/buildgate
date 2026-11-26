@@ -44,7 +44,10 @@ func cancelMain(dp *deps, args []string) error {
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err
 	}
-	id := positional[0]
+	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, positional[0], idRequest)
+	if err != nil {
+		return err
+	}
 
 	unlock, err := request.Lock(*dataDir, id)
 	if err != nil {

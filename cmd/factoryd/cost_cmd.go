@@ -158,6 +158,13 @@ func costMain(args []string) error {
 		return err
 	}
 
+	if *requestID != "" {
+		id, err := resolveIDArg(flags, *dataDir, *configPath, *requestID, idRequest)
+		if err != nil {
+			return err
+		}
+		*requestID = id
+	}
 	rep, err := buildCostReport(*dataDir, *requestID, *since)
 	if err != nil {
 		return err
