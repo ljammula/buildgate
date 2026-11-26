@@ -92,6 +92,27 @@ func TestDetectionRefused(t *testing.T) {
 	}
 }
 
+func TestColimaContextNamesTheProfile(t *testing.T) {
+	cases := []struct {
+		name, endpoint, profile string
+		ok                      bool
+	}{
+		{"colima", "unix:///Users/me/.colima/default/docker.sock", "default", true},
+		{"colima-work", "unix:///Users/me/.colima/work/docker.sock", "work", true},
+		{"mine", "unix:///Users/me/.colima/work/docker.sock", "work", true},
+		{"mine", "unix:///Users/me/.config/colima/default/docker.sock", "default", true},
+		{"mine", "unix:///Users/me/.colima/docker.sock", "", true},
+		{"default", "unix:///var/run/docker.sock", "", false},
+		{"desktop-linux", "unix:///Users/me/.docker/run/docker.sock", "", false},
+	}
+	for _, c := range cases {
+		profile, ok := ColimaContext(c.name, c.endpoint)
+		if profile != c.profile || ok != c.ok {
+			t.Errorf("ColimaContext(%q, %q) = %q, %v; want %q, %v", c.name, c.endpoint, profile, ok, c.profile, c.ok)
+		}
+	}
+}
+
 type errTest struct{}
 
 func (errTest) Error() string { return "docker: not answering" }

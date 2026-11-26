@@ -42,11 +42,8 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 		}
 		startSandboxRuntimeIfDown(dp, ctx, w, in.meterImage)
 	}
-	checks := []doctorCheck{
-		doctorCheckOpenShellImages(ctx, in.sandboxDocker),
-		doctorCheckOpenShellGateway(dp, ctx),
-		doctorCheckOpenShellGatewayConfig(),
-	}
+	checks := append(needingDocker(doctorCheckOpenShellImages(ctx, in.sandboxDocker), doctorCheckOpenShellGateway(dp, ctx)),
+		doctorCheckOpenShellGatewayConfig())
 	if sandboxesListed {
 		checks = append(checks, sandboxes)
 	}
@@ -56,7 +53,7 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 	if check, ok := doctorCheckSupervisorTrustsInterceptingCA(); ok {
 		checks = append(checks, check)
 	}
-	return append(checks, doctorCheckMeter(dp, ctx), doctorCheckMeterRunsConfiguredImage(in.meterImage))
+	return append(append(checks, needingDocker(doctorCheckMeter(dp, ctx))...), doctorCheckMeterRunsConfiguredImage(in.meterImage))
 }
 
 // doctorScratchVolumesCheck is the advisory row of the scratch volumes of

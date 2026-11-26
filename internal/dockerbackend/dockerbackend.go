@@ -124,7 +124,7 @@ func hasSecurityOption(options []string, name string) bool {
 // VM, say), whatever the machine is called.
 func isColima(f Facts, in info) bool {
 	named := func(s string) bool { return s == "colima" || strings.HasPrefix(s, "colima-") }
-	socket := strings.Contains(f.Endpoint, "/.colima/") || strings.Contains(f.Endpoint, "/colima/")
+	_, socket := ColimaContext("", f.Endpoint)
 	if named(f.Context) || socket {
 		return true
 	}
@@ -132,6 +132,31 @@ func isColima(f Facts, in info) bool {
 		return false
 	}
 	return named(in.Name) || strings.HasPrefix(in.Name, "lima-colima")
+}
+
+// ColimaContext reports whether a docker context, by its name and endpoint,
+// is colima's: named colima or colima-<profile>, or with its socket under
+// ~/.colima or $XDG_CONFIG_HOME/colima. profile is the colima profile it
+// belongs to ("default" for the context colima, the directory under
+// ~/.colima for a socket), "" when neither names one.
+func ColimaContext(name, endpoint string) (profile string, ok bool) {
+	switch {
+	case name == "colima":
+		return "default", true
+	case strings.HasPrefix(name, "colima-") && len(name) > len("colima-"):
+		return strings.TrimPrefix(name, "colima-"), true
+	}
+	for _, dir := range []string{"/.colima/", "/colima/"} {
+		_, rest, found := strings.Cut(endpoint, dir)
+		if !found {
+			continue
+		}
+		if p, _, nested := strings.Cut(rest, "/"); nested && p != "" && !strings.HasPrefix(p, "_") {
+			return p, true
+		}
+		return "", true
+	}
+	return "", false
 }
 
 // isLocalSocket reports whether endpoint is the host's own Docker Engine

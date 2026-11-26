@@ -1847,7 +1847,7 @@ func TestDoctorCheckTemporalReachableFailsClosedOnAnUnreachableAddress(t *testin
 // static-only checks (no real Docker needed), so this stays CI-safe.
 func TestIntegrationDoctorReportsFailuresAndFixesWithNonzeroExit(t *testing.T) {
 	t.Parallel()
-	cmd := factorydCommand(t, "doctor")
+	cmd := factorydCommand(t, "doctor", "-v")
 	cmd.Env = append(os.Environ(), isolatedSessionConfigEnv(t, "sandbox_docker: factoryd-doctor-test-nonexistent-binary\nsandbox_tmpfs_size: 256m\n"+
 		"routes:\n  local:\n    upstream: http://127.0.0.1:8080\n    worker_base_path: /v1\n    allow_no_credential: true\n    allow_plaintext_upstream: true\n"+
 		"models:\n  m:\n    id: qwen38\n    routes: [local]\n"+
@@ -1860,6 +1860,30 @@ func TestIntegrationDoctorReportsFailuresAndFixesWithNonzeroExit(t *testing.T) {
 	for _, want := range []string{"FAIL", "fix:", "docker daemon reachable", "route upstream path composition", "sandbox tmpfs size", "checks passed"} {
 		if !strings.Contains(output, want) {
 			t.Errorf("output does not contain %q:\n%s", want, output)
+		}
+	}
+}
+
+// TestIntegrationDoctorListsOnlyProblemsAndOneDockerLine proves the bare
+// `factoryd doctor` prints no passing row, and that with Docker unreachable
+// the rows that need it are one line, not a failure each.
+func TestIntegrationDoctorListsOnlyProblemsAndOneDockerLine(t *testing.T) {
+	t.Parallel()
+	cmd := factorydCommand(t, "doctor", "-sandbox-image", "localhost:5050/buildgate-worker:missing")
+	cmd.Env = append(os.Environ(), isolatedSessionConfigEnv(t, "sandbox_docker: factoryd-doctor-test-nonexistent-binary\nsandbox_tmpfs_size: 256m\n")...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected a nonzero exit with Docker unreachable, got success: %s", out)
+	}
+	output := string(out)
+	for _, want := range []string{"FAIL  docker daemon reachable", "checks need Docker: sandbox image present", "`factoryd doctor -v` lists every check"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output does not contain %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{"\nok    ", "FAIL  sandbox image present"} {
+		if strings.Contains(output, unwanted) {
+			t.Errorf("output contains %q:\n%s", unwanted, output)
 		}
 	}
 }
@@ -1950,7 +1974,7 @@ func TestIntegrationDoctorAppliesRelayUpstreamFromSessionConfig(t *testing.T) {
 		"routes:\n  local:\n    upstream: http://127.0.0.1:1\n    allow_no_credential: true\n    allow_plaintext_upstream: true\n"+
 		"models:\n  m:\n    id: qwen\n    routes: [local]\n"+
 		"roles:\n  execution:\n    model: m\n")...)
-	cmd := factorydCommand(t, "doctor")
+	cmd := factorydCommand(t, "doctor", "-v")
 	cmd.Env = env
 	out, _ := cmd.CombinedOutput()
 	if !strings.Contains(string(out), "route upstream path composition") {

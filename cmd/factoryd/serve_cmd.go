@@ -360,6 +360,9 @@ func serveMain(dp *deps, args []string) error {
 	if err := sv.loadConfig(); err != nil {
 		return err
 	}
+	if err := enterStableWorkDir(sv.dp, *sv.dataDir); err != nil {
+		return err
+	}
 	if err := sv.resolveTokens(); err != nil {
 		return err
 	}
@@ -397,6 +400,14 @@ func (sv *serveRun) loadConfig() error {
 		return err
 	}
 	if err := resolveDataDirFromSessionConfig(sv.flags, sv.dataDir, *sv.sf.configPath); err != nil {
+		return err
+	}
+	// serve leaves the directory it was started in (enterStableWorkDir):
+	// every path it keeps is absolute from here on.
+	if *sv.sf.configPath, err = absoluteConfigArg(*sv.sf.configPath); err != nil {
+		return err
+	}
+	if err := absolutePaths(sv.dataDir, sv.egressCABundle, daemonBuildAppScript); err != nil {
 		return err
 	}
 	if err := validateSandboxResourceLimitFlags("-sandbox", *sv.sandboxMemory, *sv.sandboxCPUs, *sv.sandboxTmpfsSize); err != nil {

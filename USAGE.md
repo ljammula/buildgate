@@ -434,7 +434,7 @@ either fails.
 | 2. Build the fork's worker image from your Dockerfile ([image contract](doc/designs/pifork-harness.md)); note the `name@sha256:...` it prints | `make pifork-image PIFORK_DOCKERFILE=<your Dockerfile>` |
 | 3. Give `quickstart` a Copilot login: a Pi login at `~/.pi/agent/auth.json` is found by itself; for the fork's own login pass the token | `export GITHUB_COPILOT_TOKEN=<token>` |
 | 4. Configure, start and submit | `factoryd quickstart -route copilot -harness pifork -sandbox-image <digest> <repo> "<task>"` |
-| 5. Check | `factoryd doctor` (all green), then watch the request to a draft PR |
+| 5. Check | `factoryd doctor` (no `FAIL` row), then watch the request to a draft PR |
 
 `-harness pifork` requires `-sandbox-image` (digest-pinned; quickstart
 never builds the pifork image itself). Over an existing config whose

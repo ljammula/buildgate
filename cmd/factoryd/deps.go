@@ -65,6 +65,9 @@ type dockerBoundary interface {
 	// one buildgate refuses. Read once per process and binary.
 	backend(ctx context.Context, dockerBinary string) dockerbackend.Detection
 	colimaBinary() string
+	// contextFacts lists the docker CLI's contexts and asks each colima
+	// context whether a daemon answers: why doctor finds Docker unreachable.
+	contextFacts(ctx context.Context, dockerBinary string) dockerContextFacts
 	dockerBinary() string
 	// imageToolchains runs image once and reads the versions of its
 	// toolchains (imageToolchainLines) and its distribution codename.
@@ -157,6 +160,9 @@ type hostBoundary interface {
 	// for a symlink or submodule, errBlobTooLarge over 1 MiB.
 	blobAtCommit(ctx context.Context, repoDir string, commit string, path string) ([]byte, bool, error)
 	browserCommand(target string) *exec.Cmd
+	// chdir moves this process to dir: a worker or serve leaves the
+	// directory it was started in (enterStableWorkDir).
+	chdir(dir string) error
 	// browserRedirectDir is where a browser can read the redirect file
 	// openInBrowser writes ("" is the OS temp directory), or why no browser
 	// can be opened on this machine.

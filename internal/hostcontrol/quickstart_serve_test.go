@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestQuickstartServeChildEnvStripsExistingTokens proves
@@ -96,6 +97,63 @@ func TestQuickstartSpawnServePassesConfigFlag(t *testing.T) {
 		}
 		if fi.Mode().Perm() != 0o600 {
 			t.Errorf("%s mode = %v, want 0600 (adversarial review)", name, fi.Mode().Perm())
+		}
+	}
+}
+
+// TestSpawnedServeRunsInItsDataDir proves a spawned serve does not run in
+// the directory of the command that started it, which can be a worktree
+// removed while serve still runs.
+func TestSpawnedServeRunsInItsDataDir(t *testing.T) {
+	dp := newFakeDeps(t)
+	dp.serveHealthzOKFn = func(addr string) bool { return true }
+	dataDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "cwd")
+	binary := filepath.Join(t.TempDir(), "factoryd")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\npwd -P > "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := RealSpawnServe(dp, &out, binary, "", dataDir, "127.0.0.1:0"); err != nil {
+		t.Fatalf("RealSpawnServe: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := os.ReadFile(marker)
+		if err == nil && len(got) > 0 {
+			if strings.TrimSpace(string(got)) != want {
+				t.Fatalf("serve ran in %q, want its data dir %q", strings.TrimSpace(string(got)), want)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the spawned serve never wrote its directory")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestSpawnedWorkerRunsInItsDataDir(t *testing.T) {
+	dataDir := t.TempDir()
+	if got := drainerCommand("factoryd", []string{"worker"}, dataDir, nil).Dir; got != dataDir {
+		t.Errorf("worker command runs in %q, want its data dir %q", got, dataDir)
+	}
+}
+
+func TestStableWorkDirIsTheDataDirElseHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dataDir := t.TempDir()
+	if got := StableWorkDir(dataDir); got != dataDir {
+		t.Errorf("StableWorkDir(%q) = %q, want the data dir", dataDir, got)
+	}
+	for _, dir := range []string{"", "data", filepath.Join(dataDir, "missing")} {
+		if got := StableWorkDir(dir); got != home {
+			t.Errorf("StableWorkDir(%q) = %q, want $HOME %q", dir, got, home)
 		}
 	}
 }

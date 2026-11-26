@@ -63,6 +63,9 @@ func buildWorkerPlist(cfg workerPlistConfig) []byte {
 		fmt.Fprintf(&b, "\t\t<string>%s</string>\n", escapeXML(arg))
 	}
 	b.WriteString("\t</array>\n")
+	// The worker runs in its data dir, never a directory that can be removed
+	// under it (hostcontrol.StableWorkDir).
+	fmt.Fprintf(&b, "\t<key>WorkingDirectory</key>\n\t<string>%s</string>\n", escapeXML(cfg.DataDir))
 	b.WriteString("\t<key>KeepAlive</key>\n\t<true/>\n")
 	// Docker/colima may not be up yet at login: space restarts out rather
 	// than crash-looping at launchd's ~10s default.
@@ -129,6 +132,7 @@ func buildServePlist(cfg servePlistConfig) []byte {
 		fmt.Fprintf(&b, "\t\t<string>%s</string>\n", escapeXML(arg))
 	}
 	b.WriteString("\t</array>\n")
+	fmt.Fprintf(&b, "\t<key>WorkingDirectory</key>\n\t<string>%s</string>\n", escapeXML(cfg.DataDir))
 	b.WriteString("\t<key>KeepAlive</key>\n\t<true/>\n")
 	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>60</integer>\n")
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")

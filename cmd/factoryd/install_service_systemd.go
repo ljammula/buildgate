@@ -66,6 +66,8 @@ type systemdUnitConfig struct {
 	Env       []string
 	StdoutLog string
 	StderrLog string
+	// WorkDir is the directory the process runs in: its data dir.
+	WorkDir string
 }
 
 // buildSystemdUnit renders a user unit deterministically, every word quoted
@@ -84,6 +86,11 @@ func buildSystemdUnit(cfg systemdUnitConfig) []byte {
 	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", strings.Join(quoted, " "))
 	b.WriteString("Restart=always\nRestartSec=60\nUMask=0077\n")
+	if cfg.WorkDir != "" {
+		// "-": a missing directory leaves the manager's default ($HOME)
+		// rather than refusing to start the unit.
+		fmt.Fprintf(&b, "WorkingDirectory=-%s\n", systemdPathValue(cfg.WorkDir))
+	}
 	env := append([]string{"PATH=" + systemdServicePATH(cfg.HomeDir, cfg.ToolDirs), "HOME=" + cfg.HomeDir}, cfg.Env...)
 	for _, kv := range env {
 		fmt.Fprintf(&b, "Environment=%s\n", hostcontrol.SystemdQuoteEnvironment(kv))
@@ -119,6 +126,7 @@ func buildSystemdWorkerUnit(cfg workerPlistConfig, toolDirs []string) []byte {
 		Env:         systemdDockerEnv(),
 		StdoutLog:   filepath.Join(cfg.DataDir, "logs", "queue-run.out.log"),
 		StderrLog:   filepath.Join(cfg.DataDir, "logs", "queue-run.err.log"),
+		WorkDir:     cfg.DataDir,
 	})
 }
 
@@ -131,6 +139,7 @@ func buildSystemdServeUnit(cfg servePlistConfig, toolDirs []string) []byte {
 		Env:         systemdDockerEnv(),
 		StdoutLog:   filepath.Join(cfg.DataDir, "logs", "serve.out.log"),
 		StderrLog:   filepath.Join(cfg.DataDir, "logs", "serve.err.log"),
+		WorkDir:     cfg.DataDir,
 	})
 }
 
