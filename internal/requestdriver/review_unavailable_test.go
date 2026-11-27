@@ -46,6 +46,7 @@ var reviewLedgers = map[unresolved.Cause]*meter.Calls{
 	unresolved.ProviderQuota:    {Answered: 12, RateLimited: 3, RefusedAtEnd: 3, RefusedAtEndBy: meter.RefusedByProviderLimit, RetryAt: "2026-10-11T03:11:00Z"},
 	unresolved.MeterDenied:      {Answered: 40, DeniedBudget: 2, RefusedAtEnd: 2, RefusedAtEndBy: meter.RefusedByMeter},
 	unresolved.ModelUnavailable: {Unanswered: 2},
+	unresolved.ModelRejected:    {Rejected: 2},
 	unresolved.NoVerdict:        {Answered: 3},
 }
 

@@ -24,7 +24,14 @@ func TestModelRouteCauseReadsOnlyTheMetersCounts(t *testing.T) {
 		{"nothing ever answered: no response at all", &meter.Calls{Unanswered: 3}, unresolved.ModelUnavailable},
 		{"nothing ever answered: only stream heads that were cut", &meter.Calls{AnsweredUnread: 2}, unresolved.ModelUnavailable},
 		{"nothing ever answered: the meter refused, then silence", &meter.Calls{DeniedCeiling: 1, Unanswered: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByMeter}, unresolved.MeterDenied},
-		{"every request rejected as malformed: the client's doing", &meter.Calls{Rejected: 3}, ""},
+		{"every request rejected with a 4xx other than 429 (a usage limit sent as a 400)", &meter.Calls{Rejected: 1}, unresolved.ModelRejected},
+		{"every request rejected, several times", &meter.Calls{Rejected: 3}, unresolved.ModelRejected},
+		{"answered, then rejected to the end: served", &meter.Calls{Answered: 5, Rejected: 2}, ""},
+		// A client that gives up on its retry of a rejected request leaves
+		// it unanswered: the rejection is still why nothing was served, and
+		// the same request meets it again, so it must not auto-resume.
+		{"rejected and unanswered, nothing answered", &meter.Calls{Rejected: 1, Unanswered: 1}, unresolved.ModelRejected},
+		{"a 5xx at the end beside a rejection, nothing answered", &meter.Calls{Rejected: 1, Failed: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByProviderError}, unresolved.ModelUnavailable},
 		{"a ledger that cannot say how requests ended", &meter.Calls{Failed: 3, Legacy: true}, ""},
 	} {
 		if got := ModelRouteCause(tc.calls); got != tc.want {

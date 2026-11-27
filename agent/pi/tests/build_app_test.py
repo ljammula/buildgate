@@ -636,6 +636,48 @@ class BuildAppTests(unittest.TestCase):
 				self.assertEqual(result.stopped_reason, "model route unreachable (1/1 assistant turns errored)")
 				self.assertFalse(hasattr(result, "model_stop"))
 
+	def test_a_round_whose_every_turn_the_route_rejected_exits_without_succeeding(self):
+		# The live case (2026-11-26): an Anthropic route answered the first
+		# turn 400 for the account's usage limit. The fixture is constructed,
+		# not recorded: pi's event shapes built around the errorMessage that
+		# build logged, since the run saved no raw pi stream. Every
+		# turn errored, so the loop stops after one round and the script exits
+		# 1, not 0 and not the setup code: the host then reads the meter's
+		# ledger (every request rejected) and halts the run with
+		# model_rejected. The script names no cause and parses no time.
+		stream = (Path(__file__).resolve().parent / "fixtures" / "pi_anthropic_usage_limit.jsonl").read_text()
+		parsed = harness_adapters.get("pi").parse(stream)
+		self.assertEqual(parsed.turn_errors, (1, 1))
+		self.assertEqual(len(parsed.route_errors), 1)
+		self.assertIn("specified API usage limits", parsed.route_errors[0])
+		with tempfile.TemporaryDirectory() as directory:
+			root = Path(directory)
+			spec = root / "spec.md"
+			spec.write_text("Fix the cache")
+			with (
+				mock.patch.object(build_app, "ensure_git_repo"),
+				mock.patch.object(build_app, "run_verification", return_value=("make verify", True, False, "", False, None)),
+				mock.patch.object(build_app, "run_agent_streaming", return_value=(subprocess.CompletedProcess([], 0, stream, ""), False)),
+			):
+				result = build_app.run_build(root, spec, max_rounds=3, timeout_minutes=1)
+		self.assertFalse(result.succeeded)
+		self.assertEqual(len(result.rounds), 1)
+		self.assertEqual(result.stopped_reason, "model route unreachable (1/1 assistant turns errored)")
+		self.assertIn("model route unreachable (1/1 assistant turns errored)", result.rounds[0].blockers)
+		# The operator docs send the reader to this round's agent_notes for
+		# the provider's own message.
+		self.assertIn("You have reached your specified API usage limits", result.rounds[0].agent_notes)
+		self.assertNotIn("2026-12-01", result.stopped_reason)
+		argv = [str(SCRIPT), "--workspace", "/tmp/work", "--spec", "/tmp/spec.md"]
+		with (
+			mock.patch.object(build_app, "run_build", return_value=result),
+			mock.patch.object(build_app, "write_report", return_value=Path("/tmp/report.md")),
+			mock.patch.object(build_app, "write_evidence_json", return_value=Path("/tmp/evidence.json")),
+			mock.patch.object(sys, "argv", argv),
+			contextlib.redirect_stdout(io.StringIO()),
+		):
+			self.assertEqual(build_app.main(), 1)
+
 	def test_a_model_that_writes_the_providers_sentence_made_a_no_change_round(self):
 		# The sentence in the model's own final message, with no error from
 		# the harness, is text like any other: a no-change round.

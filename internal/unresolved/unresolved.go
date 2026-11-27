@@ -35,6 +35,14 @@ const (
 	// ProviderQuota: as ModelUnavailable, and the provider refused with its
 	// own rate or usage limit (HTTP 429).
 	ProviderQuota Cause = "provider_quota"
+	// ModelRejected: the meter's ledger shows no model request of the step
+	// was served and the upstream answered at least one with a 4xx status
+	// other than 429 (the rest unanswered): an account's usage or spend
+	// limit some providers send as a 400, a revoked or expired credential
+	// (401/403), an unknown model, or the factory's own request refused as
+	// malformed or too large (400/413/422). The same request would meet it
+	// again, so it waits for the operator.
+	ModelRejected Cause = "model_rejected"
 	// MeterDenied: as ModelUnavailable, and the factory's own spend meter
 	// refused the requests at a ceiling, a window budget or the request
 	// rate. The session config's settings govern it.
@@ -89,6 +97,7 @@ var causes = map[Cause]string{
 	SandboxLaunch:    "the sandbox of the %s step could not be started, so the step never ran",
 	ModelUnavailable: "the model route served none of the last requests of the %s step, so the work was not judged",
 	ProviderQuota:    "the model provider refused the requests of the %s step with its own rate or usage limit, so the work was not judged",
+	ModelRejected:    "the model provider rejected the model requests of the %s step with an HTTP 4xx status other than 429 and served none, so the work was not judged. It is one of: a usage or spend limit on the account (raise it, or wait until the time the provider gave); a revoked or expired credential (401/403 on a subscription route: log in again on the host); an unknown model (correct the route's model); or the factory's own request refused as malformed or too large (400/413/422), which can be buildgate's doing: check the model and the prompt size",
 	MeterDenied:      "the spend meter refused the model requests of the %s step (a ceiling, a window budget or the request rate in the session config; `factoryd cost` shows the spend), so the work was not judged",
 	NoVerdict:        "the review of the %s step gave no verdict the factory could read, and the meter's record names no failed model route",
 	DependencyFetch:  "a package registry could not be reached while the %s step ran, so its command's failure says nothing about the work",

@@ -58,6 +58,7 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 	SandboxLaunchFailureType:    unresolved.SandboxLaunch,
 	ModelUnavailableFailureType: unresolved.ModelUnavailable,
 	ProviderQuotaFailureType:    unresolved.ProviderQuota,
+	ModelRejectedFailureType:    unresolved.ModelRejected,
 	MeterDeniedFailureType:      unresolved.MeterDenied,
 	// A command that ran and failed, twice, with a registry unreachable.
 	DependencyFetchFailureType: unresolved.DependencyFetch,
@@ -84,6 +85,7 @@ var unresolvedFailureTypes = map[string]unresolved.Cause{
 var modelRouteFailureTypes = map[unresolved.Cause]string{
 	unresolved.ModelUnavailable: ModelUnavailableFailureType,
 	unresolved.ProviderQuota:    ProviderQuotaFailureType,
+	unresolved.ModelRejected:    ModelRejectedFailureType,
 	unresolved.MeterDenied:      MeterDeniedFailureType,
 }
 
@@ -165,6 +167,7 @@ var nonRetryableActivityFailureTypes = []string{
 	SandboxLaunchFailureType,
 	ModelUnavailableFailureType,
 	ProviderQuotaFailureType,
+	ModelRejectedFailureType,
 	MeterDeniedFailureType,
 	DependencyFetchFailureType,
 	SandboxDiskFailureType,

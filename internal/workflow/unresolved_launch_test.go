@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -157,7 +158,11 @@ func TestABuildWhoseModelRouteDidNotServeItIsUnresolved(t *testing.T) {
 		{"did not succeed, the provider's limit from some point on", runner.Result{ExitCode: 1, RelayCalls: limit}, nil, unresolved.ProviderQuota},
 		{"did not succeed, nothing ever answered", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Unanswered: 4}}, nil, unresolved.ModelUnavailable},
 		{"did not succeed, the meter refused", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 2, DeniedBudget: 1, RefusedAtEnd: 1, RefusedAtEndBy: meter.RefusedByMeter}}, nil, unresolved.MeterDenied},
+		// The live record: an Anthropic route answered the build's one
+		// request 400 for the account's usage limit, and the build exited 1.
+		{"did not succeed, every request rejected by the provider", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Rejected: 1}}, nil, unresolved.ModelRejected},
 		{"did not succeed with every request answered: the gates judge it", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 40}}, nil, ""},
+		{"did not succeed, some requests answered and later ones rejected: the gates judge it", runner.Result{ExitCode: 1, RelayCalls: meter.Calls{Answered: 3, Rejected: 2}}, nil, ""},
 		{"succeeded although the limit was hit at the end: a result", runner.Result{ExitCode: 0, RelayCalls: limit}, nil, ""},
 		{"the repository's setup failed before any turn", runner.Result{ExitCode: SetupFailedExitCode, RelayCalls: meter.Calls{}}, nil, ""},
 		{"called no model", runner.Result{ExitCode: 1}, nil, ""},
@@ -187,6 +192,46 @@ func TestABuildWhoseModelRouteDidNotServeItIsUnresolved(t *testing.T) {
 		if unresolvedFailureTypes[typ] != cause || !slices.Contains(nonRetryableActivityFailureTypes, typ) {
 			t.Errorf("%s: type %q does not map back to it, or Temporal would retry it", cause, typ)
 		}
+	}
+}
+
+// The live case through the real build Activity: an upstream that answered
+// every request of the build with a 400 (an account's usage limit) leaves a
+// build that exited without succeeding and no verdict on the work, so the
+// Activity fails with model_rejected and RunWorkflow keeps the worktree and
+// halts instead of handing the empty workspace to the gates. A build some of
+// whose requests were answered before the rejections goes to the gates as
+// before.
+func TestABuildEveryRequestOfWhichWasRejectedHaltsWithModelRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		calls meter.Calls
+		want  unresolved.Cause
+	}{
+		{"every request rejected", meter.Calls{Rejected: 1}, unresolved.ModelRejected},
+		{"answered, then rejected", meter.Calls{Answered: 3, Rejected: 2}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			activities := &Activities{
+				LogDir: t.TempDir(),
+				runWithRetries: func(context.Context, string, func(int) string, int, func(int, runner.Result, error), string, ...string) (runner.Result, error) {
+					return runner.Result{ExitCode: 1, RelayCalls: tc.calls}, nil
+				},
+			}
+			var suite testsuite.WorkflowTestSuite
+			env := suite.NewTestActivityEnvironment()
+			env.RegisterActivity(activities.RunBuildActivity)
+			_, err := env.ExecuteActivity(activities.RunBuildActivity, fixtureInput())
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want the build's result for the gates", err)
+				}
+				return
+			}
+			if got := UnresolvedCauseFromError(err); got != tc.want || !StepLostFromError(err) || HaltReasonCodeFromError(err) != string(tc.want) {
+				t.Fatalf("err = %v: cause %q, halt code %q, want %q with a kept worktree", err, got, HaltReasonCodeFromError(err), tc.want)
+			}
+		})
 	}
 }
 

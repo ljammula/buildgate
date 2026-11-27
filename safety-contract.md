@@ -674,7 +674,7 @@ requires a new contract review and an updated machine-checkable test.
   record. It sizes the machine (`factoryd stats`) and is never judged: no
   gate, cause or handoff reads it, and an unreadable reading records
   nothing.
-  `model_unavailable`, `provider_quota` and `meter_denied` are read from
+  `model_unavailable`, `provider_quota`, `model_rejected` and `meter_denied` are read from
   the spend meter's ledger of the step's last launch, which the meter
   writes outside the sandbox from each response's head: the model route
   did not serve the step when no request got an answer whose usage was
@@ -682,9 +682,13 @@ requires a new contract review and an updated machine-checkable test.
   the provider (HTTP 429: `provider_quota`; another failure status:
   `model_unavailable`) or by the meter itself at a ceiling, a window budget
   or the request rate (`meter_denied`). A request that simply got no
-  response, or that the upstream rejected as malformed, neither counts as
-  a refusal nor ends the count, and a step all of whose requests were
-  rejected as malformed has no cause: that is the client's doing. So a
+  response, or that the upstream rejected with a 4xx other than 429,
+  neither counts as a refusal nor ends the count; a step none of whose
+  requests was served and some of which the upstream rejected so (the
+  rest unanswered) is `model_rejected` (a provider's usage limit sent as a
+  400 reads so, as do a revoked credential, an unknown model and a request
+  refused as malformed or too large), never transient, since the same
+  request meets it again. So a
   route that stops accepting connections after it answered is not seen. A
   ledger written before the meter recorded how requests ended names no
   cause. They apply to two steps: a build that exited without succeeding
@@ -704,8 +708,8 @@ requires a new contract review and an updated machine-checkable test.
   corrective build. A review launch that exited with not one request
   served, by the route's or the provider's doing (`model_unavailable`,
   `provider_quota`), is launched once more inside the same Activity,
-  within `-verify-max-attempts`; one that was served at all, and one the
-  meter refused, are not, and a second launch the Activity's deadline
+  within `-verify-max-attempts`; one that was served at all, one the
+  meter refused, and one the upstream rejected (`model_rejected`) are not, and a second launch the Activity's deadline
   leaves no room for leaves the first launch's result standing. The review
   script asks again only for an answer that arrived incomplete, never
   after a turn that failed. A resumed run whose adopted worktree is clean
