@@ -76,7 +76,9 @@ if [ "${FAKE_BUILD_APP_MODE:-}" = "hang" ]; then
 	sleep 300 &
 	hung_pid=$!
 	if [ -n "${FAKE_BUILD_APP_PID_FILE:-}" ]; then
-		printf '%s\n' "$hung_pid" >"$FAKE_BUILD_APP_PID_FILE"
+		# Written beside it and renamed: a reader that sees the file sees the PID.
+		printf '%s\n' "$hung_pid" >"$FAKE_BUILD_APP_PID_FILE.tmp"
+		mv "$FAKE_BUILD_APP_PID_FILE.tmp" "$FAKE_BUILD_APP_PID_FILE"
 	fi
 	wait "$hung_pid"
 	exit 0
