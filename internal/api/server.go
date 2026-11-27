@@ -50,17 +50,6 @@ var ErrConflict = errors.New("run already exists")
 // infrastructure failures reported by a RunStarter.
 var ErrInvalidStartRequest = errors.New("invalid start request")
 
-// ErrDaemonConflict reports that a daemon is already managed for a
-// repository. It is mapped to HTTP 409 by the daemon lifecycle handlers.
-var ErrDaemonConflict = errors.New("daemon already exists")
-
-// ErrDaemonNotFound reports that no daemon is managed for a repository. It is
-// mapped to HTTP 404 by the daemon lifecycle handlers.
-var ErrDaemonNotFound = errors.New("daemon not found")
-
-// ErrInvalidDaemonRequest distinguishes malformed daemon lifecycle input.
-var ErrInvalidDaemonRequest = errors.New("invalid daemon request")
-
 // StartRequest is the JSON request accepted by POST /runs. The execution
 // policy and validation remain in the injected RunStarter; the API only
 // decodes the transport shape and authenticates the caller.
@@ -91,21 +80,12 @@ type StartRequest struct {
 	TemporalAddress      string `json:"temporal_address,omitempty"`
 	Repository           string `json:"repository,omitempty"`
 	// SkipProjectCheck bypasses factoryd <run>'s mandatory project-bootstrap
-	// preflight (converted from opt-in to required, 2026-08-29), mirroring
-	// the CLI's own -skip-project-check -- the only escape hatch for a
-	// project that hasn't adopted the spec/contract/architecture
-	// convention yet. Without this field, POST /runs had no way to reach
+	// preflight, mirroring the CLI's own -skip-project-check. Without this field, POST /runs had no way to reach
 	// that escape hatch at all: every API-started run against such a
 	// project failed synchronously, with no path to the bypass the CLI
 	// itself advertises (found via a GitHub Codex App review round,
 	// 2026-08-29).
 	SkipProjectCheck bool `json:"skip_project_check,omitempty"`
-	// PreflightProfile mirrors factoryd <run>'s own -preflight-profile:
-	// "" (default, strict) or "brownfield" -- a narrower escape hatch than
-	// SkipProjectCheck for an existing repo that only needs its own real
-	// Verify-Command and a ticket, not three hand-authored docs (see that
-	// CLI flag's own doc comment).
-	PreflightProfile string `json:"preflight_profile,omitempty"`
 	// OpenPullRequest mirrors factoryd <run>'s own -open-pull-request: on
 	// acceptance, push this run's own branch and open a draft, evidence-
 	// carrying pull request (see that flag's own doc comment). Off by
@@ -146,22 +126,11 @@ type RunStarter func(context.Context, StartRequest) (*run.Run, error)
 // were wrong by actually starting a real run and watching it fail closed
 // on the project-bootstrap preflight. Ticket is optional -- an operator
 // checking a project before it has any tickets drafted yet still gets a
-// verdict on product_spec_frozen/program_design_structure/
-// architecture_structure alone, matching cmd/factoryd's own `check-project`
-// CLI subcommand where -ticket is one of several independently optional
-// flags.
+// verdict on architecture_structure alone.
 type ProjectCheckRequest struct {
 	Repository string `json:"repository,omitempty"`
 	Workspace  string `json:"workspace"`
 	Ticket     string `json:"ticket,omitempty"`
-	// PreflightProfile mirrors cmd/factoryd's own -preflight-profile:
-	// "" (default, strict) or "brownfield" (skip product_spec_frozen/
-	// program_design_structure entirely, treat architecture_structure as
-	// advisory -- see that flag's own doc comment). Lets this preview
-	// report the verdict a real brownfield-profile run would actually
-	// reach, instead of always previewing the strict profile regardless
-	// of what the caller intends to start.
-	PreflightProfile string `json:"preflight_profile,omitempty"`
 }
 
 // ProjectCheckResult is one project-bootstrap structural check's outcome --
@@ -175,7 +144,8 @@ type ProjectCheckResult struct {
 	Passed  bool     `json:"passed"`
 	Reasons []string `json:"reasons,omitempty"`
 	// Advisory mirrors cmd/factoryd's own ProjectCheckResult.Advisory --
-	// true only for architecture_structure under the brownfield profile.
+	// true for architecture_structure, and for a missing auto-discovered
+	// ticket.
 	Advisory bool `json:"advisory,omitempty"`
 }
 
@@ -250,24 +220,6 @@ type ProjectStats struct {
 // runs is a valid, reportable ProjectStats{Project: project}, not an
 // error.
 type ProjectStatsProvider func(ctx context.Context, project string) (ProjectStats, error)
-
-// DaemonStatus is the read-only status exposed for one serve-managed
-// factoryd supervise child.
-type DaemonStatus struct {
-	Repository         string `json:"repository"`
-	State              string `json:"state"`
-	PID                int    `json:"pid,omitempty"`
-	StartedAt          string `json:"started_at,omitempty"`
-	HeartbeatUpdatedAt string `json:"heartbeat_updated_at,omitempty"`
-}
-
-// DaemonController owns the lifecycle of serve-managed supervisor children.
-// The interface keeps HTTP tests independent of subprocesses and Temporal.
-type DaemonController interface {
-	List(context.Context) ([]DaemonStatus, error)
-	Start(context.Context, string) (DaemonStatus, error)
-	Stop(context.Context, string) error
-}
 
 // WithOverrideToken enables POST /runs/{id}/override, requiring every
 // request to present it as `Authorization: Bearer <token>`. The endpoint is
@@ -435,7 +387,7 @@ func WithAllowedHosts(hosts []string) Option {
 
 // WithAllowedHostSource adds allowed hosts read from source on every request
 // whose Host is not otherwise accepted, so a host can be added or removed
-// while the server runs (`factoryd remote-console` writes the file the
+// while the server runs (`factoryd remote on` writes the file the
 // source reads). They are allowed hosts in every respect WithAllowedHosts
 // describes: never local, never a reason to relax a write.
 func WithAllowedHostSource(source func() []string) Option {
@@ -494,20 +446,21 @@ func WithProjectChecker(checker ProjectChecker) Option {
 	}
 }
 
+// WithInspectConfigArg sets the " -config <profile>" the inspect commands of a
+// request detail carry, so a command copied from the console reads this
+// server's data dir. Without one the commands carry none.
+func WithInspectConfigArg(arg string) Option {
+	return func(s *Server) {
+		s.inspectConfigArg = arg
+	}
+}
+
 // WithProjectStatsProvider supplies the implementation used by
 // GET /projects/{project}/stats. Without one, the endpoint is unavailable
 // and fails closed rather than reporting fabricated numbers.
 func WithProjectStatsProvider(provider ProjectStatsProvider) Option {
 	return func(s *Server) {
 		s.projectStatsProvider = provider
-	}
-}
-
-// WithDaemonController supplies the lifecycle implementation used by
-// GET/POST /daemons. Without one, those routes fail closed as unavailable.
-func WithDaemonController(controller DaemonController) Option {
-	return func(s *Server) {
-		s.daemonController = controller
 	}
 }
 
@@ -591,12 +544,12 @@ type Server struct {
 	mcpSubmits           []time.Time
 	runStarter           RunStarter
 	projectChecker       ProjectChecker
+	inspectConfigArg     string
 	projectStatsProvider ProjectStatsProvider
 	// statsNow is the clock of GET /stats, whose weekly buckets end at the
 	// current day; nil is time.Now (see withStatsClock).
 	statsNow              func() time.Time
 	projectMemoryProvider ProjectMemoryProvider
-	daemonController      DaemonController
 	// prOpener is request.Retry's own "accepted run, no PR yet" side
 	// effect (see WithPROpener) -- nil is safe (Retry's own documented
 	// fallback), so a Server built without this option still handles
@@ -711,9 +664,6 @@ func NewServer(dataDir string, opts ...Option) *Server {
 	s.mux.HandleFunc("GET /runs", s.listRuns)
 	s.mux.HandleFunc("GET /queue-run", s.getWorkerStatus)
 	s.mux.HandleFunc("POST /runs", s.startRun)
-	s.mux.HandleFunc("GET /daemons", s.listDaemons)
-	s.mux.HandleFunc("POST /daemons/start", s.startDaemon)
-	s.mux.HandleFunc("POST /daemons/stop", s.stopDaemon)
 	s.mux.HandleFunc("POST /runs/{id}/start", s.startRunAtID)
 	s.mux.HandleFunc("GET /runs/{id}", s.getRun)
 	s.mux.HandleFunc("GET /runs/{id}/events", s.streamRunEvents)
@@ -1005,103 +955,6 @@ func (s *Server) checkProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-type daemonRequest struct {
-	Repository string `json:"repository"`
-}
-
-func decodeDaemonRequest(r *http.Request) (daemonRequest, error) {
-	var request daemonRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		return daemonRequest{}, fmt.Errorf("decode request body: %w", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return daemonRequest{}, errors.New("request body must contain one JSON object")
-	}
-	if strings.TrimSpace(request.Repository) == "" {
-		return daemonRequest{}, errors.New("repository is required")
-	}
-	return request, nil
-}
-
-func (s *Server) listDaemons(w http.ResponseWriter, r *http.Request) {
-	authorized := s.authorizeStart(r)
-	if !authorized {
-		writeError(w, http.StatusForbidden, "daemon endpoint is not authorized")
-		return
-	}
-	if s.daemonController == nil {
-		writeError(w, http.StatusNotFound, "daemon lifecycle is not configured")
-		return
-	}
-	statuses, err := s.daemonController.List(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "list daemons")
-		return
-	}
-	writeJSON(w, http.StatusOK, statuses)
-}
-
-func (s *Server) startDaemon(w http.ResponseWriter, r *http.Request) {
-	authorized := s.authorizeStart(r)
-	if !authorized {
-		writeError(w, http.StatusForbidden, "daemon endpoint is not authorized")
-		return
-	}
-	if s.daemonController == nil {
-		writeError(w, http.StatusNotFound, "daemon lifecycle is not configured")
-		return
-	}
-	request, err := decodeDaemonRequest(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	status, err := s.daemonController.Start(r.Context(), request.Repository)
-	switch {
-	case errors.Is(err, ErrInvalidDaemonRequest):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, ErrDaemonConflict):
-		writeError(w, http.StatusConflict, err.Error())
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "start daemon")
-	default:
-		writeJSON(w, http.StatusAccepted, status)
-	}
-}
-
-func (s *Server) stopDaemon(w http.ResponseWriter, r *http.Request) {
-	authorized := s.authorizeStart(r)
-	if !authorized {
-		writeError(w, http.StatusForbidden, "daemon endpoint is not authorized")
-		return
-	}
-	if s.daemonController == nil {
-		writeError(w, http.StatusNotFound, "daemon lifecycle is not configured")
-		return
-	}
-	request, err := decodeDaemonRequest(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	err = s.daemonController.Stop(r.Context(), request.Repository)
-	switch {
-	case errors.Is(err, ErrInvalidDaemonRequest):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, ErrDaemonNotFound):
-		writeError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, ErrDaemonConflict):
-		writeError(w, http.StatusConflict, err.Error())
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "stop daemon")
-	default:
-		writeJSON(w, http.StatusOK, map[string]string{"repository": request.Repository, "state": "stopped"})
-	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1396,12 +1249,7 @@ func (s *Server) runViewFor(r *run.Run) runView {
 // data dir), "stale" (a heartbeat exists but is older than
 // daemonheartbeat.WorkerStaleAfter -- worker crashed or the process
 // was killed without a graceful shutdown), or "alive" (a fresh
-// heartbeat). Exists because GET /daemons -- the console's prior signal
-// for its "worker is not running" strip -- only ever lists daemons
-// `factoryd serve` itself manages via s.daemonController and 404s
-// otherwise (see listDaemons), so the strip never fired for the common
-// setup where an operator runs `factoryd worker` by hand instead of
-// through `factoryd serve`'s own daemon lifecycle.
+// heartbeat). The console's "worker is not running" strip reads it.
 type WorkerStatus struct {
 	State string `json:"state"`
 	// LastHeartbeat is the heartbeat's UpdatedAt (RFC3339Nano), or "" when
@@ -3661,7 +3509,7 @@ func (s *Server) buildRequestDetailView(dataDir, id string, loaded *request.Requ
 			!loaded.AnyTicketAccepted(),
 	}
 	view.CanSendBackToPlan = view.CanSendBack && loaded.SendBackPlanAllowed()
-	if inspection := request.Inspect(dataDir, loaded); !inspection.Empty() {
+	if inspection := request.Inspect(dataDir, s.inspectConfigArg, loaded); !inspection.Empty() {
 		view.Inspect = &inspection
 	}
 	if next, ok := request.NextApprovalState(loaded); ok {
@@ -4932,7 +4780,7 @@ func validRunID(id string) bool {
 // outcome is positively known (see run.Run.HaltConfirmed's own doc
 // comment) — specifically, cmd/factoryd's Temporal give-up path, which
 // records a halt locally without confirmation that the underlying
-// execution actually stopped, precisely so a daemon's reclaim scan keeps
+// execution actually stopped, precisely so a worker's reclaim scan keeps
 // polling for what really happened. A client that already disconnected on
 // seeing that unconfirmed halt would never learn its later reconciliation
 // to a different terminal state (StateAccepted or a confirmed

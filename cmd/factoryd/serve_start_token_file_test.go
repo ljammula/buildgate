@@ -14,7 +14,7 @@ import (
 )
 
 // TestEnsureTokenFileGeneratesOnceAndReusesAfter proves
-// install-service's own stable-token bootstrap never rotates a token an
+// service install's own stable-token bootstrap never rotates a token an
 // operator's browser may already have stored (generateTokenFile's
 // own doc comment) -- a second call against the same path must return the
 // identical token, not mint a fresh one.
@@ -245,12 +245,12 @@ func TestResolveEffectiveConfigPathFallsBackToDefaultSearch(t *testing.T) {
 
 // TestServeConsoleFlagAndInstallServiceAgreeOnTokenPath is the regression
 // test for that same adversarial-review finding's core claim: `serve
-// -config X` and `factoryd console -config X` (and install-service's own
+// -config X` and `factoryd console -config X` (and service install's own
 // resolved configPath) must derive the exact same stable-token-file path
 // for the same X, whether or not X is one of sessionconfig.DefaultPaths().
 func TestServeConsoleFlagAndInstallServiceAgreeOnTokenPath(t *testing.T) {
 	// A NON-default path (outside any XDG_CONFIG_HOME/~/.factory
-	// location) -- the exact case that finding called out: install-service's
+	// location) -- the exact case that finding called out: service install's
 	// own -config could name a path serve's fixed default-path search
 	// would never independently rediscover.
 	explicit := filepath.Join(t.TempDir(), "somewhere-else", "config.yml")

@@ -17,7 +17,7 @@ import (
 // executing the command.
 func newResumeFlags() (flags *flag.FlagSet, dataDir, from, configPath *string) {
 	flags = flag.NewFlagSet("resume", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	from = flags.String("from", request.ResumeRound, "How a lost build continues. \"round\" continues in its kept worktree from the last completed round. \"scratch\" discards that worktree and rebuilds the ticket. Any other lost step simply runs again.")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
@@ -44,7 +44,7 @@ func resumeMainWith(dp *deps, args []string, gate requestdriver.ResumeGate) erro
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
-		return fmt.Errorf("usage: factoryd resume [-from round|scratch] [-config <path>] [-data-dir <path>] <request-id>")
+		return fmt.Errorf("usage: factoryd resume [-from round|scratch] [-config <path>] <request-id>")
 	}
 	if *from != request.ResumeRound && *from != request.ResumeScratch {
 		return fmt.Errorf("-from must be %q or %q, got %q", request.ResumeRound, request.ResumeScratch, *from)

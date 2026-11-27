@@ -22,15 +22,15 @@ func newConsoleFlags() (flags *flag.FlagSet, open *bool, configPath, dataDir *st
 	// configPath mirrors `serve`'s own -config (serve_cmd.go; an adversarial
 	// review flagged this): the stable start-token file lives at
 	// <effective config dir>/serve-start-token, and this must resolve the
-	// SAME effective config path `serve`/`install-service`/`quickstart`
+	// SAME effective config path `serve`/`service install`/`quickstart`
 	// themselves used, or this command would read a different (likely
 	// nonexistent) token file than the one actually in use.
 	configPath = flags.String("config", "", "the running serve's config path or profile name; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	// The data dir whose serve recorded its console address
 	// (<data-dir>/console-address): the token is attached only to that
 	// serve. Must match serve's own -data-dir when that differs from the
-	// config's data_dir (install-service -data-dir, say).
-	dataDir = flags.String("data-dir", "", "data directory of the running 'factoryd serve', to find its console address; empty uses the session config's data dir, else ./data")
+	// config's data_dir (service install -data-dir, say).
+	dataDir = flags.String("data-dir", "", "internal: the data dir to use in place of the session config's data_dir")
 	finishFlags(flags)
 	return
 }
@@ -38,13 +38,13 @@ func newConsoleFlags() (flags *flag.FlagSet, open *bool, configPath, dataDir *st
 // consoleMain implements `factoryd console [-open]`: prints, and
 // optionally opens, the tokenized console link for whatever session
 // config is currently resolved. Exists for the moment
-// after `factoryd install-service` (or a `factoryd quickstart` that ran
+// after `factoryd service install` (or a `factoryd quickstart` that ran
 // long enough for the printed link to scroll off) when an operator wants
 // the link again without going and reading a log file.
 //
 // Only ever knows the STABLE token (resolveEffectiveConfigPath/
 // serveStableStartTokenPathFor/readTokenFile -- the
-// serve-start-token file `install-service`'s serve LaunchAgent generates
+// serve-start-token file `service install`'s serve LaunchAgent generates
 // and `serveMain` itself prefers, see serve_start_token_file.go and
 // token_file.go): a bare
 // `factoryd serve` invocation with no session config, or one launched
@@ -110,7 +110,7 @@ func consoleMain(dp *deps, args []string) error {
 	case !hasConfig:
 		fmt.Println("no session config found -- if `factoryd serve` is running, use the link it printed on its own startup instead")
 	case !recorded && consolelink.EnvBase() == "":
-		fmt.Printf("no running `factoryd serve` recorded for data dir %s -- not attaching the start token to the default address, which another data dir's serve may hold; start `factoryd serve` for this config, or pass the -data-dir your serve uses, and rerun\n", dataDir)
+		fmt.Printf("no running `factoryd serve` recorded for data dir %s -- not attaching the start token to the default address, which another data dir's serve may hold; start `factoryd serve` for this config, or pass the -config profile your serve uses, and rerun\n", dataDir)
 	case !consoleBaseIsOwnLoopbackServe(base, serveAddr):
 		// The resolved base is a real, operator-set FACTORYD_CONSOLE_URL
 		// pointed somewhere else (a reverse proxy, a different machine) --
@@ -132,7 +132,7 @@ func consoleMain(dp *deps, args []string) error {
 				link += "&c=" + console
 			}
 		default:
-			fmt.Printf("no stable start token file yet at %s -- run `factoryd install-service` to create one, or use the link `factoryd serve` itself printed on its own startup\n", tokenPath)
+			fmt.Printf("no stable start token file yet at %s -- run `factoryd service install` to create one, or use the link `factoryd serve` itself printed on its own startup\n", tokenPath)
 		}
 	}
 
@@ -146,7 +146,7 @@ func consoleMain(dp *deps, args []string) error {
 }
 
 // consoleTokenFor returns serve's console token for configPath (written by
-// `install-service -require-tokens`), or "" when there is none. A link to
+// `service install -require-tokens`), or "" when there is none. A link to
 // this machine's own serve carries it beside the start token (`&c=`); the
 // console keeps it once the server accepts it, and it opens nothing through
 // a proxy. A file that fails the token-file checks, or a -require-tokens
@@ -168,7 +168,7 @@ func consoleTokenFor(w io.Writer, configPath string) string {
 		// A -require-tokens install from before the console token: the
 		// console would ask for a gate token, and the gate screen points
 		// back to `factoryd console`.
-		fmt.Fprintf(w, "no console token file at %s, so this console needs the gate token -- `factoryd install-service -force -require-tokens` writes one\n", path)
+		fmt.Fprintf(w, "no console token file at %s, so this console needs the gate token -- `factoryd service install -force -require-tokens` writes one\n", path)
 	}
 	return ""
 }

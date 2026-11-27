@@ -113,8 +113,8 @@ func newDoctorFlags() (flags *flag.FlagSet, sandboxImage *string, registryProxy 
 	composeServices = flags.Bool("compose-services", true, "Check that the docker compose v2 CLI (2.23.1 or newer) is available. Unset uses the session config's compose_services when it is set.")
 	fix = flags.Bool("fix", false, "Fix what doctor can: build an absent image from source, start missing services, reclaim a sandbox whose build is gone, and offer the first-run fixes (see -yes).")
 	repoRoot = flags.String("repo-root", "", "The buildgate checkout whose Makefile -fix builds images from. Empty uses $FACTORYD_REPO_ROOT, then the session config's image_source_root, then the checkout holding the running binary.")
-	workspace = flags.String("workspace", "", "A repository checkout to check: that Docker can see it, that -data-dir lies outside it, its .factory.yml, and its GitHub login. Empty skips these checks.")
-	dataDir = flags.String("data-dir", "data", "Directory of durable run records and logs, checked, with -workspace, for Docker visibility and for lying outside it. Unset uses the session config's data_dir.")
+	workspace = flags.String("workspace", "", "A repository checkout to check: that Docker can see it, that the data dir lies outside it, its .factory.yml, and its GitHub login. Empty skips these checks.")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	temporalAddress = flags.String("temporal-address", "", "Temporal server address to confirm is reachable; empty skips this check")
 	egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of extra CA certificates to check parses and to trust in the model-route reachability probe. Empty uses the bundle built for a network that re-signs TLS, when one exists.")
 	hitlReminderInterval = flags.Duration("hitl-reminder-interval", 15*time.Minute, "How often the worker re-reminds a request waiting at a review gate. Doctor prints it and checks nothing against it. Unset uses the session config's hitl_reminder_interval.")
@@ -1578,9 +1578,7 @@ func doctorChecksFailed(checks []doctorCheck) int {
 }
 
 // runDoctorChecks prints one ok/FAIL line per check (plus its fix, when
-// one is named) and the N/M summary, returning how many failed. Shared
-// by `factoryd doctor` and the init/onboard preflight
-// (runInitDoctorPreflight) so both print the identical report.
+// one is named) and the N/M summary, returning how many failed.
 func runDoctorChecks(checks []doctorCheck, w io.Writer) (failed int) {
 	var warned int
 	for _, c := range checks {
@@ -1626,41 +1624,6 @@ func printDoctorRow(w io.Writer, c doctorCheck) (failed, warned int) {
 		fmt.Fprintf(w, "      use: %s\n", c.Use)
 	}
 	return failed, warned
-}
-
-// initChecks builds the environment preflight initMain and
-// onboardMain run before writing anything: Docker reachable, the sandbox image present, and --
-// the colima trap a new Mac engineer actually hits -- dir visible from
-// inside a container. a boundary method so the in-process init/onboard
-// tests can stub it instead of needing a live Docker daemon.
-func (impl realDocker) initChecks(ctx context.Context, dockerBinary, image, dir string) []doctorCheck {
-	backend := impl.backend(ctx, dockerBinary).Backend
-	checks := explainDockerUnreachable(ctx, impl.dp, dockerBinary, []doctorCheck{doctorCheckDockerReachable(ctx, dockerBinary)})
-	if image == "" {
-		return append(checks, doctorCheck{
-			Name: "sandbox image",
-			Err:  errors.New("no sandbox image configured"),
-			Fix:  "run `make install` from the buildgate checkout to install and configure the default images, or pass -sandbox-image",
-		})
-	}
-	return append(checks,
-		doctorCheckImagePresent(ctx, dockerBinary, "sandbox image", image,
-			"run `make install` from the buildgate checkout to build or pull and configure the image"),
-		doctorCheckMountVisibility(ctx, backend, dockerBinary, image, dir),
-	)
-}
-
-// runInitDoctorPreflight runs docker.initChecks against dir and refuses
-// (without the caller having written anything) when any fails.
-func runInitDoctorPreflight(dp *deps, dockerBinary, image, dir string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	fmt.Println("Running factoryd doctor first -- pass -skip-doctor to bypass:")
-	if failed := runDoctorChecks(dp.docker.initChecks(ctx, dockerBinary, image, dir), os.Stdout); failed > 0 {
-		return fmt.Errorf("environment not ready: %d doctor check(s) failed (see fixes above, or rerun with -skip-doctor)", failed)
-	}
-	fmt.Println()
-	return nil
 }
 
 func doctorCheckDockerReachable(ctx context.Context, dockerBinary string) doctorCheck {
@@ -2650,10 +2613,10 @@ func doctorCheckHomeNotShared(ctx context.Context, dockerBinary, image string) d
 // "not there": the backend does not share dirAbs), with out its output.
 func doctorRunMarkerProbe(ctx context.Context, dockerBinary, image, dirAbs string) (out string, markerErr, probeErr error) {
 	// A unique name created with O_EXCL, never a fixed one written with
-	// os.WriteFile: now that init/onboard run this probe against a
-	// directory the operator owns, a fixed marker path that already
+	// os.WriteFile: this probe runs against a directory the operator
+	// owns, so a fixed marker path that already
 	// existed there (or was a symlink) would be truncated and then
-	// removed -- destroying their file just by running the scaffolder
+	// removed -- destroying their file just by running doctor
 	// (Codex review of PR #95). O_EXCL guarantees this probe only ever
 	// removes a file it created itself.
 	markerName := fmt.Sprintf(".factoryd-doctor-mount-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -2950,8 +2913,8 @@ func doctorCheckDataDirOutsideWorkspace(workspace, dataDir string) doctorCheck {
 	if inside {
 		return doctorCheck{
 			Name: name,
-			Err:  fmt.Errorf("-data-dir (%q, resolving to %q) is inside -workspace; Docker containment is unconditional and requires durable run records to live outside the workspace the worker mounts", dataDir, dataAbs),
-			Fix:  "pass -data-dir <path outside -workspace>",
+			Err:  fmt.Errorf("the data dir (%q, resolving to %q) is inside -workspace; Docker containment is unconditional and requires durable run records to live outside the workspace the worker mounts", dataDir, dataAbs),
+			Fix:  "set data_dir in the session config to a path outside -workspace",
 		}
 	}
 	return doctorCheck{Name: name}

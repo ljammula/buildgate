@@ -165,7 +165,6 @@
     "deploy/",
     ".github/"
   ],
-  "repository_owner_id": "<OWNER_ID>",
   "request_ticket": true,
   "resume_session_path": "<DATA_DIR>/runs/golden-quarantined/build-session",
   "review_harness": "pi",

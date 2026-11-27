@@ -14,7 +14,7 @@ import (
 // parsing, so the doc-vs-flag tests can enumerate its real flags.
 func newAnswerFlags() (flags *flag.FlagSet, dataDir, configPath, question, hash, text *string) {
 	flags = flag.NewFlagSet("answer", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	question = flags.String("q", "", "the read-back question to answer, as the spec review lists it (Q1, Q2, ...)")
 	hash = flags.String("hash", "", "the short hash factoryd watch -no-follow prints beside the question; the answer is refused if the question has changed since")
@@ -38,7 +38,7 @@ func answerMain(dp *deps, args []string) error {
 	positional := flags.Args()
 	if len(positional) != 1 || *question == "" || *hash == "" {
 		flags.Usage()
-		return fmt.Errorf(`usage: factoryd answer -q <question> -hash <hash> -text "<answer>" [-config <path>] [-data-dir <path>] <request-id>`)
+		return fmt.Errorf(`usage: factoryd answer -q <question> -hash <hash> -text "<answer>" [-config <path>] <request-id>`)
 	}
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err

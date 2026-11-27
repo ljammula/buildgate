@@ -76,7 +76,6 @@ type dockerBoundary interface {
 	// imageToolchains runs image once and reads the versions of its
 	// toolchains (imageToolchainLines) and its distribution codename.
 	imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
-	initChecks(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImage(repoRoot string, target string, vars ...string) (string, error)
 	// toolchainImage builds, or finds already built, the image that is base
 	// with the toolchains buildArgs name, and returns it by digest.
@@ -211,11 +210,11 @@ type hostBoundary interface {
 	runUpgradeCommand(c upgradeCmd) ([]byte, error)
 	serveHealthzOK(addr string) bool
 	serveVerifiedOurs(dataDir string, addr string) (int, bool)
-	// serviceManager is what supervises install-service's services on this
+	// serviceManager is what supervises service install's services on this
 	// OS (launchd, systemd or none).
 	serviceManager() hostcontrol.ServiceManager
 	// systemctl and loginctl run those commands and return their combined
-	// output: the systemd user units install-service manages, and whether
+	// output: the systemd user units service install manages, and whether
 	// the user's units start at boot (linger).
 	systemctl(args ...string) ([]byte, error)
 	loginctl(args ...string) ([]byte, error)

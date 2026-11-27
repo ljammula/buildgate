@@ -74,7 +74,6 @@ func contractRoutes() []contractRoute {
 		{Pattern: "GET /projects/{project}/memory", Path: "/projects/app/memory", File: "project-memory.json"},
 		{Pattern: "GET /queue-run", Path: "/queue-run", File: "queue-run.json"},
 		{Pattern: "GET /stats", Path: "/stats", File: "stats.json"},
-		{Pattern: "GET /daemons", Path: "/daemons", File: "daemons.json"},
 		{Pattern: "GET /workspaces", Path: "/workspaces", File: "workspaces.json"},
 		{Pattern: "GET /runs", Path: "/runs", File: "runs.json"},
 		{Pattern: "GET /runs/{id}", Path: "/runs/run-accepted", File: "run-accepted.json"},
@@ -124,10 +123,6 @@ func TestConsoleContractFixtures(t *testing.T) {
 		WithTemporalUIURL("http://localhost:8233"),
 		// GET /stats counts its weekly buckets back from today.
 		withStatsClock(func() time.Time { return time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC) }),
-		WithDaemonController(&daemonControllerStub{statuses: []DaemonStatus{{
-			Repository: "acme/app", State: "running", PID: 4242,
-			StartedAt: contractFixtureTime, HeartbeatUpdatedAt: contractFixtureTime,
-		}}}),
 		WithProjectStatsProvider(func(_ context.Context, project string) (ProjectStats, error) {
 			var stats ProjectStats
 			fillEveryField(reflect.ValueOf(&stats).Elem(), "")

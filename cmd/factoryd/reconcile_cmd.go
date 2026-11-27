@@ -45,7 +45,7 @@ import (
 func newReconcileFlags() (flags *flag.FlagSet, workspace, dataDir, temporalAddress, sandboxDocker *string) {
 	flags = flag.NewFlagSet("reconcile", flag.ContinueOnError)
 	workspace = flags.String("workspace", "", "path to the repository whose stranded isolation markers and worktrees to reconcile (required)")
-	dataDir = flags.String("data-dir", "data", "directory holding durable run records and isolation markers (must match the value the original runs used)")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	temporalAddress = flags.String("temporal-address", "", "Temporal server address. When set, a marker whose workflow still runs there is kept; when empty, every marker of a Temporal run is kept as inconclusive.")
 	sandboxDocker = flags.String("sandbox-docker", "docker", "Docker executable for removing orphaned sandbox containers and checking a run's container is gone before its worktree is reaped; a failed check keeps the marker. Pass \"\" to skip Docker.")
 	finishFlags(flags)

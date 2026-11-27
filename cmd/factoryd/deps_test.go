@@ -29,7 +29,6 @@ type fakeDocker struct {
 	contextFactsFn     func(ctx context.Context, dockerBinary string) dockerContextFacts
 	dockerBinaryFn     func() string
 	imageToolsFn       func(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error)
-	initChecksFn       func(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck
 	makeImageFn        func(repoRoot string, target string, vars ...string) (string, error)
 	toolImageFn        func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
 	memTotalFn         func(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
@@ -83,9 +82,6 @@ func (f *fakeDocker) backend(ctx context.Context, dockerBinary string) dockerbac
 func (f *fakeDocker) dockerBinary() string { return f.dockerBinaryFn() }
 func (f *fakeDocker) imageToolchains(ctx context.Context, dockerBinary string, image string) (toolchain.Installed, string, error) {
 	return f.imageToolsFn(ctx, dockerBinary, image)
-}
-func (f *fakeDocker) initChecks(ctx context.Context, dockerBinary string, image string, dir string) []doctorCheck {
-	return f.initChecksFn(ctx, dockerBinary, image, dir)
 }
 func (f *fakeDocker) makeImage(repoRoot string, target string, vars ...string) (string, error) {
 	return f.makeImageFn(repoRoot, target, vars...)
@@ -399,7 +395,6 @@ func fakeTemporalOf(dp *deps) *fakeTemporal { return dp.temporal.(*fakeTemporal)
 // it on realHost{dp: dp} and its siblings.
 //
 //	docker.memTotal      reads Docker's memory: an error (review and challenger in turn)
-//	docker.initChecks    needs a live Docker daemon: all-pass
 //	docker.docker.colimaBinary  the operator's Colima VM: a binary that does not exist
 //	docker.contextFacts  asks the operator's docker contexts: none listed
 //	host.chdir           changes the test process's directory: recorded, not changed
@@ -421,8 +416,7 @@ func newTestDeps(t testing.TB) *deps {
 		imageToolsFn: func(context.Context, string, string) (toolchain.Installed, string, error) {
 			return nil, "", errors.New("test docker: no image is run")
 		},
-		initChecksFn: realDocker.initChecks,
-		makeImageFn:  realDocker.makeImage,
+		makeImageFn: realDocker.makeImage,
 		toolImageFn: func(context.Context, string, string, []string) (string, error) {
 			return "", errors.New("test docker: no image is built")
 		},
@@ -591,7 +585,6 @@ func newTestDeps(t testing.TB) *deps {
 		stillRunningFn:   realTemporal.stillRunning,
 		wakeRequestFn:    realTemporal.wakeRequest,
 	}
-	fakeDockerOf(dp).initChecksFn = func(context.Context, string, string, string) []doctorCheck { return nil }
 	fakeDockerOf(dp).colimaBinaryFn = func() string { return "factoryd-test-no-such-colima" }
 	// No test asks the machine's Docker which backend it is: one it could
 	// not ask, which refuses nothing.

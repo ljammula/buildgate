@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -23,7 +22,7 @@ import (
 // remoteConsoleFileSuffix names the file that records how this profile's
 // console is reached from another machine: <config name>.remote-console
 // beside the session config, mode 0600, with the checks of the token files.
-// `factoryd remote-console` writes it. `serve` reads it on each request whose
+// `factoryd remote on` writes it. `serve` reads it on each request whose
 // Host is not otherwise accepted and allows the host it names, so turning the
 // remote console on or off needs no restart and survives one.
 //
@@ -189,7 +188,7 @@ const listenerFunnel = "funnel"
 
 // tailscaleName is this machine's name on its tailnet.
 func tailscaleName(ctx context.Context, dp *deps) (string, error) {
-	const install = "`factoryd remote-console` puts the console behind `tailscale serve`: install Tailscale and sign in, or follow USAGE.md's \"The console from another machine\" for another reverse proxy"
+	const install = "`factoryd remote on` puts the console behind `tailscale serve`: install Tailscale and sign in, or follow USAGE.md's \"The console from another machine\" for another reverse proxy"
 	out, err := dp.host.tailscale(ctx, "status", "--json")
 	if err != nil {
 		return "", fmt.Errorf("tailscale status failed (%s) -- %s", sanitizeFirstLine(out, err), install)
@@ -326,66 +325,6 @@ func remoteHostFor(name string, port int) string {
 	return net.JoinHostPort(name, strconv.Itoa(port))
 }
 
-type remoteConsoleFlags struct {
-	configPath *string
-	dataDir    *string
-	httpsPort  *int
-	ttl        *time.Duration
-	off        *bool
-}
-
-// newRemoteConsoleFlags builds `factoryd remote-console`'s FlagSet in
-// isolation from parsing, so the doc-vs-flag drift test can enumerate it.
-func newRemoteConsoleFlags() (flags *flag.FlagSet, f remoteConsoleFlags) {
-	flags = flag.NewFlagSet("remote-console", flag.ContinueOnError)
-	f.configPath = flags.String("config", "", "config path or profile name of the console to open; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
-	f.dataDir = flags.String("data-dir", "", "data directory of the console to open; default: the session config's data dir")
-	f.httpsPort = flags.Int("https-port", 0, "HTTPS port of the Tailscale listener; default: the one already forwarding to this console, else the first free of 443, 8443, 8444 and up")
-	f.ttl = flags.Duration("ttl", gateDefaultTTL, fmt.Sprintf("how long a gate token this command writes works, from %s to %s; a usable token is kept as it is", gateMinTTL, gateMaxTTL))
-	f.off = flags.Bool("off", false, "close the console to other machines: remove the allowed host, the listener this command added, and the gate token if this command wrote it")
-	finishFlags(flags)
-	return
-}
-
-// remoteConsoleMain implements `factoryd remote-console`: one command that
-// makes this profile's console usable from another machine on the tailnet
-// (a listener, the host `serve` accepts, a gate token), or with -off undoes
-// all three.
-func remoteConsoleMain(dp *deps, stdout io.Writer, args []string) error {
-	flags, f := newRemoteConsoleFlags()
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() != 0 {
-		return fmt.Errorf("unexpected positional argument %q", flags.Arg(0))
-	}
-	if *f.ttl < gateMinTTL || *f.ttl > gateMaxTTL {
-		return fmt.Errorf("-ttl %s is outside %s to %s", *f.ttl, gateMinTTL, gateMaxTTL)
-	}
-	if *f.httpsPort < 0 || *f.httpsPort > 65535 {
-		return fmt.Errorf("-https-port %d is not a port", *f.httpsPort)
-	}
-	configPath, found := resolveEffectiveConfigPath(*f.configPath)
-	if !found {
-		return errors.New("no session config found: run `factoryd setup` first; the remote console's files live beside it")
-	}
-	if _, err := os.Stat(configPath); err != nil {
-		return fmt.Errorf("session config %s: %w", configPath, err)
-	}
-	ctx := context.Background()
-	if *f.off {
-		return remoteConsoleOff(ctx, dp, stdout, configPath)
-	}
-	dataDir := resolveConfiguredDataDir(*f.dataDir != "", *f.dataDir, *f.configPath)
-	if dataDir == "" {
-		dataDir = "data"
-	}
-	if abs, err := filepath.Abs(dataDir); err == nil {
-		dataDir = abs
-	}
-	return remoteConsoleOn(ctx, dp, stdout, configPath, dataDir, *f.httpsPort, *f.ttl)
-}
-
 // remoteConsoleOn does the steps in the order that leaves nothing half open:
 // the gate token exists before anything forwards, and the listener is in
 // place before the host is recorded (until then `serve` refuses the name).
@@ -448,7 +387,7 @@ func remoteConsoleOn(ctx context.Context, dp *deps, stdout io.Writer, configPath
 	fmt.Fprintln(stdout, "\nOn the other machine, open the console address and paste the gate token into the field it shows.")
 	fmt.Fprintln(stdout, "The token lets that console read, and approve, reject, retry, resume, cancel, edit and submit requests. It cannot override a quarantined run, start a run or use /mcp.")
 	fmt.Fprintln(stdout, "Any device your tailnet lets reach this machine can open the address; without the token it reads and writes nothing.")
-	fmt.Fprintln(stdout, "`factoryd gate-token -rotate` replaces the token at once. `factoryd remote-console -off` closes the console to other machines.")
+	fmt.Fprintln(stdout, "`factoryd remote token -rotate` replaces the token at once. `factoryd remote off` closes the console to other machines.")
 	return nil
 }
 
@@ -488,7 +427,7 @@ func remoteConsoleOff(ctx context.Context, dp *deps, stdout io.Writer, configPat
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	if !ok {
-		fmt.Fprintln(stdout, "Remote console off: this profile had none recorded. A gate token, if any, is left: `factoryd gate-token -remove` removes it.")
+		fmt.Fprintln(stdout, "Remote console off: this profile had none recorded. A gate token, if any, is left: `factoryd remote token -remove` removes it.")
 		return nil
 	}
 	did := []string{"the allowed host " + rc.Host}
@@ -500,7 +439,7 @@ func remoteConsoleOff(ctx context.Context, dp *deps, stdout io.Writer, configPat
 		}
 		did = append(did, "the gate token")
 	} else {
-		note = " The gate token was there before this command and is left: `factoryd gate-token -remove` removes it."
+		note = " The gate token was there before this command and is left: `factoryd remote token -remove` removes it."
 	}
 	if err := remoteConsoleRemoveListener(ctx, dp, rc); err != nil {
 		return fmt.Errorf("removed %s, but not the listener on port %d: %w", strings.Join(did, " and "), rc.Listener, err)
@@ -559,6 +498,6 @@ func doctorRemoteConsoleChecks(dp *deps, configPath, dataDir string) []doctorChe
 		Name:     "remote console",
 		Advisory: true,
 		Err:      fmt.Errorf("the listener for %s forwards to %s, and %s", rc.Host, rc.Backend, state),
-		Fix:      "`factoryd remote-console` points the listener at the running serve (it starts one when none runs); `factoryd remote-console -off` closes the console to other machines",
+		Fix:      "`factoryd remote on` points the listener at the running serve (it starts one when none runs); `factoryd remote off` closes the console to other machines",
 	}}
 }

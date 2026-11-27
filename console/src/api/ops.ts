@@ -50,8 +50,7 @@ export async function fetchConsoleConfig(http: Http, signal?: AbortSignal): Prom
 
 /**
  * GET /queue-run: whether `factoryd worker` is alive against this data dir.
- * Read-token gated and answering regardless of whether `factoryd serve` itself
- * manages the daemon lifecycle; see QueueRunStatus for why this is a separate route.
+ * Read-token gated; see QueueRunStatus for why this is a separate route.
  */
 export async function getQueueRunStatus(http: Http, signal?: AbortSignal): Promise<QueueRunStatus> {
   const at = "GET /queue-run";

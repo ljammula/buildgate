@@ -299,3 +299,9 @@ func restartSayWorkerless(w io.Writer, running []upgradeProcess) {
 		}
 	}
 }
+
+// executable is this running binary's path, which restart starts the new
+// worker and console from.
+func (impl realHost) executable() (string, error) {
+	return os.Executable()
+}

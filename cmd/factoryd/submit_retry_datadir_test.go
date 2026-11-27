@@ -20,7 +20,6 @@ func TestSubmitMainUsesSessionConfigDataDir(t *testing.T) {
 
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 
 	if err := submitMain(dp, []string{workspace, "Add idempotency keys to POST /refunds"}); err != nil {
@@ -48,7 +47,6 @@ func TestSubmitMainExplicitDataDirWinsOverSessionConfig(t *testing.T) {
 	explicitDir := t.TempDir()
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 
 	if err := submitMain(dp, []string{"-data-dir", explicitDir, workspace, "Add idempotency keys to POST /refunds"}); err != nil {

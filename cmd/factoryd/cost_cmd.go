@@ -23,7 +23,7 @@ import (
 // shape newStatusFlags/newWatchFlags use.
 func newCostFlags() (flags *flag.FlagSet, dataDir, requestID, since, configPath *string, jsonOutput *bool) {
 	flags = flag.NewFlagSet("cost", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	requestID = flags.String("request", "", "only show this one request's cost rollup")
 	since = flags.String("since", "", "only include requests submitted on/after this date (YYYY-MM-DD); empty includes every request")
 	jsonOutput = flags.Bool("json", false, "print machine-readable JSON instead of a table")

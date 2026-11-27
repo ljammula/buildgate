@@ -13,7 +13,7 @@ import {
 import { getStoredGateToken, setStoredGateToken } from "@/platform/gateToken";
 
 const gateSentence =
-  "This console needs its gate token. On the host, run factoryd gate-token and paste the token it prints here. For the console on the host itself, run factoryd console instead: the link it opens carries a token that does not expire.";
+  "This console needs its gate token. On the host, run factoryd remote token and paste the token it prints here. For the console on the host itself, run factoryd console instead: the link it opens carries a token that does not expire.";
 const expiredSentence = "The gate token this browser was using has expired or was replaced.";
 
 interface Call {
@@ -204,17 +204,17 @@ test("a 403 while the server still accepts the token changes nothing", async () 
 
   // What a start-token route answers a console that holds the gate token
   // alone. The gate token was not sent there, so nothing is asked.
-  server.state.refuse = (url) => url === "/daemons" || url === "/runs/refused";
+  server.state.refuse = (url) => url === "/projects/app/stats" || url === "/runs/refused";
   const before = server.configCalls().length;
   await act(async () => {
-    await session.http.getJson("/daemons", "start").catch((e: unknown) => e);
+    await session.http.getJson("/projects/app/stats", "start").catch((e: unknown) => e);
   });
   expect(server.configCalls().length).toBe(before);
 
   // A read the gate token was sent on and the server refused all the same.
-  const daemons = () => session.http.getJson("/runs/refused", "read").catch((e: unknown) => e);
+  const refusedRead = () => session.http.getJson("/runs/refused", "read").catch((e: unknown) => e);
   await act(async () => {
-    await Promise.all([daemons(), daemons()]);
+    await Promise.all([refusedRead(), refusedRead()]);
   });
   await waitFor(() => {
     expect(server.configCalls().length - before).toBe(1);
@@ -228,7 +228,7 @@ test("a 403 while the server still accepts the token changes nothing", async () 
 
   // The answer is not remembered: the next 403 asks again.
   await act(async () => {
-    await daemons();
+    await refusedRead();
   });
   await waitFor(() => {
     expect(server.configCalls().length - before).toBe(2);

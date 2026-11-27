@@ -73,7 +73,7 @@ type uninstallEnv struct {
 	force   bool
 	stop    func(args []string) error
 	service func() error
-	// manager supervises install-service's services on this machine.
+	// manager supervises service install's services on this machine.
 	manager hostcontrol.ServiceManager
 	// backend is the Docker the gateway runs on: it decides where the
 	// gateway's state directory is and how to remove it by hand.
@@ -160,7 +160,7 @@ func (e *uninstallEnv) imagePresent(ref string) bool {
 }
 
 // serviceDefinitions lists the installed plists or units of
-// install-service's two services.
+// service install's two services.
 func (e *uninstallEnv) serviceDefinitions() []string {
 	var found []string
 	for _, svc := range []hostcontrol.Service{hostcontrol.WorkerService, hostcontrol.ServeService} {

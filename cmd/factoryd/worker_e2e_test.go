@@ -191,3 +191,15 @@ func TestWorkerEndToEndRefusesToStartWithoutATemporalAddress(t *testing.T) {
 		t.Fatalf("worker with no -temporal-address and autostart off: err = %v, want the address error; output:\n%s", err, out)
 	}
 }
+
+// waitFor polls cond every 100ms until it holds, failing the test after timeout.
+func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

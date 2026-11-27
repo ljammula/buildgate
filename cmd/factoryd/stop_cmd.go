@@ -23,9 +23,9 @@ type stopFlags struct {
 
 func newStopFlags() (flags *flag.FlagSet, f stopFlags) {
 	flags = flag.NewFlagSet("stop", flag.ContinueOnError)
-	f.configPath = flags.String("config", "", "session config path or profile name (for -data-dir resolution); empty follows the active profile")
-	f.dataDir = flags.String("data-dir", "data", "data directory whose worker and serve to stop")
-	f.all = flags.Bool("all", false, "stop worker and serve for every profile's data dir, then the OpenShell gateway and meter if this machine started them, then Temporal; exclusive with -config and -data-dir")
+	f.configPath = flags.String("config", "", "session config path or profile name whose data dir to stop; empty follows the active profile")
+	f.dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
+	f.all = flags.Bool("all", false, "stop worker and serve for every profile's data dir, then the OpenShell gateway and meter if this machine started them, then Temporal; exclusive with -config")
 	f.force = flags.Bool("force", false, "stop even when a request is building (its build is cancelled) and, with -all, stop Temporal even when a worker is still live")
 	finishFlags(flags)
 	return flags, f

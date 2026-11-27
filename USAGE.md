@@ -16,7 +16,7 @@ The shortest path from a fresh install to a reviewable pull request:
 |---|---|---|
 | 1 | `factoryd doctor` | Checks Docker, images, model route, mounts; prints the fix for anything wrong |
 | 2 | `factoryd quickstart <repo-path> "<task>"` | Configures the session, starts a `worker` and `factoryd serve`, submits the request, opens its tokenized console link, stops at `spec_review` |
-| 3 | `factoryd approve <req-id>` / `factoryd reject -reason "..." <req-id>` | Your decision at each review gate (console: Approve / Request changes). Quickstart prints each command with the `-data-dir` it needs |
+| 3 | `factoryd approve <req-id>` / `factoryd reject -reason "..." <req-id>` | Your decision at each review gate (console: Approve / Request changes). Quickstart prints each command |
 | 4 | `factoryd watch <req-id>` / `factoryd status` (or `submit -watch`, which follows the request after submitting) | Follow progress; `factoryd retry <req-id>` after a halt or quarantine |
 | 5 | The pull request on the repo's GitHub remote | Opens as a draft, marked ready for review automatically once checks pass and no reviewer thread blocks it. The factory never merges; you do |
 
@@ -241,7 +241,7 @@ per-request flag is needed for them:
 
 | What | Where | How |
 |---|---|---|
-| The repo's checks: `verify_command`, `required_binaries`, `preflight_profile: brownfield`, and a `sandbox:` block when the build needs `npm ci` or similar | `.factory.yml` at the repo root, committed | `factoryd onboard -write-factory-yml` drafts it ([`.factory.yml`](#factoryyml--commit-per-repo-defaults-once), [reference](USAGE_REFERENCE.md#factoryyml-reference)) |
+| The repo's checks: `verify_command`, `required_binaries`, `gates:`, and a `sandbox:` block when the build needs `npm ci` or similar | `.factory.yml` at the repo root, committed | `quickstart` writes one into a repo that has none; `factoryd doctor -fix -workspace <repo>` offers a minimal one ([`.factory.yml`](#factoryyml--commit-per-repo-defaults-once), [reference](USAGE_REFERENCE.md#factoryyml-reference)) |
 | The model route, model and coding agent, for the whole machine | Session config (`routes:`/`models:`/`roles:`, `data_dir`) | `factoryd setup`, or the prompts of `quickstart` ([Model routes](USAGE_REFERENCE.md#model-routes)) |
 | Which session config (profile) a command reads | `-config <profile>` on one command, or the active profile | `factoryd use <profile>` lists the profiles and makes one active |
 
@@ -385,18 +385,18 @@ new shape, `factoryd cancel <id>` and submit it again.
 |---|---|---|
 | Check the repo's `AGENTS.md` | Refuses, before anything else, a repo with no `AGENTS.md` committed at its root | Run `factoryd doctor -target-repo <repo> -fix`, review the uncommitted sandbox draft, commit it, then rerun quickstart |
 | Check setup | Docker, images, model route, mounts | `factoryd doctor` |
-| Scaffold onboarding docs | Interactive: asks whether to write `spec/spec.md`/`spec/contract.md`/`ARCHITECTURE.md` if missing; `-non-interactive` skips the prompt and uses the `brownfield` preflight profile instead (or pass `-scaffold` to write them unconditionally) | `factoryd onboard -project <name> -root <repo> -write-factory-yml` |
+| Write `.factory.yml` | In a repo that has commits and no `.factory.yml`, writes one without asking: the verify command, a commented `gates:` example and a drafted `sandbox:` block. Commit it so later requests read it | `factoryd doctor -fix -workspace <repo>` (verify command and `gates:` example only) |
 | Pick a model route | Detects an existing Codex/Copilot/Anthropic login and offers it first (`-route` to pick explicitly: `openai`/`anthropic`/`copilot`/`chatgpt-codex`); lists models, picks a usable one, warns on a weak model | `factoryd init-config`, edit, `factoryd doctor -list-models` |
-| Start the queue daemon | Detached, tracked for this session, survives you closing this terminal | `factoryd worker` |
+| Start the worker | Detached, tracked for this session, survives you closing this terminal | `factoryd worker` |
 | Start the console | Reuses one already running, else spawns one; opens the tokenized link (`-no-serve` to skip, `-no-open` to skip only the browser open) | `factoryd serve` |
 | Check the verify commands | Before a repository's first request, and before asking for the goal: runs the verify command, and the full-suite command when it differs, in the sandbox with no model call; stops with the halt sentence when either fails | `factoryd -baseline-check -workspace <repo>` |
-| Submit the request | Prints the request id, the `approve` command with `-data-dir`, and a console link | `factoryd submit -verify-command "..." -preflight-profile brownfield <repo> "<task>"` |
+| Submit the request | Prints the request id, the `approve` command and a console link | `factoryd submit -verify-command "..." <repo> "<task>"` |
 
 Non-interactively (or a non-terminal stdin, detected automatically),
 every prompt above requires its equivalent flag — `factoryd quickstart
 -help` lists them all (`-route`, `-model-host`, `-model-id`,
 `-context-window`, `-credential`, `-verify-command`, `-build-images`,
-`-scaffold`, `-reconfigure`, `-egress-ca-bundle`, ...); `-issue` or
+`-reconfigure`, `-egress-ca-bundle`, ...); `-issue` or
 `-request-file` also satisfies the goal requirement. `quickstart` also
 defaults `-pr-trusted-authors` to your own `gh` login when unset, so your
 own PR review comments trigger a corrective round.
@@ -506,20 +506,20 @@ share ... into its containers"), never a hang. `factoryd doctor` warns
 while the VM still sees all of `$HOME`. If `<cwd>/data` already holds
 records, `quickstart` prints a notice but never silently adopts that
 path. Run `quickstart` again after any mid-sequence failure — an existing
-config is reused, an already-scaffolded repo is skipped, an
-already-running daemon is left alone.
+config is reused, a `.factory.yml` already written is kept, an
+already-running worker is left alone.
 
-**Survive a reboot.** `factoryd install-service` installs the worker and
+**Survive a reboot.** `factoryd service install` installs the worker and
 the console as services: two launchd agents on macOS (`dev.factoryd.worker`,
 `dev.factoryd.serve`), two systemd user units on Linux
 (`factoryd-worker.service`, `factoryd-serve.service` under
 `~/.config/systemd/user`); `-no-serve` installs only the worker. On Linux
 the units run while you are logged in, as a LaunchAgent does; to have them
 start at boot and run with nobody logged in, the user must linger
-(`sudo loginctl enable-linger $USER`, once), which `install-service` warns
+(`sudo loginctl enable-linger $USER`, once), which `service install` warns
 about until it is on. It must run in a login of that user (ssh or a
 desktop), not under `su` or `sudo -u`, which have no user manager. `factoryd doctor` reports the
-worker service's state; `factoryd uninstall-service` removes both.
+worker service's state; `factoryd service remove` removes both.
 `factoryd console [-open]` reprints the tokenized console link at any later
 point without re-running `quickstart`.
 
@@ -571,7 +571,7 @@ factoryd install-skill -dir ~/.claude/skills  # Claude Code, once
 you: "use buildgate to implement x_spec.md in ~/code/repo"
   -> factoryd status                       profile, route that will bill
   -> factoryd doctor -target-repo <repo>   environment + what submit would refuse
-  -> factoryd submit -request-file x_spec.md [-preflight-profile brownfield] <repo>
+  -> factoryd submit -request-file x_spec.md [-verify-command "<cmd>"] <repo>
        report: request id, console link, verify command used
   -> factoryd watch <id>                   stops at spec_review / pr_review (and plan_review for several tickets or an opt-in)
        report: what is waiting + the approve/reject commands for you
@@ -580,9 +580,9 @@ you: "use buildgate to implement x_spec.md in ~/code/repo"
 
 | Repo | What the agent does |
 |---|---|
-| None of `spec/spec.md`, `spec/contract.md`, `ARCHITECTURE.md` | Treats it as brownfield without asking, says so, and gives you the `.factory.yml` (`verify_command`, `preflight_profile: brownfield`) to commit so later requests need no flag |
-| Some of those files, failing the check | Stops and relays the failures |
-| `.factory.yml` committed | Uses its `verify_command` and `preflight_profile` |
+| No `.factory.yml` committed | Passes the verify command it found as `-verify-command`, says so, and gives you a `.factory.yml` (`verify_command`) to commit so later requests need no flag |
+| `doctor -target-repo` fails a row | Stops and relays the failures |
+| `.factory.yml` committed | Uses its `verify_command` |
 
 Verify command: the one the spec file states, else `.factory.yml`'s, else
 the repo's own check (Makefile, `go.mod`, `package.json`, test layout).
@@ -601,9 +601,9 @@ turn it on.
 
 ```sh
 factoryd console        # a running serve, if there is none
-factoryd mcp            # create the token, print the endpoint and how to add it
-factoryd mcp -rotate    # new token; the old one stops working at once
-factoryd mcp -disable   # endpoint off
+factoryd remote mcp            # create the token, print the endpoint and how to add it
+factoryd remote mcp -rotate    # new token; the old one stops working at once
+factoryd remote mcp -remove    # endpoint off
 ```
 
 | Tool | Does | Changes anything |
@@ -615,7 +615,7 @@ factoryd mcp -disable   # endpoint off
 | `list_workspaces` | The repositories `submit_request` accepts | No |
 | `submit_request` | Starts a request (`workspace`, `text`; it takes no spec or plan file); it stops at `spec_review` | Yes: spends model budget |
 
-Each request `list_requests`, `get_request` and `submit_request` return carries `console_url`, its page in the console, on the address the client reached `serve` by (`https://<machine>.<tailnet>.ts.net:<port>/requests/<id>` through `factoryd remote-console`). The link carries no token: from another machine the console asks for the gate token. A client can pass it on so you can follow the request and approve it.
+Each request `list_requests`, `get_request` and `submit_request` return carries `console_url`, its page in the console, on the address the client reached `serve` by (`https://<machine>.<tailnet>.ts.net:<port>/requests/<id>` through `factoryd remote on`). The link carries no token: from another machine the console asks for the gate token. A client can pass it on so you can follow the request and approve it.
 
 ```text
 you (chat) -> MCP client -> POST /mcp (bearer token) -> factoryd serve
@@ -647,7 +647,7 @@ reaches `serve` as a local caller: require tokens first, or any container
 can approve a gate.
 
 ```sh
-factoryd install-service -force -require-tokens -allowed-host host.docker.internal:8090
+factoryd service install -force -require-tokens -allowed-host host.docker.internal:8090
 factoryd console -open   # the console on this machine: its link carries the console token
 ```
 
@@ -657,14 +657,14 @@ machine included:
 | Console | Its token |
 |---|---|
 | On this machine | The console token, in the link `factoryd console` and `quickstart` open (`&c=<token>`, beside the start token's `#t=`). The browser keeps it for every tab once `serve` accepts it. It does not expire, and it works only from this machine, never through a proxy |
-| On another machine | The gate token (`factoryd gate-token`), as below |
-| An MCP client (an agent, in a container or not) | The MCP token (`factoryd mcp`) |
+| On another machine | The gate token (`factoryd remote token`), as below |
+| An MCP client (an agent, in a container or not) | The MCP token (`factoryd remote mcp`) |
 
 From another machine, keep `serve` on loopback and put a tunnel in front
 of it. With Tailscale, one command does it:
 
 ```sh
-factoryd remote-console        # listener, accepted Host and a gate token for the console
+factoryd remote on        # listener, accepted Host and a gate token for the console
 ```
 
 It prints the console's address, `https://<machine>.<tailnet>.ts.net[:port]/`.
@@ -679,42 +679,42 @@ the command does and how to do the same by hand behind another reverse proxy.
 ```text
 host                                   other machine
 ----                                   -------------
-factoryd remote-console  -- prints --> https://<name>[:port]/ and the gate token
+factoryd remote on       -- prints --> https://<name>[:port]/ and the gate token
                                        open the address, paste the token
                                        (once per browser tab)
                                        console reads, approves, rejects, edits, submits
-factoryd gate-token -rotate            the old token stops working at once
-factoryd remote-console -off           the address stops answering
+factoryd remote token -rotate          the old token stops working at once
+factoryd remote off                    the address stops answering
 ```
 
-`factoryd remote-console` needs Tailscale on the host, connected. It does three
-things, in this order, and `-off` undoes what it set up:
+`factoryd remote on` needs Tailscale on the host, connected. It does three
+things, in this order, and `factoryd remote off` undoes what it set up:
 
 | Step | What it does | By hand, behind another reverse proxy |
 |---|---|---|
-| Gate token | Writes one if none is usable (`-ttl` sets its lifetime) and prints it. A usable one is kept; a disabled one stops the command | `factoryd gate-token` |
+| Gate token | Writes one if none is usable (`-ttl` sets its lifetime) and prints it. A usable one is kept, an expired one replaced; a disabled one stops the command | `factoryd remote token` |
 | Listener | `tailscale serve` forwards an HTTPS port of the host's tailnet name to this profile's `serve`. It keeps the port it used before, else takes the first free of 443, 8443, 8444 and up (`-https-port` to choose). It never takes a port that serves something else, or one Funnel opens to the internet. It starts `serve` when none runs | Forward HTTPS to `serve`'s loopback address. The proxy must keep the `Host` header and add `X-Forwarded-For` |
 | Accepted `Host` | Records the address in `<config name>.remote-console` beside the session config. `serve` reads that file on each request, so nothing restarts and a restart keeps it | `factoryd serve -allowed-host <name[:port]>`: the port is part of the name unless it is 443 |
 
 | Case | What happens |
 |---|---|
 | Run it again | The same address and token. If `serve` came back on another port, the listener is pointed at it and the address stays (`factoryd doctor` warns `remote console` until then) |
-| `-off` | Removes the accepted `Host` first, so the address stops answering at once; then the gate token, if this command wrote it; then the listener, unless that port has since been pointed elsewhere by hand. It says what it left |
+| `remote off` | Removes the accepted `Host` first, so the address stops answering at once; then the gate token, if `remote on` wrote it; then the listener, unless that port has since been pointed elsewhere by hand. It says what it left |
 | A step fails | Nothing is left half open: no listener forwards before the token exists, and no `Host` is accepted before the listener is in place. The error says what to run |
 | Who can open the address | Any device your tailnet lets reach the host. Without the token it reads and writes nothing; a tailnet ACL limits who can try |
 
 | Topic | What happens |
 |---|---|
 | What the token allows | Reading, and the request actions: submit, approve, reject, retry, resume, cancel, and editing a spec or ticket file |
-| What it never allows | Overriding a quarantined run, starting a single-ticket run or a daemon, the release routes, and `/mcp`. Those keep their own tokens, so the console's worker strip and release panels stay empty there |
+| What it never allows | Overriding a quarantined run, starting a single-ticket run, the release routes, and `/mcp`. Those keep their own tokens, so the console's worker strip and release panels stay empty there |
 | Reads | While a gate token file exists, a console that is not on the host needs the token to read as well. Without it the console shows a field for the token |
 | On the host itself | `http://127.0.0.1:<port>` reads and writes with no token, gate token or not, unless `serve` requires tokens (below): then the console there asks for the gate token too |
-| Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd gate-token` again and paste the new token |
+| Lifetime | 12 hours; `-ttl 30m` to `-ttl 720h` to choose. After it expires, run `factoryd remote token` (or `remote on`, which replaces an expired one) and paste the new token |
 | Handing the token over | Paste it into the "Gate token" field the console shows when it holds none: the token is then never part of a URL. `https://<name>/#gate=<token>` does the same in one step, and that link can stay in the browser's history: treat it as a password |
 | In the browser | Kept for the tab only, never in the address bar. A new tab asks for the token again |
 | Who the history names | The name you give the console, followed by `(gate token)` |
-| Stop it | `factoryd remote-console -off` (listener, accepted `Host` and token all removed). The token alone: `factoryd gate-token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the remote address need no token, and the console there cannot write) |
-| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing. colima's `host.docker.internal` is one: any container on the VM reaches `serve` as local and can approve a gate. Require tokens: `factoryd install-service -force -require-tokens`, then open the console on this machine with `factoryd console`, whose link carries the console token |
+| Stop it | `factoryd remote off` (listener, accepted `Host` and token all removed). The token alone: `factoryd remote token -rotate` (new token), `-disable` (no gate token works until the next `-rotate`), `-remove` (gate off: reads under the remote address need no token, and the console there cannot write) |
+| A proxy that hides itself | `serve` tells a proxied request from a local one by the headers a reverse proxy adds (`X-Forwarded-For` and the like). `tailscale serve` adds them. A forwarder that adds none and rewrites `Host` to the loopback address makes every caller look local, and the gate token then guards nothing. colima's `host.docker.internal` is one: any container on the VM reaches `serve` as local and can approve a gate. Require tokens: `factoryd service install -force -require-tokens`, then open the console on this machine with `factoryd console`, whose link carries the console token |
 
 ## `.factory.yml` — commit per-repo defaults once
 
@@ -726,12 +726,13 @@ unset (an explicit flag always wins).
 ```yaml
 verify_command: "make verify"
 required_binaries: [cargo, rustc]        # optional: required in the final worker image before a run starts
-preflight_profile: brownfield          # "" (strict, default) or "brownfield"
 ```
 
-`factoryd onboard -write-factory-yml` writes a full starting file
-(detected verify command, `preflight_profile: brownfield`, every
-optional key commented out). Full key reference, repository-gate
+`factoryd quickstart` writes a starting file into a repo that has commits
+and none, without asking (the detected verify command, a commented `gates:`
+example and a drafted `sandbox:` block); `factoryd doctor -fix -workspace
+<repo>` offers a minimal one. Commit it: it is read from the committed
+`HEAD` only. Full key reference, repository-gate
 semantics, and the restrictions on `sandbox_image`/ceiling keys:
 [USAGE_REFERENCE.md § `.factory.yml` reference](USAGE_REFERENCE.md#factoryyml-reference).
 
@@ -739,8 +740,8 @@ A `setup:` list in the file (code generation) runs before the
 command of every build, verify and gate sandbox, so each sees the same
 prepared tree.
 
-A `sandbox:` block (the dependency install; `onboard -write-factory-yml`
-drafts one for Node and Python repositories) takes effect only after you
+A `sandbox:` block (the dependency install; `quickstart` drafts one for
+Node and Python repositories) takes effect only after you
 approve it. After committing the file:
 
 ```sh
@@ -758,20 +759,19 @@ as an install image; later runs with the same lockfiles start from it
 
 ## New app from scratch
 
-For a brand-new app with no code yet — a different, less common path
-from `quickstart` above (which assumes an existing checkout):
+A brand-new app with no code yet goes through requests like an existing
+repo: [README.md § Build a new app](README.md#build-a-new-app) has the path
+(commit a skeleton with `AGENTS.md`, a verify command and `.factory.yml`;
+write the spec and tickets; `factoryd submit -spec-file ... -plan-dir ...`).
+To build tickets one at a time by hand, with no request:
 
 | # | Command | What it does |
 |---|---|---|
-| 1 | `git init ~/code/your-app && factoryd init -project your-app -root ~/code/your-app` | Scaffolds `spec/spec.md`, `spec/contract.md` and `ARCHITECTURE.md` with the headings the preflight checks, placeholder prose and a `STATUS: DRAFT` line. It drafts no content |
-| 2 | Write the spec, contract, architecture and `spec/tickets/001-*.md` by hand, flip the spec's `STATUS:` line to `FROZEN`, add an `AGENTS.md` and an empty `workspace/` listed in `.gitignore`, commit | Human review gate: a run refuses a spec that is not `FROZEN` and a repository with no `AGENTS.md` |
-| 3 | `factoryd check-project -project <name> -spec <spec.md> -contract <contract.md> -architecture <ARCHITECTURE.md> -ticket <001-*.md> -ticket-number 1 -data-dir <dir>` | Validates ticket structure (`## Goal`, `## Required changes`, `## Verification` mentioning `make verify`, `## Commit`; ticket 2+ also needs "This is an existing repo."). No override — fix and re-run |
-| 4 | `factoryd -workspace <repo>/workspace -spec <001-*.md> -ticket 001 -ticket-file <001-*.md> -verify-command "make verify"` | Runs the ticket — see "Run a ticket" below |
-| 5 | `git merge factoryd/<run-id>` in the repository | Merge the accepted run (§ below) |
-| 6 | Repeat 2-5 for ticket 2+, adding `-prior-run <ticket-1-run-id>` | Each ticket's run chains from the last |
-
-Every build runs at the *whole repo's* worktree root, not confined to
-`workspace/` — `workspace/` only lets `factoryd` derive the project root.
+| 1 | `git init ~/code/your-app`, then commit an `AGENTS.md` and a verify command (`make verify`) | A run refuses a repository with no `AGENTS.md` committed at its root |
+| 2 | Write `spec/tickets/001-*.md` by hand (`factoryd ticket-template` prints a skeleton; `factoryd check-ticket <file>` checks its header lines), commit | The project-bootstrap preflight refuses a ticket without `## Goal`, `## Required changes`, `## Verification` and `## Commit`, in that order (ticket 2+ also says "This is an existing repo."). An `ARCHITECTURE.md` is checked too, as advice only |
+| 3 | `factoryd -workspace ~/code/your-app -spec <001-*.md> -ticket 001 -ticket-file <001-*.md> -verify-command "make verify"` | Runs the ticket — see "Run a ticket" below |
+| 4 | `git merge factoryd/<run-id>` in the repository | Merge the accepted run (§ below) |
+| 5 | Repeat 2-4 for ticket 2+, adding `-prior-run <ticket-1-run-id>` | Each ticket's run chains from the last |
 
 ## Run a ticket
 
@@ -835,8 +835,7 @@ nothing adds to it because a repository's compose file names an image.
 each registry prefix the repo's images need and add them to the config
 only when you answer yes (`-fix -yes` for no prompt); `factoryd doctor -target-repo <path>` prints the same
 verdict (alongside what `submit` would refuse: no verify command, no
-`AGENTS.md` committed at the repo root, or the
-project-bootstrap preflight under the repo's `.factory.yml` profile), each service's `BG_SERVICE_*` variables, the `localhost` ports
+`AGENTS.md` committed at the repo root), each service's `BG_SERVICE_*` variables, the `localhost` ports
 (failing when the sandbox image predates `bg-forward`), and a warning when
 the worker's and sidecars' memory limits add up past Docker's. A ticket that edits the
 compose file (adding a dependency) is verified against the base commit's
@@ -854,11 +853,11 @@ session-config keys): [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#mo
 
 A data dir inside the workspace is refused: it would be mounted into the
 very worker containment is meant to isolate from. With a session config the
-data dir is the config's and never the working directory's; with none, a run
-from inside the workspace (`-workspace .`) needs an explicit `-data-dir <path
-outside -workspace>`, since the default is then `data` in the current
-directory. `factoryd doctor -workspace <dir>
--data-dir <dir>` catches this before a real run fails closed on it.
+data dir is the config's `data_dir` and never the working directory's; with
+none it is `data` in the current directory, so a run from inside the
+workspace (`-workspace .`) needs a session config (`-config <profile>`) whose
+data dir is outside it. `factoryd doctor -config <profile> -workspace <dir>`
+catches this before a real run fails closed on it.
 
 Useful add-ons: `-sandbox-image <name@sha256:...>` (own
 digest-pinned image), `-temporal-address <host:port>` (another Temporal server than the
@@ -1069,7 +1068,7 @@ USAGE_REFERENCE.md § Model routes for the checks it gets and the lost-build
 case.
 
 Full command reference for `submit`/`watch`/`status`/`approve`/`reject`/
-`retry`/`cancel`/`worker` (flags, `-data-dir`/`-config` resolution;
+`retry`/`cancel`/`worker` (flags, data dir and `-config` resolution;
 every request verb takes `-config`):
 [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
 
@@ -1078,10 +1077,10 @@ every request verb takes `-config`):
 | What | How |
 |---|---|
 | Watch every request, approve/reject | `factoryd serve`, open the printed URL (`console: http://<addr>/#t=<token>`) — embedded in the binary, same origin as the API. [Mission Control](#mission-control) is the landing screen; "Runs" reaches the per-run view |
-| New run and the Projects screen's stats and release without a build-time token | The `#t=<token>` fragment in `serve`'s printed URL is captured into the browser on first load and reused thereafter. Changes on every `serve` restart — re-open the newly printed link. `quickstart`/`install-service` instead generate a *stable* token file, reused across restarts; `factoryd console [-open]` reprints it. After `install-service -require-tokens`, the link also carries the console token (`&c=`), which every tab keeps |
+| New run and the Projects screen's stats and release without a build-time token | The `#t=<token>` fragment in `serve`'s printed URL is captured into the browser on first load and reused thereafter. Changes on every `serve` restart — re-open the newly printed link. `quickstart`/`service install` instead generate a *stable* token file, reused across restarts; `factoryd console [-open]` reprints it. After `service install -require-tokens`, the link also carries the console token (`&c=`), which every tab keeps |
 | Quick offline run summary | `factoryd status` — first line `profile: <name> (<config path>) · data dir <dir>` (`-json`: `profile`, `config_path`), then a table of open requests under a header row (id, project, state, age, time in this state, ticket, PR URL or reason) and one of their runs (ticket and launch suffix, project, state, time, cost, PR URL or reason). Ages are one unit (`24d`, `3h`, `5m`); a reason longer than 80 characters ends in `…` (`factoryd watch -no-follow <id>` or `-v` prints it whole). Finished requests (`done`, `closed`, `cancelled`) and their runs are counted in a closing line, and listed with `-all`. `-all-profiles` is one table of every profile's open requests. `-project`, `-state`, `-n` (default 20), `-v`, `-json`. On `chatgpt-codex`/`github-copilot`, cost reads `(API-price est.; billed to your subscription)` (aggregates: `(includes subscription-billed runs; API-price est.)`). While `worker` is alive, also prints `worker route: <credential-mode> · <worker-model>` — which subscription is billed; the route itself is daemon-wide, changed by the operator via `worker`/`quickstart -route`, not per request |
-| Remove buildgate from this machine | `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]`: stops everything `stop -all` does, then removes the launchd services, the Temporal containers (`docker compose -p buildgate down`), the OpenShell gateway and meter containers (`docker compose -p buildgate-openshell down`), the `factoryd-local-registry` container, the images `make install` built (`localhost:5050/{buildgate-worker,factoryd-meter,factoryd-registry-proxy,buildgate-pifork,project-worker}:local`), the `buildgate` skill in `~/.agents/skills` and `~/.claude/skills` (only a real directory holding a `SKILL.md`; a symlink is left), and the `factoryd` binary. Only steps whose target exists are listed. If a daemon cannot be stopped (a request is building) nothing else is removed; `-force` cancels the build. `~/.config/factoryd` and `~/buildgate` stay unless `-purge` (also drops the Temporal volumes and the gateway's state; you type `purge` to confirm). With `-purge` the gateway's own state on the Docker VM (`/var/lib/openshell`: its database, keys and stored credentials) is deleted too, through a throwaway container of the worker image run before that image is removed; if the image is already gone it prints the manual command (`colima ssh -- sudo rm -rf /var/lib/openshell`) instead. Reinstall with `make install` |
-| Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. One that launchd or systemd supervises (`install-service`) is left running with a pointer to `factoryd uninstall-service`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when colima is the Docker provider and no other container runs, `colima stop` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`); it refuses while any `worker` is still live unless `-force` |
+| Remove buildgate from this machine | `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]`: stops everything `stop -all` does, then removes the launchd services, the Temporal containers (`docker compose -p buildgate down`), the OpenShell gateway and meter containers (`docker compose -p buildgate-openshell down`), the `factoryd-local-registry` container, the images `make install` built (`localhost:5050/{buildgate-worker,factoryd-meter,factoryd-registry-proxy,buildgate-pifork,project-worker}:local`), the `buildgate` skill in `~/.agents/skills` and `~/.claude/skills` (only a real directory holding a `SKILL.md`; a symlink is left), and the `factoryd` binary. Only steps whose target exists are listed. If a worker cannot be stopped (a request is building) nothing else is removed; `-force` cancels the build. `~/.config/factoryd` and `~/buildgate` stay unless `-purge` (also drops the Temporal volumes and the gateway's state; you type `purge` to confirm). With `-purge` the gateway's own state on the Docker VM (`/var/lib/openshell`: its database, keys and stored credentials) is deleted too, through a throwaway container of the worker image run before that image is removed; if the image is already gone it prints the manual command (`colima ssh -- sudo rm -rf /var/lib/openshell`) instead. Reinstall with `make install` |
+| Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. One that launchd or systemd supervises (`service install`) is left running with a pointer to `factoryd service remove`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when colima is the Docker provider and no other container runs, `colima stop` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`); it refuses while any `worker` is still live unless `-force` |
 | Everything waiting on you, across profiles | `factoryd inbox [-config <profile>] [-project <name>] [-json]`: every request in `spec_review`, `plan_review`, `pr_review`, `resume_review`, `halted` or `quarantined` in each distinct profile data dir, oldest first. Each entry: `<age>  <profile>  <state>  <id>  <title>`, then the `factoryd approve -config <profile> <id>` / `factoryd reject -config <profile> -reason "..." <id>` commands (the PR URL for `pr_review`; `reason:` and `next:` for halted/quarantined), then `look before deciding: factoryd inspect -config <profile> <id>` when there is anything to look at, then `console: <link>` when a console link resolves. A memory request's title is prefixed `[memory]` (and its `factoryd status` row ends with `[memory]`). Prints `Nothing is waiting on you.` when empty |
 | Look at the work before deciding | `factoryd inspect -config <profile> <id>`: at a spec or plan review, the commands that open the drafted files; for built work, each ticket's latest run with its state, the size of the change and its files, each gate's result, the review's findings and the challenger's verdict. `-commands` adds what the console request page's **Commands to look at the work** panel shows: `git -C <repository> log`/`diff` of exactly the commits the gates checked, a `git worktree add` line for a copy of your own, the verdict and report files and the logs. Try or change the work in your own copy (or `gh pr checkout`), never in the factory's worktree, and remember that running the tests on your Mac runs model-written code outside the sandbox |
 | What a run did before its first round | The console run page's **Start-up** list, above the Timeline: the six steps image, workspace, verify (the baseline), install (registry proxy and sidecars), sandbox and agent, each pending, running, done, failed or skipped, with what it did, the lock it waits on when it is the step waiting, and a log where the factory recorded one (`GET /runs/{id}` `startup_steps`, `GET /runs/{id}/log?step=<name>`). `factoryd watch` leads its footer with `start-up 4/6: install (running 42s)` until the first round |
@@ -1095,12 +1094,12 @@ every request verb takes `-config`):
 | Cap a request's (or a month's) total spend | Session-config `request_token_budget`/`request_cost_budget_micro_usd` (one request's drafting + every ticket run + corrective/PR-review round) and `monthly_token_budget`/`monthly_cost_budget_micro_usd` (all requests in the data dir, current UTC calendar month) — 0/absent means unlimited. Unlike `meter_token_ceiling`/`meter_cost_ceiling_micro_usd` (a per-job ceiling the relay itself enforces mid-job), these are checked host-side before a job is launched at all; reaching one quarantines the request (`budget_exhausted:request`/`budget_exhausted:monthly`) naming the key, the spend, and the limit. `factoryd cost` prints the configured budgets and month-to-date spend once any are set |
 | Fail closed all future releases for a project | `factoryd kill-switch -project <p> -state engaged -by <you> -reason "..."` — CLI-only, works without `serve` |
 | Notification when a request waits with no `worker` alive | `factoryd status` and `factoryd serve` both check the heartbeat file each poll; Mission Control's health strip shows the same warning, with a "Check again" button that re-reads the status. Nothing notifies if neither is running |
-| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `factoryd remote-console` sets it up behind Tailscale ([the console from another machine](#the-console-from-another-machine)). By hand, `-allowed-host <host[:port]>` adds exact extra values. Reads need no token there unless a gate token exists; writes need the gate token (`factoryd gate-token`, [the console from another machine](#the-console-from-another-machine)) or `-override-token`; an enabled MCP endpoint can submit a request there with its own token. A request a reverse proxy passed on must name an `-allowed-host`, whatever its `Host` says |
+| Reach `serve` through an ssh tunnel / reverse proxy | Bound to loopback by default, refuses any `Host` header that isn't its own loopback address (DNS-rebinding defense) — `factoryd remote on` sets it up behind Tailscale ([the console from another machine](#the-console-from-another-machine)). By hand, `-allowed-host <host[:port]>` adds exact extra values. Reads need no token there unless a gate token exists; writes need the gate token (`factoryd remote token`, [the console from another machine](#the-console-from-another-machine)) or `-override-token`; an enabled MCP endpoint can submit a request there with its own token. A request a reverse proxy passed on must name an `-allowed-host`, whatever its `Host` says |
 | Console link printed by `submit` / `factoryd console` | Built from `<data-dir>/console-address`, which a live `factoryd serve` writes for its data dir. `submit` and `factoryd console` start that `serve` when it is missing; with `FACTORYD_AUTOSTART=0` (or a `serve` that cannot start) `submit` prints how to get a link instead (or set `-console-base-url` / `FACTORYD_CONSOLE_URL`) |
 | Drive Buildgate from Copilot / Claude Code / Codex | `factoryd install-skill`, then ask in plain words: see "Drive Buildgate from a coding agent" above. `factoryd upgrade` refreshes the skill |
-| Drive Buildgate from an MCP client (Claude Code, Hermes, any other) | `factoryd mcp`, then add the printed endpoint and token to the client: see "Drive Buildgate from an MCP client" above |
+| Drive Buildgate from an MCP client (Claude Code, Hermes, any other) | `factoryd remote mcp`, then add the printed endpoint and token to the client: see "Drive Buildgate from an MCP client" above |
 | Local model host serialization | Automatic (`internal/modelhost`, keyed by the selected route's own `upstream` host) — no manual "one job at a time" discipline needed. Waiting shows as a `model_host_lock` event / `waiting` chip |
-| Compose sidecar serialization | Automatic: at most `compose_services_concurrency` (default 1) runs on this machine have compose sidecars, across every data dir and factoryd process. A run takes its slot before its first phase and holds it to the end, so the wait never counts against its timeout; the wait itself is bounded by one run's timeout, after which the run halts naming the holder. The daemon's recovery of a crashed submission takes the slot too, deferring to its next scan while it is busy. Waiting shows as a `compose_services_lock` event / `waiting` chip |
+| Compose sidecar serialization | Automatic: at most `compose_services_concurrency` (default 1) runs on this machine have compose sidecars, across every data dir and factoryd process. A run takes its slot before its first phase and holds it to the end, so the wait never counts against its timeout; the wait itself is bounded by one run's timeout, after which the run halts naming the holder. Waiting shows as a `compose_services_lock` event / `waiting` chip |
 
 Every command, and the flags used most:
 [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
@@ -1156,7 +1155,7 @@ Safari's File → Add to Dock has not been tried with it.
 | The badge | The count in the sidebar's Triage item, on every screen, updated while the app's window is open; the last count can stay on the icon after the window closes. No count while the console cannot read the list. macOS draws it only while the app may badge its icon: System Settings → Notifications → Buildgate → Badge application icon |
 | Its address | An installed app is tied to the exact address it was installed from (`localhost:8090` and `127.0.0.1:8090` are two apps). `127.0.0.1:8090` belongs to the first profile whose `serve` starts; another profile's `serve` takes a free port, a different one after each restart, so an app installed from it stops opening. With several profiles, install from the one that starts first: if another starts first, the app opens that profile's console |
 | A notification's link | A desktop banner and a Slack or Discord link open the request in the default browser, or in the app when Chrome is the default browser and the app's "Open supported links" is on. A notification the app's own window raises ("Turn on notifications" in its sidebar) opens the request in the app |
-| From another machine | `factoryd remote-console`'s `https://` address can be installed the same way (not yet tried). The app needs the gate token there like any tab, and stops opening after `remote-console -off` |
+| From another machine | `factoryd remote on`'s `https://` address can be installed the same way (not yet tried). The app needs the gate token there like any tab, and stops opening after `factoryd remote off` |
 | Offline | Nothing is cached: with `serve` stopped the window shows the browser's error page until `factoryd console` starts it again |
 
 ### Projects
@@ -1224,7 +1223,7 @@ a request starts waiting on you
 |---|---|---|
 | Console tab | "Turn on notifications" at the bottom of the console's sidebar, once per browser (it asks the browser's permission). With several tabs of one console open, one of them notifies; when it closes, another takes over | Brings that tab to the front and opens the request's page |
 | Desktop banner (macOS) | On by default; `FACTORYD_DESKTOP_NOTIFICATIONS=0` turns it off | With [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) on `PATH`: opens the request's page in the browser. Without it: nothing, and the banner's text says to open the console |
-| Slack | The file the session config's `slack_webhook_urls_file` names: incoming-webhook URLs, one per line or comma-separated, in a file you own with mode 0600, read at each notification | The request's page: at the `factoryd remote-console` address while that is on, else the host's own address |
+| Slack | The file the session config's `slack_webhook_urls_file` names: incoming-webhook URLs, one per line or comma-separated, in a file you own with mode 0600, read at each notification | The request's page: at the `factoryd remote on` address while that is on, else the host's own address |
 | Discord | `discord_webhook_urls_file`, the same way | Same |
 
 The link is the page of the `serve` of the request's own data dir. When none
@@ -1256,7 +1255,7 @@ is `default`); keep one per model subscription. Only `*.yml` files count, so a
 | What | How |
 |---|---|
 | List profiles, marking the active one with `*` | `factoryd use`: name, data dir, route · model · harness, and whether a `worker` and a `serve` are alive for that data dir |
-| Switch | `factoryd use <name>` (`use default` for `config.yml`): writes `~/.config/factoryd/active-profile`; every command, and the `buildgate` skill, follows it with no `-config`/`-data-dir` |
+| Switch | `factoryd use <name>` (`use default` for `config.yml`): writes `~/.config/factoryd/active-profile`; every command, and the `buildgate` skill, follows it with no `-config` |
 | One command on another profile | `-config <name>`: a value with no path separator and no `.yml` suffix is a profile name |
 | One shell or script | `FACTORYD_PROFILE=<name>`, which beats `active-profile` |
 
@@ -1436,7 +1435,7 @@ docker compose -f docker-compose.temporal.yml down -v   # stop, wipe data
   then be given with `-temporal-address`, or the command is refused.
 - `worker` forwards the address it settled on to every ticket it builds (each
   ticket runs as a `RunWorkflow`). An explicit address is used as given. An
-  unreachable explicit server halts the run ([`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#temporal-repository-owners-daemons-observing)).
+  unreachable explicit server halts the run ([`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#temporal-repository-owners-observing)).
 - `factoryd doctor` fails its Temporal check when Temporal is unreachable
   (builds need it); `doctor -fix` starts it.
 - The stack publishes its frontend (7233) and Web UI (8233) on `127.0.0.1`
@@ -1509,9 +1508,9 @@ on the final commit as usual.
 | `factoryd stop -force`, `kill -9`, crash, reboot (`worker`) | The request building it enters `resume_review` at the next `worker` start; `factoryd resume <id>` continues it |
 | A build lost with its process (halted as above, or `factoryd` stopped with SIGTERM) | A request's run keeps its worktree and branch, flagged `kept_for_resume`, until a human decides (`resume`, `resume -from scratch`, `cancel`, or `retry` of a halted request reaps it); its containers are still removed. `factoryd -resume-worktree-of <run-id>` starts a run that adopts the kept worktree and continues from its round state. A build that had returned before a later step was lost left no round state in the worktree (it is removed, with the build's evidence file moved to the run's directory as `BUILD_EVIDENCE.json`, before any review works there): its resume starts at round 1 on the kept files |
 
-Repository-owner runs (`-repository`), daemons, what to look at in the
+Repository-owner runs (`-repository`) and what to look at in the
 Temporal Web UI are in
-[`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#temporal-repository-owners-daemons-observing).
+[`USAGE_REFERENCE.md`](USAGE_REFERENCE.md#temporal-repository-owners-observing).
 
 ## The sandbox runtime: OpenShell gateway and meter
 
@@ -1590,8 +1589,8 @@ What changes for a build:
 |---|---|---|
 | A request is `halted` with `<state> expired: no decision in <duration> (review_gate_expiry)` | No one approved or rejected the spec, plan or lost step within the session config's `review_gate_expiry`; nothing failed | `factoryd retry <id>` returns it to the same review with a fresh clock (the draft is not redone). `approve` and `reject` refuse until then. Set `review_gate_expiry: 0` (the default) for gates that wait for ever |
 | A ticket quarantined after several rounds, and an earlier round was the better one | Each round's commit is kept under `refs/buildgate/rounds/<id>/t<ticket>/r<n>` in the target repository | `factoryd rounds <id>` lists them; `factoryd retry -from <n> <id>` rebuilds on a new branch at that round (refused once the ticket's branch was pushed: close the pull request first) |
-| The console on this machine shows **Gate token needed** | `serve` requires tokens (`install-service -require-tokens`) and this browser holds no console token yet | `factoryd console -open`. If it prints `no console token file`, the install predates the console token: `factoryd install-service -force -require-tokens` writes one, then rerun `factoryd console -open` |
-| Halt naming a path that "does not appear to share ... into its containers" | The macOS Docker VM doesn't share `/private/tmp` (or anything outside `$HOME`) | Use a repo path, `-data-dir` and workspace under `$HOME` |
+| The console on this machine shows **Gate token needed** | `serve` requires tokens (`service install -require-tokens`) and this browser holds no console token yet | `factoryd console -open`. If it prints `no console token file`, the install predates the console token: `factoryd service install -force -require-tokens` writes one, then rerun `factoryd console -open` |
+| Halt naming a path that "does not appear to share ... into its containers" | The macOS Docker VM doesn't share `/private/tmp` (or anything outside `$HOME`) | Use a repo path, a session config `data_dir` and workspace under `$HOME` |
 | A run log says `buildgate: the worker cannot write /scratch` (the step exits 95) or `permission denied` under `/scratch` | The worker image predates the per-launch scratch volume, or a custom image lacks `/scratch` owned by `65532:65532` with mode `770`; the launch fails at the worker's setup | Rebuild the image: `make install` (Pi) or `make pifork-image` (pifork). A profile that pins an image of its own (a project or toolchain image) keeps it through `make install`: rebuild that image on the new worker image and re-point its `sandbox_image`. `factoryd doctor` reports the active image as `a new scratch volume is writable by the worker`, and every other profile's as `profile <name>: its sandbox_image can run this factoryd's worker`; a baseline that halts on it says the worker image predates this factoryd, not that the verify command fails |
 | A command in a build fails with `no space left on device` | Docker's data disk in the VM is full: each build's per-launch scratch volume holds its Go caches (a large Go build's can approach 4 GiB), and images and build cache share the disk. `factoryd doctor` warns on `Docker disk has room for <N> builds` when the free space of the sandbox image's container root (Docker's data filesystem on overlay2) is under 4 GiB per parallel build | Free Docker space (`docker builder prune`, `docker image prune`; `factoryd doctor -fix` reclaims leftover scratch volumes) or grow the VM's disk, or lower `max_parallel_jobs` |
 | A step ends `signal: killed`, or several containers die at once | The Docker VM ran out of memory and the kernel killed a container: `max_parallel_jobs` builds of up to `sandbox_memory` each add up to more than the VM has. `factoryd doctor` warns on `memory limits: max_parallel_jobs <N> × sandbox_memory <X> within Docker's memory` (limits, not measured use) | Lower `max_parallel_jobs` or `sandbox_memory` in the session config, or give the VM more memory (colima: `colima stop && colima start --memory <GiB>`; Docker Desktop: Settings > Resources; native Linux: the host's memory) |
@@ -1610,8 +1609,8 @@ What changes for a build:
 | Run or request halted: `halted (operator finding): .factory/ cannot be mounted read-only: ...` | Every sandbox that runs a repository command mounts `.factory/` read-only as the commit `.factory.yml` was read from holds it. The directory at that commit, or the worktree's entry of that name, has a shape the mount cannot carry: the worktree lacks the directory, it is a file or a symlink, another spelling (`.Factory`) exists, or the committed directory holds a symlink or a submodule | Fix what the sentence names (USAGE_REFERENCE, "The `.factory/` directory"), commit, then `factoryd retry <id>` |
 | A gate or the verify command fails with `Read-only file system` under `.factory/` | A repository command writes into `.factory/` (a cache, a report, `chmod +x`) | Write to a gitignored directory or `/tmp`; commit the executable bit instead of setting it at run time |
 | Quarantine names a gate but not why it failed | Nothing wrong — the triage sentence quotes the first compile/test failure line from that gate's log | Read the run's full log for the rest |
-| `quickstart`, `submit` or a single-ticket run refuses: `<repo> has no AGENTS.md committed at its root`, `AGENTS.md at HEAD of <repo> is empty` or `... is not a regular file`, or `<repo> is not a git checkout with a commit at HEAD`; `doctor -target-repo` fails its `AGENTS.md for <repo>` row; the console's New request form and the MCP `submit_request` tool answer with the same line | The repo's root `AGENTS.md` is missing, empty, only in the working tree, or a symlink. It is read from git at `HEAD`, by that exact name, as a regular file. `onboard`, `init` and `quickstart -scaffold` do not write it | Run `factoryd doctor -target-repo <repo> -fix` to draft it in the planning-role sandbox (or give your coding agent the prompt the message prints; Quick start has it), review the uncommitted `AGENTS.md`, commit it, then run the command again |
-| Request halts at preflight for a repo | Repo has no `.factory.yml` (strict preflight profile) | `factoryd onboard -project <name> -root <repo> -write-factory-yml`, commit, resubmit |
+| `quickstart`, `submit` or a single-ticket run refuses: `<repo> has no AGENTS.md committed at its root`, `AGENTS.md at HEAD of <repo> is empty` or `... is not a regular file`, or `<repo> is not a git checkout with a commit at HEAD`; `doctor -target-repo` fails its `AGENTS.md for <repo>` row; the console's New request form and the MCP `submit_request` tool answer with the same line | The repo's root `AGENTS.md` is missing, empty, only in the working tree, or a symlink. It is read from git at `HEAD`, by that exact name, as a regular file. `quickstart` does not write it | Run `factoryd doctor -target-repo <repo> -fix` to draft it in the planning-role sandbox (or give your coding agent the prompt the message prints; Quick start has it), review the uncommitted `AGENTS.md`, commit it, then run the command again |
+| A run halts at its project-bootstrap preflight | The ticket lacks `## Goal`, `## Required changes`, `## Verification` or `## Commit`, or has them out of order (the record under `<data-dir>/project-checks/` names which) | Fix the ticket and run it again; `-skip-project-check` skips the preflight |
 | `factoryd doctor` warns the release policy denies every PR unconditionally | `release_max_files_changed`/`release_max_changed_lines` is `0` or `release_rollback_plan` is empty | Add all three to `config.yml` (`init-config`'s scaffold has usable defaults; `quickstart` writes them into a fresh config automatically) |
 | Status shows "accepted, awaiting pull request" | Every ticket's build was accepted but no PR exists (`-open-pull-request=false`, a release-policy denial, or the PR failed to open: a failed push is tried three times, 15 s and 45 s apart, before the request halts) | Merge the branch by hand, or `factoryd retry <id>` — re-opens just the PR if the release decision now allows it, otherwise rebuilds. When the reason names commits "not on origin", the repository had local commits under the run's base that no gate checked: push or drop them first. `factoryd doctor -target-repo` warns about them before a run |
 | Status shows a starred state and `waiting for a job slot (all <n> in use), #<k> in line` (one slot: `queued behind <id>`) | `wait.kind` `job_slot`: this request hasn't started yet; every job slot (`max_parallel_jobs`) is held, by builds, drafting jobs or `pr_review` passes | Nothing to do — it starts once a slot frees. Raise `max_parallel_jobs` if the wait is routine and the machine has room |
@@ -1627,18 +1626,18 @@ What changes for a build:
 | Containers left behind after killing a run | The process died before cleanup | `docker ps`, then `docker rm -f` only the `factoryd-*` containers |
 | Run refuses at startup: "git credential preflight: ..." | The target repo's git config declares a credential helper, a fixed HTTP header, or a URL with embedded userinfo — a sandboxed worker's read-only git mount would expose it | Remove the offending key from the repo's own git config; keep credential helpers outside the mounted tree |
 | `factoryd worker`, `doctor -fix` or a launch says `refusing to run sandboxes on this Docker (<backend>; ...)` | The Docker CLI reaches a backend sandboxes do not run on (Docker Engine on a Linux host, Docker Desktop, Docker Desktop for Linux, rootless, `userns-remap`, the snap, podman, WSL2, or one `factoryd` cannot name) | Run Docker in colima (`colima start`, then `docker context use colima`), on Linux as on a Mac |
-| `install-service` on Linux warns `this user does not linger` | Without linger, systemd starts the user's units at the first login and stops them at the last logout, so nothing builds at boot or with nobody logged in | Run `sudo loginctl enable-linger $USER` once (it needs an administrator); the installed units then start at boot |
-| `install-service` on Linux says `no systemd user manager answers` | The shell came from `su` or `sudo -u`, which start no user manager | Log in as that user directly (ssh or a desktop session) and rerun |
+| `service install` on Linux warns `this user does not linger` | Without linger, systemd starts the user's units at the first login and stops them at the last logout, so nothing builds at boot or with nobody logged in | Run `sudo loginctl enable-linger $USER` once (it needs an administrator); the installed units then start at boot |
+| `service install` on Linux says `no systemd user manager answers` | The shell came from `su` or `sudo -u`, which start no user manager | Log in as that user directly (ssh or a desktop session) and rerun |
 | `quickstart` or `console -open` on Linux says `no graphical session here` | An ssh login or a server has no browser to open | Open the printed link; from another machine, forward the port first: `ssh -L 8090:127.0.0.1:8090 <host>` |
-| `gh auth status` fails with "no oauth token found" in an ssh session on a Mac | An ssh session cannot read the login keychain that holds the GitHub login; a process started from that session gets the same answer | Check `gh auth status` in the session that starts `worker`. If it fails, start `worker` and `serve` in the desktop login session: a terminal there, or launchd agents (`factoryd install-service`) |
+| `gh auth status` fails with "no oauth token found" in an ssh session on a Mac | An ssh session cannot read the login keychain that holds the GitHub login; a process started from that session gets the same answer | Check `gh auth status` in the session that starts `worker`. If it fails, start `worker` and `serve` in the desktop login session: a terminal there, or launchd agents (`factoryd service install`) |
 | A build fails: "sandbox runtime: ... run `factoryd doctor -fix`" | The OpenShell gateway or the meter is not running (a reboot, a colima restart, `stop -all`) | `factoryd doctor -fix` starts both; `worker` and a single-ticket run start them too unless `FACTORYD_AUTOSTART=0` |
 | `doctor`, `doctor -fix`, `worker` or a run reports `port N is published by container ...` | Another container in the Docker VM publishes one of the stack's ports (`17670`, `17671`, `17672`); the gateway shares the VM's network, so it cannot bind | Stop that container or publish it on another host port, then `factoryd doctor -fix` |
-| `doctor` warns `every sandbox belongs to a running build`; or `stop -all`, `uninstall` or `doctor -fix` reports `openshell: not stopped, in use by sandbox bg-...` with no build running | A build's `factoryd` process was lost and no `worker` has started on that run's data dir since (a profile that was deleted, a data dir used once), so nothing removed its sandbox. The warning names the run and the data dir | `factoryd doctor -fix` halts the run, puts its request in `resume_review`, ends that request's workflow and deletes the sandbox, and prints what it did. It leaves, and names, a run it could not halt (Temporal unreachable), a data dir whose `worker` holds its lock (stop that worker, then run it again) and a sandbox it cannot match to a run; for one in a data dir outside every profile and deeper than four levels under `~/buildgate`, run `factoryd doctor -data-dir <dir> -fix`; for one whose data dir was deleted, `factoryd doctor -fix -remove-sandbox <name>` deletes it and its run's registry-proxy and compose containers, networks and volumes, after the other `-fix` repairs (refused for a sandbox a known run started, whose data dir doctor can see, or whose labels another sandbox shares; two runs of one ticket in that deleted data dir can share the gateway's cut labels, and both runs' resources go) |
+| `doctor` warns `every sandbox belongs to a running build`; or `stop -all`, `uninstall` or `doctor -fix` reports `openshell: not stopped, in use by sandbox bg-...` with no build running | A build's `factoryd` process was lost and no `worker` has started on that run's data dir since (a profile that was deleted, a data dir used once), so nothing removed its sandbox. The warning names the run and the data dir | `factoryd doctor -fix` halts the run, puts its request in `resume_review`, ends that request's workflow and deletes the sandbox, and prints what it did. It leaves, and names, a run it could not halt (Temporal unreachable), a data dir whose `worker` holds its lock (stop that worker, then run it again) and a sandbox it cannot match to a run; for one in a data dir outside every profile and deeper than four levels under `~/buildgate`, point a session config's `data_dir` at it and run `factoryd doctor -config <that config> -fix`; for one whose data dir was deleted, `factoryd doctor -fix -remove-sandbox <name>` deletes it and its run's registry-proxy and compose containers, networks and volumes, after the other `-fix` repairs (refused for a sandbox a known run started, whose data dir doctor can see, or whose labels another sandbox shares; two runs of one ticket in that deleted data dir can share the gateway's cut labels, and both runs' resources go) |
 | `doctor` warns `OpenShell meter runs the configured image` | `make install` built a new meter image and wrote it to `meter_image` while the gateway and the meter were answering, and a stack that answers is not recreated; or the stack was started with no record of its meter's image | `factoryd doctor -fix` stops the gateway and the meter and starts them from `meter_image`. It leaves them running while a request is building or a sandbox exists: run it again when those builds have finished |
 | A request halts with `model route error: Connection error.`, or `doctor` warns `OpenShell supervisor trusts this network's CA` | The network re-signs TLS (a corporate proxy such as Zscaler) and the gateway was started before `make install` recorded its CA, so the sandbox's supervisor refuses the model upstream's certificate | `factoryd doctor -fix` builds the supervisor image that trusts the CA and restarts the gateway (not while a build is using it), then `factoryd retry <id>` |
 | A launch is refused: "credential expires at ..." | The route's token (`~/.codex/auth.json`) expires before the step's time budget ends | Run any `codex` command to refresh it, then `factoryd retry` |
 | `make` in the worker fails every recipe with "Operation not permitted" | Your own worker image carries a stock GNU make; OpenShell's sandbox denies the set-id calls it makes | Build the image on buildgate's worker image (`make project-sandbox-image`), whose make is built without `posix_spawn` |
-| A request halts with `was accepted but the pull request could not be opened: git push ...: fatal: could not read Username for 'https://github.com'` | The worker runs in a session that cannot use the GitHub login. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token, so a worker started over ssh builds and then cannot push; on Linux, a systemd unit or an ssh session usually has no unlocked keyring either | `factoryd doctor` warns `worker's GitHub login` for such a worker, and the worker says so when it starts. On a Mac, start it from a desktop terminal or with `factoryd install-service`; on Linux, `gh auth login --insecure-storage` once, then `factoryd restart`. Then `factoryd retry <id>` opens the pull request with no rebuild |
+| A request halts with `was accepted but the pull request could not be opened: git push ...: fatal: could not read Username for 'https://github.com'` | The worker runs in a session that cannot use the GitHub login. An ssh session on a Mac cannot read the login keychain, where `gh auth login` keeps the token, so a worker started over ssh builds and then cannot push; on Linux, a systemd unit or an ssh session usually has no unlocked keyring either | `factoryd doctor` warns `worker's GitHub login` for such a worker, and the worker says so when it starts. On a Mac, start it from a desktop terminal or with `factoryd service install`; on Linux, `gh auth login --insecure-storage` once, then `factoryd restart`. Then `factoryd retry <id>` opens the pull request with no rebuild |
 | A change you installed has no effect on a request's builds | The worker was started before the install: it runs every build in its own process, with the code it started with | `factoryd doctor` warns `worker runs this factoryd`; `factoryd restart` (`make install` runs it, unless a request was building) |
 | A build fails on `<module>: 404 Not Found`, `could not read Username for 'https://github.com'` or `unrecognized import path` for a company module | The module is private, and either this machine's Go settings do not mark it so (no `go modules:` line in the run's log) or the host could not fetch it (a `go modules: N left out` line names it) | `go env -w GOPRIVATE=<its path prefix>` and make your own `go mod download` of the repository work on this machine, then `factoryd retry <id>` ([USAGE_REFERENCE.md § Private Go modules](USAGE_REFERENCE.md#private-go-modules)) |
 | `no request matches "<id>" in <data dir> (profile <name>)` for a request you submitted | The request was recorded in another data dir: `factoryd status -all-profiles -all` lists every profile's requests. Every command that resolves a data dir prints `data dir: ... (source: ...)` first (`status`: its `profile:` line, the source with `-v`), and a `note:` when `data` in the current directory holds records it is not using. Usual causes: the request was submitted before the config had a `data_dir` (commands then used `data` in the directory they ran in), or with an explicit `-data-dir` | Set `data_dir:` in the session config to the folder that holds the request (the `note:` line prints it), then `factoryd restart` |

@@ -13,10 +13,9 @@ import (
 // is a "workspace" subdirectory of a project root that also carries
 // spec/spec.md, spec/contract.md, and ARCHITECTURE.md — a minimal,
 // already-passing project-bootstrap scaffold (see cmd/factoryd's
-// projectBootstrapArtifactPaths and `factoryd init`) so every caller of
-// this fixture satisfies factoryd <run>'s mandatory project-bootstrap
-// preflight (converted from opt-in to required, 2026-08-29) without having
-// to know about it. A test that specifically exercises that preflight
+// projectArchitecturePath) so every caller of this fixture passes
+// factoryd <run>'s project-bootstrap preflight without having to know
+// about it. A test that specifically exercises that preflight
 // builds its own workspace/root pair instead of using this fixture.
 //
 // Rooted under t.TempDir() (macOS's default $TMPDIR) — fine for every
@@ -116,9 +115,8 @@ func CommitAgentsFile(t testing.TB, dir string) {
 // WriteProjectBootstrapScaffold writes an already-passing project-bootstrap
 // scaffold at root (a project root, one level above a "workspace"
 // subdirectory the caller controls directly, e.g. via -workspace) —
-// structurally the same shape `factoryd init` produces, but pre-frozen so
-// it passes policy.ProductSpecFrozen without a further edit, since test
-// fixtures have no human review step. NewGitRepo calls this itself; a test
+// a frozen spec, a contract and an ARCHITECTURE.md with the required
+// headings. NewGitRepo calls this itself; a test
 // that builds its own workspace directly (rather than through NewGitRepo)
 // calls it too, unless it specifically means to exercise factoryd <run>'s
 // mandatory project-bootstrap preflight (converted from opt-in to

@@ -92,7 +92,8 @@ func (i Inspection) Empty() bool {
 // Inspect returns the commands for r in its current state: the drafted
 // files at spec and plan review; each built ticket's latest work at
 // pr_review, quarantined, halted and resume_review; nothing otherwise.
-func Inspect(dataDir string, r *Request) Inspection {
+// configArg is the " -config <profile>" its log commands carry, "" for none.
+func Inspect(dataDir, configArg string, r *Request) Inspection {
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
@@ -104,7 +105,7 @@ func Inspect(dataDir string, r *Request) Inspection {
 		hasPR := false
 		for _, t := range r.Tickets {
 			hasPR = hasPR || t.PRURL != ""
-			if ticket, ok := inspectTicket(dataDir, t, r.State == StatePRReview); ok {
+			if ticket, ok := inspectTicket(dataDir, configArg, t, r.State == StatePRReview); ok {
 				out.Tickets = append(out.Tickets, ticket)
 			}
 		}
@@ -123,7 +124,7 @@ func Inspect(dataDir string, r *Request) Inspection {
 // not the round's slice of it. onPR counts only the rounds the pull request
 // holds (accepted and pushed): a later round that recorded a result but was
 // not pushed is not what a reviewer of the pull request sees.
-func inspectTicket(dataDir string, t Ticket, onPR bool) (InspectTicket, bool) {
+func inspectTicket(dataDir, configArg string, t Ticket, onPR bool) (InspectTicket, bool) {
 	ids := []string{t.RunID}
 	for _, round := range t.Rounds {
 		if onPR && (round.Outcome != RoundAccepted || !round.Pushed) {
@@ -151,7 +152,7 @@ func inspectTicket(dataDir string, t Ticket, onPR bool) (InspectTicket, bool) {
 		return InspectTicket{}, false
 	}
 	base := first.DiffBase()
-	ticket := inspectRunFrom(dataDir, latest, base)
+	ticket := inspectRunFrom(dataDir, configArg, latest, base)
 	ticket.Ticket = t.Index
 	return ticket, len(ticket.Commands) > 0
 }
@@ -173,14 +174,14 @@ func draftCommands(dataDir string, r *Request) []InspectCommand {
 // InspectRun returns the commands for one run against its own base: git
 // reads of the commits the gates checked, the files it was judged against,
 // and its logs.
-func InspectRun(dataDir string, r *run.Run) InspectTicket {
+func InspectRun(dataDir, configArg string, r *run.Run) InspectTicket {
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
-	return inspectRunFrom(dataDir, r, r.DiffBase())
+	return inspectRunFrom(dataDir, configArg, r, r.DiffBase())
 }
 
-func inspectRunFrom(dataDir string, r *run.Run, base string) InspectTicket {
+func inspectRunFrom(dataDir, configArg string, r *run.Run, base string) InspectTicket {
 	t := InspectTicket{RunID: r.ID}
 	if r.WorkspacePath != "" {
 		if info, err := os.Stat(r.WorkspacePath); err == nil && info.IsDir() {
@@ -198,10 +199,10 @@ func inspectRunFrom(dataDir string, r *run.Run, base string) InspectTicket {
 			t.Commands = append(t.Commands, InspectCommand{Label: f.label, Command: "less " + ShellPath(filepath.Join(runDir, f.name))})
 		}
 	}
-	data, id := ShellPath(dataDir), shellQuote(r.ID)
+	id := shellQuote(r.ID)
 	t.Commands = append(t.Commands,
-		InspectCommand{Label: "The newest log", Command: fmt.Sprintf("factoryd logs -data-dir %s %s", data, id)},
-		InspectCommand{Label: "Every log and saved prompt", Command: fmt.Sprintf("factoryd logs -data-dir %s -list %s", data, id)},
+		InspectCommand{Label: "The newest log", Command: fmt.Sprintf("factoryd logs%s %s", configArg, id)},
+		InspectCommand{Label: "Every log and saved prompt", Command: fmt.Sprintf("factoryd logs%s -list %s", configArg, id)},
 	)
 	return t
 }

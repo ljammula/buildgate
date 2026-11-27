@@ -14,7 +14,7 @@ import (
 
 func newRoundsFlags() (flags *flag.FlagSet, dataDir, configPath *string) {
 	flags = flag.NewFlagSet("rounds", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile")
 	finishFlags(flags)
 	return
@@ -34,7 +34,7 @@ func roundsRun(args []string, w io.Writer) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return fmt.Errorf("usage: factoryd rounds [-config <profile>] [-data-dir <dir>] <request-id>")
+		return fmt.Errorf("usage: factoryd rounds [-config <profile>] <request-id>")
 	}
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err

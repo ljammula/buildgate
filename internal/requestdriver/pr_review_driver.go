@@ -1188,7 +1188,7 @@ func runRoundAttempt(dp Deps, ctx context.Context, dataDir string, r *request.Re
 	// The same QueueEntry builder as the ticket's first build and its
 	// automatic review round (ticketQueueEntry), so a PR-review round gets
 	// what they get: the request's full-suite command
-	// and its source, harness, model and preflight profile. SpecPath is the
+	// and its source, harness and model. SpecPath is the
 	// round's addendum: the
 	// ticket's own spec plus this round's appended sections.
 	entry, err := ticketQueueEntry(dataDir, r, *ticket, cfg, ticketID, specPath)

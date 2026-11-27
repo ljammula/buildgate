@@ -102,8 +102,8 @@ func remoteConsoleFixture(t *testing.T, addr string) (dp *deps, ts *fakeTailscal
 func runRemoteConsole(t *testing.T, dp *deps, args ...string) string {
 	t.Helper()
 	var out bytes.Buffer
-	if err := remoteConsoleMain(dp, &out, args); err != nil {
-		t.Fatalf("remote-console %v: %v\n%s", args, err, out.String())
+	if err := remoteMain(dp, &out, remoteConsoleArgs(args)); err != nil {
+		t.Fatalf("remote %v: %v\n%s", remoteConsoleArgs(args), err, out.String())
 	}
 	return out.String()
 }
@@ -140,7 +140,7 @@ func TestRemoteConsoleOpensAndClosesTheConsoleToAnotherMachine(t *testing.T) {
 	if info, err := os.Lstat(path); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("remote-console file mode = %v (err %v), want 0600", info.Mode().Perm(), err)
 	}
-	for _, want := range []string{"https://" + wantHost + "/", token.Token, "paste the gate token", "remote-console -off", "tailnet"} {
+	for _, want := range []string{"https://" + wantHost + "/", token.Token, "paste the gate token", "remote off", "tailnet"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -192,7 +192,7 @@ func TestRemoteConsoleLeavesWhatItDidNotSetUp(t *testing.T) {
 	// The operator points 8443 at another app by hand.
 	ts.web[8443] = "http://127.0.0.1:5000"
 	var out bytes.Buffer
-	err := remoteConsoleMain(dp, &out, []string{"-off"})
+	err := remoteMain(dp, &out, remoteConsoleArgs([]string{"-off"}))
 	if err == nil || !strings.Contains(err.Error(), "left alone") {
 		t.Errorf("-off with the port re-pointed by hand: err = %v, want it to say the listener is left alone", err)
 	}
@@ -302,7 +302,7 @@ func TestRemoteConsoleNeverTakesAPortThatServesSomethingElse(t *testing.T) {
 
 	ts.web = map[int]string{443: "http://127.0.0.1:3000"}
 	var out bytes.Buffer
-	if err := remoteConsoleMain(dp, &out, []string{"-https-port", "443"}); err == nil {
+	if err := remoteMain(dp, &out, remoteConsoleArgs([]string{"-https-port", "443"})); err == nil {
 		t.Fatal("-https-port 443 while 443 serves something else: want an error")
 	}
 	if ts.web[443] != "http://127.0.0.1:3000" || len(remoteConsoleHostSource(filepath.Join(cfgDir, "config.remote-console"))()) != 0 {
@@ -322,23 +322,23 @@ func TestRemoteConsoleSaysWhatIsAndIsNotInPlaceWhenAStepFails(t *testing.T) {
 	var out bytes.Buffer
 
 	ts.state = "NeedsLogin"
-	if err := remoteConsoleMain(dp, &out, nil); err == nil || !strings.Contains(err.Error(), "tailscale up") {
+	if err := remoteMain(dp, &out, remoteConsoleArgs(nil)); err == nil || !strings.Contains(err.Error(), "tailscale up") {
 		t.Errorf("Tailscale not connected: err = %v, want one naming `tailscale up`", err)
 	}
 	ts.state = "Running"
 	ts.fail = "status"
-	if err := remoteConsoleMain(dp, &out, nil); err == nil || !strings.Contains(err.Error(), "another reverse proxy") {
+	if err := remoteMain(dp, &out, remoteConsoleArgs(nil)); err == nil || !strings.Contains(err.Error(), "another reverse proxy") {
 		t.Errorf("no tailscale: err = %v, want one pointing at the manual steps", err)
 	}
 	// The listener cannot be added: no host is recorded.
 	ts.fail = "serve --bg"
-	if err := remoteConsoleMain(dp, &out, nil); err == nil || !strings.Contains(err.Error(), "nothing else was changed") || len(hosts()) != 0 {
+	if err := remoteMain(dp, &out, remoteConsoleArgs(nil)); err == nil || !strings.Contains(err.Error(), "nothing else was changed") || len(hosts()) != 0 {
 		t.Errorf("listener refused: err = %v, hosts %v; want an error and no host recorded", err, hosts())
 	}
 	// A disabled gate is not replaced, and nothing is opened behind it.
 	ts.fail = ""
 	runGateToken(t, dp, "-disable")
-	if err := remoteConsoleMain(dp, &out, nil); err == nil || !strings.Contains(err.Error(), "-rotate") {
+	if err := remoteMain(dp, &out, remoteConsoleArgs(nil)); err == nil || !strings.Contains(err.Error(), "-rotate") {
 		t.Errorf("disabled gate: err = %v, want one naming -rotate", err)
 	}
 	if len(hosts()) != 0 || len(ts.web) != 1 {
@@ -348,7 +348,7 @@ func TestRemoteConsoleSaysWhatIsAndIsNotInPlaceWhenAStepFails(t *testing.T) {
 
 	runRemoteConsole(t, dp)
 	ts.fail = "serve --https=8443 off"
-	err := remoteConsoleMain(dp, &out, []string{"-off"})
+	err := remoteMain(dp, &out, remoteConsoleArgs([]string{"-off"}))
 	if err == nil || !strings.Contains(err.Error(), "tailscale serve --https=8443 off") {
 		t.Errorf("-off with a listener that will not go: err = %v, want the command to run", err)
 	}
@@ -356,8 +356,8 @@ func TestRemoteConsoleSaysWhatIsAndIsNotInPlaceWhenAStepFails(t *testing.T) {
 		t.Error("-off left the host accepted when the listener would not go")
 	}
 	for _, args := range [][]string{{"extra"}, {"-ttl", "1s"}, {"-https-port", "70000"}} {
-		if err := remoteConsoleMain(dp, &out, args); err == nil {
-			t.Errorf("remote-console %v: want an error", args)
+		if err := remoteMain(dp, &out, remoteConsoleArgs(args)); err == nil {
+			t.Errorf("remote %v: want an error", remoteConsoleArgs(args))
 		}
 	}
 }
@@ -369,7 +369,7 @@ func TestRemoteConsoleStartsNoServeWhenAutostartIsOff(t *testing.T) {
 	dp, ts, cfgDir, _ := remoteConsoleFixture(t, "")
 	t.Setenv("FACTORYD_AUTOSTART", "0")
 	var out bytes.Buffer
-	err := remoteConsoleMain(dp, &out, nil)
+	err := remoteMain(dp, &out, remoteConsoleArgs(nil))
 	if err == nil || !strings.Contains(err.Error(), "factoryd console") {
 		t.Fatalf("err = %v, want one naming `factoryd console`", err)
 	}
@@ -450,7 +450,51 @@ func TestDoctorWarnsOfARemoteConsoleWhoseListenerPointsElsewhere(t *testing.T) {
 	}
 	defer remove()
 	checks := doctorRemoteConsoleChecks(dp, configPath, dataDir)
-	if len(checks) != 1 || !checks[0].Advisory || !strings.Contains(checks[0].Err.Error(), "127.0.0.1:8097") || !strings.Contains(checks[0].Err.Error(), "127.0.0.1:8123") || !strings.Contains(checks[0].Fix, "factoryd remote-console") {
+	if len(checks) != 1 || !checks[0].Advisory || !strings.Contains(checks[0].Err.Error(), "127.0.0.1:8097") || !strings.Contains(checks[0].Err.Error(), "127.0.0.1:8123") || !strings.Contains(checks[0].Fix, "factoryd remote on") {
 		t.Errorf("checks = %+v, want one warning naming both addresses and the command", checks)
+	}
+}
+
+// remoteConsoleArgs is the `factoryd remote` argv for what these tests
+// write as the arguments of the console's own subcommand: "off" when args
+// holds -off, else "on" with args.
+func remoteConsoleArgs(args []string) []string {
+	var rest []string
+	verb := "on"
+	for _, a := range args {
+		if a == "-off" {
+			verb = "off"
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return append([]string{verb}, rest...)
+}
+
+// TestRemoteRefusesAMissingOrUnknownSubcommandAndAForeignFlag: `factoryd
+// remote` needs one of its four subcommands, and each takes only its own
+// flags.
+func TestRemoteRefusesAMissingOrUnknownSubcommandAndAForeignFlag(t *testing.T) {
+	dp := newTestDeps(t)
+	mcpTestConfig(t)
+	var out bytes.Buffer
+	for _, args := range [][]string{nil, {"-config", "x"}, {"open"}} {
+		if err := remoteMain(dp, &out, args); err == nil || !strings.Contains(err.Error(), "on|off|token|mcp") {
+			t.Errorf("remote %v: err = %v, want the usage", args, err)
+		}
+	}
+	if err := remoteMain(dp, &out, []string{"off", "-ttl", "1h"}); err == nil || !strings.Contains(err.Error(), "takes no -ttl") {
+		t.Errorf("remote off -ttl: err = %v, want it refused", err)
+	}
+}
+
+// TestServiceRefusesAMissingOrUnknownSubcommand: `factoryd service` needs
+// install or remove.
+func TestServiceRefusesAMissingOrUnknownSubcommand(t *testing.T) {
+	dp := newTestDeps(t)
+	for _, args := range [][]string{nil, {"start"}, {"-force"}} {
+		if err := serviceMain(dp, args); err == nil || !strings.Contains(err.Error(), "install|remove") {
+			t.Errorf("service %v: err = %v, want the usage", args, err)
+		}
 	}
 }

@@ -171,7 +171,7 @@ func runTests(m *testing.M) int {
 	// anymore): every sandboxed test in this suite launches through
 	// testdata/fake_docker.sh rather than a real Docker daemon -- see that
 	// script's own doc comment. -sandbox-docker itself is session-config
-	// only (flags-consolidate, 2026-09-10) -- no `factoryd <run>`/`daemon`
+	// only (flags-consolidate, 2026-09-10) -- no `factoryd <run>`
 	// flag exists for it at all -- so this is set once, package-wide, via
 	// a real session config file under an isolated HOME/XDG_CONFIG_HOME
 	// every spawned subprocess inherits through its own os.Environ(); a
@@ -341,7 +341,7 @@ func newFixtureRepo(t *testing.T) string {
 // Without this, a test-started owner execution relies entirely on
 // defaultRepositoryOwnerIdle (24h, workflow.go) to ever close — every test
 // in this file that starts one via SignalWithStartWorkflow, or indirectly
-// via a `factoryd <run> -repository ...`/`factoryd daemon` subprocess,
+// via a `factoryd <run> -repository ...` subprocess,
 // leaves a distinct `repo-owner-<sha>` execution Running for 24h on
 // whatever Temporal server TEMPORAL_ADDRESS points at. Measured on a local
 // dev server after ordinary suite runs: 4,278 stale Running executions,
@@ -477,4 +477,24 @@ func newFixtureRepoWithoutBootstrapScaffold(t *testing.T) string {
 	run("commit", "-q", "-m", "init")
 	testfixture.CommitAgentsFile(t, dir)
 	return dir
+}
+
+// commitMalformedTicket commits spec/tickets/001-fixture-ticket.md with none
+// of a ticket's required sections to ws, so the ticket_structure check
+// refuses it. It returns the ticket's name.
+func commitMalformedTicket(t *testing.T, ws string) string {
+	t.Helper()
+	ticketPath := filepath.Join(ws, "spec", "tickets", "001-fixture-ticket.md")
+	if err := os.MkdirAll(filepath.Dir(ticketPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ticketPath, []byte("# not a ticket\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "spec"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "a malformed ticket"}} {
+		if out, err := runGit(t, ws, args...); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	return "001-fixture-ticket"
 }

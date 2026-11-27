@@ -49,7 +49,6 @@ export interface CreateRequestOptions {
   readonly text: string;
   readonly verifyCommand?: string;
   readonly fullSuiteCommand?: string;
-  readonly preflightProfile?: string;
   readonly planReview?: boolean;
   readonly by?: string | null;
 }
@@ -78,7 +77,6 @@ export async function createRequest(
     text: options.text,
     ...(options.verifyCommand ? { verify_command: options.verifyCommand } : {}),
     ...(options.fullSuiteCommand ? { full_suite_command: options.fullSuiteCommand } : {}),
-    ...(options.preflightProfile ? { preflight_profile: options.preflightProfile } : {}),
     ...(options.planReview ? { plan_review: true } : {}),
     ...(options.by ? { by: options.by } : {}),
   };

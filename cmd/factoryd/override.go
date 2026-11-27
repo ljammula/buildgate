@@ -21,7 +21,7 @@ import (
 func newOverrideFlags() (flags *flag.FlagSet, runID, dataDir, by, reason, state, releaseProtectedPaths *string, releaseMaxFilesChanged, releaseMaxChangedLines *int, releaseRollbackPlan *string, releaseAllowOverrides, releaseAllowDependencyLockfileChanges, releaseAllowSkippedProjectCheck *bool) {
 	flags = flag.NewFlagSet("override", flag.ContinueOnError)
 	runID = flags.String("run", "", "run identifier (required)")
-	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	by = flags.String("by", "", "name of the human applying the override (required)")
 	reason = flags.String("reason", "", "justification for the override (required)")
 	state = flags.String("state", "", "new terminal state: accepted or halted (required)")
@@ -165,7 +165,7 @@ func overrideObjectsDir(r *run.Run) string {
 // executing the command.
 func newOverrideRateFlags() (flags *flag.FlagSet, dataDir *string) {
 	flags = flag.NewFlagSet("override-rate", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	finishFlags(flags)
 	return
 }

@@ -7,23 +7,18 @@ import (
 	"buildgate/internal/projectconfig"
 )
 
-// TestFactoryYMLContentSharedByInitAndOnboard is the regression guard for
-// factoryYMLContent's move out of init.go into its own file: init.go's own
-// TestInitWithWriteFactoryYMLWritesFile et al. already prove initMain's
-// end-to-end behavior is unchanged, so this proves the extracted helper
-// itself still produces the exact byte layout both callers depend on --
-// verify_command line first (when non-empty), preflight_profile always
-// last, one call site parameterizing the profile rather than each caller
-// building its own string.
-func TestFactoryYMLContentSharedByInitAndOnboard(t *testing.T) {
+// TestFactoryYMLContentLayout pins the byte layout quickstart and
+// `doctor -fix` write: the verify_command line first (when non-empty), then
+// the commented gates example.
+func TestFactoryYMLContentLayout(t *testing.T) {
 	t.Parallel()
 	const commentedGateDefaults = "# gates:\n" +
 		"#   - id: lint\n" +
 		"#     command: \"golangci-lint run ./...\"\n"
-	if got, want := factoryYMLContent("go test ./...", "brownfield"), "verify_command: \"go test ./...\"\npreflight_profile: brownfield\n"+commentedGateDefaults; got != want {
+	if got, want := factoryYMLContent("go test ./..."), "verify_command: \"go test ./...\"\n"+commentedGateDefaults; got != want {
 		t.Errorf("factoryYMLContent = %q, want %q", got, want)
 	}
-	if got, want := factoryYMLContent("", "brownfield"), "preflight_profile: brownfield\n"+commentedGateDefaults; got != want {
+	if got, want := factoryYMLContent(""), commentedGateDefaults; got != want {
 		t.Errorf("factoryYMLContent with no verify command = %q, want %q", got, want)
 	}
 }
@@ -31,8 +26,7 @@ func TestFactoryYMLContentSharedByInitAndOnboard(t *testing.T) {
 // TestFactoryYMLCommitReminderNamesTheFileAndTheCommittedRead pins the
 // one thing this line has to convey: writing .factory.yml is not enough,
 // because projectconfig.Load reads the committed HEAD revision and
-// ignores an uncommitted worktree copy outright. Shared by initMain and
-// onboardMain so neither can drift into saying something different.
+// ignores an uncommitted worktree copy outright.
 func TestFactoryYMLCommitReminderNamesTheFileAndTheCommittedRead(t *testing.T) {
 	t.Parallel()
 	got := factoryYMLCommitReminder()

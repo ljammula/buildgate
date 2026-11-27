@@ -223,7 +223,7 @@ func TestDrainAfterShutdownWaitsForInFlightRunsEvenWhenShutdownErrors(t *testing
 
 // TestRunsNeedingReclaimFindsNonterminalRuns proves the pure "which runs
 // need a recovery Worker" decision runsNeedingReclaim was factored out of
-// daemonMain's own reclaimAbandonedRunQueues closure for: only nonterminal
+// workerMain's own reclaimAbandonedRunQueues closure for: only nonterminal
 // runs not already reclaimed are returned, and a terminal run (accepted/
 // halted/quarantined) is correctly excluded even if never reclaimed.
 func TestRunsNeedingReclaimFindsNonterminalRuns(t *testing.T) {
@@ -261,8 +261,8 @@ func TestRunsNeedingReclaimFindsNonterminalRuns(t *testing.T) {
 
 // TestRunsNeedingReclaimSkipsAlreadyReclaimed is the regression test for a
 // real P1 finding from review: an earlier reclaim scan ran only once, at
-// daemon startup, so a run abandoned later (after the daemon was already
-// running) was never picked up until the daemon itself restarted. The fix
+// worker startup, so a run abandoned later (after the worker was already
+// running) was never picked up until the worker itself restarted. The fix
 // makes the scan periodic; this proves the id-based skip that periodic
 // re-scanning needs to avoid starting a second, redundant recovery Worker
 // for a run it already reclaimed.
@@ -302,7 +302,7 @@ func TestRunsNeedingReclaimDiscoversRunsAddedAfterAnEarlierScan(t *testing.T) {
 	}
 
 	// A run created after the first scan — as if a submitting invocation
-	// started and crashed only after the daemon's own startup scan had
+	// started and crashed only after the worker's own startup scan had
 	// already completed.
 	r := &run.Run{ID: "run-crashed-later", State: run.StateVerifying, CreatedAt: time.Now().Format(time.RFC3339Nano)}
 	if err := r.Save(dataDir); err != nil {
@@ -355,7 +355,7 @@ func TestRunsNeedingReclaimExcludesOtherRepositories(t *testing.T) {
 }
 
 // TestTerminalReclaimedRunIDsFindsFinishedRuns is the regression test for a
-// real P2 finding from codex review: an earlier version of the daemon's
+// real P2 finding from codex review: an earlier version of the worker's
 // periodic reclaim never stopped a reclaimed run's recovery Worker once
 // that run actually finished, so a long-lived daemon accumulated one
 // Worker per abandoned run ever seen, without bound. This proves the pure
@@ -397,7 +397,7 @@ func TestTerminalReclaimedRunIDsFindsFinishedRuns(t *testing.T) {
 // at its stale, unconfirmed value even though the applied result is, by
 // construction, always confirmed. Left stale, an operator later
 // overriding a reconciled quarantine back to StateHalted would still read
-// as an unconfirmed halt — the daemon's reclaim scan would pick it up
+// as an unconfirmed halt — the worker's reclaim scan would pick it up
 // again and this same function could silently overwrite the operator's
 // override with the old owner result, including re-sending its
 // quarantine notification.
@@ -1110,7 +1110,7 @@ func TestRunsNeedingReclaimOnMissingRunsDirectoryIsEmptyNotError(t *testing.T) {
 
 // TestScratchRunInFlightKeepsUnconfirmedHalt pins the predicate every
 // scratch-cache removal shares: an unconfirmed halt (a Temporal submitter
-// that gave up waiting while a daemon-side Worker may still be building)
+// that gave up waiting while a worker-side Worker may still be building)
 // is in flight; a confirmed halt, an accepted run, or a missing record is
 // not.
 func TestScratchRunInFlightKeepsUnconfirmedHalt(t *testing.T) {

@@ -19,6 +19,7 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"buildgate/internal/codereview"
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/evidence"
 	"buildgate/internal/harness"
 	"buildgate/internal/hostcontrol"
@@ -287,7 +288,6 @@ type runFlags struct {
 	priorRun                     *string
 	skipProjectCheck             *bool
 	architectureRequiredSections *string
-	preflightProfile             *string
 	requestTicket                *bool
 	ticketFile                   *string
 	openPullRequest              *bool
@@ -347,7 +347,7 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.registryProxyImage = flags.String("registry-proxy-image", "", "digest-pinned Docker image for -registry-proxy. Empty uses the session config's registry_proxy_image, which make install records")
 	f.composeServices = flags.Bool("compose-services", true, "start the services the repository's compose file declares, fresh for every build, verify and full-suite attempt. Does nothing without a compose file. Unset uses the session config's value")
 	f.egressCABundle = flags.String("egress-ca-bundle", "", "PEM file of an extra CA, such as a TLS-inspecting proxy's, that the registry proxy and host-side model calls trust. Empty uses ~/.config/factoryd/build-ca.pem when it exists")
-	f.dataDir = flags.String("data-dir", "data", "directory for durable run records and logs")
+	f.dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.baselineCheck = flags.Bool("baseline-check", false, "check that the repository's verify and full-suite commands pass in the sandbox, with no model call and nothing built. Takes -workspace, no ticket")
 	f.requireDeclaredScope = flags.Bool("require-declared-scope", false, "halt before the build if the ticket does not declare Allowed-Files:")
 	f.temporalAddress = flags.String("temporal-address", "", "Temporal server address. Empty uses localhost:7233 and starts it with Docker if it is down; with FACTORYD_AUTOSTART=0 the address is required. An unreachable server halts the run")
@@ -366,7 +366,6 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 	f.priorRun = flags.String("prior-run", "", "id of an accepted run that this run follows in a multi-slice chain")
 	f.skipProjectCheck = flags.Bool("skip-project-check", false, "skip the project-bootstrap preflight")
 	f.architectureRequiredSections = flags.String("architecture-required-sections", "", "comma-separated section headings the project-bootstrap preflight requires in ARCHITECTURE.md, in order")
-	f.preflightProfile = flags.String("preflight-profile", "", "project-bootstrap preflight strictness: empty is strict, brownfield is for a repo without spec/spec.md, spec/contract.md or ARCHITECTURE.md")
 	f.requestTicket = flags.Bool("request-ticket", false, "internal: -spec is a request's ticket, so the preflight checks the structure of -spec itself and looks for no ticket file in the repository")
 	f.ticketFile = flags.String("ticket-file", "", "path to the ticket file; empty looks for it under spec/tickets/ in the workspace")
 	f.openPullRequest = flags.Bool("open-pull-request", false, "when the run is accepted, push its branch to origin and open a draft GitHub pull request")
@@ -391,8 +390,6 @@ func newRunFlags() (flags *flag.FlagSet, f runFlags) {
 		fmt.Fprintln(out, "The flags that matter (the rest have a working default):")
 		fmt.Fprintln(out, "  -spec               which ticket to build -- its own spec.md, not -ticket-file's")
 		fmt.Fprintln(out, "  -verify-command     canonical pass/fail check for this run")
-		fmt.Fprintln(out, "  -data-dir           where run records/logs live")
-		fmt.Fprintln(out, `  -preflight-profile  "" (strict) or "brownfield" for a repo without spec/spec.md, spec/contract.md, ARCHITECTURE.md`)
 		printOperatorFlags(out, flags)
 	}
 	return flags, f
@@ -439,7 +436,6 @@ type ticketRun struct {
 	priorRun                     *string
 	skipProjectCheck             *bool
 	architectureRequiredSections *string
-	preflightProfile             *string
 	requestTicket                *bool
 	ticketFile                   *string
 	openPullRequest              *bool
@@ -533,7 +529,6 @@ type ticketRun struct {
 	resolvedWorkspaceForRecordCheck       string
 	isolatedParentDir                     string
 	isolatedRepoDir                       string
-	productSpecSHA256                     string
 	// setup/autofix/requiredBinaries/projectConfigSHA256 come from the
 	// committed .factory.yml (applyCommittedProjectConfig). Required binaries
 	// are checked against the final worker image before the workflow starts.
@@ -555,7 +550,6 @@ type ticketRun struct {
 	// once applyCommittedProjectConfig has proven every read came from it.
 	headBeforeProjectConfig       string
 	projectConfigCommitSHA        string
-	contractSHA256                string
 	id                            string
 	specSnapshotPath              string
 	verifyCmd                     string
@@ -637,7 +631,7 @@ func (tr *ticketRun) parseFlags() error {
 	tr.executionModel, tr.executionHarness, tr.executionThinkingChoice = tr.rf.executionModel, tr.rf.executionHarness, tr.rf.executionThinking
 	tr.registryProxy, tr.registryProxyImage, tr.composeServices, tr.egressCABundle, tr.dataDir = tr.rf.registryProxy, tr.rf.registryProxyImage, tr.rf.composeServices, tr.rf.egressCABundle, tr.rf.dataDir
 	tr.requireDeclaredScope, tr.temporalAddress, tr.repository, tr.runID, tr.priorRun = tr.rf.requireDeclaredScope, tr.rf.temporalAddress, tr.rf.repository, tr.rf.runID, tr.rf.priorRun
-	tr.skipProjectCheck, tr.architectureRequiredSections, tr.preflightProfile, tr.requestTicket, tr.ticketFile, tr.openPullRequest = tr.rf.skipProjectCheck, tr.rf.architectureRequiredSections, tr.rf.preflightProfile, tr.rf.requestTicket, tr.rf.ticketFile, tr.rf.openPullRequest
+	tr.skipProjectCheck, tr.architectureRequiredSections, tr.requestTicket, tr.ticketFile, tr.openPullRequest = tr.rf.skipProjectCheck, tr.rf.architectureRequiredSections, tr.rf.requestTicket, tr.rf.ticketFile, tr.rf.openPullRequest
 	tr.prClosesIssue, tr.prBase, tr.allowSpecTicketScopeMismatch, tr.onBranch, tr.diffBase = tr.rf.prClosesIssue, tr.rf.prBase, tr.rf.allowSpecTicketScopeMismatch, tr.rf.onBranch, tr.rf.diffBase
 	configPath := tr.rf.configPath
 	tr.earlierAttempt, tr.instructionBase = tr.rf.earlierAttempt, tr.rf.instructionBase
@@ -679,7 +673,7 @@ func (tr *ticketRun) parseFlags() error {
 	// sessionconfig.DefaultPaths() entry that exists) -- see
 	// resolveSettings's own doc comment. A CLI flag no
 	// longer exists for any of these, so this is the whole story for them;
-	// verifyCommand/fastCheckCommand/preflightProfile/releaseProtectedPaths
+	// verifyCommand/fastCheckCommand/releaseProtectedPaths
 	// above (Tier-1 flags, or in releaseProtectedPaths' case a plain
 	// settings-derived local) then still get applyProjectConfigDefaults' own
 	// .factory.yml overlay below, unchanged.
@@ -927,7 +921,7 @@ func (tr *ticketRun) applyProjectDefaults() error {
 	explicitFlags := map[string]bool{}
 	tr.flags.Visit(func(f *flag.Flag) { explicitFlags[f.Name] = true })
 	tr.headBeforeProjectConfig = projectconfig.HeadCommit(*tr.workspace)
-	if err := applyProjectConfigDefaults(explicitFlags, *tr.workspace, tr.verifyCommand, tr.fastCheckCommand, tr.rf.gateCommands, tr.preflightProfile, tr.releaseProtectedPaths, &tr.testPatterns, tr.meterTokenCeiling, tr.meterCostCeilingMicroUSD, *tr.meterTokenBudget, *tr.meterCostBudget); err != nil {
+	if err := applyProjectConfigDefaults(explicitFlags, *tr.workspace, tr.verifyCommand, tr.fastCheckCommand, tr.rf.gateCommands, tr.releaseProtectedPaths, &tr.testPatterns, tr.meterTokenCeiling, tr.meterCostCeilingMicroUSD, *tr.meterTokenBudget, *tr.meterCostBudget); err != nil {
 		return err
 	}
 	// gateCommands is rf.gateCommands' resolved values (post-
@@ -1128,7 +1122,7 @@ func (tr *ticketRun) prepareSandbox() error {
 		if tr.sandboxImageExplicit {
 			return fmt.Errorf("-sandbox-image requires -data-dir outside -workspace: durable run records must not be writable by the worker")
 		}
-		return fmt.Errorf("-data-dir (%q, resolving to %q) is inside -workspace; Docker containment is unconditional and requires durable run records to live outside the workspace the worker mounts -- pass -data-dir <path outside -workspace>", *tr.dataDir, dataAbs)
+		return fmt.Errorf("-data-dir (%q, resolving to %q) is inside -workspace; Docker containment is unconditional and requires durable run records to live outside the workspace the worker mounts -- set data_dir in the session config to a path outside -workspace", *tr.dataDir, dataAbs)
 	}
 	// Best-effort startup hygiene, not a precondition for this run: a
 	// prior factoryd process for this same -data-dir may have crashed
@@ -1213,10 +1207,9 @@ func (tr *ticketRun) prepareSandbox() error {
 	// Resolved to an absolute path here, once, before it's ever carried
 	// into a RunWorkflowInput — found via review: -repository's own shared
 	// task queue already let a run's Activities be dispatched to any
-	// Worker polling it, not necessarily this process's own, and
-	// `factoryd daemon` (a separate, independently-launched process with
-	// its own working directory) makes that the common case rather than a
-	// rare race. A relative *workspace resolved by *that* process's own
+	// Worker polling it, not necessarily this process's own, such as
+	// another -repository invocation's, started from another working
+	// directory. A relative *workspace resolved by *that* process's own
 	// CWD instead of this one's would either fail to find the checkout at
 	// all or, worse, silently operate on whatever unrelated directory
 	// happened to exist at the same relative path there.
@@ -1478,16 +1471,9 @@ func (tr *ticketRun) checkProject() error {
 		return fmt.Errorf("the worktree directory %q resolves inside -workspace %q; use a -data-dir outside the target checkout", tr.isolatedParentDir, tr.resolvedWorkspace)
 	}
 	tr.isolatedRepoDir = tr.resolvedWorkspace
-	// Mandatory project-bootstrap preflight (converted from opt-in to
-	// required, 2026-08-29): confirm the project this run targets has a
-	// frozen spec, a structurally valid contract, and a structurally
-	// valid architecture doc — the same three checks `factoryd
-	// check-project` has always been able to run, now actually gating
-	// `factoryd <run>` the way policy.ProductSpecFrozen et al.'s own doc
-	// comments always said they should, instead of being tested dead
-	// code nothing called (see CLAIMS.md's "Remaining gaps").
-	// -skip-project-check is the only way past this for a project that
-	// hasn't adopted the convention (factoryd init scaffolds it).
+	// Project-bootstrap preflight: the ticket's structure, and
+	// ARCHITECTURE.md as advisory (runProjectBootstrapCheck).
+	// -skip-project-check is the only way past it.
 	//
 	// Deliberately placed after every pure-validation containment check
 	// above (sandbox/isolation path conflicts, the isolated-worktree
@@ -1518,12 +1504,6 @@ func (tr *ticketRun) checkProject() error {
 	// would itself be the mutation this ordering exists to avoid.
 	// runProjectBootstrapCheck redirects that one write outside the
 	// checkout in that case.
-	// productSpecSHA256/contractSHA256 stay their zero value ("") when
-	// -skip-project-check is set — gap 5's drift comparison below (against
-	// -prior-run's own recorded values) is a no-op in that case, the same
-	// as it is for a prior run that itself skipped the preflight or never
-	// went through it: no recorded hash means nothing to compare, not "no
-	// drift".
 	// Every build runs on Temporal (see resolveTemporalAddress),
 	// resolved here: after every flag, ref, path and containment check above,
 	// so a bad invocation never waits on a Temporal start, and before the
@@ -1728,9 +1708,6 @@ func (tr *ticketRun) lockRepository() error {
 		reconcileStranded(directLock)
 	}
 	removeScratchDirs(tr.lifecycleCtx, *tr.sandboxDocker, tr.sandboxDataDir)
-	if *tr.preflightProfile != "" && *tr.preflightProfile != preflightProfileBrownfield {
-		return fmt.Errorf("-preflight-profile must be \"\" or %q, got %q", preflightProfileBrownfield, *tr.preflightProfile)
-	}
 	if *tr.prClosesIssue != "" && !prClosesIssueRefPattern.MatchString(*tr.prClosesIssue) {
 		return fmt.Errorf("-pr-closes-issue must be \"\" or match <owner>/<repo>#<N>, got %q", *tr.prClosesIssue)
 	}
@@ -1789,8 +1766,7 @@ func (tr *ticketRun) snapshotSpec() error {
 	tr.mintRunID()
 	if !*tr.skipProjectCheck {
 		err := withStage(*tr.dataDir, tr.id, "preflight", func() (outcome, detail string, err error) {
-			specArtifact, contractArtifact, architectureArtifact := projectBootstrapArtifactPaths(*tr.workspace)
-			tr.productSpecSHA256, tr.contractSHA256, err = runProjectBootstrapCheck(*tr.dataDir, tr.dataDirInsideWorkspace, tr.resolvedWorkspaceForRecordCheck, tr.repositoryRoot, tr.project, specArtifact, contractArtifact, architectureArtifact, tr.piTicketPath, tr.piTicketNumber, splitTrimmedCSV(*tr.architectureRequiredSections), *tr.preflightProfile, tr.requestTicketCheck())
+			err = runProjectBootstrapCheck(*tr.dataDir, tr.dataDirInsideWorkspace, tr.resolvedWorkspaceForRecordCheck, tr.project, projectArchitecturePath(*tr.workspace), tr.piTicketPath, tr.piTicketNumber, splitTrimmedCSV(*tr.architectureRequiredSections), tr.requestTicketCheck())
 			if err != nil {
 				return "fail", err.Error(), err
 			}
@@ -1852,7 +1828,7 @@ func (tr *ticketRun) snapshotSpec() error {
 		// Guarded by scratchRunInFlight, not unconditional: on the
 		// Temporal path the Worker that populates this cache may be a
 		// daemon in another process, and a submitter that gave up waiting
-		// returns here while that Worker is still building -- the daemon's
+		// returns here while that Worker is still building -- the worker's
 		// own reclaim scan (reconcileSandboxOrphans) removes it once the
 		// run is reconciled terminal.
 		tr.atExit(func() {
@@ -2188,6 +2164,17 @@ func (tr *ticketRun) checkScope() error {
 	return nil
 }
 
+// recordRepositoryDocker records on a `-repository` run the Docker its
+// sandboxes launch through, which the worker's reclaim compares with its own
+// before it recovers the run.
+func recordRepositoryDocker(r *run.Run, sandboxDocker string) {
+	if r.Repository == "" {
+		return
+	}
+	docker := daemonheartbeat.LocalDockerEndpoint(sandboxDocker)
+	r.SandboxDocker, r.DockerHost, r.DockerContext = docker.SandboxDocker, docker.DockerHost, docker.DockerContext
+}
+
 // createRunRecord saves the run record, captures the base commit and validates the prior run.
 func (tr *ticketRun) createRunRecord() error {
 	var err error
@@ -2241,8 +2228,6 @@ func (tr *ticketRun) createRunRecord() error {
 		ResumeSpendCarried:            resumeCarried,
 		OnBranch:                      *tr.onBranch,
 		RequestID:                     resumeRequestID,
-		ProductSpecSHA256:             tr.productSpecSHA256,
-		ContractSHA256:                tr.contractSHA256,
 		SkipProjectCheck:              *tr.skipProjectCheck,
 		SpecTicketScopeMismatchFields: tr.specTicketScopeMismatchFields,
 		State:                         run.StateReady,
@@ -2263,7 +2248,7 @@ func (tr *ticketRun) createRunRecord() error {
 		PROrder:             tr.runPROrder(),
 		// ReleasePolicy: persisted here, at run start, so a LATER
 		// reconciliation of this same run (Temporal reconcileReclaimedRun,
-		// or a daemon-restart reclaim) can evaluate its release decision
+		// or a worker-restart reclaim) can evaluate its release decision
 		// against the policy this run actually started with, instead of
 		// an always-deny release.MergePolicy{} -- see run.Run.ReleasePolicy's
 		// own doc comment.
@@ -2277,6 +2262,7 @@ func (tr *ticketRun) createRunRecord() error {
 		StackBaseSHA: replayStackBase(tr.replay),
 		TicketIndex:  replayTicketIndex(tr.replay),
 	}
+	recordRepositoryDocker(tr.r, *tr.sandboxDocker)
 	if err := save(tr.dp, tr.r, *tr.dataDir); err != nil {
 		return err
 	}
@@ -2410,16 +2396,6 @@ func (tr *ticketRun) createRunRecord() error {
 			}
 			return fmt.Errorf("slice-chain validation: prior run %q has already been superseded by run %q — declare that as -prior-run instead", *tr.priorRun, successorID)
 		}
-		// This process cannot eagerly confirm base_sha:
-		// ValidateSliceChainActivity defers that to RunWorkflow's own
-		// execution-time observation (see its doc comment above), so
-		// recordSpecDriftIfDetected's own cheap state/project-path
-		// invariant check is the strongest guarantee available here. An
-		// approximation, same class as InvalidatedByRunID's own "not a
-		// bisected root cause": a chain that later turns out stale
-		// (rejected by ValidateSliceChainActivity) may still have been
-		// marked drifted here.
-		recordSpecDriftIfDetected(tr.dp, *tr.dataDir, tr.id, tr.r.ProjectPath, prior, tr.productSpecSHA256, tr.contractSHA256)
 	}
 	if err := tr.scheduleFullSuite(); err != nil {
 		return err
@@ -2624,7 +2600,7 @@ func (tr *ticketRun) dispatch() error {
 			ResumeSession:       tr.resumeSession,
 			KeepBuildSession:    tr.settings.RoundSessionContinuity && *tr.requestTicket && tr.replay == nil,
 			Replay:              replayInputOf(tr.replay),
-			TicketPath:          temporalPreflightTicketPath(tr.piTicketPath, *tr.preflightProfile),
+			TicketPath:          temporalPreflightTicketPath(tr.piTicketPath),
 			TicketNumber:        tr.piTicketNumber,
 			RequestTicket:       *tr.requestTicket,
 			Bug:                 *tr.bug,

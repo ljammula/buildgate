@@ -63,8 +63,7 @@ func runOwnerDead(dataDir, runID string) bool {
 }
 
 // reclaimDeadOwnerRuns runs at worker start, once the caller holds the
-// queue drain lock. `factoryd daemon` reclaims abandoned runs continuously;
-// without this, a worker killed with SIGKILL left its run record
+// queue drain lock. Without this, a worker killed with SIGKILL left its run record
 // slice_running, its relay container Up and its Temporal workflow Running. For every nonterminal run whose owner is dead (runOwnerDead) it:
 //
 //  1. terminates the run's Temporal workflow if that is still Running (a
@@ -74,6 +73,9 @@ func runOwnerDead(dataDir, runID string) bool {
 //  3. removes its worker, relay and compose-sidecar containers by running the
 //     sandbox reconcilers, which treat a confirmed-halted run as terminal and
 //     skip every run that is still nonterminal.
+//
+// A `-repository` run is left alone (leftToRepositoryReclaim): the worker's
+// repository reclaim finishes it on the owner's real result.
 //
 // Best-effort: failures are logged, never returned, so a broken Docker or
 // Temporal cannot stop the worker from starting. temporalAddress is the
@@ -103,7 +105,7 @@ func reclaimDeadOwnerRuns(dp *deps, ctx context.Context, dataDir, dockerBinary, 
 		}
 		id := entry.Name()
 		r, loadErr := run.Load(dataDir, id)
-		if loadErr != nil || runTerminalConfirmed(r) || !runOwnerDead(dataDir, id) {
+		if loadErr != nil || runTerminalConfirmed(r) || leftToRepositoryReclaim(r) || !runOwnerDead(dataDir, id) {
 			continue
 		}
 		terminatedWorkflow := ""
@@ -247,6 +249,16 @@ func terminateRunningWorkflow(ctx context.Context, t workflowTerminator, workflo
 	return true, nil
 }
 
+// leftToRepositoryReclaim reports whether r belongs to a repository owner:
+// its child workflow can still finish once a worker polls its queue, so the
+// worker's repository reclaim (repository_reclaim.go) recovers it to
+// accepted or quarantined instead of a dead-owner halt. That includes a run a
+// worker was recovering when it stopped: its sandbox-owner.pid names that
+// worker, and the next worker adopts the recovery.
+func leftToRepositoryReclaim(r *run.Run) bool {
+	return r.Repository != ""
+}
+
 // haltDeadOwnerRun records runID halted-and-confirmed with deadOwnerTriage,
 // under the run lock and re-checking terminal state and owner first. It
 // reports false when the run turned terminal or its owner came back in the
@@ -258,7 +270,7 @@ func haltDeadOwnerRun(dp *deps, dataDir, runID string) (bool, error) {
 		if loadErr != nil {
 			return loadErr
 		}
-		if runTerminalConfirmed(fresh) || !runOwnerDead(dataDir, runID) {
+		if runTerminalConfirmed(fresh) || leftToRepositoryReclaim(fresh) || !runOwnerDead(dataDir, runID) {
 			return nil
 		}
 		fresh.State = run.StateHalted

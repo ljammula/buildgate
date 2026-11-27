@@ -11,6 +11,7 @@ import (
 	"go.temporal.io/sdk/client"
 	temporalworker "go.temporal.io/sdk/worker"
 
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/forge"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -59,25 +60,17 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		// repository owner or Temporal child was ever contacted; there is
 		// nothing to strand, so it is definitively terminal, not the
 		// ambiguous give-up case HaltConfirmed's doc comment describes.
-		r.State = run.StateHalted
-		r.HaltConfirmed = true
-		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
-			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
-		}
+		haltUnsubmitted(dp, r, opts.DataDir)
 		return fmt.Errorf("resolve data dir: %w", err)
 	}
 	opts.DataDir = absDataDir
 
 	ownerID := workflow.RepositoryOwnerWorkflowID(opts.Repository)
-	if divergeErr := checkSandboxDockerAgainstDaemonHeartbeat(opts.DataDir, ownerID, opts.ID, opts.Repository, opts.SandboxImage, opts.SandboxDocker); divergeErr != nil {
+	if divergeErr := checkSandboxDockerAgainstWorker(opts.DataDir, opts.ID, opts.Repository, opts.SandboxImage, daemonheartbeat.LocalDockerEndpoint(opts.SandboxDocker)); divergeErr != nil {
 		// HaltConfirmed: true — same reasoning as every other pre-signal
 		// failure branch in this function: SignalWithStartWorkflow below
 		// is never reached, so nothing is stranded for this id.
-		r.State = run.StateHalted
-		r.HaltConfirmed = true
-		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
-			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
-		}
+		haltUnsubmitted(dp, r, opts.DataDir)
 		return divergeErr
 	}
 	// Shared across every invocation targeting this repository, unlike
@@ -101,11 +94,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 		// HaltConfirmed: true — SignalWithStartWorkflow below is never
 		// reached, so this request never entered the shared system at all;
 		// nothing to strand for this id specifically.
-		r.State = run.StateHalted
-		r.HaltConfirmed = true
-		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
-			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
-		}
+		haltUnsubmitted(dp, r, opts.DataDir)
 		return fmt.Errorf("start repository owner worker: %w", err)
 	}
 	defer ownerWorker.Stop()
@@ -116,11 +105,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 	if err := runWorker.Start(); err != nil {
 		// HaltConfirmed: true — same reasoning as ownerWorker.Start()'s own
 		// failure branch above: SignalWithStartWorkflow is never reached.
-		r.State = run.StateHalted
-		r.HaltConfirmed = true
-		if saveErr := save(dp, r, opts.DataDir); saveErr != nil {
-			log.Printf("run %s: additionally failed to persist %s state: %v", opts.ID, r.State, saveErr)
-		}
+		haltUnsubmitted(dp, r, opts.DataDir)
 		return fmt.Errorf("start run worker: %w", err)
 	}
 	defer runWorker.Stop()
@@ -135,13 +120,12 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 	// necessarily this process's own.
 	// runOptions.workflowInput is shared with runViaTemporal and with the
 	// Temporal-parity test's own runTemporalPathFixture -- see that function's
-	// doc comment (run_temporal.go). Project/RepositoryOwnerID/TaskQueue
+	// doc comment (run_temporal.go). Project/TaskQueue
 	// are this path's own, set directly on the result: they are what
 	// makes this a repository-owned execution rather than a run-unique
 	// one, so they belong here and not in the shared builder.
 	runInput := opts.workflowInput()
 	runInput.Project = r.Project
-	runInput.RepositoryOwnerID = ownerID
 	runInput.TaskQueue = runTaskQueue
 	// SignalWithStartWorkflow starts the owner if it isn't already running
 	// for this repository, or signals the existing one — atomically, so
@@ -290,7 +274,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 	}
 
 	// run.WithLock, reloading and re-checking run.json's state after
-	// acquiring it — found via review, twice: a daemon's periodic reclaim
+	// acquiring it — found via review, twice: a worker's periodic reclaim
 	// scan can legitimately observe the same owner result at roughly the
 	// same time this submitter does (runsNeedingReclaim has no way to
 	// distinguish "an abandoned run" from "a live submitter's own run
@@ -322,7 +306,7 @@ func runViaRepositoryOwner(dp *deps, lifecycleCtx context.Context, temporalClien
 // the "loser" side of the race that lock closure guards against. Found via
 // review: returning nil unconditionally there once a concurrent daemon
 // reconciliation had already reached a terminal state broke that contract
-// outright — a daemon that reconciled this exact request to quarantined a
+// outright — a worker that reconciled this exact request to quarantined a
 // moment before this submitter acquired the lock made the submitting
 // CLI/API report success (exit 0, "FINAL state=accepted" never even
 // printed) for a run the policy gate actually rejected. Factored out for
@@ -615,5 +599,38 @@ func terminateOrCancelOwnRequest(temporalClient client.Client, ownerID, requestI
 			return workflow.RunWorkflowResult{}, false, false
 		}
 		time.Sleep(repositoryOwnerPollInterval)
+	}
+}
+
+// checkSandboxDockerAgainstWorker refuses a sandboxed `-repository` run whose
+// Docker differs from the one dataDir's worker uses, by the worker's fresh
+// heartbeat (daemonheartbeat.SandboxDockerDiverges). Should this submitter
+// die, the worker is what recovers the run and removes its containers, and
+// it does both only through its own Docker: a container launched elsewhere
+// would be invisible to it. No live worker, or a heartbeat without an
+// endpoint, is unknown and refuses nothing; the worker's reclaim compares the
+// run's recorded Docker again before it recovers the run (repository_reclaim.go).
+func checkSandboxDockerAgainstWorker(dataDir, id, repository, sandboxImage string, local daemonheartbeat.DockerEndpoint) error {
+	if _, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dataDir)); err != nil {
+		log.Printf("run %s: no worker heartbeat in %s: if this process stops before the run ends, the run of repository %q is recovered only once `factoryd worker` runs on this data dir", id, dataDir, repository)
+		return nil
+	}
+	if sandboxImage == "" {
+		return nil
+	}
+	worker, ok, diverges := daemonheartbeat.SandboxDockerDiverges(dataDir, local)
+	if !ok || !diverges {
+		return nil
+	}
+	return fmt.Errorf("this run's Docker (executable %q, DOCKER_HOST=%q, DOCKER_CONTEXT=%q) differs from the one this data dir's worker uses (executable %q, DOCKER_HOST=%q, DOCKER_CONTEXT=%q, from its heartbeat): the worker could not recover repository %q's run or remove its containers if this process stopped", local.SandboxDocker, local.DockerHost, local.DockerContext, worker.SandboxDocker, worker.DockerHost, worker.DockerContext, repository)
+}
+
+// haltUnsubmitted saves r halted and confirmed: a failure before the run's
+// request reached its repository owner leaves nothing in flight for it.
+func haltUnsubmitted(dp *deps, r *run.Run, dataDir string) {
+	r.State = run.StateHalted
+	r.HaltConfirmed = true
+	if saveErr := save(dp, r, dataDir); saveErr != nil {
+		log.Printf("run %s: additionally failed to persist %s state: %v", r.ID, r.State, saveErr)
 	}
 }

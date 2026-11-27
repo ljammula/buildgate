@@ -167,7 +167,6 @@
   "verify_command": "every-field verify_command",
   "full_suite_command": "every-field full_suite_command",
   "full_suite_source": "every-field full_suite_source",
-  "preflight_profile": "every-field preflight_profile",
   "test_patterns": [
     "every-field test_patterns"
   ],
@@ -451,11 +450,11 @@
           },
           {
             "label": "The newest log",
-            "command": "factoryd logs -data-dir /data run-quarantined"
+            "command": "factoryd logs run-quarantined"
           },
           {
             "label": "Every log and saved prompt",
-            "command": "factoryd logs -data-dir /data -list run-quarantined"
+            "command": "factoryd logs -list run-quarantined"
           }
         ]
       }

@@ -61,7 +61,7 @@ class Oversize(lc.Challenge):
 
 	def submit_spec_only(self, repo):
 		out = self.factoryd("submit", "-spec-file", str(self.dir / "spec.md"), "-verify-command", self.fixture.get("oversize_verify_command", self.fixture["verify_command"]),
-			"-preflight-profile", self.fixture.get("preflight_profile", ""), str(repo))
+			str(repo))
 		ids = [l.strip() for l in out.splitlines() if lc.re.fullmatch(r"[a-z0-9][a-z0-9-]+-\d{8}-\d{6}", l.strip())]
 		if not ids:
 			raise RuntimeError(f"submit printed no request id:\n{out[-400:]}")

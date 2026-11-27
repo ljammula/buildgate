@@ -70,13 +70,6 @@
     "content_type": "application/json"
   },
   {
-    "pattern": "GET /daemons",
-    "path": "/daemons",
-    "file": "daemons.json",
-    "status": 200,
-    "content_type": "application/json"
-  },
-  {
     "pattern": "GET /workspaces",
     "path": "/workspaces",
     "file": "workspaces.json",

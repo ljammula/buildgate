@@ -292,24 +292,6 @@ type RunWorkflowInput struct {
 	// own doc comment): opt-in, false by default, refuses any sidecar
 	// image not pinned by digest.
 	ComposeServicesRequireDigest bool `json:"compose_services_require_digest,omitempty"`
-	// RepositoryOwnerID is the repository-owner Workflow ID
-	// (workflow.RepositoryOwnerWorkflowID(repository)) this execution was
-	// submitted through, when any — cmd/factoryd's runViaRepositoryOwner
-	// sets it; runViaTemporal leaves it empty. Exists solely so runSandboxWithRetries can re-derive
-	// daemonheartbeat.Path(dataDir, RepositoryOwnerID) and re-check this
-	// launch's own SandboxDocker/DOCKER_HOST/DOCKER_CONTEXT against the
-	// daemon's *current* heartbeat at actual launch time (found via GitHub
-	// Codex review of PR #37, round 8): cmd/factoryd's own submission-time
-	// check (checkSandboxDockerAgainstDaemonHeartbeat) only proves no
-	// divergence existed at submission — a request that sits queued, or a
-	// daemon that restarts with a different -sandbox-docker, between
-	// submission and actual dispatch could still diverge by the time a
-	// container is really launched. Empty means either no repository-owner
-	// submission at all, or one from before this field existed — the
-	// launch-time check is then simply skipped, exactly like the
-	// submission-time check already treats "no channel to ask" as
-	// "unknown, not diverging".
-	RepositoryOwnerID string `json:"repository_owner_id,omitempty"`
 	// DataDir overrides Activities.DataDir for this execution — same
 	// per-execution-wins-over-Worker-static precedence as LogDir/
 	// CheckpointDir, and for the same shared-task-queue reason: a Worker

@@ -2379,18 +2379,8 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// validated at submit time (sessionconfig.ValidateRequestHarnesses)
 		// against roles.execution.allowed_harnesses.
 		ExecutionHarness: r.Harnesses["execution"],
-		// r.PreflightProfile is what `factoryd submit` resolved at
-		// submission time (its own -preflight-profile flag or the
-		// workspace's .factory.yml) -- carried onto the ticket's own
-		// QueueEntry for the same reason VerifyCommand is: without it,
-		// BuildTicketRunArgs emits no -preflight-profile at all and the
-		// run falls back to the strict default profile, which halts a
-		// brownfield workspace's preflight on artifacts (spec/contract.md,
-		// ARCHITECTURE.md, spec/tickets/*.md) that convention was never
-		// asked to produce (found live).
-		PreflightProfile: r.PreflightProfile,
 		// IssueRef is carried onto the ticket's own QueueEntry the same
-		// way PreflightProfile and VerifyCommand are, for the same
+		// way VerifyCommand is, for the same
 		// reason: without it, BuildTicketRunArgs emits no
 		// -pr-closes-issue and the ticket's draft PR body never gets its
 		// "Closes owner/repo#N" line, even though the request was
@@ -2413,7 +2403,7 @@ func ticketQueueEntry(dataDir string, r *request.Request, ticket request.Ticket,
 		// -model execution=...` / the API's own "models" field, already
 		// validated at submit time (sessionconfig.ValidateRequestModels)
 		// against roles.execution.allowed -- carried onto every ticket's
-		// own QueueEntry the same way ExecutionHarness/PreflightProfile are. Empty
+		// own QueueEntry the same way ExecutionHarness is. Empty
 		// leaves BuildTicketRunArgs' own -execution-model unforwarded.
 		ExecutionModel: r.Models["execution"],
 	}, nil

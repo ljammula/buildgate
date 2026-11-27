@@ -193,10 +193,6 @@ func profileFactoryYMLFix(root string, profile languageprofile.Profile, config p
 	} else if config.VerifyCommand == "" {
 		lines = append(lines, "# verify_command: choose the repository's real verification command")
 	}
-	specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(root)
-	if config.PreflightProfile == "" && onboardingNotDone(specPath, contractPath, architecturePath) {
-		lines = append(lines, "preflight_profile: "+projectconfig.PreflightProfileBrownfield)
-	}
 	if config.FullSuiteCommand == "" && profile.FullSuiteCommand != "" && (config.VerifyCommand == "" || config.VerifyCommand == profile.VerifyCommand) {
 		lines = append(lines, "full_suite_command: "+strconv.Quote(profile.FullSuiteCommand))
 	}

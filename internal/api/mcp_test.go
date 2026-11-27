@@ -323,7 +323,7 @@ func TestMCPCutsALongResult(t *testing.T) {
 func TestMCPSubmitKeepsTheWorkspaceAllowlist(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 	unlisted := initGitWorkspace(t, "other")
 	server := mcpTestServer(dataDir, WithWorkspaces([]string{workspace}))
 
@@ -408,7 +408,7 @@ func TestMCPCutKeepsTheNewestRows(t *testing.T) {
 func TestMCPLimitsSubmissions(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 	server := mcpTestServer(dataDir, WithWorkspaces([]string{workspace}))
 	arguments := `{"workspace":` + jsonString(workspace) + `,"text":"Add a thing"}`
 

@@ -592,8 +592,8 @@ func MisprefixedWorkspacePaths(workspace string, paths []string) (map[string]str
 }
 
 // makefileRootTargetRE matches the same top-level "verify:" or "test:"
-// Makefile target line cmd/factoryd's own detectVerifyCommand looks for
-// (see cmd/factoryd/onboard.go) before trusting a Makefile as evidence of
+// Makefile target line languageprofile.DetectVerifyCommand looks for
+// before trusting a Makefile as evidence of
 // a real project root.
 var makefileRootTargetRE = regexp.MustCompile(`(?m)^(verify|test):`)
 

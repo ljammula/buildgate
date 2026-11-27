@@ -296,7 +296,7 @@ func (r *Runtime) present(ctx context.Context, name string) (bool, error) {
 // it removes the launch's scratch volume (one that does not exist is
 // success). A removal that fails is not an error: the name is unique to the
 // launch, so the leftover volume cannot affect a later one; it is reported
-// through Warn and the daemon's reclaim or `factoryd doctor -fix` removes it.
+// through Warn and the worker's reclaim or `factoryd doctor -fix` removes it.
 // While a container may remain the volume is kept.
 func (r *Runtime) Delete(ctx context.Context, name string) error {
 	_, gatewayErr := r.Client.Sandboxes().Delete(ctx, r.workspace(), name, v1.DeleteOptions{AllowMissing: true})
@@ -320,7 +320,7 @@ func (r *Runtime) Delete(ctx context.Context, name string) error {
 		if err := r.Volumes.Remove(ctx, volume); err != nil {
 			r.noteScratchLeft(name)
 			if r.Warn != nil {
-				r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the daemon's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
+				r.Warn("openshell: scratch volume %s of sandbox %s was not removed: %v; the worker's reclaim or `factoryd doctor -fix` removes it", volume, name, err)
 			}
 		}
 	}

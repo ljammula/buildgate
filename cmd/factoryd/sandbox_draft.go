@@ -66,17 +66,8 @@ func sandboxDraftNote(repoRoot string) string {
 	return fmt.Sprintf("The file includes a sandbox: block drafted from the detected language profile. After committing it, run `factoryd sandbox show -repo %s` to read it and `factoryd sandbox approve -repo %s` to approve it: runs against this repository are refused until you do.", q, q)
 }
 
-// printFactoryYMLNotes prints what follows writing a .factory.yml for
-// repoRoot: commit it, and approve a drafted sandbox block.
-func printFactoryYMLNotes(repoRoot string) {
-	fmt.Println(factoryYMLCommitReminder())
-	if note := sandboxDraftNote(repoRoot); note != "" {
-		fmt.Println(note)
-	}
-}
-
 // factoryYMLWithSandbox is factoryYMLContent plus the drafted sandbox block
 // for repoRoot, when its profile has one.
-func factoryYMLWithSandbox(repoRoot, verifyCommand, preflightProfile string) string {
-	return factoryYMLContent(verifyCommand, preflightProfile) + sandboxBlockDraft(repoRoot)
+func factoryYMLWithSandbox(repoRoot, verifyCommand string) string {
+	return factoryYMLContent(verifyCommand) + sandboxBlockDraft(repoRoot)
 }

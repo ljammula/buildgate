@@ -69,7 +69,7 @@ func newMemoryFlags() memoryFlags {
 	f := memoryFlags{set: flag.NewFlagSet("memory", flag.ContinueOnError), remove: &exactListFlag{}, runIDs: &exactListFlag{}}
 	f.workspace = f.set.String("workspace", "", "the repository whose memory to read or change: its root, or any directory inside it (required)")
 	f.config = f.set.String("config", "", "session config file or profile name; empty uses the active profile, then the default paths. Its memory.repositories list turns memory on per repository")
-	f.dataDir = f.set.String("data-dir", "data", "directory for durable records; must match what `factoryd worker` uses")
+	f.dataDir = f.set.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.jsonOut = f.set.Bool("json", false, "list and show: print JSON instead of text")
 	f.reason = f.set.String("reason", "", "drop and off: why, recorded with the change")
 	f.set.Var(f.remove, "remove", "propose: an exact line of the section to remove, as `memory list` prints it. Repeatable")

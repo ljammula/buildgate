@@ -70,7 +70,7 @@ func workerMain(dp *deps, args []string) error {
 	if err := daemonheartbeat.ClearDrain(dataDir); err != nil {
 		return err
 	}
-	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, githubLogin, string(backend.Backend), cfg.Settings.MaxParallelJobs)
+	stopHeartbeat, err := startWorkerHeartbeat(context.Background(), dataDir, heartbeatMode, heartbeatModel, cfg.TemporalAddress, githubLogin, string(backend.Backend), daemonheartbeat.LocalDockerEndpoint(cfg.Settings.SandboxDocker), cfg.Settings.MaxParallelJobs)
 	if err != nil {
 		return err
 	}
@@ -92,6 +92,14 @@ func workerMain(dp *deps, args []string) error {
 		return fmt.Errorf("connect to Temporal at %s: %w", cfg.TemporalAddress, err)
 	}
 	defer temporalClient.Close()
+
+	// Built before any worker starts: it fails only when the build script or
+	// the data dir cannot be resolved, and then the worker refuses to start
+	// rather than take requests without the -repository recovery.
+	reclaim, err := newRepositoryReclaim(dp, dataDir, cfg, temporalClient)
+	if err != nil {
+		return err
+	}
 
 	acts := &requestActivities{dp: dp,
 		dataDir:    dataDir,
@@ -131,6 +139,19 @@ func workerMain(dp *deps, args []string) error {
 	pruneTicker := time.NewTicker(autoPruneCheck)
 	defer pruneTicker.Stop()
 	go autoPruneLoop(ctx, dp, dataDir, cfg.Settings.PruneAfter, pruneTicker.C)
+	// The runs of a -repository owner whose submitter died are finished or
+	// halted here, at start and on a tick (repository_reclaim.go).
+	reclaimTicker := time.NewTicker(workerAdoptInterval)
+	reclaimDone := make(chan struct{})
+	go func() {
+		defer close(reclaimDone)
+		defer reclaimTicker.Stop()
+		reclaim.run(ctx, reclaimTicker.C)
+	}()
+	defer func() {
+		<-reclaimDone
+		reclaim.stop()
+	}()
 	retryPendingWakes(ctx, temporalClient, time.NewTicker(workerAdoptInterval), dataDir, queueID, jobsQueue, lightQueue)
 	log.Printf("factoryd worker: stopping")
 	return nil

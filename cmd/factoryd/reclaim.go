@@ -40,8 +40,8 @@ func runTerminalConfirmed(r *run.Run) bool {
 // caller shares: a run's scratch cache may still be in use while its
 // record is non-terminal. runTerminalConfirmed, not a bare state check, so
 // a Temporal submitter that gave up waiting (StateHalted, HaltConfirmed
-// false) keeps the cache a daemon-side Worker may still be building in;
-// the daemon's own reclaim scan removes it once the run is reconciled
+// false) keeps the cache a worker-side Worker may still be building in;
+// the worker's own reclaim scan removes it once the run is reconciled
 // terminal. A missing record is not in flight.
 // runFinishedIn reports whether dataDir records runID and its run is over.
 // A run the data dir does not record (another profile's) is not finished.
@@ -394,7 +394,7 @@ func temporalWorkflowRunning(ctx context.Context, temporalClient client.Client, 
 
 // runsNeedingReclaim scans dataDir's durable run records and returns the
 // IDs of every nonterminal one belonging to repository and not already in
-// alreadyReclaimed — factored out of daemonMain's own
+// alreadyReclaimed — factored out of workerMain's own
 // reclaimAbandonedRunQueues closure so the pure "which runs need a
 // recovery Worker" decision is unit-testable without a live Temporal
 // server or actually starting one. A load failure for one run's record is
@@ -447,7 +447,7 @@ func runsNeedingReclaim(dataDir, repository string, alreadyReclaimed map[string]
 // a terminal state — the mirror image of runsNeedingReclaim, used to know
 // which recovery Workers a periodic re-scan can now stop. Found via
 // review: without this, every reclaimed run's Worker (and its task-queue
-// poller) was kept alive for the rest of the daemon's own lifetime even
+// poller) was kept alive for the rest of the worker's own lifetime even
 // after the run it was recovering finished, so a long-lived daemon
 // serving enough abandoned runs over time would accumulate Workers and
 // server-side pollers without bound. A load failure is treated as "not
@@ -506,7 +506,7 @@ func terminalReclaimedRunIDs(dataDir string, reclaimedIDs map[string]bool) []str
 // source of which runs to consider) has no way to distinguish a genuinely
 // abandoned run from a live submitter's own run that simply hasn't
 // finished polling yet — both look identical from run.json's own
-// nonterminal state alone. The daemon's periodic scan can therefore
+// nonterminal state alone. The worker's periodic scan can therefore
 // observe the same owner result at roughly the same moment a live
 // submitter's runViaRepositoryOwner does, racing its own final
 // applyRunWorkflowResult call. The cheap, unlocked load below is only ever
@@ -519,7 +519,7 @@ func terminalReclaimedRunIDs(dataDir string, reclaimedIDs map[string]bool) []str
 //
 // ctx bounds every Temporal query this call makes — found via review: an
 // earlier version derived each query's timeout from context.Background(),
-// so a scan already in flight when the daemon received SIGTERM ran every
+// so a scan already in flight when the worker received SIGTERM ran every
 // query out to its own full 5s timeout regardless, delaying shutdown by
 // roughly 5s per batch of reconcileConcurrency reclaimed runs still queued
 // behind it. Callers should pass their own shutdown-aware context (the
@@ -779,6 +779,11 @@ func haltReclaimedRunConfirmed(dp *deps, dataDir, requestID, workspacePath, bran
 	return terminal, nil
 }
 
+// reconcileReclaimedRun applies the repository owner's real result to a run
+// a give-up path saved halted and unconfirmed. `factoryd worker` runs it, with
+// runsNeedingReclaim and the rest of this reclaim (repository_reclaim.go), at
+// start and on a tick; safety-contract.md's `halted -> accepted` and
+// `halted -> quarantined` edges name this reclaim.
 func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.Client, ownerID, requestID, dataDir string) (bool, error) {
 	recovered, loadErr := run.Load(dataDir, requestID)
 	if loadErr != nil {
@@ -1065,7 +1070,7 @@ func reconcileReclaimedRun(dp *deps, ctx context.Context, temporalClient client.
 		// runMainWithReady) via mergePolicyFromRun, centrally -- see that
 		// function's own top-of-file doc comment -- rather than always
 		// evaluating against an always-deny release.MergePolicy{}. Before
-		// this, reconciliation ran on the daemon side, long after the original
+		// this, reconciliation ran on the worker side, long after the original
 		// submitter's own -release-* flags were gone, with no way to
 		// recover them, so EVERY reconciled accepted run was denied
 		// release regardless of what the operator actually configured.

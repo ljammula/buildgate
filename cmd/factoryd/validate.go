@@ -97,9 +97,8 @@ func dockerCPUs(value string) (float64, error) {
 // keep their zero-value behavior unchanged; this validates only the
 // CLI-supplied flag values themselves, called once per flag set right
 // after parsing, at every site that supplies these three values (the
-// single-ticket run path, factoryd daemon, and serve's own
-// -sandbox-* pair for API-started runs -- the last two now from
-// sessionconfig.Settings rather than their own flags). prefix names the
+// single-ticket run path and serve's own -sandbox-* pair for API-started
+// runs). prefix names the
 // flag family in the returned error ("-sandbox") so the message points at
 // the actual flag an operator needs to fix.
 func validateSandboxResourceLimitFlags(prefix, memory, cpus, tmpfsSize string) error {
@@ -269,15 +268,6 @@ func noticeUnusedCwdRecords(dataDir, configPath string) {
 	log.Printf("note: %s holds factoryd records this command does not use. To keep using them, set `data_dir: %s` in %s, then `factoryd restart`", local, local, configPath)
 }
 
-// parseWithDataDir parses args and resolves -data-dir as every command does
-// (resolveDataDirFromSessionConfig).
-func parseWithDataDir(flags *flag.FlagSet, args []string, dataDir *string, configPath string) error {
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	return resolveDataDirFromSessionConfig(flags, dataDir, configPath)
-}
-
 // applyProjectConfigDefaults fills in flags the caller left unset from
 // workspace's committed .factory.yml, one field per flag it
 // covers. An explicit flag always wins -- explicit names only the flags
@@ -315,6 +305,6 @@ func parseWithDataDir(flags *flag.FlagSet, args []string, dataDir *string, confi
 // the real body there means `factoryd submit`, `factoryd worker`/
 // run_ticket.go, `factoryd doctor`, and POST /requests all read the
 // same logic rather than risking a fourth hand-drifted copy of it.
-func applyProjectConfigDefaults(explicit map[string]bool, workspace string, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, preflightProfile, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget int, meterCostBudget int64) error {
-	return requestsubmit.ApplyProjectConfigDefaults(explicit, workspace, verifyCommand, fastCheckCommand, gateCommands, preflightProfile, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget)
+func applyProjectConfigDefaults(explicit map[string]bool, workspace string, verifyCommand, fastCheckCommand *string, gateCommands map[string]*string, releaseProtectedPaths *string, testPatterns *[]string, meterTokenCeiling *int, meterCostCeilingMicroUSD *int64, meterTokenBudget int, meterCostBudget int64) error {
+	return requestsubmit.ApplyProjectConfigDefaults(explicit, workspace, verifyCommand, fastCheckCommand, gateCommands, releaseProtectedPaths, testPatterns, meterTokenCeiling, meterCostCeilingMicroUSD, meterTokenBudget, meterCostBudget)
 }

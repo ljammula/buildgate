@@ -10,7 +10,7 @@ import {
 /**
  * Fetches one run's durable release decision and the project kill-switch
  * state it was evaluated against. Authenticated with the start token: the
- * server treats this as a control-plane route (like GET /daemons) rather
+ * server treats this as a control-plane route rather
  * than an open read route, because the kill-switch history carries operator
  * attribution, and it fails closed (403) when no token is configured
  * server-side.

@@ -85,18 +85,6 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd serve [flags]
 stderr:   Serve the console and the API
 
-$ factoryd daemon -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd daemon [flags]
-stderr:   Service one repository's task queue
-
-$ factoryd supervise -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd supervise [flags]
-stderr:   Run one daemon per repository and restart it
-
 $ factoryd reset-stop-line -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
@@ -109,12 +97,6 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd override-rate [flags]
 stderr:   Report how many accepted runs needed an override
 
-$ factoryd check-project -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd check-project [flags]
-stderr:   Run the project-bootstrap checks on the files you name
-
 $ factoryd check-ticket -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
@@ -126,18 +108,6 @@ exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd ticket-template [flags]
 stderr:   Print a skeleton ticket
-
-$ factoryd init -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd init [flags]
-stderr:   Scaffold a new project
-
-$ factoryd onboard -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd onboard [flags]
-stderr:   Scaffold the onboarding docs of an existing repository
 
 $ factoryd doctor -zz-not-a-flag
 exit 1
@@ -284,17 +254,11 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd init-config [flags]
 stderr:   Write the example session config
 
-$ factoryd install-service -zz-not-a-flag
+$ factoryd service -zz-not-a-flag
 exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd install-service [flags]
-stderr:   Keep the worker and the console running under launchd (macOS)
-
-$ factoryd uninstall-service -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd uninstall-service [flags]
-stderr:   Remove the launchd services
+stderr: factoryd: usage: factoryd service <install|remove> [flags]
+stderr:   install  keep the worker and the console running under launchd (macOS) or systemd (Linux); takes the flags above
+stderr:   remove   remove those services; takes no flag
 
 $ factoryd quickstart -zz-not-a-flag
 exit 1
@@ -350,12 +314,6 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd setup [flags]
 stderr:   Choose the model and coding agent every run uses
 
-$ factoryd mcp -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd mcp [flags]
-stderr:   Turn the console's MCP endpoint on, and print its token
-
 $ factoryd memory -zz-not-a-flag
 exit 1
 stderr: factoryd: usage: factoryd memory <subcommand> -workspace <repository> [flags] [arguments]
@@ -392,17 +350,11 @@ stderr: flag provided but not defined: -zz-not-a-flag
 stderr: usage: factoryd build-ca-bundle
 stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 
-$ factoryd gate-token -zz-not-a-flag
+$ factoryd remote -zz-not-a-flag
 exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd gate-token [flags]
-stderr:   Write the token a remote console, or any once tokens are required, needs
-
-$ factoryd remote-console -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd remote-console [flags]
-stderr:   Open this profile's console to another machine on the tailnet
+stderr: factoryd: usage: factoryd remote <on|off|token|mcp> [flags]
+stderr:   on     open this profile's console to another machine on the tailnet: a Tailscale listener, the host serve accepts, a gate token (-config, -https-port, -ttl)
+stderr:   off    close it again: the host, the listener this command added, and the gate token if it wrote it (-config)
 
 $ factoryd help -zz-not-a-flag
 exit 1

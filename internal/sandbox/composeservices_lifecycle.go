@@ -503,7 +503,7 @@ func AcquireComposeServicesGate(ctx context.Context, spec ComposeServicesSpec, r
 // AcquireComposeServicesSlot takes the host-wide compose sidecars slot
 // unconditionally -- AcquireComposeServicesGate's slot without its
 // launches-anything check, for a caller that cannot rebuild the run's own
-// compose options (the daemon's recovery of a crashed submission) and so
+// compose options (the worker's recovery of a crashed submission) and so
 // must assume sidecars. A wait that ends names the holder, and says
 // whether it timed out or was canceled.
 func AcquireComposeServicesSlot(ctx context.Context, runID string, concurrency int, onWait func(holder string)) (*modelhost.Handle, error) {

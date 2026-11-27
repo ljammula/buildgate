@@ -1,4 +1,4 @@
-// factoryd install-service/uninstall-service manage the services that keep
+// factoryd service install/remove manage the services that keep
 // `factoryd worker` and `factoryd serve` running in the background, so an
 // operator no longer needs a dedicated terminal for them (see USAGE.md
 // §11): launchd LaunchAgents on macOS (this file), systemd user units on
@@ -47,7 +47,7 @@ type workerPlistConfig struct {
 
 // buildWorkerPlist renders the LaunchAgent plist for cfg, deterministically
 // (same input, same bytes) and with every value XML-escaped. Every value
-// factoryd install-service resolves elsewhere is passed in already
+// factoryd service install resolves elsewhere is passed in already
 // resolved: this function performs no path resolution or I/O of its own.
 func buildWorkerPlist(cfg workerPlistConfig) []byte {
 	stdoutLog := filepath.Join(cfg.DataDir, "logs", "queue-run.out.log")
@@ -172,7 +172,7 @@ func escapeXML(s string) string {
 
 // programArgumentsFirstString extracts the first <string> inside the
 // ProgramArguments <array> of a plist buildWorkerPlist produced --
-// install-service always writes that binary's path first -- so
+// service install always writes that binary's path first -- so
 // doctorCheckWorkerService can tell whether an already-installed
 // service still points at a binary that exists.
 var programArgumentsFirstString = regexp.MustCompile(`(?s)<key>ProgramArguments</key>\s*<array>\s*<string>(.*?)</string>`)
@@ -188,7 +188,7 @@ func programArgumentsBinaryPath(plistBytes []byte) (string, bool) {
 // resolveServiceBinaryPath returns this running factoryd binary's
 // absolute path with symlinks resolved -- what the installed service
 // should actually exec, regardless of how this invocation of
-// `install-service` itself was found on PATH.
+// `service install` itself was found on PATH.
 func resolveServiceBinaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -233,26 +233,47 @@ func resolveServiceDataDir(explicit, configPath string) (string, error) {
 	return cfg.EffectiveDataDir(), nil
 }
 
-// installServiceMain implements `factoryd install-service`.
-// newInstallServiceFlags builds `factoryd install-service`'s FlagSet in
+// serviceSubcommands is what `factoryd service -h` lists after the flags.
+const serviceSubcommands = `  install  keep the worker and the console running under launchd (macOS) or systemd (Linux); takes the flags above
+  remove   remove those services; takes no flag`
+
+// serviceMain implements `factoryd service <install|remove>`.
+func serviceMain(dp *deps, args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "install":
+			return installServiceMain(dp, args[1:])
+		case "remove":
+			return uninstallServiceMain(dp, args[1:])
+		}
+	}
+	return fmt.Errorf("usage: factoryd service <install|remove> [flags]\n%s", serviceSubcommands)
+}
+
+// newInstallServiceFlags builds `factoryd service install`'s FlagSet in
 // isolation from parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
 // executing the command.
 func newInstallServiceFlags() (*flag.FlagSet, *installServiceFlags) {
-	flags := flag.NewFlagSet("install-service", flag.ContinueOnError)
+	flags := flag.NewFlagSet("service", flag.ContinueOnError)
 	f := &installServiceFlags{allowedHosts: &stringListFlag{}}
 	f.configPath = flags.String("config", "", "session config path or profile name the worker reads; default: the active session config")
-	f.dataDir = flags.String("data-dir", "", "data directory the worker should use; default: the resolved session config's data dir (its data_dir, or ~/buildgate/data when it sets none)")
+	f.dataDir = flags.String("data-dir", "", "internal: the data dir to use in place of the session config's data_dir")
 	f.force = flags.Bool("force", false, "overwrite already-installed service definitions (plists on macOS, systemd units on Linux)")
 	f.print = flags.Bool("print", false, "print what would be installed (the worker plist on macOS, both systemd units on Linux) and install nothing")
 	f.noServe = flags.Bool("no-serve", false, "install only the worker service, not the console (serve) beside it")
 	f.requireTokens = flags.Bool("require-tokens", false, "make the console require a token for every read and write, even from this machine; needed when containers can reach it (colima)")
 	flags.Var(f.allowedHosts, "allowed-host", "extra Host header values (host[:port]) the console accepts, such as host.docker.internal:8090 for containers; comma-separated, repeatable")
 	finishFlags(flags)
+	shared := flags.Usage
+	flags.Usage = func() {
+		shared()
+		fmt.Fprintf(flags.Output(), "\nSubcommands:\n%s\n", serviceSubcommands)
+	}
 	return flags, f
 }
 
-// installServiceFlags holds `factoryd install-service`'s parsed flags.
+// installServiceFlags holds `factoryd service install`'s parsed flags.
 type installServiceFlags struct {
 	configPath, dataDir                  *string
 	force, print, noServe, requireTokens *bool
@@ -264,12 +285,15 @@ func installServiceMain(dp *deps, args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("service install: unexpected positional argument %q", flags.Arg(0))
+	}
 	if *f.noServe && (*f.requireTokens || len(f.allowedHosts.values) > 0) {
-		return errors.New("install-service: -require-tokens and -allowed-host set up the console agent, which -no-serve skips")
+		return errors.New("service install: -require-tokens and -allowed-host set up the console agent, which -no-serve skips")
 	}
 	m := dp.host.serviceManager()
 	if m == hostcontrol.NoServiceManager {
-		return fmt.Errorf("install-service: no service manager on %s (launchd on macOS, systemd on Linux); run `factoryd worker` and `factoryd serve` yourself", runtime.GOOS)
+		return fmt.Errorf("service install: no service manager on %s (launchd on macOS, systemd on Linux); run `factoryd worker` and `factoryd serve` yourself", runtime.GOOS)
 	}
 
 	binaryPath, err := resolveServiceBinaryPath()
@@ -292,7 +316,7 @@ func installServiceMain(dp *deps, args []string) error {
 	// to stderr so -print's stdout stays the service definition alone.
 	temporalAddress := dp.temporal.ensure(context.Background(), os.Stderr)
 	if temporalAddress == "" {
-		return errors.New("install-service: the worker needs Temporal and none is reachable; start Docker (or Temporal) and rerun")
+		return errors.New("service install: the worker needs Temporal and none is reachable; start Docker (or Temporal) and rerun")
 	}
 
 	worker := workerPlistConfig{
@@ -439,14 +463,14 @@ func installServeService(dp *deps, cfg servePlistConfig, requireTokens, force bo
 	return nil
 }
 
-// uninstallServiceMain implements `factoryd uninstall-service`.
-// newUninstallServiceFlags builds `factoryd uninstall-service`'s FlagSet
-// (currently no flags) in isolation from parsing, so USAGE.md's doc-vs-flag
-// drift test (TestUSAGEDocFlagsExistOnSubcommand) can enumerate it without
-// executing the command.
+// uninstallServiceMain implements `factoryd service remove`.
+// newUninstallServiceFlags builds its FlagSet, which has no flags.
 func newUninstallServiceFlags() *flag.FlagSet {
-	flags := flag.NewFlagSet("uninstall-service", flag.ContinueOnError)
+	flags := flag.NewFlagSet("service remove", flag.ContinueOnError)
 	finishFlags(flags)
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage: factoryd service remove\n  Stop and remove the worker and console services; the token files stay.\n")
+	}
 	return flags
 }
 
@@ -454,6 +478,9 @@ func uninstallServiceMain(dp *deps, args []string) error {
 	flags := newUninstallServiceFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("service remove: unexpected positional argument %q", flags.Arg(0))
 	}
 	switch dp.host.serviceManager() {
 	case hostcontrol.Systemd:
@@ -471,7 +498,7 @@ func uninstallServiceMain(dp *deps, args []string) error {
 	domain := fmt.Sprintf("gui/%d/%s", os.Getuid(), hostcontrol.WorkerServiceLabel)
 	if out, err := dp.host.launchctl("bootout", domain); err != nil {
 		// Not fatal: the service may already be unloaded (e.g. after a
-		// reboot before install-service's own RunAtLoad ran again), and
+		// reboot before service install's own RunAtLoad ran again), and
 		// the plist should still be removed either way.
 		fmt.Printf("launchctl bootout %s: %v: %s\n", domain, err, strings.TrimSpace(string(out)))
 	}
@@ -486,9 +513,9 @@ func uninstallServiceMain(dp *deps, args []string) error {
 // dev.factoryd.serve LaunchAgent (best-effort, exactly like the
 // worker bootout above -- it may already be unloaded) and remove its
 // plist. The stable start token file itself is left in place, like every
-// other file under the data/config directory uninstall-service doesn't
+// other file under the data/config directory service remove doesn't
 // touch (AGENTS.md: data is runtime state, not something to clean up as
-// code) -- a later `factoryd install-service` reuses it rather than
+// code) -- a later `factoryd service install` reuses it rather than
 // rotating it.
 func uninstallServeService(dp *deps) error {
 	plistPath, err := hostcontrol.ServePlistPath()
@@ -538,7 +565,7 @@ func launchctlBootstrap(dp *deps, plistPath string) error {
 }
 
 // launchctl runs `launchctl <args...>`, returning combined
-// output. a boundary method so install-service/uninstall-service's own tests
+// output. a boundary method so service install/remove's own tests
 // can stub launchd interaction instead of depending on a real, permitted
 // launchd GUI session -- doctorCheckWorkerService takes its launchctl
 // binary as a parameter instead (it only ever reads, via `print`, so a
@@ -548,7 +575,7 @@ func (impl realHost) launchctl(args ...string) ([]byte, error) {
 }
 
 // doctorCheckWorkerService is `factoryd doctor`'s report on the worker
-// service install-service installs, under this machine's service manager
+// service service install installs, under this machine's service manager
 // (path is its definition). Reports "not applicable" with none.
 func doctorCheckWorkerService(ctx context.Context, dp *deps, path string) doctorCheck {
 	switch dp.host.serviceManager() {
@@ -561,17 +588,17 @@ func doctorCheckWorkerService(ctx context.Context, dp *deps, path string) doctor
 }
 
 // doctorCheckLaunchdWorkerService is the launchd report on the
-// install-service LaunchAgent: absent, present-but-not-loaded, or loaded
+// service install LaunchAgent: absent, present-but-not-loaded, or loaded
 // (running or not), each folded into the check's Name since none of
 // those states is itself a failure. launchctlBinary is injectable so
 // tests can stub `launchctl print` with a script on disk. The one failure
 // case: the plist exists and names a binary that no longer exists on
-// disk, which install-service -force fixes.
+// disk, which service install -force fixes.
 func doctorCheckLaunchdWorkerService(ctx context.Context, launchctlBinary, plistPath string) doctorCheck {
 	plistBytes, err := os.ReadFile(plistPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return doctorCheck{Name: "worker launchd service: absent (run `factoryd install-service` to enable)"}
+			return doctorCheck{Name: "worker launchd service: absent (run `factoryd service install` to enable)"}
 		}
 		return doctorCheck{Name: "worker launchd service", Err: fmt.Errorf("read %s: %w", plistPath, err)}
 	}
@@ -579,14 +606,14 @@ func doctorCheckLaunchdWorkerService(ctx context.Context, launchctlBinary, plist
 	if binaryPath, ok := programArgumentsBinaryPath(plistBytes); ok {
 		if _, statErr := os.Stat(binaryPath); statErr != nil {
 			return doctorCheck{Name: "worker launchd service", Err: fmt.Errorf("plist at %s points at %s, which no longer exists", plistPath, binaryPath),
-				Fix: "reinstall with `factoryd install-service -force`"}
+				Fix: "reinstall with `factoryd service install -force`"}
 		}
 	}
 
 	domain := fmt.Sprintf("gui/%d/%s", os.Getuid(), hostcontrol.WorkerServiceLabel)
 	out, err := exec.CommandContext(ctx, launchctlBinary, "print", domain).CombinedOutput()
 	if err != nil {
-		return doctorCheck{Name: "worker launchd service: present, not loaded (run `factoryd install-service -force` to load it)"}
+		return doctorCheck{Name: "worker launchd service: present, not loaded (run `factoryd service install -force` to load it)"}
 	}
 	if bytes.Contains(out, []byte("state = running")) {
 		return doctorCheck{Name: "worker launchd service: present, loaded, running"}

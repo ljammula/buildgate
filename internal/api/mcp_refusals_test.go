@@ -45,23 +45,19 @@ func TestMCPToolErrorsNameNoFlag(t *testing.T) {
 			return dataDir, workspace, "submit_request", submit(workspace)
 		}, []string{"no verify command resolvable", "verify_command", ".factory.yml", "list_workspaces"}},
 		{"data dir inside the workspace", func(t *testing.T) (string, string, string, string) {
-			_, workspace := listed(t, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+			_, workspace := listed(t, "verify_command: \"make ci-verify\"\n")
 			dataDir := filepath.Join(workspace, "data")
 			if err := os.MkdirAll(dataDir, 0o750); err != nil {
 				t.Fatal(err)
 			}
 			return dataDir, workspace, "submit_request", submit(workspace)
 		}, []string{"data dir", "inside"}},
-		{"project-bootstrap preflight", func(t *testing.T) (string, string, string, string) {
-			dataDir, workspace := listed(t, "verify_command: \"make ci-verify\"\n")
-			return dataDir, workspace, "submit_request", submit(workspace)
-		}, []string{"preflight", "preflight_profile: brownfield"}},
 		{"no AGENTS.md", func(t *testing.T) (string, string, string, string) {
 			workspace := filepath.Join(t.TempDir(), "app")
 			if err := os.MkdirAll(workspace, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(workspace, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "factory config"}} {

@@ -66,9 +66,7 @@ another profile:
   them the command to run themselves
 - `factoryd console`
 - `factoryd submit [-verify-command '<cmd>'] -request-file <file> <repo-path>`,
-  after the operator confirms the request text. Add
-  `-preflight-profile brownfield` when step 1 of "Build something" found
-  the repo brownfield. Add `-plan-review`, `-bug`, `-model <role>=<model>` or
+  after the operator confirms the request text. Add `-plan-review`, `-bug`, `-model <role>=<model>` or
   `-harness <role>=<harness>` only when the operator asked for that option;
   `-bug` is for a bug fix: ticket 1 must add a test that fails on the base
   commit and passes on the result, and a plan whose ticket 1 declares
@@ -198,14 +196,8 @@ request sits in a queue nobody drains.
 ## Build something
 
 1. **Preflight.** Run `factoryd doctor -target-repo <repo-path>`. On a
-   failure, relay its printed fix and stop, with one exception: when the
-   only failures are the repo's `submit preflight` and the repo has none of
-   `spec/spec.md`, `spec/contract.md` and `ARCHITECTURE.md`, it is an
-   existing repo that never adopted them. Treat it as brownfield without
-   asking (step 4) and say so in your report. When some of those files
-   exist but fail the check, the repo is part-way through adopting them:
-   relay the failures and stop. A failed `AGENTS.md for <repo>` row is never
-   brownfield and has no override: run `factoryd doctor -target-repo <repo-path> -fix` to draft the file in the planning-role sandbox, show the uncommitted draft to the operator, and leave the commit to them. When the only failures are Docker being unreachable
+   failure, relay its printed fix and stop. A failed `AGENTS.md for <repo>`
+   row has no override: run `factoryd doctor -target-repo <repo-path> -fix` to draft the file in the planning-role sandbox, show the uncommitted draft to the operator, and leave the commit to them. When the only failures are Docker being unreachable
    and you run inside an agent sandbox (Codex's default sandbox blocks the
    Docker socket), the sandbox is the likely cause: ask the operator to run
    the same command in their own terminal and tell you the result.
@@ -213,7 +205,7 @@ request sits in a queue nobody drains.
    is nothing to start first. After submitting, run `factoryd status -n 5`;
    if it still prints `worker not running` (the submit output says why),
    ask the operator to start `factoryd worker` (or
-   `factoryd install-service` for a permanent `worker`: launchd on macOS,
+   `factoryd service install` for a permanent `worker`: launchd on macOS,
    systemd user units on Linux, which start at boot once the operator runs
    `sudo loginctl enable-linger $USER`) and wait for it.
 3. **Draft the request** into a file outside the repo. When the operator
@@ -236,8 +228,7 @@ request sits in a queue nobody drains.
    confirm it. Show the draft and submit only
    after they confirm it.
 4. **Submit.** `factoryd submit -request-file <file> <repo-path>`,
-   adding `-verify-command '<cmd>'` with the confirmed verify command, and
-   `-preflight-profile brownfield` when step 1 found the repo brownfield.
+   adding `-verify-command '<cmd>'` with the confirmed verify command.
    The first line on stdout is the request id, a readable slug of the
    request (e.g. `goal-add-a-floor-operation-…`); a `View:` line may follow
    with its console link. Your report to the operator, now and in the
@@ -245,17 +236,16 @@ request sits in a queue nobody drains.
    - the request id and the console link (`factoryd console`'s link when
      no `View:` line printed);
    - the verify command used and where it came from;
-   - when the repo was treated as brownfield: that fact, and the
-     `.factory.yml` that makes it permanent, to commit at the repo root:
+   - when the repo has no committed `.factory.yml`: the one that makes the
+     verify command permanent, to commit at the repo root:
 
      ```yaml
      verify_command: "<cmd>"
-     preflight_profile: brownfield
      ```
 
-     (`factoryd onboard -root <repo-path> -project <name>
-     -write-factory-yml` writes it, plus placeholder spec docs). Committing
-     it is the operator's; an uncommitted `.factory.yml` is ignored.
+     (`factoryd doctor -fix -workspace <repo-path>` writes a minimal one;
+     that `-fix` is the operator's command). Committing it is the
+     operator's; an uncommitted `.factory.yml` is ignored.
 5. **Follow.** `factoryd watch <id>` returns as soon as the
    request reaches a gate. Report per the table below. Once a ticket is
    `building`, its run runs as a Temporal workflow; give the operator the
@@ -320,8 +310,7 @@ Run `factoryd doctor -target-repo <repo-path>` and relay each
 fix; when the root `AGENTS.md` row fails, offer
 `factoryd doctor -target-repo <repo-path> -fix`, then show the uncommitted
 draft and ask the operator to review and commit it. `-target-repo` also checks what `submit` would refuse (no verify
-command, no `AGENTS.md` committed at the repo root, the project-bootstrap
-preflight) and validates that repo's
+command, no `AGENTS.md` committed at the repo root) and validates that repo's
 `docker-compose.yml` service dependencies exactly as a run would (a service
 outside the allow-list halts every run before it builds). For a first-time setup, point the
 operator at `factoryd quickstart <repo-path> "<task>"` in their own terminal:

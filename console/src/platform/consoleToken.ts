@@ -1,5 +1,5 @@
 // The console token is the credential of the console on the host once
-// `serve` requires a token from every caller (`factoryd install-service
+// `serve` requires a token from every caller (`factoryd service install
 // -require-tokens`). `factoryd console` hands it over in the URL fragment
 // (`#c=<token>`). It is kept in localStorage, like the start token, so every
 // tab and every restart of the browser keeps it: the server accepts it only

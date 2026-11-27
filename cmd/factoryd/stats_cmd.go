@@ -34,7 +34,7 @@ type statsFlags struct {
 func newStatsFlags() statsFlags {
 	flags := flag.NewFlagSet("stats", flag.ContinueOnError)
 	f := statsFlags{set: flags}
-	f.dataDir = flags.String("data-dir", "data", "directory containing durable run records")
+	f.dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	f.project = flags.String("project", "", "show this one project's numbers and their trend; empty prints one row per project")
 	f.since = flags.String("since", "", "count tickets whose first run began on/after this: a number of days such as 30d, or a date such as 2026-09-01; empty counts every ticket")
 	f.bucket = flags.Int("bucket", stats.DefaultBucketDays, "days in one row of the trend table")

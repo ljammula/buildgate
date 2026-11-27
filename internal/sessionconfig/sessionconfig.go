@@ -165,7 +165,7 @@ type Config struct {
 	ComposeServicesConcurrency *int `yaml:"compose_services_concurrency,omitempty"`
 
 	// Everything below was a CLI flag on `factoryd`/`factoryd worker`/
-	// `factoryd daemon`/`factoryd doctor` until the flags-consolidate
+	// `factoryd doctor` until the flags-consolidate
 	// change (2026-09-10): a per-subsystem tuning knob with one sensible
 	// value, registered as a flag because the PR that added it also added
 	// a flag, then re-registered on every entry point that needed it. Each

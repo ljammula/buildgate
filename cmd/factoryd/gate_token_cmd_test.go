@@ -14,8 +14,8 @@ import (
 func runGateToken(t *testing.T, dp *deps, args ...string) string {
 	t.Helper()
 	var out bytes.Buffer
-	if err := gateTokenMain(dp, &out, args); err != nil {
-		t.Fatalf("gateTokenMain %v: %v", args, err)
+	if err := remoteMain(dp, &out, append([]string{"token"}, args...)); err != nil {
+		t.Fatalf("remote token %v: %v", args, err)
 	}
 	return out.String()
 }
@@ -37,7 +37,7 @@ func TestGateTokenMainCreatesAndRotates(t *testing.T) {
 	out := runGateToken(t, dp)
 	first := source()
 	if !first.On || first.Token == "" {
-		t.Fatalf("after `factoryd gate-token`: %+v, want the gate on with a token", first)
+		t.Fatalf("after `factoryd remote token`: %+v, want the gate on with a token", first)
 	}
 	if info, err := os.Lstat(path); err != nil || info.Mode().Perm() != 0o600 || !info.Mode().IsRegular() {
 		t.Fatalf("token file = %v (err %v), want a regular file of mode 0600", info.Mode(), err)
@@ -51,7 +51,7 @@ func TestGateTokenMainCreatesAndRotates(t *testing.T) {
 		t.Errorf("expires in %s, want the default %s", time.Until(file.expires), gateDefaultTTL)
 	}
 	if runGateToken(t, dp); source() != first {
-		t.Error("a second `factoryd gate-token` changed the token")
+		t.Error("a second `factoryd remote token` changed the token")
 	}
 
 	out = runGateToken(t, dp, "-rotate", "-ttl", "30m")
@@ -66,7 +66,7 @@ func TestGateTokenMainCreatesAndRotates(t *testing.T) {
 	// A rotation that cannot write the new token leaves the old one working.
 	dp.forge.(*fakeForge).insideGitWorkTreeFn = func(string) bool { return true }
 	var discard bytes.Buffer
-	if err := gateTokenMain(dp, &discard, []string{"-rotate"}); err == nil {
+	if err := remoteMain(dp, &discard, []string{"token", "-rotate"}); err == nil {
 		t.Error("-rotate with the token directory refused: want an error")
 	}
 	if got := source(); got != second {
@@ -93,7 +93,7 @@ func TestGateTokenMainDisablesAndRemoves(t *testing.T) {
 	if !strings.Contains(out, "No gate token opens") {
 		t.Errorf("-disable output does not say what it closes:\n%s", out)
 	}
-	if err := gateTokenMain(dp, &discard, nil); err == nil || !strings.Contains(err.Error(), "-rotate") {
+	if err := remoteMain(dp, &discard, []string{"token"}); err == nil || !strings.Contains(err.Error(), "-rotate") {
 		t.Errorf("the plain command on a disabled gate = %v, want a refusal naming -rotate", err)
 	}
 	if runGateToken(t, dp, "-rotate"); source().Token == "" {
@@ -110,8 +110,8 @@ func TestGateTokenMainDisablesAndRemoves(t *testing.T) {
 	runGateToken(t, dp, "-remove")
 
 	for _, args := range [][]string{{"-rotate", "-disable"}, {"-disable", "-remove"}, {"-ttl", "10s"}, {"-ttl", "1000h"}, {"extra"}} {
-		if err := gateTokenMain(dp, &discard, args); err == nil {
-			t.Errorf("gate-token %v: want an error", args)
+		if err := remoteMain(dp, &discard, append([]string{"token"}, args...)); err == nil {
+			t.Errorf("remote token %v: want an error", args)
 		}
 	}
 }
@@ -166,7 +166,7 @@ func TestGateFileThatCannotBeUsedLeavesTheGateOnWithNoToken(t *testing.T) {
 			// The plain command replaces only an expired token; it never
 			// writes over a file it cannot trust, or a disabled gate.
 			var out bytes.Buffer
-			err := gateTokenMain(dp, &out, nil)
+			err := remoteMain(dp, &out, []string{"token"})
 			if name == "expired" {
 				if err != nil || gateTokenSource(path)().Token == "" {
 					t.Errorf("the plain command on an expired token: err %v, source %+v; want a new token", err, gateTokenSource(path)())
@@ -203,7 +203,7 @@ func TestGateTokenIsPerProfile(t *testing.T) {
 	}
 	runGateToken(t, dp, "-config", other)
 	if got := gateTokenSource(gateTokenPathFor(other))(); got.Token == "" {
-		t.Error("the profile `factoryd gate-token -config` named has no token")
+		t.Error("the profile `factoryd remote token -config` named has no token")
 	}
 	if got := gateTokenSource(gateTokenPathFor(filepath.Join(cfgDir, "config.yml")))(); got.On {
 		t.Errorf("the default profile's gate was turned on too: %+v", got)
@@ -224,7 +224,7 @@ func writeFileMode(t *testing.T, path, content string, mode os.FileMode) {
 }
 
 // TestGateTokenMessagesNameTheConsoleOnThisMachineOnceAReadTokenIsSet: with
-// the read token file `install-service -require-tokens` writes, the console
+// the read token file `service install -require-tokens` writes, the console
 // on this machine needs the gate token too, and every message says so.
 func TestGateTokenMessagesNameTheConsoleOnThisMachineOnceAReadTokenIsSet(t *testing.T) {
 	dp := newTestDeps(t)

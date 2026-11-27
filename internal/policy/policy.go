@@ -565,25 +565,8 @@ func EvaluateRun(input EvaluateRunInput) EvaluateRunResult {
 	return result
 }
 
-// ProductSpecFrozen checks the first-line specification status. Invoked by
-// `factoryd check-project -spec` (cmd/factoryd/main.go).
-func ProductSpecFrozen(specContent string) (bool, string) {
-	firstLine, _, _ := strings.Cut(specContent, "\n")
-	firstLine = strings.TrimSuffix(firstLine, "\r")
-	if frozenStatusRE.MatchString(firstLine) {
-		return true, ""
-	}
-	if strings.HasPrefix(firstLine, "STATUS:") {
-		if draftStatusRE.MatchString(firstLine) {
-			return false, "spec is still DRAFT, not frozen"
-		}
-		return false, "spec STATUS line is not FROZEN"
-	}
-	return false, "spec has no STATUS line"
-}
-
 // TicketStructure checks the ticket headings and required text. Invoked by
-// `factoryd check-project -ticket -ticket-number` (cmd/factoryd/main.go).
+// the project-bootstrap preflight of a single-ticket run.
 //
 // Headings and required text are located in a fenced-code-stripped view of
 // ticketContent (same length and offsets, fenced lines blanked out) so a
@@ -732,7 +715,7 @@ func hasTopLevelLineWithPrefix(scan, prefix string) bool {
 
 // DefaultArchitectureRequiredSections returns a fresh copy of the
 // section-heading convention of a factory-scaffolded project's
-// ARCHITECTURE.md (the one `factoryd init` writes). An onboarded EXISTING repo's own
+// ARCHITECTURE.md. An onboarded EXISTING repo's own
 // architecture doc, written organically over real development, essentially
 // never already uses these exact three headings in this exact order --
 // found via a real brownfield validation attempt against a real existing
@@ -774,71 +757,6 @@ func ArchitectureStructure(architectureContent string, requiredSections []string
 		requiredSections = DefaultArchitectureRequiredSections()
 	}
 	return requiredMarkdownSections(architectureContent, "architecture", requiredSections)
-}
-
-// AcceptanceSuiteWired checks that every drafted acceptance slice
-// (spec/acceptance/<NNN>/) is actually referenced somewhere in the
-// project's canonical verify command -- not merely present on disk.
-// Staging a slice into the verify command (a Makefile target, typically)
-// is a separate step a ticket's own build must do.
-//
-// Found via real live builds, twice independently: a calculator app repo (the
-// pre-existing history behind commit 00e27bb's neighbors) and a notes app repo
-// ticket 001 (2026-09-06) both shipped real contract deviations (wrong
-// error envelope, wrong timestamp precision, ignored server
-// configuration) that slice 001's own acceptance tests -- already
-// drafted, sitting on disk the whole time -- would have caught
-// immediately, because nothing ever ran them: they were never staged
-// into `make verify`/`make verify-full`.
-//
-// sliceDirs is the caller's own directory listing of spec/acceptance/*
-// (this function does no filesystem I/O, matching every other check in
-// this package); an empty list means no acceptance suite has been
-// drafted yet and always passes -- there is nothing to wire in.
-// verifyCommandContent is the content of whatever file declares the
-// project's canonical verify command (its Makefile, typically); a slice
-// passes once its own directory path appears anywhere in that content,
-// on the theory that a real reference to `spec/acceptance/001` (a
-// `python3 -m unittest discover -s spec/acceptance/001` line, a
-// `cd 'spec/acceptance/001' && go test ./...` line, or an equivalent) is
-// what "staged into verify" concretely means -- this does not attempt to
-// parse or execute the command, only to catch the case where a slice's
-// path is mentioned nowhere at all.
-func AcceptanceSuiteWired(verifyCommandContent string, sliceDirs []string) (bool, []string) {
-	var reasons []string
-	for _, dir := range sliceDirs {
-		if !strings.Contains(verifyCommandContent, dir) {
-			reasons = append(reasons, fmt.Sprintf("acceptance slice %q is drafted but not referenced anywhere in the verify command -- stage it in before this ticket is considered done", dir))
-		}
-	}
-	return len(reasons) == 0, reasons
-}
-
-// ProgramDesignStructure checks the stable shape of the API/program-design
-// artifact produced by the Pi contract step. Numbered Markdown headings are
-// accepted because the local contract artifacts use both "## Conventions"
-// and "## 1. Conventions" forms. At least one endpoint section is required,
-// and the conventions section must precede it. This check does not inspect
-// endpoint prose or accept a model's review as a pass signal.
-func ProgramDesignStructure(programDesignContent string) (bool, []string) {
-	sections := markdownSections(programDesignContent)
-	// The two local contract artifacts use these equivalent names: the
-	// calculator contract calls the section "Conventions", while the budget
-	// contract starts with an "Error envelope" section after its preamble.
-	conventions := sectionOffsetAny(sections, "conventions", "error envelope")
-	endpoint := firstEndpointSection(sections)
-
-	var reasons []string
-	if conventions < 0 {
-		reasons = append(reasons, "program design is missing the Conventions or Error envelope section")
-	}
-	if endpoint < 0 {
-		reasons = append(reasons, "program design is missing an Endpoint section")
-	}
-	if conventions >= 0 && endpoint >= 0 && conventions >= endpoint {
-		reasons = append(reasons, "program design sections are not in the required order: Conventions before Endpoint")
-	}
-	return len(reasons) == 0, reasons
 }
 
 type markdownSection struct {
@@ -973,28 +891,6 @@ func closesMarkdownFence(trimmed string, ch byte, minLen int) bool {
 func sectionOffset(sections []markdownSection, want string) int {
 	for _, section := range sections {
 		if strings.EqualFold(section.name, want) {
-			return section.offset
-		}
-	}
-	return -1
-}
-
-func sectionOffsetAny(sections []markdownSection, wants ...string) int {
-	for _, want := range wants {
-		if offset := sectionOffset(sections, want); offset >= 0 {
-			return offset
-		}
-	}
-	return -1
-}
-
-func firstEndpointSection(sections []markdownSection) int {
-	for _, section := range sections {
-		name := strings.ToLower(section.name)
-		if name == "endpoint" || name == "endpoints" || strings.HasPrefix(name, "endpoint:") || strings.HasPrefix(name, "endpoint ") {
-			return section.offset
-		}
-		if httpEndpointHeadingRE.MatchString(section.name) {
 			return section.offset
 		}
 	}

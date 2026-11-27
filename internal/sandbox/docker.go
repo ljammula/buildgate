@@ -1557,7 +1557,7 @@ func reclaimContainerWorkDir(dockerBinary, name string) {
 // staleness-debounce wait already respects its caller's ctx (see that
 // select's own comment), but this — the actual removal step right after —
 // used to always build its own 10-second timeout from Background()
-// regardless, so a caller cancellation (daemonMain's own signalCtx on
+// regardless, so a caller cancellation (workerMain's own signalCtx on
 // SIGTERM) still could not interrupt an in-flight removal, and multiple
 // unresponsive removals in one scan could each add their own full 10s to
 // shutdown. ctx still bounds this to at most 10 seconds even when it
@@ -1776,7 +1776,7 @@ func reconcileOrphans(ctx context.Context, after debounceAfter, dockerBinary, da
 			// debounce below waited a full ownerHeartbeatInterval
 			// separately for every stale candidate in this scan, so N
 			// abandoned runs at startup could each add their own wait,
-			// delaying daemonMain's caller from ever accepting real work
+			// delaying workerMain's caller from ever accepting real work
 			// by N * ownerHeartbeatInterval. Waiting once for the whole
 			// batch (below, after this loop) gives every candidate the
 			// same one interval of grace instead — no less protective

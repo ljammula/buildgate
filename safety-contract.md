@@ -45,9 +45,9 @@ The trust boundaries are:
 | CI checks | The pull request's base branch's required checks (its branch protection, as the forge reports it) (GitHub's per-check `isRequired`) and the conclusion GitHub records for each check run or commit status on the PR head | The code a check runs (the build's), every line of a check's log, the CI definition files, and every check that is not required | Only a required check that completed with a failure on the PR head the factory pushed starts a CI round; a pending check starts nothing and is named as the reason the request waits; an optional check's failure is a note; when the required set cannot be read, every completed failure counts, at most one round per check. A check's log reaches a build only as SC-018 values. The CI definition paths are built-in protected paths. See the paragraph on CI checks after SC-018. |
 | Challenger | The factory's held copy of each challenge file (copied out once, SHA-256 pinned, mounted read-only), the gate sandbox, and the factory's run of it (a reproduction runner's report, else the repository's own `verify_command`) | The challenger job and every file it writes; the build whose result it challenges | The challenger reads the whole result commit in a scratch worktree that is discarded afterwards, never the run's worktree or branch; that it tests the change's public surface is an instruction in its prompt, not a containment. It is given no build session, handoff, notes or review finding. Its tests count only by the factory's own run of them, twice when red; they refuse nothing and start at most one round per ticket (SC-022). |
 | Console loopback writes | `factoryd serve`'s bind address and the operator's own local processes | Any page loaded in the operator's browser, and any caller that reaches `serve` through a reverse proxy | On loopback with no override token, request-write routes accept same-origin JSON without a token from a request no proxy passed on; `POST /runs/{id}/override` and start-class routes always need a token. See [Console loopback writes](#console-loopback-writes) below. |
-| Gate token | The operator's `<config name>.gate-token` file (written by `factoryd gate-token`, mode 0600, beside the session config, one per profile, with an expiry) | A console that is not on the machine, and everything on the network path to it | The token opens the reads and the request writes and nothing else; while its file exists, a request that is not local needs it to read. See [Gate token](#gate-token) below. |
+| Gate token | The operator's `<config name>.gate-token` file (written by `factoryd remote token`, mode 0600, beside the session config, one per profile, with an expiry) | A console that is not on the machine, and everything on the network path to it | The token opens the reads and the request writes and nothing else; while its file exists, a request that is not local needs it to read. See [Gate token](#gate-token) below. |
 | Console-originated request creation | The operator's `workspaces:` session-config list and the factory's data directory | `POST /requests` | Takes the request-write gate, never `authorizeStart`; `workspace` is never accepted as an arbitrary host path. See [Console-originated request creation](#console-originated-request-creation) below. |
-| MCP endpoint | The operator's `<config name>.mcp-token` file (created by `factoryd mcp`, mode 0600, beside the session config, one per profile) | `POST /mcp` and the model driving the MCP client | Off until the token file exists; every call needs the token, with no loopback relaxation. Its tools are reads and `POST /requests` only: no tool approves, rejects, retries, resumes, cancels, edits or overrides. See [MCP endpoint](#mcp-endpoint) below. |
+| MCP endpoint | The operator's `<config name>.mcp-token` file (created by `factoryd remote mcp`, mode 0600, beside the session config, one per profile) | `POST /mcp` and the model driving the MCP client | Off until the token file exists; every call needs the token, with no loopback relaxation. Its tools are reads and `POST /requests` only: no tool approves, rejects, retries, resumes, cancels, edits or overrides. See [MCP endpoint](#mcp-endpoint) below. |
 | Untrusted worker output | `internal/sanitize` | Agent-authored log/report text reaching triage, halt reasons, notifications, `status`, or the console | Text is stripped (ANSI/OSC, control and Unicode format characters, invalid UTF-8) and secret-redacted (`sanitize.Text`/`sanitize.Line`; Python mirror `build_app.redact`/`single_line`) before display, and shown as a quoted log excerpt, never as a factory verdict or claimed provenance — the log-writing process shares the worker's container and uid, so the factory cannot attest who wrote a given line. |
 | Model-listing credentials | Factory route-validation code, reused | `doctor -list-models`, `doctorCheckCopilotModelListed`, the Copilot token-exchange client | These host-side calls send only what a launch's route would admit: validated via `sandbox.RoutePolicy.ValidateUpstreamScheme` + `sandbox.CredentialSafeForUpstream` (the same check `RouteSpec.Validate` applies), redirects refused (`meter.NoRedirectCheckRedirect`), no credential over plaintext and none when `routes.<name>.allow_no_credential` is set. |
 | Model routes | Session-config `routes:` and the host-side resolver in the process launching that route's worker | Request model choice; Temporal Workflow input | A route's credential is resolved host-side only for that route's own launch, and a static route reads its key only from the file its `credential_file` names, at each launch: a regular file owned by the operator with mode 0600 or stricter (a symlink, another owner or a group or other permission bit is refused), never an environment variable, and there is no default, so a key for one provider never reaches another route's upstream; the session config names the file, never the key, and the key leaves the launching process only in the route credential pushed to the OpenShell gateway (`internal/openshell`), never in argv, a log, the sandbox request or a file the sandbox mounts; Workflow input names a route, never a credential source, and the Worker refuses any policy that differs from its own route and role model in any field except a tightened ceiling, then resolves that route's credential itself. The meter policy a sandbox is created with is derived from that same checked policy (`RoutePolicy.MeterConfig`). The route's network policy admits the harnesses' model executables (`harness.ModelBinaries`, the union across harnesses), not one harness's. |
@@ -132,7 +132,7 @@ answers, retry, resume, cancel, create;
   is the loopback address is refused on every route.
 - An allowed host is an `-allowed-host` value, or the one host in
   `<config name>.remote-console` beside the session config, which
-  `factoryd remote-console` writes and `serve` reads on each request whose
+  `factoryd remote on` writes and `serve` reads on each request whose
   `Host` is not otherwise accepted (`WithAllowedHostSource`). The file gets
   the token files' checks (not a symlink, a regular file, this user's, mode
   0600) and must hold exactly its four well-formed lines, the host a
@@ -152,11 +152,11 @@ answers, retry, resume, cancel, create;
 - `serve` takes the override and read tokens from
   `FACTORYD_API_OVERRIDE_TOKEN` and `FACTORYD_API_READ_TOKEN`, else from
   `serve-override-token` and `serve-read-token` beside the session config
-  (`tokensFromFiles`), which `factoryd install-service -require-tokens`
+  (`tokensFromFiles`), which `factoryd service install -require-tokens`
   creates (mode 0600, exclusive create, never inside a git work tree) and
   never writes into the plist. Such a file that exists and fails the token
   files' checks stops `serve` from starting: the protection is never
-  dropped silently. `install-service -allowed-host` puts `-allowed-host`
+  dropped silently. `service install -allowed-host` puts `-allowed-host`
   into the serve plist's arguments.
 - `-require-tokens` also creates `serve-console-token` the same way, which
   `serve` reads with them: the credential of the console on this machine,
@@ -189,7 +189,7 @@ send-back makes a full redraft.
 An approval is bound to text instead, by the hashes of the files it
 approves: a spec or plan, when the caller sends them.
 
-Start-class routes (`POST /runs`, daemon lifecycle, and the `GET` release
+Start-class routes (`POST /runs` and the `GET` release
 and stats routes; `authorizeStart`) get no relaxation. A missing or wrong
 bearer token is always a 403. The token is handled as follows:
 
@@ -205,18 +205,18 @@ bearer token is always a 403. The token is handled as follows:
   it in origin-scoped `localStorage`, then strips it from the address bar
   with `history.replaceState`. The token exists in only three places:
   `serve`'s own stdout, that fragment, and that browser's storage.
-- **Stable token for a supervised `serve`.** `factoryd install-service`
+- **Stable token for a supervised `serve`.** `factoryd service install`
   creates `<session config dir>/serve-start-token` once, so a restart does
   not invalidate stored tokens (`cmd/factoryd/serve_start_token_file.go`;
   the file checks are `cmd/factoryd/token_file.go`).
   - The file is mode `0600`. It is never written into the LaunchAgent plist,
     and never passed through a child's env or argv: `quickstart`'s `serve`
     child re-derives the path from `-config` and reads the file itself.
-  - `serve`, `factoryd console`, and `install-service` all resolve the path
+  - `serve`, `factoryd console`, and `service install` all resolve the path
     through the one shared `resolveEffectiveConfigPath`/
     `serveStableStartTokenPathFor` pair.
   - `factoryd console` only reads the file, never creates it.
-    `uninstall-service` leaves it in place.
+    `service remove` leaves it in place.
 - **Hardening of the stable token:**
   - The token is appended to a printed or opened link only when
     `consoleBaseIsOwnLoopbackServe` confirms the link points at this
@@ -298,7 +298,7 @@ from every caller (`internal/api`'s `WithConsoleToken`, `cmd/factoryd`'s
 |---|---|
 | What it opens | What the gate token opens, the reads and the request writes (`gateBearer`, `consoleBearer`), and only for a local request (`Server.local`): a copy of it opens nothing through a proxy |
 | What it never opens | `POST /runs/{id}/override`, the start-class routes and `POST /mcp`, as for the gate token |
-| The file | `serve-console-token` beside the session config, written by `install-service -require-tokens` with the other token files (mode 0600, exclusive create, never inside a git work tree, kept across a reinstall, never in the plist). `serve` reads it at start; a file that fails the token files' checks stops `serve` from starting. It has no environment variable and does not expire |
+| The file | `serve-console-token` beside the session config, written by `service install -require-tokens` with the other token files (mode 0600, exclusive create, never inside a git work tree, kept across a reinstall, never in the plist). `serve` reads it at start; a file that fails the token files' checks stops `serve` from starting. It has no environment variable and does not expire |
 | One value, one class | A console token equal to the override, start, read or MCP token opens nothing, and a gate token equal to it is not usable |
 | Who is recorded | A write it authorized is the operator at this machine: recorded under the name the console sent, with no suffix, as a local write without a token is |
 | In the browser | `factoryd console` and `quickstart` append `&c=<token>` to the start-token link they open, only for this data dir's own loopback `serve` (`consoleLinkTokens`). The console removes it from the address bar and stores it only once `/console-config.json` answers `accepted`, in `localStorage`, like the start token, so every tab keeps it. A gate token held by the tab is used first; a stored console token the server refuses is forgotten. **Residuals:** the `#t=…&c=…` link can remain in the browser's history; script in the console's page could read `localStorage`. Its holder must also be on the machine, and it has no override power. A colima container is local too (above): like the override and read token files, this one is out of a container's reach only while the session config is outside every directory the container VM mounts |
@@ -313,7 +313,7 @@ What tells the operator a request waits on them (`internal/requestdriver`'s
 |---|---|
 | What one can do | Open the request's own page. No notification, on any channel, approves, rejects or otherwise passes a gate: a gate is passed on the page that shows the text, under [Console loopback writes](#console-loopback-writes) or the [gate token](#gate-token) |
 | What a link carries | The address of a console and `/requests/<id>` or `/runs/<id>`: never the start, gate, override, read or MCP token, in a path, query or fragment. The address is the one the data dir's own `serve` recorded, or `FACTORYD_CONSOLE_URL` (for `submit`'s printed link, `-console-base-url`), each used only when it is an http or https address with no user information, query or fragment and treated as unset otherwise (`consolelink.BaseURL`); a path prefix the operator sets there is kept as given. A link handed to another program (`open`, a Slack or Discord webhook) is that and nothing else; a browser notification carries no link at all, only text |
-| The link for another machine | `https://<host>` as `factoryd remote-console` recorded it in the data dir (`consolelink.RemoteBaseURL`), used only while the `<config name>.remote-console` record it names exists, and only when it parses as an https URL of a host with no user, path, query or fragment. The page it opens asks for the gate token; the link does not supply it |
+| The link for another machine | `https://<host>` as `factoryd remote on` recorded it in the data dir (`consolelink.RemoteBaseURL`), used only while the `<config name>.remote-console` record it names exists, and only when it parses as an https URL of a host with no user, path, query or fragment. The page it opens asks for the gate token; the link does not supply it |
 | One notification for one event | A run that is a request's ticket sends nothing to the operator itself (`dispatchRunNotification`); its halt, quarantine or acceptance is on its own record and `notifications.log`, and the request's notification follows from the same outcome: `HaltRequest`, `quarantineRequestWithCheck`, `EnterResumeReview`, or the PR-review poll (`notifyPullRequestWaiting`: ready to merge, marked ready and not ready to merge, or still not ready to merge ten minutes after the head was first checked; a pull request stacked on one that has not merged waits for that one's notification). A quarantine the factory follows with a corrective round of its own notifies nobody: it does not wait for a person. A run with no request, and a run halted through `POST /runs/{id}/override`, send their own (SC-013). **Residual:** a pull request whose review state cannot be read from GitHub is never checked, so it notifies nobody; the worker logs each failed read |
 | Where a webhook comes from | A Slack or Discord webhook URL is a credential: it is read, at each notification, from the file named by `slack_webhook_urls_file` or `discord_webhook_urls_file` in the session config the notifying worker, console or run loaded (its `-config`, else the active profile), under the same rule as a route's `credential_file` (regular, owned by the operator, mode 0600 or stricter), and never from the environment or the config itself; a key or URL with a control character is refused; a file that cannot be used sends nothing to that channel and is named, in a log line at the worker's start and at each notification and in a failing `doctor` row, never with its content |
 | The host's banner standing down | The desktop banner for a request is not shown while a console tab on the host raises the notification itself. The tab says so with `GET /requests/events?notifier=1`, and `serve` records it (a file in the data dir, fresh for 20 seconds after the stream's last poll) only for a request that passes the loopback write's local and same-origin checks (`loopbackSameOriginWrite`): a page of another origin, a caller with neither `Origin` nor `Sec-Fetch-Site`, and a caller through a proxy record nothing. The log line, Slack and Discord are never held back. **Residual:** a tab whose browser shows no notifications (Focus, the site muted in system settings) still holds the banner back; the log line and the console's own "Needs you" column remain |
@@ -337,10 +337,10 @@ follow it, and no means to pass a gate.
   (`config.mcp-token` for `config.yml`). The config's name is in the file
   name, so turning the endpoint on for one profile's `serve` leaves
   another's off. `serve` reads the file on every call (`mcpTokenSource`),
-  so `factoryd mcp -rotate` and `-disable` take effect at once; a rotation
+  so `factoryd remote mcp -rotate` and `-remove` take effect at once; a rotation
   that cannot write the new token leaves the old one working. A file that
   is a symlink, not owned by the operator or readable beyond its owner
-  counts as absent. `factoryd mcp` prints the token only beside the
+  counts as absent. `factoryd remote mcp` prints the token only beside the
   address this data directory's own `serve` recorded.
 - **Token on every call.** The bearer token is compared in constant time.
   `loopbackSameOriginWrite` is never consulted, and the start, read and
@@ -1348,7 +1348,7 @@ differ in either direction, and `run.CanTransition` is what
 | created `ready` | `cmd/factoryd/run_ticket.go` (every run that goes on toward its build) |
 | created `halted` (confirmed) | `cmd/factoryd/run_ticket.go` (a `-ticket-file` scope that differs from `-spec`'s, a missing `Allowed-Files:` under `-require-declared-scope`) |
 | `ready -> slice_running` | `cmd/factoryd/run_ticket.go`, before the build is dispatched |
-| `ready -> halted` | `cmd/factoryd/run_ticket.go` (a check before dispatch, the `slice_running` save failing); the reclaim of a run whose owner is gone (`cmd/factoryd/reclaim.go`, `reclaim_dead_owner.go`) |
+| `ready -> halted` | `cmd/factoryd/run_ticket.go` (a check before dispatch, the `slice_running` save failing); the reclaim of a run whose owner is gone (`cmd/factoryd/reclaim.go`, `reclaim_dead_owner.go`), never of a `-repository` run, which the repository reclaim (`repository_reclaim.go`) finishes on its owner's result |
 | `slice_running -> accepted`, `-> quarantined` | `cmd/factoryd/apply_run_result.go` (`r.State = result.State`: the policy evaluation's verdict, a setup or repository gate turning an accepted result into `quarantined`) |
 | `slice_running -> halted` | `cmd/factoryd/run_ticket.go`, `run_temporal.go`, `run_repository_owner.go` (a lost step, a refused launch, a deadline, a give-up path); the reclaim |
 | `ready`, `slice_running`, unconfirmed `halted` `-> quarantined` | `internal/sandbox.ReconcileOrphans`: owner and container are gone |

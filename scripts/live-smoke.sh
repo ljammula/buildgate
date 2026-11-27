@@ -241,15 +241,8 @@ EOF_FIXTURE
 	"$REPO_ROOT/scripts/fixture-repo.sh" "$source_repo" "$clone_dir"
 
 	echo "=== $repo_name: running ticket $ticket_id ==="
-	# -preflight-profile brownfield: found on this script's own first real
-	# run, 2026-09-17 -- the default (strict) preflight
-	# requires spec/spec.md, spec/contract.md, or ARCHITECTURE.md, none of
-	# which these bare fixture repos have (and never will, being fresh
-	# disposable clones each run); brownfield skips that requirement
-	# without disabling the rest of the preflight the way -skip-project-check
-	# would.
 	set -- -ticket "$ticket_id" -spec "$spec_file" -workspace "$clone_dir" \
-		-data-dir "$data_dir" -preflight-profile brownfield -open-pull-request=false \
+		-data-dir "$data_dir" -open-pull-request=false \
 		-code-review-policy "$LIVE_SMOKE_CODE_REVIEW_POLICY"
 	if [ -n "${LIVE_SMOKE_TEMPORAL:-}" ]; then
 		set -- "$@" -temporal-address "$LIVE_SMOKE_TEMPORAL"

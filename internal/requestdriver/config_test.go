@@ -98,22 +98,6 @@ func TestBuildTicketRunArgsForwardsNoRouteFlag(t *testing.T) {
 	}
 }
 
-func TestBuildTicketRunArgsIncludesPreflightProfileOnlyWhenSet(t *testing.T) {
-	withProfile := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", PreflightProfile: "brownfield"}
-	args := requestdriver.BuildTicketRunArgs("data", withProfile, requestdriver.WorkerConfig{OpenPullRequest: true})
-	if !requestdrivertest.ContainsArg(args, "-preflight-profile", "brownfield") {
-		t.Errorf("args = %v, want -preflight-profile brownfield", args)
-	}
-
-	withoutProfile := &requestdriver.QueueEntry{ID: "t2", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify"}
-	args = requestdriver.BuildTicketRunArgs("data", withoutProfile, requestdriver.WorkerConfig{OpenPullRequest: true})
-	for _, a := range args {
-		if a == "-preflight-profile" {
-			t.Errorf("args = %v, want no -preflight-profile flag", args)
-		}
-	}
-}
-
 func TestBuildTicketRunArgsIncludesFullSuiteCommandOnlyWhenSet(t *testing.T) {
 	with := &requestdriver.QueueEntry{ID: "t1", Workspace: "/repo", SpecPath: "/repo/spec.md", VerifyCommand: "make verify", FullSuiteCommand: "go test ./..."}
 	if args := requestdriver.BuildTicketRunArgs("data", with, requestdriver.WorkerConfig{}); !requestdrivertest.ContainsArg(args, "-full-suite-command", "go test ./...") {

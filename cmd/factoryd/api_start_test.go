@@ -455,6 +455,7 @@ func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testin
 	settings := fakeSandboxSettings(t)
 	// not parallel-safe: newFixtureRepoWithoutBootstrapScaffold calls t.Setenv internally
 	workspace := newFixtureRepoWithoutBootstrapScaffold(t)
+	ticket := commitMalformedTicket(t, workspace)
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte("# fixture spec\nTests-Required: no -- API-start fixture doesn't exercise tests_red_on_base\n"), 0o644); err != nil {
 		t.Fatalf("write spec: %v", err)
@@ -470,7 +471,7 @@ func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testin
 	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress: sharedTemporalAddress(t),
 		ID:              "api-project-bootstrap-failure-1",
-		Ticket:          "api-ticket",
+		Ticket:          ticket,
 		Workspace:       workspace,
 		Spec:            spec,
 		Timeout:         "30s",
@@ -482,11 +483,10 @@ func TestAPIStartStarterReportsProjectBootstrapFailureAsInvalidRequest(t *testin
 		BuildAppInterpreter: "/bin/sh",
 		BuildAppScript:      scriptPath,
 		// SkipProjectCheck deliberately left false: this is the exact
-		// omission a real console-started run against a not-yet-onboarded
-		// project makes.
+		// omission a real console-started run makes.
 	})
 	if err == nil {
-		t.Fatal("start against a workspace missing the bootstrap scaffold succeeded, want a project-bootstrap preflight failure")
+		t.Fatal("start against a workspace with a malformed ticket succeeded, want a project-bootstrap preflight failure")
 	}
 	if !errors.Is(err, api.ErrInvalidStartRequest) {
 		t.Errorf("err = %v, want it to wrap api.ErrInvalidStartRequest so the API caller sees 400 with the real message, not a generic 500", err)
@@ -518,9 +518,16 @@ func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (via testfixture.NewGitRepo) calls
 	// t.Setenv, which panics if called after t.Parallel().
 	workspace := newFixtureRepo(t)
-	// Deliberately no spec/tickets/ directory: newFixtureRepo's own strict
-	// scaffold (spec.md/contract.md/ARCHITECTURE.md) is real, so only
-	// ticket_structure can fail here.
+	// A repo-native ticket for -ticket that is not ticket-shaped: checked as
+	// a native ticket it fails ticket_structure, where -request-ticket would
+	// have checked the well-formed -spec instead.
+	nativeTicket := filepath.Join(filepath.Dir(workspace), "spec", "tickets", "001-api-ticket.md")
+	if err := os.MkdirAll(filepath.Dir(nativeTicket), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nativeTicket, []byte("# not a ticket\n"), 0o644); err != nil {
+		t.Fatalf("write native ticket: %v", err)
+	}
 	spec := filepath.Join(t.TempDir(), "spec.md")
 	if err := os.WriteFile(spec, []byte(wellFormedRequestTicketspec), 0o644); err != nil {
 		t.Fatalf("write request ticketspec: %v", err)
@@ -535,7 +542,7 @@ func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 	_, err = apiStartStarter(dp, dataDir, &inFlight, release.MergePolicy{}, sandboxResourceLimits{memory: "4g", cpus: "2", tmpfsSize: "256m"}, apiSandboxPolicy{settings: settings})(context.Background(), api.StartRequest{
 		TemporalAddress:     sharedTemporalAddress(t),
 		ID:                  "api-request-ticket-marker-1",
-		Ticket:              "api-ticket",
+		Ticket:              "001-api-ticket",
 		Workspace:           workspace,
 		Spec:                spec,
 		Timeout:             "30s",
@@ -547,7 +554,7 @@ func TestAPIStartStarterNeverSetsRequestTicketFlag(t *testing.T) {
 		// this test proves.
 	})
 	if err == nil {
-		t.Fatal("start against a repo with no repo-native ticket succeeded despite a well-formed -spec, want the native-ticket resolution to still fail closed (POST /runs cannot reach -request-ticket)")
+		t.Fatal("start against a repo with a malformed repo-native ticket succeeded despite a well-formed -spec, want the native ticket checked and failing closed (POST /runs cannot reach -request-ticket)")
 	}
 	if !errors.Is(err, api.ErrInvalidStartRequest) {
 		t.Errorf("err = %v, want it to wrap api.ErrInvalidStartRequest", err)
@@ -632,7 +639,7 @@ func TestAPIStartStarterPlumbsSandboxImageFlag(t *testing.T) {
 // regression test for a real GitHub Codex App review finding on this same
 // PR (P1): an API-started run never received serveMain's trusted,
 // operator-configured resource ceiling at all -- only the
-// separately-supervised `factoryd daemon` did -- so it silently fell back
+// daemon children did -- so it silently fell back
 // to runMainWithReady's own flag defaults (4g/2/512/256m) regardless of
 // what an operator configured on `serve`, e.g. an operator configuring a 1g
 // ceiling would still see ordinary API runs consume up to 4g.

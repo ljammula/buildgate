@@ -76,7 +76,7 @@ func TestBuildServicePlistDeterministicAndEscapesXML(t *testing.T) {
 // TestBuildServicePlistValidatesWithPlutil is the "Done when" requirement
 // that generated plists pass `plutil -lint`; skipped when plutil is not
 // on PATH (non-macOS).
-// stubEnsureTemporal makes install-service's Temporal resolution answer addr
+// stubEnsureTemporal makes service install's Temporal resolution answer addr
 // ("" means none available) for the test.
 func stubEnsureTemporal(dp *deps, t *testing.T, addr string) {
 	t.Helper()
@@ -292,7 +292,7 @@ func TestDoctorCheckLaunchdWorkerServiceNamesEachState(t *testing.T) {
 			t.Fatal("stale binary: want a failing check, got nil error")
 		}
 		if check.Fix == "" {
-			t.Error("stale binary: want a Fix naming install-service -force")
+			t.Error("stale binary: want a Fix naming service install -force")
 		}
 	})
 }
@@ -357,7 +357,7 @@ func TestBuildServePlistValidatesWithPlutil(t *testing.T) {
 }
 
 // TestInstallServiceAlsoInstallsServeByDefault proves a plain
-// `factoryd install-service` (no -no-serve) installs and bootstraps BOTH
+// `factoryd service install` (no -no-serve) installs and bootstraps BOTH
 // LaunchAgents, generates a stable serve-start-token file (0600) next to
 // the session config, and that a second install reuses rather than
 // rotates that token -- the whole point being that a service restart
@@ -526,8 +526,20 @@ func TestInstallServiceRefusesServeFlagsWithNoServe(t *testing.T) {
 	}
 }
 
+// TestServiceRefusesStrayPositionalArguments proves `service install` and
+// `service remove` take no positional argument: `service install x -print`
+// stops flag parsing at x, so -print would otherwise be silently ignored.
+func TestServiceRefusesStrayPositionalArguments(t *testing.T) {
+	for _, args := range [][]string{{"install", "x", "-print"}, {"install", "x"}, {"remove", "x"}} {
+		err := serviceMain(launchdTestDeps(t), args)
+		if err == nil || !strings.Contains(err.Error(), "unexpected positional argument") {
+			t.Errorf("service %v = %v, want a positional-argument refusal", args, err)
+		}
+	}
+}
+
 // TestUninstallServiceRemovesServeAgentToo proves `factoryd
-// uninstall-service` bootouts and removes BOTH LaunchAgents, not only
+// service remove` bootouts and removes BOTH LaunchAgents, not only
 // worker's.
 func TestUninstallServiceRemovesServeAgentToo(t *testing.T) {
 	dp := launchdTestDeps(t)
@@ -651,7 +663,7 @@ func TestBuildServicePlistIncludesUmask(t *testing.T) {
 
 // TestServicesRunInTheirDataDir proves the worker and serve services run in
 // their data dir, under launchd and systemd alike, never in the directory
-// install-service ran in.
+// service install ran in.
 func TestServicesRunInTheirDataDir(t *testing.T) {
 	worker := workerPlistConfig{BinaryPath: "/usr/local/bin/factoryd", ConfigPath: "/Users/op/.config/factoryd/config.yml", DataDir: "/Users/op/buildgate/data", HomeDir: "/Users/op"}
 	serve := servePlistConfig{BinaryPath: worker.BinaryPath, ConfigPath: worker.ConfigPath, DataDir: worker.DataDir, HomeDir: worker.HomeDir}
@@ -669,7 +681,7 @@ func TestServicesRunInTheirDataDir(t *testing.T) {
 
 // TestInstallServeServicePassesResolvedConfigPathToPlist is the
 // end-to-end regression test for the -config-flag adversarial-review
-// finding above: a plain `factoryd install-service` must produce a
+// finding above: a plain `factoryd service install` must produce a
 // serve plist whose own -config argument is the SAME path
 // installServeService resolved for the stable
 // token file -- so a supervised serve reading -config on its own startup

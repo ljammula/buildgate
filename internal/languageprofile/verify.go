@@ -35,8 +35,7 @@ func packageScript(root, name string) bool {
 	return ok
 }
 
-// DetectVerifyCommand is the one verify command `init`, `onboard`,
-// `quickstart` and `doctor -fix` write into a fresh .factory.yml as its single
+// DetectVerifyCommand is the one verify command `quickstart` and `doctor -fix` write into a fresh .factory.yml as its single
 // verify_command (which then also serves as the full suite), and where it came
 // from: a Makefile's verify: target, then its test: target, the most
 // deliberate signals a repository gives; then the command that runs the tests

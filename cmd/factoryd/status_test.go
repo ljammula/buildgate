@@ -487,7 +487,6 @@ func TestStatusMainShowsRequestsAboveRuns(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make ci-verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 

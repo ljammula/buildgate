@@ -194,7 +194,7 @@ func TestDoctorReportsAWorkerThatCannotUseTheGitHubLogin(t *testing.T) {
 	if stale := doctorWorkerGitHubLoginChecks(dp, dir, time.Now()); len(stale) != 0 {
 		t.Errorf("a heartbeat of a pid that is not the running worker: %+v, want no row", stale)
 	}
-	for _, want := range []string{"ssh session", "install-service", "factoryd retry"} {
+	for _, want := range []string{"ssh session", "service install", "factoryd retry"} {
 		if !strings.Contains(checks[0].Fix, want) {
 			t.Errorf("Fix = %q, want it to mention %q", checks[0].Fix, want)
 		}

@@ -51,7 +51,7 @@ const (
 )
 
 // WithMCPToken enables POST /mcp. source is asked on every call, so the
-// operator can create, rotate or remove the token (`factoryd mcp`) under a
+// operator can create, rotate or remove the token (`factoryd remote mcp`) under a
 // running `serve`; while it returns "" the endpoint answers 404.
 func WithMCPToken(source func() string) Option {
 	return func(s *Server) {
@@ -238,13 +238,13 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 		token = s.mcpToken()
 	}
 	if token == "" {
-		writeError(w, http.StatusNotFound, "the MCP endpoint is not enabled: run `factoryd mcp`")
+		writeError(w, http.StatusNotFound, "the MCP endpoint is not enabled: run `factoryd remote mcp`")
 		return
 	}
 	if !s.authorize(r, token) {
 		// No WWW-Authenticate challenge: a client would answer one by
 		// looking for OAuth metadata, which this server does not have.
-		writeError(w, http.StatusUnauthorized, "the MCP endpoint needs its bearer token (`factoryd mcp` prints it)")
+		writeError(w, http.StatusUnauthorized, "the MCP endpoint needs its bearer token (`factoryd remote mcp` prints it)")
 		return
 	}
 	s.mcpHandler.ServeHTTP(w, s.withMCPConsoleBase(r))

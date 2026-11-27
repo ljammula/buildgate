@@ -38,8 +38,8 @@ func TestResolveQuickstartRepoRootRefusesNonGitPath(t *testing.T) {
 	if !strings.Contains(err.Error(), "not inside a git repository") {
 		t.Errorf("error = %q, want a message pointing at the non-git-repo refusal", err.Error())
 	}
-	if !strings.Contains(err.Error(), "factoryd init") {
-		t.Errorf("error = %q, want it to point at init as the from-scratch path", err.Error())
+	if !strings.Contains(err.Error(), "git init") {
+		t.Errorf("error = %q, want it to point at git init as the from-scratch path", err.Error())
 	}
 }
 
@@ -241,13 +241,12 @@ func TestQuickstartSubmitAndWatchResolvesTheDesignGuideFromTheSessionSettings(t 
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
-preflight_profile: brownfield
 design_guide: go-service
 `)
 	dataDir := t.TempDir()
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, designGuideSettings(t), workspace, dataDir, "Reading-time endpoint", "", "", "", false, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
+	err := quickstartSubmitAndWatch(dp, &buf, designGuideSettings(t), workspace, dataDir, qsTestConfig, "Reading-time endpoint", "", "", "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
@@ -267,7 +266,6 @@ func TestQuickstartSubmitAndWatchRequestFileReachesRequest(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 	reqFile := filepath.Join(t.TempDir(), "req.txt")
@@ -276,7 +274,7 @@ preflight_profile: brownfield
 	}
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "", reqFile, "", false, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
+	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, qsTestConfig, "", "", reqFile, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
@@ -307,7 +305,6 @@ func TestQuickstartSubmitAndWatchIssueReachesRequest(t *testing.T) {
 	dp := newTestDeps(t)
 	workspace := t.TempDir()
 	writeTestSubmitRepo(t, workspace, `verify_command: "make verify"
-preflight_profile: brownfield
 `)
 	dataDir := t.TempDir()
 
@@ -318,7 +315,7 @@ preflight_profile: brownfield
 	defer func() { fakeForgeOf(dp).fetchIssueFn = orig }()
 
 	var buf bytes.Buffer
-	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, "", "https://github.com/acme/widgets/issues/42", "", "", false, "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
+	err := quickstartSubmitAndWatch(dp, &buf, sessionconfig.Settings{}, workspace, dataDir, qsTestConfig, "", "https://github.com/acme/widgets/issues/42", "", "", false, time.Millisecond, time.Millisecond, consoleLinkTokens{}, false)
 	if err != nil {
 		t.Fatalf("quickstartSubmitAndWatch: %v", err)
 	}
@@ -1027,14 +1024,21 @@ func TestQuickstartShellQuoteEscapesSpacesAndMetacharacters(t *testing.T) {
 	}
 }
 
-// TestQuickstartDataDirArgQuotesPathWithSpace proves the printed
-// -data-dir flag itself is safe to copy-paste when the resolved data dir
-// contains a space.
-func TestQuickstartDataDirArgQuotesPathWithSpace(t *testing.T) {
-	got := quickstartDataDirArg("/Users/op/Library/Application Support/factoryd/data")
-	want := ` -data-dir '/Users/op/Library/Application Support/factoryd/data'`
+// qsTestConfig is a session config that is not a named profile, so a printed
+// command names it by path.
+const qsTestConfig = "/home/op/.config/factoryd/work.yml"
+
+// TestQuickstartConfigArgQuotesPathWithSpace proves the printed -config value
+// is safe to copy-paste when the session config's path contains a space, and
+// that no printed command carries -data-dir.
+func TestQuickstartConfigArgQuotesPathWithSpace(t *testing.T) {
+	got := quickstartConfigArg("/home/op/.config/factoryd/work config.yml")
+	want := ` -config '/home/op/.config/factoryd/work config.yml'`
 	if got != want {
-		t.Errorf("quickstartDataDirArg(...) = %q, want %q", got, want)
+		t.Errorf("quickstartConfigArg(...) = %q, want %q", got, want)
+	}
+	if got := quickstartConfigArg(""); got != "" {
+		t.Errorf("quickstartConfigArg(\"\") = %q, want empty", got)
 	}
 }
 
@@ -1044,7 +1048,7 @@ func TestQuickstartReportRequestStateSpecReview(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-1", State: request.StateSpecReview}
 	var out bytes.Buffer
-	if err := quickstartReportRequestState(dataDir, r, &out); err != nil {
+	if err := quickstartReportRequestState(dataDir, qsTestConfig, r, &out); err != nil {
 		t.Fatalf("quickstartReportRequestState: %v", err)
 	}
 	got := out.String()
@@ -1052,7 +1056,7 @@ func TestQuickstartReportRequestStateSpecReview(t *testing.T) {
 	// data dir isn't necessarily approve's default -- otherwise the exact
 	// command printed can fail with "no such file" against the wrong
 	// directory (seen on a live walk).
-	wantApprove := "factoryd approve -data-dir " + dataDir + " req-1"
+	wantApprove := "factoryd approve -config " + qsTestConfig + " req-1"
 	if !strings.Contains(got, wantApprove) {
 		t.Errorf("output = %q, want the exact approve command %q", got, wantApprove)
 	}
@@ -1065,10 +1069,10 @@ func TestQuickstartReportRequestStatePlanReview(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-2", State: request.StatePlanReview}
 	var out bytes.Buffer
-	if err := quickstartReportRequestState(dataDir, r, &out); err != nil {
+	if err := quickstartReportRequestState(dataDir, qsTestConfig, r, &out); err != nil {
 		t.Fatalf("quickstartReportRequestState: %v", err)
 	}
-	wantApprove := "factoryd approve -data-dir " + dataDir + " req-2"
+	wantApprove := "factoryd approve -config " + qsTestConfig + " req-2"
 	if !strings.Contains(out.String(), wantApprove) {
 		t.Errorf("output = %q, want the exact approve command %q", out.String(), wantApprove)
 	}
@@ -1097,7 +1101,7 @@ func TestQuickstartReportRequestStatePrintsTheReviewNotes(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
-		if err := quickstartReportRequestState(dataDir, r, &out); err != nil {
+		if err := quickstartReportRequestState(dataDir, qsTestConfig, r, &out); err != nil {
 			t.Fatalf("quickstartReportRequestState: %v", err)
 		}
 		got := out.String()
@@ -1111,7 +1115,7 @@ func TestQuickstartReportRequestStateHalted(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-3", State: request.StateHalted, Error: "relay upstream unreachable"}
 	var out bytes.Buffer
-	err := quickstartReportRequestState(dataDir, r, &out)
+	err := quickstartReportRequestState(dataDir, qsTestConfig, r, &out)
 	if err == nil {
 		t.Fatal("expected a non-nil error for a halted request")
 	}
@@ -1119,7 +1123,7 @@ func TestQuickstartReportRequestStateHalted(t *testing.T) {
 		t.Errorf("err = %v, want the halt reason", err)
 	}
 	got := out.String()
-	wantRetry := "factoryd retry -data-dir " + dataDir + " req-3"
+	wantRetry := "factoryd retry -config " + qsTestConfig + " req-3"
 	if !strings.Contains(got, "relay upstream unreachable") || !strings.Contains(got, wantRetry) {
 		t.Errorf("output = %q, want the reason and the exact retry command %q", got, wantRetry)
 	}
@@ -1129,7 +1133,7 @@ func TestQuickstartReportRequestStateQuarantined(t *testing.T) {
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-4", State: request.StateQuarantined, Error: "gate failure: lint"}
 	var out bytes.Buffer
-	err := quickstartReportRequestState(dataDir, r, &out)
+	err := quickstartReportRequestState(dataDir, qsTestConfig, r, &out)
 	if err == nil {
 		t.Fatal("expected a non-nil error for a quarantined request")
 	}
@@ -1137,7 +1141,7 @@ func TestQuickstartReportRequestStateQuarantined(t *testing.T) {
 		t.Errorf("err = %v, want the quarantine reason", err)
 	}
 	got := out.String()
-	wantRetry := "factoryd retry -data-dir " + dataDir + " req-4"
+	wantRetry := "factoryd retry -config " + qsTestConfig + " req-4"
 	if !strings.Contains(got, "gate failure: lint") || !strings.Contains(got, wantRetry) {
 		t.Errorf("output = %q, want the reason and the exact retry command %q", got, wantRetry)
 	}
@@ -1145,15 +1149,15 @@ func TestQuickstartReportRequestStateQuarantined(t *testing.T) {
 
 func TestQuickstartReportRequestStateDoneAndCancelled(t *testing.T) {
 	dataDir := t.TempDir()
-	if err := quickstartReportRequestState(dataDir, &request.Request{ID: "req-5", State: request.StateDone}, &bytes.Buffer{}); err != nil {
+	if err := quickstartReportRequestState(dataDir, qsTestConfig, &request.Request{ID: "req-5", State: request.StateDone}, &bytes.Buffer{}); err != nil {
 		t.Errorf("done: err = %v, want nil (success exit)", err)
 	}
-	if err := quickstartReportRequestState(dataDir, &request.Request{ID: "req-6", State: request.StateCancelled}, &bytes.Buffer{}); err == nil {
+	if err := quickstartReportRequestState(dataDir, qsTestConfig, &request.Request{ID: "req-6", State: request.StateCancelled}, &bytes.Buffer{}); err == nil {
 		t.Error("cancelled: want a non-nil error")
 	}
 	// A closed pull request is an outcome the operator chose, not a failure.
 	var out bytes.Buffer
-	if err := quickstartReportRequestState(dataDir, &request.Request{ID: "req-8", State: request.StateClosed}, &out); err != nil {
+	if err := quickstartReportRequestState(dataDir, qsTestConfig, &request.Request{ID: "req-8", State: request.StateClosed}, &out); err != nil {
 		t.Errorf("closed: err = %v, want nil", err)
 	}
 	if !strings.Contains(out.String(), "closed without merging") {
@@ -1165,7 +1169,7 @@ func TestQuickstartReportRequestStateUnknownIsInformationalNotFatal(t *testing.T
 	dataDir := t.TempDir()
 	r := &request.Request{ID: "req-7", State: request.StateBuilding}
 	var out bytes.Buffer
-	if err := quickstartReportRequestState(dataDir, r, &out); err != nil {
+	if err := quickstartReportRequestState(dataDir, qsTestConfig, r, &out); err != nil {
 		t.Errorf("err = %v, want nil for a busy, non-gate state", err)
 	}
 	if !strings.Contains(out.String(), "factoryd status") {
@@ -1201,14 +1205,14 @@ func TestQuickstartWatchRequestPollsUntilSpecReview(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := quickstartWatchRequest(dp, dataDir, id, &out, time.Millisecond, time.Hour)
+	err := quickstartWatchRequest(dp, dataDir, qsTestConfig, id, &out, time.Millisecond, time.Hour)
 	if err != nil {
 		t.Fatalf("quickstartWatchRequest: %v", err)
 	}
 	if calls < 2 {
 		t.Errorf("sleep called %d times, want at least 2 (one per non-terminal poll)", calls)
 	}
-	if !strings.Contains(out.String(), "factoryd approve -data-dir "+dataDir+" "+id) {
+	if !strings.Contains(out.String(), "factoryd approve -config "+qsTestConfig+" "+id) {
 		t.Errorf("output = %q, want the approve command once spec_review is reached", out.String())
 	}
 }
@@ -1228,7 +1232,7 @@ func TestQuickstartWatchRequestTimesOutWithoutFailing(t *testing.T) {
 	fakeHostOf(dp).sleepFn = func(time.Duration) {}
 
 	var out bytes.Buffer
-	err := quickstartWatchRequest(dp, dataDir, id, &out, time.Nanosecond, -time.Second)
+	err := quickstartWatchRequest(dp, dataDir, qsTestConfig, id, &out, time.Nanosecond, -time.Second)
 	if err != nil {
 		t.Fatalf("quickstartWatchRequest: %v, want nil (timeout while still in-flight is not a failure)", err)
 	}
@@ -1571,8 +1575,8 @@ func TestQuickstartEnsureConfigReuseNoticesButNeverAdoptsCwdDataRecords(t *testi
 	if !strings.Contains(out.String(), "earlier records found at "+cwdDataDir) {
 		t.Errorf("output = %q, want a notice naming %s", out.String(), cwdDataDir)
 	}
-	if !strings.Contains(out.String(), "-data-dir "+cwdDataDir) {
-		t.Errorf("output = %q, want the notice to name the -data-dir flag to recover them", out.String())
+	if !strings.Contains(out.String(), "set data_dir to "+cwdDataDir) {
+		t.Errorf("output = %q, want the notice to name the data_dir to recover them", out.String())
 	}
 	reloaded, err := sessionconfig.Load(configPath)
 	if err != nil {
@@ -1747,35 +1751,28 @@ func TestQuickstartEnsureConfigReuseWritesFreshlyBuiltImageRefs(t *testing.T) {
 	}
 }
 
-// ---- verify-command / preflight-profile explicitness --------------------
+// ---- verify-command explicitness ----------------------------------------
 
 // TestQuickstartEnsureRepoReadyExplicitFlagStaysExplicit is the regression
-// test for the self-review finding that verifyCommandExplicit/
-// preflightProfileExplicit were computed from "is the resolved value
-// non-empty" (always true, since both are given non-empty defaults or
-// detected values) instead of "did the operator actually pass the flag" --
+// test for the self-review finding that verifyCommandExplicit was computed
+// from "is the resolved value non-empty" (always true, since it is given a
+// detected value) instead of "did the operator actually pass the flag" --
 // which meant a repo's own committed .factory.yml could never win, even
-// when the operator left both flags at their defaults, because
+// when the operator left the flag at its default, because
 // submitRequest's applyProjectConfigDefaults always saw them as explicit.
 func TestQuickstartEnsureRepoReadyExplicitFlagStaysExplicit(t *testing.T) {
-	dp := newTestDeps(t)
 	dir := t.TempDir()
 	opts := &quickstartOptions{
-		VerifyCommand:            "make my-verify",
-		VerifyCommandExplicit:    true,
-		PreflightProfile:         "brownfield",
-		PreflightProfileExplicit: false,
-		NonInteractive:           true,
+		VerifyCommand:         "make my-verify",
+		VerifyCommandExplicit: true,
+		NonInteractive:        true,
 	}
-	verifyCommand, verifyExplicit, preflightProfile, preflightExplicit, err := quickstartEnsureRepoReady(dp, opts, newQuickstartPrompter(strings.NewReader("")), &bytes.Buffer{}, dir)
+	verifyCommand, verifyExplicit, err := quickstartEnsureRepoReady(opts, newQuickstartPrompter(strings.NewReader("")), &bytes.Buffer{}, dir)
 	if err != nil {
 		t.Fatalf("quickstartEnsureRepoReady: %v", err)
 	}
 	if verifyCommand != "make my-verify" || !verifyExplicit {
 		t.Errorf("verifyCommand = %q, verifyExplicit = %v, want (%q, true)", verifyCommand, verifyExplicit, "make my-verify")
-	}
-	if preflightProfile != "brownfield" || preflightExplicit {
-		t.Errorf("preflightProfile = %q, preflightExplicit = %v, want (%q, false) since -preflight-profile was left at its default", preflightProfile, preflightExplicit, "brownfield")
 	}
 }
 
@@ -1783,11 +1780,9 @@ func TestQuickstartEnsureRepoReadyExplicitFlagStaysExplicit(t *testing.T) {
 // applyProjectConfigDefaults' own "explicit flag wins, otherwise
 // .factory.yml" precedence is honored even in what quickstart itself
 // displays: a repo with both a committed .factory.yml verify_command and a
-// Makefile target must show (and, since preflightExplicit/verifyExplicit
-// stay false, actually submit with) the .factory.yml value, not the
+// Makefile target must show (and, since verifyExplicit stays false, actually submit with) the .factory.yml value, not the
 // Makefile-detected one.
 func TestQuickstartEnsureRepoReadyPrefersFactoryYmlOverDetection(t *testing.T) {
-	dp := newTestDeps(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Makefile"), []byte("test:\n\techo makefile-test\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1795,9 +1790,9 @@ func TestQuickstartEnsureRepoReadyPrefersFactoryYmlOverDetection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".factory.yml"), []byte("verify_command: \"make ci-verify\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts := &quickstartOptions{NonInteractive: true, PreflightProfile: "brownfield"}
+	opts := &quickstartOptions{NonInteractive: true}
 	var out bytes.Buffer
-	verifyCommand, verifyExplicit, _, _, err := quickstartEnsureRepoReady(dp, opts, newQuickstartPrompter(strings.NewReader("")), &out, dir)
+	verifyCommand, verifyExplicit, err := quickstartEnsureRepoReady(opts, newQuickstartPrompter(strings.NewReader("")), &out, dir)
 	if err != nil {
 		t.Fatalf("quickstartEnsureRepoReady: %v", err)
 	}
@@ -1812,16 +1807,13 @@ func TestQuickstartEnsureRepoReadyPrefersFactoryYmlOverDetection(t *testing.T) {
 	}
 }
 
-// TestQuickstartEnsureRepoReadyAutoDetectsBrownfieldRepo is plan 2.2's own
-// done criterion: an existing git repo with commits and none of the three
-// onboarding artifacts (spec/spec.md, spec/contract.md, ARCHITECTURE.md)
-// needs zero flags/prompts under -non-interactive to proceed, and prints
-// what quickstart auto-detected. The prompter is given an empty reader
-// (no queued answers) so a regression that still asked the old y/N
-// "scaffold onboarding docs now?" question would surface as a read-input
-// error, not just a silently-wrong default.
-func TestQuickstartEnsureRepoReadyAutoDetectsBrownfieldRepo(t *testing.T) {
-	dp := newTestDeps(t)
+// TestQuickstartEnsureRepoReadyWritesFactoryYMLForAnExistingRepo: an
+// existing git repo with commits needs zero flags/prompts under
+// -non-interactive to proceed, and gets a .factory.yml holding the
+// detected verify command. The prompter is given an empty reader (no
+// queued answers) so a regression that asked a question would surface as
+// a read-input error, not just a silently-wrong default.
+func TestQuickstartEnsureRepoReadyWritesFactoryYMLForAnExistingRepo(t *testing.T) {
 	dir := t.TempDir()
 	// Resolved up front (as resolveQuickstartRepoRoot's real toplevel()
 	// call would leave it) so the .factory.yml path this test later hands
@@ -1848,27 +1840,21 @@ func TestQuickstartEnsureRepoReadyAutoDetectsBrownfieldRepo(t *testing.T) {
 	runGit("add", "Makefile")
 	runGit("commit", "-q", "-m", "initial commit")
 
-	opts := &quickstartOptions{NonInteractive: true, PreflightProfile: "brownfield"}
+	opts := &quickstartOptions{NonInteractive: true}
 	var out bytes.Buffer
-	verifyCommand, _, preflightProfile, _, err := quickstartEnsureRepoReady(dp, opts, newQuickstartPrompter(strings.NewReader("")), &out, dir)
+	verifyCommand, _, err := quickstartEnsureRepoReady(opts, newQuickstartPrompter(strings.NewReader("")), &out, dir)
 	if err != nil {
 		t.Fatalf("quickstartEnsureRepoReady: %v", err)
 	}
 	if verifyCommand != "make test" {
 		t.Errorf("verifyCommand = %q, want the Makefile-detected \"make test\"", verifyCommand)
 	}
-	if preflightProfile != "brownfield" {
-		t.Errorf("preflightProfile = %q, want \"brownfield\"", preflightProfile)
-	}
-	if !strings.Contains(out.String(), "brownfield") || !strings.Contains(out.String(), "-scaffold") {
-		t.Errorf("output = %q, want it to name the auto-detected brownfield profile and the -scaffold override", out.String())
-	}
 	factoryYML, err := os.ReadFile(filepath.Join(dir, ".factory.yml"))
 	if err != nil {
 		t.Fatalf("expected .factory.yml to be written: %v", err)
 	}
-	if !strings.Contains(string(factoryYML), `verify_command: "make test"`) || !strings.Contains(string(factoryYML), "preflight_profile: brownfield") {
-		t.Errorf(".factory.yml = %q, want the detected verify_command and preflight_profile", factoryYML)
+	if !strings.Contains(string(factoryYML), `verify_command: "make test"`) {
+		t.Errorf(".factory.yml = %q, want the detected verify_command", factoryYML)
 	}
 	if want := 1; strings.Count(out.String(), "Commit .factory.yml") != want {
 		t.Errorf("output = %q, want the commit reminder exactly once", out.String())
@@ -1894,87 +1880,23 @@ func TestQuickstartEnsureRepoReadyAutoDetectsBrownfieldRepo(t *testing.T) {
 	}
 }
 
-// TestQuickstartEnsureRepoReadyGreenfieldRepoStillPromptsToScaffold confirms
-// the brownfield auto-detection is scoped to repos with real history: a
-// freshly `git init`'d repo with no commits yet still gets the
-// interactive y/N scaffold prompt (declining here), since there is no
-// existing codebase yet for "brownfield" to describe.
-func TestQuickstartEnsureRepoReadyGreenfieldRepoStillPromptsToScaffold(t *testing.T) {
-	dp := newTestDeps(t)
+// TestQuickstartEnsureRepoReadyWritesNoFactoryYMLWithoutCommits: a
+// freshly `git init`'d repo with no commits gets no .factory.yml, which
+// would never be read from a HEAD that does not exist, and no question.
+func TestQuickstartEnsureRepoReadyWritesNoFactoryYMLWithoutCommits(t *testing.T) {
 	dir := t.TempDir()
 	if err := exec.Command("git", "-C", dir, "init", "-q").Run(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
 
-	opts := &quickstartOptions{NonInteractive: false, PreflightProfile: "brownfield", VerifyCommand: "make test", VerifyCommandExplicit: true}
+	opts := &quickstartOptions{NonInteractive: false, VerifyCommand: "make test", VerifyCommandExplicit: true}
 	var out bytes.Buffer
-	_, _, _, _, err := quickstartEnsureRepoReady(dp, opts, newQuickstartPrompter(strings.NewReader("n\n")), &out, dir)
+	_, _, err := quickstartEnsureRepoReady(opts, newQuickstartPrompter(strings.NewReader("")), &out, dir)
 	if err != nil {
 		t.Fatalf("quickstartEnsureRepoReady: %v", err)
-	}
-	if !strings.Contains(out.String(), "scaffold onboarding docs") {
-		t.Errorf("output = %q, want the interactive scaffold prompt for a no-commits repo", out.String())
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".factory.yml")); !os.IsNotExist(err) {
 		t.Errorf(".factory.yml should not be auto-written for a no-commits repo, stat err = %v", err)
-	}
-}
-
-// TestQuickstartEnsureRepoReadyOffersScaffoldForPartiallyOnboardedRepo is
-// the regression test for a real bug found via Codex review of PR #173:
-// a repo with a hand-written ARCHITECTURE.md but no spec/ yet has
-// existingArtifacts non-empty, so the brownfield auto-detect branch above
-// is skipped -- but the interactive fallback used to check only
-// os.Stat("ARCHITECTURE.md"), which exists here, so the scaffold prompt
-// was never even offered and spec/spec.md, spec/contract.md were never
-// created, despite this PR's own doOnboard change (scaffold only what's
-// missing) being built exactly for this case. Confirms the prompt now
-// fires (checking existingArtifacts's count, not one hardcoded filename)
-// and, on a yes, only the missing two files are created.
-func TestQuickstartEnsureRepoReadyOffersScaffoldForPartiallyOnboardedRepo(t *testing.T) {
-	dp := newTestDeps(t)
-	dir := t.TempDir()
-	architecturePath := filepath.Join(dir, "ARCHITECTURE.md")
-	original := "# Architecture\n\nHand-written, pre-existing.\n"
-	if err := os.WriteFile(architecturePath, []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Makefile"), []byte("test:\n\techo makefile-test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t.com")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	runGit("init", "-q")
-	runGit("add", "ARCHITECTURE.md", "Makefile")
-	runGit("commit", "-q", "-m", "initial commit")
-
-	opts := &quickstartOptions{NonInteractive: false, PreflightProfile: "brownfield", VerifyCommand: "make test", VerifyCommandExplicit: true}
-	var out bytes.Buffer
-	_, _, _, _, err := quickstartEnsureRepoReady(dp, opts, newQuickstartPrompter(strings.NewReader("y\n")), &out, dir)
-	if err != nil {
-		t.Fatalf("quickstartEnsureRepoReady: %v", err)
-	}
-	if !strings.Contains(out.String(), "Onboarding docs missing") {
-		t.Errorf("output = %q, want the scaffold prompt to fire for a repo missing spec/", out.String())
-	}
-	if _, err := os.Stat(filepath.Join(dir, "spec", "spec.md")); err != nil {
-		t.Errorf("expected spec/spec.md to be scaffolded: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "spec", "contract.md")); err != nil {
-		t.Errorf("expected spec/contract.md to be scaffolded: %v", err)
-	}
-	gotArchitecture, err := os.ReadFile(architecturePath)
-	if err != nil {
-		t.Fatalf("read ARCHITECTURE.md: %v", err)
-	}
-	if string(gotArchitecture) != original {
-		t.Errorf("ARCHITECTURE.md = %q, want it left byte-identical to the original", gotArchitecture)
 	}
 }
 

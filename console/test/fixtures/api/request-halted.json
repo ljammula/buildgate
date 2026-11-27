@@ -120,11 +120,11 @@
           },
           {
             "label": "The newest log",
-            "command": "factoryd logs -data-dir /data run-accepted"
+            "command": "factoryd logs run-accepted"
           },
           {
             "label": "Every log and saved prompt",
-            "command": "factoryd logs -data-dir /data -list run-accepted"
+            "command": "factoryd logs -list run-accepted"
           }
         ]
       }

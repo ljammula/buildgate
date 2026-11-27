@@ -91,7 +91,7 @@ func TestRequestWakerOnWriteRoutes(t *testing.T) {
 
 func TestRequestWakerOnCreate(t *testing.T) {
 	workspace := initGitWorkspace(t, "app")
-	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\npreflight_profile: brownfield\n")
+	writeCreateTestFactoryYML(t, workspace, "verify_command: \"make ci-verify\"\n")
 	var woken []string
 	var wakeErr error
 	server := NewServer(t.TempDir(), WithOverrideToken("test-token"), WithWorkspaces([]string{workspace}),

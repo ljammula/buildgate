@@ -298,11 +298,8 @@ func executionHarnessOf(r *run.Run) string {
 // is set in this process's own environment. Called by every code path that
 // goes on to execute
 // untrusted build_app.py/canonical-verify subprocesses — the plain
-// run-invocation path in realMain and `factoryd daemon`'s daemonMain
-// alike (found via review: daemon mode is exactly as exposed as a plain
-// run invocation once it starts servicing real Activities, and the first
-// version of this fix only guarded the latter) — never `serve` or
-// `override`, where the token is expected.
+// run-invocation path in realMain — never `serve` or `override`, where the
+// token is expected.
 //
 // Found via review: internal/runner's own subprocessEnv() strips this
 // var from a launched subprocess's inherited environment, but that alone
@@ -420,48 +417,42 @@ func withoutDeps(run func(args []string) error) subcommand {
 // ones only the Makefile uses (through `go run ./cmd/factoryd`).
 func subcommands() map[string]subcommand {
 	return map[string]subcommand{
-		"override":          overrideMain,
-		"serve":             serveMain,
-		"daemon":            daemonMain,
-		"supervise":         superviseMain,
-		"reset-stop-line":   withoutDeps(resetStopLineMain),
-		"override-rate":     withoutDeps(overrideRateMain),
-		"check-project":     withoutDeps(checkProjectMain),
-		"check-ticket":      withoutDeps(checkTicketMain),
-		"ticket-template":   withoutDeps(ticketTemplateMain),
-		"init":              initMain,
-		"onboard":           onboardMain,
-		"doctor":            doctorMain,
-		"kill-switch":       withoutDeps(killSwitchMain),
-		"reconcile":         withoutDeps(reconcileMain),
-		"status":            statusMain,
-		"inbox":             inboxMain,
-		"inspect":           withoutDeps(inspectMain),
-		"rounds":            withoutDeps(roundsMain),
-		"stop":              stopMain,
-		"uninstall":         uninstallMain,
-		"upgrade":           upgradeMain,
-		"use":               useMain,
-		"watch":             watchMain,
-		"logs":              withoutDeps(logsMain),
-		"cost":              withoutDeps(costMain),
-		"submit":            submitMain,
-		"approve":           approveMain,
-		"reject":            rejectMain,
-		"answer":            answerMain,
-		"cancel":            cancelMain,
-		"prune":             pruneMain,
-		"worker":            workerMain,
-		"retry":             retryMain,
-		"resume":            resumeMain,
-		"amend-scope":       amendScopeMain,
-		"init-config":       withoutDeps(initConfigMain),
-		"install-service":   installServiceMain,
-		"uninstall-service": uninstallServiceMain,
-		"quickstart":        quickstartMain,
-		"console":           consoleMain,
-		"install-skill":     withoutDeps(installSkillMain),
-		"configure-images":  withoutDeps(configureImagesMain),
+		"override":         overrideMain,
+		"serve":            serveMain,
+		"reset-stop-line":  withoutDeps(resetStopLineMain),
+		"override-rate":    withoutDeps(overrideRateMain),
+		"check-ticket":     withoutDeps(checkTicketMain),
+		"ticket-template":  withoutDeps(ticketTemplateMain),
+		"doctor":           doctorMain,
+		"kill-switch":      withoutDeps(killSwitchMain),
+		"reconcile":        withoutDeps(reconcileMain),
+		"status":           statusMain,
+		"inbox":            inboxMain,
+		"inspect":          withoutDeps(inspectMain),
+		"rounds":           withoutDeps(roundsMain),
+		"prune":            pruneMain,
+		"stop":             stopMain,
+		"uninstall":        uninstallMain,
+		"upgrade":          upgradeMain,
+		"use":              useMain,
+		"watch":            watchMain,
+		"logs":             withoutDeps(logsMain),
+		"cost":             withoutDeps(costMain),
+		"submit":           submitMain,
+		"approve":          approveMain,
+		"reject":           rejectMain,
+		"answer":           answerMain,
+		"cancel":           cancelMain,
+		"worker":           workerMain,
+		"retry":            retryMain,
+		"resume":           resumeMain,
+		"amend-scope":      amendScopeMain,
+		"init-config":      withoutDeps(initConfigMain),
+		"service":          serviceMain,
+		"quickstart":       quickstartMain,
+		"console":          consoleMain,
+		"install-skill":    withoutDeps(installSkillMain),
+		"configure-images": withoutDeps(configureImagesMain),
 		"build-ca-bundle": func(dp *deps, args []string) error {
 			return buildCABundleMain(dp, args, os.Stdout, os.Stderr)
 		},
@@ -473,14 +464,8 @@ func subcommands() map[string]subcommand {
 		},
 		"image-reuse": withoutDeps(imageReuseMain),
 		"setup":       setupMain,
-		"mcp": func(dp *deps, args []string) error {
-			return mcpMain(dp, os.Stdout, args)
-		},
-		"remote-console": func(dp *deps, args []string) error {
-			return remoteConsoleMain(dp, os.Stdout, args)
-		},
-		"gate-token": func(dp *deps, args []string) error {
-			return gateTokenMain(dp, os.Stdout, args)
+		"remote": func(dp *deps, args []string) error {
+			return remoteMain(dp, os.Stdout, args)
 		},
 		"memory":  memoryMain,
 		"sandbox": sandboxMain,

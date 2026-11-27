@@ -1389,7 +1389,7 @@ esac
 // a real P2 finding from a sixth round of GitHub Codex review of PR #37:
 // ensureRemoved used to always build its own context.Background()-based
 // 10-second timeout regardless of ReconcileOrphans' own ctx parameter, so
-// a caller's cancellation (daemonMain's own signalCtx on SIGTERM) could not
+// a caller's cancellation (workerMain's own signalCtx on SIGTERM) could not
 // interrupt an in-flight `docker rm` — only the staleness-debounce wait
 // (the prior round's fix) actually honored it. Proven with a fake `docker
 // rm` that sleeps far longer than the test's own cancellation delay:
@@ -1604,7 +1604,7 @@ func staleOwnerRefreshedDuringDebounce(t *testing.T, dataDir, runID string) (deb
 // finding from a ninth round of GitHub Codex review of PR #37: an earlier
 // version of the staleness debounce waited a full ownerHeartbeatInterval
 // separately for every stale non-terminal candidate in one scan, so N
-// abandoned runs at startup delayed the caller (daemonMain, before it
+// abandoned runs at startup delayed the caller (workerMain, before it
 // even dials Temporal) by N * ownerHeartbeatInterval — a modest orphan
 // backlog could make a restart unavailable for minutes. Three stale
 // candidates here must all be reconciled within roughly one debounce

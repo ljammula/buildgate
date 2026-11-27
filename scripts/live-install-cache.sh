@@ -81,7 +81,7 @@ approve() {
 run_ticket() {
 	ticket="live-install-cache-$1-$(date +%Y%m%d-%H%M%S)"
 	set -- -ticket "$ticket" -spec "$SPEC" -workspace "$CLONE" -data-dir "$DATA" \
-		-preflight-profile brownfield -open-pull-request=false -code-review-policy off
+		-open-pull-request=false -code-review-policy off
 	if [ -n "${LIVE_SMOKE_TEMPORAL:-}" ]; then
 		set -- "$@" -temporal-address "$LIVE_SMOKE_TEMPORAL"
 	fi

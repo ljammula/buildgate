@@ -8,7 +8,7 @@ import (
 // serveOverrideTokenFileName and serveReadTokenFileName are the files beside
 // the session config that hold the override and read tokens of a `serve`
 // whose environment sets neither FACTORYD_API_OVERRIDE_TOKEN nor
-// FACTORYD_API_READ_TOKEN. `install-service -require-tokens` writes them
+// FACTORYD_API_READ_TOKEN. `service install -require-tokens` writes them
 // (mode 0600); the plist never carries them. With both, no caller is trusted
 // for being local: a forwarder that adds no forwarding header (colima's
 // host.docker.internal) makes every container look local
@@ -44,7 +44,7 @@ func serveTokenFromFile(configPath, name string) (string, error) {
 		return "", err
 	}
 	if issue != nil {
-		issue.Fix = "`chmod 600` it if its mode is the reason; otherwise delete it and run `factoryd install-service -force -require-tokens` to write a new one"
+		issue.Fix = "`chmod 600` it if its mode is the reason; otherwise delete it and run `factoryd service install -force -require-tokens` to write a new one"
 		if name != serveConsoleTokenFileName {
 			issue.Fix += " (deleting it alone turns this protection off)"
 		}

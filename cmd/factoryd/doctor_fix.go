@@ -28,11 +28,10 @@ func doctorRegisterYesFlag(flags *flag.FlagSet) *bool {
 // is about to onboard" (unlike -repo-root, which names THIS buildgate
 // checkout, whose Makefile builds images -- never a stand-in for the
 // target repo). Advisory, not fail-closed: plenty of repos run fine
-// today with verify_command/preflight_profile resolved some other way
+// today with verify_command resolved some other way
 // (an explicit -verify-command, or detectVerifyCommand's own Makefile or
 // language-profile fallback) -- a missing .factory.yml is a usability
-// gap (`factoryd doctor -fix -yes` or `factoryd onboard -write-factory-yml`
-// closes it), not a broken configuration.
+// gap (`factoryd doctor -fix -yes` closes it), not a broken configuration.
 func doctorCheckFactoryYML(workspace string) doctorCheck {
 	name := fmt.Sprintf("%s present in workspace", projectconfig.FileName)
 	path := filepath.Join(workspace, projectconfig.FileName)
@@ -43,8 +42,8 @@ func doctorCheckFactoryYML(workspace string) doctorCheck {
 	}
 	return doctorCheck{
 		Name:     name,
-		Err:      fmt.Errorf("%s has no %s -- verify_command/preflight_profile fall back to flags or detection instead of a committed default", workspace, projectconfig.FileName),
-		Fix:      "run `factoryd doctor -fix -yes` (or `-fix` and confirm) to write a minimal one, or `factoryd onboard -write-factory-yml`",
+		Err:      fmt.Errorf("%s has no %s -- verify_command falls back to flags or detection instead of a committed default", workspace, projectconfig.FileName),
+		Fix:      "run `factoryd doctor -fix -yes` (or `-fix` and confirm) to write a minimal one",
 		Advisory: true,
 	}
 }
@@ -84,9 +83,8 @@ func doctorFixConfirm(p *quickstartPrompter, w io.Writer, yes, interactive bool,
 // collected.
 //
 //   - (a) workspace has no committed .factory.yml -- write a minimal one
-//     via factoryYMLContent (the exact content `factoryd onboard
-//     -write-factory-yml` itself writes, reused directly rather than
-//     duplicated), with verify_command pre-filled via detectVerifyCommand
+//     via factoryYMLContent (the content quickstart writes too), with
+//     verify_command pre-filled via detectVerifyCommand
 //     when it finds one.
 //   - (b) the resolved session config (sessionconfig.LoadDefault) is
 //     missing one or more release_* keys -- append them via the exact
@@ -129,7 +127,7 @@ func doctorApplyFixes(checks []doctorCheck, workspace, dataDir string, dataDirEx
 			verifyCommand, _ := detectVerifyCommand(workspace)
 			desc := fmt.Sprintf("write a minimal %s to %s", projectconfig.FileName, path)
 			if doctorFixConfirm(p, w, yes, interactive, desc) {
-				content := factoryYMLContent(verifyCommand, projectconfig.PreflightProfileBrownfield)
+				content := factoryYMLContent(verifyCommand)
 				if err := writeFactoryYMLExclusive(path, content); err != nil {
 					fmt.Fprintf(w, "could not write %s: %v\n", path, err)
 				} else {

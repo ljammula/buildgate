@@ -2,7 +2,6 @@ import { asObject } from "@/domain/decode";
 import {
   decodeApiErrorBody,
   decodeConsoleConfig,
-  decodeDaemonList,
   decodeHealth,
   decodeQueueRunStatus,
   decodeWorkspaceHintList,
@@ -46,19 +45,6 @@ test("a console config whose gate is not a string does not decode", () => {
   expect(() => decodeConsoleConfig({ gate: true }, "GET /console-config.json")).toThrow(
     /GET \/console-config\.json/,
   );
-});
-
-test("GET /daemons decodes", () => {
-  const daemons = decodeDaemonList(readFixtureJson("api/daemons.json"), "GET /daemons");
-  expect(daemons).toEqual([
-    {
-      repository: "acme/app",
-      state: "running",
-      pid: 4242,
-      startedAt: "2026-09-10T09:00:00Z",
-      heartbeatUpdatedAt: "2026-09-10T09:00:00Z",
-    },
-  ]);
 });
 
 test("GET /queue-run decodes", () => {

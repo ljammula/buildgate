@@ -26,7 +26,7 @@ import (
 // reports the exact verdict a real API-started run's own project-
 // bootstrap preflight (runProjectBootstrapCheck, called from
 // runMainWithReady) would reach against the same Workspace/Ticket --
-// same artifact paths (projectBootstrapArtifactPaths), same ticket
+// same artifact path (projectArchitecturePath), same ticket
 // resolution (resolvePiTicketPath) -- but through
 // evaluateProjectBootstrapChecks directly, never runProjectBootstrapCheck
 // itself, so this preview writes no durable ProjectCheckRecord and never
@@ -44,19 +44,14 @@ import (
 // reach.
 func apiProjectChecker() api.ProjectChecker {
 	return func(_ context.Context, req api.ProjectCheckRequest) (api.ProjectCheckResponse, error) {
-		cfg, _, err := projectconfig.Load(req.Workspace)
-		if err != nil {
+		if _, _, err := projectconfig.Load(req.Workspace); err != nil {
 			return api.ProjectCheckResponse{}, fmt.Errorf("load %s: %w", projectconfig.FileName, err)
-		}
-		profile, err := effectivePreflightProfile(req.PreflightProfile, cfg)
-		if err != nil {
-			return api.ProjectCheckResponse{}, err
 		}
 		workspaceAbs, err := filepath.Abs(req.Workspace)
 		if err != nil {
 			return api.ProjectCheckResponse{}, fmt.Errorf("resolve workspace: %w", err)
 		}
-		specPath, contractPath, architecturePath := projectBootstrapArtifactPaths(workspaceAbs)
+		architecturePath := projectArchitecturePath(workspaceAbs)
 
 		var ticketPath string
 		var ticketNumber int
@@ -72,7 +67,7 @@ func apiProjectChecker() api.ProjectChecker {
 		// never set -request-ticket (see that flag's own doc comment) --
 		// the request pipeline's own tickets are never previewed through
 		// this endpoint.
-		results, allPassed := evaluateProjectBootstrapChecks(specPath, contractPath, architecturePath, ticketPath, ticketNumber, nil, profile, nil)
+		results, allPassed := evaluateProjectBootstrapChecks(architecturePath, ticketPath, ticketNumber, nil, nil)
 		checks := make([]api.ProjectCheckResult, len(results))
 		for i, r := range results {
 			checks[i] = api.ProjectCheckResult{Check: r.Check, Path: r.Path, Passed: r.Passed, Reasons: r.Reasons, Advisory: r.Advisory}
@@ -223,16 +218,6 @@ func apiStartStarter(dp *deps, dataDir string, inFlight *sync.WaitGroup, release
 		if req.Ticket == "" || workspace == "" || spec == "" {
 			return nil, fmt.Errorf("%w: ticket, workspace, and spec are required", api.ErrInvalidStartRequest)
 		}
-		// Validated here, before the spawned runMainWithReady's own copy
-		// of this check ever runs (see -preflight-profile's own doc
-		// comment): that copy's error is a plain error, not wrapped in
-		// api.ErrInvalidStartRequest, so an invalid value would otherwise
-		// fall through to the generic 500 "start run" branch below --
-		// exactly the swallowed-diagnostic bug errProjectBootstrapCheckFailed
-		// exists to prevent, for a different field.
-		if req.PreflightProfile != "" && req.PreflightProfile != preflightProfileBrownfield {
-			return nil, fmt.Errorf("%w: preflight_profile must be \"\" or %q, got %q", api.ErrInvalidStartRequest, preflightProfileBrownfield, req.PreflightProfile)
-		}
 		// sandbox_docker/sandbox_user are rejected outright now, not merely
 		// narrowed: flags-consolidate (2026-09-10) made both
 		// session-config-only, so runMainWithReady defines no
@@ -367,7 +352,6 @@ func apiStartStarter(dp *deps, dataDir string, inFlight *sync.WaitGroup, release
 		if req.SkipProjectCheck {
 			args = append(args, "-skip-project-check")
 		}
-		appendStringFlag("-preflight-profile", req.PreflightProfile)
 		if req.OpenPullRequest {
 			args = append(args, "-open-pull-request")
 		}

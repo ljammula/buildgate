@@ -12,7 +12,7 @@ import (
 )
 
 // amendScopeMain implements `factoryd amend-scope -reason "<text>"
-// [-data-dir <path>] <request-id> <file>...`: an operator widens ONE
+// <request-id> <file>...`: an operator widens ONE
 // quarantined ticket's approved Allowed-Files: scope, re-pinning that
 // ticket spec's approval hash, so `factoryd retry` can rebuild the ticket.
 // Shares internal/request.AmendScope with nothing else yet (v1: CLI only,
@@ -25,7 +25,7 @@ import (
 // executing the command.
 func newAmendScopeFlags() (flags *flag.FlagSet, dataDir, reason, configPath *string) {
 	flags = flag.NewFlagSet("amend-scope", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory holding the request; must be the data directory it was submitted to")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	reason = flags.String("reason", "", "why this ticket's scope is being widened (required); recorded on the request's history")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
@@ -44,7 +44,7 @@ func amendScopeMain(dp *deps, args []string) error {
 	positional := flags.Args()
 	if len(positional) < 2 {
 		flags.Usage()
-		return fmt.Errorf(`usage: factoryd amend-scope -reason "<text>" [-config <path>] [-data-dir <path>] <request-id> <file>...`)
+		return fmt.Errorf(`usage: factoryd amend-scope -reason "<text>" [-config <path>] <request-id> <file>...`)
 	}
 	if err := resolveDataDirFromSessionConfig(flags, dataDir, *configPath); err != nil {
 		return err

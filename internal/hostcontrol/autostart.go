@@ -38,7 +38,7 @@ type Deps interface {
 	// VM's loopback.
 	MeterHealthy(ctx context.Context) error
 	PidLooksLikeWorker(pid int) bool
-	// ServiceManager is what supervises install-service's services on this
+	// ServiceManager is what supervises service install's services on this
 	// machine.
 	ServiceManager() ServiceManager
 	// Systemctl runs `systemctl <args...>` and returns its combined output.

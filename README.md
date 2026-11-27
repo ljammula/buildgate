@@ -149,7 +149,7 @@ missing and starts colima for you.
    committed `AGENTS.md` ([above](#install)). It stops at `spec_review` and
    prints the `factoryd approve` command.
 7. To keep the worker and console running as launchd services:
-   `factoryd install-service`.
+   `factoryd service install`.
 
 Start over with `factoryd uninstall -purge`.
 
@@ -185,7 +185,7 @@ missing.
    port from your own machine (`ssh -L 8090:127.0.0.1:8090 <host>`) and open
    the link `quickstart` prints.
 6. To keep the worker and console running as services:
-   `factoryd install-service`, which installs `factoryd-worker.service` and
+   `factoryd service install`, which installs `factoryd-worker.service` and
    `factoryd-serve.service` as systemd user units. They run while you are
    logged in; for them to start at boot and run with nobody logged in, run
    `sudo loginctl enable-linger $USER` once.
@@ -317,7 +317,7 @@ The ones most likely to surprise you ([all of them](STATUS.md#known-limits)):
 - **Go builds compile cold.** Every worker container starts with an empty Go cache; on a large repo this is the main wall-clock cost.
 - **Docker Desktop cannot run a sandbox.** Its VM has neither Landlock nor AppArmor; use colima, with `sshfs` or `virtiofs` mounts (not `9p`). Docker Desktop for Linux, Docker Engine on a Linux host, rootless Docker, `userns-remap`, the snap, podman and WSL2 are refused too, before any sandbox starts.
 - **Builds do not run on Docker Engine on a Linux host.** The worker runs as the image's user 65532, which cannot use `factoryd`'s launch directories when no VM sits between them, so no worker command starts; `factoryd` refuses that backend. On Linux, colima is the only path, and it is not live-proven there (it needs `/dev/kvm`). The install, the systemd services and the backend checks were run on an Ubuntu 24.04 VM; no build has run on Linux yet.
-- **On colima, any container can act as the local console** and approve a gate: colima's `host.docker.internal` reaches `serve` as a local caller. `factoryd install-service -force -require-tokens` closes it; open the console on this machine with `factoryd console`, whose link carries a token that does not expire.
+- **On colima, any container can act as the local console** and approve a gate: colima's `host.docker.internal` reaches `serve` as a local caller. `factoryd service install -force -require-tokens` closes it; open the console on this machine with `factoryd console`, whose link carries a token that does not expire.
 - **OpenShell 0.1.2 is young**: residual gaps are listed in [`containment-matrix.md`](containment-matrix.md).
 - **A baseline failure is matched to the ticket by name.** Failing tests are read from `go test` and `pytest` output only; a verify command that fails in another runner's format halts the run even when the ticket expects the failure. A failure the log does not name as a test (a panic in `TestMain`, a second failing package behind a named one) is not seen, so such a build can still be spent on a command it cannot pass. Every build also pays for one more run of the verify command.
 - **A review finding is advice.** It refuses nothing and starts no build; a review that gave no verdict hands the run to a person.
@@ -423,7 +423,7 @@ container launches or run record is created.
 | Need | How |
 |---|---|
 | Your own image | `-sandbox-image=<name@sha256:...>` (always wins) |
-| Run from inside the target repo (`-workspace .`) | Put `-data-dir` outside the workspace, or the data dir gets mounted into the worker |
+| Run from inside the target repo (`-workspace .`) | Keep the session config's `data_dir` outside the workspace: a data dir inside it is refused, since it would be mounted into the worker |
 | Dependencies the worker image lacks (the sandbox has no package-registry network) | `make project-sandbox-image PROJECT_DIR=<path> BASE_IMAGE=<worker ref>` (Go, npm, Maven, Ruby Bundler, pip manifests; `internal/sandbox/Dockerfile.project`), or `-registry-proxy` for a per-run read-only caching proxy over an npm/PyPI/Go/Maven Central/RubyGems allowlist (`internal/registryproxy`) |
 | A Go, Python, Java/Maven or Ruby/Bundler toolchain the worker image lacks (the sandbox downloads no toolchain) | Nothing: a build reads what the repository declares (`go.mod`, `.python-version`, `pyproject.toml`, `pom.xml` with `.java-version` or `.sdkmanrc`, `Gemfile` with `.ruby-version`) and derives an image with that toolchain on first use. Gradle is not derived. [USAGE_REFERENCE.md § Project toolchains](USAGE_REFERENCE.md#project-toolchains) |
 | A model route | The default `build_app.py` is model-backed and needs `roles.execution`; a run with neither a route nor an explicit offline `-build-app-script` is rejected before any container launch or run record |
@@ -467,9 +467,9 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 | Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; with a step in flight it drains the worker first: the step finishes, no new one starts, then it restarts) |
 | Switch session-config profile | `factoryd use [<name>]` |
 | Upgrade to the newest release tag | `factoryd upgrade` |
-| Keep the worker and console alive across reboots (launchd on macOS, systemd user units on Linux) | `factoryd install-service` |
+| Keep the worker and console alive across reboots (launchd on macOS, systemd user units on Linux) | `factoryd service install` |
 | Fail closed every release for a project | `factoryd kill-switch -project <p> -state engaged -by <who> -reason <why>` |
-| Clean up after a killed run | `factoryd reconcile -workspace <path> -data-dir <dir>` |
+| Clean up after a killed run | `factoryd reconcile -workspace <path>` |
 | Free the disk finished requests and old buildgate images hold (lists first) | `factoryd prune [-all-profiles]` |
 
 Every command, and the flags used most: [USAGE_REFERENCE.md § Command reference](USAGE_REFERENCE.md#command-reference).
@@ -512,7 +512,7 @@ Sharding, live-test and proving-ground notes: [AGENTS.md § Build, test, verify]
 | [`demo/console-tour.mp4`](demo/console-tour.mp4) | A captioned recording of the operator console (1 min 55 s): board, triage, spec and plan review, editing, a build, and what a stopped request shows |
 | [`STATUS.md`](STATUS.md) | What works, what is opt-in, every known limit |
 | [`USAGE.md`](USAGE.md) | End-to-end walkthrough: `quickstart`, `submit`/`worker`, how Temporal runs a request and what happens to a lost step |
-| [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | What each command does, the 25 flags used most, gotchas, harness/credential configs, session-config keys, repository-owner runs and daemons |
+| [`USAGE_REFERENCE.md`](USAGE_REFERENCE.md) | What each command does, the 25 flags used most, gotchas, harness/credential configs, session-config keys, repository-owner runs |
 | [`console/README.md`](console/README.md) | The operator console |
 | [`agent/pi/README.md`](agent/pi/README.md) | The in-sandbox build, drafting and review scripts and their harness adapters |
 | [`doc/designs/architecture-flows.md`](doc/designs/architecture-flows.md) | Component diagram, request lifecycle, the request workflow and a run's Activity sequence |

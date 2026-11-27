@@ -16,7 +16,7 @@ import (
 
 func newInspectFlags() (flags *flag.FlagSet, dataDir, configPath *string, jsonOutput, commands *bool) {
 	flags = flag.NewFlagSet("inspect", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory containing durable request and run records")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile")
 	jsonOutput = flags.Bool("json", false, "print the commands as JSON instead of text")
 	commands = flags.Bool("commands", false, "also print the commands to copy: the git reads of the change, a worktree of your own, the files it was judged against and its logs")
@@ -48,7 +48,7 @@ func inspectRun(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	inspection, err := inspectionFor(*dataDir, id)
+	inspection, err := inspectionFor(*dataDir, profileConfigArg(*configPath), id)
 	if err != nil {
 		return err
 	}
@@ -69,9 +69,9 @@ func inspectRun(args []string, w io.Writer) error {
 }
 
 // inspectionFor resolves id as a request first, then as a run.
-func inspectionFor(dataDir, id string) (request.Inspection, error) {
+func inspectionFor(dataDir, configArg, id string) (request.Inspection, error) {
 	if r, err := request.Load(dataDir, id); err == nil {
-		return request.Inspect(dataDir, r), nil
+		return request.Inspect(dataDir, configArg, r), nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return request.Inspection{}, fmt.Errorf("load request %s: %w", id, err)
 	}
@@ -79,7 +79,7 @@ func inspectionFor(dataDir, id string) (request.Inspection, error) {
 	if err != nil {
 		return request.Inspection{}, fmt.Errorf("load run %s: %w", id, err)
 	}
-	ticket := request.InspectRun(dataDir, loaded)
+	ticket := request.InspectRun(dataDir, configArg, loaded)
 	return request.Inspection{Tickets: []request.InspectTicket{ticket}, Note: request.InspectRunNote}, nil
 }
 

@@ -21,7 +21,7 @@ import (
 // executing the command.
 func newRetryFlags() (flags *flag.FlagSet, dataDir, reason, from, configPath *string) {
 	flags = flag.NewFlagSet("retry", flag.ContinueOnError)
-	dataDir = flags.String("data-dir", "data", "directory holding the request; must be the data directory it was submitted to")
+	dataDir = flags.String("data-dir", "data", "internal: the data dir to use in place of the session config's data_dir")
 	// reason (an adversarial review, 2026-09-24) mirrors the
 	// console's own required retry-reason field (POST /requests/{id}/retry's
 	// body -- see retryRequestHandler) and reject's own -reason flag
@@ -49,7 +49,7 @@ func retryMain(dp *deps, args []string) error {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return fmt.Errorf("usage: factoryd retry [-config <path>] [-data-dir <dir>] [-reason ...] [-from attempt|scratch|<round>] <id>")
+		return fmt.Errorf("usage: factoryd retry [-config <path>] [-reason ...] [-from attempt|scratch|<round>] <id>")
 	}
 	choice, err := parseRetryFrom(*from)
 	if err != nil {
