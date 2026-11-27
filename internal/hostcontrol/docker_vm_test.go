@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -103,6 +104,7 @@ func vmStatWith(available uint64) func() ([]byte, error) {
 }
 
 func TestEnsureDockerVMCreatesAMissingProfileSizedForTheMac(t *testing.T) {
+	t.Setenv(AutostartEnvVar, "1")
 	dp := newFakeDeps(t)
 	f := newColimaFake(dp, t, "default", false)
 	f.SetList(t, `{"name":"default","status":"Running","cpus":8,"memory":17179869184}`)
@@ -127,6 +129,7 @@ func TestEnsureDockerVMCreatesAMissingProfileSizedForTheMac(t *testing.T) {
 }
 
 func TestEnsureDockerVMRefusesWithoutHeadroomAndCreatesNothing(t *testing.T) {
+	t.Setenv(AutostartEnvVar, "1")
 	dp := newFakeDeps(t)
 	f := newColimaFake(dp, t, "default", false)
 	dp.hostResourcesFn = func() (uint64, int, error) { return 16 << 30, 8, nil }
@@ -146,6 +149,7 @@ func TestEnsureDockerVMRefusesWithoutHeadroomAndCreatesNothing(t *testing.T) {
 }
 
 func TestEnsureDockerVMStartsAStoppedProfileWithItsOwnSize(t *testing.T) {
+	t.Setenv(AutostartEnvVar, "1")
 	dp := newFakeDeps(t)
 	f := newColimaFake(dp, t, "default", false)
 	f.SetList(t, `{"name":"buildgate","status":"Stopped","cpus":2,"memory":8589934592}`)
@@ -219,5 +223,31 @@ func TestAutostartNamesDoctorFixForAMissingPinnedVM(t *testing.T) {
 	}
 	if strings.Contains(f.ColimaCalls(), "start") {
 		t.Errorf("colima calls = %q", f.ColimaCalls())
+	}
+}
+
+// TestDockerVMIsNeverStartedOrCreatedWithAutostartOff proves a test
+// subprocess (FACTORYD_AUTOSTART=0) can never start or create a real VM.
+func TestDockerVMIsNeverStartedOrCreatedWithAutostartOff(t *testing.T) {
+	for _, tc := range []struct{ name, list, verb string }{
+		{"missing", `{"name":"default","status":"Running","cpus":8,"memory":17179869184}`, "create"},
+		{"stopped", `{"name":"buildgate","status":"Stopped","cpus":7,"memory":12884901888}`, "start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(AutostartEnvVar, "0")
+			dp := newFakeDeps(t)
+			f := newColimaFake(dp, t, "default", false)
+			f.SetList(t, tc.list)
+			dp.hostResourcesFn = func() (uint64, int, error) { return 96 << 30, 28, nil }
+			dp.vmStatFn = vmStatWith(40 << 30)
+			_, err := EnsureDockerVM(dp, context.Background(), io.Discard, "buildgate", VMMounts{Writable: filepath.Join(t.TempDir(), "b")})
+			var off AutostartOffError
+			if !errors.As(err, &off) || off.Verb != tc.verb {
+				t.Fatalf("err = %v, want AutostartOffError %s", err, tc.verb)
+			}
+			if calls := f.ColimaCalls(); strings.Contains(calls, "start") {
+				t.Errorf("colima was asked to start: %q", calls)
+			}
+		})
 	}
 }

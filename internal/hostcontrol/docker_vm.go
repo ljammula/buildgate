@@ -296,6 +296,15 @@ func (e MissingDockerVMError) Error() string {
 	return fmt.Sprintf("the Docker VM colima-%s does not exist: `factoryd doctor -fix` creates it", e.Profile)
 }
 
+// AutostartOffError is a VM StartDockerVM or EnsureDockerVM would have
+// started or created under FACTORYD_AUTOSTART=0, which every test
+// subprocess sets: no test ever starts or creates a real VM.
+type AutostartOffError struct{ Profile, Verb string }
+
+func (e AutostartOffError) Error() string {
+	return fmt.Sprintf("the Docker VM colima-%s is not running, and %s=0 stops factoryd from starting anything: run `factoryd doctor -fix` without it to %s the VM", e.Profile, AutostartEnvVar, e.Verb)
+}
+
 // StartDockerVM starts profile when it is stopped, after the headroom
 // check; it never creates one (MissingDockerVMError).
 func StartDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string) (DockerVMState, error) {
@@ -309,6 +318,9 @@ func StartDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string) (D
 	state := DockerVMState{Profile: profile, Memory: vm.Memory}
 	if vm.Running() {
 		return state, nil
+	}
+	if !AutostartEnabled() {
+		return state, AutostartOffError{Profile: profile, Verb: "start"}
 	}
 	if err := CheckHostHeadroom(dp, profile, vm.Memory); err != nil {
 		return state, err
@@ -328,6 +340,9 @@ func EnsureDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string, m
 	state, err := StartDockerVM(dp, ctx, w, profile)
 	if !errors.As(err, new(MissingDockerVMError)) {
 		return state, err
+	}
+	if !AutostartEnabled() {
+		return DockerVMState{}, AutostartOffError{Profile: profile, Verb: "create"}
 	}
 	memory, cpus, err := dp.HostResources()
 	if err != nil {
