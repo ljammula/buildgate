@@ -136,7 +136,7 @@ func triageCIChecks(dp Deps, dataDir string, r *request.Request, ticket *request
 			Detail: fmt.Sprintf("Ticket %d/%d: required check %q on %s %s; no corrective round was started", ticket.Index, r.TicketCount, handoff.CleanSentence(c.Name), ticket.PRURL, why),
 			Next:   fmt.Sprintf("review %s", ticket.PRURL),
 		}, now)
-		notify.DispatchExternal(dataDir, n)
+		notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 	}
 	if !sent {
 		return nil

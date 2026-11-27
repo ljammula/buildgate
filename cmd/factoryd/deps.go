@@ -5,6 +5,7 @@ import (
 	"buildgate/internal/forge"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/meter"
+	"buildgate/internal/notify"
 	"buildgate/internal/openshell"
 	"buildgate/internal/requestdriver"
 	"buildgate/internal/sandbox"
@@ -45,11 +46,14 @@ type deps struct {
 	releaseWarning *releasePolicyWarning
 	// ghLogins keeps the factory's own gh login for the process.
 	ghLogins *forge.SelfLogins
+	// webhooks are the notification webhook files of the session config the
+	// process loaded (useWebhookFiles).
+	webhooks *webhookSettings
 }
 
 // newDeps returns the real implementations.
 func newDeps() *deps {
-	dp := &deps{backends: &backendMemo{}, releaseWarning: &releasePolicyWarning{}, ghLogins: &forge.SelfLogins{}}
+	dp := &deps{backends: &backendMemo{}, releaseWarning: &releasePolicyWarning{}, ghLogins: &forge.SelfLogins{}, webhooks: &webhookSettings{}}
 	dp.docker = realDocker{dp: dp}
 	dp.forge = realForge{dp: dp}
 	dp.host = realHost{dp: dp}
@@ -181,6 +185,9 @@ type hostBoundary interface {
 	// can be opened on this machine.
 	browserRedirectDir() (string, error)
 	executable() (string, error)
+	// notifyWebhooks reads the notification webhook URLs from files
+	// (readWebhookFiles).
+	notifyWebhooks(files webhookFiles) notify.Webhooks
 	// rootTreeAtCommit lists the entries of commit's root tree in repoDir
 	// (name, mode, type, object) from git objects, never from a worktree.
 	rootTreeAtCommit(ctx context.Context, repoDir string, commit string) ([]gitTreeEntry, error)

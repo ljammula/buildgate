@@ -120,6 +120,16 @@ type Config struct {
 	// registry-proxy containers -- see -egress-ca-bundle's own flag help.
 	EgressCABundle *string `yaml:"egress_ca_bundle,omitempty"`
 
+	// SlackWebhookURLsFile and DiscordWebhookURLsFile name files holding the
+	// incoming-webhook URLs a notification is posted to (one or more,
+	// separated by newlines or commas): each must be a regular file owned by
+	// this user with mode 0600 or stricter, like a route's credential_file,
+	// and is read at each notification. A webhook URL is a credential (anyone
+	// holding it can post to the channel), so the config names the file,
+	// never the URL. Unset sends nothing to that channel.
+	SlackWebhookURLsFile   *string `yaml:"slack_webhook_urls_file,omitempty"`
+	DiscordWebhookURLsFile *string `yaml:"discord_webhook_urls_file,omitempty"`
+
 	// ComposeServices mirrors RegistryProxy's own three-tier resolution
 	// (explicit -compose-services flag > this key > the flag's own true
 	// default) -- see -compose-services' own flag help.
@@ -492,9 +502,14 @@ var validThinkingLevels = map[string]bool{
 // Settings is always fully populated, so callers read it directly instead
 // of dereferencing.
 type Settings struct {
-	SandboxImage       string
-	MeterImage         string
-	RegistryProxyImage string
+	// SlackWebhookURLsFile and DiscordWebhookURLsFile mirror Config's: the
+	// files the process that loaded this config reads its notification
+	// webhook URLs from. "" sends nothing to that channel.
+	SlackWebhookURLsFile   string
+	DiscordWebhookURLsFile string
+	SandboxImage           string
+	MeterImage             string
+	RegistryProxyImage     string
 	// ImageSourceRoot mirrors Config.ImageSourceRoot -- see that field's
 	// own doc comment. Advisory only: a staleness check treats an empty
 	// value as "cannot verify", never as "fresh" or "stale".
@@ -810,6 +825,8 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 		return nil
 	}
 
+	str(&s.SlackWebhookURLsFile, c.SlackWebhookURLsFile)
+	str(&s.DiscordWebhookURLsFile, c.DiscordWebhookURLsFile)
 	str(&s.SandboxImage, c.SandboxImage)
 	str(&s.MeterImage, c.MeterImage)
 	str(&s.RegistryProxyImage, c.RegistryProxyImage)
@@ -1062,8 +1079,8 @@ routes:
     allow_no_credential: true
     # Default is x-api-key; a credentialed OpenAI-compatible endpoint usually wants Authorization instead (sent as "Bearer <key>").
     # credential_header: Authorization
-    # A route that needs a key names the env var holding it (there is no default) and drops allow_no_credential.
-    # credential_env: OPENAI_API_KEY
+    # A route that needs a key names the file holding it (mode 0600, owned by you; there is no default) and drops allow_no_credential.
+    # credential_file: ~/.config/factoryd/credentials/local
   # Route the relay through GitHub Copilot instead of a static credential -- see USAGE.md §11.
   # copilot:
   #   credential_mode: github-copilot
@@ -1116,6 +1133,9 @@ roles:
 #       budget_chars: 3000   # 500 to 6000
 registry_proxy: true
 # egress_ca_bundle: /path/to/corp-ca.pem
+# Notifications: files (mode 0600) holding incoming-webhook URLs, one per line.
+# slack_webhook_urls_file: ~/.config/factoryd/credentials/slack-webhooks
+# discord_webhook_urls_file: ~/.config/factoryd/credentials/discord-webhooks
 # open_pull_request: true
 # data_dir: ~/buildgate/data
 # workspaces: absolute paths POST /requests (the console's "New request"
@@ -1178,14 +1198,31 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("parse %s: %s: %s", path, key, legacyRoutingKeyHintFor(key))
 		}
 	}
-	if modelName, key, found := retiredModelPriceKey(data); found {
+	if modelName, key, found := retiredEntryKey(data, "models", retiredModelPriceKeys); found {
 		return nil, fmt.Errorf("parse %s: models.%s.%s: moved to internal/prices/prices.yml (see USAGE_REFERENCE.md \"Model prices\")", path, modelName, key)
+	}
+	if routeName, key, found := retiredEntryKey(data, "routes", retiredRouteKeys); found {
+		return nil, fmt.Errorf("parse %s: routes.%s.%s: %s", path, routeName, key, retiredRouteKeyHint)
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var cfg Config
 	if err := dec.Decode(&cfg); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	for _, f := range []struct {
+		key  string
+		path *string
+	}{
+		{"slack_webhook_urls_file", cfg.SlackWebhookURLsFile},
+		{"discord_webhook_urls_file", cfg.DiscordWebhookURLsFile},
+	} {
+		if f.path == nil {
+			continue
+		}
+		if err := requireAbsoluteOrHomePath(f.key, *f.path); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
 	}
 	cfg.presentKeys = presentKeys
 	cfg.loadedFrom = path

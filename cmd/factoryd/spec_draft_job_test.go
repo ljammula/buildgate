@@ -113,7 +113,7 @@ func TestDraftSpecArgsIncludesThinkingWhenGiven(t *testing.T) {
 // role's alias replacing the session's own worker model id/API/base path/
 // extra JSON in the resolved relay spec.
 func TestResolveSpecDraftRelaySpecAppliesRoleOverride(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "test-key")
 	settings := sessionconfig.DefaultSettings()
 	basePath := "/v1/a"
 	settings.Routes = map[string]sessionconfig.Route{
@@ -122,7 +122,7 @@ func TestResolveSpecDraftRelaySpecAppliesRoleOverride(t *testing.T) {
 			Upstream:          "https://api.anthropic.com",
 			AllowedPathPrefix: "/v1/messages",
 			CredentialHeader:  meter.CredentialHeaderXAPIKey,
-			CredentialEnv:     "ANTHROPIC_API_KEY",
+			CredentialFile:    testRouteKeyPath("ANTHROPIC_API_KEY"),
 			WorkerBasePath:    &basePath,
 		},
 	}
@@ -163,7 +163,7 @@ func TestResolveSpecDraftRelaySpecAppliesRoleOverride(t *testing.T) {
 // policy after the "requires a credential" check ran left this alias
 // refused before it ever got the chance to apply.
 func TestResolveSpecDraftRelaySpecAllowNoCredentialReachesTheSpec(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "")
 	settings := sessionconfig.DefaultSettings()
 	settings.Routes = map[string]sessionconfig.Route{
 		"anthropic": {
@@ -231,7 +231,7 @@ func TestRequestJobContainerDeadlineWorkerTimeoutLeavesSlackOverTheScriptBudget(
 // always carries a resolved RouteSelection by the time
 // resolveRequestJobRelaySpec/resolveSpecDraftRelaySpec sees it.
 func TestResolveSpecDraftRelaySpecSucceedsWithACredential(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "test-key")
 	settings := sessionconfig.DefaultSettings()
 	settings.Routes = map[string]sessionconfig.Route{
 		"anthropic": {
@@ -239,7 +239,7 @@ func TestResolveSpecDraftRelaySpecSucceedsWithACredential(t *testing.T) {
 			Upstream:          "https://api.anthropic.com",
 			AllowedPathPrefix: "/v1/messages",
 			CredentialHeader:  meter.CredentialHeaderXAPIKey,
-			CredentialEnv:     "ANTHROPIC_API_KEY",
+			CredentialFile:    testRouteKeyPath("ANTHROPIC_API_KEY"),
 		},
 	}
 	settings.Models = map[string]sessionconfig.Model{
@@ -474,10 +474,10 @@ func TestWithDraftingWorktreeWorksWithARelativeDataDir(t *testing.T) {
 // CABundlePath at all, silently dropping -egress-ca-bundle for every
 // routes: mode spec/plan/oracle-drafting job).
 func TestResolveRequestJobRelaySpecRoutesModeCarriesCABundlePath(t *testing.T) {
-	t.Setenv("ROUTES_MODE_CA_BUNDLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "ROUTES_MODE_CA_BUNDLE_TEST_KEY", "sk-test")
 	settings := sessionconfig.DefaultSettings()
 	settings.Routes = map[string]sessionconfig.Route{
-		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ROUTES_MODE_CA_BUNDLE_TEST_KEY"},
+		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialFile: testRouteKeyPath("ROUTES_MODE_CA_BUNDLE_TEST_KEY")},
 	}
 	settings.Models = map[string]sessionconfig.Model{
 		"luna": {ID: "gpt-5.6-luna", Routes: []string{"litellm"}},

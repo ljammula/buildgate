@@ -22,12 +22,12 @@ func routesModeSettings() sessionconfig.Settings {
 		"primary": {
 			CredentialMode: "static",
 			Upstream:       "https://primary.example.invalid",
-			CredentialEnv:  "PRIMARY_KEY",
+			CredentialFile: "/keys/PRIMARY_KEY",
 		},
 		"fallback": {
 			CredentialMode: "static",
 			Upstream:       "https://fallback.example.invalid",
-			CredentialEnv:  "FALLBACK_KEY",
+			CredentialFile: "/keys/FALLBACK_KEY",
 		},
 	}
 	s.Models = map[string]sessionconfig.Model{
@@ -110,7 +110,7 @@ func TestSelectRouteSaysWhenOnlyCredentialsStoodInTheWay(t *testing.T) {
 	if _, err := SelectRoute(s, RoleExecution, "", "", "", mixed); err == nil || errors.Is(err, sandbox.ErrRouteCredential) {
 		t.Errorf("one route failed on something else: err = %v, want no ErrRouteCredential", err)
 	}
-	s.Routes["primary"] = sessionconfig.Route{CredentialMode: "static", Upstream: "ftp://primary.example.invalid", CredentialEnv: "PRIMARY_KEY"}
+	s.Routes["primary"] = sessionconfig.Route{CredentialMode: "static", Upstream: "ftp://primary.example.invalid", CredentialFile: "/keys/PRIMARY_KEY"}
 	if _, err := SelectRoute(s, RoleExecution, "", "", "", expired); err == nil || errors.Is(err, sandbox.ErrRouteCredential) {
 		t.Errorf("one route was refused before its credential was read: err = %v, want no ErrRouteCredential", err)
 	} else if !strings.Contains(err.Error(), "routes tried") {
@@ -127,7 +127,7 @@ func routesModeSettingsWithAllowedSonnet() sessionconfig.Settings {
 	s.Routes["fallback2"] = sessionconfig.Route{
 		CredentialMode: "static",
 		Upstream:       "https://fallback2.example.invalid",
-		CredentialEnv:  "FALLBACK2_KEY",
+		CredentialFile: "/keys/FALLBACK2_KEY",
 	}
 	s.Models["sonnet"] = sessionconfig.Model{ID: "claude-sonnet-5", Routes: []string{"fallback2"}}
 	s.Roles.Execution.Allowed = []string{"luna", "sonnet"}

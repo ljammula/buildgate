@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -32,7 +33,7 @@ type routeCredentials struct {
 // run_ticket.go, spec_draft_job.go, and internal/workflow/activities.go.
 // It resolves
 // r's own credential_mode against r's own credential source fields only
-// (r.CodexAuthFile, r.GitHubTokenFile/GitHubTokenKey, r.CredentialEnv) --
+// (r.CodexAuthFile, r.GitHubTokenFile/GitHubTokenKey, r.CredentialFile) --
 // never any other route's -- and runs fresh on every call (a ChatGPT
 // access token in particular must never be cached across a long-running
 // worker; see resolveChatGPTCodexCredential's own doc comment).
@@ -70,29 +71,50 @@ func resolveRouteCredentials(r sessionconfig.Route) (routeCredentials, error) {
 		}
 		return routeCredentials{githubToken: sandbox.NewRouteSecret(token)}, nil
 	default: // static
-		env := r.CredentialEnv
-		if env == "" {
-			// A route reads only the variable it names (sessionconfig.Route.
-			// CredentialEnv): never a default, which would hand another
-			// provider's key to this route's upstream.
-			if r.AllowNoCredential {
-				return routeCredentials{}, nil
-			}
-			// A configuration fault (ValidateRouting refuses it first), not a
-			// missing credential: no RouteCredentialError.
-			return routeCredentials{}, fmt.Errorf("route: a static route needs credential_env naming the environment variable that holds its key, unless allow_no_credential: true is set for a model endpoint with no real credential to protect")
-		}
-		value := os.Getenv(env)
-		if value == "" && !r.AllowNoCredential {
-			return routeCredentials{}, sandbox.RouteCredentialError(fmt.Errorf("route: static credential_mode requires %s in this process's environment, unless allow_no_credential: true is set for a model endpoint with no real credential to protect", env))
-		}
-		if value != "" && r.AllowPlaintextUpstream {
-			if err := sandbox.CredentialSafeForUpstream(r.Upstream, true, true); err != nil {
-				return routeCredentials{}, err
-			}
+		value, err := resolveStaticRouteKey(r)
+		if err != nil {
+			return routeCredentials{}, err
 		}
 		return routeCredentials{apiKey: sandbox.NewRouteSecret(value)}, nil
 	}
+}
+
+// resolveStaticRouteKey reads a static route's key from the file its
+// credential_file names (readSecretValue), fresh on every call: "" with no
+// error for an allow_no_credential route that names no file. It reads no
+// environment variable and no other route's file. A file that cannot be
+// used carries sandbox.ErrRouteCredential; a route that needs a key and
+// names no file, and a key its plaintext upstream must not carry, are
+// configuration faults and do not.
+func resolveStaticRouteKey(r sessionconfig.Route) (string, error) {
+	if r.CredentialFile == "" {
+		// Never a default, which would hand another provider's key to this
+		// route's upstream.
+		if r.AllowNoCredential {
+			return "", nil
+		}
+		// ValidateRouting refuses this first.
+		return "", fmt.Errorf("route: a static route needs credential_file naming the file (mode 0600) that holds its key, unless allow_no_credential: true is set for a model endpoint with no real credential to protect")
+	}
+	if r.AllowNoCredential {
+		// The route may be reached with no key: only a file that is there is
+		// read (and still checked).
+		if path, err := expandAuthPath(r.CredentialFile); err == nil {
+			if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+				return "", nil
+			}
+		}
+	}
+	value, err := readSecretValue(r.CredentialFile)
+	if err != nil {
+		return "", sandbox.RouteCredentialError(fmt.Errorf("route credential_file: %w", err))
+	}
+	if r.AllowPlaintextUpstream {
+		if err := sandbox.CredentialSafeForUpstream(r.Upstream, true, true); err != nil {
+			return "", err
+		}
+	}
+	return value, nil
 }
 
 // checkRouteFunc builds a Temporal Worker's own

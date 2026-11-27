@@ -14,7 +14,7 @@ import (
 // run-wide) harness is visible in its argv and worker environment.
 func jobHarnessSettings() sessionconfig.Settings {
 	s := routesModeExecutionOnlySettings()
-	s.Routes["litellm2"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://litellm2.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_TEST_KEY2"}
+	s.Routes["litellm2"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://litellm2.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_TEST_KEY2")}
 	s.Models["sonnet"] = sessionconfig.Model{ID: "sonnet-4", Routes: []string{"litellm2"}}
 	s.Roles.Execution.Harness = "pi"
 	s.Roles.Planning = &sessionconfig.RoleConfig{Model: "luna", Harness: "pifork", AllowedHarnesses: []string{"pifork", "pi"}}
@@ -26,8 +26,8 @@ func jobHarnessSettings() sessionconfig.Settings {
 // planning role's harness, oracle drafting the review role's, and each job's
 // argv names it and its worker environment follows it.
 func TestDraftingJobsUseTheirOwnRolesHarness(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
 	cfg := requestdriver.WorkerConfig{Settings: jobHarnessSettings()}
 
 	for _, tc := range []struct {

@@ -74,9 +74,9 @@ type RouteAccess struct {
 	// Provider is the gateway provider holding the route's credential, empty
 	// for a route with none (allow_no_credential).
 	Provider string
-	// CredentialEnv names the placeholders the provider supplies.
-	CredentialEnv []string
-	Endpoint      RouteEndpoint
+	// CredentialPlaceholders names the placeholders the provider supplies.
+	CredentialPlaceholders []string
+	Endpoint               RouteEndpoint
 	// Environment is the FACTORY_MODEL_* entries the worker gets.
 	Environment []string
 }
@@ -147,12 +147,12 @@ func (p RoutePolicy) RouteAccess(dataDir string, binaries []string) (RouteAccess
 	headers := map[string]string{}
 	switch {
 	case p.AuthMode == meter.CredentialModeChatGPTCodex:
-		access.CredentialEnv = []string{EnvChatGPTToken, EnvChatGPTAccount}
+		access.CredentialPlaceholders = []string{EnvChatGPTToken, EnvChatGPTAccount}
 		headers[chatGPTAccountHeader] = EnvChatGPTAccount
 	case !p.AllowUnauthenticatedUpstream:
-		access.CredentialEnv = []string{EnvModelKey}
+		access.CredentialPlaceholders = []string{EnvModelKey}
 	}
-	if len(access.CredentialEnv) > 0 {
+	if len(access.CredentialPlaceholders) > 0 {
 		if !endpoint.TLS {
 			return RouteAccess{}, fmt.Errorf("sandbox runtime: route %q sends a credential to a plaintext upstream", p.Route)
 		}
@@ -177,8 +177,8 @@ func (p RoutePolicy) RouteAccess(dataDir string, binaries []string) (RouteAccess
 	if extra != "" {
 		access.Environment = append(access.Environment, envModelExtraJSON+"="+extra)
 	}
-	if len(access.CredentialEnv) > 0 {
-		access.Environment = append(access.Environment, envModelKeyEnv+"="+access.CredentialEnv[0])
+	if len(access.CredentialPlaceholders) > 0 {
+		access.Environment = append(access.Environment, envModelKeyEnv+"="+access.CredentialPlaceholders[0])
 	}
 	if len(headers) > 0 {
 		encoded, err := json.Marshal(headers)
@@ -282,15 +282,15 @@ func (p RoutePolicy) RouteCredential(access RouteAccess, apiKey, githubToken, ch
 	// The route's access must name exactly the keys its credential mode
 	// supplies: a mismatch is a configuration fault, never a credential to
 	// refresh. Only then is a supplied key with no value the credential's.
-	if len(values) != len(access.CredentialEnv) {
+	if len(values) != len(access.CredentialPlaceholders) {
 		return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q: credential does not match the route's access", p.Route)
 	}
-	for _, name := range access.CredentialEnv {
+	for _, name := range access.CredentialPlaceholders {
 		if _, supplied := values[name]; !supplied {
 			return RouteCredential{}, fmt.Errorf("sandbox runtime: route %q: credential does not match the route's access", p.Route)
 		}
 	}
-	for _, name := range access.CredentialEnv {
+	for _, name := range access.CredentialPlaceholders {
 		if values[name] == "" {
 			return RouteCredential{}, RouteCredentialError(fmt.Errorf("sandbox runtime: route %q has no value for %s", p.Route, name))
 		}

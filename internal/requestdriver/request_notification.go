@@ -169,7 +169,7 @@ func notifyClosedRequest(dp Deps, dataDir string, r *request.Request, ticket *re
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 	return nil
 }
 
@@ -242,7 +242,7 @@ func notifyPullRequestWaiting(dp Deps, dataDir string, r *request.Request, ticke
 	notice.Next = ticket.PRURL
 	n := prepareRequestNotification(dp, dataDir, r, notice, now)
 	ticket.NotifiedPR = sent
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 }
 
 // ticketBelowMerged reports whether the pull request of the ticket before

@@ -694,7 +694,7 @@ func runFactorydWithSpec(t *testing.T, workspace, mode, verifyCommand, specConte
 
 // runFactorydWithSpecAndEnv is runFactorydWithSpec with additional
 // environment variables set on the factoryd subprocess — used by the
-// Discord notification test to point FACTORYD_DISCORD_WEBHOOK_URLS at a
+// Discord notification test to point discord_webhook_urls_file at a
 // fixture HTTP server.
 func runFactorydWithSpecAndEnv(t *testing.T, workspace, mode, verifyCommand, specContent, timeout string, extraEnv []string) *run.Run {
 	t.Helper()

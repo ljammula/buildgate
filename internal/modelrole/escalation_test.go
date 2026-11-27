@@ -12,7 +12,7 @@ import (
 // high.
 func escalationSettings() sessionconfig.Settings {
 	s := routesModeSettings()
-	s.Routes["strong"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://strong.example.invalid", CredentialEnv: "STRONG_KEY"}
+	s.Routes["strong"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://strong.example.invalid", CredentialFile: "/keys/STRONG_KEY"}
 	s.Models["sol"] = sessionconfig.Model{ID: "gpt-5.6-sol", Routes: []string{"strong"}}
 	s.Roles.Execution.Allowed = []string{"luna", "sol"}
 	s.Roles.Execution.Escalation = &sessionconfig.Escalation{Model: "sol", Thinking: "high"}

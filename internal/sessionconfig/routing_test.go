@@ -12,14 +12,14 @@ import (
 
 // TestRoutingAppliesRouteDefaults confirms Settings.Routing() applies
 // defaultedRoute uniformly across every routes: entry: a static route
-// keeps the CredentialEnv it names (no default) and defaults Billing to metered; a
+// keeps the CredentialFile it names (no default) and defaults Billing to metered; a
 // chatgpt-codex route defaults Billing to subscription and never
-// defaults CredentialEnv (credential_env only applies to a static
+// defaults CredentialFile (credential_file only applies to a static
 // route). Routing only defaults Routes, never Models.
 func TestRoutingAppliesRouteDefaults(t *testing.T) {
 	s := DefaultSettings()
 	s.Routes = map[string]Route{
-		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "ANTHROPIC_API_KEY"},
+		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialFile: "~/.config/factoryd/credentials/litellm"},
 		"codex":   {CredentialMode: "chatgpt-codex"},
 	}
 	s.Models = map[string]Model{"luna": {ID: "gpt-5.6-luna", Routes: []string{"litellm", "codex"}}}
@@ -27,8 +27,8 @@ func TestRoutingAppliesRouteDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Routing: %v", err)
 	}
-	if routes["litellm"].CredentialEnv != "ANTHROPIC_API_KEY" {
-		t.Errorf(`routes["litellm"].CredentialEnv = %q, want ANTHROPIC_API_KEY (as declared; no default)`, routes["litellm"].CredentialEnv)
+	if routes["litellm"].CredentialFile != "~/.config/factoryd/credentials/litellm" {
+		t.Errorf(`routes["litellm"].CredentialFile = %q, want the declared path (no default)`, routes["litellm"].CredentialFile)
 	}
 	if routes["litellm"].Billing != run.BillingMetered {
 		t.Errorf(`routes["litellm"].Billing = %q, want %q`, routes["litellm"].Billing, run.BillingMetered)
@@ -36,8 +36,8 @@ func TestRoutingAppliesRouteDefaults(t *testing.T) {
 	if routes["codex"].Billing != run.BillingSubscription {
 		t.Errorf(`routes["codex"].Billing = %q, want %q`, routes["codex"].Billing, run.BillingSubscription)
 	}
-	if routes["codex"].CredentialEnv != "" {
-		t.Errorf(`routes["codex"].CredentialEnv = %q, want empty: credential_env only applies to a static route`, routes["codex"].CredentialEnv)
+	if routes["codex"].CredentialFile != "" {
+		t.Errorf(`routes["codex"].CredentialFile = %q, want empty: credential_file only applies to a static route`, routes["codex"].CredentialFile)
 	}
 	if len(models) != 1 || models["luna"].ID != "gpt-5.6-luna" {
 		t.Errorf("models = %#v, want the configured luna model unchanged (Routing only defaults Routes, never Models)", models)

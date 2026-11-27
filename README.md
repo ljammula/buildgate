@@ -247,8 +247,8 @@ tickets, submitted together.
    ```
 
 5. **Submit each part.** When no worker is running for the profile, submit
-   starts one from your shell, so export every route's credentials first; a
-   running worker keeps the environment it started with.
+   starts one; every route reads its key from its own file, so nothing needs
+   exporting first.
 
    ```sh
    cd ~/code/my-app
@@ -443,8 +443,8 @@ worker image (`make pifork-image`,
 
 | Route | `credential_mode` | Credential (host-side only) | Notes |
 |---|---|---|---|
-| OpenAI-compatible endpoint (local ai-stack, vLLM, Ollama, OpenAI, any gateway) | `static` | None, or an `Authorization` header | `upstream: <URL>`, `allowed_path_prefix: /v1` (must match `worker_base_path`); model `id` from `GET <URL>/v1/models`; `api: openai-responses` for a Responses-only model |
-| Anthropic API key (Pi) | `static` | `ANTHROPIC_API_KEY` | The native Messages API (`api: anthropic-messages`); default model `claude-sonnet-5-5` with adaptive thinking. The Codex CLI cannot speak it |
+| OpenAI-compatible endpoint (local ai-stack, vLLM, Ollama, OpenAI, any gateway) | `static` | None, or the route's `credential_file` sent as an `Authorization` header | `upstream: <URL>`, `allowed_path_prefix: /v1` (must match `worker_base_path`); model `id` from `GET <URL>/v1/models`; `api: openai-responses` for a Responses-only model |
+| Anthropic API key (Pi) | `static` | The route's `credential_file` (mode 0600; `quickstart` writes it from `-credential` or `ANTHROPIC_API_KEY`) | The native Messages API (`api: anthropic-messages`); default model `claude-sonnet-5-5` with adaptive thinking. The Codex CLI cannot speak it |
 | GitHub Copilot (Pi, a Pi fork or the Copilot CLI harness) | `github-copilot` | The route's `github_token_file`, then `GITHUB_COPILOT_TOKEN`, then `~/.pi/agent/auth.json` | One entitled model `id`. A model that can't run under the configured worker API is refused with the reason |
 | ChatGPT (Codex OAuth) | `chatgpt-codex` | `~/.codex/auth.json`, read fresh per launch, never refreshed or written | Model `gpt-6-luna`. A launch whose token expires before the step's time budget ends is refused (fix: run any `codex` command). Upstream and paths are pinned |
 

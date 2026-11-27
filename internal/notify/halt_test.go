@@ -79,7 +79,7 @@ func TestPrepareHaltIncludesHaltError(t *testing.T) {
 // TestDispatchExternalCallsAllThreeChannels proves DispatchExternal
 // reaches Discord, Slack, and the desktop notifier, using each channel's
 // own configured/injected seam as a spy: two fake webhook servers stood
-// in via the two env vars (the same seam DiscordWebhookURLs/DispatchDiscord
+// in through Webhooks (the same seam DispatchDiscord
 // already use), and the desktop notifier's osascript lookup pointed at a stand-in script
 // that records its own invocation, since there is no HTTP call to
 // intercept for the desktop channel.
@@ -96,8 +96,7 @@ func TestDispatchExternalCallsAllThreeChannels(t *testing.T) {
 	}))
 	defer slackSrv.Close()
 
-	t.Setenv(DiscordWebhookURLsEnvironmentVariable, discordSrv.URL)
-	t.Setenv(SlackWebhookURLsEnvironmentVariable, slackSrv.URL)
+	hooks := Webhooks{Discord: []string{discordSrv.URL}, Slack: []string{slackSrv.URL}}
 	t.Setenv(DesktopNotificationsEnvironmentVariable, "1")
 
 	marker := filepath.Join(t.TempDir(), "desktop-notifier-invoked")
@@ -110,7 +109,7 @@ func TestDispatchExternalCallsAllThreeChannels(t *testing.T) {
 	env.os = "darwin"
 	env.notifierLookPath = func() (string, error) { return script, nil }
 
-	dispatchExternal(DesktopNotifier{env: env}, t.TempDir(), Notification{RunID: "run-1", Ticket: "ticket-1", State: run.StateHalted, Reason: "test"})
+	dispatchExternal(DesktopNotifier{env: env}, t.TempDir(), hooks, Notification{RunID: "run-1", Ticket: "ticket-1", State: run.StateHalted, Reason: "test"})
 	// DispatchExternal itself returns immediately (its fan-out runs on a
 	// background goroutine) -- wait for it to finish before asserting.
 	WaitForPendingDispatches(5 * time.Second)
@@ -141,9 +140,9 @@ func TestWaitForPendingDispatchesWaitsForSlowDispatch(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	t.Setenv(DiscordWebhookURLsEnvironmentVariable, srv.URL)
+	hooks := Webhooks{Discord: []string{srv.URL}}
 
-	DispatchExternal(t.TempDir(), Notification{RunID: "run-1"})
+	DispatchExternal(t.TempDir(), hooks, Notification{RunID: "run-1"})
 
 	start := time.Now()
 	WaitForPendingDispatches(5 * time.Second)
@@ -168,9 +167,9 @@ func TestWaitForPendingDispatchesReturnsOnTimeout(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
-	t.Setenv(DiscordWebhookURLsEnvironmentVariable, srv.URL)
+	hooks := Webhooks{Discord: []string{srv.URL}}
 
-	DispatchExternal(t.TempDir(), Notification{RunID: "run-1"})
+	DispatchExternal(t.TempDir(), hooks, Notification{RunID: "run-1"})
 
 	start := time.Now()
 	WaitForPendingDispatches(100 * time.Millisecond)
@@ -219,10 +218,9 @@ func TestDispatchExternalRunsChannelsConcurrently(t *testing.T) {
 	}))
 	defer slackSrv.Close()
 
-	t.Setenv(DiscordWebhookURLsEnvironmentVariable, discordSrv.URL)
-	t.Setenv(SlackWebhookURLsEnvironmentVariable, slackSrv.URL)
+	hooks := Webhooks{Discord: []string{discordSrv.URL}, Slack: []string{slackSrv.URL}}
 
-	DispatchExternal(t.TempDir(), Notification{RunID: "run-1"})
+	DispatchExternal(t.TempDir(), hooks, Notification{RunID: "run-1"})
 
 	select {
 	case <-slackHit:

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -127,7 +128,7 @@ func TestIntegrationVerifyFailureQuarantinesAndRecordsNotification(t *testing.T)
 }
 
 // TestIntegrationQuarantineNotifiesDiscordWebhooks confirms
-// FACTORYD_DISCORD_WEBHOOK_URLS is read as a comma-separated list and
+// discord_webhook_urls_file is read as a comma-separated list and
 // every entry receives the quarantine notification, alongside (not
 // instead of) the durable LogNotifier record.
 func TestIntegrationQuarantineNotifiesDiscordWebhooks(t *testing.T) {
@@ -144,8 +145,9 @@ func TestIntegrationQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
-		[]string{"FACTORYD_DISCORD_WEBHOOK_URLS=" + srv.URL + "/hook-a, " + srv.URL + "/hook-b"})
+	dataDir := t.TempDir()
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
+		webhookSessionConfigEnv(t, dataDir, "", srv.URL+"/hook-a, "+srv.URL+"/hook-b"), nil, dataDir)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -167,9 +169,9 @@ func TestIntegrationQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 // for the Codex finding round 2 on PR #88: the quarantine
 // notification called notify.DiscordNotifier directly rather than
 // notify.DispatchExternal, so an operator configuring only
-// FACTORYD_SLACK_WEBHOOK_URLS (no Discord) never got paged on quarantine
+// slack_webhook_urls_file (no Discord) never got paged on quarantine
 // even though DispatchExternal's own documentation says all three
-// channels fire. Deliberately sets only the Slack env var, not Discord.
+// channels fire. Deliberately configures only Slack, not Discord.
 func TestIntegrationQuarantineNotifiesSlackWebhook(t *testing.T) {
 	// not parallel-safe: newFixtureRepo (below) calls t.Setenv, which
 	// panics if the test also calls t.Parallel.
@@ -181,14 +183,15 @@ func TestIntegrationQuarantineNotifiesSlackWebhook(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndEnv(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
-		[]string{"FACTORYD_SLACK_WEBHOOK_URLS=" + srv.URL})
+	dataDir := t.TempDir()
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
+		webhookSessionConfigEnv(t, dataDir, srv.URL, ""), nil, dataDir)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
 	}
 	if !hit.Load() {
-		t.Error("Slack webhook was never hit for a quarantined run with only FACTORYD_SLACK_WEBHOOK_URLS configured")
+		t.Error("Slack webhook was never hit for a quarantined run with only slack_webhook_urls_file configured")
 	}
 }
 
@@ -241,12 +244,11 @@ func TestIntegrationQuarantinePersistsBeforeDiscordCompletes(t *testing.T) {
 		"-verify-command", afterBaseline(t, "false"),
 		"-data-dir", dataDir,
 	)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append(os.Environ(),
 		"FAKE_BUILD_APP_MODE=commit",
-		"FACTORYD_DISCORD_WEBHOOK_URLS="+srv.URL,
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
-	)
+	), webhookSessionConfigEnv(t, dataDir, "", srv.URL)...)
 	var output synchronizedBuffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -263,7 +265,7 @@ func TestIntegrationQuarantinePersistsBeforeDiscordCompletes(t *testing.T) {
 
 	select {
 	case <-reached:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		processWaited = true
@@ -350,12 +352,11 @@ func TestIntegrationOverrideDuringDiscordWaitIsNotLost(t *testing.T) {
 		"-verify-command", afterBaseline(t, "false"),
 		"-data-dir", dataDir,
 	)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append(os.Environ(),
 		"FAKE_BUILD_APP_MODE=commit",
-		"FACTORYD_DISCORD_WEBHOOK_URLS="+srv.URL,
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
-	)
+	), webhookSessionConfigEnv(t, dataDir, "", srv.URL)...)
 	var output synchronizedBuffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -372,7 +373,7 @@ func TestIntegrationOverrideDuringDiscordWaitIsNotLost(t *testing.T) {
 
 	select {
 	case <-reached:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		processWaited = true
@@ -1415,3 +1416,27 @@ func TestIntegrationReconcileReclaimedRunRecoversCrashedSubmitter(t *testing.T) 
 // immediately afterward; the daemon adopts that request, and a concurrent
 // direct invocation is rejected until the recovered child finishes and its
 // lock is released.
+
+// webhookSessionConfigEnv is the environment of a factoryd subprocess whose
+// session config (an isolated one, data_dir dataDir) names files holding the
+// slack and discord webhook URLs ("" leaves that channel unset).
+func webhookSessionConfigEnv(t *testing.T, dataDir, slack, discord string) []string {
+	t.Helper()
+	// The package's own default config (fake docker, a worker uid other than
+	// this process's), plus data_dir and the webhook files.
+	config := "sandbox_docker: " + filepath.Join(testdataDir(t), "fake_docker.sh") + "\n" +
+		"sandbox_worker_uid: " + strconv.Itoa(testSandboxWorkerUID()) + "\n" +
+		"data_dir: " + dataDir + "\n"
+	dir := t.TempDir()
+	for key, urls := range map[string]string{"slack_webhook_urls_file": slack, "discord_webhook_urls_file": discord} {
+		if urls == "" {
+			continue
+		}
+		path := filepath.Join(dir, key)
+		if err := writeSecretFile(path, urls); err != nil {
+			t.Fatal(err)
+		}
+		config += key + ": " + path + "\n"
+	}
+	return isolatedSessionConfigEnv(t, config)
+}

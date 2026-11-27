@@ -209,7 +209,10 @@ func TestWorkerSpawnArgs(t *testing.T) {
 	}
 }
 
-func TestShellCredentialEnvKeepsWhatTheShellHas(t *testing.T) {
+// TestShellCredentialEnvKeepsOnlyTheCopilotToken proves a worker started from
+// a shell gets the shell's GITHUB_COPILOT_TOKEN and never its
+// ANTHROPIC_API_KEY: no route reads a key from the environment.
+func TestShellCredentialEnvKeepsOnlyTheCopilotToken(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 	t.Setenv("GITHUB_COPILOT_TOKEN", "")
 	got := QuickstartChildEnv(ShellCredentialEnv())
@@ -222,8 +225,8 @@ func TestShellCredentialEnvKeepsWhatTheShellHas(t *testing.T) {
 			copilot = append(copilot, kv)
 		}
 	}
-	if len(anthropic) != 1 || anthropic[0] != "ANTHROPIC_API_KEY=sk-test" {
-		t.Errorf("child ANTHROPIC_API_KEY entries = %v, want exactly the shell's value", anthropic)
+	if len(anthropic) != 0 {
+		t.Errorf("child ANTHROPIC_API_KEY entries = %v, want none", anthropic)
 	}
 	if len(copilot) != 1 || copilot[0] != "GITHUB_COPILOT_TOKEN=" {
 		t.Errorf("child GITHUB_COPILOT_TOKEN entries = %v, want exactly the shell's (empty) value", copilot)

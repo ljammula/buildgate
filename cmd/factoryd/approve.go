@@ -56,7 +56,7 @@ func approveMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
-	opts, err := gateExpiryOptions(*configPath)
+	opts, err := gateExpiryOptions(dp, *configPath)
 	if err != nil {
 		return fmt.Errorf("approve request %q: %w", id, err)
 	}
@@ -153,7 +153,7 @@ func rejectMain(dp *deps, args []string) error {
 		return nil
 	}
 
-	opts, err := gateExpiryOptions(*configPath)
+	opts, err := gateExpiryOptions(dp, *configPath)
 	if err != nil {
 		return fmt.Errorf("reject request %q: %w", id, err)
 	}
@@ -223,12 +223,14 @@ func currentOSUser() string {
 // gateExpiryOptions makes a decision refuse a review gate past the session
 // config's review_gate_expiry, atomically under the request's lock
 // (request.WithGateExpiry). A config that does not load refuses the decision:
-// a gate's expiry is not guessed.
-func gateExpiryOptions(configPath string) ([]request.DecisionOption, error) {
+// a gate's expiry is not guessed. The config's webhook files become the
+// ones an expiry notification is posted to (useWebhookFiles).
+func gateExpiryOptions(dp *deps, configPath string) ([]request.DecisionOption, error) {
 	settings, err := loadSettingsForConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("the session config cannot be read, so review_gate_expiry is unknown and the decision is refused: %w", err)
 	}
+	dp.useWebhookFiles(settings, os.Getenv)
 	return []request.DecisionOption{request.WithGateExpiry(settings.ReviewGateExpiry)}, nil
 }
 

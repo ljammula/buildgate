@@ -60,7 +60,7 @@ func writeAgentsDraftAfterLaunch(t *testing.T, rt *sandboxtest.WorkerRuntime, co
 }
 
 func TestRunAgentsDraftJobWritesAnUncommittedDraftThroughTheSandbox(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	workspace, dataDir, _ := runtimeJobWorkspace(t)
 	if out, err := exec.Command("git", "-C", workspace, "-c", "user.name=buildgate-test", "-c", "user.email=buildgate-test@example.com", "commit", "--allow-empty", "-m", "initial").CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, out)
@@ -142,7 +142,7 @@ func TestRunAgentsDraftJobLeavesAnExistingFileAlone(t *testing.T) {
 }
 
 func TestRunAgentsDraftJobFailureLeavesNoFileAndReportsOneLine(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	workspace, dataDir, _ := runtimeJobWorkspace(t)
 	if out, err := exec.Command("git", "-C", workspace, "-c", "user.name=buildgate-test", "-c", "user.email=buildgate-test@example.com", "commit", "--allow-empty", "-m", "initial").CombinedOutput(); err != nil {
 		t.Fatalf("git commit: %v: %s", err, out)
@@ -164,7 +164,7 @@ func TestRunAgentsDraftJobFailureLeavesNoFileAndReportsOneLine(t *testing.T) {
 }
 
 func TestRunAgentsDraftJobGivesTheModelOnlyTheCommittedTree(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	workspace, dataDir, _ := runtimeJobWorkspace(t)
 	if err := os.WriteFile(filepath.Join(workspace, "README.md"), []byte("read me\n"), 0o644); err != nil {
 		t.Fatal(err)

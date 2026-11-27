@@ -167,6 +167,7 @@ func (d *daemonRun) loadConfig() error {
 	if err := validateRoles(d.settings); err != nil {
 		return err
 	}
+	d.dp.useWebhookFiles(d.settings, os.Getenv)
 	d.buildAppMaxAttempts = &d.settings.BuildAppMaxAttempts
 	d.verifyMaxAttempts = &d.settings.VerifyMaxAttempts
 	d.sandboxDocker = &d.settings.SandboxDocker

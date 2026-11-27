@@ -22,7 +22,7 @@ import (
 // outputs (see writeReadBackAfterLaunch).
 func readBackJobFixture(t *testing.T, exitCode int) (string, *request.Request, requestdriver.WorkerConfig, *sandboxtest.WorkerRuntime) {
 	t.Helper()
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	dataDir := t.TempDir()
 	r := requestdrivertest.HandedOverRequest(t, dataDir, requestdrivertest.CanonicalValidSpec)
 	if err := os.WriteFile(requestdriver.RequestSpecPath(dataDir, r.ID), []byte(requestdrivertest.CanonicalValidSpec), 0o600); err != nil {

@@ -25,7 +25,7 @@ func TestSelectionCannotCarryACredential(t *testing.T) {
 		// Policy fields named after "credential" that hold a mode name,
 		// an env var NAME, or an opt-in flag, never a value.
 		"Selection.Route.CredentialMode":    reflect.String,
-		"Selection.Route.CredentialEnv":     reflect.String,
+		"Selection.Route.CredentialFile":    reflect.String,
 		"Selection.Route.CredentialHeader":  reflect.String,
 		"Selection.Route.AllowNoCredential": reflect.Bool,
 		// The operator's worker models.json extras: rendered into

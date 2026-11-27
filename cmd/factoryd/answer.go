@@ -47,7 +47,7 @@ func answerMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
-	opts, err := gateExpiryOptions(*configPath)
+	opts, err := gateExpiryOptions(dp, *configPath)
 	if err != nil {
 		return fmt.Errorf("answer request %q: %w", id, err)
 	}

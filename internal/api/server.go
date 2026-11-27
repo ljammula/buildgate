@@ -466,6 +466,15 @@ func WithConsoleBaseURL(resolve func(dataDir string) string) Option {
 	}
 }
 
+// WithNotifyWebhooks supplies how the server reads the webhook URLs a halt
+// notification is posted to: those of the session config serve loaded. Without one, a halt notification
+// is posted to no webhook.
+func WithNotifyWebhooks(resolve func() notify.Webhooks) Option {
+	return func(s *Server) {
+		s.notifyWebhooks = resolve
+	}
+}
+
 // WithRunStarter supplies the execution implementation used by POST /runs.
 // Without one, the endpoint is unavailable and fails closed rather than
 // pretending a run was started.
@@ -641,6 +650,8 @@ type Server struct {
 	// consoleBaseURL resolves the console base URL for a data dir; nil means
 	// no console link.
 	consoleBaseURL func(dataDir string) string
+	// notifyWebhooks reads the webhook URLs; nil means none.
+	notifyWebhooks func() notify.Webhooks
 	// sessionTokenCeiling/sessionCostCeilingMicroUSD are the session
 	// config's own effective relay ceilings (sessionconfig.Settings.
 	// EffectiveRelayCeilings), set by WithSessionRelayCeilings and
@@ -2496,7 +2507,7 @@ func (s *Server) overrideRun(w http.ResponseWriter, r *http.Request) {
 		// on its own goroutine and returns immediately, so this handler
 		// is never blocked on it.
 		if dispatchHalt {
-			notify.DispatchExternal(s.dataDir, haltNotification)
+			notify.DispatchExternal(s.dataDir, s.webhooks(), haltNotification)
 		}
 		// Found via Codex review of PR #45: an override to accepted is
 		// exactly the AllowOverrides=true case internal/release.MergePolicy
@@ -4997,6 +5008,15 @@ func (s *Server) rollbackOverriddenRun(id string, loaded *run.Run) {
 	if err := loaded.Persist(s.dataDir); err != nil {
 		log.Printf("run %s: clear kept-for-resume after override rollback: %v", id, err)
 	}
+}
+
+// webhooks are the notification webhook URLs of serve's session config, none
+// when no resolver was supplied.
+func (s *Server) webhooks() notify.Webhooks {
+	if s.notifyWebhooks == nil {
+		return notify.Webhooks{}
+	}
+	return s.notifyWebhooks()
 }
 
 // consoleBase is the console base URL for the server's data dir, "" when

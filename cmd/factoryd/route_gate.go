@@ -106,14 +106,9 @@ func routeWaitSentence(s sessionconfig.Settings, role modelrole.Role, failed map
 }
 
 // credentialFromWorkerEnv reports whether route's credential is read from the
-// worker process's own environment, which only a restart changes: a static
-// key, or a github-copilot route with no token file.
+// worker process's own environment, which only a restart changes: a
+// github-copilot route with no token file (its GITHUB_COPILOT_TOKEN). A static
+// key is read from its credential_file at each check.
 func credentialFromWorkerEnv(route sessionconfig.Route) bool {
-	switch route.EffectiveCredentialMode() {
-	case meter.CredentialModeStatic:
-		return true
-	case meter.CredentialModeGitHubCopilot:
-		return route.GitHubTokenFile == ""
-	}
-	return false
+	return route.EffectiveCredentialMode() == meter.CredentialModeGitHubCopilot && route.GitHubTokenFile == ""
 }

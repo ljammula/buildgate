@@ -299,19 +299,18 @@ func EnsureWorkerAndServe(dp Deps, w io.Writer, configPath, dataDir string) {
 	EnsureServe(dp, w, binaryPath, configPath, dataDir)
 }
 
-// ShellCredentialEnv returns the credential variables QuickstartChildEnv
-// scrubs, as this process has them, so a worker started here gets the
-// environment it would have had if the operator had run `factoryd worker`
-// from the same shell. quickstart passes its own route decision instead;
-// submit and console have no such decision to make.
+// ShellCredentialEnv returns GITHUB_COPILOT_TOKEN as this process has it, so
+// a worker started here can still use a github-copilot route that names no
+// github_token_file, as `factoryd worker` from the same shell could. No other
+// credential is forwarded: a static route reads its key from its
+// credential_file, and ANTHROPIC_API_KEY, which QuickstartChildEnv scrubs, is
+// never put back. quickstart passes its own route decision instead; submit
+// and console have no such decision to make.
 func ShellCredentialEnv() []string {
-	var env []string
-	for _, name := range []string{"ANTHROPIC_API_KEY", "GITHUB_COPILOT_TOKEN"} {
-		if v, ok := os.LookupEnv(name); ok {
-			env = append(env, name+"="+v)
-		}
+	if v, ok := os.LookupEnv("GITHUB_COPILOT_TOKEN"); ok {
+		return []string{"GITHUB_COPILOT_TOKEN=" + v}
 	}
-	return env
+	return nil
 }
 
 // EnsureServe starts `factoryd serve` for dataDir unless one is already

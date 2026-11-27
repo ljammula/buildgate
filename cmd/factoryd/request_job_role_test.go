@@ -18,7 +18,7 @@ import (
 func routesModeExecutionOnlySettings() sessionconfig.Settings {
 	s := sessionconfig.DefaultSettings()
 	s.Routes = map[string]sessionconfig.Route{
-		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_TEST_KEY"},
+		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_TEST_KEY")},
 	}
 	s.Models = map[string]sessionconfig.Model{
 		"luna": {ID: "gpt-5.6-luna", Routes: []string{"litellm"}},
@@ -34,7 +34,7 @@ func routesModeExecutionOnlySettings() sessionconfig.Settings {
 // session-default model, so an unset roles.planning must fall back to
 // the build's own role rather than refusing the job outright.
 func TestResolveRequestJobRoleRoutesModeSpecDraftingFallsBackToExecution(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	cfg := requestdriver.WorkerConfig{Settings: routesModeExecutionOnlySettings()}
 	got, err := resolveRequestJobRole(cfg, modelrole.StageSpecDrafting, "spec drafting", "", "")
 	if err != nil {
@@ -52,10 +52,10 @@ func TestResolveRequestJobRoleRoutesModeSpecDraftingFallsBackToExecution(t *test
 // the fallback only fires for an UNSET role: when roles.planning is
 // itself configured, it is used directly, not roles.execution's.
 func TestResolveRequestJobRoleRoutesModeUsesItsOwnRoleWhenConfigured(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
 	settings := routesModeExecutionOnlySettings()
-	settings.Routes["litellm2"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://litellm2.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_TEST_KEY2"}
+	settings.Routes["litellm2"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://litellm2.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_TEST_KEY2")}
 	settings.Models["sonnet"] = sessionconfig.Model{ID: "sonnet-4", Routes: []string{"litellm2"}}
 	settings.Roles.Planning = &sessionconfig.RoleConfig{Model: "sonnet"}
 
@@ -75,10 +75,10 @@ func TestResolveRequestJobRoleRoutesModeUsesItsOwnRoleWhenConfigured(t *testing.
 // planning itself: accepted when it names a member of
 // roles.planning.allowed.
 func TestResolveRequestJobRolePassesPlanningModelChoice(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY2", "sk-test2")
 	settings := routesModeExecutionOnlySettings()
-	settings.Routes["litellm2"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://litellm2.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_TEST_KEY2"}
+	settings.Routes["litellm2"] = sessionconfig.Route{CredentialMode: "static", Upstream: "https://litellm2.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_TEST_KEY2")}
 	settings.Models["sonnet"] = sessionconfig.Model{ID: "sonnet-4", Routes: []string{"litellm2"}}
 	settings.Roles.Planning = &sessionconfig.RoleConfig{Model: "luna", Allowed: []string{"luna", "sonnet"}}
 
@@ -100,11 +100,11 @@ func TestResolveRequestJobRolePassesPlanningModelChoice(t *testing.T) {
 // (operator rule: silence is a bug).
 func TestResolveRequestJobRoleRecordsSkipOnRouteSelection(t *testing.T) {
 	os.Unsetenv("REQUEST_JOB_ROLE_SKIP_FIRST")
-	t.Setenv("REQUEST_JOB_ROLE_SKIP_SECOND", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_SKIP_SECOND", "sk-test")
 	settings := sessionconfig.DefaultSettings()
 	settings.Routes = map[string]sessionconfig.Route{
-		"first":  {CredentialMode: "static", Upstream: "https://first.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_SKIP_FIRST"},
-		"second": {CredentialMode: "static", Upstream: "https://second.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_SKIP_SECOND"},
+		"first":  {CredentialMode: "static", Upstream: "https://first.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_SKIP_FIRST")},
+		"second": {CredentialMode: "static", Upstream: "https://second.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_SKIP_SECOND")},
 	}
 	settings.Models = map[string]sessionconfig.Model{
 		"luna": {ID: "gpt-5.6-luna", Routes: []string{"first", "second"}},
@@ -129,10 +129,10 @@ func TestResolveRequestJobRoleRecordsSkipOnRouteSelection(t *testing.T) {
 // RouteSelection carries the model/route the role names, and Thinking
 // mirrors sel.Thinking (roles.planning.thinking).
 func TestResolveRequestJobRoleAppliesThinkingFromTheRole(t *testing.T) {
-	t.Setenv("REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
+	setTestRouteKey(t, "REQUEST_JOB_ROLE_TEST_KEY", "sk-test")
 	settings := sessionconfig.DefaultSettings()
 	settings.Routes = map[string]sessionconfig.Route{
-		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialEnv: "REQUEST_JOB_ROLE_TEST_KEY"},
+		"litellm": {CredentialMode: "static", Upstream: "https://litellm.example.invalid", CredentialFile: testRouteKeyPath("REQUEST_JOB_ROLE_TEST_KEY")},
 	}
 	settings.Models = map[string]sessionconfig.Model{
 		"model-a": {ID: "model-a", Routes: []string{"litellm"}, API: "openai-completions"},

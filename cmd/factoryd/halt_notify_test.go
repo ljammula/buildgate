@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"buildgate/internal/notify"
 	"buildgate/internal/run"
 )
 
@@ -125,11 +126,11 @@ func TestSaveDoesNotNotifyNonHaltedStates(t *testing.T) {
 // disk (bypassing this process's own in-memory r) and assert the halted
 // state is already there by the time the webhook fires.
 //
-// save(dp, ) now dispatches notify.DispatchExternal on a goroutine (PR #88
+// save(newTestDeps(t), ) now dispatches notify.DispatchExternal on a goroutine (PR #88
 // fix, so a run's own save never blocks on network I/O), so the webhook
-// can fire after save(dp, ) has already returned -- the handler's own result
+// can fire after save(newTestDeps(t), ) has already returned -- the handler's own result
 // is handed back over hookDone and awaited with a timeout, rather than
-// read from a shared variable straight after save(dp, ) returns.
+// read from a shared variable straight after save(newTestDeps(t), ) returns.
 func TestSavePersistsHaltBeforeDispatchingDiscord(t *testing.T) {
 	dataDir := t.TempDir()
 	hookDone := make(chan run.State, 1)
@@ -143,10 +144,10 @@ func TestSavePersistsHaltBeforeDispatchingDiscord(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer webhook.Close()
-	t.Setenv("FACTORYD_DISCORD_WEBHOOK_URLS", webhook.URL)
+	dp := depsWithDiscordWebhook(t, webhook.URL)
 
 	r := &run.Run{ID: "run-1", Ticket: "fixture-ticket", State: run.StateHalted}
-	if err := save(newTestDeps(t), r, dataDir); err != nil {
+	if err := save(dp, r, dataDir); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -176,10 +177,10 @@ func TestSaveReturnsErrorWithoutDispatchingDiscordOnSaveFailure(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer webhook.Close()
-	t.Setenv("FACTORYD_DISCORD_WEBHOOK_URLS", webhook.URL)
+	dp := depsWithDiscordWebhook(t, webhook.URL)
 
 	r := &run.Run{ID: "run-1", Ticket: "fixture-ticket", State: run.StateHalted}
-	if err := save(newTestDeps(t), r, notADir); err == nil {
+	if err := save(dp, r, notADir); err == nil {
 		t.Fatal("save(dp, ) error = nil, want an error since dataDir cannot hold a run directory")
 	}
 	if dispatched {
@@ -207,13 +208,13 @@ func TestSaveReturnsWithoutWaitingOnSlowWebhook(t *testing.T) {
 	}))
 	defer webhook.Close()
 	defer close(blockCh)
-	t.Setenv("FACTORYD_DISCORD_WEBHOOK_URLS", webhook.URL)
+	dp := depsWithDiscordWebhook(t, webhook.URL)
 
 	dataDir := t.TempDir()
 	r := &run.Run{ID: "run-1", Ticket: "fixture-ticket", State: run.StateHalted}
 
 	done := make(chan error, 1)
-	go func() { done <- save(newTestDeps(t), r, dataDir) }()
+	go func() { done <- save(dp, r, dataDir) }()
 
 	select {
 	case err := <-done:
@@ -261,9 +262,19 @@ func TestSaveRollsBackStagedNotificationOnSaveFailure(t *testing.T) {
 
 	r := &run.Run{ID: "run-1", Ticket: "fixture-ticket", State: run.StateHalted}
 	if err := save(newTestDeps(t), r, dataDir); err == nil {
-		t.Fatal("save(dp, ) error = nil, want an error since run.json cannot be created in a read-only directory")
+		t.Fatal("save(newTestDeps(t), ) error = nil, want an error since run.json cannot be created in a read-only directory")
 	}
 	if len(r.Notifications) != 0 {
 		t.Errorf("Notifications = %+v, want empty -- a notification staged before a failed save must be rolled back", r.Notifications)
 	}
+}
+
+// depsWithDiscordWebhook is newTestDeps whose session config names url as its
+// one Discord webhook.
+func depsWithDiscordWebhook(t *testing.T, url string) *deps {
+	t.Helper()
+	dp := newTestDeps(t)
+	dp.webhooks.files.Store(&webhookFiles{Discord: "/discord-webhooks"})
+	fakeHostOf(dp).notifyWebhooksFn = func(webhookFiles) notify.Webhooks { return notify.Webhooks{Discord: []string{url}} }
+	return dp
 }

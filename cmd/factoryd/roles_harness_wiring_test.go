@@ -19,7 +19,7 @@ func TestIntegrationExecutionRoleHarnessReachesBuildAppArgvAndAttempt(t *testing
 		t.Fatalf("resolve fake docker path: %v", err)
 	}
 	config := "sandbox_docker: " + fakeDockerPath + "\n" +
-		"routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_env: INTEGRATION_HARNESS_TEST_KEY\n" +
+		"routes:\n  litellm:\n    credential_mode: static\n    upstream: https://litellm.example.invalid\n    credential_file: " + testRouteKeyPath("INTEGRATION_HARNESS_TEST_KEY") + "\n" +
 		"models:\n  luna:\n    id: gpt-9000\n    api: openai-completions\n    routes: [litellm]\n" +
 		"  other:\n    id: gpt-9001\n    api: openai-completions\n    routes: [litellm]\n" +
 		"roles:\n  execution:\n    model: luna\n    harness: pifork\n    allowed_harnesses: [pifork, pi]\n" +
@@ -36,7 +36,7 @@ func TestIntegrationExecutionRoleHarnessReachesBuildAppArgvAndAttempt(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			ws := newFixtureRepo(t)
 			path := isolateSessionConfig(t)
-			t.Setenv("INTEGRATION_HARNESS_TEST_KEY", "sk-test")
+			setTestRouteKey(t, "INTEGRATION_HARNESS_TEST_KEY", "sk-test")
 			writeSessionConfig(t, path, config)
 
 			r := runFactorydWithSpecAndFlags(t, ws, "commit", "true", "# Ticket: fixture\n", "5m0s", nil, tc.extra)

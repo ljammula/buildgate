@@ -1224,8 +1224,8 @@ a request starts waiting on you
 |---|---|---|
 | Console tab | "Turn on notifications" at the bottom of the console's sidebar, once per browser (it asks the browser's permission). With several tabs of one console open, one of them notifies; when it closes, another takes over | Brings that tab to the front and opens the request's page |
 | Desktop banner (macOS) | On by default; `FACTORYD_DESKTOP_NOTIFICATIONS=0` turns it off | With [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) on `PATH`: opens the request's page in the browser. Without it: nothing, and the banner's text says to open the console |
-| Slack | `FACTORYD_SLACK_WEBHOOK_URLS` (comma-separated incoming-webhook URLs) in the worker's environment | The request's page: at the `factoryd remote-console` address while that is on, else the host's own address |
-| Discord | `FACTORYD_DISCORD_WEBHOOK_URLS`, the same way | Same |
+| Slack | The file the session config's `slack_webhook_urls_file` names: incoming-webhook URLs, one per line or comma-separated, in a file you own with mode 0600, read at each notification | The request's page: at the `factoryd remote-console` address while that is on, else the host's own address |
+| Discord | `discord_webhook_urls_file`, the same way | Same |
 
 The link is the page of the `serve` of the request's own data dir. When none
 answers, the worker starts one at the start of a request's next step, at most

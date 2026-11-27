@@ -31,7 +31,7 @@ func workerEndToEndArgs(t *testing.T, dataDir string) (args, env []string, confi
 	}
 	configPath = filepath.Join(t.TempDir(), "config.yml")
 	writeSessionConfig(t, configPath, "sandbox_docker: "+abs("docker.sh")+"\ncode_review_policy: off\n"+
-		"routes:\n  fixture:\n    credential_mode: static\n    upstream: https://model.example.invalid\n    credential_env: WORKER_E2E_TEST_KEY\n"+
+		"routes:\n  fixture:\n    credential_mode: static\n    upstream: https://model.example.invalid\n    credential_file: "+testRouteKeyPath("WORKER_E2E_TEST_KEY")+"\n"+
 		"models:\n  fixture-model:\n    id: fixture-model-id\n    api: openai-completions\n    routes: [fixture]\n"+
 		"roles:\n  planning: { model: fixture-model }\n  execution: { model: fixture-model }\n  review: { model: fixture-model, allow_shared_model: true }\n")
 	args = []string{
@@ -45,7 +45,8 @@ func workerEndToEndArgs(t *testing.T, dataDir string) (args, env []string, confi
 		"-plan-tickets-script", abs("plan_tickets.py"),
 		"-build-app-script", abs("build_app.py"),
 	}
-	env = append(os.Environ(), "WORKER_E2E_TEST_KEY=sk-test", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	setTestRouteKey(t, "WORKER_E2E_TEST_KEY", "sk-test")
+	env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	return args, env, configPath
 }
 

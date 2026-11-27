@@ -779,9 +779,10 @@ func TestIntegrationTemporalQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
-		[]string{"FACTORYD_DISCORD_WEBHOOK_URLS=" + srv.URL + "/hook-a, " + srv.URL + "/hook-b"},
-		[]string{"-temporal-address", address})
+	dataDir := t.TempDir()
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
+		webhookSessionConfigEnv(t, dataDir, "", srv.URL+"/hook-a, "+srv.URL+"/hook-b"),
+		[]string{"-temporal-address", address}, dataDir)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
@@ -804,9 +805,9 @@ func TestIntegrationTemporalQuarantineNotifiesDiscordWebhooks(t *testing.T) {
 // Temporal path — the regression test for the Codex finding round 2 on
 // PR #88: applyRunWorkflowResult's quarantine notification called
 // notify.DiscordNotifier directly rather than notify.DispatchExternal,
-// so an operator configuring only FACTORYD_SLACK_WEBHOOK_URLS never got
+// so an operator configuring only slack_webhook_urls_file never got
 // paged on a Temporal-routed quarantine. Deliberately sets only the
-// Slack env var, not Discord.
+// Slack, not Discord.
 func TestIntegrationTemporalQuarantineNotifiesSlackWebhook(t *testing.T) {
 	// not parallel-safe: depends on the run-wide test Temporal server (sharedTemporalAddress), not a private per-test one.
 	address := sharedTemporalAddress(t)
@@ -819,15 +820,16 @@ func TestIntegrationTemporalQuarantineNotifiesSlackWebhook(t *testing.T) {
 	defer srv.Close()
 
 	ws := newFixtureRepo(t)
-	r := runFactorydWithSpecAndFlags(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
-		[]string{"FACTORYD_SLACK_WEBHOOK_URLS=" + srv.URL},
-		[]string{"-temporal-address", address})
+	dataDir := t.TempDir()
+	r := runFactorydWithSpecFlagsAndDataDir(t, ws, "commit", afterBaseline(t, "false"), "# fixture spec\nTests-Required: no -- integration fixture doesn't exercise tests_red_on_base\n", "30s",
+		webhookSessionConfigEnv(t, dataDir, srv.URL, ""),
+		[]string{"-temporal-address", address}, dataDir)
 
 	if r.State != run.StateQuarantined {
 		t.Fatalf("state = %q, want %q", r.State, run.StateQuarantined)
 	}
 	if !hit.Load() {
-		t.Error("Slack webhook was never hit for a Temporal-routed quarantined run with only FACTORYD_SLACK_WEBHOOK_URLS configured")
+		t.Error("Slack webhook was never hit for a Temporal-routed quarantined run with only slack_webhook_urls_file configured")
 	}
 }
 

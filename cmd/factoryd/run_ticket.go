@@ -702,6 +702,10 @@ func (tr *ticketRun) parseFlags() error {
 	if err != nil {
 		return err
 	}
+	// A run the worker or serve starts in-process keeps their webhook files
+	// (the first useWebhookFiles of a process wins); a run started from the
+	// command line records its own.
+	tr.dp.useWebhookFiles(tr.settings, os.Getenv)
 	// Silent (error only, no warning print): this function runs once per
 	// ticket build under the worker (which already printed any roles:
 	// warning once, itself, via applySessionConfig) as well as for a bare

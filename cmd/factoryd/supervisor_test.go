@@ -507,7 +507,7 @@ func TestSuperviseDaemonArgsOmitConfigWhenUnset(t *testing.T) {
 // supervisorHarnessConfig is a minimal routes:/models:/roles: session config
 // whose execution role runs the given harness.
 func supervisorHarnessConfig(harness string) string {
-	return "routes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_env: SUP_TEST_KEY\n" +
+	return "routes:\n  r:\n    credential_mode: static\n    upstream: https://r.example.invalid\n    credential_file: " + testRouteKeyPath("SUP_TEST_KEY") + "\n" +
 		"models:\n  m:\n    id: gpt-x\n    routes: [r]\n" +
 		"roles:\n  execution:\n    model: m\n    harness: " + harness + "\n"
 }

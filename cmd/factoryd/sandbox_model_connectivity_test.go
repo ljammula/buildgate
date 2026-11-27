@@ -58,9 +58,10 @@ func TestExplicitImageStillRequiresCredential(t *testing.T) {
 		"-data-dir", t.TempDir(),
 		"-sandbox-image", "example.test/worker@sha256:"+strings.Repeat("a", 64),
 	)
+	setTestRouteKey(t, "ANTHROPIC_API_KEY", "")
 	cmd.Env = filterOutEnv(os.Environ(), "ANTHROPIC_API_KEY")
 	cmd.Env = append(cmd.Env, isolatedSessionConfigEnv(t, "sandbox_docker: "+filepath.Join(t.TempDir(), "docker-does-not-exist")+"\n"+
-		"routes:\n  anthropic:\n    upstream: https://api.anthropic.com\n    credential_env: ANTHROPIC_API_KEY\n"+
+		"routes:\n  anthropic:\n    upstream: https://api.anthropic.com\n    credential_file: "+testRouteKeyPath("ANTHROPIC_API_KEY")+"\n"+
 		"models:\n  m:\n    id: claude\n    routes: [anthropic]\n"+
 		"roles:\n  execution:\n    model: m\n")...)
 	out, err := cmd.CombinedOutput()

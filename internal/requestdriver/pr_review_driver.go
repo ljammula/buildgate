@@ -1752,5 +1752,5 @@ func notifyRoundOutcome(dp Deps, dataDir string, r *request.Request, ticket *req
 		Detail: detail,
 		Next:   fmt.Sprintf("review %s", ticket.PRURL),
 	}, now)
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 }

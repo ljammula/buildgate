@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -44,13 +46,16 @@ type Route struct {
 	AllowedPathPrefix string  `yaml:"allowed_path_prefix,omitempty"`
 	WorkerBasePath    *string `yaml:"worker_base_path,omitempty"`
 	CredentialHeader  string  `yaml:"credential_header,omitempty"` // static only
-	// CredentialEnv (static only) names the one environment variable this
-	// route's key is read from. There is no default: a static route that
-	// needs a credential must name it, and a route with AllowNoCredential
-	// and no CredentialEnv reads none. A default name would hand one
-	// provider's key (an inherited ANTHROPIC_API_KEY) to any other static
-	// route that left the field empty.
-	CredentialEnv          string `yaml:"credential_env,omitempty"`
+	// CredentialFile (static only) is the path of the one file this route's
+	// key is read from, at each launch, by the host process launching the
+	// route's worker: a regular file owned by this user with no group or
+	// other permission bits (mode 0600 or stricter), holding the key and
+	// nothing else. There is no default: a static route that needs a
+	// credential must name it, and a route with AllowNoCredential and no
+	// CredentialFile reads none. A default would hand one provider's key to
+	// any other static route that left the field empty. The config names
+	// the file, never the key.
+	CredentialFile         string `yaml:"credential_file,omitempty"`
 	GitHubTokenFile        string `yaml:"github_token_file,omitempty"` // github-copilot only
 	GitHubTokenKey         string `yaml:"github_token_key,omitempty"`  // github-copilot only
 	CodexAuthFile          string `yaml:"codex_auth_file,omitempty"`   // chatgpt-codex only
@@ -86,7 +91,7 @@ func (r Route) effectiveCredentialMode() string {
 // prefix default depends on which model/API reaches it, which a Route
 // alone doesn't know, so that half is left to a later change that
 // resolves a specific model against it), and Billing defaults from the
-// effective credential mode. CredentialEnv has no default (see its field).
+// effective credential mode. CredentialFile has no default (see its field).
 func defaultedRoute(r Route) Route {
 	mode := r.effectiveCredentialMode()
 	switch mode {
@@ -120,7 +125,7 @@ func defaultedRoute(r Route) Route {
 // validateRoute checks one routes: entry's own internal consistency,
 // independent of any model/role that might reference it: a known
 // credential_mode; a known billing value; each mode-specific field
-// (credential_env/credential_header are static-only; github_token_file/
+// (credential_file/credential_header are static-only; github_token_file/
 // _key are github-copilot-only; codex_auth_file is chatgpt-codex-only)
 // is refused on a route in the wrong mode, rather than silently ignored
 // -- an operator who sets e.g. codex_auth_file on a static route almost
@@ -134,7 +139,17 @@ func defaultedRoute(r Route) Route {
 // would reject at launch (a leftover upstream from another route, a
 // typo'd path) is refused here too, at validation time, not only when a
 // job actually launches a relay against it.
+// routeNameRE is the shape of a routes: key: lower-case letters, digits,
+// '_' and '-', starting with a letter or digit. A route's key file is named
+// after it (credentials/<profile>/<route>), so a name of another shape could
+// reach outside that directory or, once made safe, collide with another
+// route's.
+var routeNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
 func validateRoute(name string, r Route) error {
+	if !routeNameRE.MatchString(name) {
+		return fmt.Errorf("routes.%s: a route name must be lower-case letters, digits, '_' or '-', starting with a letter or digit", name)
+	}
 	switch r.CredentialMode {
 	case "", meter.CredentialModeStatic, meter.CredentialModeGitHubCopilot, meter.CredentialModeChatGPTCodex:
 	default:
@@ -165,13 +180,13 @@ func validateRoute(name string, r Route) error {
 		if r.Upstream == "" && !r.AllowNoCredential {
 			return fmt.Errorf("routes.%s: upstream is required for a static route (or set allow_no_credential: true)", name)
 		}
-		if r.CredentialEnv == "" && !r.AllowNoCredential {
-			return fmt.Errorf("routes.%s: credential_env is required for a static route: name the environment variable that holds this route's key (or set allow_no_credential: true for an endpoint with no credential)", name)
+		if r.CredentialFile == "" && !r.AllowNoCredential {
+			return fmt.Errorf("routes.%s: credential_file is required for a static route: name the file (mode 0600) that holds this route's key (or set allow_no_credential: true for an endpoint with no credential)", name)
 		}
 	}
 
-	if r.CredentialEnv != "" && mode != meter.CredentialModeStatic {
-		return fmt.Errorf("routes.%s: credential_env only applies to a static route", name)
+	if r.CredentialFile != "" && mode != meter.CredentialModeStatic {
+		return fmt.Errorf("routes.%s: credential_file only applies to a static route", name)
 	}
 	if r.CredentialHeader != "" && mode != meter.CredentialModeStatic {
 		return fmt.Errorf("routes.%s: credential_header only applies to a static route", name)
@@ -182,7 +197,28 @@ func validateRoute(name string, r Route) error {
 	if r.CodexAuthFile != "" && mode != meter.CredentialModeChatGPTCodex {
 		return fmt.Errorf("routes.%s: codex_auth_file only applies to a chatgpt-codex route", name)
 	}
+	for _, f := range []struct{ key, path string }{
+		{"credential_file", r.CredentialFile},
+		{"codex_auth_file", r.CodexAuthFile},
+		{"github_token_file", r.GitHubTokenFile},
+	} {
+		if err := requireAbsoluteOrHomePath("routes."+name+"."+f.key, f.path); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// requireAbsoluteOrHomePath refuses a non-empty credential file path that is
+// neither absolute nor starts with ~/: a worker and serve run with their
+// data dir as the working directory, so a relative path would name a file
+// other than the one the operator meant. where is the key, as the config
+// spells it.
+func requireAbsoluteOrHomePath(where, path string) error {
+	if path == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "~/") {
+		return nil
+	}
+	return fmt.Errorf("%s %q must be an absolute path (or start with ~/)", where, path)
 }
 
 // Model is one named model a `models:` block configures -- see Config's
@@ -364,7 +400,7 @@ func (m Model) WorkerModelJSON(route string) (string, error) {
 
 // Routing returns a defaulted copy of s.Routes/s.Models: the routes/
 // models a job resolves against. defaultedRoute applies uniformly so
-// credential_env/billing defaults are never computed twice.
+// billing defaults are never computed twice.
 func (s Settings) Routing() (routes map[string]Route, models map[string]Model, err error) {
 	routes = make(map[string]Route, len(s.Routes))
 	for name, r := range s.Routes {
@@ -444,7 +480,7 @@ func legacyRoutingKeyHintFor(key string) string {
 
 // retiredModelPriceKeys are the per-model cost_per_* fields deleted from
 // Model (2026-09-28) in favor of a real provider price looked up from
-// internal/prices by the model's own id. retiredModelPriceKey scans a
+// internal/prices by the model's own id. retiredEntryKey scans a
 // config's models: section for either, so Load can refuse it with a
 // migration hint naming exactly where it was, rather than KnownFields'
 // generic "field not found" for a deleted Model field.
@@ -453,10 +489,18 @@ var retiredModelPriceKeys = []string{
 	"cost_per_output_token_micro_usd",
 }
 
-// retiredModelPriceKey scans data's top-level models: mapping for the first
-// model entry that still sets one of retiredModelPriceKeys, returning that
-// model's own name and the offending key.
-func retiredModelPriceKey(data []byte) (modelName, key string, found bool) {
+// retiredRouteKeys are the per-route fields deleted from Route. A static
+// route's key is read from the file its credential_file names, never from an
+// environment variable.
+var retiredRouteKeys = []string{"credential_env"}
+
+// retiredRouteKeyHint is what Load reports for a retiredRouteKeys entry.
+const retiredRouteKeyHint = "deleted: a static route reads its key from a file; write the key to a file of mode 0600 (such as ~/.config/factoryd/credentials/<route>) and name it in credential_file"
+
+// retiredEntryKey scans data's top-level section mapping (models:, routes:)
+// for the first entry that still sets one of retired, returning that
+// entry's own name and the offending key.
+func retiredEntryKey(data []byte, section string, retired []string) (entryName, key string, found bool) {
 	var node yaml.Node
 	if err := yaml.Unmarshal(data, &node); err != nil || len(node.Content) == 0 {
 		return "", "", false
@@ -466,24 +510,22 @@ func retiredModelPriceKey(data []byte) (modelName, key string, found bool) {
 		return "", "", false
 	}
 	for i := 0; i+1 < len(doc.Content); i += 2 {
-		if doc.Content[i].Value != "models" {
+		if doc.Content[i].Value != section {
 			continue
 		}
-		modelsNode := doc.Content[i+1]
-		if modelsNode.Kind != yaml.MappingNode {
+		sectionNode := doc.Content[i+1]
+		if sectionNode.Kind != yaml.MappingNode {
 			return "", "", false
 		}
-		for j := 0; j+1 < len(modelsNode.Content); j += 2 {
-			name := modelsNode.Content[j].Value
-			entry := modelsNode.Content[j+1]
+		for j := 0; j+1 < len(sectionNode.Content); j += 2 {
+			name := sectionNode.Content[j].Value
+			entry := sectionNode.Content[j+1]
 			if entry.Kind != yaml.MappingNode {
 				continue
 			}
 			for k := 0; k+1 < len(entry.Content); k += 2 {
-				for _, retired := range retiredModelPriceKeys {
-					if entry.Content[k].Value == retired {
-						return name, retired, true
-					}
+				if slices.Contains(retired, entry.Content[k].Value) {
+					return name, entry.Content[k].Value, true
 				}
 			}
 		}

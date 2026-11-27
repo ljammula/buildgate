@@ -56,6 +56,7 @@ func resumeMainWith(dp *deps, args []string, gate requestdriver.ResumeGate) erro
 	if err != nil {
 		return err
 	}
+	dp.useWebhookFiles(settings, os.Getenv)
 	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, flags.Arg(0), idRequest)
 	if err != nil {
 		return err

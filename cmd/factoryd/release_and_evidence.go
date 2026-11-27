@@ -784,7 +784,7 @@ func notifyAcceptedRun(dp *deps, dataDir, id, ticket, requestID, prURL, prWithhe
 	// notify.WaitForPendingDispatches before this process exits, so an
 	// exit shortly after this call still gives the goroutine a bounded
 	// chance to actually reach the network.
-	dispatchRunNotification(dataDir, requestID, n)
+	dispatchRunNotification(dp, dataDir, requestID, n)
 	return n
 }
 
@@ -795,11 +795,11 @@ func notifyAcceptedRun(dp *deps, dataDir, id, ticket, requestID, prURL, prWithhe
 // request's own, sent when the request starts waiting on them, with the
 // request's page as its link: one notification for one event, and none for
 // an outcome the factory goes on from by itself (a corrective round).
-func dispatchRunNotification(dataDir, requestID string, n notify.Notification) {
+func dispatchRunNotification(dp *deps, dataDir, requestID string, n notify.Notification) {
 	if requestID != "" {
 		return
 	}
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 }
 
 // recordAcceptedRunSideEffects persists prURL (when non-empty) and n --

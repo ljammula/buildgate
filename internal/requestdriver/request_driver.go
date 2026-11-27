@@ -41,6 +41,9 @@ type Deps interface {
 	// ConsoleBaseURL is the console base URL for dataDir, "" when there is no
 	// console to link to.
 	ConsoleBaseURL(dataDir string) string
+	// NotifyWebhooks are the webhook URLs a notification is posted to, read
+	// from the files the session config this process loaded names.
+	NotifyWebhooks() notify.Webhooks
 	MarkPullRequestReady(ctx context.Context, prURL string) error
 	PushExistingBranch(ctx context.Context, workspaceDir string, sha string, branch string) error
 	ReadReviewState(ctx context.Context, prURL string, policy forge.AuthorPolicy) (forge.ReviewState, error)
@@ -2294,7 +2297,7 @@ func notifyTerminalRequest(dp Deps, dataDir string, r *request.Request, reason s
 	if err := r.Save(dataDir); err != nil {
 		return err
 	}
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 	return nil
 }
 
@@ -2865,7 +2868,7 @@ func RemindRequest(dp Deps, dataDir string, r *request.Request, now time.Time) {
 		waited = now.Sub(since)
 	}
 	n := prepareRequestNotification(dp, dataDir, r, reviewNotice(dataDir, r, waited), now)
-	notify.DispatchExternal(dataDir, n)
+	notify.DispatchExternal(dataDir, dp.NotifyWebhooks(), n)
 	r.NotifyCount++
 }
 

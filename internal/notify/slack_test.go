@@ -204,24 +204,14 @@ func TestSlackNotifierRedactsWebhookURLOnConnectionFailure(t *testing.T) {
 	}
 }
 
-func TestSlackWebhookURLsParsesCommaSeparatedList(t *testing.T) {
-	t.Setenv(SlackWebhookURLsEnvironmentVariable, " https://hooks.slack.com/a , https://hooks.slack.com/b ,,")
-	got := SlackWebhookURLs()
-	want := []string{"https://hooks.slack.com/a", "https://hooks.slack.com/b"}
-	if len(got) != len(want) {
-		t.Fatalf("SlackWebhookURLs() = %v, want %v", got, want)
+func TestParseWebhookURLsReadsLinesAndCommas(t *testing.T) {
+	got := ParseWebhookURLs(" https://hooks.slack.com/a , https://hooks.slack.com/b ,,\n\nhttps://hooks.slack.com/c\n")
+	want := []string{"https://hooks.slack.com/a", "https://hooks.slack.com/b", "https://hooks.slack.com/c"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("ParseWebhookURLs = %v, want %v", got, want)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("SlackWebhookURLs()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestSlackWebhookURLsEmptyWhenUnset(t *testing.T) {
-	t.Setenv(SlackWebhookURLsEnvironmentVariable, "")
-	if got := SlackWebhookURLs(); got != nil {
-		t.Errorf("SlackWebhookURLs() = %v, want nil for an unset env var", got)
+	if got := ParseWebhookURLs(" \n "); got != nil {
+		t.Errorf("ParseWebhookURLs(blank) = %v, want nil", got)
 	}
 }
 

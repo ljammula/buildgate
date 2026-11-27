@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,16 +17,16 @@ import (
 // own workflow.Activities.CheckRoute/ResolveRouteCredentials closures --
 // check a submitted RoutePolicy against this Worker's own routes: config
 // (modelrole.CheckRouteBinding) and then resolve ONLY that one route's
-// own credential (its own env var), never the other configured route's,
+// own credential (its own credential_file), never the other configured route's,
 // even though both are present in this Worker's own routes: config.
 func TestRouteBinderResolvesOnlyTheBoundRoute(t *testing.T) {
-	t.Setenv("RB_PRIMARY_KEY", "sk-primary")
-	t.Setenv("RB_FALLBACK_KEY", "sk-fallback")
+	setTestRouteKey(t, "RB_PRIMARY_KEY", "sk-primary")
+	setTestRouteKey(t, "RB_FALLBACK_KEY", "sk-fallback")
 
 	s := sessionconfig.DefaultSettings()
 	s.Routes = map[string]sessionconfig.Route{
-		"primary":  {CredentialMode: "static", Upstream: "https://primary.example.invalid", CredentialEnv: "RB_PRIMARY_KEY"},
-		"fallback": {CredentialMode: "static", Upstream: "https://fallback.example.invalid", CredentialEnv: "RB_FALLBACK_KEY"},
+		"primary":  {CredentialMode: "static", Upstream: "https://primary.example.invalid", CredentialFile: testRouteKeyPath("RB_PRIMARY_KEY")},
+		"fallback": {CredentialMode: "static", Upstream: "https://fallback.example.invalid", CredentialFile: testRouteKeyPath("RB_FALLBACK_KEY")},
 	}
 	s.Models = map[string]sessionconfig.Model{
 		"m": {ID: "test-model", Routes: []string{"primary", "fallback"}},
@@ -53,8 +52,8 @@ func TestRouteBinderResolvesOnlyTheBoundRoute(t *testing.T) {
 	}
 	// resolveRouteCredentials never exposes a resolved value directly for
 	// comparison (see sandbox.RouteSecret's own doc comment) -- this
-	// test relies on TestResolveRouteCredentialsStaticFromEnv's own proof
-	// that a static route's credential comes from its own CredentialEnv,
+	// test relies on TestResolveRouteCredentialsStaticFromFile's own proof
+	// that a static route's credential comes from its own credential_file,
 	// and instead proves here that binding the OTHER route's policy
 	// yields a DIFFERENT (still configured) credential, so the two never
 	// collapse to the same value by accident.
@@ -74,9 +73,9 @@ func TestRouteBinderResolvesOnlyTheBoundRoute(t *testing.T) {
 	}
 }
 
-func TestResolveRouteCredentialsStaticFromEnv(t *testing.T) {
-	t.Setenv("RC_TEST_KEY", "sk-test-value")
-	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialEnv: "RC_TEST_KEY"}
+func TestResolveRouteCredentialsStaticFromFile(t *testing.T) {
+	setTestRouteKey(t, "RC_TEST_KEY", "sk-test-value")
+	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialFile: testRouteKeyPath("RC_TEST_KEY")}
 	creds, err := resolveRouteCredentials(r)
 	if err != nil {
 		t.Fatalf("resolveRouteCredentials: %v", err)
@@ -89,23 +88,21 @@ func TestResolveRouteCredentialsStaticFromEnv(t *testing.T) {
 	}
 }
 
-func TestResolveRouteCredentialsStaticMissingEnvRefuses(t *testing.T) {
-	os.Unsetenv("RC_TEST_KEY_MISSING")
-	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialEnv: "RC_TEST_KEY_MISSING"}
+func TestResolveRouteCredentialsStaticMissingFileRefuses(t *testing.T) {
+	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialFile: testRouteKeyPath("RC_TEST_KEY_MISSING")}
 	if _, err := resolveRouteCredentials(r); err == nil {
-		t.Fatal("resolveRouteCredentials: err = nil, want a refusal for a missing env credential")
+		t.Fatal("resolveRouteCredentials: err = nil, want a refusal for a missing credential_file")
 	}
 }
 
 func TestResolveRouteCredentialsStaticAllowsNoCredential(t *testing.T) {
-	os.Unsetenv("RC_TEST_KEY_MISSING2")
-	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialEnv: "RC_TEST_KEY_MISSING2", AllowNoCredential: true}
+	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialFile: testRouteKeyPath("RC_TEST_KEY_MISSING2"), AllowNoCredential: true}
 	creds, err := resolveRouteCredentials(r)
 	if err != nil {
 		t.Fatalf("resolveRouteCredentials: %v", err)
 	}
 	if creds.apiKey.Configured() {
-		t.Error("apiKey should be unconfigured when the env var is empty and allow_no_credential is set")
+		t.Error("apiKey should be unconfigured when the credential_file is absent and allow_no_credential is set")
 	}
 }
 
@@ -129,17 +126,16 @@ func TestResolveRouteCredentialsChatGPTCodexMissingAuthFileRefuses(t *testing.T)
 // TestRouteCredentialsResolvedOnlyForChosenRoute proves resolveRouteCredentials
 // -- used as modelrole.SelectRoute's own probe -- is only ever invoked for
 // this job's own candidate routes, stopping at the first one that
-// resolves, in declared order: a static route with its env var unset is
+// resolves, in declared order: a static route whose credential_file is absent is
 // skipped, and a later route that DOES resolve is chosen without the
 // first route's own failure reason leaking into the result.
 func TestRouteCredentialsResolvedOnlyForChosenRoute(t *testing.T) {
-	os.Unsetenv("RC_ORDER_FIRST")
-	t.Setenv("RC_ORDER_SECOND", "sk-second")
+	setTestRouteKey(t, "RC_ORDER_SECOND", "sk-second")
 
 	s := sessionconfig.DefaultSettings()
 	s.Routes = map[string]sessionconfig.Route{
-		"first":  {CredentialMode: "static", Upstream: "https://first.example.invalid", CredentialEnv: "RC_ORDER_FIRST"},
-		"second": {CredentialMode: "static", Upstream: "https://second.example.invalid", CredentialEnv: "RC_ORDER_SECOND"},
+		"first":  {CredentialMode: "static", Upstream: "https://first.example.invalid", CredentialFile: testRouteKeyPath("RC_ORDER_FIRST")},
+		"second": {CredentialMode: "static", Upstream: "https://second.example.invalid", CredentialFile: testRouteKeyPath("RC_ORDER_SECOND")},
 	}
 	s.Models = map[string]sessionconfig.Model{
 		"m": {ID: "test-model", Routes: []string{"first", "second"}},
@@ -165,8 +161,8 @@ func TestRouteCredentialsResolvedOnlyForChosenRoute(t *testing.T) {
 }
 
 func TestResolveRouteCredentialsErrorNeverEchoesSecretValue(t *testing.T) {
-	t.Setenv("RC_TEST_SECRET_ENV", "")
-	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialEnv: "RC_TEST_SECRET_ENV"}
+	setTestRouteKey(t, "RC_TEST_SECRET_ENV", "")
+	r := sessionconfig.Route{CredentialMode: "static", Upstream: "https://example.invalid", CredentialFile: testRouteKeyPath("RC_TEST_SECRET_ENV")}
 	_, err := resolveRouteCredentials(r)
 	if err == nil {
 		t.Fatal("resolveRouteCredentials: err = nil, want a refusal")
@@ -185,8 +181,8 @@ func TestResolveRouteCredentialsErrorNeverEchoesSecretValue(t *testing.T) {
 func TestResolveRouteCredentialsMarksAnUnusableCredential(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GITHUB_COPILOT_TOKEN", "")
-	t.Setenv("RC_MARK_UNSET", "")
-	t.Setenv("RC_MARK_SET", "sk-set")
+	setTestRouteKey(t, "RC_MARK_UNSET", "")
+	setTestRouteKey(t, "RC_MARK_SET", "sk-set")
 	expiring := writeCodexAuthFile(t, dir, map[string]any{
 		"auth_mode": "chatgpt",
 		"tokens":    map[string]any{"access_token": fakeCodexJWT(t, time.Now().Add(codexTokenExpiryMargin-time.Minute)), "account_id": "acct"},
@@ -195,13 +191,13 @@ func TestResolveRouteCredentialsMarksAnUnusableCredential(t *testing.T) {
 		"codex token inside the margin": {CredentialMode: "chatgpt-codex", CodexAuthFile: expiring},
 		"codex auth file missing":       {CredentialMode: "chatgpt-codex", CodexAuthFile: filepath.Join(dir, "absent.json")},
 		"copilot token missing":         {CredentialMode: "github-copilot", GitHubTokenFile: filepath.Join(dir, "absent-hosts.json")},
-		"static key unset":              {CredentialMode: "static", Upstream: "https://example.invalid", CredentialEnv: "RC_MARK_UNSET"},
+		"static key unset":              {CredentialMode: "static", Upstream: "https://example.invalid", CredentialFile: testRouteKeyPath("RC_MARK_UNSET")},
 	} {
 		if _, err := resolveRouteCredentials(r); !errors.Is(err, sandbox.ErrRouteCredential) {
 			t.Errorf("%s: err = %v, want sandbox.ErrRouteCredential in its chain", name, err)
 		}
 	}
-	plaintext := sessionconfig.Route{CredentialMode: "static", Upstream: "http://models.example", CredentialEnv: "RC_MARK_SET", AllowPlaintextUpstream: true}
+	plaintext := sessionconfig.Route{CredentialMode: "static", Upstream: "http://models.example", CredentialFile: testRouteKeyPath("RC_MARK_SET"), AllowPlaintextUpstream: true}
 	if _, err := resolveRouteCredentials(plaintext); err == nil || errors.Is(err, sandbox.ErrRouteCredential) {
 		t.Errorf("a key unsafe for a plaintext upstream: err = %v, want a refusal without ErrRouteCredential", err)
 	}
