@@ -118,7 +118,7 @@ cannot see repositories under `/tmp`.
 
 Sandboxes run in colima's VM; Docker Desktop is refused
 ([Known limits](#known-limits)). `make install` uses Homebrew for what is
-missing and starts colima for you.
+missing and creates buildgate's own colima VM, profile `buildgate`, for you.
 
 1. Install [Homebrew](https://brew.sh), then `git` and `make` (Xcode command
    line tools: `xcode-select --install`) and clone:
@@ -126,24 +126,27 @@ missing and starts colima for you.
 2. `make install`. With Homebrew it installs what is missing of `go`,
    `python`, `git`, `gh`, `node` (optional, console only), `docker`,
    `docker-buildx`, `colima` and `terminal-notifier`; a machine that already
-   has a docker CLI keeps its own daemon. It starts colima (`colima start
-   --memory 4`, or `colima start` for an existing VM), builds the images,
-   installs `factoryd`, links it into `~/.local/bin`, adds that directory to
+   has a docker CLI and no colima keeps its own daemon. With colima it creates
+   or starts buildgate's colima VM (profile `buildgate`, docker context
+   `colima-buildgate`: an eighth of the Mac's memory, 4 to 12 GiB, and a
+   quarter of its CPUs; it refuses, naming both numbers, while the Mac has less
+   than that plus 6 GiB available), builds the images in it, installs `factoryd`, links it into `~/.local/bin`, adds that directory to
    `~/.zshrc` and runs `gh auth login`, `factoryd setup` and `factoryd doctor
    -fix`. Whatever it could not finish is the numbered "Left for you" list
    printed last. Open a new terminal afterwards.
-3. Narrow colima's mounts: it shares all of `$HOME` read-write by default.
-   Edit `~/.colima/default/colima.yaml` to share `~/buildgate` read-write and
-   your repositories (for example `~/code`) read-only, keep `mountType` at
-   `sshfs` or `virtiofs` (not `9p`), then `colima restart`
-   ([USAGE.md § Data directory and colima](USAGE.md#quick-start-existing-repo)).
-   A repository must live under `$HOME` and inside a shared folder: the VM
-   cannot see `/tmp`.
+3. The VM shares `~/buildgate` read-write and `~/code` read-only (when it
+   exists), and the session config `factoryd setup` writes pins it
+   (`docker_context: colima-buildgate`), so another `colima start -p <name>`
+   or `docker context use` does not move buildgate. A repository must live
+   under `$HOME` in a shared folder: the VM cannot see `/tmp`. For one in
+   another folder see
+   [USAGE.md § Data directory and colima](USAGE.md#quick-start-existing-repo).
 4. A model route, if `make install` could not ask (no terminal) or you want
    another: `factoryd setup` (`-route chatgpt-codex|copilot|anthropic|openai`;
    [Model routes](USAGE_REFERENCE.md#model-routes)).
-5. `factoryd doctor -fix` until every row is ok (it starts Temporal, the
-   OpenShell gateway and meter, and builds a missing image). `factoryd doctor
+5. `factoryd doctor -fix` until every row is ok (it creates or starts the
+   Docker VM, starts Temporal, the OpenShell gateway and meter, and builds a
+   missing image). `factoryd doctor
    -target-repo ~/code/your-repo` also checks the repository.
 6. `factoryd quickstart ~/code/your-repo "Add X to Y"`: the repository needs a
    committed `AGENTS.md` ([above](#install)). It stops at `spec_review` and

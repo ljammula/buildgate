@@ -362,6 +362,45 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.colima_calls(), ["start"])
 
+    def go_stub(self, body):
+        self.install("go", '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HOME/go.log"\n' + body)
+
+    def go_calls(self):
+        log = self.home / "go.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def test_a_mac_gets_buildgates_own_vm_from_factoryd(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.go_stub("echo colima-buildgate\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.go_calls(), ["run ./cmd/factoryd docker-context -ensure-vm"])
+        # factoryd created or started the VM: no colima start on the default profile.
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_a_mac_vm_refusal_fails_the_step(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.go_stub("echo 'the Mac has 3 GiB of memory available' >&2\nexit 1\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("3 GiB of memory available", result.stderr)
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_a_mac_config_without_docker_context_keeps_its_docker(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.go_stub("echo\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), ["start --memory 4"])
+
+    def test_linux_never_asks_factoryd_for_a_vm(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.system("Linux")
+        self.go_stub("echo colima-buildgate\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.go_calls(), [])
+
     def test_docker_down_without_colima_is_left_to_the_operator(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", docker_up=False)
         result = self.run_script()

@@ -54,31 +54,54 @@ func dockerOutput(ctx context.Context, timeout time.Duration, dockerBinary strin
 	return out, err
 }
 
-// parallelMemoryFix is the fix of an over-committed Docker VM. Sidecars are
-// not counted by this row, which says so when compose services are set.
+// dockerInfraReserve is the memory counted for the containers that run
+// beside the sandboxes in Docker's VM: Temporal and its Postgres, the
+// OpenShell gateway, the meter and the registry proxy.
+const dockerInfraReserve = 3 << 29
+
+// parallelMemoryFix is the fix of an over-committed Docker VM. With
+// docker_context pinning a Colima VM it names that VM.
 func parallelMemoryFix(settings sessionconfig.Settings) string {
-	fix := "lower max_parallel_jobs or sandbox_memory in the session config, or give the Docker VM more memory (colima stop && colima start --memory <GiB>; Docker Desktop: Settings > Resources; native Linux: the host's memory)"
-	if settings.ComposeServicesMemory != "" {
-		fix += ". Compose sidecars are not counted here: `factoryd doctor -target-repo <repo>` checks one build with its sidecars"
+	grow := "give the Docker VM more memory (colima stop && colima start --memory <GiB>; Docker Desktop: Settings > Resources; native Linux: the host's memory)"
+	if profile, ok := colimaProfileOfContext(settings.DockerContext); ok {
+		grow = fmt.Sprintf("give buildgate's VM colima-%s more memory (colima stop -p %s && colima start -p %s --memory <GiB> --activate=false), keeping 6 GiB of the Mac's memory free", profile, profile, profile)
+	}
+	fix := "lower max_parallel_jobs or sandbox_memory in the session config, or " + grow
+	if settings.ComposeServices {
+		fix += ". Compose sidecars are counted at compose_services_memory per run: `factoryd doctor -target-repo <repo>` checks one build with all of its sidecars"
 	}
 	return fix
 }
 
-// doctorCheckParallelMemory warns (advisory) when max_parallel_jobs (the
-// number of activities that run at once, model jobs included) times the
-// sandboxes one job can hold times sandbox_memory exceeds Docker's total
-// memory: the kernel then OOM-kills a container if they all grow to their
-// limits. A job holds two sandboxes (a ticket build's review and challenger
-// at once) only where reviewAndChallengerTogether holds, else one: with
-// roles.challenger set and Docker's memory under that, the row passes and says
-// the two run one after the other. One sandbox at a time passes without
-// asking Docker.
+// composeServicesNeed is what compose sidecars are counted at: with
+// compose_services on, compose_services_memory times
+// compose_services_concurrency (the runs that may have sidecars up at once).
+// An unlimited concurrency (0) counts one run.
+func composeServicesNeed(settings sessionconfig.Settings) (int64, string) {
+	if !settings.ComposeServices {
+		return 0, ""
+	}
+	each, err := composeservices.MemoryBytes(settings.ComposeServicesMemory)
+	if err != nil || each <= 0 {
+		return 0, ""
+	}
+	runs := max(settings.ComposeServicesConcurrency, 1)
+	return each * int64(runs), fmt.Sprintf(", %d × %s of compose sidecars", runs, formatGiB(each))
+}
+
+// doctorCheckParallelMemory warns (advisory) when what may run in Docker at
+// once exceeds Docker's total memory: max_parallel_jobs (the number of
+// activities that run at once, model jobs included) times the sandboxes one
+// job can hold times sandbox_memory, plus dockerInfraReserve for the stack
+// and, with compose_services on, the sidecars (composeServicesNeed). The
+// kernel then OOM-kills a container if they all grow to their limits. A job
+// holds two sandboxes (a ticket build's review and challenger at once) only
+// where reviewAndChallengerTogether holds, else one: with roles.challenger
+// set and Docker's memory under that, the row says the two run one after the
+// other.
 func doctorCheckParallelMemory(dp *deps, ctx context.Context, dockerBinary string, settings sessionconfig.Settings, to sizingTimeouts) doctorCheck {
 	name := fmt.Sprintf("memory limits: max_parallel_jobs %d × sandbox_memory %s within Docker's memory", settings.MaxParallelJobs, settings.SandboxMemory)
 	challenger := hasChallenger(settings)
-	if settings.MaxParallelJobs <= 1 && !challenger {
-		return doctorCheck{Name: name}
-	}
 	each, problem := sandboxMemoryBytes(settings.SandboxMemory)
 	if problem != nil {
 		return doctorCheck{Name: name, Err: problem, Advisory: true}
@@ -87,16 +110,17 @@ func doctorCheckParallelMemory(dp *deps, ctx context.Context, dockerBinary strin
 	if err != nil {
 		return doctorCheck{Name: name, Err: err, Advisory: true}
 	}
-	sandboxes, detail := settings.MaxParallelJobs, ""
+	sandboxes, detail := max(settings.MaxParallelJobs, 1), ""
 	switch {
 	case reviewAndChallengerTogether(settings, total):
 		sandboxes *= 2
 	case challenger:
 		detail = fmt.Sprintf("the review and the challenger run one after the other: Docker's memory (%s) is under max_parallel_jobs × 2 × sandbox_memory (%s)", formatGiB(total), formatGiB(int64(settings.MaxParallelJobs)*2*each))
 	}
-	if need := each * int64(sandboxes); need > total {
+	sidecars, sidecarsText := composeServicesNeed(settings)
+	if need := each*int64(sandboxes) + dockerInfraReserve + sidecars; need > total {
 		return doctorCheck{Name: name, Advisory: true,
-			Err: fmt.Errorf("limits add up to %s (%d × %s), Docker has %s -- limits, not measured use: builds can still fit, but if they all grew to their limits the kernel would OOM-kill one", formatGiB(need), sandboxes, formatGiB(each), formatGiB(total)),
+			Err: fmt.Errorf("limits add up to %s (%d × %s, %s for Temporal, the gateway, the meter and the registry proxy%s), Docker has %s -- limits, not measured use: builds can still fit, but if they all grew to their limits the kernel would OOM-kill one", formatGiB(need), sandboxes, formatGiB(each), formatGiB(dockerInfraReserve), sidecarsText, formatGiB(total)),
 			Fix: parallelMemoryFix(settings)}
 	}
 	return doctorCheck{Name: name, Detail: detail}

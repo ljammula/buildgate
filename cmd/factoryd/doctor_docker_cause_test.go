@@ -112,7 +112,7 @@ func TestExplainDockerUnreachableReplacesOnlyTheFailedDockerRow(t *testing.T) {
 		{Name: doctorDockerReachableName, Err: errors.New("docker version: no daemon"), Fix: dockerReachableFix()},
 		{Name: "sandbox image present", Err: errors.New("not present locally"), Fix: "make install"},
 	}
-	got := explainDockerUnreachable(t.Context(), dp, "docker", checks)
+	got := explainDockerUnreachable(t.Context(), dp, "docker", "", checks)
 	if got[0].Fix != "`docker context use colima`" || !strings.Contains(got[0].Err.Error(), "no daemon") {
 		t.Errorf("docker row = %v / %q, want the context fix and the CLI's own error kept", got[0].Err, got[0].Fix)
 	}
@@ -121,7 +121,7 @@ func TestExplainDockerUnreachableReplacesOnlyTheFailedDockerRow(t *testing.T) {
 	}
 	asked := false
 	fakeDockerOf(dp).contextFactsFn = func(context.Context, string) dockerContextFacts { asked = true; return dockerContextFacts{} }
-	explainDockerUnreachable(t.Context(), dp, "docker", []doctorCheck{{Name: doctorDockerReachableName}})
+	explainDockerUnreachable(t.Context(), dp, "docker", "", []doctorCheck{{Name: doctorDockerReachableName}})
 	if asked {
 		t.Error("contexts were asked for although Docker answered")
 	}

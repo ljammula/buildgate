@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -532,6 +533,9 @@ func runQuickstart(dp *deps, opts *quickstartOptions, repoPathArg string, stdin 
 		return err
 	}
 
+	if err := quickstartPinNewConfigDockerContext(dp, existingConfig); err != nil {
+		return err
+	}
 	if err := quickstartEnsureImages(dp, opts, p, w, configPath, existingConfig); err != nil {
 		return err
 	}
@@ -1138,6 +1142,18 @@ func quickstartImageOrNil(existing *sessionconfig.Config, get func(*sessionconfi
 
 // ---- step 2: session config ------------------------------------------
 
+// quickstartPinNewConfigDockerContext pins, when quickstart will write a new
+// config, the docker_context that config gets (newConfigDockerContext), so
+// the image checks before it is written already reach that Docker. An
+// existing config was pinned at dispatch.
+func quickstartPinNewConfigDockerContext(dp *deps, existing *sessionconfig.Config) error {
+	dockerContext := newConfigDockerContext(dp, runtime.GOOS)
+	if existing != nil || dockerContext == "" {
+		return nil
+	}
+	return applyDockerContextPin(dp, dockerContext, "the session config quickstart writes")
+}
+
 // quickstartResolveExistingConfig resolves the session config path
 // quickstart will use, and loads it too when a valid one already exists
 // and -reconfigure was not passed -- called before quickstartEnsureImages
@@ -1545,10 +1561,20 @@ func quickstartWriteNewConfig(dp *deps, opts *quickstartOptions, p *quickstartPr
 		keep(&cfg.MeterImage, imagesFrom.MeterImage)
 		keep(&cfg.ImageSourceRoot, imagesFrom.ImageSourceRoot)
 	}
+	if dockerContext := newConfigDockerContext(dp, runtime.GOOS); dockerContext != "" && cfg.DockerContext == nil {
+		cfg.DockerContext = &dockerContext
+	}
 	if err := quickstartWriteConfig(configPath, cfg); err != nil {
 		return "", nil, false, err
 	}
 	fmt.Fprintf(w, "Wrote session config to %s.\n", configPath)
+	// This process loaded no config at dispatch: it pins the new one's
+	// docker_context now, for every Docker call and process that follows.
+	if cfg.DockerContext != nil && *cfg.DockerContext != "" {
+		if err := applyDockerContextPin(dp, *cfg.DockerContext, configPath); err != nil {
+			return "", nil, false, err
+		}
+	}
 	if err := quickstartWritePendingRouteKeys(opts, w); err != nil {
 		return "", nil, false, err
 	}

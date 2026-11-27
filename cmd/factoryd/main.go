@@ -366,6 +366,11 @@ func dispatch(dp *deps, args []string) error {
 	if _, listed := lookupCommand(args[0]); listed && len(args) == 2 && topLevelHelpTokens[args[1]] {
 		return helpMain(os.Stdout, args[:1])
 	}
+	// The one home of the docker_context pin: before any command reaches
+	// Docker, so every child process inherits it.
+	if err := pinDockerContext(dp, args[0], args); err != nil {
+		return err
+	}
 	if handler, ok := subcommands()[args[0]]; ok {
 		return handler(dp, args[1:])
 	}
@@ -413,8 +418,9 @@ func withoutDeps(run func(args []string) error) subcommand {
 // subcommands is the dispatch table realMain looks its first argument up in:
 // one line per subcommand. A first argument that is not a key here is a
 // single-ticket run (runMain). `build-ca-bundle`, `image-inputs-hash`,
-// `stage-agent-tests`, `project-image-args` and `image-reuse` are the hidden
-// ones only the Makefile uses (through `go run ./cmd/factoryd`).
+// `stage-agent-tests`, `project-image-args`, `image-reuse` and
+// `docker-context` are the hidden ones only the Makefile and its scripts use
+// (through `go run ./cmd/factoryd`).
 func subcommands() map[string]subcommand {
 	return map[string]subcommand{
 		"override":         overrideMain,
@@ -447,7 +453,7 @@ func subcommands() map[string]subcommand {
 		"retry":            retryMain,
 		"resume":           resumeMain,
 		"amend-scope":      amendScopeMain,
-		"init-config":      withoutDeps(initConfigMain),
+		"init-config":      initConfigMain,
 		"service":          serviceMain,
 		"quickstart":       quickstartMain,
 		"console":          consoleMain,
@@ -463,7 +469,10 @@ func subcommands() map[string]subcommand {
 			return projectImageArgsMain(dp, args, os.Stdout, os.Stderr)
 		},
 		"image-reuse": withoutDeps(imageReuseMain),
-		"setup":       setupMain,
+		"docker-context": func(dp *deps, args []string) error {
+			return dockerContextMain(dp, args, os.Stdout, os.Stderr)
+		},
+		"setup": setupMain,
 		"remote": func(dp *deps, args []string) error {
 			return remoteMain(dp, os.Stdout, args)
 		},

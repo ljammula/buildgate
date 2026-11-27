@@ -25,6 +25,7 @@ var dispatchGoldenSubcommands = []string{
 	"quickstart", "console", "install-skill", "configure-images",
 	"image-inputs-hash", "restart", "project-image-args", "image-reuse", "setup",
 	"memory", "sandbox", "content", "stats", "prune", "build-ca-bundle", "remote", "help",
+	"docker-context",
 }
 
 // dispatchGoldenUndefinedFlag is the flag no command defines.

@@ -246,6 +246,9 @@ type fakeHost struct {
 	browserRedirectDirFn func() (string, error)
 	chdirFn              func(dir string) error
 	executableFn         func() (string, error)
+	env                  map[string]string
+	hostResourcesFn      func() (uint64, int, error)
+	vmStatFn             func() ([]byte, error)
 	notifyWebhooksFn     func(files webhookFiles) notify.Webhooks
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
@@ -282,8 +285,21 @@ func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit 
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
 func (f *fakeHost) browserRedirectDir() (string, error)    { return f.browserRedirectDirFn() }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
-func (f *fakeHost) chdir(dir string) error                 { return f.chdirFn(dir) }
-func (f *fakeHost) baselineCheck(args []string) error      { return f.baselineCheckFn(args) }
+func (f *fakeHost) lookupEnv(key string) (string, bool) {
+	v, ok := f.env[key]
+	return v, ok
+}
+func (f *fakeHost) setenv(key, value string) error {
+	if f.env == nil {
+		f.env = map[string]string{}
+	}
+	f.env[key] = value
+	return nil
+}
+func (f *fakeHost) hostResources() (uint64, int, error) { return f.hostResourcesFn() }
+func (f *fakeHost) vmStat() ([]byte, error)             { return f.vmStatFn() }
+func (f *fakeHost) chdir(dir string) error              { return f.chdirFn(dir) }
+func (f *fakeHost) baselineCheck(args []string) error   { return f.baselineCheckFn(args) }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	return f.goCommandFn(ctx, dir, env, args...)
 }
@@ -516,6 +532,12 @@ func newTestDeps(t testing.TB) *deps {
 		// graphical session.
 		browserRedirectDirFn: func() (string, error) { return "", nil },
 		executableFn:         realHost.executable,
+		// The process environment is a map of the fake's own: nothing is
+		// read from or set in the test process's (lookupEnv, setenv).
+		env: map[string]string{},
+		// No test reads this machine's memory or runs vm_stat.
+		hostResourcesFn: func() (uint64, int, error) { return 0, 0, errors.New("test host: no host memory is read") },
+		vmStatFn:        func() ([]byte, error) { return nil, errors.New("test host: no vm_stat") },
 		// A passing check, decided in the test process: no run is started.
 		baselineCheckFn: func([]string) error { return nil },
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {

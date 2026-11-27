@@ -10,6 +10,10 @@ import (
 // The methods that make *deps a hostcontrol dependency set.
 
 func (dp *deps) ColimaBinary() string { return dp.docker.colimaBinary() }
+func (dp *deps) HostResources() (uint64, int, error) {
+	return dp.host.hostResources()
+}
+func (dp *deps) VMStat() ([]byte, error) { return dp.host.vmStat() }
 
 // ProcessAlive and Listening make dp the consolelink.Prober of this machine
 // (consolelink.ServeAddress, consolelink.ServePID).
@@ -69,6 +73,10 @@ func (impl realTemporal) ensure(ctx context.Context, w io.Writer) string {
 }
 func (impl realDocker) colimaBinary() string  { return hostcontrol.RealColimaBinary(impl.dp) }
 func (impl realHost) launchctlBinary() string { return hostcontrol.RealLaunchctlBinary(impl.dp) }
+func (impl realHost) hostResources() (uint64, int, error) {
+	return hostcontrol.RealHostResources(impl.dp)
+}
+func (impl realHost) vmStat() ([]byte, error) { return hostcontrol.RealVMStat(impl.dp) }
 func (impl realHost) serveHealthzOK(addr string) bool {
 	return hostcontrol.RealServeHealthzOK(impl.dp, addr)
 }

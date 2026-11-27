@@ -38,10 +38,17 @@
 # this script installs. Nothing is upgraded or removed, and a tool already on
 # PATH is left as it is, whatever installed it.
 #
-# Docker not answering is started only through colima, when colima is on
-# PATH, on either OS: `colima start` for a VM that already exists (its own
-# settings), else `colima start --memory 4`. FACTORYD_AUTOSTART=0 turns the
-# start off, as it does for factoryd's own. Any other Docker is the
+# On a Mac with colima, Docker is buildgate's own Colima VM, profile
+# buildgate (docker context colima-buildgate, which a new session config
+# pins as docker_context): `factoryd docker-context -ensure-vm` creates it
+# sized for the Mac (an eighth of its memory, 4 to 12 GiB; a quarter of its
+# CPUs, 2 to 8; 100 GiB disk), or starts it, only when the Mac has the VM's
+# memory plus 6 GiB available. It never changes the docker CLI's current
+# context or any other Colima profile. Elsewhere, and on a Mac whose existing
+# config sets no docker_context, Docker not answering is started only through
+# colima, when colima is on PATH: `colima start` for a VM that already exists
+# (its own settings), else `colima start --memory 4`. FACTORYD_AUTOSTART=0
+# turns the start off, as it does for factoryd's own. Any other Docker is the
 # operator's to start; this never starts dockerd. `make install` stops at the
 # image build and says so.
 #
@@ -160,7 +167,16 @@ if [ "$os" = Darwin ] && ! have terminal-notifier; then
 	fi
 fi
 
-if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
+# On a Mac, buildgate's own Colima VM: factoryd sizes, creates or starts it
+# (`factoryd docker-context -ensure-vm`, the code `factoryd doctor -fix`
+# runs) and prints its docker context; an existing config without
+# docker_context prints none and keeps the Docker it has.
+pinned=""
+if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && [ "$os" = Darwin ] && have docker && have colima && have go; then
+	pinned="$(go run ./cmd/factoryd docker-context -ensure-vm)" || exit 1
+fi
+
+if [ -z "$pinned" ] && [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
 	if [ -e "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ]; then
 		echo "Starting Docker: colima start"
 		colima start

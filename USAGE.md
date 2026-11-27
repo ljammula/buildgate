@@ -282,12 +282,14 @@ trailing request text `factoryd submit` takes; each must precede
 `<repo-path>` on the command line.
 
 **Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
-that are missing, starts colima and runs `gh auth login`. On Linux it installs
+that are missing, creates or starts buildgate's own colima VM (profile
+`buildgate`, "Data directory and colima" below) and runs `gh auth login`. On Linux it installs
 nothing and runs no `sudo`: it names each missing tool and stops, with the
 docker CLI, buildx and Compose v2 (2.23.1 or later) from Docker's own apt repository
 (`docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
 distribution's `docker.io` or the snap, and colima, whose VM runs Docker as on
-a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (colima: `colima
+a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (on a Mac,
+buildgate's colima VM, which `make install` and `factoryd doctor -fix` create; on Linux colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
@@ -446,11 +448,25 @@ pick `copilot` per role in the session config or per request (see
 fails, send back: the command, its full output, `factoryd doctor`
 output, and `factoryd version`.
 
-**Data directory and colima.** colima shares all of `$HOME` read-write
-with its VM by default, so a worker that escapes its container could
-write any file under it. Share only what a run mounts — `~/buildgate`
-(data dirs, script scratch) read-write and your repositories read-only —
-in `~/.colima/default/colima.yaml`, then `colima restart`:
+**Data directory and colima.** On a Mac buildgate runs Docker in a colima
+VM of its own, profile `buildgate` (docker context `colima-buildgate`), which
+a new session config pins with `docker_context: colima-buildgate`: every
+factoryd command, and `make install`'s Docker steps, use it whatever `docker
+context` is current, so `colima start -p other` in another shell does not move
+buildgate. `make install` and `factoryd doctor -fix` create it sharing only
+what a run mounts: `~/buildgate` (data dirs, script scratch) read-write, and
+read-only `~/code` when it exists plus the top-level home folder of
+`doctor`'s `-workspace` and `-target-repo`. A repository in another folder
+needs that folder added: `colima stop -p buildgate`, add it under `mounts:` in
+`~/.colima/buildgate/colima.yaml`, then `colima start -p buildgate
+--activate=false`. Nothing changes the docker CLI's current context or
+another colima profile.
+
+On Linux, and on a Mac whose config sets no `docker_context`, colima's own
+VM shares all of `$HOME` read-write by default, so a worker that escapes its
+container could write any file under it. Share only what a run mounts —
+`~/buildgate` read-write and your repositories read-only — in
+`~/.colima/default/colima.yaml`, then `colima restart`:
 
 ```yaml
 mounts:
@@ -474,7 +490,14 @@ Docker Desktop cannot run a sandbox: its VM's kernel has no Landlock and its
 daemon no AppArmor, both of which every sandbox runs under. `factoryd doctor`
 fails its "Docker can run sandboxes" row there.
 
-**Sizing colima.** `memory: 4` in the same file fits the default
+**Sizing colima.** buildgate's own VM gets an eighth of the Mac's memory (a
+whole number of GiB, 4 to 12: 12 GiB on a 96 GiB Mac, 4 GiB on a 16 GiB
+laptop), a quarter of its CPUs (2 to 8) and a 100 GiB disk, and is created or
+started only when the Mac has the VM's memory plus 6 GiB available
+(`vm_stat`), so macOS does not swap; `factoryd doctor` shows both
+(`Docker VM colima-buildgate: <N> GiB, running`, `Mac memory available`) and
+warns when `max_parallel_jobs` × `sandbox_memory` plus 1.5 GiB for the stack
+exceeds the VM. For a VM of your own, `memory: 4` fits the default
 `max_parallel_jobs: 2`. Once builds have run, the VM holds its whole
 configured memory on the host (the VM process's `footprint`; `ps` RSS reads
 higher because it counts shared pages) and keeps it until it stops. A build's
@@ -1594,7 +1617,8 @@ What changes for a build:
 | Halt naming a path that "does not appear to share ... into its containers" | The macOS Docker VM doesn't share `/private/tmp` (or anything outside `$HOME`) | Use a repo path, a session config `data_dir` and workspace under `$HOME` |
 | A run log says `buildgate: the worker cannot write /scratch` (the step exits 95) or `permission denied` under `/scratch` | The worker image predates the per-launch scratch volume, or a custom image lacks `/scratch` owned by `65532:65532` with mode `770`; the launch fails at the worker's setup | Rebuild the image: `make install` (Pi) or `make pifork-image` (pifork). A profile that pins an image of its own (a project or toolchain image) keeps it through `make install`: rebuild that image on the new worker image and re-point its `sandbox_image`. `factoryd doctor` reports the active image as `a new scratch volume is writable by the worker`, and every other profile's as `profile <name>: its sandbox_image can run this factoryd's worker`; a baseline that halts on it says the worker image predates this factoryd, not that the verify command fails |
 | A command in a build fails with `no space left on device` | Docker's data disk in the VM is full: each build's per-launch scratch volume holds its Go caches (a large Go build's can approach 4 GiB), and images and build cache share the disk. `factoryd doctor` warns on `Docker disk has room for <N> builds` when the free space of the sandbox image's container root (Docker's data filesystem on overlay2) is under 4 GiB per parallel build | Free Docker space (`docker builder prune`, `docker image prune`; `factoryd doctor -fix` reclaims leftover scratch volumes) or grow the VM's disk, or lower `max_parallel_jobs` |
-| A step ends `signal: killed`, or several containers die at once | The Docker VM ran out of memory and the kernel killed a container: `max_parallel_jobs` builds of up to `sandbox_memory` each add up to more than the VM has. `factoryd doctor` warns on `memory limits: max_parallel_jobs <N> × sandbox_memory <X> within Docker's memory` (limits, not measured use) | Lower `max_parallel_jobs` or `sandbox_memory` in the session config, or give the VM more memory (colima: `colima stop && colima start --memory <GiB>`; Docker Desktop: Settings > Resources; native Linux: the host's memory) |
+| A step ends `signal: killed`, or several containers die at once | The Docker VM ran out of memory and the kernel killed a container: `max_parallel_jobs` builds of up to `sandbox_memory` each add up to more than the VM has. `factoryd doctor` warns on `memory limits: max_parallel_jobs <N> × sandbox_memory <X> within Docker's memory` (limits, not measured use) | Lower `max_parallel_jobs` or `sandbox_memory` in the session config, or give the VM more memory (buildgate's VM: `colima stop -p buildgate && colima start -p buildgate --memory <GiB> --activate=false`, keeping 6 GiB of the Mac free; another colima VM: `colima stop && colima start --memory <GiB>`; Docker Desktop: Settings > Resources; native Linux: the host's memory) |
+| buildgate uses the wrong Docker VM: its containers, images or runs are in another colima profile, or appear after `colima start -p <other>` | The session config sets no `docker_context`, so buildgate follows the docker CLI's current context, which another colima start or `docker context use` moved | Add `docker_context: colima-buildgate` to the session config (`factoryd doctor -fix` creates that VM), or the context you want; `make install` to rebuild the images in it. `factoryd doctor` refuses to run while `DOCKER_HOST` or another `DOCKER_CONTEXT` is exported: unset it |
 | `factoryd doctor` warns `N leftover scratch volume(s) of finished runs` | A factoryd was killed before it removed a launch's `bg-scratch-<sandbox>` volume | `factoryd doctor -fix` removes the volumes of runs that are no longer in flight |
 | Every launch fails with `Landlock probe child exited with status 1` or `the worker command did not start within 2m0s of its release`, while `doctor` shows the gateway and meter healthy | Docker's VM has no Landlock or AppArmor (Docker Desktop), or colima shares `~/buildgate` over `9p`, whose permission bits keep the sandbox's user out | `factoryd doctor`'s "Docker can run sandboxes" row names the first; for either, run Docker in colima with `sshfs` or `virtiofs` mounts, not `9p` ("Data directory and colima") |
 | New flags rejected, fewer `doctor` checks, odd old behaviour | A stale `factoryd` earlier on `PATH` | `which -a factoryd`; run the fresh build by full path or fix `PATH` |

@@ -35,10 +35,15 @@ func RealColimaBinary(dp Deps) string { return "colima" }
 
 // ColimaProfile reports the Colima profile that provides Docker: the docker
 // context is `colima` (profile "default") or `colima-<name>`, and a colima
-// binary is on PATH. Anything else is not Colima.
+// binary is on PATH. Anything else is not Colima. The context is
+// DOCKER_CONTEXT when it is set (the one docker_context pins, which need not
+// exist yet), else what `docker context show` prints.
 func ColimaProfile(dp Deps, ctx context.Context) (profile string, ok bool) {
 	if _, err := exec.LookPath(dp.ColimaBinary()); err != nil {
 		return "", false
+	}
+	if name := os.Getenv("DOCKER_CONTEXT"); name != "" {
+		return colimaContextProfile(name)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -46,14 +51,7 @@ func ColimaProfile(dp Deps, ctx context.Context) (profile string, ok bool) {
 	if err != nil {
 		return "", false
 	}
-	name := strings.TrimSpace(string(out))
-	switch {
-	case name == "colima":
-		return "default", true
-	case strings.HasPrefix(name, "colima-") && len(name) > len("colima-"):
-		return strings.TrimPrefix(name, "colima-"), true
-	}
-	return "", false
+	return colimaContextProfile(strings.TrimSpace(string(out)))
 }
 
 // ColimaStoppedMarker records, in TemporalStackDir, the profile of a VM that
@@ -110,6 +108,13 @@ func ColimaArgs(verb, profile string) []string {
 // startColima runs `colima start`, logging next to the Temporal stack's log,
 // behind a spinner. The error is a one-line reason naming the log file.
 func startColima(dp Deps, ctx context.Context, w io.Writer, profile string) error {
+	return runColimaStart(dp, ctx, w, profile, ColimaArgs("start", profile), colimaStartTimeout, "starting Colima")
+}
+
+// runColimaStart runs colima with args (a `start`), logging to
+// colima-start.log beside the Temporal stack's log, behind a spinner that
+// says doing. The error is a one-line reason naming the log file.
+func runColimaStart(dp Deps, ctx context.Context, w io.Writer, profile string, args []string, timeout time.Duration, doing string) error {
 	dir, err := TemporalStackDir()
 	if err != nil {
 		return err
@@ -120,11 +125,11 @@ func startColima(dp Deps, ctx context.Context, w io.Writer, profile string) erro
 		return err
 	}
 	defer logFile.Close()
-	ctx, cancel := context.WithTimeout(ctx, colimaStartTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	sp := spinner.New(w, spinner.IsTerminal(os.Stdout))
-	sp.Start(fmt.Sprintf("starting Colima (profile %s)", profile))
-	cmd := exec.CommandContext(ctx, dp.ColimaBinary(), ColimaArgs("start", profile)...)
+	sp.Start(fmt.Sprintf("%s (profile %s)", doing, profile))
+	cmd := exec.CommandContext(ctx, dp.ColimaBinary(), args...)
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	if err := cmd.Run(); err != nil {
 		sp.Stop("")

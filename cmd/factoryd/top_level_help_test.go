@@ -36,7 +36,7 @@ func TestIsTopLevelHelpRequest(t *testing.T) {
 
 // makefileOnlyCommands are the dispatch-table entries no operator runs
 // (subcommands' doc comment), which the catalog leaves out.
-var makefileOnlyCommands = []string{"build-ca-bundle", "image-inputs-hash", "stage-agent-tests", "project-image-args", "image-reuse"}
+var makefileOnlyCommands = []string{"build-ca-bundle", "image-inputs-hash", "stage-agent-tests", "project-image-args", "image-reuse", "docker-context"}
 
 // The catalog is the dispatch table: a command added to one and not the
 // other would be missing from the help, or listed and not runnable.

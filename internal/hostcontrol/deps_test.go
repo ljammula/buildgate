@@ -58,6 +58,8 @@ type fakeDeps struct {
 	spawnWorkerFn        func(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
 	temporalHealthyFn    func(ctx context.Context, addr string) error
 	workerServiceStateFn func(ctx context.Context, plistPath string) string
+	hostResourcesFn      func() (uint64, int, error)
+	vmStatFn             func() ([]byte, error)
 	processAliveFn       func(pid int) bool
 	listeningFn          func(addr string) bool
 }
@@ -65,8 +67,10 @@ type fakeDeps struct {
 func (f *fakeDeps) ProcessAlive(pid int) bool  { return f.processAliveFn(pid) }
 func (f *fakeDeps) Listening(addr string) bool { return f.listeningFn(addr) }
 
-func (f *fakeDeps) ColimaBinary() string { return f.colimaBinaryFn() }
-func (f *fakeDeps) DockerBinary() string { return f.dockerBinaryFn() }
+func (f *fakeDeps) ColimaBinary() string                { return f.colimaBinaryFn() }
+func (f *fakeDeps) HostResources() (uint64, int, error) { return f.hostResourcesFn() }
+func (f *fakeDeps) VMStat() ([]byte, error)             { return f.vmStatFn() }
+func (f *fakeDeps) DockerBinary() string                { return f.dockerBinaryFn() }
 func (f *fakeDeps) EnsureTemporal(ctx context.Context, w io.Writer) string {
 	return f.ensureTemporalFn(ctx, w)
 }
@@ -121,6 +125,7 @@ func (f *fakeDeps) WorkerServiceState(ctx context.Context, plistPath string) str
 //	SpawnServe          starts a process: refused
 //	WorkerServiceState  asks launchd: no service
 //	ServeStartToken     writes beside the session config: refused
+//	HostResources, VMStat  read this machine's memory: refused
 //
 // A test that needs another answer sets the field (dp.spawnWorkerFn = ...); a
 // test of a real method calls it with the fake (RealSpawnServe(dp, ...)).
@@ -156,6 +161,8 @@ func newFakeDeps(t testing.TB) *fakeDeps {
 		return errors.New("tests start no real serve")
 	}
 	f.workerServiceStateFn = func(context.Context, string) string { return "" }
+	f.hostResourcesFn = func() (uint64, int, error) { return 0, 0, errors.New("tests read no host memory") }
+	f.vmStatFn = func() ([]byte, error) { return nil, errors.New("tests run no vm_stat") }
 	f.serveStartTokenFn = func(string) (string, string, error) {
 		return "", "", errors.New("tests write no serve start token")
 	}

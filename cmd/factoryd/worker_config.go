@@ -517,7 +517,7 @@ func applySessionConfig(flags *flag.FlagSet, configPath string) (sessionconfig.S
 // calls; a boundary method so tests can stub it the same way
 // docker.initChecks is stubbed, instead of needing a live Docker daemon.
 func (impl realDocker) workerChecks(ctx context.Context, in doctorInputs) []doctorCheck {
-	return explainDockerUnreachable(ctx, impl.dp, in.sandboxDocker, doctorChecksFor(ctx, in))
+	return explainDockerUnreachable(ctx, impl.dp, in.sandboxDocker, in.settings.DockerContext, doctorChecksFor(ctx, in))
 }
 
 // runWorkerDoctorPreflight runs the same checks `factoryd doctor` would

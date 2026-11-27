@@ -851,14 +851,14 @@ func TestWorkerConfigExplicitConfigPathMustExist(t *testing.T) {
 
 func TestInitConfigWritesExampleAndRefusesToOverwrite(t *testing.T) {
 	path := isolateSessionConfig(t)
-	if err := initConfigMain(nil); err != nil {
+	if err := initConfigMain(newTestDeps(t), nil); err != nil {
 		t.Fatalf("initConfigMain: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != sessionconfig.Example {
 		t.Fatalf("read %s: %v, content matches Example: %v", path, err, string(data) == sessionconfig.Example)
 	}
-	err = initConfigMain(nil)
+	err = initConfigMain(newTestDeps(t), nil)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("second initConfigMain = %v, want an already-exists refusal", err)
 	}

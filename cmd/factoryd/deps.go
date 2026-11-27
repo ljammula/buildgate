@@ -184,6 +184,16 @@ type hostBoundary interface {
 	// can be opened on this machine.
 	browserRedirectDir() (string, error)
 	executable() (string, error)
+	// lookupEnv and setenv read and set this process's environment, which
+	// every child process inherits: the docker_context pin
+	// (pinDockerContext) is the one caller of setenv.
+	lookupEnv(key string) (string, bool)
+	setenv(key, value string) error
+	// hostResources is this machine's physical memory in bytes and its CPU
+	// count, and vmStat is macOS's vm_stat output: the Docker VM's size and
+	// the Mac's memory headroom (internal/hostcontrol docker_vm.go).
+	hostResources() (memory uint64, cpus int, err error)
+	vmStat() ([]byte, error)
 	// notifyWebhooks reads the notification webhook URLs from files
 	// (readWebhookFiles).
 	notifyWebhooks(files webhookFiles) notify.Webhooks

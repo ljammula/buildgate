@@ -80,9 +80,10 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 		wantFix  string
 	}{
 		{"fits", 2, "4g", "", "17179869184", "", ""},
-		{"does not fit", 4, "4g", "", "8589934592", "limits add up to 16.0 GiB (4 × 4.0 GiB), Docker has 8.0 GiB -- limits, not measured use", "Docker Desktop: Settings > Resources"},
-		{"sidecars not counted", 4, "4g", "512m", "8589934592", "limits add up", "Compose sidecars are not counted here: `factoryd doctor -target-repo"},
-		{"one job needs no Docker", 1, "4g", "", "1", "", ""},
+		{"does not fit", 4, "4g", "", "8589934592", "limits add up to 17.5 GiB (4 × 4.0 GiB, 1.5 GiB for Temporal, the gateway, the meter and the registry proxy), Docker has 8.0 GiB -- limits, not measured use", "Docker Desktop: Settings > Resources"},
+		{"sidecars counted with compose services on", 4, "4g", "512m", "8589934592", "limits add up to 18.0 GiB (4 × 4.0 GiB, 1.5 GiB for Temporal, the gateway, the meter and the registry proxy, 1 × 0.5 GiB of compose sidecars)", "Compose sidecars are counted at compose_services_memory per run"},
+		{"one job counts the stack too", 1, "4g", "", "4294967296", "limits add up to 5.5 GiB (1 × 4.0 GiB", ""},
+		{"the stack fits beside one job", 1, "4g", "", "6442450944", "", ""},
 		{"unparseable", 4, "4g", "", "lots", "parse Docker MemTotal", ""},
 		{"empty memory", 4, "", "", "8589934592", "sandbox_memory is empty: every launch is refused with \"sandbox resource limits are required\"", ""},
 		{"zero memory", 4, "0", "", "8589934592", "not a positive size", ""},
@@ -92,6 +93,7 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := sessionconfig.DefaultSettings()
 			s.MaxParallelJobs, s.SandboxMemory, s.ComposeServicesMemory = tc.jobs, tc.memory, tc.compose
+			s.ComposeServices = tc.compose != ""
 			docker, argv := sizingFake{memTotal: tc.memTotal}.install(t)
 			c := doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
 			checkSizingRow(t, c, tc.wantErr)
@@ -110,7 +112,7 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 		s := sessionconfig.DefaultSettings()
 		s.MaxParallelJobs, s.SandboxMemory = 2, "4g"
 		s.Roles = &sessionconfig.Roles{Challenger: &sessionconfig.RoleConfig{Model: "m"}}
-		docker, _ := sizingFake{memTotal: "17179869184"}.install(t)
+		docker, _ := sizingFake{memTotal: "19327352832"}.install(t)
 		c := doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
 		checkSizingRow(t, c, "")
 		if c.Detail != "" {
@@ -120,7 +122,7 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 		// serial count (4 × 4 GiB) still warns.
 		s.MaxParallelJobs = 4
 		docker, _ = sizingFake{memTotal: "12884901888"}.install(t)
-		checkSizingRow(t, doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts), "limits add up to 16.0 GiB (4 × 4.0 GiB), Docker has 12.0 GiB")
+		checkSizingRow(t, doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts), "limits add up to 17.5 GiB (4 × 4.0 GiB, 1.5 GiB for Temporal")
 	})
 	t.Run("a challenger runs after the review where Docker's memory is under jobs x 2 x sandbox_memory", func(t *testing.T) {
 		s := sessionconfig.DefaultSettings()
@@ -133,11 +135,20 @@ func TestDoctorCheckParallelMemory(t *testing.T) {
 			t.Errorf("detail = %q, want it to say the review and challenger run one after the other", c.Detail)
 		}
 		s.MaxParallelJobs = 1
-		docker, _ = sizingFake{memTotal: "4294967296"}.install(t)
+		docker, _ = sizingFake{memTotal: "6442450944"}.install(t)
 		c = doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
 		checkSizingRow(t, c, "")
 		if !strings.Contains(c.Detail, "one after the other") {
 			t.Errorf("one job: detail = %q", c.Detail)
+		}
+	})
+	t.Run("a pinned Colima VM is named in the fix", func(t *testing.T) {
+		s := sessionconfig.DefaultSettings()
+		s.MaxParallelJobs, s.SandboxMemory, s.DockerContext = 4, "4g", "colima-buildgate"
+		docker, _ := sizingFake{memTotal: "8589934592"}.install(t)
+		c := doctorCheckParallelMemory(realMemDeps(t), context.Background(), docker, s, quickTimeouts)
+		if !strings.Contains(c.Fix, "buildgate's VM colima-buildgate") || !strings.Contains(c.Fix, "colima start -p buildgate --memory <GiB> --activate=false") {
+			t.Errorf("fix = %q", c.Fix)
 		}
 	})
 	t.Run("docker failure", func(t *testing.T) {
