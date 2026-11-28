@@ -158,6 +158,10 @@ func TestUninstallGatewayStateCommandFollowsTheBackend(t *testing.T) {
 	if got := (&uninstallEnv{}).gatewayStateRemoveCommand(); !strings.Contains(got, "colima ssh") || !strings.Contains(got, "machine Docker runs on") {
 		t.Errorf("unknown backend: %q", got)
 	}
+	pinned := &uninstallEnv{backend: dockerbackend.Colima, colimaProfile: "buildgate"}
+	if got := pinned.gatewayStateRemoveCommand(); got != "`colima ssh -p buildgate -- sudo rm -rf /var/lib/openshell`" {
+		t.Errorf("pinned: %q", got)
+	}
 }
 
 // TestDetectBackendKeepsItsOwnDeadlineButEndsOnCancel: a caller's deadline

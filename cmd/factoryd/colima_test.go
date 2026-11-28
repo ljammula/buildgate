@@ -37,10 +37,18 @@ func runStopAll(dp *deps, t *testing.T, args ...string) string {
 	return out.String()
 }
 
+// pinWork pins dp's process to the Colima profile work, as a config's
+// docker_context: colima-work does at dispatch.
+func pinWork(dp *deps) {
+	fakeHostOf(dp).env["DOCKER_CONTEXT"] = "colima-work"
+	fakeHostOf(dp).env[pinnedDockerContextEnv] = "colima-work"
+}
+
 func TestStopAllStopsColimaWhenNothingElseRuns(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	f := newColimaFake(dp, t, "colima-work", false, "factoryd-local-registry")
+	pinWork(dp)
 	out := runStopAll(dp, t, "-all")
 	if got := strings.TrimSpace(f.ColimaCalls()); got != "stop --profile work" {
 		t.Errorf("colima calls = %q", got)
@@ -54,6 +62,7 @@ func TestStopAllLeavesColimaWhenOtherContainersRun(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	f := newColimaFake(dp, t, "colima", false, "a", "b", "c", "d", "e", "f", "g")
+	pinWork(dp)
 	out := runStopAll(dp, t, "-all")
 	if f.ColimaCalls() != "" {
 		t.Errorf("colima stopped with other containers up: %q", f.ColimaCalls())
@@ -67,6 +76,7 @@ func TestStopAllLeavesColimaWhenAutostartIsOff(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "0")
 	f := newColimaFake(dp, t, "colima", false)
+	pinWork(dp)
 	out := runStopAll(dp, t, "-all")
 	if f.ColimaCalls() != "" {
 		t.Errorf("colima stopped under FACTORYD_AUTOSTART=0: %q", f.ColimaCalls())
@@ -80,6 +90,7 @@ func TestStopAllColimaStopFailureDoesNotFailStop(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	f := newColimaFake(dp, t, "colima", false)
+	pinWork(dp)
 	if err := os.WriteFile(f.StopFail, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -152,10 +163,26 @@ func markerPath(t *testing.T) string {
 	return filepath.Join(dir, hostcontrol.ColimaStoppedMarker)
 }
 
+// TestStopAllWithoutAPinStopsNoColima: the current context's VM may be
+// another project's.
+func TestStopAllWithoutAPinStopsNoColima(t *testing.T) {
+	dp := newTestDeps(t)
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	f := newColimaFake(dp, t, "colima", false)
+	out := runStopAll(dp, t, "-all")
+	if f.ColimaCalls() != "" || !strings.Contains(out, "no docker_context pins") {
+		t.Errorf("colima calls = %q\n%s", f.ColimaCalls(), out)
+	}
+}
+
 func TestAutostartRestartsColimaThatStopAllStopped(t *testing.T) {
 	dp := newTestDeps(t)
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	f := newColimaFake(dp, t, "colima-work", false)
+	pinWork(dp)
+	f.SetList(t, `{"name":"work","status":"Stopped","memory":4294967296}`)
+	fakeHostOf(dp).hostResourcesFn = func() (uint64, int, error) { return 96 << 30, 28, nil }
+	fakeHostOf(dp).vmStatFn = vmStatAvailable(40)
 	out := runStopAll(dp, t, "-all")
 	if !strings.Contains(out, "colima: stopped (profile work)") {
 		t.Fatalf("VM not stopped:\n%s", out)
@@ -177,7 +204,7 @@ func TestAutostartRestartsColimaThatStopAllStopped(t *testing.T) {
 	if got := hostcontrol.StartTemporal(dp, context.Background(), &o); got == "" {
 		t.Fatalf("startTemporal failed:\n%s", o.String())
 	}
-	if got := f.ColimaCalls(); !strings.HasSuffix(strings.TrimSpace(got), "start --profile work") {
+	if got := f.ColimaCalls(); !strings.HasSuffix(strings.TrimSpace(got), "start --profile work --activate=false") {
 		t.Errorf("colima calls = %q", got)
 	}
 	if _, err := os.Stat(markerPath(t)); err == nil {

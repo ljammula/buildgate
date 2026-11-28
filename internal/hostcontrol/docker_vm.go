@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // On macOS buildgate runs Docker in a Colima VM of its own, profile
@@ -79,12 +81,14 @@ func RealVMStat(dp Deps) ([]byte, error) {
 
 var (
 	vmStatPageSize = regexp.MustCompile(`page size of (\d+) bytes`)
-	vmStatLine     = regexp.MustCompile(`^Pages (free|inactive|speculative|purgeable):\s+(\d+)\.?$`)
+	vmStatLine     = regexp.MustCompile(`^(Pages free|Pages inactive|Pages speculative|Pages purgeable|File-backed pages):\s+(\d+)\.?$`)
 )
 
 // ParseVMStat reads vm_stat's output as the memory macOS can hand out
-// without swapping: free, inactive, speculative and purgeable pages times
-// the page size.
+// without swapping: free, speculative and purgeable pages, plus the inactive
+// pages that are file-backed (min(inactive, file-backed): an inactive
+// anonymous page must be compressed or swapped to be reused), times the page
+// size.
 func ParseVMStat(out []byte) (uint64, error) {
 	m := vmStatPageSize.FindSubmatch(out)
 	if m == nil {
@@ -94,8 +98,7 @@ func ParseVMStat(out []byte) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("parse vm_stat page size: %w", err)
 	}
-	var pages uint64
-	seen := 0
+	pages := map[string]uint64{}
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := vmStatLine.FindStringSubmatch(strings.TrimSpace(scanner.Text()))
@@ -104,15 +107,15 @@ func ParseVMStat(out []byte) (uint64, error) {
 		}
 		n, err := strconv.ParseUint(line[2], 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("parse vm_stat %s pages: %w", line[1], err)
+			return 0, fmt.Errorf("parse vm_stat %s: %w", line[1], err)
 		}
-		pages += n
-		seen++
+		pages[line[1]] = n
 	}
-	if seen != 4 {
-		return 0, fmt.Errorf("parse vm_stat: found %d of the free, inactive, speculative and purgeable lines", seen)
+	if len(pages) != 5 {
+		return 0, fmt.Errorf("parse vm_stat: found %d of the free, inactive, speculative, purgeable and file-backed lines", len(pages))
 	}
-	return pages * pageSize, nil
+	reusable := pages["Pages free"] + pages["Pages speculative"] + pages["Pages purgeable"] + min(pages["Pages inactive"], pages["File-backed pages"])
+	return reusable * pageSize, nil
 }
 
 // HostMemoryAvailable is the memory the Mac has available now (vm_stat).
@@ -165,26 +168,41 @@ func ParseColimaList(out []byte) []ColimaVM {
 	return vms
 }
 
-// FindColimaVM looks profile up in `colima list --json`.
-func FindColimaVM(dp Deps, ctx context.Context, profile string) (ColimaVM, bool, error) {
+// ListColimaVMs is every profile of `colima list --json`.
+func ListColimaVMs(dp Deps, ctx context.Context) ([]ColimaVM, error) {
 	ctx, cancel := context.WithTimeout(ctx, colimaListTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, dp.ColimaBinary(), "list", "--json").Output()
 	if err != nil {
-		return ColimaVM{}, false, fmt.Errorf("colima list: %w", err)
+		return nil, fmt.Errorf("colima list: %w", err)
 	}
-	for _, vm := range ParseColimaList(out) {
+	return ParseColimaList(out), nil
+}
+
+// FindColimaVM looks profile up in `colima list --json`.
+func FindColimaVM(dp Deps, ctx context.Context, profile string) (ColimaVM, bool, error) {
+	vms, err := ListColimaVMs(dp, ctx)
+	if err != nil {
+		return ColimaVM{}, false, err
+	}
+	vm, found := colimaVMNamed(vms, profile)
+	return vm, found, nil
+}
+
+func colimaVMNamed(vms []ColimaVM, profile string) (ColimaVM, bool) {
+	for _, vm := range vms {
 		if vm.Name == profile {
-			return vm, true, nil
+			return vm, true
 		}
 	}
-	return ColimaVM{}, false, nil
+	return ColimaVM{}, false
 }
 
 // PinnedColimaProfile is the Colima profile DOCKER_CONTEXT names (colima or
 // colima-<profile>), the docker context factoryd pins from docker_context.
-func PinnedColimaProfile() (string, bool) {
-	return colimaContextProfile(os.Getenv("DOCKER_CONTEXT"))
+func PinnedColimaProfile(dp Deps) (string, bool) {
+	name, _ := dp.LookupEnv("DOCKER_CONTEXT")
+	return colimaContextProfile(name)
 }
 
 // colimaContextProfile is the Colima profile of a docker context name.
@@ -255,15 +273,38 @@ func formatGiB(b uint64) string {
 	return fmt.Sprintf("%.1f GiB", g)
 }
 
-// CheckHostHeadroom refuses when the Mac has less available memory than
-// vmMemory plus HostMemoryReserve. The refusal names both numbers.
-func CheckHostHeadroom(dp Deps, profile string, vmMemory uint64) error {
+// CheckHostHeadroom refuses to start or create profile with vmMemory when
+// either check fails: the Mac's available memory (vm_stat) is under vmMemory
+// plus HostMemoryReserve, or its physical memory less every other running
+// Colima VM's configured memory (vms, from `colima list --json`) and
+// vmMemory leaves under HostMemoryReserve. A VM holds its whole configured
+// memory once it has run. Each refusal names both numbers.
+func CheckHostHeadroom(dp Deps, profile string, vmMemory uint64, vms []ColimaVM) error {
 	available, err := HostMemoryAvailable(dp)
 	if err != nil {
 		return fmt.Errorf("could not read the Mac's available memory, so the Docker VM colima-%s was not started: %w", profile, err)
 	}
 	if need := vmMemory + HostMemoryReserve; available < need {
 		return fmt.Errorf("the Mac has %s of memory available, and the Docker VM colima-%s needs %s (%s for the VM plus %s kept for macOS): quit applications or stop a Colima VM you do not need, then run it again", formatGiB(available), profile, formatGiB(need), formatGiB(vmMemory), formatGiB(HostMemoryReserve))
+	}
+	total, _, err := dp.HostResources()
+	if err != nil {
+		return fmt.Errorf("could not read the Mac's memory, so the Docker VM colima-%s was not started: %w", profile, err)
+	}
+	var others uint64
+	var running []string
+	for _, vm := range vms {
+		if vm.Name != profile && vm.Running() {
+			others += vm.Memory
+			running = append(running, fmt.Sprintf("%s %s", vm.Name, formatGiB(vm.Memory)))
+		}
+	}
+	if committed := others + vmMemory; total < committed+HostMemoryReserve {
+		held := "no other Colima VM runs"
+		if len(running) > 0 {
+			held = "the running Colima VMs hold " + formatGiB(others) + " (" + strings.Join(running, ", ") + ")"
+		}
+		return fmt.Errorf("the Mac has %s of memory, and %s: with colima-%s's %s that commits %s, leaving under the %s macOS keeps: stop a Colima VM you do not need, then run it again", formatGiB(total), held, profile, formatGiB(vmMemory), formatGiB(committed), formatGiB(HostMemoryReserve))
 	}
 	return nil
 }
@@ -306,12 +347,14 @@ func (e AutostartOffError) Error() string {
 }
 
 // StartDockerVM starts profile when it is stopped, after the headroom
-// check; it never creates one (MissingDockerVMError).
+// checks, without making its context current; it never creates one
+// (MissingDockerVMError).
 func StartDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string) (DockerVMState, error) {
-	vm, found, err := FindColimaVM(dp, ctx, profile)
+	vms, err := ListColimaVMs(dp, ctx)
 	if err != nil {
 		return DockerVMState{}, err
 	}
+	vm, found := colimaVMNamed(vms, profile)
 	if !found {
 		return DockerVMState{}, MissingDockerVMError{Profile: profile}
 	}
@@ -322,7 +365,7 @@ func StartDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string) (D
 	if !AutostartEnabled() {
 		return state, AutostartOffError{Profile: profile, Verb: "start"}
 	}
-	if err := CheckHostHeadroom(dp, profile, vm.Memory); err != nil {
+	if err := CheckHostHeadroom(dp, profile, vm.Memory, vms); err != nil {
 		return state, err
 	}
 	args := append(ColimaArgs("start", profile), "--activate=false")
@@ -350,7 +393,11 @@ func EnsureDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string, m
 	}
 	size := SizeVM(memory, cpus)
 	vmMemory := uint64(size.MemoryGiB) << 30
-	if err := CheckHostHeadroom(dp, profile, vmMemory); err != nil {
+	vms, err := ListColimaVMs(dp, ctx)
+	if err != nil {
+		return DockerVMState{}, err
+	}
+	if err := CheckHostHeadroom(dp, profile, vmMemory, vms); err != nil {
 		return DockerVMState{}, err
 	}
 	if mounts.Writable != "" {
@@ -362,4 +409,48 @@ func EnsureDockerVM(dp Deps, ctx context.Context, w io.Writer, profile string, m
 		return DockerVMState{}, err
 	}
 	return DockerVMState{Profile: profile, Memory: vmMemory, Created: true}, nil
+}
+
+// ColimaMounts are the host directories a Colima profile shares, read from
+// its colima.yaml under colimaHome (~/.colima, or $COLIMA_HOME), with `~`
+// expanded against home. found is false when the profile has no colima.yaml.
+// An empty mounts list is colima's default, the whole home directory.
+func ColimaMounts(colimaHome, home, profile string) (dirs []string, found bool, err error) {
+	data, err := os.ReadFile(filepath.Join(colimaHome, profile, "colima.yaml"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var cfg struct {
+		Mounts []struct {
+			Location string `yaml:"location"`
+		} `yaml:"mounts"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, true, fmt.Errorf("parse %s: %w", filepath.Join(colimaHome, profile, "colima.yaml"), err)
+	}
+	if len(cfg.Mounts) == 0 {
+		return []string{home}, true, nil
+	}
+	for _, m := range cfg.Mounts {
+		loc := m.Location
+		if loc == "~" || strings.HasPrefix(loc, "~/") {
+			loc = filepath.Join(home, strings.TrimPrefix(loc, "~"))
+		}
+		dirs = append(dirs, filepath.Clean(loc))
+	}
+	return dirs, true, nil
+}
+
+// Shares reports whether dir is one of dirs or inside one.
+func Shares(dirs []string, dir string) bool {
+	dir = filepath.Clean(dir)
+	for _, d := range dirs {
+		if dir == d || strings.HasPrefix(dir, d+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

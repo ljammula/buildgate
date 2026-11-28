@@ -198,7 +198,9 @@ class InstallPrereqsTest(unittest.TestCase):
         self.assertIn("install go python gh git node docker docker-buildx colima", self.brew_calls())
         link = self.home / ".docker" / "cli-plugins" / "docker-buildx"
         self.assertEqual(os.readlink(link), str(self.prefix / "lib/docker/cli-plugins/docker-buildx"))
-        self.assertEqual(self.colima_calls(), ["start --memory 4"])
+        # Docker on a Mac is factoryd's to start (`go run ./cmd/factoryd
+        # docker-context -ensure-vm`): the script runs no colima itself.
+        self.assertEqual(self.colima_calls(), [])
 
     def test_existing_docker_without_buildx_gets_the_plugin_and_no_colima(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
@@ -355,6 +357,7 @@ fi
 
     def test_a_stopped_colima_vm_is_started_with_its_own_settings(self):
         self.have(*EVERYTHING, docker_up=False)
+        self.system("Linux")
         vm = self.home / ".colima" / "default"
         vm.mkdir(parents=True)
         (vm / "colima.yaml").write_text("memory: 8\n")
@@ -386,12 +389,16 @@ fi
         self.assertIn("3 GiB of memory available", result.stderr)
         self.assertEqual(self.colima_calls(), [])
 
-    def test_a_mac_config_without_docker_context_keeps_its_docker(self):
+    def test_a_mac_config_without_docker_context_creates_nothing_itself(self):
+        # factoryd prints how to pin and starts only a stopped default
+        # profile, after its memory checks; the script starts no colima.
         self.have(*EVERYTHING, docker_up=False)
-        self.go_stub("echo\n")
+        self.go_stub("echo 'the session config sets no docker_context' >&2\necho\n")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.colima_calls(), ["start --memory 4"])
+        self.assertEqual(self.go_calls(), ["run ./cmd/factoryd docker-context -ensure-vm"])
+        self.assertIn("sets no docker_context", result.stderr)
+        self.assertEqual(self.colima_calls(), [])
 
     def test_linux_never_asks_factoryd_for_a_vm(self):
         self.have(*EVERYTHING, docker_up=False)

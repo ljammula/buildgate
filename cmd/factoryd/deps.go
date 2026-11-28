@@ -189,6 +189,7 @@ type hostBoundary interface {
 	// (pinDockerContext) is the one caller of setenv.
 	lookupEnv(key string) (string, bool)
 	setenv(key, value string) error
+	unsetenv(key string) error
 	// hostResources is this machine's physical memory in bytes and its CPU
 	// count, and vmStat is macOS's vm_stat output: the Docker VM's size and
 	// the Mac's memory headroom (internal/hostcontrol docker_vm.go).

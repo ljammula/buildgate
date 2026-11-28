@@ -42,7 +42,7 @@ func ColimaProfile(dp Deps, ctx context.Context) (profile string, ok bool) {
 	if _, err := exec.LookPath(dp.ColimaBinary()); err != nil {
 		return "", false
 	}
-	if name := os.Getenv("DOCKER_CONTEXT"); name != "" {
+	if name, _ := dp.LookupEnv("DOCKER_CONTEXT"); name != "" {
 		return colimaContextProfile(name)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -54,9 +54,11 @@ func ColimaProfile(dp Deps, ctx context.Context) (profile string, ok bool) {
 	return colimaContextProfile(strings.TrimSpace(string(out)))
 }
 
-// ColimaStoppedMarker records, in TemporalStackDir, the profile of a VM that
-// `stop -all` stopped: the only case where the docker context is gone yet
-// factoryd restarts the VM.
+// ColimaStoppedMarker records, in TemporalStackDir, that `stop -all`
+// stopped the pinned VM: it is written only for the profile docker_context
+// pins and removed when a start succeeds. Nothing starts a profile because
+// the marker names it: autostart starts the pinned profile, or the current
+// context's.
 const ColimaStoppedMarker = "colima-stopped"
 
 func writeColimaMarker(profile string) {
@@ -73,28 +75,17 @@ func removeColimaMarker() {
 
 var colimaProfileName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// colimaToStart is the profile autostart should start: the one the docker
-// context names, else the one `stop -all` stopped (marker valid, colima on PATH).
+// colimaToStart is the profile autostart may start (colima on PATH): the one
+// docker_context pins, else the one the docker CLI's current context names.
+// No other profile is ever started.
 func colimaToStart(dp Deps, ctx context.Context) (profile string, ok bool) {
-	if p, ok := ColimaProfile(dp, ctx); ok {
-		return p, true
-	}
 	if _, err := exec.LookPath(dp.ColimaBinary()); err != nil {
 		return "", false
 	}
-	dir, err := TemporalStackDir()
-	if err != nil {
-		return "", false
+	if p, ok := PinnedColimaProfile(dp); ok {
+		return p, true
 	}
-	b, err := os.ReadFile(filepath.Join(dir, ColimaStoppedMarker))
-	if err != nil {
-		return "", false
-	}
-	name := strings.TrimSuffix(string(b), "\n")
-	if !colimaProfileName.MatchString(name) {
-		return "", false
-	}
-	return name, true
+	return ColimaProfile(dp, ctx)
 }
 
 func ColimaArgs(verb, profile string) []string {
@@ -103,12 +94,6 @@ func ColimaArgs(verb, profile string) []string {
 		args = append(args, "--profile", profile)
 	}
 	return args
-}
-
-// startColima runs `colima start`, logging next to the Temporal stack's log,
-// behind a spinner. The error is a one-line reason naming the log file.
-func startColima(dp Deps, ctx context.Context, w io.Writer, profile string) error {
-	return runColimaStart(dp, ctx, w, profile, ColimaArgs("start", profile), colimaStartTimeout, "starting Colima")
 }
 
 // runColimaStart runs colima with args (a `start`), logging to
@@ -152,12 +137,18 @@ func stopColima(dp Deps, ctx context.Context, profile string) error {
 }
 
 // StopColimaAfterStopAll applies the stop -all rule once Temporal was
-// stopped: stop the VM when nothing else runs in it. It prints one line and
-// never fails stop.
+// stopped: stop the VM docker_context pins when nothing else runs in it.
+// With no pin no Colima VM is stopped: the one the docker CLI's current
+// context names may be another project's. It prints one line and never
+// fails stop.
 func StopColimaAfterStopAll(dp Deps, w io.Writer) {
 	ctx := context.Background()
-	profile, ok := ColimaProfile(dp, ctx)
+	if _, err := exec.LookPath(dp.ColimaBinary()); err != nil {
+		return
+	}
+	profile, ok := PinnedColimaProfile(dp)
 	if !ok {
+		fmt.Fprintln(w, "colima: left running (no docker_context pins a Colima VM of buildgate's)")
 		return
 	}
 	if !AutostartEnabled() {

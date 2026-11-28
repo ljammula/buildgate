@@ -954,8 +954,6 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	return s, nil
 }
 
-// applyListKeys overlays the list-valued keys (workspaces, skill_dirs,
-// design_guide_dirs, spec_draft_guidance_dirs, memory) that are present in c onto s.
 // dockerContextName is the shape of a docker CLI context name buildgate
 // accepts in docker_context.
 var dockerContextName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.+-]*$`)
@@ -973,6 +971,8 @@ func (c *Config) applyDockerContext(s *Settings) error {
 	return nil
 }
 
+// applyListKeys overlays the list-valued keys (workspaces, skill_dirs,
+// design_guide_dirs, spec_draft_guidance_dirs, memory) that are present in c onto s.
 func (c *Config) applyListKeys(s *Settings) error {
 	if c.Workspaces != nil {
 		s.Workspaces = c.Workspaces

@@ -77,6 +77,8 @@ func TestAutostartStartsColimaWhenDockerIsDownThenProceeds(t *testing.T) {
 	dp := newFakeDeps(t)
 	t.Setenv(AutostartEnvVar, "1")
 	f := newColimaFake(dp, t, "colima-work", true)
+	f.SetList(t, `{"name":"work","status":"Stopped","memory":4294967296}`)
+	roomyHost(dp)
 	stubTemporalProbe(dp, t, func() bool {
 		log, _ := os.ReadFile(f.DockerLog)
 		return strings.Contains(string(log), "up -d")
@@ -87,8 +89,8 @@ func TestAutostartStartsColimaWhenDockerIsDownThenProceeds(t *testing.T) {
 	if got := StartTemporal(dp, context.Background(), &out); got == "" {
 		t.Fatalf("startTemporal failed:\n%s", out.String())
 	}
-	if got := strings.TrimSpace(f.ColimaCalls()); got != "start --profile work" {
-		t.Errorf("colima calls = %q, want start --profile work", got)
+	if got := strings.TrimSpace(f.ColimaCalls()); got != "list --json\nstart --profile work --activate=false" {
+		t.Errorf("colima calls = %q, want the list, then start --profile work --activate=false", got)
 	}
 	if !strings.Contains(out.String(), "Temporal started at") {
 		t.Errorf("output lacks the Temporal line:\n%s", out.String())
@@ -99,6 +101,8 @@ func TestAutostartReportsWhyColimaCouldNotStart(t *testing.T) {
 	dp := newFakeDeps(t)
 	t.Setenv(AutostartEnvVar, "1")
 	f := newColimaFake(dp, t, "colima", true)
+	f.SetList(t, `{"name":"default","status":"Stopped","memory":4294967296}`)
+	roomyHost(dp)
 	if err := os.WriteFile(f.StartFail, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -156,5 +160,46 @@ func TestAutostartIgnoresColimaWithoutMarkerOrContext(t *testing.T) {
 				t.Errorf("colima=%q out=%q", f.ColimaCalls(), out.String())
 			}
 		})
+	}
+}
+
+// TestAutostartRefusesAnUnpinnedStartWithoutHeadroom: the current context's
+// VM is started only after the same headroom checks as the pinned one.
+func TestAutostartRefusesAnUnpinnedStartWithoutHeadroom(t *testing.T) {
+	dp := newFakeDeps(t)
+	t.Setenv(AutostartEnvVar, "1")
+	f := newColimaFake(dp, t, "colima", true)
+	f.SetList(t, `{"name":"default","status":"Stopped","memory":8589934592}`)
+	dp.hostResourcesFn = func() (uint64, int, error) { return 16 << 30, 8, nil }
+	dp.vmStatFn = vmStatWith(10 << 30)
+	err := ensureDocker(dp, context.Background(), &bytes.Buffer{}, "not reachable")
+	if err == nil || !strings.Contains(err.Error(), "10 GiB of memory available") {
+		t.Fatalf("ensureDocker = %v", err)
+	}
+	if strings.Contains(f.ColimaCalls(), "start") {
+		t.Errorf("colima calls = %q", f.ColimaCalls())
+	}
+}
+
+// TestStopAllStopsOnlyThePinnedVM: with no pin stop -all stops no Colima
+// VM, whatever the current context names; with one it stops that profile
+// and marks it.
+func TestStopAllStopsOnlyThePinnedVM(t *testing.T) {
+	t.Setenv(AutostartEnvVar, "1")
+	dp := newFakeDeps(t)
+	f := newColimaFake(dp, t, "colima", false)
+	var out bytes.Buffer
+	StopColimaAfterStopAll(dp, &out)
+	if f.ColimaCalls() != "" || !strings.Contains(out.String(), "no docker_context pins") {
+		t.Errorf("unpinned: colima calls %q, out %q", f.ColimaCalls(), out.String())
+	}
+	dp.env["DOCKER_CONTEXT"] = "colima-buildgate"
+	out.Reset()
+	StopColimaAfterStopAll(dp, &out)
+	if got := strings.TrimSpace(f.ColimaCalls()); got != "stop --profile buildgate" {
+		t.Errorf("pinned: colima calls = %q", got)
+	}
+	if b, err := os.ReadFile(markerPath(t)); err != nil || strings.TrimSpace(string(b)) != "buildgate" {
+		t.Errorf("marker = %q, %v", b, err)
 	}
 }

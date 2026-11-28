@@ -14,6 +14,9 @@ func (dp *deps) HostResources() (uint64, int, error) {
 	return dp.host.hostResources()
 }
 func (dp *deps) VMStat() ([]byte, error) { return dp.host.vmStat() }
+func (dp *deps) LookupEnv(key string) (string, bool) {
+	return dp.host.lookupEnv(key)
+}
 
 // ProcessAlive and Listening make dp the consolelink.Prober of this machine
 // (consolelink.ServeAddress, consolelink.ServePID).

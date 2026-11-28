@@ -28,8 +28,9 @@ BUILD_CA_BUNDLE ?= $(eval export BUILD_CA_BUNDLE := $(shell go run ./cmd/factory
 # no config yet the one a new config gets (colima-buildgate on a Mac with
 # colima), else DOCKER_CONTEXT as the shell has it. Read once, on first use,
 # by the hidden `factoryd docker-context`, which refuses a DOCKER_HOST or
-# DOCKER_CONTEXT that contradicts the config; that refusal stops make.
-FACTORYD_DOCKER_CONTEXT ?= $(eval FACTORYD_DOCKER_CONTEXT := $(shell go run ./cmd/factoryd docker-context $(if $(FACTORYD_CONFIG),-config "$(firstword $(FACTORYD_CONFIG))") || echo '!'))$(if $(filter !,$(FACTORYD_DOCKER_CONTEXT)),$(error factoryd docker-context failed: see the line above))$(FACTORYD_DOCKER_CONTEXT)
+# DOCKER_CONTEXT that contradicts the config; that refusal stops make. The
+# result is exported, so a sub-make does not ask again.
+FACTORYD_DOCKER_CONTEXT ?= $(eval export FACTORYD_DOCKER_CONTEXT := $(shell go run ./cmd/factoryd docker-context $(if $(FACTORYD_CONFIG),-config "$(firstword $(FACTORYD_CONFIG))") || echo '!'))$(if $(filter !,$(FACTORYD_DOCKER_CONTEXT)),$(error factoryd docker-context failed: see the line above))$(FACTORYD_DOCKER_CONTEXT)
 DOCKER_TARGETS = temporal-up local-images ghcr-images openshell-images .local-registry sandbox-image pifork-image meter-image registry-proxy-image project-sandbox-image
 $(DOCKER_TARGETS): export DOCKER_CONTEXT = $(FACTORYD_DOCKER_CONTEXT)
 

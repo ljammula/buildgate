@@ -23,8 +23,55 @@ func TestParseVMStatReadsACapturedOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := uint64((369227 + 2105980 + 52112 + 10256) * 16384); got != want {
+	// free + speculative + purgeable + min(inactive 2105980, file-backed 2584499)
+	if want := uint64((369227 + 52112 + 10256 + 2105980) * 16384); got != want {
 		t.Errorf("ParseVMStat = %d, want %d", got, want)
+	}
+}
+
+// TestParseVMStatCountsOnlyFileBackedInactivePages: inactive anonymous
+// pages must be compressed or swapped to be reused, so inactive counts only
+// up to the file-backed pages.
+func TestParseVMStatCountsOnlyFileBackedInactivePages(t *testing.T) {
+	out := "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free: 10.\nPages active: 999.\nPages inactive: 500.\nPages speculative: 2.\nPages purgeable: 3.\nFile-backed pages: 100.\n"
+	got, err := ParseVMStat([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := uint64((10 + 2 + 3 + 100) * 4096); got != want {
+		t.Errorf("ParseVMStat = %d, want %d", got, want)
+	}
+}
+
+// roomyHost gives dp a 96 GiB Mac with 40 GiB available.
+func roomyHost(dp *fakeDeps) {
+	dp.hostResourcesFn = func() (uint64, int, error) { return 96 << 30, 28, nil }
+	dp.vmStatFn = vmStatWith(40 << 30)
+}
+
+// TestHeadroomCountsTheOtherRunningVMs: available memory can be plenty while
+// the running VMs' configured memory, which they hold once used, leaves too
+// little; a stopped VM and the profile itself do not count.
+func TestHeadroomCountsTheOtherRunningVMs(t *testing.T) {
+	dp := newFakeDeps(t)
+	dp.hostResourcesFn = func() (uint64, int, error) { return 32 << 30, 8, nil }
+	dp.vmStatFn = vmStatWith(20 << 30)
+	vms := []ColimaVM{
+		{Name: "default", Status: "Running", Memory: 16 << 30},
+		{Name: "other", Status: "Stopped", Memory: 16 << 30},
+		{Name: "buildgate", Status: "Stopped", Memory: 12 << 30},
+	}
+	err := CheckHostHeadroom(dp, "buildgate", 12<<30, vms)
+	if err == nil {
+		t.Fatal("no refusal: 32 GiB - 16 GiB - 12 GiB leaves 4 GiB")
+	}
+	for _, want := range []string{"the Mac has 32 GiB of memory", "the running Colima VMs hold 16 GiB (default 16 GiB)", "commits 28 GiB", "6 GiB macOS keeps"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal lacks %q: %v", want, err)
+		}
+	}
+	if err := CheckHostHeadroom(dp, "buildgate", 8<<30, vms); err != nil {
+		t.Errorf("32 - 16 - 8 leaves 8 GiB: %v", err)
 	}
 }
 
@@ -99,7 +146,7 @@ func vmStatWith(available uint64) func() ([]byte, error) {
 	return func() ([]byte, error) {
 		pages := available / 4096
 		return []byte("Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free: " +
-			strconv.FormatUint(pages, 10) + ".\nPages inactive: 0.\nPages speculative: 0.\nPages purgeable: 0.\n"), nil
+			strconv.FormatUint(pages, 10) + ".\nPages inactive: 0.\nPages speculative: 0.\nPages purgeable: 0.\nFile-backed pages: 0.\n"), nil
 	}
 }
 
@@ -108,8 +155,7 @@ func TestEnsureDockerVMCreatesAMissingProfileSizedForTheMac(t *testing.T) {
 	dp := newFakeDeps(t)
 	f := newColimaFake(dp, t, "default", false)
 	f.SetList(t, `{"name":"default","status":"Running","cpus":8,"memory":17179869184}`)
-	dp.hostResourcesFn = func() (uint64, int, error) { return 96 << 30, 28, nil }
-	dp.vmStatFn = vmStatWith(40 << 30)
+	roomyHost(dp)
 	data := filepath.Join(t.TempDir(), "buildgate")
 	var out bytes.Buffer
 	state, err := EnsureDockerVM(dp, context.Background(), &out, "buildgate", VMMounts{Writable: data, ReadOnly: []string{"/Users/op/code"}})
@@ -153,7 +199,7 @@ func TestEnsureDockerVMStartsAStoppedProfileWithItsOwnSize(t *testing.T) {
 	dp := newFakeDeps(t)
 	f := newColimaFake(dp, t, "default", false)
 	f.SetList(t, `{"name":"buildgate","status":"Stopped","cpus":2,"memory":8589934592}`)
-	dp.vmStatFn = vmStatWith(20 << 30)
+	roomyHost(dp)
 	state, err := EnsureDockerVM(dp, context.Background(), &bytes.Buffer{}, "buildgate", VMMounts{Writable: "/x"})
 	if err != nil {
 		t.Fatal(err)
@@ -189,10 +235,10 @@ func TestEnsureDockerVMLeavesARunningProfileAlone(t *testing.T) {
 func TestAutostartFollowsThePinnedContext(t *testing.T) {
 	dp := newFakeDeps(t)
 	t.Setenv(AutostartEnvVar, "1")
-	t.Setenv("DOCKER_CONTEXT", "colima-buildgate")
+	dp.env["DOCKER_CONTEXT"] = "colima-buildgate"
 	f := newColimaFake(dp, t, "colima", true)
 	f.SetList(t, `{"name":"default","status":"Running","memory":4294967296}`, `{"name":"buildgate","status":"Stopped","memory":4294967296}`)
-	dp.vmStatFn = vmStatWith(20 << 30)
+	roomyHost(dp)
 	if p, ok := ColimaProfile(dp, context.Background()); !ok || p != "buildgate" {
 		t.Fatalf("ColimaProfile = (%q, %v), want buildgate", p, ok)
 	}
@@ -210,7 +256,7 @@ func TestAutostartFollowsThePinnedContext(t *testing.T) {
 func TestAutostartNamesDoctorFixForAMissingPinnedVM(t *testing.T) {
 	dp := newFakeDeps(t)
 	t.Setenv(AutostartEnvVar, "1")
-	t.Setenv("DOCKER_CONTEXT", "colima-buildgate")
+	dp.env["DOCKER_CONTEXT"] = "colima-buildgate"
 	f := newColimaFake(dp, t, "colima", true)
 	f.SetList(t, `{"name":"default","status":"Running","memory":4294967296}`)
 	err := ensureDocker(dp, context.Background(), &bytes.Buffer{}, "not reachable at localhost:7233")
@@ -238,8 +284,7 @@ func TestDockerVMIsNeverStartedOrCreatedWithAutostartOff(t *testing.T) {
 			dp := newFakeDeps(t)
 			f := newColimaFake(dp, t, "default", false)
 			f.SetList(t, tc.list)
-			dp.hostResourcesFn = func() (uint64, int, error) { return 96 << 30, 28, nil }
-			dp.vmStatFn = vmStatWith(40 << 30)
+			roomyHost(dp)
 			_, err := EnsureDockerVM(dp, context.Background(), io.Discard, "buildgate", VMMounts{Writable: filepath.Join(t.TempDir(), "b")})
 			var off AutostartOffError
 			if !errors.As(err, &off) || off.Verb != tc.verb {
@@ -249,5 +294,31 @@ func TestDockerVMIsNeverStartedOrCreatedWithAutostartOff(t *testing.T) {
 				t.Errorf("colima was asked to start: %q", calls)
 			}
 		})
+	}
+}
+
+func TestColimaMountsReadsTheProfilesYAML(t *testing.T) {
+	colimaHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(colimaHome, "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(colimaHome, "p", "colima.yaml"), []byte("mounts:\n  - location: ~/buildgate\n    writable: true\n  - location: /Volumes/x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirs, found, err := ColimaMounts(colimaHome, "/Users/op", "p")
+	if err != nil || !found || strings.Join(dirs, " ") != "/Users/op/buildgate /Volumes/x" {
+		t.Errorf("got (%v, %v, %v)", dirs, found, err)
+	}
+	if !Shares(dirs, "/Users/op/buildgate/data") || Shares(dirs, "/Users/op/buildgatex") {
+		t.Error("Shares")
+	}
+	if err := os.WriteFile(filepath.Join(colimaHome, "p", "colima.yaml"), []byte("cpu: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirs, _, _ := ColimaMounts(colimaHome, "/Users/op", "p"); strings.Join(dirs, " ") != "/Users/op" {
+		t.Errorf("no mounts is the home directory: %v", dirs)
+	}
+	if _, found, _ := ColimaMounts(colimaHome, "/Users/op", "absent"); found {
+		t.Error("absent profile found")
 	}
 }

@@ -296,6 +296,10 @@ func (f *fakeHost) setenv(key, value string) error {
 	f.env[key] = value
 	return nil
 }
+func (f *fakeHost) unsetenv(key string) error {
+	delete(f.env, key)
+	return nil
+}
 func (f *fakeHost) hostResources() (uint64, int, error) { return f.hostResourcesFn() }
 func (f *fakeHost) vmStat() ([]byte, error)             { return f.vmStatFn() }
 func (f *fakeHost) chdir(dir string) error              { return f.chdirFn(dir) }

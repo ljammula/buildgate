@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sessionconfig"
@@ -25,8 +28,53 @@ func doctorDockerVMChecksOn(dp *deps, goos string, settings sessionconfig.Settin
 	var checks []doctorCheck
 	if profile, ok := colimaProfileOfContext(settings.DockerContext); ok {
 		checks = append(checks, doctorCheckDockerVM(dp, profile, fix, repos, w))
+		checks = append(checks, doctorCheckVMMounts(dp, profile, repos)...)
 	}
 	return append(checks, doctorCheckHostMemory(dp))
+}
+
+// doctorCheckVMMounts is one row per repository doctor checks (-workspace,
+// -target-repo): whether the pinned VM shares it, from the mounts of the
+// profile's colima.yaml. A VM shares only what it was created with, so a
+// repository outside them fails with how to add it. No rows when the
+// profile has no colima.yaml (the VM row already fails).
+func doctorCheckVMMounts(dp *deps, profile string, repos []string) []doctorCheck {
+	home, _ := os.UserHomeDir()
+	colimaHome, _ := dp.host.lookupEnv("COLIMA_HOME")
+	if colimaHome == "" {
+		colimaHome = filepath.Join(home, ".colima")
+	}
+	yamlPath := filepath.Join(colimaHome, profile, "colima.yaml")
+	mounts, found, err := hostcontrol.ColimaMounts(colimaHome, home, profile)
+	if !found {
+		return nil
+	}
+	var checks []doctorCheck
+	for _, repo := range repos {
+		if repo == "" {
+			continue
+		}
+		abs, absErr := filepath.Abs(repo)
+		if absErr != nil {
+			continue
+		}
+		name := fmt.Sprintf("Docker VM colima-%s shares %s", profile, abs)
+		switch {
+		case err != nil:
+			checks = append(checks, doctorCheck{Name: name, Err: err, Advisory: true})
+		case !hostcontrol.Shares(mounts, abs):
+			add := abs
+			if top, ok := topLevelHomeDir(home, abs); ok {
+				add = top
+			}
+			checks = append(checks, doctorCheck{Name: name,
+				Err: fmt.Errorf("colima-%s shares only %s, so no sandbox can bind %s", profile, strings.Join(mounts, ", "), abs),
+				Fix: fmt.Sprintf("add `- location: %s` with `writable: false` under `mounts:` in %s, then `colima stop -p %s && colima start -p %s --activate=false`", add, yamlPath, profile, profile)})
+		default:
+			checks = append(checks, doctorCheck{Name: name})
+		}
+	}
+	return checks
 }
 
 // doctorCheckDockerVM is the row of the Colima VM docker_context pins:

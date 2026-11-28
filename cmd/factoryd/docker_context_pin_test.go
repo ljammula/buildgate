@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,20 +16,26 @@ import (
 )
 
 func TestConfigArgOf(t *testing.T) {
-	cases := map[string][]string{
-		"":          {"status"},
-		"a.yml":     {"worker", "-config", "a.yml", "-data-dir", "x"},
-		"b.yml":     {"serve", "--config=b.yml"},
-		"work":      {"submit", "-config=work", "-goal", "x"},
-		"c.yml ":    {"run", "--config", "c.yml "},
-		"last-wins": {"doctor", "-x", "-config"},
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"status"}, ""},
+		{[]string{"worker", "-config", "a.yml", "-data-dir", "x"}, "a.yml"},
+		{[]string{"worker", "-data-dir", "x", "-config", "a.yml"}, "a.yml"},
+		{[]string{"serve", "--config=b.yml"}, "b.yml"},
+		{[]string{"submit", "-config=work", "-goal", "x"}, "work"},
+		{[]string{"-ticket", "t", "--config", "c.yml"}, "c.yml"},
+		{[]string{"doctor", "-x", "-config"}, ""},
+		{[]string{"submit", "repo", "-config", "a.yml"}, ""},
+		{[]string{"submit", "--", "-config", "a.yml"}, ""},
+		{[]string{"worker", "---config", "a.yml"}, ""},
+		{[]string{"worker", "-config", "-data-dir"}, ""},
+		{[]string{"worker", "-config=-x"}, ""},
 	}
-	for want, args := range cases {
-		if want == "last-wins" {
-			want = ""
-		}
-		if got := configArgOf(args); got != want {
-			t.Errorf("configArgOf(%q) = %q, want %q", args, got, want)
+	for _, c := range cases {
+		if got := configArgOf(c.args); got != c.want {
+			t.Errorf("configArgOf(%q) = %q, want %q", c.args, got, c.want)
 		}
 	}
 }
@@ -57,6 +64,48 @@ func TestPinDockerContextExportsTheConfigsContext(t *testing.T) {
 	if got := fakeHostOf(dp).env["DOCKER_CONTEXT"]; got != "colima-buildgate" {
 		t.Errorf("DOCKER_CONTEXT = %q, want colima-buildgate", got)
 	}
+}
+
+// TestPinDockerContextInheritedFromAParentFactoryd: a DOCKER_CONTEXT the
+// marker names came from a parent factoryd's pin, so this process's config
+// decides: its own context, or none at all.
+func TestPinDockerContextInheritedFromAParentFactoryd(t *testing.T) {
+	inherited := map[string]string{"DOCKER_CONTEXT": "colima-buildgate", pinnedDockerContextEnv: "colima-buildgate"}
+	t.Run("a config pinning another context", func(t *testing.T) {
+		dp := newTestDeps(t)
+		maps.Copy(fakeHostOf(dp).env, inherited)
+		if err := pinDockerContext(dp, "worker", []string{"worker", "-config", pinnedConfig(t, "colima-other")}); err != nil {
+			t.Fatal(err)
+		}
+		if env := fakeHostOf(dp).env; env["DOCKER_CONTEXT"] != "colima-other" || env[pinnedDockerContextEnv] != "colima-other" {
+			t.Errorf("env = %v", env)
+		}
+	})
+	t.Run("a config pinning none", func(t *testing.T) {
+		dp := newTestDeps(t)
+		maps.Copy(fakeHostOf(dp).env, inherited)
+		if err := pinDockerContext(dp, "worker", []string{"worker", "-config", pinnedConfig(t, "")}); err != nil {
+			t.Fatal(err)
+		}
+		if env := fakeHostOf(dp).env; len(env) != 0 {
+			t.Errorf("env = %v, want the inherited pin dropped", env)
+		}
+	})
+	t.Run("an operator's DOCKER_CONTEXT is still refused", func(t *testing.T) {
+		dp := newTestDeps(t)
+		fakeHostOf(dp).env["DOCKER_CONTEXT"] = "colima"
+		fakeHostOf(dp).env[pinnedDockerContextEnv] = "colima-buildgate"
+		if err := pinDockerContext(dp, "worker", []string{"worker", "-config", pinnedConfig(t, "colima-other")}); err == nil || !strings.Contains(err.Error(), "DOCKER_CONTEXT is colima") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("an operator's DOCKER_CONTEXT with no pin is left alone", func(t *testing.T) {
+		dp := newTestDeps(t)
+		fakeHostOf(dp).env["DOCKER_CONTEXT"] = "colima"
+		if err := pinDockerContext(dp, "worker", []string{"worker", "-config", pinnedConfig(t, "")}); err != nil || fakeHostOf(dp).env["DOCKER_CONTEXT"] != "colima" {
+			t.Errorf("err = %v, env = %v", err, fakeHostOf(dp).env)
+		}
+	})
 }
 
 func TestPinDockerContextWithoutTheKeyChangesNothing(t *testing.T) {
@@ -182,6 +231,10 @@ func TestNewConfigDockerContext(t *testing.T) {
 	if text := initConfigText(dp, "darwin"); !strings.HasSuffix(text, "docker_context: colima-buildgate\n") {
 		t.Errorf("init-config on a Mac does not pin the VM:\n%s", text)
 	}
+	fakeHostOf(dp).env["DOCKER_HOST"] = "unix:///Users/op/.orbstack/run/docker.sock"
+	if got := newConfigDockerContext(dp, "darwin"); got != "" {
+		t.Errorf("DOCKER_HOST set: %q, want no pin", got)
+	}
 }
 
 func TestTopLevelHomeDir(t *testing.T) {
@@ -205,7 +258,7 @@ func TestTopLevelHomeDir(t *testing.T) {
 func vmStatAvailable(gib uint64) func() ([]byte, error) {
 	return func() ([]byte, error) {
 		return []byte("Mach Virtual Memory Statistics: (page size of 1073741824 bytes)\nPages free: " +
-			strconv.FormatUint(gib, 10) + ".\nPages inactive: 0.\nPages speculative: 0.\nPages purgeable: 0.\n"), nil
+			strconv.FormatUint(gib, 10) + ".\nPages inactive: 0.\nPages speculative: 0.\nPages purgeable: 0.\nFile-backed pages: 0.\n"), nil
 	}
 }
 
@@ -268,5 +321,77 @@ func TestPinnedDockerUnreachableNamesDoctorFix(t *testing.T) {
 	checks := explainDockerUnreachable(t.Context(), newTestDeps(t), "docker", "colima-buildgate", []doctorCheck{{Name: doctorDockerReachableName, Err: errors.New("down")}})
 	if !strings.Contains(checks[0].Fix, "doctor -fix") {
 		t.Errorf("fix = %q", checks[0].Fix)
+	}
+}
+
+// TestDoctorVMMountRows: a repository outside the pinned VM's mounts fails
+// with how to add it; one inside passes.
+func TestDoctorVMMountRows(t *testing.T) {
+	dp := newTestDeps(t)
+	home, _ := os.UserHomeDir()
+	colimaHome := t.TempDir()
+	fakeHostOf(dp).env["COLIMA_HOME"] = colimaHome
+	if err := os.MkdirAll(filepath.Join(colimaHome, "buildgate"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "cpu: 2\nmounts:\n  - location: ~/buildgate\n    writable: true\n  - location: ~/code\n    writable: false\n"
+	if err := os.WriteFile(filepath.Join(colimaHome, "buildgate", "colima.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inside, outside := filepath.Join(home, "code", "repo"), filepath.Join(home, "src", "repo")
+	rows := doctorCheckVMMounts(dp, "buildgate", []string{inside, "", outside})
+	if len(rows) != 2 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	if rows[0].Err != nil {
+		t.Errorf("inside ~/code: %+v", rows[0])
+	}
+	if rows[1].Err == nil || !strings.Contains(rows[1].Fix, "`- location: "+filepath.Join(home, "src")+"`") || !strings.Contains(rows[1].Fix, "colima stop -p buildgate && colima start -p buildgate --activate=false") {
+		t.Errorf("outside: %+v", rows[1])
+	}
+	if rows := doctorCheckVMMounts(dp, "absent", []string{outside}); rows != nil {
+		t.Errorf("a profile with no colima.yaml: %+v", rows)
+	}
+}
+
+// TestEnsureVMWithoutAPinSaysHowAndStartsOnlyAStoppedDefault: -ensure-vm with
+// a config that pins nothing creates nothing; it starts colima's default
+// profile only when it exists and is stopped.
+func TestEnsureVMWithoutAPinSaysHowAndStartsOnlyAStoppedDefault(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dp := newTestDeps(t)
+	f := withFakeColima(t, dp)
+	var out bytes.Buffer
+	if err := ensureDockerContextVM(dp, "", &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "add `docker_context: colima-buildgate`") || strings.Contains(f.ColimaCalls(), "start") {
+		t.Errorf("no default profile: out %q, colima %q", out.String(), f.ColimaCalls())
+	}
+	f.SetList(t, `{"name":"default","status":"Stopped","memory":4294967296}`)
+	fakeHostOf(dp).hostResourcesFn = func() (uint64, int, error) { return 96 << 30, 28, nil }
+	fakeHostOf(dp).vmStatFn = vmStatAvailable(40)
+	if err := ensureDockerContextVM(dp, "", &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(f.ColimaCalls()), "\n")
+	if got := lines[len(lines)-1]; got != "start --activate=false" {
+		t.Errorf("colima calls = %q", f.ColimaCalls())
+	}
+}
+
+// TestSystemdUnitLeavesOutAPinnedDockerContext: the unit's factoryd pins
+// from its config; only an operator's own DOCKER_CONTEXT is written.
+func TestSystemdUnitLeavesOutAPinnedDockerContext(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "colima-buildgate")
+	t.Setenv(pinnedDockerContextEnv, "colima-buildgate")
+	if env := systemdDockerEnv(); len(env) != 0 {
+		t.Errorf("pinned: env = %v", env)
+	}
+	t.Setenv(pinnedDockerContextEnv, "")
+	if env := systemdDockerEnv(); len(env) != 1 || env[0] != "DOCKER_CONTEXT=colima-buildgate" {
+		t.Errorf("operator's: env = %v", env)
 	}
 }

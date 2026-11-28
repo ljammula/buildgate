@@ -44,8 +44,9 @@
 # sized for the Mac (an eighth of its memory, 4 to 12 GiB; a quarter of its
 # CPUs, 2 to 8; 100 GiB disk), or starts it, only when the Mac has the VM's
 # memory plus 6 GiB available. It never changes the docker CLI's current
-# context or any other Colima profile. Elsewhere, and on a Mac whose existing
-# config sets no docker_context, Docker not answering is started only through
+# context or any other Colima profile; an existing config that sets no
+# docker_context gets one line on how to pin, and only a stopped default
+# profile is started. Elsewhere Docker not answering is started only through
 # colima, when colima is on PATH: `colima start` for a VM that already exists
 # (its own settings), else `colima start --memory 4`. FACTORYD_AUTOSTART=0
 # turns the start off, as it does for factoryd's own. Any other Docker is the
@@ -169,14 +170,16 @@ fi
 
 # On a Mac, buildgate's own Colima VM: factoryd sizes, creates or starts it
 # (`factoryd docker-context -ensure-vm`, the code `factoryd doctor -fix`
-# runs) and prints its docker context; an existing config without
-# docker_context prints none and keeps the Docker it has.
-pinned=""
+# runs). With an existing config that sets no docker_context it says so and
+# how to pin, and starts colima's default profile only when that exists and
+# is stopped, after the same memory checks.
+mac_vm=""
 if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && [ "$os" = Darwin ] && have docker && have colima && have go; then
-	pinned="$(go run ./cmd/factoryd docker-context -ensure-vm)" || exit 1
+	go run ./cmd/factoryd docker-context -ensure-vm >/dev/null || exit 1
+	mac_vm=1
 fi
 
-if [ -z "$pinned" ] && [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
+if [ -z "$mac_vm" ] && [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
 	if [ -e "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ]; then
 		echo "Starting Docker: colima start"
 		colima start

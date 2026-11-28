@@ -115,7 +115,7 @@ func doctorCheckParallelMemory(dp *deps, ctx context.Context, dockerBinary strin
 	case reviewAndChallengerTogether(settings, total):
 		sandboxes *= 2
 	case challenger:
-		detail = fmt.Sprintf("the review and the challenger run one after the other: Docker's memory (%s) is under max_parallel_jobs × 2 × sandbox_memory (%s)", formatGiB(total), formatGiB(int64(settings.MaxParallelJobs)*2*each))
+		detail = fmt.Sprintf("the review and the challenger run one after the other: Docker's memory (%s) is under max_parallel_jobs × 2 × sandbox_memory (%s)", formatGiB(total), formatGiB(int64(max(settings.MaxParallelJobs, 1))*2*each))
 	}
 	sidecars, sidecarsText := composeServicesNeed(settings)
 	if need := each*int64(sandboxes) + dockerInfraReserve + sidecars; need > total {
