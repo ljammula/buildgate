@@ -168,8 +168,9 @@ func TestWakeVMAfterIdleStopStartsTheVMAndStackThenClearsTheMarker(t *testing.T)
 		t.Fatal(err)
 	}
 	var runtimeStartedWithMarker bool
-	err := WakeVMAfterIdleStop(dp, context.Background(), io.Discard, func(context.Context, io.Writer) {
+	err := WakeVMAfterIdleStop(dp, context.Background(), io.Discard, func(context.Context, io.Writer) error {
 		runtimeStartedWithMarker = VMIdleMarkerPresent()
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +189,7 @@ func TestWakeVMAfterIdleStopKeepsTheMarkerWhenTemporalDoesNotStart(t *testing.T)
 	if err := createVMIdleMarker(idleNow()); err != nil {
 		t.Fatal(err)
 	}
-	if err := WakeVMAfterIdleStop(dp, context.Background(), io.Discard, func(context.Context, io.Writer) { t.Error("runtime started without Temporal") }); err == nil {
+	if err := WakeVMAfterIdleStop(dp, context.Background(), io.Discard, func(context.Context, io.Writer) error { t.Error("runtime started without Temporal"); return nil }); err == nil {
 		t.Error("a wake with no Temporal succeeded")
 	}
 	if !VMIdleMarkerPresent() {
@@ -205,5 +206,63 @@ func TestReadVMIdleMarkerTreatsAGarbledMarkerAsStopping(t *testing.T) {
 	m, found, err := ReadVMIdleMarker(idleNow())
 	if err != nil || !found || m.State != VMIdleStopping || !m.Since.Equal(idleNow()) {
 		t.Errorf("marker = %+v found=%v err=%v", m, found, err)
+	}
+}
+
+func TestWakeVMAfterIdleStopKeepsTheMarkerWhenTheRuntimeDoesNotStart(t *testing.T) {
+	dp := newFakeDeps(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dp.ensureTemporalFn = func(context.Context, io.Writer) string { return "localhost:7233" }
+	if err := createVMIdleMarker(idleNow()); err != nil {
+		t.Fatal(err)
+	}
+	if err := WakeVMAfterIdleStop(dp, context.Background(), io.Discard, func(context.Context, io.Writer) error { return errors.New("gateway down") }); err == nil {
+		t.Fatal("a wake whose gateway did not start succeeded")
+	}
+	if !VMIdleMarkerPresent() {
+		t.Fatal("the marker was removed with the gateway down: steps would start")
+	}
+	if err := WakeVMAfterIdleStop(dp, context.Background(), io.Discard, func(context.Context, io.Writer) error { return nil }); err != nil || VMIdleMarkerPresent() {
+		t.Errorf("a later successful wake: err=%v marker=%v, want it cleared", err, VMIdleMarkerPresent())
+	}
+}
+
+func TestStopVMWhenIdleFailureAfterTheStacksStoppedIsPartial(t *testing.T) {
+	dp, _ := idleFake(t, "someone-elses-db")
+	err := StopVMWhenIdle(dp, context.Background(), io.Discard, nil, idleNow, stillIdle)
+	var partial PartialVMStopError
+	if !errors.As(err, &partial) {
+		t.Errorf("err = %v, want a PartialVMStopError", err)
+	}
+	// A refusal before any stop began is not partial.
+	dp2, _ := idleFake(t)
+	err = StopVMWhenIdle(dp2, context.Background(), io.Discard, nil, idleNow, func(context.Context) error { return errors.New("busy") })
+	if errors.As(err, &partial) {
+		t.Errorf("a recheck refusal reported as partial: %v", err)
+	}
+}
+
+func TestStopVMWhenIdleCancelledDuringTheSettleWaitClearsTheMarker(t *testing.T) {
+	dp, f := idleFake(t)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	dp.sleepFn = func(time.Duration) { <-release }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- StopVMWhenIdle(dp, ctx, io.Discard, nil, idleNow, stillIdle) }()
+	for !VMIdleMarkerPresent() {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want the cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stop kept waiting after its context was cancelled")
+	}
+	if VMIdleMarkerPresent() || strings.Contains(f.ColimaCalls(), "stop") {
+		t.Errorf("marker=%v colima=%q after a cancelled stop", VMIdleMarkerPresent(), f.ColimaCalls())
 	}
 }

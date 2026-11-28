@@ -47,6 +47,14 @@ type VMIdleMarker struct {
 	MemoryBytes uint64 `json:"memory_bytes,omitempty"`
 }
 
+// PartialVMStopError is a stop that failed after it began stopping the
+// stacks: the machine may be half down, so the stopper undoes it at once
+// (WakeVMAfterIdleStop) instead of leaving it to the stale-marker repair.
+type PartialVMStopError struct{ Err error }
+
+func (e PartialVMStopError) Error() string { return "the VM stop failed partway: " + e.Err.Error() }
+func (e PartialVMStopError) Unwrap() error { return e.Err }
+
 // ErrVMIdleStopBusy is the refusal of a stop while another one holds the
 // marker.
 var ErrVMIdleStopBusy = errors.New("another worker is already stopping the VM, or a stopped VM has not been woken")
@@ -141,12 +149,14 @@ func writeVMIdleMarker(m VMIdleMarker) error {
 // stop -all sequence for a machine that has gone idle. The caller has judged
 // the machine idle; this checks again after VMIdleSettle, with the marker
 // already refusing new steps, by calling stillIdle (a non-nil result aborts
-// the stop and removes the marker). It refuses without autostart (nothing
+// the stop and removes the marker; so does a cancelled ctx). A failure once
+// the stacks began to stop is a PartialVMStopError. It refuses without autostart (nothing
 // would start the VM again), when docker_context does not pin the
 // DockerVMProfile VM (never any other profile), and with a build running or a
-// container of anything but the registry up. Any failure after the stopping
-// marker was written leaves it, so the wake path or a stale-marker repair
-// brings the stacks back; a refusal before the stop begins removes it.
+// container of anything but the registry up. A failure after the stacks began
+// to stop leaves the marker, for the caller to undo with WakeVMAfterIdleStop
+// (a stopper that died is repaired by the stale-marker rule); a refusal
+// before the stop begins removes it.
 func StopVMWhenIdle(dp Deps, ctx context.Context, w io.Writer, dataDirs []string, now func() time.Time, stillIdle func(context.Context) error) error {
 	profile, err := vmIdleProfile(dp)
 	if err != nil {
@@ -159,6 +169,15 @@ func StopVMWhenIdle(dp Deps, ctx context.Context, w io.Writer, dataDirs []string
 		_ = ClearVMIdleMarker()
 		return err
 	}
+	if err := stopStacksAndVM(dp, ctx, w, profile, dataDirs, now); err != nil {
+		return PartialVMStopError{Err: err}
+	}
+	return nil
+}
+
+// stopStacksAndVM is the stop itself, once the machine was judged idle twice:
+// OpenShell, Temporal, then the VM, and the stopped marker.
+func stopStacksAndVM(dp Deps, ctx context.Context, w io.Writer, profile string, dataDirs []string, now func() time.Time) error {
 	var memory uint64
 	if vm, found, err := FindColimaVM(dp, ctx, profile); err == nil && found {
 		memory = vm.Memory
@@ -206,7 +225,16 @@ func vmIdleProfile(dp Deps) (string, error) {
 // checkStillIdle waits VMIdleSettle, then re-checks: no build runs and the
 // caller's own predicate still holds.
 func checkStillIdle(dp Deps, ctx context.Context, dataDirs []string, now func() time.Time, stillIdle func(context.Context) error) error {
-	dp.Sleep(VMIdleSettle)
+	settled := make(chan struct{})
+	go func() {
+		dp.Sleep(VMIdleSettle)
+		close(settled)
+	}()
+	select {
+	case <-settled:
+	case <-ctx.Done():
+		return fmt.Errorf("not idle: %w", ctx.Err())
+	}
 	if active, err := ActiveBuilds(dp, ctx, dataDirs, now()); err != nil {
 		return fmt.Errorf("not idle: %w", err)
 	} else if len(active) > 0 {
@@ -220,12 +248,14 @@ func checkStillIdle(dp Deps, ctx context.Context, dataDirs []string, now func() 
 
 // WakeVMAfterIdleStop undoes an idle stop (or repairs a partial one): it
 // starts the VM and Temporal's stack (EnsureTemporal), then startRuntime
-// (the OpenShell stack), and only then removes the marker, so no step starts
+// (the OpenShell stack, which must answer), and only then removes the marker, so no step starts
 // before both answer. An error leaves the marker for the next attempt.
-func WakeVMAfterIdleStop(dp Deps, ctx context.Context, w io.Writer, startRuntime func(context.Context, io.Writer)) error {
+func WakeVMAfterIdleStop(dp Deps, ctx context.Context, w io.Writer, startRuntime func(context.Context, io.Writer) error) error {
 	if dp.EnsureTemporal(ctx, w) == "" {
 		return errors.New("Temporal did not start")
 	}
-	startRuntime(ctx, w)
+	if err := startRuntime(ctx, w); err != nil {
+		return fmt.Errorf("OpenShell did not start: %w", err)
+	}
 	return ClearVMIdleMarker()
 }

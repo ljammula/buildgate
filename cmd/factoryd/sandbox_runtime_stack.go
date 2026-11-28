@@ -25,6 +25,32 @@ func ensureSandboxRuntime(dp *deps, ctx context.Context, w io.Writer, meterImage
 	startSandboxRuntimeIfDown(dp, ctx, w, meterImage)
 }
 
+// startSandboxRuntimeForWake is ensureSandboxRuntime for the wake of an idle
+// stop, which must not finish with the gateway or meter down: it returns the
+// error of the start, or of a gateway or meter that still does not answer. It
+// does nothing when this build has no gateway runtime or no meter image names
+// a stack to start.
+func startSandboxRuntimeForWake(dp *deps, ctx context.Context, w io.Writer, meterImage string) error {
+	if dp.sandbox.runtime() == nil || meterImage == "" {
+		return nil
+	}
+	if !hostcontrol.AutostartEnabled() {
+		return fmt.Errorf("%s=0", hostcontrol.AutostartEnvVar)
+	}
+	if dp.sandbox.gatewayHealthy(ctx) != nil || dp.sandbox.meterHealthy(ctx) != nil {
+		if err := dp.sandbox.startStack(ctx, w, meterImage); err != nil {
+			return err
+		}
+	}
+	if err := dp.sandbox.gatewayHealthy(ctx); err != nil {
+		return fmt.Errorf("gateway: %w", err)
+	}
+	if err := dp.sandbox.meterHealthy(ctx); err != nil {
+		return fmt.Errorf("meter: %w", err)
+	}
+	return nil
+}
+
 // startSandboxRuntimeIfDown starts the stack when the gateway or the meter
 // does not answer, and reports a failed start on w.
 func startSandboxRuntimeIfDown(dp *deps, ctx context.Context, w io.Writer, meterImage string) {

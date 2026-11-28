@@ -14,9 +14,11 @@ import (
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
 
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/hostcontrol/hostcontroltest"
 	"buildgate/internal/request"
+	"buildgate/internal/sandbox"
 	"buildgate/internal/workflow"
 )
 
@@ -53,14 +55,15 @@ func openWorkflow(id, typ string) *workflowpb.WorkflowExecutionInfo {
 // idleRig is a watcher over one data dir on a fake buildgate VM, with the
 // clock under the test's control.
 type idleRig struct {
-	dp     *deps
-	w      *vmIdleWatcher
-	dir    string
-	qid    string
-	colima *hostcontroltest.Colima
-	lister *fakeWorkflowLister
-	now    time.Time
-	slept  time.Duration
+	dp      *deps
+	w       *vmIdleWatcher
+	dir     string
+	qid     string
+	colima  *hostcontroltest.Colima
+	lister  *fakeWorkflowLister
+	now     time.Time
+	slept   time.Duration
+	ensured int
 }
 
 func newIdleRig(t *testing.T, after time.Duration) *idleRig {
@@ -380,5 +383,80 @@ func TestVMIdleInfoLineNamesTheStopOnlyWhileStopped(t *testing.T) {
 	t.Setenv(hostcontrol.AutostartEnvVar, "0")
 	if got := vmIdleInfoLine(now); got != "" {
 		t.Errorf("line with autostart off = %q", got)
+	}
+}
+
+// runtimeRig gives the rig a gateway runtime so a wake has one to start.
+func (r *idleRig) withRuntime() {
+	fakeSandboxOf(r.dp).runtimeFn = func() sandbox.Runtime { return &fakeSandboxes{} }
+}
+
+func TestVMIdleFailedStopAfterTheStacksStoppedIsUndoneInTheSameTick(t *testing.T) {
+	rig := newIdleRig(t, 30*time.Minute)
+	ctx := context.Background()
+	// A foreign container shows up only once Temporal's stack was stopped.
+	fakeTemporalOf(rig.dp).ensureFn = func(context.Context, io.Writer) string { rig.ensured++; return "localhost:7233" }
+	rig.colima = hostcontroltest.NewColima(t, "colima-buildgate", false, "factoryd-local-registry", "someones-db")
+	rig.colima.SetList(t, `{"name":"buildgate","status":"Running","memory":8589934592}`)
+	fakeDockerOf(rig.dp).dockerBinaryFn = rig.colima.DockerBinary
+	fakeDockerOf(rig.dp).colimaBinaryFn = rig.colima.ColimaBinary
+	rig.w.tick(ctx)
+	rig.now = rig.now.Add(31 * time.Minute)
+	if !rig.w.tick(ctx) {
+		t.Error("the worker stayed asleep after a stop that failed partway")
+	}
+	log, _ := os.ReadFile(rig.colima.DockerLog)
+	if !strings.Contains(string(log), " stop") {
+		t.Fatalf("the stacks were never stopped, so the failure was not partial:\n%s", log)
+	}
+	if rig.ensured != 1 || hostcontrol.VMIdleMarkerPresent() {
+		t.Errorf("ensured=%d marker=%v, want the stack started again and the marker cleared", rig.ensured, hostcontrol.VMIdleMarkerPresent())
+	}
+}
+
+func TestVMIdleWakeWithAGatewayThatDoesNotStartKeepsTheMarker(t *testing.T) {
+	rig := newIdleRig(t, time.Hour)
+	rig.withRuntime()
+	ctx := context.Background()
+	fakeTemporalOf(rig.dp).ensureFn = func(context.Context, io.Writer) string { return "localhost:7233" }
+	fakeSandboxOf(rig.dp).startStackFn = func(context.Context, io.Writer, string) error { return errors.New("port in use") }
+	if err := hostcontrol.StopVMWhenIdle(rig.dp, ctx, io.Discard, []string{rig.dir}, func() time.Time { return rig.now }, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if rig.w.wake(ctx, "test") || !hostcontrol.VMIdleMarkerPresent() {
+		t.Fatal("a wake with the gateway down removed the marker")
+	}
+	// Started but never answering is just as bad.
+	fakeSandboxOf(rig.dp).startStackFn = func(context.Context, io.Writer, string) error { return nil }
+	if rig.w.wake(ctx, "test") || !hostcontrol.VMIdleMarkerPresent() {
+		t.Fatal("a wake whose gateway never answers removed the marker")
+	}
+	fakeSandboxOf(rig.dp).gatewayHealthyFn = func(context.Context) error { return nil }
+	fakeSandboxOf(rig.dp).meterHealthyFn = func(context.Context) error { return nil }
+	if !rig.w.wake(ctx, "test") || hostcontrol.VMIdleMarkerPresent() {
+		t.Error("a wake with both services answering did not clear the marker")
+	}
+}
+
+func TestVMIdleWorkerOnAnotherVersionBlocksTheStop(t *testing.T) {
+	for name, hbVersion := range map[string]string{"older": "v0.0.1-older", "none": ""} {
+		t.Run(name, func(t *testing.T) {
+			rig := newIdleRig(t, time.Hour)
+			fakeHostOf(rig.dp).pidLooksLikeWorkerFn = func(int) bool { return true }
+			hb := daemonheartbeat.Heartbeat{PID: os.Getpid(), StartedAt: rig.now.Format(time.RFC3339Nano), UpdatedAt: time.Now().Format(time.RFC3339Nano), Version: hbVersion}
+			if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(rig.dir), hb); err != nil {
+				t.Fatal(err)
+			}
+			if got := rig.blocker(t); !strings.Contains(got, rig.dir) || !strings.Contains(got, "does not know the idle stop") {
+				t.Errorf("blocker = %q, want one naming the data dir and the version", got)
+			}
+			hb.Version = version
+			if err := daemonheartbeat.Write(daemonheartbeat.WorkerPath(rig.dir), hb); err != nil {
+				t.Fatal(err)
+			}
+			if got := rig.blocker(t); got != "" {
+				t.Errorf("a worker of this binary's version blocks: %q", got)
+			}
+		})
 	}
 }

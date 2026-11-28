@@ -14,6 +14,7 @@ import (
 
 	"go.temporal.io/api/workflowservice/v1"
 
+	"buildgate/internal/daemonheartbeat"
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/request"
 	"buildgate/internal/sanitize"
@@ -127,7 +128,26 @@ func (w *vmIdleWatcher) blocker(ctx context.Context) (why string, dirs []string)
 	if len(active) > 0 {
 		return "in use by " + strings.Join(active, ", "), dirs
 	}
+	if why := workerVersionBlocker(w.dp, dirs, w.now()); why != "" {
+		return why, dirs
+	}
 	return w.containerBlocker(ctx), dirs
+}
+
+// workerVersionBlocker names a live worker of any data dir that runs another
+// factoryd than this binary (or one that records none): an older worker does
+// not know the idle-stop marker and would start steps under it.
+func workerVersionBlocker(dp *deps, dirs []string, now time.Time) string {
+	for _, dir := range dirs {
+		hb, err := daemonheartbeat.Read(daemonheartbeat.WorkerPath(dir))
+		if err != nil || daemonheartbeat.Stale(hb, now, daemonheartbeat.WorkerStaleAfter) || !hostcontrol.AliveFactoryd(dp, hb.PID) {
+			continue
+		}
+		if hb.Version != version {
+			return fmt.Sprintf("the worker of %s runs factoryd %q, not %q: it does not know the idle stop", dir, hb.Version, version)
+		}
+	}
+	return ""
 }
 
 // containerBlocker is a container in the VM that is not part of buildgate's
@@ -245,8 +265,8 @@ func (w *vmIdleWatcher) wakePending() bool {
 // whether it did.
 func (w *vmIdleWatcher) wake(ctx context.Context, reason string) bool {
 	log.Printf("factoryd worker: starting the VM that was stopped while idle (%s)", reason)
-	err := hostcontrol.WakeVMAfterIdleStop(w.dp, ctx, w.out, func(ctx context.Context, out io.Writer) {
-		ensureSandboxRuntime(w.dp, ctx, out, w.meterImage)
+	err := hostcontrol.WakeVMAfterIdleStop(w.dp, ctx, w.out, func(ctx context.Context, out io.Writer) error {
+		return startSandboxRuntimeForWake(w.dp, ctx, out, w.meterImage)
 	})
 	if err != nil {
 		log.Printf("factoryd worker: start the VM: %v", err)
@@ -291,6 +311,12 @@ func (w *vmIdleWatcher) maybeStop(ctx context.Context) {
 		}
 		return nil
 	})
+	var partial hostcontrol.PartialVMStopError
+	if errors.As(err, &partial) {
+		log.Printf("factoryd worker: the VM stop failed partway (%v); starting everything again", partial.Err)
+		w.wake(ctx, "the stop failed partway")
+		return
+	}
 	if err != nil {
 		log.Printf("factoryd worker: the VM was not stopped: %v", err)
 		return

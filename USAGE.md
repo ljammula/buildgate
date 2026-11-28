@@ -525,7 +525,7 @@ has needed it for that long: every request is finished, halted or quarantined, n
 runs, no wake is pending, and the VM runs no container but buildgate's own. The stopped worker keeps
 running. A saved decision, a new request or a worker start brings the VM back within a minute;
 `factoryd status` and `factoryd doctor` say `VM stopped while idle since ...` meanwhile. A request
-waiting at a review gate or a pull request keeps the VM up. Off by default; needs autostart on.
+waiting at a review gate or a pull request keeps the VM up. A stop that fails partway is undone at once; a worker that died mid-stop is repaired by the next worker within 15 minutes. Off by default; needs autostart on.
 
 **Move an existing install into buildgate's VM.** An install that ran in
 colima's default VM (context `colima`) keeps its Temporal history this way;
