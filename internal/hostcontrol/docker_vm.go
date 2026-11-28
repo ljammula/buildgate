@@ -154,18 +154,23 @@ type ColimaVM struct {
 // Running reports whether colima says the VM runs.
 func (v ColimaVM) Running() bool { return v.Status == "Running" }
 
-// ParseColimaList reads `colima list --json`, one JSON object a line; a line
-// it cannot read is left out.
-func ParseColimaList(out []byte) []ColimaVM {
+// ParseColimaList reads `colima list --json`, one JSON object a line. It
+// fails closed: a line it cannot read is an error, so the headroom check
+// refuses rather than leave a running VM uncounted.
+func ParseColimaList(out []byte) ([]ColimaVM, error) {
 	var vms []ColimaVM
 	for _, line := range strings.Split(string(out), "\n") {
-		var vm ColimaVM
-		if json.Unmarshal([]byte(strings.TrimSpace(line)), &vm) != nil || vm.Name == "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
+		}
+		var vm ColimaVM
+		if err := json.Unmarshal([]byte(line), &vm); err != nil || vm.Name == "" {
+			return nil, fmt.Errorf("colima list: cannot read the line %q, so the running VMs' memory is unknown", line)
 		}
 		vms = append(vms, vm)
 	}
-	return vms
+	return vms, nil
 }
 
 // ListColimaVMs is every profile of `colima list --json`.
@@ -176,7 +181,7 @@ func ListColimaVMs(dp Deps, ctx context.Context) ([]ColimaVM, error) {
 	if err != nil {
 		return nil, fmt.Errorf("colima list: %w", err)
 	}
-	return ParseColimaList(out), nil
+	return ParseColimaList(out)
 }
 
 // FindColimaVM looks profile up in `colima list --json`.
@@ -198,11 +203,49 @@ func colimaVMNamed(vms []ColimaVM, profile string) (ColimaVM, bool) {
 	return ColimaVM{}, false
 }
 
-// PinnedColimaProfile is the Colima profile DOCKER_CONTEXT names (colima or
-// colima-<profile>), the docker context factoryd pins from docker_context.
+// PinnedDockerContextEnv marks DOCKER_CONTEXT as set by factoryd's
+// docker_context pin: it holds the same value only when factoryd pinned it
+// from a config (or inherited such a pin), never for a DOCKER_CONTEXT the
+// operator exported.
+const PinnedDockerContextEnv = "FACTORYD_PINNED_DOCKER_CONTEXT"
+
+// PinnedColimaProfile is the Colima profile factoryd pinned from
+// docker_context: DOCKER_CONTEXT names it (colima or colima-<profile>) and
+// PinnedDockerContextEnv holds the same value. An operator-exported
+// DOCKER_CONTEXT alone is no pin.
 func PinnedColimaProfile(dp Deps) (string, bool) {
 	name, _ := dp.LookupEnv("DOCKER_CONTEXT")
+	if marker, _ := dp.LookupEnv(PinnedDockerContextEnv); name == "" || marker != name {
+		return "", false
+	}
 	return colimaContextProfile(name)
+}
+
+// CurrentDockerContext is what `docker context show` prints: the docker
+// CLI's current context, DOCKER_CONTEXT when that is set.
+func CurrentDockerContext(dp Deps, ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, dp.DockerBinary(), "context", "show").Output()
+	if err != nil {
+		return "", fmt.Errorf("docker context show: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// DockerAnswers reports whether `docker info` succeeds on the current
+// context.
+func DockerAnswers(dp Deps, ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, dp.DockerBinary(), "info").Run() == nil
+}
+
+// IsColimaContext reports whether a docker context name is colima's
+// (colima, or colima-<profile>).
+func IsColimaContext(name string) bool {
+	_, ok := colimaContextProfile(name)
+	return ok
 }
 
 // colimaContextProfile is the Colima profile of a docker context name.
@@ -432,11 +475,17 @@ func ColimaMounts(colimaHome, home, profile string) (dirs []string, found bool, 
 		return nil, true, fmt.Errorf("parse %s: %w", filepath.Join(colimaHome, profile, "colima.yaml"), err)
 	}
 	if len(cfg.Mounts) == 0 {
+		if home == "" {
+			return nil, true, nil
+		}
 		return []string{home}, true, nil
 	}
 	for _, m := range cfg.Mounts {
 		loc := m.Location
 		if loc == "~" || strings.HasPrefix(loc, "~/") {
+			if home == "" {
+				continue
+			}
 			loc = filepath.Join(home, strings.TrimPrefix(loc, "~"))
 		}
 		dirs = append(dirs, filepath.Clean(loc))
@@ -444,13 +493,26 @@ func ColimaMounts(colimaHome, home, profile string) (dirs []string, found bool, 
 	return dirs, true, nil
 }
 
-// Shares reports whether dir is one of dirs or inside one.
+// Shares reports whether dir is one of dirs or inside one, comparing the
+// paths with symlinks resolved (a path that does not resolve is compared as
+// given). An empty entry shares nothing.
 func Shares(dirs []string, dir string) bool {
-	dir = filepath.Clean(dir)
+	dir = resolvedPath(dir)
 	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		d = resolvedPath(d)
 		if dir == d || strings.HasPrefix(dir, d+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
+}
+
+func resolvedPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }

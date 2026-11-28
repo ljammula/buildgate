@@ -45,8 +45,9 @@
 # CPUs, 2 to 8; 100 GiB disk), or starts it, only when the Mac has the VM's
 # memory plus 6 GiB available. It never changes the docker CLI's current
 # context or any other Colima profile; an existing config that sets no
-# docker_context gets one line on how to pin, and only a stopped default
-# profile is started. Elsewhere Docker not answering is started only through
+# docker_context gets one line on how to pin, and the default profile is
+# started only when it is the current context and its Docker does not
+# answer. A Mac never runs a plain `colima start`. Elsewhere Docker not answering is started only through
 # colima, when colima is on PATH: `colima start` for a VM that already exists
 # (its own settings), else `colima start --memory 4`. FACTORYD_AUTOSTART=0
 # turns the start off, as it does for factoryd's own. Any other Docker is the
@@ -173,13 +174,17 @@ fi
 # runs). With an existing config that sets no docker_context it says so and
 # how to pin, and starts colima's default profile only when that exists and
 # is stopped, after the same memory checks.
-mac_vm=""
-if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && [ "$os" = Darwin ] && have docker && have colima && have go; then
-	go run ./cmd/factoryd docker-context -ensure-vm >/dev/null || exit 1
-	mac_vm=1
+# A Mac never takes the plain `colima start` below: without go there is no
+# factoryd to size and check the VM, so it only says what to run.
+if [ "${FACTORYD_AUTOSTART:-}" != 0 ] && [ "$os" = Darwin ] && have docker && have colima; then
+	if have go; then
+		go run ./cmd/factoryd docker-context -ensure-vm >/dev/null || exit 1
+	else
+		echo "Docker VM not started: without go, run 'factoryd docker-context -ensure-vm' (or 'factoryd doctor -fix') once factoryd is installed" >&2
+	fi
 fi
 
-if [ -z "$mac_vm" ] && [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
+if [ "$os" != Darwin ] && [ "${FACTORYD_AUTOSTART:-}" != 0 ] && have docker && have colima && ! docker info >/dev/null 2>&1; then
 	if [ -e "${COLIMA_HOME:-$HOME/.colima}/default/colima.yaml" ]; then
 		echo "Starting Docker: colima start"
 		colima start

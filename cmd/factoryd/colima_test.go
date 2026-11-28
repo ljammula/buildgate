@@ -154,24 +154,25 @@ func TestUninstallStopLeavesColimaRunning(t *testing.T) {
 	}
 }
 
-func markerPath(t *testing.T) string {
-	t.Helper()
-	dir, err := hostcontrol.TemporalStackDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(dir, hostcontrol.ColimaStoppedMarker)
-}
-
 // TestStopAllWithoutAPinStopsNoColima: the current context's VM may be
-// another project's.
+// another project's, and so may one the operator exported DOCKER_CONTEXT
+// for: only factoryd's own pin (the marker equal to DOCKER_CONTEXT) counts.
 func TestStopAllWithoutAPinStopsNoColima(t *testing.T) {
-	dp := newTestDeps(t)
-	t.Setenv(hostcontrol.AutostartEnvVar, "1")
-	f := newColimaFake(dp, t, "colima", false)
-	out := runStopAll(dp, t, "-all")
-	if f.ColimaCalls() != "" || !strings.Contains(out, "no docker_context pins") {
-		t.Errorf("colima calls = %q\n%s", f.ColimaCalls(), out)
+	for name, env := range map[string]map[string]string{
+		"no DOCKER_CONTEXT":       {},
+		"an operator's":           {"DOCKER_CONTEXT": "colima-work"},
+		"a marker for another VM": {"DOCKER_CONTEXT": "colima-work", pinnedDockerContextEnv: "colima-buildgate"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dp := newTestDeps(t)
+			t.Setenv(hostcontrol.AutostartEnvVar, "1")
+			f := newColimaFake(dp, t, "colima", false)
+			fakeHostOf(dp).env = env
+			out := runStopAll(dp, t, "-all")
+			if f.ColimaCalls() != "" || !strings.Contains(out, "no docker_context pins") {
+				t.Errorf("colima calls = %q\n%s", f.ColimaCalls(), out)
+			}
+		})
 	}
 }
 
@@ -187,9 +188,6 @@ func TestAutostartRestartsColimaThatStopAllStopped(t *testing.T) {
 	if !strings.Contains(out, "colima: stopped (profile work)") {
 		t.Fatalf("VM not stopped:\n%s", out)
 	}
-	if b, err := os.ReadFile(markerPath(t)); err != nil || strings.TrimSpace(string(b)) != "work" {
-		t.Fatalf("marker = %q, %v", b, err)
-	}
 	if err := os.WriteFile(f.InfoFail, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +196,7 @@ func TestAutostartRestartsColimaThatStopAllStopped(t *testing.T) {
 		log, _ := os.ReadFile(f.DockerLog)
 		return strings.Contains(string(log), "up -d")
 	})
-	t.Setenv("XDG_CONFIG_HOME", xdg) // the marker lives under it
+	t.Setenv("XDG_CONFIG_HOME", xdg) // the Temporal stack's dir lives under it
 	fakeDockerOf(dp).dockerBinaryFn = func() string { return filepath.Join(f.Dir, "docker") }
 	var o bytes.Buffer
 	if got := hostcontrol.StartTemporal(dp, context.Background(), &o); got == "" {
@@ -206,8 +204,5 @@ func TestAutostartRestartsColimaThatStopAllStopped(t *testing.T) {
 	}
 	if got := f.ColimaCalls(); !strings.HasSuffix(strings.TrimSpace(got), "start --profile work --activate=false") {
 		t.Errorf("colima calls = %q", got)
-	}
-	if _, err := os.Stat(markerPath(t)); err == nil {
-		t.Error("marker not removed after the start")
 	}
 }

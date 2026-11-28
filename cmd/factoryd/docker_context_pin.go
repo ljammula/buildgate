@@ -32,7 +32,7 @@ import (
 // none.
 
 // pinnedDockerContextEnv marks DOCKER_CONTEXT as set by a factoryd pin.
-const pinnedDockerContextEnv = "FACTORYD_PINNED_DOCKER_CONTEXT"
+const pinnedDockerContextEnv = hostcontrol.PinnedDockerContextEnv
 
 // dockerPinExempt are the commands that run without the pin: they reach no
 // Docker, and are how an operator fixes or switches the config a refusal
@@ -118,23 +118,32 @@ func inheritedDockerPin(dp *deps) bool {
 	return current != "" && current == marker
 }
 
-// applyDockerContextPin exports DOCKER_CONTEXT=want and its marker, refusing
-// when the operator's environment already points the docker CLI elsewhere:
+// applyDockerContextPin exports DOCKER_CONTEXT=want, refusing when the
+// operator's environment already points the docker CLI elsewhere:
 // DOCKER_HOST (which overrides every context) or a DOCKER_CONTEXT of their
-// own naming another context. A parent factoryd's pin gives way.
+// own naming another context. A parent factoryd's pin gives way. The marker
+// is set only when the pin is factoryd's (DOCKER_CONTEXT was empty or
+// inherited): an operator who exported the same context keeps it as theirs,
+// so children treat it as operator-set and stop -all stops nothing.
 func applyDockerContextPin(dp *deps, want, configPath string) error {
 	if host, _ := dp.host.lookupEnv("DOCKER_HOST"); host != "" {
 		return fmt.Errorf("DOCKER_HOST is set (%s), which overrides the docker context %s that %s pins (docker_context): unset DOCKER_HOST, or remove docker_context from that config", host, want, configPath)
 	}
-	if current, _ := dp.host.lookupEnv("DOCKER_CONTEXT"); current != "" && current != want && !inheritedDockerPin(dp) {
+	current, _ := dp.host.lookupEnv("DOCKER_CONTEXT")
+	ours := current == "" || inheritedDockerPin(dp)
+	if !ours && current != want {
 		return fmt.Errorf("DOCKER_CONTEXT is %s, and %s pins docker_context %s: unset DOCKER_CONTEXT (or set it to %s), or change docker_context in that config", current, configPath, want, want)
+	}
+	if !ours {
+		return dp.host.unsetenv(pinnedDockerContextEnv)
 	}
 	return errors.Join(dp.host.setenv("DOCKER_CONTEXT", want), dp.host.setenv(pinnedDockerContextEnv, want))
 }
 
 // newConfigDockerContext is the docker_context a config written on this
-// machine starts with: colima-buildgate on a Mac with colima on PATH and no
-// DOCKER_HOST (the VM `factoryd doctor -fix` creates), else none.
+// machine starts with: colima-buildgate (the VM `factoryd doctor -fix`
+// creates) on a Mac with colima on PATH, no DOCKER_HOST, and a current
+// docker context that is colima's or does not answer; else none.
 func newConfigDockerContext(dp *deps, goos string) string {
 	if goos != "darwin" {
 		return ""
@@ -145,6 +154,13 @@ func newConfigDockerContext(dp *deps, goos string) string {
 		return ""
 	}
 	if _, err := exec.LookPath(dp.docker.colimaBinary()); err != nil {
+		return ""
+	}
+	// A Mac whose current context is another Docker that answers (Docker
+	// Desktop, OrbStack) keeps it: the pin is for colima's Docker, or a Mac
+	// with none running yet.
+	ctx := context.Background()
+	if current, err := hostcontrol.CurrentDockerContext(dp, ctx); err == nil && !hostcontrol.IsColimaContext(current) && hostcontrol.DockerAnswers(dp, ctx) {
 		return ""
 	}
 	return hostcontrol.DockerVMContext
@@ -221,8 +237,9 @@ func dockerContextMain(dp *deps, args []string, stdout, stderr io.Writer) error 
 // ensureDockerContextVM is -ensure-vm: it creates or starts the Colima VM of
 // a pinned colima-<profile>. With no pin it says the config follows the
 // current context and how to pin, and starts colima's default profile only
-// when it exists and is stopped (never creating one), after the same
-// headroom checks; with DOCKER_HOST set it starts nothing.
+// when the current context is `colima`, its Docker does not answer and the
+// profile exists stopped (never creating one), after the same headroom
+// checks; with DOCKER_HOST set it starts nothing.
 func ensureDockerContextVM(dp *deps, want string, w io.Writer) error {
 	ctx := context.Background()
 	if profile, colima := colimaProfileOfContext(want); colima {
@@ -239,8 +256,16 @@ func ensureDockerContextVM(dp *deps, want string, w io.Writer) error {
 	if host, _ := dp.host.lookupEnv("DOCKER_HOST"); host != "" {
 		return nil
 	}
+	// Only the current context's VM, and only when its Docker does not
+	// answer: colima's default profile, context `colima`.
+	if current, err := hostcontrol.CurrentDockerContext(dp, ctx); err != nil || current != "colima" || hostcontrol.DockerAnswers(dp, ctx) {
+		return nil
+	}
 	vm, found, err := hostcontrol.FindColimaVM(dp, ctx, "default")
-	if err != nil || !found || vm.Running() {
+	if err != nil {
+		return err
+	}
+	if !found || vm.Running() {
 		return nil
 	}
 	_, err = hostcontrol.StartDockerVM(dp, ctx, w, "default")

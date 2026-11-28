@@ -400,6 +400,15 @@ fi
         self.assertIn("sets no docker_context", result.stderr)
         self.assertEqual(self.colima_calls(), [])
 
+    def test_a_mac_without_go_never_runs_colima(self):
+        self.have("python3", "gh", "git", "npm", "docker", "colima", docker_up=False, brew=False)
+        # brew installs go as a formula that puts nothing on PATH here.
+        self.install("brew", BREW.replace('    *) printf', '    go) : ;;\n    *) printf'))
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), [])
+        self.assertIn("factoryd docker-context -ensure-vm", result.stderr)
+
     def test_linux_never_asks_factoryd_for_a_vm(self):
         self.have(*EVERYTHING, docker_up=False)
         self.system("Linux")

@@ -54,25 +54,6 @@ func ColimaProfile(dp Deps, ctx context.Context) (profile string, ok bool) {
 	return colimaContextProfile(strings.TrimSpace(string(out)))
 }
 
-// ColimaStoppedMarker records, in TemporalStackDir, that `stop -all`
-// stopped the pinned VM: it is written only for the profile docker_context
-// pins and removed when a start succeeds. Nothing starts a profile because
-// the marker names it: autostart starts the pinned profile, or the current
-// context's.
-const ColimaStoppedMarker = "colima-stopped"
-
-func writeColimaMarker(profile string) {
-	if dir, err := TemporalStackDir(); err == nil {
-		_ = os.WriteFile(filepath.Join(dir, ColimaStoppedMarker), []byte(profile+"\n"), 0o600)
-	}
-}
-
-func removeColimaMarker() {
-	if dir, err := TemporalStackDir(); err == nil {
-		_ = os.Remove(filepath.Join(dir, ColimaStoppedMarker))
-	}
-}
-
 var colimaProfileName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // colimaToStart is the profile autostart may start (colima on PATH): the one
@@ -120,7 +101,6 @@ func runColimaStart(dp Deps, ctx context.Context, w io.Writer, profile string, a
 		sp.Stop("")
 		return fmt.Errorf("`colima start` failed: %v; see %s", err, logPath)
 	}
-	removeColimaMarker()
 	sp.Stop(fmt.Sprintf("Colima started (profile %s)", profile))
 	return nil
 }
@@ -180,6 +160,5 @@ func StopColimaAfterStopAll(dp Deps, w io.Writer) {
 		fmt.Fprintf(w, "colima: could not stop: %v\n", err)
 		return
 	}
-	writeColimaMarker(profile)
 	fmt.Fprintf(w, "colima: stopped (profile %s); the next factoryd command starts it\n", profile)
 }

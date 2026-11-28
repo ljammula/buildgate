@@ -122,9 +122,15 @@ func TestSizeVM(t *testing.T) {
 func TestParseColimaListReadsEachProfile(t *testing.T) {
 	out := `{"name":"default","status":"Running","arch":"aarch64","cpus":8,"memory":17179869184,"disk":429496729600,"runtime":"docker"}
 {"name":"other","status":"Stopped","arch":"aarch64","cpus":8,"memory":17179869184,"disk":107374182400,"runtime":"docker"}
-not json
+
 `
-	vms := ParseColimaList([]byte(out))
+	vms, err := ParseColimaList([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseColimaList([]byte(out + "not json\n")); err == nil {
+		t.Error("an unreadable line was skipped, not refused")
+	}
 	if len(vms) != 2 || !vms[0].Running() || vms[1].Running() || vms[1].Name != "other" || vms[0].Memory != 16<<30 {
 		t.Errorf("ParseColimaList = %+v", vms)
 	}
@@ -320,5 +326,39 @@ func TestColimaMountsReadsTheProfilesYAML(t *testing.T) {
 	}
 	if _, found, _ := ColimaMounts(colimaHome, "/Users/op", "absent"); found {
 		t.Error("absent profile found")
+	}
+}
+
+// TestSharesResolvesSymlinksAndAnEmptyHomeSharesNothing.
+func TestSharesResolvesSymlinksAndAnEmptyHomeSharesNothing(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(filepath.Join(real, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if !Shares([]string{real}, filepath.Join(link, "repo")) || !Shares([]string{link}, filepath.Join(real, "repo")) {
+		t.Error("a symlinked path was not matched to its mount")
+	}
+	if Shares([]string{""}, "/Users/op/code") {
+		t.Error("an empty mount shared a path")
+	}
+	colimaHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(colimaHome, "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(colimaHome, "p", "colima.yaml"), []byte("mounts:\n  - location: ~/code\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, yaml := range []string{"mounts:\n  - location: ~/code\n", "cpu: 2\n"} {
+		if err := os.WriteFile(filepath.Join(colimaHome, "p", "colima.yaml"), []byte(yaml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if dirs, _, _ := ColimaMounts(colimaHome, "", "p"); Shares(dirs, "/code/repo") || Shares(dirs, "/Users/op/code") {
+			t.Errorf("%q with no home shares %v", yaml, dirs)
+		}
 	}
 }

@@ -140,7 +140,7 @@ func TestApplyDockerContextPinRefusals(t *testing.T) {
 		refused []string
 	}{
 		{"nothing set", map[string]string{}, nil},
-		{"the same context", map[string]string{"DOCKER_CONTEXT": "colima-buildgate"}, nil},
+		{"the same context", map[string]string{"DOCKER_CONTEXT": "colima-buildgate", pinnedDockerContextEnv: "stale"}, nil},
 		{"an empty DOCKER_HOST", map[string]string{"DOCKER_HOST": ""}, nil},
 		{"DOCKER_HOST", map[string]string{"DOCKER_HOST": "unix:///x.sock"}, []string{"DOCKER_HOST is set (unix:///x.sock)", "unset DOCKER_HOST", "/cfg.yml"}},
 		{"another context", map[string]string{"DOCKER_CONTEXT": "colima"}, []string{"DOCKER_CONTEXT is colima", "pins docker_context colima-buildgate", "unset DOCKER_CONTEXT"}},
@@ -148,11 +148,18 @@ func TestApplyDockerContextPinRefusals(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dp := newTestDeps(t)
+			operators := c.env["DOCKER_CONTEXT"] != ""
 			fakeHostOf(dp).env = c.env
 			err := applyDockerContextPin(dp, "colima-buildgate", "/cfg.yml")
 			if c.refused == nil {
 				if err != nil || fakeHostOf(dp).env["DOCKER_CONTEXT"] != "colima-buildgate" {
 					t.Fatalf("err = %v, env = %v", err, fakeHostOf(dp).env)
+				}
+				// Only factoryd's own pin is marked: an operator who
+				// exported the same context keeps it as theirs.
+				_, marked := fakeHostOf(dp).env[pinnedDockerContextEnv]
+				if marked == operators {
+					t.Errorf("marked = %v with env %v", marked, c.env)
 				}
 				return
 			}
@@ -207,12 +214,20 @@ func TestDockerContextPrintsTheConfigsContext(t *testing.T) {
 	}
 }
 
-// withFakeColima points dp's colima at an executable, so a new config on a
-// Mac gets the VM's context.
+// withFakeColima points dp's colima and docker at fakes on disk: docker's
+// current context is colima's, and its daemon answers.
 func withFakeColima(t *testing.T, dp *deps) *hostcontroltest.Colima {
 	t.Helper()
-	f := hostcontroltest.NewColima(t, "default", false)
+	return withFakeDocker(t, dp, "colima", false)
+}
+
+// withFakeDocker is withFakeColima with docker's current context ctxName,
+// its daemon down when infoDown.
+func withFakeDocker(t *testing.T, dp *deps, ctxName string, infoDown bool) *hostcontroltest.Colima {
+	t.Helper()
+	f := hostcontroltest.NewColima(t, ctxName, infoDown)
 	fakeDockerOf(dp).colimaBinaryFn = f.ColimaBinary
+	fakeDockerOf(dp).dockerBinaryFn = f.DockerBinary
 	return f
 }
 
@@ -228,6 +243,21 @@ func TestNewConfigDockerContext(t *testing.T) {
 	if got := newConfigDockerContext(dp, "linux"); got != "" {
 		t.Errorf("linux: %q", got)
 	}
+	// Another Docker that answers on the current context (Docker Desktop,
+	// OrbStack) keeps it; one that does not answer gets buildgate's VM.
+	withFakeDocker(t, dp, "orbstack", false)
+	if got := newConfigDockerContext(dp, "darwin"); got != "" {
+		t.Errorf("an answering OrbStack context: %q, want no pin", got)
+	}
+	withFakeDocker(t, dp, "desktop-linux", true)
+	if got := newConfigDockerContext(dp, "darwin"); got != hostcontrol.DockerVMContext {
+		t.Errorf("a Docker Desktop context that does not answer: %q", got)
+	}
+	withFakeDocker(t, dp, "colima-other", false)
+	if got := newConfigDockerContext(dp, "darwin"); got != hostcontrol.DockerVMContext {
+		t.Errorf("a colima context: %q", got)
+	}
+	withFakeColima(t, dp)
 	if text := initConfigText(dp, "darwin"); !strings.HasSuffix(text, "docker_context: colima-buildgate\n") {
 		t.Errorf("init-config on a Mac does not pin the VM:\n%s", text)
 	}
@@ -361,7 +391,7 @@ func TestEnsureVMWithoutAPinSaysHowAndStartsOnlyAStoppedDefault(t *testing.T) {
 	t.Setenv(hostcontrol.AutostartEnvVar, "1")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dp := newTestDeps(t)
-	f := withFakeColima(t, dp)
+	f := withFakeDocker(t, dp, "colima", true)
 	var out bytes.Buffer
 	if err := ensureDockerContextVM(dp, "", &out); err != nil {
 		t.Fatal(err)
@@ -378,6 +408,35 @@ func TestEnsureVMWithoutAPinSaysHowAndStartsOnlyAStoppedDefault(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(f.ColimaCalls()), "\n")
 	if got := lines[len(lines)-1]; got != "start --activate=false" {
 		t.Errorf("colima calls = %q", f.ColimaCalls())
+	}
+}
+
+// TestEnsureVMWithoutAPinStartsOnlyTheCurrentContextsDownVM: a stopped
+// default profile is left alone when the current context is another, or
+// when the current context's Docker answers; an unreadable colima list is
+// an error, not a silent skip.
+func TestEnsureVMWithoutAPinStartsOnlyTheCurrentContextsDownVM(t *testing.T) {
+	t.Setenv(hostcontrol.AutostartEnvVar, "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, c := range []struct {
+		ctx  string
+		down bool
+	}{{"colima-work", true}, {"orbstack", true}, {"colima", false}} {
+		dp := newTestDeps(t)
+		f := withFakeDocker(t, dp, c.ctx, c.down)
+		f.SetList(t, `{"name":"default","status":"Stopped","memory":4294967296}`)
+		if err := ensureDockerContextVM(dp, "", &bytes.Buffer{}); err != nil {
+			t.Fatalf("%+v: %v", c, err)
+		}
+		if f.ColimaCalls() != "" {
+			t.Errorf("%+v: colima calls = %q", c, f.ColimaCalls())
+		}
+	}
+	dp := newTestDeps(t)
+	f := withFakeDocker(t, dp, "colima", true)
+	f.SetList(t, "not json")
+	if err := ensureDockerContextVM(dp, "", &bytes.Buffer{}); err == nil {
+		t.Error("an unreadable colima list was swallowed")
 	}
 }
 

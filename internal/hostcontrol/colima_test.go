@@ -25,15 +25,6 @@ func newColimaFake(dp *fakeDeps, t *testing.T, ctxName string, infoDown bool, ps
 	return f
 }
 
-func markerPath(t *testing.T) string {
-	t.Helper()
-	dir, err := TemporalStackDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(dir, ColimaStoppedMarker)
-}
-
 func TestColimaProfileArgs(t *testing.T) {
 	if got := strings.Join(ColimaArgs("stop", "default"), " "); got != "stop" {
 		t.Errorf("default profile args = %q", got)
@@ -137,21 +128,18 @@ func TestAutostartDockerDownWithoutColimaStartsNothing(t *testing.T) {
 	}
 }
 
-func TestAutostartIgnoresColimaWithoutMarkerOrContext(t *testing.T) {
+// TestAutostartIgnoresColimaWithoutItsContext: a context that is not
+// colima's starts no VM, whatever profiles colima has.
+func TestAutostartIgnoresColimaWithoutItsContext(t *testing.T) {
 	dp := newFakeDeps(t)
 	t.Setenv(AutostartEnvVar, "1")
-	cases := map[string]string{"no marker": "", "traversal": "../x\n", "two lines": "work\nother\n", "empty": "\n"}
-	for name, marker := range cases {
+	for _, name := range []string{"default", "desktop-linux", "orbstack"} {
 		t.Run(name, func(t *testing.T) {
-			f := newColimaFake(dp, t, "default", true)
+			f := newColimaFake(dp, t, name, true)
+			f.SetList(t, `{"name":"default","status":"Stopped","memory":4294967296}`)
 			stubTemporalProbe(dp, t, func() bool { return false })
 			dp.dockerBinaryFn = func() string { return filepath.Join(f.Dir, "docker") }
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-			if marker != "" {
-				if err := os.WriteFile(markerPath(t), []byte(marker), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
 			var out bytes.Buffer
 			if got := StartTemporal(dp, context.Background(), &out); got != "" {
 				t.Fatalf("startTemporal = %q", got)
@@ -183,7 +171,7 @@ func TestAutostartRefusesAnUnpinnedStartWithoutHeadroom(t *testing.T) {
 
 // TestStopAllStopsOnlyThePinnedVM: with no pin stop -all stops no Colima
 // VM, whatever the current context names; with one it stops that profile
-// and marks it.
+// only.
 func TestStopAllStopsOnlyThePinnedVM(t *testing.T) {
 	t.Setenv(AutostartEnvVar, "1")
 	dp := newFakeDeps(t)
@@ -196,10 +184,13 @@ func TestStopAllStopsOnlyThePinnedVM(t *testing.T) {
 	dp.env["DOCKER_CONTEXT"] = "colima-buildgate"
 	out.Reset()
 	StopColimaAfterStopAll(dp, &out)
+	if f.ColimaCalls() != "" {
+		t.Errorf("an operator's DOCKER_CONTEXT alone stopped a VM: %q", f.ColimaCalls())
+	}
+	dp.env[PinnedDockerContextEnv] = "colima-buildgate"
+	out.Reset()
+	StopColimaAfterStopAll(dp, &out)
 	if got := strings.TrimSpace(f.ColimaCalls()); got != "stop --profile buildgate" {
 		t.Errorf("pinned: colima calls = %q", got)
-	}
-	if b, err := os.ReadFile(markerPath(t)); err != nil || strings.TrimSpace(string(b)) != "buildgate" {
-		t.Errorf("marker = %q, %v", b, err)
 	}
 }
