@@ -519,6 +519,14 @@ means it is enough.
 `factoryd stop -all` stops the colima VM `docker_context` pins when nothing else runs in it (with no pin, none); the
 next factoryd command starts it.
 
+With `vm_idle_stop_after: 30m` in the session config, a worker stops buildgate's own VM
+(`colima-buildgate`, never another profile) and the Temporal and OpenShell stacks in it once nothing
+has needed it for that long: every request is finished, halted or quarantined, no build or sandbox
+runs, no wake is pending, and the VM runs no container but buildgate's own. The stopped worker keeps
+running. A saved decision, a new request or a worker start brings the VM back within a minute;
+`factoryd status` and `factoryd doctor` say `VM stopped while idle since ...` meanwhile. A request
+waiting at a review gate or a pull request keeps the VM up. Off by default; needs autostart on.
+
 **Move an existing install into buildgate's VM.** An install that ran in
 colima's default VM (context `colima`) keeps its Temporal history this way;
 colima forwards a host port from whichever VM bound it first, so the old

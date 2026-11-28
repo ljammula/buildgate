@@ -19,6 +19,7 @@ import (
 	"go.temporal.io/sdk/client"
 	temporalworker "go.temporal.io/sdk/worker"
 
+	"buildgate/internal/hostcontrol"
 	"buildgate/internal/request"
 	"buildgate/internal/run"
 	"buildgate/internal/workflow"
@@ -52,6 +53,10 @@ func workerMain(dp *deps, args []string) error {
 	if err := enterStableWorkDir(dp, dataDir); err != nil {
 		return err
 	}
+	// Started under a marker of an idle stop: loadWorkerConfig has just
+	// started the VM and Temporal; this starts the rest and removes it.
+	idle := newVMIdleWatcher(dp, cfg.Settings.VMIdleStopAfter, cfg.Settings.MeterImage, dataDir, cfg.TemporalAddress)
+	idle.wakeAtStart(context.Background())
 	// The same liveness heartbeat worker writes, so status, stop, use,
 	// upgrade and the console see the worker and the requests it runs.
 	heartbeatMode, heartbeatModel := heartbeatRoute(cfg)
@@ -92,6 +97,7 @@ func workerMain(dp *deps, args []string) error {
 		return fmt.Errorf("connect to Temporal at %s: %w", cfg.TemporalAddress, err)
 	}
 	defer temporalClient.Close()
+	idle.lister = temporalClient
 
 	// Built before any worker starts: it fails only when the build script or
 	// the data dir cannot be resolved, and then the worker refuses to start
@@ -105,6 +111,7 @@ func workerMain(dp *deps, args []string) error {
 		dataDir:    dataDir,
 		jobsQueue:  jobsQueue,
 		cfg:        cfg,
+		vmStopping: hostcontrol.VMIdleMarkerPresent,
 		specRunner: runSpecDraftJob,
 		planRunner: runPlanTicketsJob,
 		buildRunner: func(a0 context.Context, a1 []string, a2 func(*run.Run)) error {
@@ -146,13 +153,13 @@ func workerMain(dp *deps, args []string) error {
 	go func() {
 		defer close(reclaimDone)
 		defer reclaimTicker.Stop()
-		reclaim.run(ctx, reclaimTicker.C)
+		reclaim.run(ctx, idle.gate(ctx, reclaimTicker.C))
 	}()
 	defer func() {
 		<-reclaimDone
 		reclaim.stop()
 	}()
-	retryPendingWakes(ctx, temporalClient, time.NewTicker(workerAdoptInterval), dataDir, queueID, jobsQueue, lightQueue)
+	retryPendingWakes(ctx, temporalClient, time.NewTicker(workerAdoptInterval), idle.tick, dataDir, queueID, jobsQueue, lightQueue)
 	log.Printf("factoryd worker: stopping")
 	return nil
 }
@@ -309,19 +316,28 @@ const workerAdoptInterval = time.Minute
 
 // retryPendingWakes runs retryWakes on every tick until ctx is done, then
 // stops the ticker.
-func retryPendingWakes(ctx context.Context, c requestWorkflowStarter, ticker *time.Ticker, dataDir, queueID, jobsQueue, lightQueue string) {
+func retryPendingWakes(ctx context.Context, c requestWorkflowStarter, ticker *time.Ticker, awake func(context.Context) bool, dataDir, queueID, jobsQueue, lightQueue string) {
 	defer ticker.Stop()
-	retryOnTicks(ctx, c, ticker.C, dataDir, queueID, jobsQueue, lightQueue)
+	retryOnTicksWhenAwake(ctx, c, ticker.C, awake, dataDir, queueID, jobsQueue, lightQueue)
 }
 
 // retryOnTicks is the loop of retryPendingWakes over a tick channel.
 func retryOnTicks(ctx context.Context, c requestWorkflowStarter, ticks <-chan time.Time, dataDir, queueID, jobsQueue, lightQueue string) {
+	retryOnTicksWhenAwake(ctx, c, ticks, func(context.Context) bool { return true }, dataDir, queueID, jobsQueue, lightQueue)
+}
+
+// retryOnTicksWhenAwake is retryOnTicks that first asks awake (the idle-VM
+// check, which also stops or wakes the VM) and skips the sweep when it says
+// the VM is stopped or being stopped.
+func retryOnTicksWhenAwake(ctx context.Context, c requestWorkflowStarter, ticks <-chan time.Time, awake func(context.Context) bool, dataDir, queueID, jobsQueue, lightQueue string) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticks:
-			retryWakes(ctx, c, dataDir, queueID, jobsQueue, lightQueue)
+			if awake(ctx) {
+				retryWakes(ctx, c, dataDir, queueID, jobsQueue, lightQueue)
+			}
 		}
 	}
 }

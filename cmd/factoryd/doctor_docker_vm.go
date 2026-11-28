@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sessionconfig"
@@ -96,6 +97,8 @@ func doctorCheckDockerVM(dp *deps, profile string, fix bool, repos []string, w i
 	case !found:
 		return doctorCheck{Name: name, Err: hostcontrol.MissingDockerVMError{Profile: profile},
 			Fix: "`factoryd doctor -fix` creates it, sized for this Mac"}
+	case !vm.Running() && vmIdleInfoLine(time.Now()) != "":
+		return doctorCheck{Name: name + ": " + vmIdleInfoLine(time.Now())}
 	case !vm.Running():
 		return doctorCheck{Name: name, Err: fmt.Errorf("the Docker VM colima-%s is %s", profile, vm.Status),
 			Fix: "`factoryd doctor -fix` starts it (so does any factoryd command that needs Docker)"}

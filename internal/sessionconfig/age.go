@@ -34,3 +34,20 @@ func ParseAge(s string) (time.Duration, error) {
 	}
 	return d, nil
 }
+
+// MinVMIdleStopAfter is the shortest vm_idle_stop_after accepted: a shorter
+// one would stop and start the VM over a pause between two requests.
+const MinVMIdleStopAfter = 5 * time.Minute
+
+// ParseVMIdleStopAfter reads vm_idle_stop_after: a Go duration such as "30m",
+// at least MinVMIdleStopAfter, or a zero ("0", "0s") that turns it off.
+func ParseVMIdleStopAfter(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a duration such as 30m", s)
+	}
+	if d != 0 && d < MinVMIdleStopAfter {
+		return 0, fmt.Errorf("%q: must be 0 (off) or at least %s", s, MinVMIdleStopAfter)
+	}
+	return d, nil
+}
