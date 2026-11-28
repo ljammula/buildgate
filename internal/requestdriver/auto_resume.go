@@ -16,7 +16,7 @@ import (
 // limit that stopped its step has reset, or a transient cause's delay has
 // passed and its window has not
 // (request.AutoResumeRequest decides, under the request's lock): the resume
-// `factoryd resume` makes, with the same checks (cfg.Resume) and the same
+// `factoryd retry` makes, with the same checks (cfg.Resume) and the same
 // gate expiry, and afterwards, as that command does, the reap of a kept
 // worktree a resume that continues no build leaves behind. The operator is
 // told either way: that it was resumed, or that its checks refused it and it

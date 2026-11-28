@@ -108,7 +108,7 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
 
 | | |
 |---|---|
-| Decision | `RunBuildActivity` launches one sandbox and the script runs every round in it. The script records the last completed round and the next prompt in its own state file in the worktree, which `factoryd resume` hands back with `--resume-from-state` |
+| Decision | `RunBuildActivity` launches one sandbox and the script runs every round in it. The script records the last completed round and the next prompt in its own state file in the worktree, which `factoryd retry` hands back with `--resume-from-state` |
 | Because | The rounds of a build share one container, one harness session and, with Compose services, one set of sidecars, under one heartbeat. A round per Activity would start a sandbox per round (a cold cache and the network's start-up delay each time) and would make every change to the loop a workflow-history change needing a version marker |
 | Rules out | Per-round Temporal timeouts and per-round history. Temporal replay as the way to resume a build |
 | Revisit when | Builds are often lost mid-way and resuming them by hand is a measured cost (`factoryd stats`, "halted by") |
@@ -119,8 +119,8 @@ factoryd (Go, host)      which job, which sandbox, gates, accept or quarantine
 
 | | |
 |---|---|
-| Decision | A step lost to a laptop sleep, a lost worker or a stopped `factoryd` halts the run. The request waits in `resume_review` until a person chooses `factoryd resume`, `resume -from scratch` or `cancel` |
-| Because | A silent rerun spends the model budget a second time. A container of the lost run may still be alive and writing, and a rerun would race it: `resume` is refused while one is, or when the worktree's history changed |
+| Decision | A step lost to a laptop sleep, a lost worker or a stopped `factoryd` halts the run. The request waits in `resume_review` until a person chooses `factoryd retry`, `retry -from scratch` or `cancel` |
+| Because | A silent rerun spends the model budget a second time. A container of the lost run may still be alive and writing, and a rerun would race it: `factoryd retry` of it is refused while one is, or when the worktree's history changed |
 | Rules out | An Activity retry policy on a job. A worker that reruns a lost build without being asked |
 | Revisit when | Lost steps are frequent enough that the wait costs more than an occasional double spend (`factoryd stats`, "halted by") |
 

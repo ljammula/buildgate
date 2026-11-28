@@ -39,7 +39,7 @@ func TestAdvanceBuildingAKeptRunCarriesItsCauseIntoResumeReview(t *testing.T) {
 	if got.State != request.StateResumeReview || got.Resume == nil || got.Resume.Cause != unresolved.SandboxLaunch {
 		t.Fatalf("state %s resume %+v, want resume_review with the launch failure as its cause", got.State, got.Resume)
 	}
-	if strings.Contains(got.Error, "worker stopped") || !strings.Contains(got.Error, "could not be started") || !strings.Contains(got.Error, "factoryd resume "+id) {
+	if strings.Contains(got.Error, "worker stopped") || !strings.Contains(got.Error, "could not be started") || !strings.Contains(got.Error, "factoryd retry "+id) {
 		t.Errorf("Error = %q, want the launch failure named and the one command", got.Error)
 	}
 	if next := got.NextAction(); !strings.Contains(next, "could not be started") || !strings.Contains(next, "kept worktree") {
@@ -81,7 +81,7 @@ func TestAnUnresolvedCorrectiveRoundIsNotCountedAndWaitsInResumeReview(t *testin
 			if len(rounds) != 1 || rounds[0].Unresolved != cause || rounds[0].Counted() || rounds[0].Outcome != request.RoundHalted {
 				t.Fatalf("Rounds = %+v, want one halted, uncounted round carrying the cause", rounds)
 			}
-			if next := loaded.NextAction(); !strings.Contains(next, "factoryd resume -from scratch "+id) || strings.Contains(next, "kept worktree") {
+			if next := loaded.NextAction(); !strings.Contains(next, "factoryd retry -from scratch "+id) || strings.Contains(next, "kept worktree") {
 				t.Errorf("NextAction = %q, want only the rebuild and cancel: nothing was kept", next)
 			}
 		})
@@ -153,7 +153,7 @@ func TestAdvanceBuildingAnUnresolvedRunWithNothingKeptStillWaitsInResumeReview(t
 		t.Fatalf("state %s resume %+v (%s), want resume_review with the cause and no kept run", got.State, got.Resume, got.Error)
 	}
 	for _, text := range []string{got.Error, got.NextAction()} {
-		if !strings.Contains(text, "factoryd resume -from scratch "+id) || strings.Contains(text, "continues it") {
+		if !strings.Contains(text, "factoryd retry -from scratch "+id) || strings.Contains(text, "continues it") {
 			t.Errorf("%q: want only the rebuild offered, nothing was kept", text)
 		}
 	}

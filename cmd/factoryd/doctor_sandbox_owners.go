@@ -317,7 +317,7 @@ func endRequestWorkflows(dp *deps, ctx context.Context, temporalAddress, dataDir
 			continue
 		}
 		// Which of the two ids runs the request is what could not be read.
-		fmt.Fprintf(w, "sandboxes: could not end the workflow of request %s (%v): before `factoryd resume`, end the one that is running with `temporal workflow terminate --workflow-id %s` or `--workflow-id %s`\n",
+		fmt.Fprintf(w, "sandboxes: could not end the workflow of request %s (%v): before `factoryd retry`, end the one that is running with `temporal workflow terminate --workflow-id %s` or `--workflow-id %s`\n",
 			sanitize.Line(id), why, workflow.RequestWorkflowID(queueID, id), workflow.LegacyRequestWorkflowID(id))
 	}
 }

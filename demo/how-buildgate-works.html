@@ -291,7 +291,7 @@ worker      one per data dir (heartbeat); started for you
                                       a ceiling (127.0.0.1:17672)
 serve       the console and its API, over the same data dir</code></pre>
 <ul>
-  <li><strong>worker</strong> refuses to stop mid-build unless forced. A forced stop, crash, reboot or laptop sleep halts the run and nothing reruns the lost step on its own: the request waits in <code>resume_review</code> with the build's worktree kept, until you run <code>factoryd resume &lt;id&gt;</code>, <code>resume -from scratch</code> or <code>cancel</code>. A shared local model host and compose sidecars are locked host-wide, so jobs queue rather than collide.</li>
+  <li><strong>worker</strong> refuses to stop mid-build unless forced. A forced stop, crash, reboot or laptop sleep halts the run and nothing reruns the lost step on its own: the request waits in <code>resume_review</code> with the build's worktree kept, until you run <code>factoryd retry &lt;id&gt;</code>, <code>retry -from scratch</code> or <code>cancel</code>. A shared local model host and compose sidecars are locked host-wide, so jobs queue rather than collide.</li>
   <li><strong>Temporal:</strong> every build runs on it, and factoryd starts it with Docker when it is down (with <code>FACTORYD_AUTOSTART=0</code> an address must be given). A resumed build continues in its kept worktree with a fresh agent session and a short handoff. It adds workflow history in its Web UI (<code>localhost:8233</code>), and <code>-repository</code> serializes all runs on one repo.</li>
   <li><strong>OpenShell gateway and meter:</strong> two containers in the Docker VM, started with the worker (or by <code>factoryd doctor -fix</code>). The gateway is the only thing that creates a worker container; each sandbox gets its own supervisor, the worker's one route out. Both listen on the VM's loopback only, and the gateway accepts only factoryd's client certificate.</li>
 </ul>
@@ -412,7 +412,7 @@ serve       the console and its API, over the same data dir</code></pre>
 <div class="cards">
   <div class="card ok"><h3>Accepted</h3><p>All gates passed. The branch carries <code>BUILD_REPORT.md</code> and <code>BUILD_EVIDENCE.json</code>; a draft PR opens and is marked ready once checks pass.</p></div>
   <div class="card bad"><h3>Quarantined</h3><p>A gate failed, or the corrective rounds ran out. The triage note names the gate and likely cause. Nothing reaches a PR.</p></div>
-  <div class="card halt"><h3>Halted</h3><p>A crash, timeout or environment fault. <code>factoryd retry &lt;id&gt;</code> once fixed. A worker lost mid-build (sleep, crash, stop) leaves the request in <code>resume_review</code> with its work kept: <code>factoryd resume &lt;id&gt;</code>.</p></div>
+  <div class="card halt"><h3>Halted</h3><p>A crash, timeout or environment fault. <code>factoryd retry &lt;id&gt;</code> once fixed. A worker lost mid-build (sleep, crash, stop) leaves the request in <code>resume_review</code> with its work kept: <code>factoryd retry &lt;id&gt;</code>.</p></div>
 </div>
 <p><code>factoryd inbox</code> lists everything waiting on you, with the command to act on each.</p>
 
@@ -445,7 +445,7 @@ serve       the console and its API, over the same data dir</code></pre>
 <ul>
   <li><strong>Tested like it tests agents:</strong> Go tests under the race detector, a Python suite covering every harness adapter, and console tests. <code>CLAIMS.md</code> maps every safety claim to the test that enforces it; a claim citing a missing test fails the build.</li>
   <li><strong>Live runs gate pipeline changes:</strong> <code>make live-smoke</code> runs real tickets through the real gateway, sandbox and meter before merge. The worst bugs found so far were invisible to unit tests and review.</li>
-  <li><strong>Proven live on:</strong> a fixed corpus of accept and must-quarantine tickets, with no false accepts; real GitHub issues; a service with Postgres, Kafka and Redis; real bugs in three repos, merged by a human; and resuming a build with <code>factoryd resume</code> after a laptop sleep and after a <code>kill -9</code> of the worker mid-build (the earlier work kept).</li>
+  <li><strong>Proven live on:</strong> a fixed corpus of accept and must-quarantine tickets, with no false accepts; real GitHub issues; a service with Postgres, Kafka and Redis; real bugs in three repos, merged by a human; and resuming a build with <code>factoryd retry</code> after a laptop sleep and after a <code>kill -9</code> of the worker mid-build (the earlier work kept).</li>
 </ul>
 
 <h3 id="cost">Cost: Codex alone vs Buildgate</h3>
@@ -530,7 +530,7 @@ factoryd stop                      # stop what quickstart started</code></pre>
       id: "building", title: "Building", who: "factory",
       what: "The execution role's coding agent works in a sandbox with no network interface, reaching the model only through its supervisor and the meter. If the repo's docker-compose.yml declares Postgres, Kafka or Redis, they run as sidecars the agent and the gates can reach. The agent self-checks with focused tests; the factory then reruns the full verify command and the gates itself. A failure with rounds left goes back to the agent, with the failure attached.",
       see: '<pre><code>$ factoryd watch &lt;request-id&gt;\nbuilding   round 1  agent committed 2 files\nverify     go test ./...            pass\ngates      diff_scope               pass\n           tests_red_on_base       pass\n           full_suite_verify        pass\n           code_review              pass\nresult     accepted</code></pre>',
-      why: 'If the Mac sleeps, factoryd crashes or you force a stop mid-build, the request waits in <code>resume_review</code> and the build keeps its code: <code>factoryd resume &lt;request-id&gt;</code> continues it. See <a href="#build">Inside the build</a> for the full picture. <code>factoryd logs -f &lt;request-id&gt;</code> follows the raw log. A shared local model host is serialized automatically; a waiting job shows "queued behind &lt;run&gt;".'
+      why: 'If the Mac sleeps, factoryd crashes or you force a stop mid-build, the request waits in <code>resume_review</code> and the build keeps its code: <code>factoryd retry &lt;request-id&gt;</code> continues it. See <a href="#build">Inside the build</a> for the full picture. <code>factoryd logs -f &lt;request-id&gt;</code> follows the raw log. A shared local model host is serialized automatically; a waiting job shows "queued behind &lt;run&gt;".'
     },
     {
       id: "pr_review", title: "Pull request", who: "factory",

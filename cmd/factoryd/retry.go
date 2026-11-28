@@ -9,12 +9,9 @@ import (
 	"time"
 
 	"buildgate/internal/request"
+	"buildgate/internal/requestdriver"
 )
 
-// retryMain implements `factoryd retry [-data-dir data] <id>`: put a
-// quarantined, halted or resume_review request back in motion (see
-// retryRequestFrom). Any other request state, or an id no request has, is
-// refused with the reason.
 // newRetryFlags builds `factoryd retry`'s FlagSet in isolation from
 // parsing, so USAGE.md's doc-vs-flag drift test
 // (TestUSAGEDocFlagsExistOnSubcommand) can enumerate its real flags without
@@ -28,7 +25,7 @@ func newRetryFlags() (flags *flag.FlagSet, dataDir, reason, from, configPath *st
 	// (newRejectFlags): recorded on the request's appended History entry
 	// via request.Retry, not dropped.
 	reason = flags.String("reason", "", "why this request is being retried, recorded on its history")
-	from = flags.String("from", retryFromAttempt, "Where a rebuilt ticket starts: \"attempt\" (default) on the failed attempt's commit, \"scratch\" on the base commit, or a round number from `factoryd rounds` on a new branch at that round.")
+	from = flags.String("from", retryFromAttempt, "Where a rebuild starts: \"attempt\" (default) on the failed attempt's commit, \"scratch\" on the base, or a round number from `factoryd rounds`. A resume_review request takes the first two.")
 	configPath = flags.String("config", "", "session config path or profile name, for the data dir; empty: the active profile, else the first of ~/.config/factoryd/config.yml and ~/.factory/config.yml that exists")
 	finishFlags(flags)
 	return
@@ -40,7 +37,17 @@ const (
 	retryFromScratch = "scratch"
 )
 
+// retryMain implements `factoryd retry [-from attempt|scratch|<round>] <id>`:
+// put a quarantined or halted request back in motion (retryRequestFrom), or
+// continue a resume_review request (continueLostStep). Any other request
+// state, or an id no request has, is refused with the reason.
 func retryMain(dp *deps, args []string) error {
+	return retryMainWith(dp, args, requestdriver.ResumeGate{Sandboxes: dp.sandbox.runtime()})
+}
+
+// retryMainWith is retryMain consulting gate for the resume checks of a
+// resume_review request.
+func retryMainWith(dp *deps, args []string, gate requestdriver.ResumeGate) error {
 	flags, dataDir, reason, from, configPath := newRetryFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -51,15 +58,18 @@ func retryMain(dp *deps, args []string) error {
 	if flags.NArg() != 1 {
 		return fmt.Errorf("usage: factoryd retry [-config <path>] [-reason ...] [-from attempt|scratch|<round>] <id>")
 	}
-	choice, err := parseRetryFrom(*from)
-	if err != nil {
-		return err
-	}
 	id, err := resolveDecisionIDArg(flags, *dataDir, *configPath, flags.Arg(0), idRequest)
 	if err != nil {
 		return err
 	}
 	req, err := request.Load(*dataDir, id)
+	if err != nil {
+		return err
+	}
+	if req.State == request.StateResumeReview {
+		return continueLostStep(dp, *dataDir, *configPath, id, *from, *reason, gate)
+	}
+	choice, err := parseRetryFrom(*from)
 	if err != nil {
 		return err
 	}
@@ -113,9 +123,7 @@ func (c retryChoice) retryFunc() func(dataDir, id, by, reason string, now time.T
 // request with its state. fromScratch is `-from scratch`'s choice: a rebuilt
 // ticket starts from the base commit whatever the quarantined attempt left.
 func retryRequestFrom(dp *deps, dataDir string, r *request.Request, reason string, choice retryChoice, now time.Time) (handled bool, err error) {
-	// resume_review is handled too, so request.Retry refuses it with the hint
-	// to use `factoryd resume`, rather than a refusal that names nothing.
-	if r.State != request.StateQuarantined && r.State != request.StateHalted && r.State != request.StateResumeReview {
+	if r.State != request.StateQuarantined && r.State != request.StateHalted {
 		return false, nil
 	}
 	updated, err := choice.retryFunc()(dataDir, r.ID, currentOSUser(), reason, now, func(dataDir, runID, stackBase string) request.PROpenOutcome {

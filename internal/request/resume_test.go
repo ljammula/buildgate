@@ -40,7 +40,7 @@ func TestEnterResumeReviewFromEveryLostStepState(t *testing.T) {
 			if r.WaitingSince != "" || r.NotifyCount != 0 {
 				t.Errorf("reminder state not reset: %q %d", r.WaitingSince, r.NotifyCount)
 			}
-			for _, word := range []string{string(from), "factoryd resume req-1", "-from scratch", "factoryd cancel req-1"} {
+			for _, word := range []string{string(from), "factoryd retry req-1", "-from scratch", "factoryd cancel req-1"} {
 				if !strings.Contains(r.Error, word) {
 					t.Errorf("prompt %q lacks %q", r.Error, word)
 				}
@@ -222,7 +222,7 @@ func TestRefuseResumeReturnsToResumeReviewWithReasons(t *testing.T) {
 			t.Errorf("Error %q / NextAction %q lack %q", r.Error, r.NextAction(), want)
 		}
 	}
-	if strings.Contains(r.NextAction(), "factoryd resume req-1`") {
+	if strings.Contains(r.NextAction(), "factoryd retry req-1`") {
 		t.Errorf("NextAction offers a plain resume after a refusal: %q", r.NextAction())
 	}
 	// A scratch decision after a refusal clears the reasons.
@@ -250,8 +250,8 @@ func TestRetryRefusesInResumeReviewWithAHint(t *testing.T) {
 	if !errors.Is(err, ErrIllegalTransition) {
 		t.Fatalf("Retry err = %v, want ErrIllegalTransition", err)
 	}
-	if !strings.Contains(err.Error(), "factoryd resume req-1") {
-		t.Errorf("Retry err = %q, want the `factoryd resume` hint", err)
+	if !strings.Contains(err.Error(), "factoryd retry req-1") {
+		t.Errorf("Retry err = %q, want the `factoryd retry` hint", err)
 	}
 	loaded, err := Load(dataDir, "req-1")
 	if err != nil || loaded.State != StateResumeReview {

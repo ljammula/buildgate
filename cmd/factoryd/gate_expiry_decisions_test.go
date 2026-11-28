@@ -43,7 +43,7 @@ func TestResumeRefusedAtALapsedGateAndTheOperatorIsToldOnce(t *testing.T) {
 	writeSessionConfig(t, config, "review_gate_expiry: 2h\n")
 	reviewWaitingSince(t, dataDir, request.StateResumeReview, 3*time.Hour)
 
-	err := resumeMainWith(dp, []string{"-config", config, "-data-dir", dataDir, "-from", "scratch", "req-1"}, requestdriver.ResumeGate{})
+	err := retryMainWith(dp, []string{"-config", config, "-data-dir", dataDir, "-from", "scratch", "req-1"}, requestdriver.ResumeGate{})
 	if err == nil || !strings.Contains(err.Error(), "resume_review expired") {
 		t.Fatalf("resume = %v, want a refusal naming the expiry", err)
 	}

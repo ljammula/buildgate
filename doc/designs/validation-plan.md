@@ -178,7 +178,7 @@ pipeline (§11), which drafts spec and tickets itself and opens a draft PR.
    opened → `pr_review`. Two negative checks: edit `spec.md` after
    approving it and confirm planning refuses naming the file; stop
    `worker` mid-ticket (`factoryd stop -force`) and confirm the request
-   waits in `resume_review` at the next start and `factoryd resume <id>`
+   waits in `resume_review` at the next start and `factoryd retry <id>`
    continues the ticket in its kept worktree. Acceptance: every state above observed in `request.json`,
    `factoryd status` shows `ticket i/n` and the PR URL, the PR is a
    draft on the throwaway remote, and `worker` never merged it.

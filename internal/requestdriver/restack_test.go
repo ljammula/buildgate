@@ -541,7 +541,7 @@ func TestRestackParksBeforeReplaying(t *testing.T) {
 // TestRestackConflictParksAndResumeReplaysAgain: a replay that conflicts
 // parks the request in resume_review with a reason that says what resolves
 // it (the branch under the ticket moving, or cancel) and that a fix pushed
-// by hand is refused, nothing built; `factoryd resume` returns it to
+// by hand is refused, nothing built; `factoryd retry` returns it to
 // pr_review, and the next pass replays again.
 func TestRestackConflictParksAndResumeReplaysAgain(t *testing.T) {
 	f := newRestackFixture(t, 2)
@@ -555,7 +555,7 @@ func TestRestackConflictParksAndResumeReplaysAgain(t *testing.T) {
 			t.Errorf("reason %q does not say %q", f.r.Resume.Reason, want)
 		}
 	}
-	if !strings.Contains(f.r.NextAction(), "factoryd resume req-1") {
+	if !strings.Contains(f.r.NextAction(), "factoryd retry req-1") {
 		t.Errorf("next action %q does not offer the resume", f.r.NextAction())
 	}
 	resumed, err := request.ResumeRequest(f.dataDir, "req-1", request.ResumeRound, "alice", f.now, nil)
@@ -694,7 +694,7 @@ func TestAStaleKeptBuildOfAStackedTicketIsNotResumed(t *testing.T) {
 	f.save()
 	gate := requestdriver.ResumeGate{Preconditions: &requestdrivertest.FakeResumePreconditions{T: t, OK: true}}
 	reasons, err := gate.RequestResumeRefusals(context.Background(), f.dataDir, "", f.r)
-	if err != nil || len(reasons) != 1 || !strings.Contains(reasons[0], "ticket 1's old head") || !strings.Contains(reasons[0], "factoryd resume -from scratch req-1") {
+	if err != nil || len(reasons) != 1 || !strings.Contains(reasons[0], "ticket 1's old head") || !strings.Contains(reasons[0], "factoryd retry -from scratch req-1") {
 		t.Fatalf("refusals = %v, %v; want the stale build refused, pointing at a rebuild", reasons, err)
 	}
 

@@ -111,7 +111,7 @@ func handoffForABuild(dataDir string, quarantined *run.Run) (handoff.Document, b
 // halted (its worker was lost, its sandbox could not start) and its own
 // build had been given a record, as a corrective round or a retry's rebuild
 // is. The build that follows it, resumed in its kept worktree (`factoryd
-// resume`, resumeRunID) or started again from the base (`resume -from
+// resume`, resumeRunID) or started again from the base (`retry -from
 // scratch`, `retry`), is given the record of that same attempt. The record
 // is loaded again from that attempt's handoff, under every check of the
 // first time; it is never copied from what the halted run was handed, and
@@ -143,7 +143,7 @@ func withEarlierAttemptOf(dataDir string, r *request.Request, ticket *request.Ti
 	// what an unfinished run left on the branch is not known to be whole.
 	//
 	// Nor a build an operator's resume decision starts (PendingResumeVerb):
-	// `resume -from scratch` is a rebuild in a fresh worktree from the
+	// `retry -from scratch` is a rebuild in a fresh worktree from the
 	// base, also when the step it replaces was a retry lost before its
 	// run existed, whose own choice the move through resume_review dropped.
 	scratch, _ := r.RetryChoiceFor(ticket.Index)

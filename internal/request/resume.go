@@ -99,9 +99,9 @@ func ResumePrompt(id string, from State, step LostStep) string {
 	}
 	what := lostStepWhat(step.Cause, from, step.RetryAt)
 	if from == StateBuilding && step.RunID == "" {
-		return fmt.Sprintf("%s; nothing of it was kept: `factoryd resume -from scratch %s` rebuilds the ticket (or `factoryd cancel %s`)", what, id, id)
+		return fmt.Sprintf("%s; nothing of it was kept: `factoryd retry -from scratch %s` rebuilds the ticket (or `factoryd cancel %s`)", what, id, id)
 	}
-	return fmt.Sprintf("%s; `factoryd resume %s` continues it (or `-from scratch` / `factoryd cancel %s`)", what, id, id)
+	return fmt.Sprintf("%s; `factoryd retry %s` continues it (or `-from scratch` / `factoryd cancel %s`)", what, id, id)
 }
 
 // Parked reports whether the wait is a park: the factory stopped the request
@@ -124,9 +124,9 @@ func (i *ResumeInfo) KeepsLostBuild() bool {
 // is the lost build the park interrupted the resume of.
 func parkPrompt(id, reason, keptRunID string) string {
 	if keptRunID != "" {
-		return fmt.Sprintf("%s: once it is repaired, `factoryd resume %s` checks again and continues the kept build of run %s (or `-from scratch` / `factoryd cancel %s`)", reason, id, keptRunID, id)
+		return fmt.Sprintf("%s: once it is repaired, `factoryd retry %s` checks again and continues the kept build of run %s (or `-from scratch` / `factoryd cancel %s`)", reason, id, keptRunID, id)
 	}
-	return fmt.Sprintf("%s: once it is repaired, `factoryd resume %s` checks again and continues, or `factoryd cancel %s`", reason, id, id)
+	return fmt.Sprintf("%s: once it is repaired, `factoryd retry %s` checks again and continues, or `factoryd cancel %s`", reason, id, id)
 }
 
 // lostStepWhat is the clause naming what happened to a lost step, with the
@@ -203,7 +203,7 @@ func (r *Request) RefuseResume(reasons []string, now time.Time) error {
 	if r.Resume == nil || r.State != StateBuilding {
 		return fmt.Errorf("request %s: only a building request resumed from a lost build can be refused (state %q) %w", r.ID, r.State, ErrIllegalTransition)
 	}
-	line := fmt.Sprintf("the lost build cannot be resumed (%s); only `factoryd resume -from scratch %s` or `factoryd cancel %s` are possible", strings.Join(reasons, "; "), r.ID, r.ID)
+	line := fmt.Sprintf("the lost build cannot be resumed (%s); only `factoryd retry -from scratch %s` or `factoryd cancel %s` are possible", strings.Join(reasons, "; "), r.ID, r.ID)
 	if err := advance(r, []State{StateBuilding}, StateResumeReview, factoryActor, line, now); err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (r *Request) resumeNextAction() string {
 // resumeWaysOn is the operator's ways out of resume_review.
 func (r *Request) resumeWaysOn() string {
 	if r.Resume == nil {
-		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd resume %s`, `factoryd resume -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
+		return fmt.Sprintf("the factoryd worker stopped mid-step: `factoryd retry %s`, `factoryd retry -from scratch %s` or `factoryd cancel %s`", r.ID, r.ID, r.ID)
 	}
 	if r.Resume.Parked() {
 		return parkPrompt(r.ID, r.Resume.Reason, r.Resume.LostRunID)
@@ -294,17 +294,17 @@ func (r *Request) resumeWaysOn() string {
 	from := r.Resume.FromState
 	what := lostStepWhat(r.Resume.Cause, from, r.Resume.RetryAt)
 	if len(r.Resume.Refused) > 0 {
-		return fmt.Sprintf("the lost %s step cannot be resumed (%s); `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", from, strings.Join(r.Resume.Refused, "; "), r.ID, r.ID)
+		return fmt.Sprintf("the lost %s step cannot be resumed (%s); `factoryd retry -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", from, strings.Join(r.Resume.Refused, "; "), r.ID, r.ID)
 	}
 	if from == StateBuilding && r.Resume.LostRunID == "" {
 		// Nothing of the step was kept (a corrective round builds on the
 		// ticket's branch and keeps no worktree), so only a rebuild is left.
-		return fmt.Sprintf("%s: `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID)
+		return fmt.Sprintf("%s: `factoryd retry -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID)
 	}
 	if from == StateBuilding {
-		return fmt.Sprintf("%s: `factoryd resume %s` continues it in its kept worktree (a build from its last completed round; a build that had finished is kept and only the steps after it run again), `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
+		return fmt.Sprintf("%s: `factoryd retry %s` continues it in its kept worktree (a build from its last completed round; a build that had finished is kept and only the steps after it run again), `factoryd retry -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", what, r.ID, r.ID, r.ID)
 	}
-	return fmt.Sprintf("%s: `factoryd resume %s` runs it again, or `factoryd cancel %s`", what, r.ID, r.ID)
+	return fmt.Sprintf("%s: `factoryd retry %s` runs it again, or `factoryd cancel %s`", what, r.ID, r.ID)
 }
 
 func stateIn(s State, set []State) bool {
@@ -330,7 +330,7 @@ func (e *ResumeRefusedError) Error() string {
 	if e.Step != "" && e.Step != StateBuilding {
 		return fmt.Sprintf("request %s: cannot resume the lost %s step: %s; try again once it has stopped, or `factoryd cancel %s`", e.RequestID, e.Step, strings.Join(e.Reasons, "; "), e.RequestID)
 	}
-	return fmt.Sprintf("request %s: cannot resume the lost build: %s; `factoryd resume -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", e.RequestID, strings.Join(e.Reasons, "; "), e.RequestID, e.RequestID)
+	return fmt.Sprintf("request %s: cannot resume the lost build: %s; `factoryd retry -from scratch %s` rebuilds the ticket, or `factoryd cancel %s`", e.RequestID, strings.Join(e.Reasons, "; "), e.RequestID, e.RequestID)
 }
 
 func (e *ResumeRefusedError) Unwrap() error { return ErrIllegalTransition }
@@ -356,7 +356,7 @@ func (e *ResumePreflightError) Unwrap() error { return e.Err }
 // worktree checks live outside this package); a nil preflight skips the check.
 type ResumePreflight func(r *Request) (reasons []string, err error)
 
-// ResumeRequest is the one function `factoryd resume` and POST
+// ResumeRequest is the one function `factoryd retry` and POST
 // /requests/{id}/resume call. Under the request lock it loads the request,
 // runs preflight (for a ResumeRound of a lost build, and for any other lost
 // step), and applies
@@ -377,7 +377,7 @@ func ResumeRequest(dataDir, id, verb, by string, now time.Time, preflight Resume
 	if err := r.refuseLapsed(dataDir, now, opts); err != nil {
 		return nil, err
 	}
-	if err := r.resumeLoaded(verb, by, "", now, preflight); err != nil {
+	if err := r.resumeLoaded(verb, by, noteOf(opts), now, preflight); err != nil {
 		return nil, err
 	}
 	if err := r.Save(dataDir); err != nil {

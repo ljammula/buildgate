@@ -201,7 +201,7 @@ func (a *AutoResume) Note() string {
 
 // AutoResumeRequest is the factory's automatic resume of request id once
 // its wait is due (AutoResumeDue at now): under the request's
-// lock, on a fresh read, it makes the resume `factoryd resume` makes
+// lock, on a fresh read, it makes the resume `factoryd retry` makes
 // (resumeLoaded, with preflight), by the factory, with the verb the prompt
 // offers (autoResumeVerb), and records it in the same save as the wait's
 // kind's record (Request.AutoResumed for provider_quota,

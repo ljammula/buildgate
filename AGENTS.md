@@ -269,7 +269,7 @@ The package-variable baseline regenerates the same way, with
 
 `internal/hostcontrol`'s own tests are in the package, on `newFakeDeps` (`internal/hostcontrol/deps_test.go`) and the fixtures of `hostcontroltest`. The tests of it left in `cmd/factoryd` are those of a command on the way to it (`stop`, `doctor`, `service`, `worker`), and those of `QuickstartEnsureServe` and `QuickstartEnsureDaemon`, which need the real `ServeStartToken` and `WorkerServiceState` that `cmd/factoryd` implements.
 
-`internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `resume`, `approve`, `reject`, `cancel`, `worker`, the spec and plan jobs, the real ticket build), which use the same fixtures.
+`internal/requestdriver`'s own tests are in its external test package (`requestdriver_test`), on the `fakeDeps` of `deps_fake_test.go`, whose defaults refuse, and the fixtures of `requestdrivertest`. The tests of it left in `cmd/factoryd` are those of a command, the worker or a model job on the way to it (`retry`, `approve`, `reject`, `cancel`, `worker`, the spec and plan jobs, the real ticket build), which use the same fixtures.
 
 Operator docs describe the current state only: no history, no "used to",
 no PR-by-PR changelog (git log has it). Tables and lists over prose; flows as

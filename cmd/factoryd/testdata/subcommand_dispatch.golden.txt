@@ -228,19 +228,13 @@ $ factoryd retry -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd retry [flags] <request-id>
-stderr:   Rebuild the ticket of a quarantined or halted request
+stderr:   Continue a quarantined, halted or resume_review request
 
 $ factoryd rounds -zz-not-a-flag
 exit 1
 stderr: flag provided but not defined: -zz-not-a-flag
 stderr: Usage: factoryd rounds [flags] <request-id>
 stderr:   List the rounds a request's builds ended in, to retry a ticket from one
-
-$ factoryd resume -zz-not-a-flag
-exit 1
-stderr: flag provided but not defined: -zz-not-a-flag
-stderr: Usage: factoryd resume [flags] <request-id>
-stderr:   Continue a request whose step ended with no verdict (resume_review)
 
 $ factoryd amend-scope -zz-not-a-flag
 exit 1

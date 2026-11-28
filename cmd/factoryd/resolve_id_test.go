@@ -255,7 +255,6 @@ func TestADecisionTakesOnlyTheStartOrEndOfAnIDAndNoShortPart(t *testing.T) {
 			"answer":      answerMain(dp, []string{"-data-dir", dataDir, "-q", "Q1", "-hash", "0123456789ab", "-text", "yes", tc.part}),
 			"cancel":      cancelMain(dp, []string{"-data-dir", dataDir, tc.part}),
 			"retry":       retryMain(dp, []string{"-data-dir", dataDir, tc.part}),
-			"resume":      resumeMain(dp, []string{"-data-dir", dataDir, tc.part}),
 			"amend-scope": amendScopeMain(dp, []string{"-data-dir", dataDir, "-reason", "r", tc.part, "a.go"}),
 		}
 		for verb, err := range refusals {

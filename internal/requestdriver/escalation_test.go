@@ -180,7 +180,7 @@ func TestPRReviewRoundStaysOnTheRolesModel(t *testing.T) {
 }
 
 // TestABuildThatReplacesALostEscalatedRoundRunsOnTheEscalation: an escalated
-// build that never finished is followed, on `factoryd resume` in its kept
+// build that never finished is followed, on `factoryd retry` in its kept
 // worktree, by a build on the escalation too, itself recorded as escalated.
 // A lost build that was not escalated (a ticket's first build) is followed
 // by an ordinary one, and so is any lost build once no escalation is

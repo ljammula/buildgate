@@ -119,7 +119,7 @@ func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requ
 		notice = requestNotice{
 			Ask:    "An earlier ticket needs you before the request can continue",
 			Detail: r.NextAction(),
-			Next:   fmt.Sprintf("factoryd resume %s once it is repaired (or `factoryd cancel %s`)", r.ID, r.ID),
+			Next:   fmt.Sprintf("factoryd retry %s once it is repaired (or `factoryd cancel %s`)", r.ID, r.ID),
 		}
 	case r.State == request.StateResumeReview:
 		// Nothing to edit or approve: a step was lost, and the ways on are
@@ -127,7 +127,7 @@ func reviewNotice(dataDir string, r *request.Request, waited time.Duration) requ
 		notice = requestNotice{
 			Ask:    "A step was lost: choose how to continue",
 			Detail: r.NextAction(),
-			Next:   fmt.Sprintf("factoryd resume %s (or `-from scratch`, or `factoryd cancel %s`)", r.ID, r.ID),
+			Next:   fmt.Sprintf("factoryd retry %s (or `-from scratch`, or `factoryd cancel %s`)", r.ID, r.ID),
 		}
 	default: // request.StateSpecReview, and any state that ends up here.
 		notice = requestNotice{Ask: "Spec ready for your review", Detail: "Read it, then approve or request changes.", Next: approve}

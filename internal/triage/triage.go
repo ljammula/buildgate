@@ -850,17 +850,17 @@ func classifyHaltError(haltErr string) string {
 
 // workerStoppedTriage is classifyHaltError's sentence for an Activity
 // heartbeat timeout -- see that case's comment. A request waits in
-// resume_review for `factoryd resume <id>`; a single-ticket run is started
+// resume_review for `factoryd retry <id>`; a single-ticket run is started
 // again. The old Activity may still be running if the process only froze or
 // lost Temporal; its next heartbeat round-trip cancels it, and the run's
 // kept worktree is what a resume continues from.
-const workerStoppedTriage = "halted: the factoryd process running this build stopped mid-run (restarted, crashed, slept, or lost Temporal); resume the request (factoryd resume <id>) or start a single-ticket run again"
+const workerStoppedTriage = "halted: the factoryd process running this build stopped mid-run (restarted, crashed, slept, or lost Temporal); resume the request (factoryd retry <id>) or start a single-ticket run again"
 
 // temporalUnreachableTriage is triageHalt's sentence for a run that lost the
 // Temporal server for longer than its heartbeat timeout. Unlike a lost
 // worker, the process is alive; what the build did is in the kept worktree,
 // and nothing judged it. A request waits in resume_review.
-const temporalUnreachableTriage = "halted: factoryd lost contact with the Temporal server mid-run, so the work was not judged; once Temporal answers, resume the request (factoryd resume <id>)"
+const temporalUnreachableTriage = "halted: factoryd lost contact with the Temporal server mid-run, so the work was not judged; once Temporal answers, resume the request (factoryd retry <id>)"
 
 // truncateTriage caps s at maxTriageSentenceLen bytes -- Run.Triage's own
 // doc comment promises callers a short sentence, not an unbounded one.

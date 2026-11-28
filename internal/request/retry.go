@@ -201,7 +201,7 @@ func retry(dataDir, id, by, reason string, choice retryChoice, now time.Time, op
 		return nil, err
 	}
 	if r.State == StateResumeReview {
-		return nil, fmt.Errorf("request %s: cannot retry a request waiting in %q: run `factoryd resume %s` to continue the lost step, `factoryd resume -from scratch %s` to start it over, or `factoryd cancel %s` %w", id, r.State, id, id, id, ErrIllegalTransition)
+		return nil, fmt.Errorf("request %s: cannot retry a request waiting in %q: run `factoryd retry %s` to continue the lost step, `factoryd retry -from scratch %s` to start it over, or `factoryd cancel %s` %w", id, r.State, id, id, id, ErrIllegalTransition)
 	}
 	if r.State != StateQuarantined && r.State != StateHalted {
 		return nil, fmt.Errorf("request %s: cannot retry from state %q (must be %q or %q) %w", id, r.State, StateQuarantined, StateHalted, ErrIllegalTransition)

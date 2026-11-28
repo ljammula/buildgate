@@ -383,7 +383,7 @@ func TestClosedUnmergedEarlierTicketParksRequest(t *testing.T) {
 	if r.State != request.StateResumeReview || r.Resume == nil || !strings.Contains(r.Resume.Reason, "closed without merging") {
 		t.Fatalf("state=%q resume=%+v, want parked with closed-unmerged reason", r.State, r.Resume)
 	}
-	if action := r.NextAction(); !strings.Contains(action, "factoryd resume "+r.ID) || !strings.Contains(action, "factoryd cancel "+r.ID) {
+	if action := r.NextAction(); !strings.Contains(action, "factoryd retry "+r.ID) || !strings.Contains(action, "factoryd cancel "+r.ID) {
 		t.Fatalf("NextAction=%q, want resume and cancel choices", action)
 	}
 

@@ -201,7 +201,7 @@ func TestRetryRouteRefusesAResumeReviewRequestWithTheResumeHint(t *testing.T) {
 	seedLostBuild(t, dataDir)
 	rec := httptest.NewRecorder()
 	NewServer(dataDir, WithOverrideToken("test-token")).ServeHTTP(rec, requestActionFor(t, http.MethodPost, "/requests/req-1/retry", "test-token", ""))
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "factoryd resume req-1") {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "factoryd retry req-1") {
 		t.Errorf("retry of a resume_review request: status %d body %s; want 409 with the resume hint", rec.Code, rec.Body)
 	}
 }

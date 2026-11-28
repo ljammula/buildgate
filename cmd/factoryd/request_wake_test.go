@@ -213,13 +213,13 @@ func TestCLIVerbsWakeTheWorkflowAfterTheirWrite(t *testing.T) {
 			run: func(d string) error { return retryMain(dp, []string{"-data-dir", d, "-reason", "again", "req-1"}) },
 		},
 		{
-			name: "resume",
+			name: "retry of a resume_review request",
 			seed: func(t *testing.T, d string) { requestdrivertest.SeedLostStep(t, d, "req-1", request.StatePlanning, "") },
 			badSeed: func(t *testing.T, d string) {
 				requestdrivertest.NewApprovableDriverRequest(t, d, "req-1", request.StateBuilding)
 			},
 			run: func(d string) error {
-				return resumeMainWith(dp, []string{"-data-dir", d, "req-1"}, requestdriver.ResumeGate{Containers: &requestdrivertest.FakeJobContainers{}})
+				return retryMainWith(dp, []string{"-data-dir", d, "req-1"}, requestdriver.ResumeGate{Containers: &requestdrivertest.FakeJobContainers{}})
 			},
 		},
 		{

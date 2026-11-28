@@ -70,7 +70,10 @@ var ErrGateExpired = errors.New("the review gate expired")
 // DecisionOption adjusts a decision on a request (Approve, Reject, ResumeRequest).
 type DecisionOption func(*decisionOptions)
 
-type decisionOptions struct{ expiry time.Duration }
+type decisionOptions struct {
+	expiry time.Duration
+	note   string
+}
 
 // WithGateExpiry makes the decision refuse, under the request's own lock, a
 // review gate that has waited expiry or longer: the request is halted
@@ -78,6 +81,21 @@ type decisionOptions struct{ expiry time.Duration }
 // wrapping ErrGateExpired. 0 is off.
 func WithGateExpiry(expiry time.Duration) DecisionOption {
 	return func(o *decisionOptions) { o.expiry = expiry }
+}
+
+// WithNote records note beside a resume decision's History entry (the
+// operator's reason). Empty adds nothing.
+func WithNote(note string) DecisionOption {
+	return func(o *decisionOptions) { o.note = note }
+}
+
+// noteOf is the note a decision's options carry.
+func noteOf(opts []DecisionOption) string {
+	var o decisionOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o.note
 }
 
 // expiryOf is the gate expiry a decision's options carry.

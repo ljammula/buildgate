@@ -114,13 +114,10 @@ func TestHaltLostRequestStepEntersResumeReviewOnlyInTheLostState(t *testing.T) {
 	if lost.NotifyCount != 1 || lost.LastNotifiedAt == "" {
 		t.Errorf("reminder state = %d/%q, want the first reminder sent on entering", lost.NotifyCount, lost.LastNotifiedAt)
 	}
-	for _, want := range []string{"planning", "factoryd resume req-lost", "-from scratch", "factoryd cancel req-lost"} {
+	for _, want := range []string{"planning", "factoryd retry req-lost", "-from scratch", "factoryd cancel req-lost"} {
 		if !strings.Contains(lost.Error, want) {
 			t.Errorf("prompt %q lacks %q", lost.Error, want)
 		}
-	}
-	if strings.Contains(lost.Error, "retry") {
-		t.Errorf("prompt %q still offers retry", lost.Error)
 	}
 }
 

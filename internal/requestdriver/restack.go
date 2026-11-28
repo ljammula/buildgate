@@ -483,7 +483,7 @@ func replayedPairDiffers(pair run.ReplayedCommit) string {
 // faithfully; the factory never rebuilds the ticket to resolve it, and a
 // fix pushed by hand to the ticket's branch is refused as a human commit.
 func restackConflictPark(r *request.Request, ticket *request.Ticket, need restackNeed, how string) string {
-	return fmt.Sprintf("ticket %d/%d's commits on branch %s cannot be restacked onto %s, the new tip of %s: they %s. Nothing was judged or pushed, and the factory does not rebuild the ticket to resolve it; a fix pushed by hand to %s is refused as a commit the factory did not make. `factoryd resume %s` tries the replay again, which succeeds once %s has moved so the commits replay cleanly; or `factoryd cancel %s`", ticket.Index, r.TicketCount, need.head.Branch, shortSHA(need.onto), need.ontoBranch, how, need.head.Branch, r.ID, need.ontoBranch, r.ID)
+	return fmt.Sprintf("ticket %d/%d's commits on branch %s cannot be restacked onto %s, the new tip of %s: they %s. Nothing was judged or pushed, and the factory does not rebuild the ticket to resolve it; a fix pushed by hand to %s is refused as a commit the factory did not make. `factoryd retry %s` tries the replay again, which succeeds once %s has moved so the commits replay cleanly; or `factoryd cancel %s`", ticket.Index, r.TicketCount, need.head.Branch, shortSHA(need.onto), need.ontoBranch, how, need.head.Branch, r.ID, need.ontoBranch, r.ID)
 }
 
 // writeReplayRecord writes replay to path, refusing one that is not well

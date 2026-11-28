@@ -221,7 +221,7 @@ func TestInspectNoteSaysHowAChangeGoesBackInEachState(t *testing.T) {
 	for state, want := range map[State]string{
 		StateQuarantined:  "`factoryd retry` rebuilds the ticket",
 		StateHalted:       "follow the next step printed",
-		StateResumeReview: "`factoryd resume`",
+		StateResumeReview: "`factoryd retry`",
 	} {
 		note := InspectNoteFor(state, false, true)
 		if !strings.Contains(note, want) || strings.Contains(note, "comment on the pull request") || strings.Contains(note, "These commands only read") {

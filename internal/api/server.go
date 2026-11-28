@@ -3986,7 +3986,7 @@ func (s *Server) retryRequest(w http.ResponseWriter, r *http.Request) {
 
 // resumeRequest serves POST /requests/{id}/resume: the operator's decision for
 // a request waiting in resume_review, via the shared request.ResumeRequest the
-// `factoryd resume` command also calls. The body's "from" is "round" (the
+// `factoryd retry` command also calls. The body's "from" is "round" (the
 // default: continue the lost step, a build in its kept worktree) or "scratch"
 // (start the lost build over); cancelling goes through POST
 // /requests/{id}/cancel. Gated like retryRequest (authorizeRequestWrite): a
