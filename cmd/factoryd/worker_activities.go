@@ -49,6 +49,10 @@ type requestActivities struct {
 
 	// steps is the requests with a step running (AdvanceRequest).
 	steps stepGuard
+	// vmStopping reports an idle stop of the VM under way or done
+	// (hostcontrol.VMIdleMarkerPresent): no step starts under it. Nil in a
+	// test that has no VM.
+	vmStopping func() bool
 }
 
 func (a *requestActivities) registerLight(w temporalworker.Worker) {
@@ -70,6 +74,9 @@ const drainingErrorType = "Draining"
 func (a *requestActivities) refuseWhileDraining() error {
 	if daemonheartbeat.Draining(a.dataDir) {
 		return temporal.NewApplicationError("the worker is draining for a restart: no new step starts", drainingErrorType)
+	}
+	if a.vmStopping != nil && a.vmStopping() {
+		return temporal.NewApplicationError("the VM is stopping while idle, or stopped: no new step starts until the worker has started it again", drainingErrorType)
 	}
 	return nil
 }
@@ -93,9 +100,10 @@ func (a *requestActivities) LoadRequestStep(_ context.Context, id string) (workf
 		requestdriver.PruneRoundRefs(a.dp, r)
 	}
 	step := requestStepFor(r.State, a.cfg)
-	if step.Advance != "" && daemonheartbeat.Draining(a.dataDir) {
-		// A draining worker refuses every step: ask again at the repository
-		// retry pace, not every couple of seconds for the whole drain.
+	if step.Advance != "" && (daemonheartbeat.Draining(a.dataDir) || (a.vmStopping != nil && a.vmStopping())) {
+		// A draining worker (or one whose VM is stopping or stopped while
+		// idle) refuses every step: ask again at the repository retry pace,
+		// not every couple of seconds for the whole drain.
 		step.RetryAfter = max(step.RetryAfter, requestRepoBusyRetryAfter)
 	}
 	if r.State == request.StateBuilding && r.StackedWait != nil {

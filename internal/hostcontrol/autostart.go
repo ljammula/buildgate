@@ -205,9 +205,10 @@ func ensureDocker(dp Deps, ctx context.Context, w io.Writer, subject string) err
 	return nil
 }
 
-// TemporalStackDir is where the compose file and its log live:
-// $XDG_CONFIG_HOME (default ~/.config, like the session config) /factoryd/temporal.
-func TemporalStackDir() (string, error) {
+// TemporalStackPath is where the compose file and its log live:
+// $XDG_CONFIG_HOME (default ~/.config, like the session config) /factoryd/temporal,
+// without creating it.
+func TemporalStackPath() (string, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -216,7 +217,15 @@ func TemporalStackDir() (string, error) {
 		}
 		base = filepath.Join(home, ".config")
 	}
-	dir := filepath.Join(base, "factoryd", "temporal")
+	return filepath.Join(base, "factoryd", "temporal"), nil
+}
+
+// TemporalStackDir is TemporalStackPath, created.
+func TemporalStackDir() (string, error) {
+	dir, err := TemporalStackPath()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}

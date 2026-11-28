@@ -105,6 +105,25 @@ func runColimaStart(dp Deps, ctx context.Context, w io.Writer, profile string, a
 	return nil
 }
 
+// OtherContainers names the running containers of the current docker context
+// other than factoryd's own registry, which does not count as other work
+// keeping the VM up.
+func OtherContainers(dp Deps, ctx context.Context) ([]string, error) {
+	psCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(psCtx, dp.DockerBinary(), "ps", "--format", "{{.Names}}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps failed: %v", err)
+	}
+	var others []string
+	for _, name := range strings.Fields(string(out)) {
+		if name != colimaIgnoredContainer {
+			others = append(others, sanitize.Line(name))
+		}
+	}
+	return others, nil
+}
+
 // stopColima runs `colima stop` for profile.
 func stopColima(dp Deps, ctx context.Context, profile string) error {
 	ctx, cancel := context.WithTimeout(ctx, colimaStopTimeout)
@@ -135,18 +154,10 @@ func StopColimaAfterStopAll(dp Deps, w io.Writer) {
 		fmt.Fprintf(w, "colima: left running (%s=0: nothing would start it again)\n", AutostartEnvVar)
 		return
 	}
-	psCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(psCtx, dp.DockerBinary(), "ps", "--format", "{{.Names}}").Output()
+	others, err := OtherContainers(dp, ctx)
 	if err != nil {
-		fmt.Fprintf(w, "colima: could not stop: docker ps failed: %v\n", err)
+		fmt.Fprintf(w, "colima: could not stop: %v\n", err)
 		return
-	}
-	var others []string
-	for _, name := range strings.Fields(string(out)) {
-		if name != colimaIgnoredContainer {
-			others = append(others, sanitize.Line(name))
-		}
 	}
 	if len(others) > 0 {
 		shown := others

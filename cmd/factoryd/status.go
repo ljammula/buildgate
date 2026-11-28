@@ -737,6 +737,10 @@ func statusMain(dp *deps, args []string) error {
 	// session config sets. Empty (nil) whenever roles: is absent or
 	// unresolvable, so a config that never uses roles: renders identically
 	// to before this field existed -- see TestStatusJSONWithoutRolesIsUnchanged.
+	if idle := vmIdleInfoLine(now); idle != "" {
+		routeLine = strings.TrimSuffix(routeLine+"\n"+idle, "\n")
+		routeLine = strings.TrimPrefix(routeLine, "\n")
+	}
 	roleLines := rolesStatusLines(*configPath)
 	profileName, profilePath := statusProfile(*configPath)
 

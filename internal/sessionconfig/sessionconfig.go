@@ -236,6 +236,15 @@ type Config struct {
 	// prunes nothing, and only `factoryd prune` does.
 	PruneAfter *string `yaml:"prune_after,omitempty"`
 
+	// VMIdleStopAfter, when set, has `factoryd worker` stop buildgate's Docker
+	// VM (the Colima profile docker_context pins), with the Temporal and
+	// OpenShell stacks in it, once nothing has needed it for this long: every
+	// request is finished, halted or quarantined, no build runs and no wake is
+	// pending. A wake or a worker start brings it back. A duration such as
+	// 30m, at least MinVMIdleStopAfter. Absent or 0: the VM is never stopped
+	// for being idle.
+	VMIdleStopAfter *string `yaml:"vm_idle_stop_after,omitempty"`
+
 	// PRBudgetLines is the source-line threshold for a pull request size note
 	// and the target when a planning job drafts tickets. Default 400; 0 disables
 	// the line threshold; negative is refused. The release size limits are
@@ -564,6 +573,9 @@ type Settings struct {
 	// PruneAfter mirrors Config.PruneAfter; 0 is off.
 	PruneAfter time.Duration
 
+	// VMIdleStopAfter mirrors Config.VMIdleStopAfter; 0 is off.
+	VMIdleStopAfter time.Duration
+
 	// PRBudgetLines mirrors Config.PRBudgetLines; 0 is no budget.
 	PRBudgetLines int
 
@@ -795,6 +807,26 @@ func (c *Config) applyLimits(s *Settings) error {
 	return nil
 }
 
+// applyHousekeeping applies the keys that schedule the worker's own upkeep:
+// prune_after and vm_idle_stop_after.
+func (c *Config) applyHousekeeping(s *Settings) error {
+	if c.PruneAfter != nil {
+		d, err := ParseAge(*c.PruneAfter)
+		if err != nil {
+			return fmt.Errorf("prune_after: %w", err)
+		}
+		s.PruneAfter = d
+	}
+	if c.VMIdleStopAfter != nil {
+		d, err := ParseVMIdleStopAfter(*c.VMIdleStopAfter)
+		if err != nil {
+			return fmt.Errorf("vm_idle_stop_after: %w", err)
+		}
+		s.VMIdleStopAfter = d
+	}
+	return nil
+}
+
 // ApplySettings overlays c's present fields onto s, returning the result.
 // An absent Config field (nil pointer) leaves the corresponding s field
 // untouched -- the same "only present keys apply" rule Load's KnownFields
@@ -877,12 +909,8 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	if err := c.applyLimits(&s); err != nil {
 		return s, err
 	}
-	if c.PruneAfter != nil {
-		d, err := ParseAge(*c.PruneAfter)
-		if err != nil {
-			return s, fmt.Errorf("prune_after: %w", err)
-		}
-		s.PruneAfter = d
+	if err := c.applyHousekeeping(&s); err != nil {
+		return s, err
 	}
 
 	boolean(&s.RegistryProxy, c.RegistryProxy)
