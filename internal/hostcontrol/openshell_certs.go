@@ -34,6 +34,25 @@ func OpenShellMTLSDir(dir string) string { return filepath.Join(dir, openShellMT
 // there; only the client bundle is copied to the host. An existing client key
 // is never overwritten: a bundle whose CA differs from the VM's is an error.
 func EnsureOpenShellCerts(dp Deps, ctx context.Context, dir string, t OpenShellTimeouts) error {
+	return ensureOpenShellCerts(dp, ctx, dir, t, nil, time.Time{})
+}
+
+// ReissueOpenShellCerts is EnsureOpenShellCerts for `doctor -fix`: a client
+// bundle whose CA differs from the gateway's (a new Docker VM generated a
+// new CA) is derived state, so it is moved aside to mtls.replaced-<now> and
+// issued again, with one line on w saying so. It does nothing under
+// FACTORYD_AUTOSTART=0.
+func ReissueOpenShellCerts(dp Deps, ctx context.Context, w io.Writer, dir string, t OpenShellTimeouts, now time.Time) error {
+	if !AutostartEnabled() {
+		return nil
+	}
+	return ensureOpenShellCerts(dp, ctx, dir, t, w, now)
+}
+
+// ensureOpenShellCerts is EnsureOpenShellCerts; with replaced non-nil a
+// mismatched bundle is moved aside (ReissueOpenShellCerts) instead of
+// refused.
+func ensureOpenShellCerts(dp Deps, ctx context.Context, dir string, t OpenShellTimeouts, replaced io.Writer, now time.Time) error {
 	run := dockerRunner{dp: dp, timeout: t.Stop}
 	ca, err := run.read(ctx, openShellVMCA)
 	if err != nil {
@@ -47,10 +66,17 @@ func EnsureOpenShellCerts(dp Deps, ctx context.Context, dir string, t OpenShellT
 	mtls := OpenShellMTLSDir(dir)
 	if _, err := os.Stat(filepath.Join(mtls, "tls.key")); err == nil {
 		have, rerr := os.ReadFile(filepath.Join(mtls, "ca.crt"))
-		if rerr != nil || !bytes.Equal(have, ca) {
-			return fmt.Errorf("client bundle in %s does not match the gateway's CA; remove %s and start again", mtls, mtls)
+		if rerr == nil && bytes.Equal(have, ca) {
+			return nil
 		}
-		return nil
+		if replaced == nil {
+			return fmt.Errorf("client bundle in %s does not match the gateway's CA; remove %s and start again (`factoryd doctor -fix` issues a new one)", mtls, mtls)
+		}
+		aside := fmt.Sprintf("%s.replaced-%s", mtls, now.UTC().Format("20060102T150405Z"))
+		if err := os.Rename(mtls, aside); err != nil {
+			return fmt.Errorf("move the client bundle that does not match the gateway's CA aside: %w", err)
+		}
+		fmt.Fprintf(replaced, "OpenShell: the client bundle did not match the gateway's CA (a new Docker VM); moved it to %s and issued a new one\n", aside)
 	}
 	cert, err := run.read(ctx, openShellVMCert)
 	if err != nil {

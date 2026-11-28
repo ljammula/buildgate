@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 
 	"buildgate/internal/hostcontrol"
 	"buildgate/internal/sandbox"
+	"buildgate/internal/sanitize"
 )
 
 // doctorOpenShellChecks are the advisory checks of the OpenShell gateway and
@@ -36,14 +38,22 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 	// A sandbox whose build is gone is reclaimed before the restart below,
 	// which refuses while any sandbox exists.
 	sandboxes, sandboxesListed := doctorSandboxOwnersCheck(dp, ctx, in, fix, w)
-	if fix {
+	// A stack left in another Colima VM answers on the host ports in place of
+	// the pinned VM's: -fix cannot start one that would be reached, so it
+	// starts nothing until that stack is retired.
+	placement, placed := doctorCheckStackInPinnedContext(dp, ctx, in.sandboxDocker, in.settings.DockerContext)
+	if fix && (!placed || placement.Err == nil) {
 		if reasons := stackRestartReasons(in.meterImage); len(reasons) > 0 {
 			stopStackForRestart(dp, w, reasons)
 		}
+		reissueClientBundleIfDown(dp, ctx, w)
 		startSandboxRuntimeIfDown(dp, ctx, w, in.meterImage)
 	}
 	checks := append(needingDocker(doctorCheckOpenShellImages(ctx, in.sandboxDocker), doctorCheckOpenShellGateway(dp, ctx)),
 		doctorCheckOpenShellGatewayConfig())
+	if placed {
+		checks = append([]doctorCheck{placement}, checks...)
+	}
 	if sandboxesListed {
 		checks = append(checks, sandboxes)
 	}
@@ -54,6 +64,23 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 		checks = append(checks, check)
 	}
 	return append(append(checks, needingDocker(doctorCheckMeter(dp, ctx))...), doctorCheckMeterRunsConfiguredImage(in.meterImage))
+}
+
+// reissueClientBundleIfDown, for doctor -fix, issues the client bundle again
+// when the stack does not answer and the bundle's CA is not the gateway's (a
+// new Docker VM generated a new one): the start that follows then finds a
+// matching bundle. A start outside doctor -fix still refuses a mismatch.
+func reissueClientBundleIfDown(dp *deps, ctx context.Context, w io.Writer) {
+	if dp.sandbox.gatewayHealthy(ctx) == nil && dp.sandbox.meterHealthy(ctx) == nil {
+		return
+	}
+	dir, err := hostcontrol.OpenShellStackDir()
+	if err != nil {
+		return
+	}
+	if err := hostcontrol.ReissueOpenShellCerts(dp, ctx, w, dir, hostcontrol.DefaultOpenShellTimeouts(), time.Now()); err != nil {
+		fmt.Fprintf(w, "OpenShell: could not check the client bundle: %s\n", sanitize.Line(err.Error()))
+	}
 }
 
 // doctorScratchVolumesCheck is the advisory row of the scratch volumes of

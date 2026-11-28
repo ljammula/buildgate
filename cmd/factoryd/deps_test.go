@@ -32,6 +32,7 @@ type fakeDocker struct {
 	makeImageFn        func(repoRoot string, target string, vars ...string) (string, error)
 	toolImageFn        func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
 	memTotalFn         func(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
+	runningFn          func(ctx context.Context, dockerBinary string, dockerContext string) ([]string, error)
 	requiredBinariesFn func(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
 	workerChecksFn     func(ctx context.Context, in doctorInputs) []doctorCheck
 	installImagesFn    func() workflow.InstallImages
@@ -91,6 +92,9 @@ func (f *fakeDocker) toolchainImage(ctx context.Context, dockerBinary string, ba
 }
 func (f *fakeDocker) requiredBinaries(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error) {
 	return f.requiredBinariesFn(ctx, dockerBinary, image, user, names)
+}
+func (f *fakeDocker) runningContainers(ctx context.Context, dockerBinary string, dockerContext string) ([]string, error) {
+	return f.runningFn(ctx, dockerBinary, dockerContext)
 }
 func (f *fakeDocker) memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error) {
 	return f.memTotalFn(ctx, dockerBinary, timeout)
@@ -446,6 +450,10 @@ func newTestDeps(t testing.TB) *deps {
 		// Docker's memory is not read: the review and challenger run in turn.
 		memTotalFn: func(context.Context, string, time.Duration) (int64, error) {
 			return 0, errors.New("test docker: Docker's memory is not read")
+		},
+		// No test lists the machine's containers in any context.
+		runningFn: func(context.Context, string, string) ([]string, error) {
+			return nil, errors.New("test docker: no containers are listed")
 		},
 		workerChecksFn:  realDocker.workerChecks,
 		installImagesFn: func() workflow.InstallImages { return refusingInstallImages{} },

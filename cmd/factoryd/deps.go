@@ -92,6 +92,10 @@ type dockerBoundary interface {
 	// within timeout; the rule for running a build's review and challenger
 	// together (reviewAndChallengerTogether) and doctor's memory row use it.
 	memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
+	// runningContainers names the running containers of the docker context
+	// dockerContext ("" is the current one): `docker --context <c> ps`, a
+	// read that changes nothing.
+	runningContainers(ctx context.Context, dockerBinary string, dockerContext string) ([]string, error)
 	// buildgateImages lists the images that carry a buildgate kind label,
 	// with the containers that use each and the bytes only it holds;
 	// removeImage runs `docker image rm` (no force) on refs; imagesBytes is
