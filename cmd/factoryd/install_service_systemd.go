@@ -107,12 +107,17 @@ func systemdPathValue(p string) string { return strings.ReplaceAll(p, "%", "%%")
 
 // systemdDockerEnv is the Docker endpoint this shell names, which the unit
 // must name too: a user manager starts with none of the shell's variables.
+// A DOCKER_CONTEXT this process's docker_context pin set is left out: the
+// service's own factoryd pins it from the config, and a written one would
+// outlive a config change.
 func systemdDockerEnv() []string {
 	var env []string
 	for _, name := range []string{"DOCKER_HOST", "DOCKER_CONTEXT"} {
-		if v := os.Getenv(name); v != "" {
-			env = append(env, name+"="+v)
+		v := os.Getenv(name)
+		if v == "" || (name == "DOCKER_CONTEXT" && v == os.Getenv(pinnedDockerContextEnv)) {
+			continue
 		}
+		env = append(env, name+"="+v)
 	}
 	return env
 }

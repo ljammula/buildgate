@@ -23,6 +23,17 @@ GO_COVERPKG = $(shell echo $(GO_PACKAGES) | tr ' ' ',')
 # subcommand prints the bundle it wrote when this network intercepts TLS,
 # nothing otherwise. The result is exported, so a sub-make does not ask again.
 BUILD_CA_BUNDLE ?= $(eval export BUILD_CA_BUNDLE := $(shell go run ./cmd/factoryd build-ca-bundle))$(BUILD_CA_BUNDLE)
+# The docker context the Docker steps below run in: the session config's
+# docker_context (FACTORYD_CONFIG's first config, else the active one), with
+# no config yet the one a new config gets (colima-buildgate on a Mac with
+# colima), else DOCKER_CONTEXT as the shell has it. Read once, on first use,
+# by the hidden `factoryd docker-context`, which refuses a DOCKER_HOST or
+# DOCKER_CONTEXT that contradicts the config; that refusal stops make. The
+# result is exported, so a sub-make does not ask again.
+FACTORYD_DOCKER_CONTEXT ?= $(eval export FACTORYD_DOCKER_CONTEXT := $(shell go run ./cmd/factoryd docker-context $(if $(FACTORYD_CONFIG),-config "$(firstword $(FACTORYD_CONFIG))") || echo '!'))$(if $(filter !,$(FACTORYD_DOCKER_CONTEXT)),$(error factoryd docker-context failed: see the line above))$(FACTORYD_DOCKER_CONTEXT)
+DOCKER_TARGETS = temporal-up local-images ghcr-images openshell-images .local-registry sandbox-image pifork-image meter-image registry-proxy-image project-sandbox-image
+$(DOCKER_TARGETS): export DOCKER_CONTEXT = $(FACTORYD_DOCKER_CONTEXT)
+
 # Without the proxy's CA, npm cannot verify the registry; under some Node
 # versions it then dies with "Exit handler never called!" instead of naming
 # the certificate.
@@ -379,7 +390,7 @@ temporal-up:
 local-images: docker-buildx-check
 	@: one lookup for the image builds below and the console build after them: $(BUILD_CA_BUNDLE)
 	@if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then \
-		echo "Docker is required to install the sandbox/meter/registry-proxy images -- start Docker (colima: 'colima start --memory 4') and re-run 'make install'." >&2; exit 1; \
+		echo "Docker is required to install the sandbox/meter/registry-proxy images -- start Docker (on a Mac: 'go run ./cmd/factoryd docker-context -ensure-vm' creates or starts buildgate's Colima VM) and re-run 'make install'." >&2; exit 1; \
 	fi
 	@if [ "$(IMAGE_SOURCE)" = ghcr ]; then \
 		$(MAKE) .local-registry; \

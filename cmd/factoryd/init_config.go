@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"buildgate/internal/sessionconfig"
 )
@@ -24,7 +25,7 @@ func newInitConfigFlags() (flags *flag.FlagSet, path *string) {
 	return
 }
 
-func initConfigMain(args []string) error {
+func initConfigMain(dp *deps, args []string) error {
 	flags, path := newInitConfigFlags()
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -39,7 +40,7 @@ func initConfigMain(args []string) error {
 		}
 		return err
 	}
-	if _, err := f.WriteString(sessionconfig.Example); err != nil {
+	if _, err := f.WriteString(initConfigText(dp, runtime.GOOS)); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -48,4 +49,13 @@ func initConfigMain(args []string) error {
 	}
 	fmt.Printf("wrote %s -- replace every <placeholder>, then run `factoryd worker`\n", *path)
 	return nil
+}
+
+// initConfigText is sessionconfig.Example, with the docker_context a new
+// config on this machine gets (newConfigDockerContext) when there is one.
+func initConfigText(dp *deps, goos string) string {
+	if dockerContext := newConfigDockerContext(dp, goos); dockerContext != "" {
+		return sessionconfig.Example + "\n# The Colima VM buildgate owns; `factoryd doctor -fix` creates it.\ndocker_context: " + dockerContext + "\n"
+	}
+	return sessionconfig.Example
 }

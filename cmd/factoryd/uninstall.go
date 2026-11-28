@@ -77,11 +77,14 @@ type uninstallEnv struct {
 	manager hostcontrol.ServiceManager
 	// backend is the Docker the gateway runs on: it decides where the
 	// gateway's state directory is and how to remove it by hand.
-	backend  dockerbackend.Backend
-	out      io.Writer
-	runDock  func(args ...string) error
-	dockOut  func(args ...string) (string, error)
-	xdgConfg string
+	backend dockerbackend.Backend
+	// colimaProfile is the Colima profile docker_context pins, "" for none:
+	// the hand-run commands name it.
+	colimaProfile string
+	out           io.Writer
+	runDock       func(args ...string) error
+	dockOut       func(args ...string) (string, error)
+	xdgConfg      string
 }
 
 func uninstallMain(dp *deps, args []string) error {
@@ -116,7 +119,11 @@ func newUninstallEnv(dp *deps, home, exe string, out io.Writer) *uninstallEnv {
 		service: func() error { return uninstallServiceMain(dp, nil) },
 		manager: dp.host.serviceManager(),
 		backend: dp.docker.backend(context.Background(), dp.docker.dockerBinary()).Backend,
-		out:     out,
+		colimaProfile: func() string {
+			profile, _ := hostcontrol.PinnedColimaProfile(dp)
+			return profile
+		}(),
+		out: out,
 	}
 	env.xdgConfg = os.Getenv("XDG_CONFIG_HOME")
 	if env.xdgConfg == "" {
@@ -238,9 +245,18 @@ func (e *uninstallEnv) gatewayStateRemoveCommand() string {
 	case dockerbackend.NativeLinux:
 		return "`sudo rm -rf " + uninstallGatewayStateDir + "`"
 	case dockerbackend.Colima:
-		return "`colima ssh -- sudo rm -rf " + uninstallGatewayStateDir + "`"
+		return "`" + e.colimaSSH() + " -- sudo rm -rf " + uninstallGatewayStateDir + "`"
 	}
-	return "`sudo rm -rf " + uninstallGatewayStateDir + "` on the machine Docker runs on (colima: `colima ssh -- sudo rm -rf " + uninstallGatewayStateDir + "`)"
+	return "`sudo rm -rf " + uninstallGatewayStateDir + "` on the machine Docker runs on (colima: `" + e.colimaSSH() + " -- sudo rm -rf " + uninstallGatewayStateDir + "`)"
+}
+
+// colimaSSH is `colima ssh` into the pinned profile's VM, or the current
+// one's with no pin.
+func (e *uninstallEnv) colimaSSH() string {
+	if e.colimaProfile == "" || e.colimaProfile == "default" {
+		return "colima ssh"
+	}
+	return "colima ssh -p " + e.colimaProfile
 }
 
 // scratchVolumePurgeSteps removes every worker scratch volume a sandbox left

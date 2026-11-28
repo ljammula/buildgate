@@ -363,3 +363,9 @@ stdout: Usage: factoryd help [flags] [<command>]
 stdout:   List every command, or show one command's arguments and flags
 stderr: factoryd: flag provided but not defined: -zz-not-a-flag
 
+$ factoryd docker-context -zz-not-a-flag
+exit 1
+stderr: flag provided but not defined: -zz-not-a-flag
+stderr: Usage of docker-context:
+stderr:   -config string
+

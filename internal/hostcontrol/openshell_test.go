@@ -533,3 +533,47 @@ func TestOpenShellStartLeavesAGatewayThatAnswersAlone(t *testing.T) {
 		t.Errorf("a gateway that answers was recreated:\n%s", strings.Join(lines, "\n"))
 	}
 }
+
+// TestOpenShellReissueMovesABundleFromAnotherCAAside: doctor -fix's path
+// keeps the old bundle as mtls.replaced-<time> and issues the VM's.
+func TestOpenShellReissueMovesABundleFromAnotherCAAside(t *testing.T) {
+	t.Setenv(AutostartEnvVar, "1")
+	f := newOpenShellFixture(t)
+	f.Marker("preexisting")
+	mtls := filepath.Join(f.stack, "mtls")
+	if err := os.MkdirAll(mtls, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"ca.crt": "OLD-CA", "tls.crt": "OLD", "tls.key": "OLD-KEY"} {
+		if err := os.WriteFile(filepath.Join(mtls, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	older := mtls + ".replaced-20261101T000000.000000000Z"
+	if err := os.MkdirAll(older, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	now := time.Date(2026, 11, 27, 18, 30, 0, 5, time.UTC)
+	if err := ReissueOpenShellCerts(f.dp, context.Background(), &out, f.stack, f.stack0.Timeouts, now); err != nil {
+		t.Fatal(err)
+	}
+	aside := mtls + ".replaced-20261127T183000.000000005Z"
+	if _, err := os.Stat(older); err == nil {
+		t.Error("an older replaced bundle, which holds a private key, was kept")
+	}
+	if got, _ := os.ReadFile(filepath.Join(aside, "tls.key")); string(got) != "OLD-KEY" {
+		t.Errorf("old bundle not kept at %s: %q", aside, got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(mtls, "ca.crt")); string(got) != "CA-PEM" {
+		t.Errorf("new bundle ca = %q", got)
+	}
+	if !strings.Contains(out.String(), "moved it to "+aside) {
+		t.Errorf("out = %q", out.String())
+	}
+	// A matching bundle is left as it is.
+	out.Reset()
+	if err := ReissueOpenShellCerts(f.dp, context.Background(), &out, f.stack, f.stack0.Timeouts, now); err != nil || out.Len() != 0 {
+		t.Errorf("second reissue: %v, %q", err, out.String())
+	}
+}

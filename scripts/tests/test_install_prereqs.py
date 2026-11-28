@@ -198,7 +198,9 @@ class InstallPrereqsTest(unittest.TestCase):
         self.assertIn("install go python gh git node docker docker-buildx colima", self.brew_calls())
         link = self.home / ".docker" / "cli-plugins" / "docker-buildx"
         self.assertEqual(os.readlink(link), str(self.prefix / "lib/docker/cli-plugins/docker-buildx"))
-        self.assertEqual(self.colima_calls(), ["start --memory 4"])
+        # Docker on a Mac is factoryd's to start (`go run ./cmd/factoryd
+        # docker-context -ensure-vm`): the script runs no colima itself.
+        self.assertEqual(self.colima_calls(), [])
 
     def test_existing_docker_without_buildx_gets_the_plugin_and_no_colima(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
@@ -355,12 +357,65 @@ fi
 
     def test_a_stopped_colima_vm_is_started_with_its_own_settings(self):
         self.have(*EVERYTHING, docker_up=False)
+        self.system("Linux")
         vm = self.home / ".colima" / "default"
         vm.mkdir(parents=True)
         (vm / "colima.yaml").write_text("memory: 8\n")
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.colima_calls(), ["start"])
+
+    def go_stub(self, body):
+        self.install("go", '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HOME/go.log"\n' + body)
+
+    def go_calls(self):
+        log = self.home / "go.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def test_a_mac_gets_buildgates_own_vm_from_factoryd(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.go_stub("echo colima-buildgate\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.go_calls(), ["run ./cmd/factoryd docker-context -ensure-vm"])
+        # factoryd created or started the VM: no colima start on the default profile.
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_a_mac_vm_refusal_fails_the_step(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.go_stub("echo 'the Mac has 3 GiB of memory available' >&2\nexit 1\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("3 GiB of memory available", result.stderr)
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_a_mac_config_without_docker_context_creates_nothing_itself(self):
+        # factoryd prints how to pin and starts only a stopped default
+        # profile, after its memory checks; the script starts no colima.
+        self.have(*EVERYTHING, docker_up=False)
+        self.go_stub("echo 'the session config sets no docker_context' >&2\necho\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.go_calls(), ["run ./cmd/factoryd docker-context -ensure-vm"])
+        self.assertIn("sets no docker_context", result.stderr)
+        self.assertEqual(self.colima_calls(), [])
+
+    def test_a_mac_without_go_never_runs_colima(self):
+        self.have("python3", "gh", "git", "npm", "docker", "colima", docker_up=False, brew=False)
+        # brew installs go as a formula that puts nothing on PATH here.
+        self.install("brew", BREW.replace('    *) printf', '    go) : ;;\n    *) printf'))
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(), [])
+        self.assertIn("factoryd docker-context -ensure-vm", result.stderr)
+
+    def test_linux_never_asks_factoryd_for_a_vm(self):
+        self.have(*EVERYTHING, docker_up=False)
+        self.system("Linux")
+        self.go_stub("echo colima-buildgate\n")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.go_calls(), [])
 
     def test_docker_down_without_colima_is_left_to_the_operator(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", docker_up=False)

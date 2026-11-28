@@ -32,6 +32,7 @@ type fakeDocker struct {
 	makeImageFn        func(repoRoot string, target string, vars ...string) (string, error)
 	toolImageFn        func(ctx context.Context, dockerBinary string, base string, buildArgs []string) (string, error)
 	memTotalFn         func(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
+	runningFn          func(ctx context.Context, dockerBinary string, dockerContext string) ([]string, error)
 	requiredBinariesFn func(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error)
 	workerChecksFn     func(ctx context.Context, in doctorInputs) []doctorCheck
 	installImagesFn    func() workflow.InstallImages
@@ -91,6 +92,9 @@ func (f *fakeDocker) toolchainImage(ctx context.Context, dockerBinary string, ba
 }
 func (f *fakeDocker) requiredBinaries(ctx context.Context, dockerBinary string, image string, user string, names []string) ([]string, error) {
 	return f.requiredBinariesFn(ctx, dockerBinary, image, user, names)
+}
+func (f *fakeDocker) runningContainers(ctx context.Context, dockerBinary string, dockerContext string) ([]string, error) {
+	return f.runningFn(ctx, dockerBinary, dockerContext)
 }
 func (f *fakeDocker) memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error) {
 	return f.memTotalFn(ctx, dockerBinary, timeout)
@@ -246,6 +250,9 @@ type fakeHost struct {
 	browserRedirectDirFn func() (string, error)
 	chdirFn              func(dir string) error
 	executableFn         func() (string, error)
+	env                  map[string]string
+	hostResourcesFn      func() (uint64, int, error)
+	vmStatFn             func() ([]byte, error)
 	notifyWebhooksFn     func(files webhookFiles) notify.Webhooks
 	goCommandFn          func(ctx context.Context, dir string, env []string, args ...string) ([]byte, error)
 	headCommitFn         func(ctx context.Context, repoDir string) (string, error)
@@ -282,8 +289,25 @@ func (f *fakeHost) rootTreeAtCommit(ctx context.Context, repoDir string, commit 
 func (f *fakeHost) browserCommand(target string) *exec.Cmd { return f.browserCommandFn(target) }
 func (f *fakeHost) browserRedirectDir() (string, error)    { return f.browserRedirectDirFn() }
 func (f *fakeHost) executable() (string, error)            { return f.executableFn() }
-func (f *fakeHost) chdir(dir string) error                 { return f.chdirFn(dir) }
-func (f *fakeHost) baselineCheck(args []string) error      { return f.baselineCheckFn(args) }
+func (f *fakeHost) lookupEnv(key string) (string, bool) {
+	v, ok := f.env[key]
+	return v, ok
+}
+func (f *fakeHost) setenv(key, value string) error {
+	if f.env == nil {
+		f.env = map[string]string{}
+	}
+	f.env[key] = value
+	return nil
+}
+func (f *fakeHost) unsetenv(key string) error {
+	delete(f.env, key)
+	return nil
+}
+func (f *fakeHost) hostResources() (uint64, int, error) { return f.hostResourcesFn() }
+func (f *fakeHost) vmStat() ([]byte, error)             { return f.vmStatFn() }
+func (f *fakeHost) chdir(dir string) error              { return f.chdirFn(dir) }
+func (f *fakeHost) baselineCheck(args []string) error   { return f.baselineCheckFn(args) }
 func (f *fakeHost) goCommand(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	return f.goCommandFn(ctx, dir, env, args...)
 }
@@ -340,6 +364,7 @@ type fakeSandboxRuntime struct {
 	sandboxNamesFn   func(ctx context.Context) ([]string, error)
 	sandboxLabelsFn  func(ctx context.Context, name string) (map[string]string, error)
 	startStackFn     func(ctx context.Context, w io.Writer, meterImage string) error
+	reissueFn        func(ctx context.Context, w io.Writer) error
 }
 
 func (f *fakeSandboxRuntime) gatewayHealthy(ctx context.Context) error {
@@ -360,6 +385,9 @@ func (f *fakeSandboxRuntime) sandboxLabels(ctx context.Context, name string) (ma
 
 func (f *fakeSandboxRuntime) startStack(ctx context.Context, w io.Writer, meterImage string) error {
 	return f.startStackFn(ctx, w, meterImage)
+}
+func (f *fakeSandboxRuntime) reissueClientBundle(ctx context.Context, w io.Writer) error {
+	return f.reissueFn(ctx, w)
 }
 
 func fakeSandboxOf(dp *deps) *fakeSandboxRuntime { return dp.sandbox.(*fakeSandboxRuntime) }
@@ -426,6 +454,10 @@ func newTestDeps(t testing.TB) *deps {
 		// Docker's memory is not read: the review and challenger run in turn.
 		memTotalFn: func(context.Context, string, time.Duration) (int64, error) {
 			return 0, errors.New("test docker: Docker's memory is not read")
+		},
+		// No test lists the machine's containers in any context.
+		runningFn: func(context.Context, string, string) ([]string, error) {
+			return nil, errors.New("test docker: no containers are listed")
 		},
 		workerChecksFn:  realDocker.workerChecks,
 		installImagesFn: func() workflow.InstallImages { return refusingInstallImages{} },
@@ -516,6 +548,12 @@ func newTestDeps(t testing.TB) *deps {
 		// graphical session.
 		browserRedirectDirFn: func() (string, error) { return "", nil },
 		executableFn:         realHost.executable,
+		// The process environment is a map of the fake's own: nothing is
+		// read from or set in the test process's (lookupEnv, setenv).
+		env: map[string]string{},
+		// No test reads this machine's memory or runs vm_stat.
+		hostResourcesFn: func() (uint64, int, error) { return 0, 0, errors.New("test host: no host memory is read") },
+		vmStatFn:        func() ([]byte, error) { return nil, errors.New("test host: no vm_stat") },
 		// A passing check, decided in the test process: no run is started.
 		baselineCheckFn: func([]string) error { return nil },
 		goCommandFn: func(context.Context, string, []string, ...string) ([]byte, error) {
@@ -576,6 +614,10 @@ func newTestDeps(t testing.TB) *deps {
 		sandboxNamesFn:   realSandbox.sandboxNames,
 		sandboxLabelsFn:  realSandbox.sandboxLabels,
 		startStackFn:     realSandbox.startStack,
+		// No test reaches Docker to read the gateway's CA.
+		reissueFn: func(context.Context, io.Writer) error {
+			return errors.New("test sandbox: no client bundle is issued")
+		},
 	}
 	realTemporal := realTemporal{dp: dp}
 	dp.temporal = &fakeTemporal{

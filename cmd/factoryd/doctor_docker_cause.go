@@ -196,9 +196,13 @@ func colimaStartCommand(profile string) string {
 // (dockerUnreachableCause). Every other row is returned as it was. The
 // contexts are asked under their own deadline: a Docker that hangs rather
 // than refuses has spent the caller's by now.
-func explainDockerUnreachable(ctx context.Context, dp *deps, dockerBinary string, checks []doctorCheck) []doctorCheck {
+func explainDockerUnreachable(ctx context.Context, dp *deps, dockerBinary, pinned string, checks []doctorCheck) []doctorCheck {
 	for i, c := range checks {
 		if c.Name != doctorDockerReachableName || c.Err == nil {
+			continue
+		}
+		if pinned != "" {
+			checks[i].Err, checks[i].Fix = pinnedDockerUnreachable(pinned, c.Err)
 			continue
 		}
 		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dockerContextsTimeout)
@@ -210,4 +214,16 @@ func explainDockerUnreachable(ctx context.Context, dp *deps, dockerBinary string
 		}
 	}
 	return checks
+}
+
+// pinnedDockerUnreachable names the cause when docker_context pins the
+// context that does not answer: that context, never another one to switch
+// to.
+func pinnedDockerUnreachable(pinned string, err error) (error, string) {
+	if profile, ok := colimaProfileOfContext(pinned); ok {
+		return fmt.Errorf("docker context %s, which docker_context pins, does not answer: its Colima VM is missing or stopped (%v)", pinned, err),
+			fmt.Sprintf("`factoryd doctor -fix` creates or starts the VM colima-%s", profile)
+	}
+	return fmt.Errorf("docker context %s, which docker_context pins, does not answer (%v)", pinned, err),
+		"start the Docker that context names, or change docker_context in the session config"
 }

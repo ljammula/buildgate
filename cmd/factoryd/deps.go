@@ -92,6 +92,10 @@ type dockerBoundary interface {
 	// within timeout; the rule for running a build's review and challenger
 	// together (reviewAndChallengerTogether) and doctor's memory row use it.
 	memTotal(ctx context.Context, dockerBinary string, timeout time.Duration) (int64, error)
+	// runningContainers names the running containers of the docker context
+	// dockerContext ("" is the current one): `docker --context <c> ps`, a
+	// read that changes nothing.
+	runningContainers(ctx context.Context, dockerBinary string, dockerContext string) ([]string, error)
 	// buildgateImages lists the images that carry a buildgate kind label,
 	// with the containers that use each and the bytes only it holds;
 	// removeImage runs `docker image rm` (no force) on refs; imagesBytes is
@@ -184,6 +188,17 @@ type hostBoundary interface {
 	// can be opened on this machine.
 	browserRedirectDir() (string, error)
 	executable() (string, error)
+	// lookupEnv and setenv read and set this process's environment, which
+	// every child process inherits: the docker_context pin
+	// (pinDockerContext) is the one caller of setenv.
+	lookupEnv(key string) (string, bool)
+	setenv(key, value string) error
+	unsetenv(key string) error
+	// hostResources is this machine's physical memory in bytes and its CPU
+	// count, and vmStat is macOS's vm_stat output: the Docker VM's size and
+	// the Mac's memory headroom (internal/hostcontrol docker_vm.go).
+	hostResources() (memory uint64, cpus int, err error)
+	vmStat() ([]byte, error)
 	// notifyWebhooks reads the notification webhook URLs from files
 	// (readWebhookFiles).
 	notifyWebhooks(files webhookFiles) notify.Webhooks
@@ -245,6 +260,9 @@ type sandboxRuntimeBoundary interface {
 	runtime() sandbox.Runtime
 	// startStack starts the meter, then the gateway, and waits for both.
 	startStack(ctx context.Context, w io.Writer, meterImage string) error
+	// reissueClientBundle moves a client bundle from another CA aside and
+	// issues the gateway's (hostcontrol.ReissueOpenShellCerts): doctor -fix.
+	reissueClientBundle(ctx context.Context, w io.Writer) error
 	sandboxNames(ctx context.Context) ([]string, error)
 	// sandboxLabels are the labels the gateway stores with a sandbox.
 	sandboxLabels(ctx context.Context, name string) (map[string]string, error)

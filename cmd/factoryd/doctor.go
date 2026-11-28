@@ -278,6 +278,9 @@ func doctorMain(dp *deps, args []string) error {
 		defer cancel()
 		return doctorListModels(listCtx, os.Stdout, in)
 	}
+	// buildgate's own Docker VM (docker_context colima-<profile>, a Mac),
+	// created or started first with -fix: every check after it needs Docker.
+	vmChecks := doctorDockerVMChecks(dp, settings, *fix, []string{*workspace, *targetRepo}, os.Stdout)
 	// With -fix the Temporal check can start Docker itself (a Colima VM that
 	// `stop -all` stopped), so it runs before the checks that need Docker.
 	// Its row keeps its place at the end.
@@ -303,6 +306,7 @@ func doctorMain(dp *deps, args []string) error {
 	if err != nil {
 		return err
 	}
+	checks = append(vmChecks, checks...)
 	// Temporal, the OpenShell stack and Docker's sizing all run in Docker.
 	switch {
 	case fixedTemporal != nil:
@@ -531,7 +535,7 @@ func doctorRunChecks(dp *deps, in doctorInputs, fix bool, repoRoot string) ([]do
 	in.dockerBackend = backend.Backend
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	checks := append(built, explainDockerUnreachable(ctx, dp, in.sandboxDocker, doctorChecksFor(ctx, in))...)
+	checks := append(built, explainDockerUnreachable(ctx, dp, in.sandboxDocker, in.settings.DockerContext, doctorChecksFor(ctx, in))...)
 	if c, ok := doctorCheckDockerBackend(backend); ok {
 		checks = append(checks, c)
 	}

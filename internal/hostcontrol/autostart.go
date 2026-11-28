@@ -52,6 +52,14 @@ type Deps interface {
 	SpawnServe(w io.Writer, binaryPath string, configPath string, dataDir string, addr string) error
 	SpawnWorker(w io.Writer, binaryPath string, configPath string, dataDir string, credentialEnv []string, pidPath string, temporalAddress string) error
 	TemporalHealthy(ctx context.Context, addr string) error
+	// HostResources is this machine's physical memory in bytes and its CPU
+	// count (sysctl on a Mac).
+	HostResources() (memory uint64, cpus int, err error)
+	// VMStat is macOS's vm_stat output (ParseVMStat).
+	VMStat() ([]byte, error)
+	// LookupEnv reads this process's environment: DOCKER_CONTEXT, which
+	// the docker_context pin sets.
+	LookupEnv(key string) (string, bool)
 	// WorkerServiceState is the installed worker service's state line for
 	// its definition at path ("... loaded, running ...").
 	WorkerServiceState(ctx context.Context, path string) string
@@ -183,8 +191,11 @@ func ensureDocker(dp Deps, ctx context.Context, w io.Writer, subject string) err
 	if !isColima {
 		return fmt.Errorf("%s and docker is not usable (start it: `colima start`): %v", subject, err)
 	}
-	if cerr := startColima(dp, ctx, w, profile); cerr != nil {
-		return fmt.Errorf("%s and docker is not usable (%v): %v", subject, err, cerr)
+	// Every start passes the headroom checks and leaves the current context
+	// as it is; a VM is never created here (doctor -fix creates the pinned
+	// one).
+	if _, verr := StartDockerVM(dp, ctx, w, profile); verr != nil {
+		return fmt.Errorf("%s and docker is not usable (%v): %v", subject, err, verr)
 	}
 	infoCtx2, cancel2 := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel2()

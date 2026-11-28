@@ -34,8 +34,9 @@ const (
 
 // Colima is a fake docker and colima on disk. docker answers
 // `context show` with the context name, `info` (failing while InfoFail
-// exists), and `ps` with the given names; colima logs argv, and `start`
-// clears InfoFail unless StartFail exists.
+// exists), and `ps` with the given names; colima logs argv, `start` clears
+// InfoFail unless StartFail exists, and `list` prints ListFile (absent: no
+// profiles).
 type Colima struct {
 	Dir          string
 	ColimaLog    string
@@ -46,6 +47,7 @@ type Colima struct {
 	PsFile       string
 	CtxFile      string
 	StoppedState string
+	ListFile     string
 }
 
 // NewColima writes the two scripts under a temp dir of t.
@@ -62,6 +64,7 @@ func NewColima(t *testing.T, ctxName string, infoDown bool, ps ...string) *Colim
 		PsFile:       filepath.Join(d, "ps"),
 		CtxFile:      filepath.Join(d, "ctx"),
 		StoppedState: filepath.Join(d, "stopped"),
+		ListFile:     filepath.Join(d, "list"),
 	}
 	write := func(path, body string, mode os.FileMode) {
 		if err := os.WriteFile(path, []byte(body), mode); err != nil {
@@ -87,6 +90,7 @@ echo "$@" >> `+f.ColimaLog+`
 case "$1" in
   start) [ -e `+f.StartFail+` ] && { echo vm boom >&2; exit 1; }; rm -f `+f.InfoFail+` `+f.StoppedState+` ;;
   stop) [ -e `+f.StopFail+` ] && { echo stop boom >&2; exit 1; }; : > `+f.StoppedState+` ;;
+  list) [ -e `+f.ListFile+` ] && cat `+f.ListFile+` ;;
 esac
 exit 0
 `, 0o755)
@@ -98,6 +102,14 @@ func (f *Colima) DockerBinary() string { return filepath.Join(f.Dir, "docker") }
 
 // ColimaBinary is the path of the fake colima.
 func (f *Colima) ColimaBinary() string { return filepath.Join(f.Dir, "colima") }
+
+// SetList makes the fake colima's `list --json` print lines.
+func (f *Colima) SetList(t *testing.T, lines ...string) {
+	t.Helper()
+	if err := os.WriteFile(f.ListFile, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // ColimaCalls is every argv the fake colima was run with, one per line.
 func (f *Colima) ColimaCalls() string {

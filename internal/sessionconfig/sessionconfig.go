@@ -23,6 +23,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -281,7 +282,12 @@ type Config struct {
 	// a daemon-wide Tier-2 setting.
 	CodeReviewPolicy *string `yaml:"code_review_policy,omitempty"`
 
-	SandboxDocker    *string `yaml:"sandbox_docker,omitempty"`
+	SandboxDocker *string `yaml:"sandbox_docker,omitempty"`
+	// DockerContext is the docker CLI context every factoryd process of this
+	// config pins (DOCKER_CONTEXT) before its first Docker call: on a Mac,
+	// colima-buildgate, the Colima VM buildgate owns. Unset or empty is the
+	// docker CLI's current context.
+	DockerContext    *string `yaml:"docker_context,omitempty"`
 	SandboxUser      *string `yaml:"sandbox_user,omitempty"`
 	SandboxWorkerUID *int    `yaml:"sandbox_worker_uid,omitempty"`
 	SandboxMemory    *string `yaml:"sandbox_memory,omitempty"`
@@ -521,7 +527,9 @@ type Settings struct {
 	// takes it, as a request's ticket build does through the worker.
 	CodeReviewPolicy string
 
-	SandboxDocker    string
+	SandboxDocker string
+	// DockerContext is the config's docker_context, "" when it sets none.
+	DockerContext    string
 	SandboxUser      string
 	SandboxWorkerUID int
 	SandboxMemory    string
@@ -930,7 +938,7 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	if c.Models != nil {
 		s.Models = c.Models
 	}
-	if err := c.applyListKeys(&s); err != nil {
+	if err := errors.Join(c.applyListKeys(&s), c.applyDockerContext(&s)); err != nil {
 		return s, err
 	}
 	// PresentKeys carries every top-level YAML key Load actually saw
@@ -944,6 +952,23 @@ func (c *Config) ApplySettings(s Settings) (Settings, error) {
 	}
 
 	return s, nil
+}
+
+// dockerContextName is the shape of a docker CLI context name buildgate
+// accepts in docker_context.
+var dockerContextName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.+-]*$`)
+
+// applyDockerContext sets s.DockerContext from docker_context, refusing a
+// name that is no docker context name.
+func (c *Config) applyDockerContext(s *Settings) error {
+	if c.DockerContext == nil || *c.DockerContext == "" {
+		return nil
+	}
+	if !dockerContextName.MatchString(*c.DockerContext) {
+		return fmt.Errorf("docker_context %q: a docker context name is letters, digits and _ . + -, starting with a letter or digit (for example colima-buildgate)", *c.DockerContext)
+	}
+	s.DockerContext = *c.DockerContext
+	return nil
 }
 
 // applyListKeys overlays the list-valued keys (workspaces, skill_dirs,

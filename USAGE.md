@@ -282,12 +282,14 @@ trailing request text `factoryd submit` takes; each must precede
 `<repo-path>` on the command line.
 
 **Prerequisites**: on macOS with Homebrew, `make install` installs the tools below
-that are missing, starts colima and runs `gh auth login`. On Linux it installs
+that are missing, creates or starts buildgate's own colima VM (profile
+`buildgate`, "Data directory and colima" below) and runs `gh auth login`. On Linux it installs
 nothing and runs no `sudo`: it names each missing tool and stops, with the
 docker CLI, buildx and Compose v2 (2.23.1 or later) from Docker's own apt repository
 (`docker-ce-cli docker-buildx-plugin docker-compose-plugin`), not the
 distribution's `docker.io` or the snap, and colima, whose VM runs Docker as on
-a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (colima: `colima
+a Mac (sandboxes do not run on Docker Engine on the host). Go, Docker (on a Mac,
+buildgate's colima VM, which `make install` and `factoryd doctor -fix` create; on Linux colima: `colima
 start --memory 4`, then narrow its mounts — "Data directory and colima" below), `python3`, `git`, `gh` logged in
 (`gh auth login` — `quickstart`/`doctor` preflight this: installed, and
 logged in for the repo's remote host, checked in the environment spawned
@@ -446,11 +448,25 @@ pick `copilot` per role in the session config or per request (see
 fails, send back: the command, its full output, `factoryd doctor`
 output, and `factoryd version`.
 
-**Data directory and colima.** colima shares all of `$HOME` read-write
-with its VM by default, so a worker that escapes its container could
-write any file under it. Share only what a run mounts — `~/buildgate`
-(data dirs, script scratch) read-write and your repositories read-only —
-in `~/.colima/default/colima.yaml`, then `colima restart`:
+**Data directory and colima.** On a Mac buildgate runs Docker in a colima
+VM of its own, profile `buildgate` (docker context `colima-buildgate`), which
+a new session config pins with `docker_context: colima-buildgate`: every
+factoryd command, and `make install`'s Docker steps, use it whatever `docker
+context` is current, so `colima start -p other` in another shell does not move
+buildgate. `make install` and `factoryd doctor -fix` create it sharing only
+what a run mounts: `~/buildgate` (data dirs, script scratch) read-write, and
+read-only `~/code` when it exists plus the top-level home folder of
+`doctor`'s `-workspace` and `-target-repo`. A repository in another folder
+needs that folder added: `colima stop -p buildgate`, add it under `mounts:` in
+`~/.colima/buildgate/colima.yaml`, then `colima start -p buildgate
+--activate=false`. Nothing changes the docker CLI's current context or
+another colima profile.
+
+On Linux, and on a Mac whose config sets no `docker_context`, colima's own
+VM shares all of `$HOME` read-write by default, so a worker that escapes its
+container could write any file under it. Share only what a run mounts —
+`~/buildgate` read-write and your repositories read-only — in
+`~/.colima/default/colima.yaml`, then `colima restart`:
 
 ```yaml
 mounts:
@@ -474,7 +490,15 @@ Docker Desktop cannot run a sandbox: its VM's kernel has no Landlock and its
 daemon no AppArmor, both of which every sandbox runs under. `factoryd doctor`
 fails its "Docker can run sandboxes" row there.
 
-**Sizing colima.** `memory: 4` in the same file fits the default
+**Sizing colima.** buildgate's own VM gets an eighth of the Mac's memory (a
+whole number of GiB, 4 to 12: 12 GiB on a 96 GiB Mac, 4 GiB on a 16 GiB
+laptop), a quarter of its CPUs (2 to 8) and a 100 GiB disk, and is created or
+started only when the Mac has the VM's memory plus 6 GiB available
+(`vm_stat`) and its memory less every running colima VM's leaves 6 GiB, so
+macOS does not swap; `factoryd doctor` shows both
+(`Docker VM colima-buildgate: <N> GiB, running`, `Mac memory available`) and
+warns when `max_parallel_jobs` × `sandbox_memory` plus 1.5 GiB for the stack
+exceeds the VM. For a VM of your own, `memory: 4` fits the default
 `max_parallel_jobs: 2`. Once builds have run, the VM holds its whole
 configured memory on the host (the VM process's `footprint`; `ps` RSS reads
 higher because it counts shared pages) and keeps it until it stops. A build's
@@ -492,8 +516,39 @@ means it is enough.
 | 2 | 4 GiB | about 4 GB |
 | 3 | 6 GiB | about 6 GB |
 
-`factoryd stop -all` stops the colima VM when nothing else runs in it; the
+`factoryd stop -all` stops the colima VM `docker_context` pins when nothing else runs in it (with no pin, none); the
 next factoryd command starts it.
+
+**Move an existing install into buildgate's VM.** An install that ran in
+colima's default VM (context `colima`) keeps its Temporal history this way;
+colima forwards a host port from whichever VM bound it first, so the old
+stack must stop before the new one can answer:
+
+```text
+1. Each profile under ~/.config/factoryd/ gets the line
+     docker_context: colima-buildgate
+2. Stop buildgate's Temporal in the old VM:
+     docker --context colima compose -p buildgate stop
+3. Export its history:
+     mkdir -p ~/buildgate/backups/temporal
+     docker --context colima run --rm -v buildgate_temporal-postgres-data:/v:ro \
+       -v ~/buildgate/backups/temporal:/out alpine tar czf /out/t.tgz -C /v .
+4. Create buildgate's VM, starting nothing in it:
+     factoryd docker-context -ensure-vm
+5. Put the history in the new VM before its Temporal starts:
+     docker --context colima-buildgate volume create buildgate_temporal-postgres-data
+     docker --context colima-buildgate run --rm -v buildgate_temporal-postgres-data:/v \
+       -v ~/buildgate/backups/temporal:/in:ro alpine tar xzf /in/t.tgz -C /v
+6. From the buildgate checkout: make install   (the images, built in the new VM)
+7. Retire the old stack (it stays in that VM, stopped, until you remove it):
+     docker --context colima update --restart=no buildgate-openshell-gateway-1 buildgate-openshell-meter-1 factoryd-local-registry buildgate-temporal-1 buildgate-temporal-ui-1 buildgate-postgresql-1
+     docker --context colima stop buildgate-openshell-gateway-1 buildgate-openshell-meter-1 factoryd-local-registry buildgate-temporal-1 buildgate-temporal-ui-1 buildgate-postgresql-1
+8. factoryd doctor -fix
+```
+
+`docker compose` warns once that the volume was not created by Compose, and
+uses it. `doctor -fix` issues a new OpenShell client bundle for the new VM's
+gateway, keeping the old one, and only the newest, as `~/.config/factoryd/openshell/mtls.replaced-<time>`.
 
 | Path | Needs |
 |---|---|
@@ -1081,7 +1136,7 @@ every request verb takes `-config`):
 | New run and the Projects screen's stats and release without a build-time token | The `#t=<token>` fragment in `serve`'s printed URL is captured into the browser on first load and reused thereafter. Changes on every `serve` restart — re-open the newly printed link. `quickstart`/`service install` instead generate a *stable* token file, reused across restarts; `factoryd console [-open]` reprints it. After `service install -require-tokens`, the link also carries the console token (`&c=`), which every tab keeps |
 | Quick offline run summary | `factoryd status` — first line `profile: <name> (<config path>) · data dir <dir>` (`-json`: `profile`, `config_path`), then a table of open requests under a header row (id, project, state, age, time in this state, ticket, PR URL or reason) and one of their runs (ticket and launch suffix, project, state, time, cost, PR URL or reason). Ages are one unit (`24d`, `3h`, `5m`); a reason longer than 80 characters ends in `…` (`factoryd watch -no-follow <id>` or `-v` prints it whole). Finished requests (`done`, `closed`, `cancelled`) and their runs are counted in a closing line, and listed with `-all`. `-all-profiles` is one table of every profile's open requests. `-project`, `-state`, `-n` (default 20), `-v`, `-json`. On `chatgpt-codex`/`github-copilot`, cost reads `(API-price est.; billed to your subscription)` (aggregates: `(includes subscription-billed runs; API-price est.)`). While `worker` is alive, also prints `worker route: <credential-mode> · <worker-model>` — which subscription is billed; the route itself is daemon-wide, changed by the operator via `worker`/`quickstart -route`, not per request |
 | Remove buildgate from this machine | `factoryd uninstall [-dry-run] [-yes] [-force] [-purge]`: stops everything `stop -all` does, then removes the launchd services, the Temporal containers (`docker compose -p buildgate down`), the OpenShell gateway and meter containers (`docker compose -p buildgate-openshell down`), the `factoryd-local-registry` container, the images `make install` built (`localhost:5050/{buildgate-worker,factoryd-meter,factoryd-registry-proxy,buildgate-pifork,project-worker}:local`), the `buildgate` skill in `~/.agents/skills` and `~/.claude/skills` (only a real directory holding a `SKILL.md`; a symlink is left), and the `factoryd` binary. Only steps whose target exists are listed. If a worker cannot be stopped (a request is building) nothing else is removed; `-force` cancels the build. `~/.config/factoryd` and `~/buildgate` stay unless `-purge` (also drops the Temporal volumes and the gateway's state; you type `purge` to confirm). With `-purge` the gateway's own state on the Docker VM (`/var/lib/openshell`: its database, keys and stored credentials) is deleted too, through a throwaway container of the worker image run before that image is removed; if the image is already gone it prints the manual command (`colima ssh -- sudo rm -rf /var/lib/openshell`) instead. Reinstall with `make install` |
-| Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. One that launchd or systemd supervises (`service install`) is left running with a pointer to `factoryd service remove`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when colima is the Docker provider and no other container runs, `colima stop` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`); it refuses while any `worker` is still live unless `-force` |
+| Stop what factoryd started | `factoryd stop [-config <profile>] [-all] [-force]`: SIGTERMs this data dir's `worker` and `serve` (found via `quickstart-*.pid`, the worker heartbeat and `console-address`, each checked to still be a factoryd process) and prints one line per process. One that launchd or systemd supervises (`service install`) is left running with a pointer to `factoryd service remove`. Refuses while a request is building unless `-force`; a forced stop cancels a `worker` build (its Temporal workflow is terminated and the run halted; the ticket is rebuilt from scratch at the next `worker` start), while a `worker`'s building requests wait in `resume_review` from the next worker start and `factoryd resume <id>` continues or rebuilds them. `-all` does this for every profile's data dir, then `docker compose stop` on the embedded Temporal stack, then, when `docker_context` pins a colima VM and no other container runs in it, `colima stop -p <profile>` (the next command starts it; left running under `FACTORYD_AUTOSTART=0`; with no pin no colima VM is stopped); it refuses while any `worker` is still live unless `-force` |
 | Everything waiting on you, across profiles | `factoryd inbox [-config <profile>] [-project <name>] [-json]`: every request in `spec_review`, `plan_review`, `pr_review`, `resume_review`, `halted` or `quarantined` in each distinct profile data dir, oldest first. Each entry: `<age>  <profile>  <state>  <id>  <title>`, then the `factoryd approve -config <profile> <id>` / `factoryd reject -config <profile> -reason "..." <id>` commands (the PR URL for `pr_review`; `reason:` and `next:` for halted/quarantined), then `look before deciding: factoryd inspect -config <profile> <id>` when there is anything to look at, then `console: <link>` when a console link resolves. A memory request's title is prefixed `[memory]` (and its `factoryd status` row ends with `[memory]`). Prints `Nothing is waiting on you.` when empty |
 | Look at the work before deciding | `factoryd inspect -config <profile> <id>`: at a spec or plan review, the commands that open the drafted files; for built work, each ticket's latest run with its state, the size of the change and its files, each gate's result, the review's findings and the challenger's verdict. `-commands` adds what the console request page's **Commands to look at the work** panel shows: `git -C <repository> log`/`diff` of exactly the commits the gates checked, a `git worktree add` line for a copy of your own, the verdict and report files and the logs. Try or change the work in your own copy (or `gh pr checkout`), never in the factory's worktree, and remember that running the tests on your Mac runs model-written code outside the sandbox |
 | What a run did before its first round | The console run page's **Start-up** list, above the Timeline: the six steps image, workspace, verify (the baseline), install (registry proxy and sidecars), sandbox and agent, each pending, running, done, failed or skipped, with what it did, the lock it waits on when it is the step waiting, and a log where the factory recorded one (`GET /runs/{id}` `startup_steps`, `GET /runs/{id}/log?step=<name>`). `factoryd watch` leads its footer with `start-up 4/6: install (running 42s)` until the first round |
@@ -1594,7 +1649,9 @@ What changes for a build:
 | Halt naming a path that "does not appear to share ... into its containers" | The macOS Docker VM doesn't share `/private/tmp` (or anything outside `$HOME`) | Use a repo path, a session config `data_dir` and workspace under `$HOME` |
 | A run log says `buildgate: the worker cannot write /scratch` (the step exits 95) or `permission denied` under `/scratch` | The worker image predates the per-launch scratch volume, or a custom image lacks `/scratch` owned by `65532:65532` with mode `770`; the launch fails at the worker's setup | Rebuild the image: `make install` (Pi) or `make pifork-image` (pifork). A profile that pins an image of its own (a project or toolchain image) keeps it through `make install`: rebuild that image on the new worker image and re-point its `sandbox_image`. `factoryd doctor` reports the active image as `a new scratch volume is writable by the worker`, and every other profile's as `profile <name>: its sandbox_image can run this factoryd's worker`; a baseline that halts on it says the worker image predates this factoryd, not that the verify command fails |
 | A command in a build fails with `no space left on device` | Docker's data disk in the VM is full: each build's per-launch scratch volume holds its Go caches (a large Go build's can approach 4 GiB), and images and build cache share the disk. `factoryd doctor` warns on `Docker disk has room for <N> builds` when the free space of the sandbox image's container root (Docker's data filesystem on overlay2) is under 4 GiB per parallel build | Free Docker space (`docker builder prune`, `docker image prune`; `factoryd doctor -fix` reclaims leftover scratch volumes) or grow the VM's disk, or lower `max_parallel_jobs` |
-| A step ends `signal: killed`, or several containers die at once | The Docker VM ran out of memory and the kernel killed a container: `max_parallel_jobs` builds of up to `sandbox_memory` each add up to more than the VM has. `factoryd doctor` warns on `memory limits: max_parallel_jobs <N> × sandbox_memory <X> within Docker's memory` (limits, not measured use) | Lower `max_parallel_jobs` or `sandbox_memory` in the session config, or give the VM more memory (colima: `colima stop && colima start --memory <GiB>`; Docker Desktop: Settings > Resources; native Linux: the host's memory) |
+| A step ends `signal: killed`, or several containers die at once | The Docker VM ran out of memory and the kernel killed a container: `max_parallel_jobs` builds of up to `sandbox_memory` each add up to more than the VM has. `factoryd doctor` warns on `memory limits: max_parallel_jobs <N> × sandbox_memory <X> within Docker's memory` (limits, not measured use) | Lower `max_parallel_jobs` or `sandbox_memory` in the session config, or give the VM more memory (buildgate's VM: `colima stop -p buildgate && colima start -p buildgate --memory <GiB> --activate=false`, keeping 6 GiB of the Mac free; another colima VM: `colima stop && colima start --memory <GiB>`; Docker Desktop: Settings > Resources; native Linux: the host's memory) |
+| `doctor` fails `buildgate's containers run only in docker context colima-buildgate`, or its health rows pass while builds reach an old gateway | The gateway, meter, `factoryd-local-registry` or Temporal still runs in another colima VM, which colima may forward their host ports (17670-17672, 5050, 7233) from | The row's fix: `docker --context <ctx> update --restart=no <names> && docker --context <ctx> stop <names>`, then `factoryd doctor -fix`; move Temporal's history first when it also runs there ("Move an existing install into buildgate's VM") |
+| buildgate uses the wrong Docker VM: its containers, images or runs are in another colima profile, or appear after `colima start -p <other>` | The session config sets no `docker_context`, so buildgate follows the docker CLI's current context, which another colima start or `docker context use` moved | Add `docker_context: colima-buildgate` to the session config (`factoryd doctor -fix` creates that VM), or the context you want; `make install` to rebuild the images in it. `factoryd doctor` refuses to run while `DOCKER_HOST` or another `DOCKER_CONTEXT` is exported: unset it |
 | `factoryd doctor` warns `N leftover scratch volume(s) of finished runs` | A factoryd was killed before it removed a launch's `bg-scratch-<sandbox>` volume | `factoryd doctor -fix` removes the volumes of runs that are no longer in flight |
 | Every launch fails with `Landlock probe child exited with status 1` or `the worker command did not start within 2m0s of its release`, while `doctor` shows the gateway and meter healthy | Docker's VM has no Landlock or AppArmor (Docker Desktop), or colima shares `~/buildgate` over `9p`, whose permission bits keep the sandbox's user out | `factoryd doctor`'s "Docker can run sandboxes" row names the first; for either, run Docker in colima with `sshfs` or `virtiofs` mounts, not `9p` ("Data directory and colima") |
 | New flags rejected, fewer `doctor` checks, odd old behaviour | A stale `factoryd` earlier on `PATH` | `which -a factoryd`; run the fresh build by full path or fix `PATH` |
