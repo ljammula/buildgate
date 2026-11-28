@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,17 @@ type fakeUpgrade struct {
 	makeErr   error
 	makeOut   string
 	onMake    func()
+	// notAncestor makes `merge-base --is-ancestor` exit 1; back is the count
+	// `rev-list --count target..current` prints (forward is always 42).
+	notAncestor bool
+	back        string
 }
+
+// upgradeExitError is a command that exited with a status.
+type upgradeExitError int
+
+func (e upgradeExitError) Error() string { return "exit status " + strconv.Itoa(int(e)) }
+func (e upgradeExitError) ExitCode() int { return int(e) }
 
 func newFakeUpgrade(dp *deps, t *testing.T) *fakeUpgrade {
 	t.Helper()
@@ -68,27 +79,8 @@ func (f *fakeUpgrade) exec(c upgradeCmd) ([]byte, error) {
 	f.calls = append(f.calls, line)
 	switch {
 	case c.Name == "git":
-		rest := strings.TrimPrefix(line, "git -C "+f.source+" ")
-		switch {
-		case rest == "rev-parse --git-dir":
-			return []byte(".git\n"), nil
-		case strings.HasPrefix(rest, "status"):
-			return []byte(f.dirty), nil
-		case strings.HasPrefix(rest, "fetch"):
-			return nil, nil
-		case strings.HasPrefix(rest, "tag"):
-			return []byte(f.tags), nil
-		case rest == "rev-parse --short=12 HEAD^{commit}":
-			return []byte(f.head + "\n"), nil
-		case strings.HasPrefix(rest, "rev-parse --short=12 v0.1.0^{commit}"), strings.HasPrefix(rest, "rev-parse --short=12 "+upgradeTargetSHA):
-			return []byte(upgradeTargetSHA + "\n"), nil
-		case strings.HasPrefix(rest, "rev-parse"):
-			return []byte("fatal: unknown revision"), errors.New("exit 128")
-		case strings.HasPrefix(rest, "rev-list --count"):
-			return []byte("42\n"), nil
-		case strings.HasPrefix(rest, "checkout --detach"):
-			f.head = upgradeTargetSHA
-			return nil, nil
+		if out, ok, err := f.git(strings.TrimPrefix(line, "git -C "+f.source+" ")); ok {
+			return out, err
 		}
 	case c.Name == "go" && strings.Join(c.Args, " ") == "env GOBIN":
 		return []byte(filepath.Dir(f.binary) + "\n"), nil
@@ -108,6 +100,48 @@ func (f *fakeUpgrade) exec(c upgradeCmd) ([]byte, error) {
 	}
 	f.t.Fatalf("unexpected command: %s", line)
 	return nil, nil
+}
+
+// git answers one git command (without its -C prefix); ok is false for an
+// unknown one.
+func (f *fakeUpgrade) git(rest string) (out []byte, ok bool, err error) {
+	switch {
+	case rest == "rev-parse --git-dir":
+		return []byte(".git\n"), true, nil
+	case strings.HasPrefix(rest, "status"):
+		return []byte(f.dirty), true, nil
+	case strings.HasPrefix(rest, "fetch"):
+		return nil, true, nil
+	case strings.HasPrefix(rest, "tag"):
+		return []byte(f.tags), true, nil
+	case rest == "rev-parse --short=12 HEAD^{commit}":
+		return []byte(f.head + "\n"), true, nil
+	case strings.HasPrefix(rest, "rev-parse --short=12 v0.1.0^{commit}"), strings.HasPrefix(rest, "rev-parse --short=12 "+upgradeTargetSHA):
+		return []byte(upgradeTargetSHA + "\n"), true, nil
+	case strings.HasPrefix(rest, "rev-parse"):
+		return []byte("fatal: unknown revision"), true, errors.New("exit 128")
+	case strings.HasPrefix(rest, "merge-base --is-ancestor"):
+		if f.notAncestor {
+			return nil, true, upgradeExitError(1)
+		}
+		return nil, true, nil
+	case rest == "rev-list --count "+upgradeTargetSHA+".."+upgradeOldSHA:
+		if f.back != "" {
+			return []byte(f.back + "\n"), true, nil
+		}
+		return []byte("0\n"), true, nil
+	case rest == "rev-list --count "+upgradeOldSHA+".."+upgradeTargetSHA:
+		if f.back != "" {
+			return []byte("0\n"), true, nil
+		}
+		return []byte("42\n"), true, nil
+	case strings.HasPrefix(rest, "rev-list --count"):
+		return []byte("42\n"), true, nil
+	case strings.HasPrefix(rest, "checkout --detach"):
+		f.head = upgradeTargetSHA
+		return nil, true, nil
+	}
+	return nil, false, nil
 }
 
 type upgradeHarness struct {
@@ -522,5 +556,136 @@ func TestUpgradeStopsNothingWhenAWorkerCouldNotReadItsRouteKey(t *testing.T) {
 		if strings.HasPrefix(c, "make ") || strings.Contains(c, " checkout ") {
 			t.Errorf("ran %q before refusing", c)
 		}
+	}
+}
+
+func (h *upgradeHarness) mutated() bool {
+	for _, c := range h.calls {
+		if strings.HasPrefix(c, "make ") || strings.Contains(c, " checkout ") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestUpgradeDefaultTargetBehindInstalledIsRefused(t *testing.T) {
+	// The installed binary prints its commit, or `<commit>-dirty` when it was
+	// built from a checkout with uncommitted changes: both are checked.
+	for name, installed := range map[string]string{"clean build": upgradeOldSHA, "dirty build": upgradeOldSHA + "-dirty"} {
+		dp := newTestDeps(t)
+		h := newUpgradeHarness(dp, t)
+		queuePID, servePID := h.startDefaultProcesses()
+		h.installed = installed
+		h.notAncestor = true
+		h.back = "7"
+		out, err := h.run(dp, "-yes")
+		if err == nil {
+			t.Fatalf("%s: upgrade = nil, want a refusal\n%s", name, out)
+		}
+		for _, want := range []string{"v0.1.0", upgradeOldSHA, upgradeTargetSHA, "newer than or diverged from the newest release", "-to <tag|ref>"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q lacks %q", name, err, want)
+			}
+		}
+		if strings.Contains(out, "upgrade: ") || h.mutated() || !alive(queuePID) || !alive(servePID) {
+			t.Errorf("%s: something was planned or touched:\n%s\n%v", name, out, h.calls)
+		}
+		if !h.called("git -C " + h.source + " merge-base --is-ancestor " + upgradeOldSHA + " " + upgradeTargetSHA) {
+			t.Errorf("%s: ancestry was not checked on the commit: %v", name, h.calls)
+		}
+	}
+}
+
+func TestUpgradeDefaultTargetAheadProceeds(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	out, err := h.run(dp, "-yes")
+	if err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out)
+	}
+	if !h.called("git -C " + h.source + " merge-base --is-ancestor " + upgradeOldSHA + " " + upgradeTargetSHA) {
+		t.Errorf("ancestry was not checked: %v", h.calls)
+	}
+	if !strings.Contains(out, "(v0.1.0, 42 commits)") {
+		t.Errorf("plan: %s", out)
+	}
+}
+
+func TestUpgradeExplicitTargetBehindMovesBack(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	h.notAncestor = true
+	h.back = "7"
+	out, err := h.run(dp, "-yes", "-to", "v0.1.0")
+	if err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(v0.1.0, moves back 7 commits)") || strings.Contains(out, "0 commits") {
+		t.Errorf("plan: %s", out)
+	}
+	if h.called("git -C " + h.source + " merge-base") {
+		t.Error("an explicit -to must not be ancestry-checked")
+	}
+	if !h.called("make -C ") {
+		t.Error("the explicit move back did not install")
+	}
+}
+
+func TestUpgradeBrokenProfileIsRefusedBeforeAnythingStops(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	queuePID, servePID := h.startDefaultProcesses()
+	writeSessionConfig(t, sessionconfig.ProfilePath("broken"), "data_dir: [unclosed\n")
+	out, err := h.run(dp, "-yes")
+	if err == nil {
+		t.Fatalf("upgrade = nil, want a refusal\n%s", out)
+	}
+	for _, want := range []string{"broken:", "fix or remove that profile file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "\n") || h.mutated() || len(h.calls) != 0 || !alive(queuePID) || !alive(servePID) {
+		t.Errorf("something ran before the refusal: %v", h.calls)
+	}
+}
+
+func TestUpgradeFailedRestartFailsTheCommand(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	queuePID, _ := h.startDefaultProcesses()
+	dir := h.profiles.roots["default"]
+	writeFreshWorkerHeartbeat(t, dir, queuePID, "localhost:7233", 3)
+	fakeHostOf(dp).spawnWorkerFn = func(io.Writer, string, string, string, []string, string, string) error {
+		return errors.New("boom")
+	}
+	out, err := h.run(dp, "-yes")
+	if err == nil {
+		t.Fatalf("upgrade = nil, want an error\n%s", out)
+	}
+	for _, want := range []string{"installed v0.1.0", "worker (" + dir + ")"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
+	}
+	for _, want := range []string{"not restarted: worker (" + dir + ")", "worker (" + dir + "): could not start: boom", "restarted: serve (" + dir + ")"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "nothing was running") {
+		t.Errorf("output claims nothing was running:\n%s", out)
+	}
+}
+
+func TestUpgradeSummaryWhenNothingWasRunning(t *testing.T) {
+	dp := newTestDeps(t)
+	h := newUpgradeHarness(dp, t)
+	out, err := h.run(dp, "-yes")
+	if err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "restarted: nothing was running") || strings.Contains(out, "not restarted") {
+		t.Errorf("summary: %s", out)
 	}
 }
