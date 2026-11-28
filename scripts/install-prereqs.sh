@@ -142,6 +142,9 @@ else
 				exit 0
 			fi
 			echo "make install needs these, and found no Homebrew (https://brew.sh) to install them with: $missing" >&2
+			case " $missing " in *" colima "*)
+				echo "colima is required even beside Docker Desktop: sandboxes run only in colima's VM (https://github.com/abiosoft/colima#installation)." >&2 ;;
+			esac
 			echo "Install Homebrew or the tools themselves, then re-run 'make install'." >&2
 			exit 1
 		fi

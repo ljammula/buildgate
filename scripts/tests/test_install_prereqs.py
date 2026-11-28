@@ -443,6 +443,13 @@ fi
         self.assertIn("go gh", result.stderr)
         self.assertIn("brew.sh", result.stderr)
 
+    def test_docker_desktop_without_colima_or_homebrew_names_colima(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker", brew=False)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("found no Homebrew (https://brew.sh) to install them with: colima", result.stderr)
+        self.assertIn("colima is required even beside Docker Desktop", result.stderr)
+
     def test_without_homebrew_a_missing_npm_alone_is_not_a_failure(self):
         self.have("go", "python3", "gh", "git", "docker", "colima", brew=False)
         result = self.run_script()
