@@ -29,7 +29,7 @@ func (d ReviewSaveDeps) SaveReviewEntry(dataDir string, r *request.Request) erro
 }
 
 // OperatorResumesBetweenTheSaves returns the function that makes the operator
-// decide request id (`factoryd resume -from scratch`) at the moment the
+// decide request id (`factoryd retry -from scratch`) at the moment the
 // driver has saved it in resume_review and has not yet recorded the first
 // reminder; the test sets it as its Deps' review-entry save callback. The
 // returned flag reports whether that moment came.

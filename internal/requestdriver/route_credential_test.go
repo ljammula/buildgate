@@ -74,7 +74,7 @@ func TestATicketBuildThatCouldNotStartForItsRouteCredentialWaitsInResumeReview(t
 	}
 	requestdrivertest.AdvanceBuildingOnce(dp, t, dataDir, id, requestdriver.ResumeGate{}, runner)
 	got := wantRouteCredentialWait(t, dataDir, id, request.StateBuilding)
-	if got.Resume.LostRunID != "" || !strings.Contains(got.Error, "resume -from scratch") {
+	if got.Resume.LostRunID != "" || !strings.Contains(got.Error, "retry -from scratch") {
 		t.Errorf("Resume %+v, Error %q: want no kept run and a rebuild offered", got.Resume, got.Error)
 	}
 
@@ -228,7 +228,7 @@ func TestAResumeOfAKeptBuildRefusedForItsRouteCredentialKeepsTheBuild(t *testing
 	if got.State != request.StateResumeReview || got.Resume == nil || got.Resume.Cause != unresolved.RouteCredential || got.Resume.LostRunID != "lost-run" {
 		t.Fatalf("state %s resume %+v (%s), want resume_review with route_credential and the kept run", got.State, got.Resume, got.Error)
 	}
-	if !strings.Contains(got.Error, "factoryd resume "+id+"` continues it") {
+	if !strings.Contains(got.Error, "factoryd retry "+id+"` continues it") {
 		t.Errorf("Error = %q, want the resume of the kept build offered", got.Error)
 	}
 	if rec, err := run.Load(dataDir, "lost-run"); err != nil || !rec.KeptForResume {

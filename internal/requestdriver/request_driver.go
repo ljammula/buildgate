@@ -1230,7 +1230,7 @@ func settlePriorRun(dp Deps, ctx context.Context, dataDir string, r *request.Req
 		return "", true, settleInterruptedAdviceRound(dp, ctx, dataDir, r, ticket, cfg, now)
 	}
 	// A human chose to continue the lost build in its kept worktree
-	// (`factoryd resume`, verb round): check it still can be, then adopt that
+	// (`factoryd retry`, verb round): check it still can be, then adopt that
 	// worktree. A decision answering an earlier resume_review (a stale
 	// Generation) is no decision at all (PendingResumeVerb). A park kept no
 	// worktree, unless it interrupted such a resume (KeepsLostBuild): its
@@ -2546,10 +2546,10 @@ func escalate(entry *QueueEntry, cfg WorkerConfig) {
 
 // replacesEscalatedBuild reports whether the build AdvanceBuilding is about
 // to start takes the place of one that ran on the escalation and never
-// finished: the ticket's last run (the lost run of a `factoryd resume`,
+// finished: the ticket's last run (the lost run of a `factoryd retry`,
 // resumeRunID) is this request's, halted, and recorded as escalated
 // (run.Run.Escalated). That build, resumed in the kept worktree or started
-// again (`resume -from scratch`, `retry`), runs on the escalation as the lost
+// again (`retry -from scratch`, `retry`), runs on the escalation as the lost
 // one did, and is recorded as escalated in turn. A rebuild after a round
 // that finished and quarantined is not this: it is the operator's retry, on
 // the role's model. The escalation is the one configured now; with none the

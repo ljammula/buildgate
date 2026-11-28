@@ -52,8 +52,7 @@ func commandCatalog() []commandInfo {
 		{"approve", "<request-id>", "Release a request from its spec or plan review", groupRequests, func() *flag.FlagSet { fs, _, _ := newApproveFlags(); return fs }},
 		{"reject", "<request-id>", "Send a review back for a redraft, with the reason", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newRejectFlags(); return fs }},
 		{"answer", "<request-id>", "Answer a question of a handed-over spec's read-back at spec review", groupRequests, func() *flag.FlagSet { fs, _, _, _, _, _ := newAnswerFlags(); return fs }},
-		{"retry", "<request-id>", "Rebuild the ticket of a quarantined or halted request", groupRequests, func() *flag.FlagSet { fs, _, _, _, _ := newRetryFlags(); return fs }},
-		{"resume", "<request-id>", "Continue a request whose step ended with no verdict (resume_review)", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newResumeFlags(); return fs }},
+		{"retry", "<request-id>", "Continue a quarantined, halted or resume_review request", groupRequests, func() *flag.FlagSet { fs, _, _, _, _ := newRetryFlags(); return fs }},
 		{"cancel", "<request-id>", "Cancel a request", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newCancelFlags(); return fs }},
 		{"amend-scope", "<request-id> <file>...", "Add files to a quarantined ticket's allowed scope", groupRequests, func() *flag.FlagSet { fs, _, _, _ := newAmendScopeFlags(); return fs }},
 

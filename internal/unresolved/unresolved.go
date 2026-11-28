@@ -115,7 +115,7 @@ var causes = map[Cause]string{
 // that never started its command, a model route that served none of the
 // step's last requests, a package registry that could not be reached. A
 // request waiting on one of them is resumed by the factory itself
-// (request.AutoResumeDue), as the operator's `factoryd resume` would: once
+// (request.AutoResumeDue), as the operator's `factoryd retry` would: once
 // per request, and only while the wait is younger than
 // request.AutoRetryWindow.
 // Nothing else is: a lost worker or Temporal server may have left work

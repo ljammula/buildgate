@@ -153,7 +153,7 @@ func TestRetryGivesTheRebuildTheRecordOfTheFailedAttempt(t *testing.T) {
 
 // TestAResumeFromScratchAfterALostRetryStartsFromTheBase: a retry that was
 // to continue on the attempt's branch is lost before its run exists; the
-// only decision left is `resume -from scratch`, and the build it starts is
+// only decision left is `retry -from scratch`, and the build it starts is
 // from the base (told so by its record), never on that branch.
 func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 	dp := newTestDeps(t)
@@ -194,7 +194,7 @@ func TestAResumeFromScratchAfterALostRetryStartsFromTheBase(t *testing.T) {
 		t.Fatalf("builds = %d, want the first and the one the resume started", len(builds))
 	}
 	if requestdrivertest.HasFlag(builds[1], "-on-branch") || requestdrivertest.HasFlag(builds[1], "-diff-base") {
-		t.Fatalf("resume -from scratch built on the attempt's branch: %v", builds[1])
+		t.Fatalf("retry -from scratch built on the attempt's branch: %v", builds[1])
 	}
 	assertRecordOf(t, requestdrivertest.ArgValue(builds[1], "-earlier-attempt"), "This build starts again from the base commit: none of that attempt's changes are in the workspace", id+"-001")
 }

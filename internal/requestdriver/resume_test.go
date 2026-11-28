@@ -166,7 +166,7 @@ func TestAdvanceBuildingRefusedPreconditionsReturnToResumeReviewWithReasons(t *t
 			t.Errorf("reason %q lacks %q", got.Error, want)
 		}
 	}
-	if strings.Contains(got.NextAction(), "factoryd resume "+id+"`") {
+	if strings.Contains(got.NextAction(), "factoryd retry "+id+"`") {
 		t.Errorf("next action %q offers a plain resume after a refusal", got.NextAction())
 	}
 	if _, err := os.Stat(marker.WorktreePath); err != nil {
@@ -296,7 +296,7 @@ func TestRemindRequestForResumeReviewNamesTheLostStepAndTheThreeCommands(t *test
 	if err != nil {
 		t.Fatalf("read notification log: %v", err)
 	}
-	for _, want := range []string{"resume_review", "build", "factoryd resume req-1", "-from scratch", "factoryd cancel req-1"} {
+	for _, want := range []string{"resume_review", "build", "factoryd retry req-1", "-from scratch", "factoryd cancel req-1"} {
 		if !strings.Contains(string(log), want) {
 			t.Errorf("reminder %q lacks %q", log, want)
 		}

@@ -425,7 +425,7 @@ func seedTransientWait(t *testing.T, dataDir, id string, cause unresolved.Cause)
 
 // A step that never got to the work (its sandbox never started, the route
 // served nothing, a registry was unreachable) is resumed once by the factory
-// AutoRetryDelay after the wait began, as `factoryd resume` would.
+// AutoRetryDelay after the wait began, as `factoryd retry` would.
 func TestAutoResumeRetriesATransientCauseOnceAfterItsDelay(t *testing.T) {
 	due := quotaRefusedAt.Add(request.AutoRetryDelay)
 	for _, cause := range []unresolved.Cause{unresolved.SandboxLaunch, unresolved.ModelUnavailable, unresolved.DependencyFetch} {

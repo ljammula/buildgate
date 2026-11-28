@@ -13,15 +13,15 @@ import (
 	"buildgate/internal/run"
 )
 
-func TestResumeMainDefaultsToRoundAndChecksTheKeptWorktree(t *testing.T) {
+func TestRetryMainContinuesAResumeReviewRequestInItsKeptWorktree(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
 	pre := &requestdrivertest.FakeResumePreconditions{T: t, OK: true}
 	dataDir, id, _ := requestdrivertest.LostBuildFixture(dp, t, "")
 
-	if err := resumeMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre}); err != nil {
-		t.Fatalf("resumeMain: %v", err)
+	if err := retryMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre}); err != nil {
+		t.Fatalf("retryMain: %v", err)
 	}
 	got, _ := request.Load(dataDir, id)
 	if got.State != request.StateBuilding || got.PendingResumeVerb() != request.ResumeRound {
@@ -35,16 +35,33 @@ func TestResumeMainDefaultsToRoundAndChecksTheKeptWorktree(t *testing.T) {
 	}
 }
 
-func TestResumeMainRefusesUpFrontWhenThePreconditionsFail(t *testing.T) {
+func TestRetryMainRecordsItsReasonOnTheResumeDecision(t *testing.T) {
+	dp := newTestDeps(t)
+	isolateSessionConfig(t)
+	stubWake(dp, t, nil)
+	pre := &requestdrivertest.FakeResumePreconditions{T: t, OK: true}
+	dataDir, id, _ := requestdrivertest.LostBuildFixture(dp, t, "")
+
+	if err := retryMainWith(dp, []string{"-data-dir", dataDir, "-reason", "disk was full", id}, requestdriver.ResumeGate{Preconditions: pre}); err != nil {
+		t.Fatalf("retryMain: %v", err)
+	}
+	got, _ := request.Load(dataDir, id)
+	last := got.History[len(got.History)-1]
+	if !strings.Contains(last.Reason, "resume decision: round") || !strings.Contains(last.Reason, "disk was full") {
+		t.Errorf("last history reason %q, want the resume decision with the operator's reason", last.Reason)
+	}
+}
+
+func TestRetryMainRefusesAResumeUpFrontWhenThePreconditionsFail(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
 	pre := &requestdrivertest.FakeResumePreconditions{T: t, Reasons: []string{"a container of the lost run is alive"}}
 	dataDir, id, _ := requestdrivertest.LostBuildFixture(dp, t, "")
 
-	err := resumeMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre})
+	err := retryMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre})
 	if err == nil {
-		t.Fatal("resumeMain succeeded with failing preconditions")
+		t.Fatal("retryMain succeeded with failing preconditions")
 	}
 	for _, want := range []string{"a container of the lost run is alive", "-from scratch", "factoryd cancel " + id} {
 		if !strings.Contains(err.Error(), want) {
@@ -59,36 +76,24 @@ func TestResumeMainRefusesUpFrontWhenThePreconditionsFail(t *testing.T) {
 	}
 }
 
-func TestResumeMainScratchSkipsThePreconditionsAndRejectsAnUnknownFrom(t *testing.T) {
+func TestRetryMainFromScratchSkipsTheResumePreconditionsAndRefusesARound(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	woken := stubWake(dp, t, nil)
 	pre := &requestdrivertest.FakeResumePreconditions{T: t, Reasons: []string{"never consulted"}}
 	dataDir, id, _ := requestdrivertest.LostBuildFixture(dp, t, "")
 
-	if err := resumeMainWith(dp, []string{"-data-dir", dataDir, "-from", "bogus", id}, requestdriver.ResumeGate{Preconditions: pre}); err == nil || !strings.Contains(err.Error(), "-from") {
-		t.Errorf("unknown -from: err = %v", err)
+	for _, bad := range []string{"bogus", "2"} {
+		if err := retryMainWith(dp, []string{"-data-dir", dataDir, "-from", bad, id}, requestdriver.ResumeGate{Preconditions: pre}); err == nil || !strings.Contains(err.Error(), "attempt") || !strings.Contains(err.Error(), "scratch") {
+			t.Errorf("-from %s: err = %v, want a refusal naming attempt and scratch", bad, err)
+		}
 	}
-	if err := resumeMainWith(dp, []string{"-data-dir", dataDir, "-from", "scratch", id}, requestdriver.ResumeGate{Preconditions: pre}); err != nil {
-		t.Fatalf("resumeMain -from scratch: %v", err)
+	if err := retryMainWith(dp, []string{"-data-dir", dataDir, "-from", "scratch", id}, requestdriver.ResumeGate{Preconditions: pre}); err != nil {
+		t.Fatalf("retryMain -from scratch: %v", err)
 	}
 	got, _ := request.Load(dataDir, id)
 	if got.PendingResumeVerb() != request.ResumeScratch || len(pre.Asked) != 0 || len(*woken) != 1 {
 		t.Errorf("verb %q, asked %v, woken %v; want scratch, no check, one wake", got.PendingResumeVerb(), pre.Asked, *woken)
-	}
-}
-
-func TestRetryMainRefusesAResumeReviewRequestWithTheResumeHint(t *testing.T) {
-	dp := newTestDeps(t)
-	woken := stubWake(dp, t, nil)
-	dataDir := t.TempDir()
-	requestdrivertest.SeedLostStep(t, dataDir, "req-1", request.StatePlanning, "")
-	err := retryMain(dp, []string{"-data-dir", dataDir, "req-1"})
-	if err == nil || !strings.Contains(err.Error(), "factoryd resume req-1") {
-		t.Fatalf("retryMain err = %v, want the `factoryd resume` hint", err)
-	}
-	if len(*woken) != 0 {
-		t.Errorf("woken %v, want none", *woken)
 	}
 }
 
@@ -141,9 +146,9 @@ func TestResumeRoundWithNoKeptBuildIsRefusedNamingScratch(t *testing.T) {
 	if err := r.Save(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	err := resumeMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre})
+	err := retryMainWith(dp, []string{"-data-dir", dataDir, id}, requestdriver.ResumeGate{Preconditions: pre})
 	if err == nil || !strings.Contains(err.Error(), "no kept build to continue; use -from scratch") {
-		t.Fatalf("resumeMain err = %v, want the no-kept-build refusal", err)
+		t.Fatalf("retryMain err = %v, want the no-kept-build refusal", err)
 	}
 	if len(*woken) != 0 || len(pre.Asked) != 0 {
 		t.Errorf("woken %v asked %v, want neither", *woken, pre.Asked)
@@ -164,7 +169,7 @@ func TestResumeRoundWithNoKeptBuildIsRefusedNamingScratch(t *testing.T) {
 }
 
 // A decision that continues no kept build ends the wait of any kept worktree.
-func TestResumeMainReapsKeptRunsWhenNoKeptBuildIsContinued(t *testing.T) {
+func TestRetryMainReapsKeptRunsWhenAResumeContinuesNoKeptBuild(t *testing.T) {
 	dp := newTestDeps(t)
 	isolateSessionConfig(t)
 	stubWake(dp, t, nil)
@@ -176,7 +181,7 @@ func TestResumeMainReapsKeptRunsWhenNoKeptBuildIsContinued(t *testing.T) {
 		if err := (&run.Run{ID: "run-kept", State: run.StateHalted, HaltConfirmed: true, KeptForResume: true, RequestID: "req-1"}).Save(dataDir); err != nil {
 			t.Fatal(err)
 		}
-		if err := resumeMainWith(dp, []string{"-data-dir", dataDir, "req-1"}, gate); err != nil {
+		if err := retryMainWith(dp, []string{"-data-dir", dataDir, "req-1"}, gate); err != nil {
 			t.Fatalf("%s: %v", from, err)
 		}
 		if got, _ := run.Load(dataDir, "run-kept"); got.KeptForResume {
@@ -185,7 +190,7 @@ func TestResumeMainReapsKeptRunsWhenNoKeptBuildIsContinued(t *testing.T) {
 	}
 	// A build resumed with round keeps the worktree it continues.
 	dataDir, id, _ := requestdrivertest.LostBuildFixture(dp, t, "")
-	if err := resumeMainWith(dp, []string{"-data-dir", dataDir, id}, gate); err != nil {
+	if err := retryMainWith(dp, []string{"-data-dir", dataDir, id}, gate); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := run.Load(dataDir, "lost-run"); !got.KeptForResume {

@@ -168,7 +168,7 @@ func TestRouteWaitReasonWaitsWhileAQuotaRefusalHoldsTheRoute(t *testing.T) {
 	}
 	need := requestdriver.RouteNeed{Role: "execution"}
 	got := routeWaitReason(dataDir, s, need, time.Now())
-	for _, want := range []string{"route keyed", "req-refused", "`factoryd resume req-refused`"} {
+	for _, want := range []string{"route keyed", "req-refused", "`factoryd retry req-refused`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("reason = %q, want %q in it", got, want)
 		}

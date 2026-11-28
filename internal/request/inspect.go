@@ -23,7 +23,7 @@ const (
 	inspectNoteQuarantined = "To send a change back: `factoryd retry` rebuilds the ticket, `factoryd amend-scope` widens its files."
 	inspectNoteSendBack    = "`factoryd reject -to spec` redrafts the spec."
 	inspectNoteHalted      = "To continue, follow the next step printed for the request (`factoryd retry` when the cause is fixed)."
-	inspectNoteResume      = "To continue: `factoryd resume`, or `factoryd resume -from scratch` to rebuild the ticket."
+	inspectNoteResume      = "To continue: `factoryd retry`, or `factoryd retry -from scratch` to rebuild the ticket."
 )
 
 // InspectDraftNote is the note printed with the commands of a draft gate.

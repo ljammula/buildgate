@@ -230,7 +230,7 @@ func (g ResumeGate) RequestResumeRefusals(ctx context.Context, dataDir, dockerBi
 	reasons = append(reasons, held...)
 	if lost, err := run.Load(dataDir, r.Resume.LostRunID); err == nil {
 		if stale := staleStackBase(dataDir, r, ticket.Index, lost); stale != "" {
-			reasons = append(reasons, stale+"; `factoryd resume -from scratch "+r.ID+"` builds the ticket again on that head")
+			reasons = append(reasons, stale+"; `factoryd retry -from scratch "+r.ID+"` builds the ticket again on that head")
 		}
 	}
 	return reasons, nil

@@ -15,7 +15,7 @@ import (
 )
 
 // Every driver path into resume_review records its first reminder on the
-// request as it is on disk: an operator's `factoryd resume` that lands
+// request as it is on disk: an operator's `factoryd retry` that lands
 // between the review save and the reminder survives. These are the paths
 // that hold no lock; the worker's own, which hold it, cannot be written
 // between their saves.

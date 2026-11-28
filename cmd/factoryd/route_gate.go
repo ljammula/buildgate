@@ -79,7 +79,7 @@ func routeHoldReason(dataDir string, role modelrole.Role, route, resumedAt strin
 	if at, err := time.Parse(time.RFC3339, holder.Resume.RetryAt); err == nil {
 		until = ", or at " + at.Local().Format("15:04 MST")
 	}
-	return fmt.Sprintf("waiting for roles.%s's model route: route %s: the model provider refused request %s with its own usage limit, and that request waits in resume_review. The step has not started; it starts once that request is resumed (`factoryd resume %s`, after the limit resets) or cancelled%s", role, route, holder.ID, holder.ID, until)
+	return fmt.Sprintf("waiting for roles.%s's model route: route %s: the model provider refused request %s with its own usage limit, and that request waits in resume_review. The step has not started; it starts once that request is resumed (`factoryd retry %s`, after the limit resets) or cancelled%s", role, route, holder.ID, holder.ID, until)
 }
 
 // routeWaitSentence is the operator's line for a role none of whose routes

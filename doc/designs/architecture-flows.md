@@ -122,12 +122,12 @@ loop
                                                        request -> resume_review
 ```
 
-- A decision (`approve`, `reject`, `retry`, `resume`, `cancel`, amend scope,
+- A decision (`approve`, `reject`, `retry`, `cancel`, amend scope,
   send back; CLI or console) is saved to `request.json` first, then a
   `request-wake` signal ends the wait.
 - A jobs-queue step runs once. Nothing reruns a lost model job or build: the
-  request waits in `resume_review` for `factoryd resume <id>`,
-  `resume -from scratch` or `cancel`. A worker restarted mid-build puts the
+  request waits in `resume_review` for `factoryd retry <id>`,
+  `retry -from scratch` or `cancel`. A worker restarted mid-build puts the
   requests it was building there at start.
 - A build on a repository another build holds alone gives its job slot back
   and retries every 30 s; `pr_review` reads the PR at most once per

@@ -451,7 +451,6 @@ func subcommands() map[string]subcommand {
 		"cancel":           cancelMain,
 		"worker":           workerMain,
 		"retry":            retryMain,
-		"resume":           resumeMain,
 		"amend-scope":      amendScopeMain,
 		"init-config":      initConfigMain,
 		"service":          serviceMain,

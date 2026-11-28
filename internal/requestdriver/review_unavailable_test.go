@@ -165,7 +165,7 @@ func TestAnUnjudgedTicketRunWaitsInResumeReviewWithItsBuildKept(t *testing.T) {
 			if !kept.KeptForResume || kept.State != run.StateQuarantined {
 				t.Errorf("run KeptForResume %v, state %s: want it kept, still quarantined", kept.KeptForResume, kept.State)
 			}
-			if want := cause.What("building"); !strings.Contains(r.Error, want) || !strings.Contains(r.Error, "`factoryd resume "+r.ID+"`") {
+			if want := cause.What("building"); !strings.Contains(r.Error, want) || !strings.Contains(r.Error, "`factoryd retry "+r.ID+"`") {
 				t.Errorf("Error = %q, want %q and the resume command", r.Error, want)
 			}
 			if wantTime := cause == unresolved.ProviderQuota; (r.Resume.RetryAt == "2026-10-11T03:11:00Z") != wantTime || strings.Contains(r.Error, "try again after 2026-10-11T03:11:00Z") != wantTime {
@@ -200,7 +200,7 @@ func TestAnUnjudgedTicketRunOnlyTakesARunThatWasNotJudged(t *testing.T) {
 	if handled, err := afterUnjudgedTicketRun(ReviewSaveDeps{}, dataDir, r, onBranch, time.Now()); !handled || err != nil {
 		t.Fatalf("handled %v, err %v", handled, err)
 	}
-	if r.State != request.StateResumeReview || r.Resume.LostRunID != "" || !strings.Contains(r.Error, "factoryd resume -from scratch "+r.ID) {
+	if r.State != request.StateResumeReview || r.Resume.LostRunID != "" || !strings.Contains(r.Error, "factoryd retry -from scratch "+r.ID) {
 		t.Errorf("state %s, LostRunID %q, Error %q: want resume_review with nothing kept", r.State, r.Resume.LostRunID, r.Error)
 	}
 }
