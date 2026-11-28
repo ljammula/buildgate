@@ -260,6 +260,9 @@ type sandboxRuntimeBoundary interface {
 	runtime() sandbox.Runtime
 	// startStack starts the meter, then the gateway, and waits for both.
 	startStack(ctx context.Context, w io.Writer, meterImage string) error
+	// reissueClientBundle moves a client bundle from another CA aside and
+	// issues the gateway's (hostcontrol.ReissueOpenShellCerts): doctor -fix.
+	reissueClientBundle(ctx context.Context, w io.Writer) error
 	sandboxNames(ctx context.Context) ([]string, error)
 	// sandboxLabels are the labels the gateway stores with a sandbox.
 	sandboxLabels(ctx context.Context, name string) (map[string]string, error)

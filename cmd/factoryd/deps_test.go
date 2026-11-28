@@ -364,6 +364,7 @@ type fakeSandboxRuntime struct {
 	sandboxNamesFn   func(ctx context.Context) ([]string, error)
 	sandboxLabelsFn  func(ctx context.Context, name string) (map[string]string, error)
 	startStackFn     func(ctx context.Context, w io.Writer, meterImage string) error
+	reissueFn        func(ctx context.Context, w io.Writer) error
 }
 
 func (f *fakeSandboxRuntime) gatewayHealthy(ctx context.Context) error {
@@ -384,6 +385,9 @@ func (f *fakeSandboxRuntime) sandboxLabels(ctx context.Context, name string) (ma
 
 func (f *fakeSandboxRuntime) startStack(ctx context.Context, w io.Writer, meterImage string) error {
 	return f.startStackFn(ctx, w, meterImage)
+}
+func (f *fakeSandboxRuntime) reissueClientBundle(ctx context.Context, w io.Writer) error {
+	return f.reissueFn(ctx, w)
 }
 
 func fakeSandboxOf(dp *deps) *fakeSandboxRuntime { return dp.sandbox.(*fakeSandboxRuntime) }
@@ -610,6 +614,10 @@ func newTestDeps(t testing.TB) *deps {
 		sandboxNamesFn:   realSandbox.sandboxNames,
 		sandboxLabelsFn:  realSandbox.sandboxLabels,
 		startStackFn:     realSandbox.startStack,
+		// No test reaches Docker to read the gateway's CA.
+		reissueFn: func(context.Context, io.Writer) error {
+			return errors.New("test sandbox: no client bundle is issued")
+		},
 	}
 	realTemporal := realTemporal{dp: dp}
 	dp.temporal = &fakeTemporal{

@@ -11,18 +11,22 @@ import (
 	"buildgate/internal/dockerbackend"
 )
 
-// buildgateStackContainers are the containers that must run in the pinned
-// docker context: the OpenShell gateway and meter (compose project
-// buildgate-openshell) and the local image registry. Colima forwards a
-// guest port to the host for the VM that bound it first, so one of these
-// left running in another VM answers on its host port in place of the pinned
-// VM's, and every health check reaches the wrong stack.
-var buildgateStackContainers = []string{"buildgate-openshell-gateway-1", "buildgate-openshell-meter-1", "factoryd-local-registry"}
+// buildgateStackContainers are buildgate's containers that publish host
+// ports: the OpenShell gateway and meter (compose project
+// buildgate-openshell, 17670-17672), the local image registry (5050) and
+// Temporal with its Postgres and UI (compose project buildgate, 7233 and the
+// UI's). Colima forwards a guest port to the host for the VM that bound it
+// first, so one of these running in another VM may answer on its host port
+// in place of the pinned VM's, even while the pinned VM runs its own.
+var buildgateStackContainers = []string{
+	"buildgate-openshell-gateway-1", "buildgate-openshell-meter-1", "factoryd-local-registry",
+	"buildgate-temporal-1", "buildgate-postgresql-1", "buildgate-temporal-ui-1",
+}
 
-// buildgateTemporalContainers are buildgate's Temporal and its Postgres,
-// named beside a stale stack: their history moves with the recipe in
-// USAGE.md ("Move an existing install into buildgate's VM").
-var buildgateTemporalContainers = []string{"buildgate-temporal-1", "buildgate-postgresql-1"}
+// buildgateTemporalContainers are the ones that hold Temporal's history,
+// which moves with the recipe in USAGE.md ("Move an existing install into
+// buildgate's VM") before they are stopped.
+var buildgateTemporalContainers = []string{"buildgate-temporal-1", "buildgate-postgresql-1", "buildgate-temporal-ui-1"}
 
 // runningContainers is the real dockerBoundary read: `docker [--context c]
 // ps --format {{.Names}}`.
@@ -41,30 +45,19 @@ func (impl realDocker) runningContainers(ctx context.Context, dockerBinary strin
 }
 
 // doctorCheckStackInPinnedContext is the row that buildgate's stack runs in
-// the context docker_context pins and not in another Colima VM: a gateway,
-// meter or registry found running in another Colima context (and missing
-// from the pinned one) fails, naming that context's containers and the
-// commands that retire them. They are never stopped here: that VM is not
-// buildgate's. ok is false when nothing is pinned or the contexts cannot be
-// read.
+// no Colima VM but the one docker_context pins: any of
+// buildgateStackContainers running in another Colima context fails, whether
+// or not the pinned VM runs its own, naming that context's containers and
+// the commands that retire them. Only Colima contexts are scanned (a
+// read-only `docker --context <c> ps`): Docker Desktop and OrbStack contexts
+// are left unread, since colima's port forwarding is what lets a stale stack
+// answer. Nothing is stopped here: that VM is not buildgate's. ok is false
+// when nothing is pinned.
 func doctorCheckStackInPinnedContext(dp *deps, ctx context.Context, dockerBinary, pinned string) (check doctorCheck, ok bool) {
 	if pinned == "" {
 		return doctorCheck{}, false
 	}
-	name := "buildgate's gateway, meter and registry run in docker context " + pinned
-	here, err := dp.docker.runningContainers(ctx, dockerBinary, pinned)
-	if err != nil {
-		return doctorCheck{}, false
-	}
-	var missing []string
-	for _, c := range buildgateStackContainers {
-		if !slices.Contains(here, c) {
-			missing = append(missing, c)
-		}
-	}
-	if len(missing) == 0 {
-		return doctorCheck{Name: name}, true
-	}
+	name := "buildgate's containers run only in docker context " + pinned
 	for _, other := range dp.docker.contextFacts(ctx, dockerBinary).Contexts {
 		if _, colima := dockerbackend.ColimaContext(other.Name, other.Endpoint); !colima || other.Name == pinned {
 			continue
@@ -73,17 +66,17 @@ func doctorCheckStackInPinnedContext(dp *deps, ctx context.Context, dockerBinary
 		if err != nil {
 			continue
 		}
-		if stale := staleStackIn(names, missing); len(stale) > 0 {
-			return staleStackCheck(name, other.Name, pinned, stale, names), true
+		if stale := staleStackIn(names, buildgateStackContainers); len(stale) > 0 {
+			return staleStackCheck(name, other.Name, pinned, stale), true
 		}
 	}
-	return doctorCheck{}, false
+	return doctorCheck{Name: name}, true
 }
 
-// staleStackIn is the containers of missing that run in names.
-func staleStackIn(names, missing []string) []string {
+// staleStackIn is the containers of wanted that run in names.
+func staleStackIn(names, wanted []string) []string {
 	var stale []string
-	for _, c := range missing {
+	for _, c := range wanted {
 		if slices.Contains(names, c) {
 			stale = append(stale, c)
 		}
@@ -91,20 +84,15 @@ func staleStackIn(names, missing []string) []string {
 	return stale
 }
 
-// staleStackCheck is the failing row of a stack left in context other.
-func staleStackCheck(name, other, pinned string, stale, names []string) doctorCheck {
+// staleStackCheck is the failing row of buildgate containers left in
+// context other.
+func staleStackCheck(name, other, pinned string, stale []string) doctorCheck {
 	list := strings.Join(stale, " ")
 	fix := fmt.Sprintf("`docker --context %s update --restart=no %s && docker --context %s stop %s`, then `factoryd doctor -fix`", other, list, other, list)
-	var temporal []string
-	for _, c := range buildgateTemporalContainers {
-		if slices.Contains(names, c) {
-			temporal = append(temporal, c)
-		}
-	}
-	if len(temporal) > 0 {
-		fix += fmt.Sprintf("; %s also run there: move their history first (USAGE.md, \"Move an existing install into buildgate's VM\")", strings.Join(temporal, " and "))
+	if len(staleStackIn(stale, buildgateTemporalContainers)) > 0 {
+		fix = "move Temporal's history first (USAGE.md, \"Move an existing install into buildgate's VM\"), then " + fix
 	}
 	return doctorCheck{Name: name,
-		Err: fmt.Errorf("%s run in docker context %s and not in %s: colima forwards their host ports from that VM, so the health checks reach that stack, not the pinned one", list, other, pinned),
+		Err: fmt.Errorf("%s run in docker context %s as well as or instead of %s: colima forwards a host port from the VM that bound it first, so a health check or a build can reach that VM's", list, other, pinned),
 		Fix: fix}
 }

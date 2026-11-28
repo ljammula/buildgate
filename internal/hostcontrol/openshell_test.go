@@ -549,12 +549,19 @@ func TestOpenShellReissueMovesABundleFromAnotherCAAside(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	older := mtls + ".replaced-20261101T000000.000000000Z"
+	if err := os.MkdirAll(older, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
-	now := time.Date(2026, 11, 27, 18, 30, 0, 0, time.UTC)
+	now := time.Date(2026, 11, 27, 18, 30, 0, 5, time.UTC)
 	if err := ReissueOpenShellCerts(f.dp, context.Background(), &out, f.stack, f.stack0.Timeouts, now); err != nil {
 		t.Fatal(err)
 	}
-	aside := mtls + ".replaced-20261127T183000Z"
+	aside := mtls + ".replaced-20261127T183000.000000005Z"
+	if _, err := os.Stat(older); err == nil {
+		t.Error("an older replaced bundle, which holds a private key, was kept")
+	}
 	if got, _ := os.ReadFile(filepath.Join(aside, "tls.key")); string(got) != "OLD-KEY" {
 		t.Errorf("old bundle not kept at %s: %q", aside, got)
 	}

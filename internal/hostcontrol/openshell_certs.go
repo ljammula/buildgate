@@ -39,8 +39,9 @@ func EnsureOpenShellCerts(dp Deps, ctx context.Context, dir string, t OpenShellT
 
 // ReissueOpenShellCerts is EnsureOpenShellCerts for `doctor -fix`: a client
 // bundle whose CA differs from the gateway's (a new Docker VM generated a
-// new CA) is derived state, so it is moved aside to mtls.replaced-<now> and
-// issued again, with one line on w saying so. It does nothing under
+// new CA) is derived state, so it is moved aside to mtls.replaced-<now>
+// (an older replaced bundle is removed: each holds a private key) and issued
+// again, with one line on w saying so. It does nothing under
 // FACTORYD_AUTOSTART=0.
 func ReissueOpenShellCerts(dp Deps, ctx context.Context, w io.Writer, dir string, t OpenShellTimeouts, now time.Time) error {
 	if !AutostartEnabled() {
@@ -72,7 +73,14 @@ func ensureOpenShellCerts(dp Deps, ctx context.Context, dir string, t OpenShellT
 		if replaced == nil {
 			return fmt.Errorf("client bundle in %s does not match the gateway's CA; remove %s and start again (`factoryd doctor -fix` issues a new one)", mtls, mtls)
 		}
-		aside := fmt.Sprintf("%s.replaced-%s", mtls, now.UTC().Format("20060102T150405Z"))
+		aside := fmt.Sprintf("%s.replaced-%s", mtls, now.UTC().Format("20060102T150405.000000000Z"))
+		// Each holds a private key: only the newest is kept.
+		older, _ := filepath.Glob(mtls + ".replaced-*")
+		for _, dir := range older {
+			if err := os.RemoveAll(dir); err != nil {
+				return fmt.Errorf("remove an older replaced client bundle: %w", err)
+			}
+		}
 		if err := os.Rename(mtls, aside); err != nil {
 			return fmt.Errorf("move the client bundle that does not match the gateway's CA aside: %w", err)
 		}

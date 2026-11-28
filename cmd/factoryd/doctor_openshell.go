@@ -46,8 +46,7 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 		if reasons := stackRestartReasons(in.meterImage); len(reasons) > 0 {
 			stopStackForRestart(dp, w, reasons)
 		}
-		reissueClientBundleIfDown(dp, ctx, w)
-		startSandboxRuntimeIfDown(dp, ctx, w, in.meterImage)
+		startSandboxRuntimeForFix(dp, ctx, w, in.meterImage, in.settings.DockerContext)
 	}
 	checks := append(needingDocker(doctorCheckOpenShellImages(ctx, in.sandboxDocker), doctorCheckOpenShellGateway(dp, ctx)),
 		doctorCheckOpenShellGatewayConfig())
@@ -66,21 +65,29 @@ func doctorOpenShellChecks(dp *deps, ctx context.Context, in doctorInputs, fix b
 	return append(append(checks, needingDocker(doctorCheckMeter(dp, ctx))...), doctorCheckMeterRunsConfiguredImage(in.meterImage))
 }
 
-// reissueClientBundleIfDown, for doctor -fix, issues the client bundle again
-// when the stack does not answer and the bundle's CA is not the gateway's (a
-// new Docker VM generated a new one): the start that follows then finds a
-// matching bundle. A start outside doctor -fix still refuses a mismatch.
-func reissueClientBundleIfDown(dp *deps, ctx context.Context, w io.Writer) {
-	if dp.sandbox.gatewayHealthy(ctx) == nil && dp.sandbox.meterHealthy(ctx) == nil {
-		return
+// startSandboxRuntimeForFix is doctor -fix's start of the stack: when it
+// would start one (the gateway or meter does not answer), with a gateway
+// runtime, a meter image and docker_context pinned, it first issues the
+// client bundle again if its CA is not the gateway's (a new Docker VM
+// generated a new one), so the start finds a matching bundle. A start
+// outside doctor -fix still refuses a mismatch.
+func startSandboxRuntimeForFix(dp *deps, ctx context.Context, w io.Writer, meterImage, pinned string) {
+	down := dp.sandbox.gatewayHealthy(ctx) != nil || dp.sandbox.meterHealthy(ctx) != nil
+	if down && dp.sandbox.runtime() != nil && meterImage != "" && pinned != "" {
+		if err := dp.sandbox.reissueClientBundle(ctx, w); err != nil {
+			fmt.Fprintf(w, "OpenShell: could not check the client bundle: %s\n", sanitize.Line(err.Error()))
+		}
 	}
+	startSandboxRuntimeIfDown(dp, ctx, w, meterImage)
+}
+
+// reissueClientBundle is the real sandboxRuntimeBoundary re-issue.
+func (impl realSandboxRuntime) reissueClientBundle(ctx context.Context, w io.Writer) error {
 	dir, err := hostcontrol.OpenShellStackDir()
 	if err != nil {
-		return
+		return err
 	}
-	if err := hostcontrol.ReissueOpenShellCerts(dp, ctx, w, dir, hostcontrol.DefaultOpenShellTimeouts(), time.Now()); err != nil {
-		fmt.Fprintf(w, "OpenShell: could not check the client bundle: %s\n", sanitize.Line(err.Error()))
-	}
+	return hostcontrol.ReissueOpenShellCerts(impl.dp, ctx, w, dir, hostcontrol.DefaultOpenShellTimeouts(), time.Now())
 }
 
 // doctorScratchVolumesCheck is the advisory row of the scratch volumes of
