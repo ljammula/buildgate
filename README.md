@@ -469,7 +469,7 @@ Full detail: [USAGE_REFERENCE.md § Model routes](USAGE_REFERENCE.md#model-route
 | Stop what factoryd started | `factoryd stop [-all] [-force]` |
 | Restart the worker and console with the installed binary | `factoryd restart` (`make install` does it; with a step in flight it drains the worker first: the step finishes, no new one starts, then it restarts) |
 | Switch session-config profile | `factoryd use [<name>]` |
-| Upgrade to the newest release tag | `factoryd upgrade` |
+| Upgrade to the newest release tag (refused when the installed build is already newer) | `factoryd upgrade` |
 | Keep the worker and console alive across reboots (launchd on macOS, systemd user units on Linux) | `factoryd service install` |
 | Fail closed every release for a project | `factoryd kill-switch -project <p> -state engaged -by <who> -reason <why>` |
 | Clean up after a killed run | `factoryd reconcile -workspace <path>` |

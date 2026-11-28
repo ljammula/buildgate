@@ -135,23 +135,12 @@ func upgradeRun(dp *deps, args []string, in io.Reader, w io.Writer, interactive,
 	if err != nil {
 		return err
 	}
-	source, err := upgradeSourceCheckout(*f.source, profiles)
-	if err != nil {
+	if err := upgradeRefuseBrokenProfiles(profiles); err != nil {
 		return err
 	}
-	if err := upgradeCheckSource(dp, source); err != nil {
-		return err
-	}
-	if out, err := upgradeGit(dp, source, "fetch", "--tags", "origin"); err != nil {
-		return fmt.Errorf("git fetch --tags origin in %s failed: %s", source, sanitize.Line(hostcontrol.LastLine(string(out))))
-	}
-	target, err := upgradeTarget(dp, source, *f.to)
+	source, target, targetSHA, err := upgradeResolveTarget(dp, *f.source, *f.to, profiles)
 	if err != nil {
 		return err
-	}
-	targetSHA, err := upgradeRevParse(dp, source, target)
-	if err != nil {
-		return fmt.Errorf("target %q does not resolve to a commit in %s: %w", target, source, err)
 	}
 	binary, err := upgradeInstalledBinary(dp, source)
 	if err != nil {
@@ -162,6 +151,11 @@ func upgradeRun(dp *deps, args []string, in io.Reader, w io.Writer, interactive,
 		fmt.Fprintf(w, "already on %s (%s)\n", target, targetSHA)
 		return nil
 	}
+	if *f.to == "" {
+		if err := upgradeRefuseNotAhead(dp, source, current, target, targetSHA); err != nil {
+			return err
+		}
+	}
 	if current == "" {
 		current = "unknown"
 	}
@@ -169,7 +163,7 @@ func upgradeRun(dp *deps, args []string, in io.Reader, w io.Writer, interactive,
 	dirs, _ := distinctDataDirs(profiles)
 	running := upgradeRunning(dp, profiles, dirs, time.Now())
 	skills := upgradeSkillTargets()
-	upgradePrintPlan(w, source, current, target, targetSHA, upgradeCommitCount(dp, source, current, targetSHA), profiles, running, skills)
+	upgradePrintPlan(w, source, current, target, targetSHA, upgradeCommitSummary(dp, source, current, targetSHA), profiles, running, skills)
 
 	if err := refuseCredentialGaps(running); err != nil {
 		return err
@@ -208,10 +202,71 @@ func upgradeRun(dp *deps, args []string, in io.Reader, w io.Writer, interactive,
 		return upgradeFailure(w, state, fmt.Errorf("%s reports version %q after install, want %q", binary, got, targetSHA), "")
 	}
 
-	restarted := upgradeRestart(dp, w, binary, running)
+	restarted, failed := upgradeRestart(dp, w, binary, running)
 	refreshed := upgradeRefreshSkills(dp, w, binary, skills)
-	upgradePrintSummary(w, targetSHA, target, profiles, restarted, refreshed)
+	upgradePrintSummary(w, targetSHA, target, profiles, len(running), restarted, failed, refreshed)
+	if len(failed) > 0 {
+		return fmt.Errorf("upgrade installed %s (%s) but these did not restart: %s; the line above for each names the command to run", target, targetSHA, strings.Join(failed, ", "))
+	}
 	return nil
+}
+
+// upgradeResolveTarget checks the source checkout, fetches its tags and
+// resolves the target to a ref and its 12-character sha.
+func upgradeResolveTarget(dp *deps, sourceFlag, toFlag string, profiles []profileInfo) (source, target, targetSHA string, err error) {
+	source, err = upgradeSourceCheckout(sourceFlag, profiles)
+	if err != nil {
+		return "", "", "", err
+	}
+	if err := upgradeCheckSource(dp, source); err != nil {
+		return "", "", "", err
+	}
+	if out, err := upgradeGit(dp, source, "fetch", "--tags", "origin"); err != nil {
+		return "", "", "", fmt.Errorf("git fetch --tags origin in %s failed: %s", source, sanitize.Line(hostcontrol.LastLine(string(out))))
+	}
+	target, err = upgradeTarget(dp, source, toFlag)
+	if err != nil {
+		return "", "", "", err
+	}
+	targetSHA, err = upgradeRevParse(dp, source, target)
+	if err != nil {
+		return "", "", "", fmt.Errorf("target %q does not resolve to a commit in %s: %w", target, source, err)
+	}
+	return source, target, targetSHA, nil
+}
+
+// upgradeRefuseBrokenProfiles refuses before anything stops when a profile
+// file does not load: its data dir would be skipped, and its processes left
+// running on the old binary.
+func upgradeRefuseBrokenProfiles(profiles []profileInfo) error {
+	var broken []string
+	for _, p := range profiles {
+		if p.LoadErr != nil {
+			broken = append(broken, fmt.Sprintf("%s: %s", p.Name, sanitize.Line(p.LoadErr.Error())))
+		}
+	}
+	if len(broken) == 0 {
+		return nil
+	}
+	return fmt.Errorf("profile does not load, so upgrade cannot tell what it runs: %s; fix or remove that profile file, then rerun (nothing was stopped or checked out)", strings.Join(broken, "; "))
+}
+
+// upgradeRefuseNotAhead refuses a default target (no -to) that is not a
+// descendant of the installed commit, so the default never moves backwards.
+// A build from a checkout with uncommitted changes (`<sha>-dirty`) is checked
+// by its commit. An unknown installed commit (`dev`, or one the source does
+// not contain) is not refused.
+func upgradeRefuseNotAhead(dp *deps, source, current, target, targetSHA string) error {
+	commit := strings.TrimSuffix(current, "-dirty")
+	if commit == "" {
+		return nil
+	}
+	_, err := upgradeGit(dp, source, "merge-base", "--is-ancestor", commit, targetSHA)
+	var exit interface{ ExitCode() int }
+	if err == nil || !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return nil
+	}
+	return fmt.Errorf("the installed build %s is newer than or diverged from the newest release %s (%s); pass -to <tag|ref> to choose a target explicitly", current, target, targetSHA)
 }
 
 // upgradeSourceCheckout is -source, else the active profile's
@@ -281,6 +336,18 @@ func upgradeRevParse(dp *deps, source, ref string) (string, error) {
 		return "", errors.New(sanitize.Line(hostcontrol.LastLine(string(out))))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// upgradeCommitSummary is the plan's count: "N commits" forward, or "moves
+// back N commits" when the target is behind the installed commit.
+func upgradeCommitSummary(dp *deps, source, current, targetSHA string) string {
+	forward := upgradeCommitCount(dp, source, current, targetSHA)
+	if forward == "0" {
+		if back := upgradeCommitCount(dp, source, targetSHA, current); back != "0" && back != "unknown" {
+			return "moves back " + back + " commits"
+		}
+	}
+	return forward + " commits"
 }
 
 func upgradeCommitCount(dp *deps, source, from, to string) string {
@@ -385,7 +452,7 @@ func upgradeSkillTargets() (dirs []string) {
 }
 
 func upgradePrintPlan(w io.Writer, source, current, target, targetSHA, commits string, profiles []profileInfo, running []upgradeProcess, skills []string) {
-	fmt.Fprintf(w, "upgrade: %s -> %s (%s, %s commits)\n", current, targetSHA, target, commits)
+	fmt.Fprintf(w, "upgrade: %s -> %s (%s, %s)\n", current, targetSHA, target, commits)
 	fmt.Fprintf(w, "  source:  %s\n", source)
 	fmt.Fprintf(w, "  images:  re-pointed for %s\n", upgradeProfileNames(profiles))
 	if len(running) == 0 {
@@ -510,15 +577,16 @@ func upgradeTail(s string, n int) string {
 }
 
 // upgradeRestart brings back what was running with the newly installed
-// binary and returns "kind (dir): pid N" descriptions.
-func upgradeRestart(dp *deps, w io.Writer, binary string, running []upgradeProcess) []string {
-	var out []string
+// binary and returns "kind (dir): pid N" descriptions of what restarted, and
+// "kind (dir)" of what did not.
+func upgradeRestart(dp *deps, w io.Writer, binary string, running []upgradeProcess) (out, failed []string) {
 	for _, p := range running {
 		switch {
 		case p.Supervisor != "":
 			name, args := p.Supervisor.RestartCommand(p.Service)
 			if o, err := dp.host.runUpgradeCommand(upgradeCmd{Name: name, Args: args}); err != nil {
 				fmt.Fprintf(w, "%s (%s): `%s %s` failed: %s\n", p.Kind, p.DataDir, name, strings.Join(args, " "), sanitize.Line(hostcontrol.LastLine(string(o))))
+				failed = append(failed, fmt.Sprintf("%s (%s)", p.Kind, p.DataDir))
 				continue
 			}
 			out = append(out, fmt.Sprintf("%s (%s): restarted by %s", p.Kind, p.DataDir, p.Supervisor))
@@ -530,26 +598,30 @@ func upgradeRestart(dp *deps, w io.Writer, binary string, running []upgradeProce
 			}
 			if addr == "" {
 				fmt.Fprintf(w, "worker (%s): could not start: no Temporal -- run `factoryd doctor -fix`, then `factoryd worker`\n", p.DataDir)
+				failed = append(failed, fmt.Sprintf("%s (%s)", p.Kind, p.DataDir))
 				continue
 			}
 			if err := dp.host.spawnWorker(w, binary, p.ConfigPath, p.DataDir, hostcontrol.ShellCredentialEnv(), pidPath, addr); err != nil {
 				fmt.Fprintf(w, "worker (%s): could not start: %v -- start it with `factoryd worker -temporal-address %s`\n", p.DataDir, err, addr)
+				failed = append(failed, fmt.Sprintf("%s (%s)", p.Kind, p.DataDir))
 				continue
 			}
 			out = append(out, upgradeStarted(dp, p, pidPath))
 		case p.Kind == "serve":
 			if _, _, err := ensureTokenFile(dp, serveStableStartTokenPathFor(p.ConfigPath)); err != nil {
 				fmt.Fprintf(w, "serve (%s): could not prepare its start token: %v\n", p.DataDir, err)
+				failed = append(failed, fmt.Sprintf("%s (%s)", p.Kind, p.DataDir))
 				continue
 			}
 			if err := dp.host.spawnServe(w, binary, p.ConfigPath, p.DataDir, p.ServeAddr); err != nil {
 				fmt.Fprintf(w, "serve (%s): could not start: %v -- start it with `factoryd serve`\n", p.DataDir, err)
+				failed = append(failed, fmt.Sprintf("%s (%s)", p.Kind, p.DataDir))
 				continue
 			}
 			out = append(out, upgradeStarted(dp, p, filepath.Join(p.DataDir, "quickstart-serve.pid")))
 		}
 	}
-	return out
+	return out, failed
 }
 
 func upgradeStarted(dp *deps, p upgradeProcess, pidPath string) string {
@@ -572,13 +644,17 @@ func upgradeRefreshSkills(dp *deps, w io.Writer, binary string, skills []string)
 	return done
 }
 
-func upgradePrintSummary(w io.Writer, sha, target string, profiles []profileInfo, restarted, skills []string) {
+func upgradePrintSummary(w io.Writer, sha, target string, profiles []profileInfo, ran int, restarted, failed, skills []string) {
 	fmt.Fprintf(w, "\nupgraded to %s (%s)\n", target, sha)
 	fmt.Fprintf(w, "images re-pointed: %s\n", upgradeProfileNames(profiles))
-	if len(restarted) == 0 {
+	switch {
+	case ran == 0:
 		fmt.Fprintln(w, "restarted: nothing was running")
-	} else {
+	case len(restarted) > 0:
 		fmt.Fprintf(w, "restarted: %s\n", strings.Join(restarted, "; "))
+	}
+	if len(failed) > 0 {
+		fmt.Fprintf(w, "not restarted: %s\n", strings.Join(failed, "; "))
 	}
 	if len(skills) == 0 {
 		fmt.Fprintln(w, "skills refreshed: none")

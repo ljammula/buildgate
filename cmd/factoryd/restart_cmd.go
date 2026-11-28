@@ -153,7 +153,7 @@ func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer
 					already = append(already, p)
 				}
 			}
-			restarted := upgradeRestart(dp, w, binary, already)
+			restarted, _ := upgradeRestart(dp, w, binary, already)
 			fmt.Fprintf(w, "restarted: %s\n", strings.Join(restarted, "; "))
 			return fmt.Errorf("a build step started in %s while stopping; the workers already stopped were started again; run `factoryd restart` once that step ends", dir)
 		}
@@ -167,7 +167,7 @@ func restartRunContext(ctx context.Context, dp *deps, args []string, w io.Writer
 			running, notStopped = withoutStillRunning(running, notStopped, dir, out)
 		}
 	}
-	restarted := upgradeRestart(dp, w, binary, running)
+	restarted, _ := upgradeRestart(dp, w, binary, running)
 	if len(notStopped) > 0 {
 		fmt.Fprintf(w, "restarted: %s\n", strings.Join(restarted, "; "))
 		return fmt.Errorf("still running with the binary it started with: %s; stop it (the line above has its pid), then `factoryd restart`", strings.Join(notStopped, "; "))
