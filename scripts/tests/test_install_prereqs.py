@@ -202,16 +202,23 @@ class InstallPrereqsTest(unittest.TestCase):
         # docker-context -ensure-vm`): the script runs no colima itself.
         self.assertEqual(self.colima_calls(), [])
 
-    def test_existing_docker_without_buildx_gets_the_plugin_and_no_colima(self):
+    def test_existing_docker_without_buildx_gets_the_plugin_and_colima(self):
         self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("install docker-buildx", self.brew_calls())
+        self.assertIn("install docker-buildx colima", self.brew_calls())
         self.assertTrue((self.home / ".docker" / "cli-plugins" / "docker-buildx").is_symlink())
-        self.assertNotIn("colima", result.stdout)
+
+    def test_docker_desktop_cli_without_colima_gets_colima_and_no_docker(self):
+        # Docker Desktop's CLI and buildx are on PATH; its daemon is refused
+        # as a sandbox backend, so colima is still needed.
+        self.have("go", "python3", "gh", "git", "npm", "docker")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("install colima", self.brew_calls())
 
     def test_ghcr_image_install_still_installs_buildx_for_toolchain_derivation(self):
-        self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
+        self.have("go", "python3", "gh", "git", "npm", "docker", "colima", buildx=False)
         result = self.run_script(FACTORYD_IMAGE_SOURCE="ghcr")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.brew_calls(), ["--prefix", "install docker-buildx", "--prefix"])
@@ -345,7 +352,7 @@ fi
                     self.assertIn(expected_message, result.stderr)
 
     def test_an_installed_buildx_formula_is_linked_without_brew_install(self):
-        self.have("go", "python3", "gh", "git", "npm", "docker", buildx=False)
+        self.have("go", "python3", "gh", "git", "npm", "docker", "colima", buildx=False)
         plugin = self.prefix / "lib/docker/cli-plugins/docker-buildx"
         plugin.parent.mkdir(parents=True)
         plugin.write_text("#!/bin/sh\n")
@@ -436,8 +443,15 @@ fi
         self.assertIn("go gh", result.stderr)
         self.assertIn("brew.sh", result.stderr)
 
+    def test_docker_desktop_without_colima_or_homebrew_names_colima(self):
+        self.have("go", "python3", "gh", "git", "npm", "docker", brew=False)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("found no Homebrew (https://brew.sh) to install them with: colima", result.stderr)
+        self.assertIn("colima is required even beside Docker Desktop", result.stderr)
+
     def test_without_homebrew_a_missing_npm_alone_is_not_a_failure(self):
-        self.have("go", "python3", "gh", "git", "docker", brew=False)
+        self.have("go", "python3", "gh", "git", "docker", "colima", brew=False)
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("placeholder", result.stderr)

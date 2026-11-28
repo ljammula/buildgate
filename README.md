@@ -125,8 +125,8 @@ missing and creates buildgate's own colima VM, profile `buildgate`, for you.
    `git clone https://github.com/ljammula/buildgate.git && cd buildgate`.
 2. `make install`. With Homebrew it installs what is missing of `go`,
    `python`, `git`, `gh`, `node` (optional, console only), `docker`,
-   `docker-buildx`, `colima` and `terminal-notifier`; a machine that already
-   has a docker CLI and no colima keeps its own daemon. With colima it creates
+   `docker-buildx`, `colima` and `terminal-notifier`. A Mac that already has
+   Docker Desktop also gets colima, beside it, untouched. With colima it creates
    or starts buildgate's colima VM (profile `buildgate`, docker context
    `colima-buildgate`: an eighth of the Mac's memory, 4 to 12 GiB, and a
    quarter of its CPUs; it refuses, naming both numbers, while the Mac has less

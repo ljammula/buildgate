@@ -14,8 +14,7 @@
 #   docker (the CLI)      docker             Docker's apt repository    the command is not on PATH
 #   docker buildx         docker-buildx      Docker's apt repository    `docker buildx version` fails
 #   docker compose        -                  Docker's apt repository    Linux, and `docker compose version` fails
-#   a Docker daemon       colima             colima (QEMU, /dev/kvm)    macOS: neither docker nor colima is on PATH;
-#                                                                       Linux: colima is not on PATH
+#   a Docker daemon       colima             colima (QEMU, /dev/kvm)    colima is not on PATH
 #   terminal-notifier     terminal-notifier  -                          macOS, and the command is not on PATH
 #
 # On Linux the Docker daemon runs in colima's VM, as on a Mac: sandboxes do
@@ -33,10 +32,12 @@
 # launched as an application one time, which is what makes macOS list it
 # under Notifications and ask to allow it.
 #
-# A machine that already has a docker CLI keeps its own daemon (Docker
-# Desktop, colima, another VM): colima is installed only beside a docker CLI
-# this script installs. Nothing is upgraded or removed, and a tool already on
-# PATH is left as it is, whatever installed it.
+# colima is installed whenever it is missing, also beside a docker CLI that
+# another daemon came with (Docker Desktop, another VM): sandboxes run only on
+# colima, so any other daemon would be refused at the first launch. That
+# daemon is left running and its context is not changed. Nothing is upgraded
+# or removed, and a tool already on PATH is left as it is, whatever installed
+# it.
 #
 # On a Mac with colima, Docker is buildgate's own Colima VM, profile
 # buildgate (docker context colima-buildgate, which a new session config
@@ -128,10 +129,10 @@ else
 	if ! have docker; then
 		want docker
 		want docker-buildx
-		have colima || want colima
 	elif ! docker buildx version >/dev/null 2>&1; then
 		want docker-buildx
 	fi
+	have colima || want colima
 	missing="${missing# }"
 
 	if [ -n "$missing" ]; then
@@ -141,6 +142,9 @@ else
 				exit 0
 			fi
 			echo "make install needs these, and found no Homebrew (https://brew.sh) to install them with: $missing" >&2
+			case " $missing " in *" colima "*)
+				echo "colima is required even beside Docker Desktop: sandboxes run only in colima's VM (https://github.com/abiosoft/colima#installation)." >&2 ;;
+			esac
 			echo "Install Homebrew or the tools themselves, then re-run 'make install'." >&2
 			exit 1
 		fi
